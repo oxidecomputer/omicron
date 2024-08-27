@@ -12,8 +12,9 @@ use omicron_common::api::external::{
     AddressLotKind, AllowedSourceIps, BfdMode, BgpPeer, ByteCount, Hostname,
     IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
     InstanceCpuCount, LinkFec, LinkSpeed, Name, NameOrId, PaginationOrder,
-    RouteDestination, RouteTarget, SemverVersion,
+    RouteDestination, RouteTarget, SemverVersion, UserId,
 };
+use omicron_common::disk::DiskVariant;
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
 use serde::{
@@ -390,48 +391,6 @@ pub struct UserCreate {
     pub external_id: UserId,
     /// how to set the user's login password
     pub password: UserPassword,
-}
-
-/// A username for a local-only user
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(try_from = "String")]
-pub struct UserId(String);
-
-impl AsRef<str> for UserId {
-    fn as_ref(&self) -> &str {
-        self.0.as_ref()
-    }
-}
-
-impl FromStr for UserId {
-    type Err = String;
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        UserId::try_from(String::from(value))
-    }
-}
-
-/// Used to impl `Deserialize`
-impl TryFrom<String> for UserId {
-    type Error = String;
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        // Mostly, this validation exists to cap the input size.  The specific
-        // length is not critical here.  For convenience and consistency, we use
-        // the same rules as `Name`.
-        let _ = Name::try_from(value.clone())?;
-        Ok(UserId(value))
-    }
-}
-
-impl JsonSchema for UserId {
-    fn schema_name() -> String {
-        "UserId".to_string()
-    }
-
-    fn json_schema(
-        gen: &mut schemars::gen::SchemaGenerator,
-    ) -> schemars::schema::Schema {
-        Name::json_schema(gen)
-    }
 }
 
 /// A password used for authenticating a local-only user
@@ -1134,12 +1093,6 @@ impl JsonSchema for UserData {
     }
 }
 
-/// Migration parameters for an `Instance`
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct InstanceMigrate {
-    pub dst_sled_id: Uuid,
-}
-
 /// Forwarded to a propolis server to request the contents of an Instance's serial console.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct InstanceSerialConsoleRequest {
@@ -1350,12 +1303,11 @@ pub enum PhysicalDiskKind {
     U2,
 }
 
-impl From<sled_agent_client::types::DiskVariant> for PhysicalDiskKind {
-    fn from(variant: sled_agent_client::types::DiskVariant) -> Self {
-        use sled_agent_client::types::DiskVariant;
-        match variant {
-            DiskVariant::U2 => Self::U2,
-            DiskVariant::M2 => Self::M2,
+impl From<DiskVariant> for PhysicalDiskKind {
+    fn from(dv: DiskVariant) -> Self {
+        match dv {
+            DiskVariant::M2 => PhysicalDiskKind::M2,
+            DiskVariant::U2 => PhysicalDiskKind::U2,
         }
     }
 }
@@ -1546,7 +1498,7 @@ pub struct LinkConfigCreate {
     pub mtu: u16,
 
     /// The link-layer discovery protocol (LLDP) configuration for the link.
-    pub lldp: LldpServiceConfigCreate,
+    pub lldp: LldpLinkConfigCreate,
 
     /// The forward error correction mode of the link.
     pub fec: LinkFec,
@@ -1580,16 +1532,29 @@ pub struct NamedLinkConfigCreate {
     pub autoneg: bool,
 }
 
-/// The LLDP configuration associated with a port. LLDP may be either enabled or
-/// disabled, if enabled, an LLDP configuration must be provided by name or id.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct LldpServiceConfigCreate {
+/// The LLDP configuration associated with a port.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+pub struct LldpLinkConfigCreate {
     /// Whether or not LLDP is enabled.
     pub enabled: bool,
 
-    /// A reference to the LLDP configuration used. Must not be `None` when
-    /// `enabled` is `true`.
-    pub lldp_config: Option<NameOrId>,
+    /// The LLDP link name TLV.
+    pub link_name: Option<String>,
+
+    /// The LLDP link description TLV.
+    pub link_description: Option<String>,
+
+    /// The LLDP chassis identifier TLV.
+    pub chassis_id: Option<String>,
+
+    /// The LLDP system name TLV.
+    pub system_name: Option<String>,
+
+    /// The LLDP system description TLV.
+    pub system_description: Option<String>,
+
+    /// The LLDP management IP TLV.
+    pub management_ip: Option<IpAddr>,
 }
 
 /// A layer-3 switch interface configuration. When IPv6 is enabled, a link local
@@ -1649,6 +1614,10 @@ pub struct Route {
 
     /// VLAN id the gateway is reachable over.
     pub vid: Option<u16>,
+
+    /// Local preference for route. Higher preference indictes precedence
+    /// within and across protocols.
+    pub local_pref: Option<u32>,
 }
 
 /// Select a BGP config by a name or id.
@@ -1678,6 +1647,13 @@ pub struct BgpAnnounceSetCreate {
 
     /// The announcements in this set.
     pub announcement: Vec<BgpAnnouncementCreate>,
+}
+
+/// Optionally select a BGP announce set by a name or id.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct OptionalBgpAnnounceSetSelector {
+    /// A name or id to use when s electing BGP port settings
+    pub name_or_id: Option<NameOrId>,
 }
 
 /// Select a BGP announce set by a name or id.

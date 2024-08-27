@@ -14,7 +14,7 @@ description = "Duration for the server to handle a request"
 units = "seconds"
 datum_type = "histogram_f64"
 versions = [
-    { added_in = 1, fields = [ "route", "method", "status_code" ] }
+    { added_in = 1, fields = [ "operation_id", "status_code" ] }
 ]
 
 [fields.name]
@@ -25,14 +25,15 @@ description = "The name of the HTTP server, or program running it"
 type = "uuid"
 description = "UUID of the HTTP server"
 
-[fields.route]
+[fields.operation_id]
 type = "string"
-description = "HTTP route in the request"
+description = """\
+The identifier for the HTTP operation.\
 
-[fields.method]
-type = "string"
-description = "HTTP method in the request"
+In most cases, this the OpenAPI `operationId` field that uniquely identifies the
+endpoint the request is targeted to and the HTTP method used.
+"""
 
 [fields.status_code]
-type = "i64"
+type = "u16"
 description = "HTTP status code in the server's response"

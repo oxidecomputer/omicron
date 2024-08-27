@@ -10,6 +10,10 @@ use gateway_client::types::RotState;
 use gateway_client::types::SpState;
 use indexmap::IndexMap;
 use nexus_inventory::CollectionBuilder;
+use nexus_sled_agent_shared::inventory::Baseboard;
+use nexus_sled_agent_shared::inventory::Inventory;
+use nexus_sled_agent_shared::inventory::InventoryDisk;
+use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbSettings;
 use nexus_types::deployment::PlanningInputBuilder;
@@ -25,17 +29,17 @@ use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::PowerState;
 use nexus_types::inventory::RotSlot;
-use nexus_types::inventory::SledRole;
 use nexus_types::inventory::SpType;
 use omicron_common::address::get_sled_address;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv6Subnet;
-use omicron_common::address::NEXUS_REDUNDANCY;
 use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
 use omicron_common::disk::DiskIdentity;
+use omicron_common::disk::DiskVariant;
+use omicron_common::policy::NEXUS_REDUNDANCY;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -75,6 +79,7 @@ pub struct SystemDescription {
     sled_subnets: Box<dyn SubnetIterator>,
     available_non_scrimlet_slots: BTreeSet<u16>,
     available_scrimlet_slots: BTreeSet<u16>,
+    target_boundary_ntp_zone_count: usize,
     target_nexus_zone_count: usize,
     target_cockroachdb_zone_count: usize,
     target_cockroachdb_cluster_version: CockroachDbClusterVersion,
@@ -126,9 +131,11 @@ impl SystemDescription {
         // Policy defaults
         let target_nexus_zone_count = NEXUS_REDUNDANCY;
 
-        // TODO-cleanup This is wrong, but we don't currently set up any CRDB
-        // nodes in our fake system, so this prevents downstream test issues
-        // with the planner thinking our system is out of date from the gate.
+        // TODO-cleanup These are wrong, but we don't currently set up any
+        // boundary NTP or CRDB nodes in our fake system, so this prevents
+        // downstream test issues with the planner thinking our system is out of
+        // date from the gate.
+        let target_boundary_ntp_zone_count = 0;
         let target_cockroachdb_zone_count = 0;
 
         let target_cockroachdb_cluster_version =
@@ -147,6 +154,7 @@ impl SystemDescription {
             sled_subnets,
             available_non_scrimlet_slots,
             available_scrimlet_slots,
+            target_boundary_ntp_zone_count,
             target_nexus_zone_count,
             target_cockroachdb_zone_count,
             target_cockroachdb_cluster_version,
@@ -315,10 +323,12 @@ impl SystemDescription {
     ) -> anyhow::Result<PlanningInputBuilder> {
         let policy = Policy {
             service_ip_pool_ranges: self.service_ip_pool_ranges.clone(),
+            target_boundary_ntp_zone_count: self.target_boundary_ntp_zone_count,
             target_nexus_zone_count: self.target_nexus_zone_count,
             target_cockroachdb_zone_count: self.target_cockroachdb_zone_count,
             target_cockroachdb_cluster_version: self
                 .target_cockroachdb_cluster_version,
+            clickhouse_policy: None,
         };
         let mut builder = PlanningInputBuilder::new(
             policy,
@@ -443,7 +453,7 @@ struct Sled {
     sled_id: SledUuid,
     sled_subnet: Ipv6Subnet<SLED_PREFIX>,
     inventory_sp: Option<(u16, SpState)>,
-    inventory_sled_agent: sled_agent_client::types::Inventory,
+    inventory_sled_agent: Inventory,
     zpools: BTreeMap<ZpoolUuid, SledDisk>,
     policy: SledPolicy,
 }
@@ -517,23 +527,21 @@ impl Sled {
 
         let inventory_sled_agent = {
             let baseboard = match hardware {
-                SledHardware::Gimlet => {
-                    sled_agent_client::types::Baseboard::Gimlet {
-                        identifier: serial.clone(),
-                        model: model.clone(),
-                        revision,
-                    }
-                }
-                SledHardware::Pc => sled_agent_client::types::Baseboard::Pc {
+                SledHardware::Gimlet => Baseboard::Gimlet {
+                    identifier: serial.clone(),
+                    model: model.clone(),
+                    revision,
+                },
+                SledHardware::Pc => Baseboard::Pc {
                     identifier: serial.clone(),
                     model: model.clone(),
                 },
                 SledHardware::Unknown | SledHardware::Empty => {
-                    sled_agent_client::types::Baseboard::Unknown
+                    Baseboard::Unknown
                 }
             };
-            let sled_agent_address = get_sled_address(sled_subnet).to_string();
-            sled_agent_client::types::Inventory {
+            let sled_agent_address = get_sled_address(sled_subnet);
+            Inventory {
                 baseboard,
                 reservoir_size: ByteCount::from(1024),
                 sled_role,
@@ -545,9 +553,9 @@ impl Sled {
                 disks: zpools
                     .values()
                     .enumerate()
-                    .map(|(i, d)| sled_agent_client::types::InventoryDisk {
+                    .map(|(i, d)| InventoryDisk {
                         identity: d.disk_identity.clone(),
-                        variant: sled_agent_client::types::DiskVariant::U2,
+                        variant: DiskVariant::U2,
                         slot: i64::try_from(i).unwrap(),
                     })
                     .collect(),
@@ -588,12 +596,12 @@ impl Sled {
         // inventory types again.  This is a little goofy.
         let baseboard = inventory_sp
             .as_ref()
-            .map(|sledhw| sled_agent_client::types::Baseboard::Gimlet {
+            .map(|sledhw| Baseboard::Gimlet {
                 identifier: sledhw.baseboard_id.serial_number.clone(),
                 model: sledhw.baseboard_id.part_number.clone(),
                 revision: sledhw.sp.baseboard_revision,
             })
-            .unwrap_or(sled_agent_client::types::Baseboard::Unknown);
+            .unwrap_or(Baseboard::Unknown);
 
         let inventory_sp = inventory_sp.map(|sledhw| {
             // RotStateV3 unconditionally sets all of these
@@ -679,11 +687,11 @@ impl Sled {
             (sledhw.sp.sp_slot, sp_state)
         });
 
-        let inventory_sled_agent = sled_agent_client::types::Inventory {
+        let inventory_sled_agent = Inventory {
             baseboard,
             reservoir_size: inv_sled_agent.reservoir_size,
             sled_role: inv_sled_agent.sled_role,
-            sled_agent_address: inv_sled_agent.sled_agent_address.to_string(),
+            sled_agent_address: inv_sled_agent.sled_agent_address,
             sled_id: sled_id.into_untyped_uuid(),
             usable_hardware_threads: inv_sled_agent.usable_hardware_threads,
             usable_physical_ram: inv_sled_agent.usable_physical_ram,
@@ -705,7 +713,7 @@ impl Sled {
         self.inventory_sp.as_ref()
     }
 
-    fn sled_agent_inventory(&self) -> &sled_agent_client::types::Inventory {
+    fn sled_agent_inventory(&self) -> &Inventory {
         &self.inventory_sled_agent
     }
 }

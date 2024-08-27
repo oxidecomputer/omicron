@@ -12,9 +12,11 @@ use crate::blueprint_builder::EnsureMultiple;
 use crate::blueprint_builder::Error;
 use crate::blueprint_builder::Operation;
 use crate::planner::omicron_zone_placement::PlacementError;
+use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
+use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::CockroachDbSettings;
@@ -26,7 +28,6 @@ use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::Collection;
 use omicron_uuid_kinds::SledUuid;
-use sled_agent_client::ZoneKind;
 use slog::error;
 use slog::{info, warn, Logger};
 use std::collections::BTreeMap;
@@ -144,8 +145,10 @@ impl<'a> Planner<'a> {
 
             // Check 2: have all this sled's zones been expunged? It's possible
             // we ourselves have made this change, which is fine.
-            let all_zones_expunged =
-                self.blueprint.current_sled_zones(sled_id).all(|zone| {
+            let all_zones_expunged = self
+                .blueprint
+                .current_sled_zones(sled_id, BlueprintZoneFilter::All)
+                .all(|zone| {
                     zone.disposition == BlueprintZoneDisposition::Expunged
                 });
 
@@ -187,7 +190,7 @@ impl<'a> Planner<'a> {
             if !commissioned_sled_ids.contains(&sled_id) {
                 let num_zones = self
                     .blueprint
-                    .current_sled_zones(sled_id)
+                    .current_sled_zones(sled_id, BlueprintZoneFilter::All)
                     .filter(|zone| {
                         zone.disposition != BlueprintZoneDisposition::Expunged
                     })
@@ -351,8 +354,9 @@ impl<'a> Planner<'a> {
         let mut zone_placement = None;
 
         for zone_kind in [
-            DiscretionaryOmicronZone::Nexus,
+            DiscretionaryOmicronZone::BoundaryNtp,
             DiscretionaryOmicronZone::CockroachDb,
+            DiscretionaryOmicronZone::Nexus,
         ] {
             let num_zones_to_add = self.num_additional_zones_needed(zone_kind);
             if num_zones_to_add == 0 {
@@ -361,29 +365,30 @@ impl<'a> Planner<'a> {
             // We need to add at least one zone; construct our `zone_placement`
             // (or reuse the existing one if a previous loop iteration already
             // created it).
-            let zone_placement = match zone_placement.as_mut() {
-                Some(zone_placement) => zone_placement,
-                None => {
-                    // This constructs a picture of the sleds as we currently
-                    // understand them, as far as which sleds have discretionary
-                    // zones. This will remain valid as we loop through the
-                    // `zone_kind`s in this function, as any zone additions will
-                    // update the `zone_placement` heap in-place.
-                    let current_discretionary_zones = self
-                        .input
-                        .all_sled_resources(SledFilter::Discretionary)
-                        .filter(|(sled_id, _)| {
-                            !sleds_waiting_for_ntp_zone.contains(&sled_id)
-                        })
-                        .map(|(sled_id, sled_resources)| {
-                            OmicronZonePlacementSledState {
+            let zone_placement = zone_placement.get_or_insert_with(|| {
+                // This constructs a picture of the sleds as we currently
+                // understand them, as far as which sleds have discretionary
+                // zones. This will remain valid as we loop through the
+                // `zone_kind`s in this function, as any zone additions will
+                // update the `zone_placement` heap in-place.
+                let current_discretionary_zones = self
+                    .input
+                    .all_sled_resources(SledFilter::Discretionary)
+                    .filter(|(sled_id, _)| {
+                        !sleds_waiting_for_ntp_zone.contains(&sled_id)
+                    })
+                    .map(|(sled_id, sled_resources)| {
+                        OmicronZonePlacementSledState {
                             sled_id,
                             num_zpools: sled_resources
                                 .all_zpools(ZpoolFilter::InService)
                                 .count(),
                             discretionary_zones: self
                                 .blueprint
-                                .current_sled_zones(sled_id)
+                                .current_sled_zones(
+                                    sled_id,
+                                    BlueprintZoneFilter::ShouldBeRunning,
+                                )
                                 .filter_map(|zone| {
                                     DiscretionaryOmicronZone::from_zone_type(
                                         &zone.zone_type,
@@ -391,12 +396,9 @@ impl<'a> Planner<'a> {
                                 })
                                 .collect(),
                         }
-                        });
-                    zone_placement.insert(OmicronZonePlacement::new(
-                        current_discretionary_zones,
-                    ))
-                }
-            };
+                    });
+                OmicronZonePlacement::new(current_discretionary_zones)
+            });
             self.add_discretionary_zones(
                 zone_placement,
                 zone_kind,
@@ -421,16 +423,19 @@ impl<'a> Planner<'a> {
         for sled_id in self.input.all_sled_ids(SledFilter::InService) {
             let num_zones_of_kind = self
                 .blueprint
-                .sled_num_zones_of_kind(sled_id, zone_kind.into());
+                .sled_num_running_zones_of_kind(sled_id, zone_kind.into());
             num_existing_kind_zones += num_zones_of_kind;
         }
 
         let target_count = match zone_kind {
-            DiscretionaryOmicronZone::Nexus => {
-                self.input.target_nexus_zone_count()
+            DiscretionaryOmicronZone::BoundaryNtp => {
+                self.input.target_boundary_ntp_zone_count()
             }
             DiscretionaryOmicronZone::CockroachDb => {
                 self.input.target_cockroachdb_zone_count()
+            }
+            DiscretionaryOmicronZone::Nexus => {
+                self.input.target_nexus_zone_count()
             }
         };
 
@@ -496,29 +501,36 @@ impl<'a> Planner<'a> {
             // total zones go on a given sled, but we have a count of how many
             // we want to add. Construct a new target count. Maybe the builder
             // should provide a different interface here?
-            let new_total_zone_count =
-                self.blueprint.sled_num_zones_of_kind(sled_id, kind.into())
-                    + additional_zone_count;
+            let new_total_zone_count = self
+                .blueprint
+                .sled_num_running_zones_of_kind(sled_id, kind.into())
+                + additional_zone_count;
 
             let result = match kind {
-                DiscretionaryOmicronZone::Nexus => {
-                    self.blueprint.sled_ensure_zone_multiple_nexus(
-                        sled_id,
-                        new_total_zone_count,
-                    )?
-                }
+                DiscretionaryOmicronZone::BoundaryNtp => self
+                    .blueprint
+                    .sled_promote_internal_ntp_to_boundary_ntp(sled_id)?,
                 DiscretionaryOmicronZone::CockroachDb => {
                     self.blueprint.sled_ensure_zone_multiple_cockroachdb(
                         sled_id,
                         new_total_zone_count,
                     )?
                 }
+                DiscretionaryOmicronZone::Nexus => {
+                    self.blueprint.sled_ensure_zone_multiple_nexus(
+                        sled_id,
+                        new_total_zone_count,
+                    )?
+                }
             };
             match result {
-                EnsureMultiple::Changed { added, removed: _ } => {
+                EnsureMultiple::Changed { added, removed } => {
                     info!(
-                        self.log, "will add {added} Nexus zone(s) to sled";
+                        self.log, "modified zones on sled";
                         "sled_id" => %sled_id,
+                        "kind" => ?kind,
+                        "added" => added,
+                        "removed" => removed,
                     );
                     new_zones_added += added;
                 }
@@ -714,6 +726,7 @@ mod test {
     use chrono::Utc;
     use expectorate::assert_contents;
     use nexus_inventory::now_db_precision;
+    use nexus_sled_agent_shared::inventory::ZoneKind;
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::deployment::BlueprintDiff;
     use nexus_types::deployment::BlueprintZoneDisposition;
@@ -737,7 +750,6 @@ mod test {
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
-    use sled_agent_client::ZoneKind;
     use std::collections::HashMap;
     use std::mem;
     use typed_rng::TypedUuidRng;
@@ -1389,10 +1401,17 @@ mod test {
         assert_eq!(diff.sleds_removed.len(), 0);
         assert_eq!(diff.sleds_modified.len(), 1);
 
-        // We should be removing all zones using this zpool
-        assert_eq!(diff.zones.added.len(), 0);
+        // We should be removing all zones using this zpool. Because we're
+        // removing the NTP zone, we should add a new one.
+        assert_eq!(diff.zones.added.len(), 1);
         assert_eq!(diff.zones.removed.len(), 0);
         assert_eq!(diff.zones.modified.len(), 1);
+
+        let (_zone_id, added_zones) = diff.zones.added.iter().next().unwrap();
+        assert_eq!(added_zones.zones.len(), 1);
+        for zone in &added_zones.zones {
+            assert_eq!(zone.kind(), ZoneKind::InternalNtp);
+        }
 
         let (_zone_id, modified_zones) =
             diff.zones.modified.iter().next().unwrap();

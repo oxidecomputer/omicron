@@ -238,6 +238,7 @@ mod tests {
     use httptest::Expectation;
     use nexus_db_queries::db::datastore::pub_test_utils::datastore_test;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
+    use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
@@ -277,7 +278,7 @@ mod tests {
                 zone_type: BlueprintZoneType::CockroachDb(
                     blueprint_zone_type::CockroachDb {
                         address: addr,
-                        dataset: nexus_types::inventory::OmicronZoneDataset {
+                        dataset: OmicronZoneDataset {
                             pool_name: format!("oxp_{}", zpool_id)
                                 .parse()
                                 .unwrap(),

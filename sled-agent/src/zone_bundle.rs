@@ -11,8 +11,6 @@ use anyhow::Context;
 use camino::FromPathBufError;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
-use chrono::DateTime;
-use chrono::Utc;
 use flate2::bufread::GzDecoder;
 use illumos_utils::running_zone::is_oxide_smf_log_file;
 use illumos_utils::running_zone::RunningZone;
@@ -29,18 +27,12 @@ use illumos_utils::zfs::Snapshot;
 use illumos_utils::zfs::Zfs;
 use illumos_utils::zfs::ZFS;
 use illumos_utils::zone::AdmError;
-use schemars::JsonSchema;
-use serde::Deserialize;
-use serde::Serialize;
+use sled_agent_types::zone_bundle::*;
 use sled_storage::dataset::U2_DEBUG_DATASET;
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
-use std::cmp::Ord;
-use std::cmp::Ordering;
-use std::cmp::PartialOrd;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use std::collections::HashSet;
 use std::io::Cursor;
 use std::sync::Arc;
 use std::time::Duration;
@@ -54,104 +46,6 @@ use tokio::sync::Notify;
 use tokio::time::sleep;
 use tokio::time::Instant;
 use uuid::Uuid;
-
-/// An identifier for a zone bundle.
-#[derive(
-    Clone,
-    Debug,
-    Deserialize,
-    Eq,
-    Hash,
-    JsonSchema,
-    Ord,
-    PartialEq,
-    PartialOrd,
-    Serialize,
-)]
-pub struct ZoneBundleId {
-    /// The name of the zone this bundle is derived from.
-    pub zone_name: String,
-    /// The ID for this bundle itself.
-    pub bundle_id: Uuid,
-}
-
-/// The reason or cause for a zone bundle, i.e., why it was created.
-//
-// NOTE: The ordering of the enum variants is important, and should not be
-// changed without careful consideration.
-//
-// The ordering is used when deciding which bundles to remove automatically. In
-// addition to time, the cause is used to sort bundles, so changing the variant
-// order will change that priority.
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Default,
-    Deserialize,
-    Eq,
-    Hash,
-    JsonSchema,
-    Ord,
-    PartialEq,
-    PartialOrd,
-    Serialize,
-)]
-#[serde(rename_all = "snake_case")]
-#[non_exhaustive]
-pub enum ZoneBundleCause {
-    /// Some other, unspecified reason.
-    #[default]
-    Other,
-    /// A zone bundle taken when a sled agent finds a zone that it does not
-    /// expect to be running.
-    UnexpectedZone,
-    /// An instance zone was terminated.
-    TerminatedInstance,
-    /// Generated in response to an explicit request to the sled agent.
-    ExplicitRequest,
-}
-
-/// Metadata about a zone bundle.
-#[derive(
-    Clone,
-    Debug,
-    Deserialize,
-    Eq,
-    Hash,
-    JsonSchema,
-    Ord,
-    PartialEq,
-    PartialOrd,
-    Serialize,
-)]
-pub struct ZoneBundleMetadata {
-    /// Identifier for this zone bundle
-    pub id: ZoneBundleId,
-    /// The time at which this zone bundle was created.
-    pub time_created: DateTime<Utc>,
-    /// A version number for this zone bundle.
-    pub version: u8,
-    /// The reason or cause a bundle was created.
-    pub cause: ZoneBundleCause,
-}
-
-impl ZoneBundleMetadata {
-    const VERSION: u8 = 0;
-
-    /// Create a new set of metadata for the provided zone.
-    pub(crate) fn new(zone_name: &str, cause: ZoneBundleCause) -> Self {
-        Self {
-            id: ZoneBundleId {
-                zone_name: zone_name.to_string(),
-                bundle_id: Uuid::new_v4(),
-            },
-            time_created: Utc::now(),
-            version: Self::VERSION,
-            cause,
-        }
-    }
-}
 
 // The name of the snapshot created from the zone root filesystem.
 const ZONE_ROOT_SNAPSHOT_NAME: &'static str = "zone-root";
@@ -650,20 +544,14 @@ pub enum BundleError {
     #[error("Zone '{name}' cannot currently be bundled")]
     Unavailable { name: String },
 
-    #[error("Storage limit must be expressed as a percentage in (0, 100]")]
-    InvalidStorageLimit,
+    #[error(transparent)]
+    StorageLimitCreate(#[from] StorageLimitCreateError),
 
-    #[error(
-        "Cleanup period must be between {min:?} and {max:?}, inclusive",
-        min = CleanupPeriod::MIN,
-        max = CleanupPeriod::MAX,
-    )]
-    InvalidCleanupPeriod,
+    #[error(transparent)]
+    CleanupPeriodCreate(#[from] CleanupPeriodCreateError),
 
-    #[error(
-        "Invalid priority ordering. Each element must appear exactly once."
-    )]
-    InvalidPriorityOrder,
+    #[error(transparent)]
+    PriorityOrderCreate(#[from] PriorityOrderCreateError),
 
     #[error("Cleanup failed")]
     Cleanup(#[source] anyhow::Error),
@@ -691,6 +579,9 @@ pub enum BundleError {
 
     #[error("Failed to get ZFS property value")]
     GetProperty(#[from] GetValueError),
+
+    #[error("Instance is terminating")]
+    InstanceTerminating,
 }
 
 // Helper function to write an array of bytes into the tar archive, with
@@ -1481,29 +1372,6 @@ async fn get_zone_bundle_paths(
     Ok(out)
 }
 
-/// The portion of a debug dataset used for zone bundles.
-#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, Serialize)]
-pub struct BundleUtilization {
-    /// The total dataset quota, in bytes.
-    pub dataset_quota: u64,
-    /// The total number of bytes available for zone bundles.
-    ///
-    /// This is `dataset_quota` multiplied by the context's storage limit.
-    pub bytes_available: u64,
-    /// Total bundle usage, in bytes.
-    pub bytes_used: u64,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-struct ZoneBundleInfo {
-    // The raw metadata for the bundle
-    metadata: ZoneBundleMetadata,
-    // The full path to the bundle
-    path: Utf8PathBuf,
-    // The number of bytes consumed on disk by the bundle
-    bytes: u64,
-}
-
 // Enumerate all zone bundles under the provided directory.
 async fn enumerate_zone_bundles(
     log: &Logger,
@@ -1572,15 +1440,6 @@ async fn enumerate_zone_bundles(
         out.insert(dir.clone(), info_by_dir);
     }
     Ok(out)
-}
-
-/// The count of bundles / bytes removed during a cleanup operation.
-#[derive(Clone, Copy, Debug, Default, Deserialize, JsonSchema, Serialize)]
-pub struct CleanupCount {
-    /// The number of bundles removed.
-    bundles: u64,
-    /// The number of bytes removed.
-    bytes: u64,
 }
 
 // Run a cleanup, removing old bundles according to the strategy.
@@ -1682,19 +1541,6 @@ async fn compute_bundle_utilization(
         );
     }
     Ok(out)
-}
-
-/// Context provided for the zone bundle cleanup task.
-#[derive(
-    Clone, Copy, Debug, Default, Deserialize, JsonSchema, PartialEq, Serialize,
-)]
-pub struct CleanupContext {
-    /// The period on which automatic checks and cleanup is performed.
-    pub period: CleanupPeriod,
-    /// The limit on the dataset quota available for zone bundles.
-    pub storage_limit: StorageLimit,
-    /// The priority ordering for keeping old bundles.
-    pub priority: PriorityOrder,
 }
 
 // Return the number of bytes occupied by the provided directory.
@@ -1811,258 +1657,10 @@ async fn zfs_quota(path: &Utf8PathBuf) -> Result<u64, BundleError> {
     }
 }
 
-/// The limit on space allowed for zone bundles, as a percentage of the overall
-/// dataset's quota.
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Deserialize,
-    JsonSchema,
-    PartialEq,
-    PartialOrd,
-    Serialize,
-)]
-pub struct StorageLimit(u8);
-
-impl std::fmt::Display for StorageLimit {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}%", self.as_u8())
-    }
-}
-
-impl Default for StorageLimit {
-    fn default() -> Self {
-        StorageLimit(25)
-    }
-}
-
-impl StorageLimit {
-    /// Minimum percentage of dataset quota supported.
-    pub const MIN: Self = Self(0);
-
-    /// Maximum percentage of dataset quota supported.
-    pub const MAX: Self = Self(50);
-
-    /// Construct a new limit allowed for zone bundles.
-    ///
-    /// This should be expressed as a percentage, in the range (Self::MIN,
-    /// Self::MAX].
-    pub const fn new(percentage: u8) -> Result<Self, BundleError> {
-        if percentage > Self::MIN.0 && percentage <= Self::MAX.0 {
-            Ok(Self(percentage))
-        } else {
-            Err(BundleError::InvalidStorageLimit)
-        }
-    }
-
-    /// Return the contained quota percentage.
-    pub const fn as_u8(&self) -> u8 {
-        self.0
-    }
-
-    // Compute the number of bytes available from a dataset quota, in bytes.
-    const fn bytes_available(&self, dataset_quota: u64) -> u64 {
-        (dataset_quota * self.as_u8() as u64) / 100
-    }
-}
-
-/// A dimension along with bundles can be sorted, to determine priority.
-#[derive(
-    Clone,
-    Copy,
-    Debug,
-    Deserialize,
-    Eq,
-    Hash,
-    JsonSchema,
-    Serialize,
-    Ord,
-    PartialEq,
-    PartialOrd,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum PriorityDimension {
-    /// Sorting by time, with older bundles with lower priority.
-    Time,
-    /// Sorting by the cause for creating the bundle.
-    Cause,
-    // TODO-completeness: Support zone or zone type (e.g., service vs instance)?
-}
-
-/// The priority order for bundles during cleanup.
-///
-/// Bundles are sorted along the dimensions in [`PriorityDimension`], with each
-/// dimension appearing exactly once. During cleanup, lesser-priority bundles
-/// are pruned first, to maintain the dataset quota. Note that bundles are
-/// sorted by each dimension in the order in which they appear, with each
-/// dimension having higher priority than the next.
-#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, PartialEq, Serialize)]
-pub struct PriorityOrder([PriorityDimension; PriorityOrder::EXPECTED_SIZE]);
-
-impl std::ops::Deref for PriorityOrder {
-    type Target = [PriorityDimension; PriorityOrder::EXPECTED_SIZE];
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl Default for PriorityOrder {
-    fn default() -> Self {
-        Self::DEFAULT
-    }
-}
-
-impl PriorityOrder {
-    // NOTE: Must match the number of variants in `PriorityDimension`.
-    const EXPECTED_SIZE: usize = 2;
-    const DEFAULT: Self =
-        Self([PriorityDimension::Cause, PriorityDimension::Time]);
-
-    /// Construct a new priority order.
-    ///
-    /// This requires that each dimension appear exactly once.
-    pub fn new(dims: &[PriorityDimension]) -> Result<Self, BundleError> {
-        if dims.len() != Self::EXPECTED_SIZE {
-            return Err(BundleError::InvalidPriorityOrder);
-        }
-        let mut seen = HashSet::new();
-        for dim in dims.iter() {
-            if !seen.insert(dim) {
-                return Err(BundleError::InvalidPriorityOrder);
-            }
-        }
-        Ok(Self(dims.try_into().unwrap()))
-    }
-
-    // Order zone bundle info according to the contained priority.
-    //
-    // We sort the info by each dimension, in the order in which it appears.
-    // That means earlier dimensions have higher priority than later ones.
-    fn compare_bundles(
-        &self,
-        lhs: &ZoneBundleInfo,
-        rhs: &ZoneBundleInfo,
-    ) -> Ordering {
-        for dim in self.0.iter() {
-            let ord = match dim {
-                PriorityDimension::Cause => {
-                    lhs.metadata.cause.cmp(&rhs.metadata.cause)
-                }
-                PriorityDimension::Time => {
-                    lhs.metadata.time_created.cmp(&rhs.metadata.time_created)
-                }
-            };
-            if matches!(ord, Ordering::Equal) {
-                continue;
-            }
-            return ord;
-        }
-        Ordering::Equal
-    }
-}
-
-/// A period on which bundles are automatically cleaned up.
-#[derive(
-    Clone, Copy, Deserialize, JsonSchema, PartialEq, PartialOrd, Serialize,
-)]
-pub struct CleanupPeriod(Duration);
-
-impl Default for CleanupPeriod {
-    fn default() -> Self {
-        Self(Duration::from_secs(600))
-    }
-}
-
-impl CleanupPeriod {
-    /// The minimum supported cleanup period.
-    pub const MIN: Self = Self(Duration::from_secs(60));
-
-    /// The maximum supported cleanup period.
-    pub const MAX: Self = Self(Duration::from_secs(60 * 60 * 24));
-
-    /// Construct a new cleanup period, checking that it's valid.
-    pub fn new(duration: Duration) -> Result<Self, BundleError> {
-        if duration >= Self::MIN.as_duration()
-            && duration <= Self::MAX.as_duration()
-        {
-            Ok(Self(duration))
-        } else {
-            Err(BundleError::InvalidCleanupPeriod)
-        }
-    }
-
-    /// Return the period as a duration.
-    pub const fn as_duration(&self) -> Duration {
-        self.0
-    }
-}
-
-impl TryFrom<Duration> for CleanupPeriod {
-    type Error = BundleError;
-
-    fn try_from(duration: Duration) -> Result<Self, Self::Error> {
-        Self::new(duration)
-    }
-}
-
-impl std::fmt::Debug for CleanupPeriod {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::disk_usage;
-    use super::PriorityDimension;
-    use super::PriorityOrder;
-    use super::StorageLimit;
     use super::Utf8PathBuf;
-    use super::ZoneBundleCause;
-    use super::ZoneBundleId;
-    use super::ZoneBundleInfo;
-    use super::ZoneBundleMetadata;
-    use chrono::TimeZone;
-    use chrono::Utc;
-
-    #[test]
-    fn test_sort_zone_bundle_cause() {
-        use ZoneBundleCause::*;
-        let mut original =
-            [ExplicitRequest, Other, TerminatedInstance, UnexpectedZone];
-        let expected =
-            [Other, UnexpectedZone, TerminatedInstance, ExplicitRequest];
-        original.sort();
-        assert_eq!(original, expected);
-    }
-
-    #[test]
-    fn test_priority_dimension() {
-        assert!(PriorityOrder::new(&[]).is_err());
-        assert!(PriorityOrder::new(&[PriorityDimension::Cause]).is_err());
-        assert!(PriorityOrder::new(&[
-            PriorityDimension::Cause,
-            PriorityDimension::Cause
-        ])
-        .is_err());
-        assert!(PriorityOrder::new(&[
-            PriorityDimension::Cause,
-            PriorityDimension::Cause,
-            PriorityDimension::Time
-        ])
-        .is_err());
-
-        assert!(PriorityOrder::new(&[
-            PriorityDimension::Cause,
-            PriorityDimension::Time
-        ])
-        .is_ok());
-        assert_eq!(
-            PriorityOrder::new(&PriorityOrder::default().0).unwrap(),
-            PriorityOrder::default()
-        );
-    }
 
     #[tokio::test]
     async fn test_disk_usage() {
@@ -2077,95 +1675,6 @@ mod tests {
         );
         let path = Utf8PathBuf::from("/some/nonexistent/path");
         assert!(disk_usage(&path).await.is_err());
-    }
-
-    #[test]
-    fn test_storage_limit_bytes_available() {
-        let pct = StorageLimit(1);
-        assert_eq!(pct.bytes_available(100), 1);
-        assert_eq!(pct.bytes_available(1000), 10);
-
-        let pct = StorageLimit(100);
-        assert_eq!(pct.bytes_available(100), 100);
-        assert_eq!(pct.bytes_available(1000), 1000);
-
-        let pct = StorageLimit(100);
-        assert_eq!(pct.bytes_available(99), 99);
-
-        let pct = StorageLimit(99);
-        assert_eq!(pct.bytes_available(1), 0);
-
-        // Test non-power of 10.
-        let pct = StorageLimit(25);
-        assert_eq!(pct.bytes_available(32768), 8192);
-    }
-
-    #[test]
-    fn test_compare_bundles() {
-        use PriorityDimension::*;
-        let time_first = PriorityOrder([Time, Cause]);
-        let cause_first = PriorityOrder([Cause, Time]);
-
-        fn make_info(
-            year: i32,
-            month: u32,
-            day: u32,
-            cause: ZoneBundleCause,
-        ) -> ZoneBundleInfo {
-            ZoneBundleInfo {
-                metadata: ZoneBundleMetadata {
-                    id: ZoneBundleId {
-                        zone_name: String::from("oxz_whatever"),
-                        bundle_id: uuid::Uuid::new_v4(),
-                    },
-                    time_created: Utc
-                        .with_ymd_and_hms(year, month, day, 0, 0, 0)
-                        .single()
-                        .unwrap(),
-                    cause,
-                    version: 0,
-                },
-                path: Utf8PathBuf::from("/some/path"),
-                bytes: 0,
-            }
-        }
-
-        let info = [
-            make_info(2020, 1, 2, ZoneBundleCause::TerminatedInstance),
-            make_info(2020, 1, 2, ZoneBundleCause::ExplicitRequest),
-            make_info(2020, 1, 1, ZoneBundleCause::TerminatedInstance),
-            make_info(2020, 1, 1, ZoneBundleCause::ExplicitRequest),
-        ];
-
-        let mut sorted = info.clone();
-        sorted.sort_by(|lhs, rhs| time_first.compare_bundles(lhs, rhs));
-        // Low -> high priority
-        // [old/terminated, old/explicit, new/terminated, new/explicit]
-        let expected = [
-            info[2].clone(),
-            info[3].clone(),
-            info[0].clone(),
-            info[1].clone(),
-        ];
-        assert_eq!(
-            sorted, expected,
-            "sorting zone bundles by time-then-cause failed"
-        );
-
-        let mut sorted = info.clone();
-        sorted.sort_by(|lhs, rhs| cause_first.compare_bundles(lhs, rhs));
-        // Low -> high priority
-        // [old/terminated, new/terminated, old/explicit, new/explicit]
-        let expected = [
-            info[2].clone(),
-            info[0].clone(),
-            info[3].clone(),
-            info[1].clone(),
-        ];
-        assert_eq!(
-            sorted, expected,
-            "sorting zone bundles by cause-then-time failed"
-        );
     }
 }
 
@@ -2344,7 +1853,10 @@ mod illumos_tests {
         let new_context = CleanupContext {
             period: CleanupPeriod::new(ctx.context.period.as_duration() / 2)
                 .unwrap(),
-            storage_limit: StorageLimit(ctx.context.storage_limit.as_u8() / 2),
+            storage_limit: StorageLimit::new(
+                ctx.context.storage_limit.as_u8() / 2,
+            )
+            .unwrap(),
             priority: PriorityOrder::new(
                 &ctx.context.priority.iter().copied().rev().collect::<Vec<_>>(),
             )
@@ -2526,7 +2038,11 @@ mod illumos_tests {
         // First, reduce the storage limit, so that we only need to add a few
         // bundles.
         ctx.bundler
-            .update_cleanup_context(None, Some(StorageLimit(2)), None)
+            .update_cleanup_context(
+                None,
+                Some(StorageLimit::new(2).unwrap()),
+                None,
+            )
             .await
             .context("failed to update cleanup context")?;
 

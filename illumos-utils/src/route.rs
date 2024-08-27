@@ -12,6 +12,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 /// Wraps commands for interacting with routing tables.
 pub struct Route {}
 
+#[derive(Debug, Clone, Copy)]
 pub enum Gateway {
     Ipv4(Ipv4Addr),
     Ipv6(Ipv6Addr),
@@ -105,6 +106,25 @@ impl Route {
             }
             Some(_) | None => return Err(output_to_exec_error(cmd, &out)),
         };
+        Ok(())
+    }
+
+    pub fn add_bootstrap_route(
+        bootstrap_prefix: u16,
+        gz_bootstrap_addr: Ipv6Addr,
+        zone_vnic_name: &str,
+    ) -> Result<(), ExecutionError> {
+        let mut cmd = std::process::Command::new(PFEXEC);
+        let cmd = cmd.args(&[
+            ROUTE,
+            "add",
+            "-inet6",
+            &format!("{bootstrap_prefix:x}::/16"),
+            &gz_bootstrap_addr.to_string(),
+            "-ifp",
+            zone_vnic_name,
+        ]);
+        execute(cmd)?;
         Ok(())
     }
 }

@@ -19,9 +19,6 @@ use std::net::SocketAddrV6;
 #[derive(Debug, Parser)]
 #[clap(name = "cockroach-admin", about = "Omicron CRDB cluster admin server")]
 enum Args {
-    /// Print the OpenAPI Spec document and exit
-    Openapi,
-
     /// Start the CRDB admin server
     Run {
         /// Path to the `cockroach` CLI
@@ -57,8 +54,6 @@ async fn main_impl() -> Result<(), CmdError> {
     let args = Args::parse();
 
     match args {
-        Args::Openapi => omicron_cockroach_admin::run_openapi()
-            .map_err(|e| CmdError::Failure(anyhow!(e))),
         Args::Run {
             path_to_cockroach_binary,
             cockroach_address,

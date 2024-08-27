@@ -67,7 +67,7 @@ impl<'a> Widget for Logo<'a> {
             for (x, c) in line.chars().enumerate() {
                 if c == '#' {
                     let cell = buf
-                        .get_mut(x as u16 + area.left(), y as u16 + area.top())
+                        [(x as u16 + area.left(), y as u16 + area.top())]
                         .set_symbol(" ");
                     if x < paint_point {
                         // The cell is highlighted

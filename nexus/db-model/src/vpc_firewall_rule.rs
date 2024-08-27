@@ -211,12 +211,34 @@ pub struct VpcFirewallRule {
     pub priority: VpcFirewallRulePriority,
 }
 
+/// Cap on the number of rules in a VPC
+///
+/// The choice of value is somewhat arbitrary, but the goal is to have a
+/// large number that customers are unlikely to actually hit, but which still
+/// meaningfully limits the ability to overload the DB with a single request.
+const MAX_FW_RULES_PER_VPC: usize = 1024;
+
+/// Cap on targets and on each type of filter
+const MAX_FW_RULE_PARTS: usize = 256;
+
+fn ensure_max_len<T>(
+    items: &Vec<T>,
+    label: &str,
+    max: usize,
+) -> Result<(), external::Error> {
+    if items.len() > max {
+        let msg = format!("max length {}", max);
+        return Err(external::Error::invalid_value(label, msg));
+    }
+    Ok(())
+}
+
 impl VpcFirewallRule {
     pub fn new(
         rule_id: Uuid,
         vpc_id: Uuid,
         rule: &external::VpcFirewallRuleUpdate,
-    ) -> Self {
+    ) -> Result<Self, external::Error> {
         let identity = VpcFirewallRuleIdentity::new(
             rule_id,
             external::IdentityMetadataCreateParams {
@@ -224,7 +246,20 @@ impl VpcFirewallRule {
                 description: rule.description.clone(),
             },
         );
-        Self {
+
+        ensure_max_len(&rule.targets, "targets", MAX_FW_RULE_PARTS)?;
+
+        if let Some(hosts) = rule.filters.hosts.as_ref() {
+            ensure_max_len(&hosts, "filters.hosts", MAX_FW_RULE_PARTS)?;
+        }
+        if let Some(ports) = rule.filters.ports.as_ref() {
+            ensure_max_len(&ports, "filters.ports", MAX_FW_RULE_PARTS)?;
+        }
+        if let Some(protocols) = rule.filters.protocols.as_ref() {
+            ensure_max_len(&protocols, "filters.protocols", MAX_FW_RULE_PARTS)?;
+        }
+
+        Ok(Self {
             identity,
             vpc_id,
             status: rule.status.into(),
@@ -248,7 +283,7 @@ impl VpcFirewallRule {
             }),
             action: rule.action.into(),
             priority: rule.priority.into(),
-        }
+        })
     }
 
     pub fn vec_from_params(
@@ -256,11 +291,12 @@ impl VpcFirewallRule {
         params: external::VpcFirewallRuleUpdateParams,
     ) -> Result<Vec<VpcFirewallRule>, external::Error> {
         ensure_no_duplicates(&params)?;
-        Ok(params
+        ensure_max_len(&params.rules, "rules", MAX_FW_RULES_PER_VPC)?;
+        params
             .rules
-            .iter()
-            .map(|rule| VpcFirewallRule::new(Uuid::new_v4(), vpc_id, rule))
-            .collect())
+            .into_iter()
+            .map(|rule| VpcFirewallRule::new(Uuid::new_v4(), vpc_id, &rule))
+            .collect()
     }
 }
 

@@ -2276,62 +2276,6 @@
         }
       }
     },
-    "/v1/instances/{instance}/migrate": {
-      "post": {
-        "tags": [
-          "instances"
-        ],
-        "summary": "Migrate an instance",
-        "operationId": "instance_migrate",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "project",
-            "description": "Name or ID of the project",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "path",
-            "name": "instance",
-            "description": "Name or ID of the instance",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/InstanceMigrate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Instance"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/v1/instances/{instance}/reboot": {
       "post": {
         "tags": [
@@ -6678,21 +6622,47 @@
         }
       }
     },
-    "/v1/system/networking/bgp-announce": {
+    "/v1/system/networking/bgp-announce-set": {
       "get": {
         "tags": [
           "system/networking"
         ],
-        "summary": "Get originated routes for a BGP configuration",
+        "summary": "List BGP announce sets",
         "operationId": "networking_bgp_announce_set_list",
         "parameters": [
           {
             "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
             "name": "name_or_id",
-            "description": "A name or id to use when selecting BGP port settings",
-            "required": true,
+            "description": "A name or id to use when s electing BGP port settings",
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
             }
           }
         ],
@@ -6702,10 +6672,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Array_of_BgpAnnouncement",
+                  "title": "Array_of_BgpAnnounceSet",
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/BgpAnnouncement"
+                    "$ref": "#/components/schemas/BgpAnnounceSet"
                   }
                 }
               }
@@ -6717,6 +6687,9 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
+        },
+        "x-dropshot-pagination": {
+          "required": []
         }
       },
       "put": {
@@ -6754,7 +6727,9 @@
             "$ref": "#/components/responses/Error"
           }
         }
-      },
+      }
+    },
+    "/v1/system/networking/bgp-announce-set/{name_or_id}": {
       "delete": {
         "tags": [
           "system/networking"
@@ -6763,7 +6738,7 @@
         "operationId": "networking_bgp_announce_set_delete",
         "parameters": [
           {
-            "in": "query",
+            "in": "path",
             "name": "name_or_id",
             "description": "A name or id to use when selecting BGP port settings",
             "required": true,
@@ -6775,6 +6750,75 @@
         "responses": {
           "204": {
             "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/bgp-announce-set/{name_or_id}/announcement": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Get originated routes for a specified BGP announce set",
+        "operationId": "networking_bgp_announcement_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name_or_id",
+            "description": "A name or id to use when selecting BGP port settings",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_BgpAnnouncement",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BgpAnnouncement"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/bgp-exported": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Get BGP exported routes",
+        "operationId": "networking_bgp_exported",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BgpExported"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -9234,11 +9278,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Array_of_Table",
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/Table"
-                  }
+                  "$ref": "#/components/schemas/OxqlQueryResult"
                 }
               }
             }
@@ -9449,6 +9489,7 @@
           "vpcs"
         ],
         "summary": "Replace firewall rules",
+        "description": "The maximum number of rules per VPC is 1024.\n\nTargets are used to specify the set of instances to which a firewall rule applies. You can target instances directly by name, or specify a VPC, VPC subnet, IP, or IP subnet, which will apply the rule to traffic going to all matching instances. Targets are additive: the rule applies to instances matching ANY target. The maximum number of targets is 256.\n\nFilters reduce the scope of a firewall rule. Without filters, the rule applies to all packets to the targets (or from the targets, if it's an outbound rule). With multiple filters, the rule applies only to packets matching ALL filters. The maximum number of each type of filter is 256.",
         "operationId": "vpc_firewall_rules_update",
         "parameters": [
           {
@@ -11544,6 +11585,25 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "BgpExported": {
+        "description": "The current status of a BGP peer.",
+        "type": "object",
+        "properties": {
+          "exports": {
+            "description": "Exported routes indexed by peer address.",
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/Ipv4Net"
+              }
+            }
+          }
+        },
+        "required": [
+          "exports"
         ]
       },
       "BgpImportedRouteIpv4": {
@@ -16406,19 +16466,6 @@
           }
         ]
       },
-      "InstanceMigrate": {
-        "description": "Migration parameters for an `Instance`",
-        "type": "object",
-        "properties": {
-          "dst_sled_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "dst_sled_id"
-        ]
-      },
       "InstanceNetworkInterface": {
         "description": "An `InstanceNetworkInterface` represents a virtual network interface device attached to an instance.",
         "type": "object",
@@ -17162,7 +17209,7 @@
       "L4PortRange": {
         "example": "22",
         "title": "A range of IP ports",
-        "description": "An inclusive-inclusive range of IP ports. The second port may be omitted to represent a single port",
+        "description": "An inclusive-inclusive range of IP ports. The second port may be omitted to represent a single port.",
         "type": "string",
         "pattern": "^[0-9]{1,5}(-[0-9]{1,5})?$",
         "minLength": 1,
@@ -17188,7 +17235,7 @@
             "description": "The link-layer discovery protocol (LLDP) configuration for the link.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/LldpServiceConfigCreate"
+                "$ref": "#/components/schemas/LldpLinkConfigCreate"
               }
             ]
           },
@@ -17309,10 +17356,15 @@
           }
         ]
       },
-      "LldpServiceConfig": {
+      "LldpLinkConfig": {
         "description": "A link layer discovery protocol (LLDP) service configuration.",
         "type": "object",
         "properties": {
+          "chassis_id": {
+            "nullable": true,
+            "description": "The LLDP chassis identifier TLV.",
+            "type": "string"
+          },
           "enabled": {
             "description": "Whether or not the LLDP service is enabled.",
             "type": "boolean"
@@ -17322,11 +17374,34 @@
             "type": "string",
             "format": "uuid"
           },
-          "lldp_config_id": {
+          "link_description": {
             "nullable": true,
-            "description": "The link-layer discovery protocol configuration for this service.",
-            "type": "string",
-            "format": "uuid"
+            "description": "The LLDP link description TLV.",
+            "type": "string"
+          },
+          "link_name": {
+            "nullable": true,
+            "description": "The LLDP link name TLV.",
+            "type": "string"
+          },
+          "management_ip": {
+            "nullable": true,
+            "description": "The LLDP management IP TLV.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpNet"
+              }
+            ]
+          },
+          "system_description": {
+            "nullable": true,
+            "description": "The LLDP system description TLV.",
+            "type": "string"
+          },
+          "system_name": {
+            "nullable": true,
+            "description": "The LLDP system name TLV.",
+            "type": "string"
           }
         },
         "required": [
@@ -17334,22 +17409,44 @@
           "id"
         ]
       },
-      "LldpServiceConfigCreate": {
-        "description": "The LLDP configuration associated with a port. LLDP may be either enabled or disabled, if enabled, an LLDP configuration must be provided by name or id.",
+      "LldpLinkConfigCreate": {
+        "description": "The LLDP configuration associated with a port.",
         "type": "object",
         "properties": {
+          "chassis_id": {
+            "nullable": true,
+            "description": "The LLDP chassis identifier TLV.",
+            "type": "string"
+          },
           "enabled": {
             "description": "Whether or not LLDP is enabled.",
             "type": "boolean"
           },
-          "lldp_config": {
+          "link_description": {
             "nullable": true,
-            "description": "A reference to the LLDP configuration used. Must not be `None` when `enabled` is `true`.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/NameOrId"
-              }
-            ]
+            "description": "The LLDP link description TLV.",
+            "type": "string"
+          },
+          "link_name": {
+            "nullable": true,
+            "description": "The LLDP link name TLV.",
+            "type": "string"
+          },
+          "management_ip": {
+            "nullable": true,
+            "description": "The LLDP management IP TLV.",
+            "type": "string",
+            "format": "ip"
+          },
+          "system_description": {
+            "nullable": true,
+            "description": "The LLDP system description TLV.",
+            "type": "string"
+          },
+          "system_name": {
+            "nullable": true,
+            "description": "The LLDP system name TLV.",
+            "type": "string"
           }
         },
         "required": [
@@ -17759,6 +17856,22 @@
               "type"
             ]
           }
+        ]
+      },
+      "OxqlQueryResult": {
+        "description": "The result of a successful OxQL query.",
+        "type": "object",
+        "properties": {
+          "tables": {
+            "description": "Tables resulting from the query, each containing timeseries.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Table"
+            }
+          }
+        },
+        "required": [
+          "tables"
         ]
       },
       "Password": {
@@ -18427,6 +18540,13 @@
             "description": "The route gateway.",
             "type": "string",
             "format": "ip"
+          },
+          "local_pref": {
+            "nullable": true,
+            "description": "Local preference for route. Higher preference indictes precedence within and across protocols.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
           },
           "vid": {
             "nullable": true,
@@ -20427,7 +20547,7 @@
             "description": "The name of this link.",
             "type": "string"
           },
-          "lldp_service_config_id": {
+          "lldp_link_config_id": {
             "description": "The link-layer discovery protocol service configuration id for this link.",
             "type": "string",
             "format": "uuid"
@@ -20456,7 +20576,7 @@
           "autoneg",
           "fec",
           "link_name",
-          "lldp_service_config_id",
+          "lldp_link_config_id",
           "mtu",
           "port_settings_id",
           "speed"
@@ -20506,6 +20626,13 @@
           "interface_name": {
             "description": "The interface name this route configuration is assigned to.",
             "type": "string"
+          },
+          "local_pref": {
+            "nullable": true,
+            "description": "Local preference indicating priority within and across protocols.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
           },
           "port_settings_id": {
             "description": "The port settings object this route configuration belongs to.",
@@ -20711,7 +20838,7 @@
             "description": "Link-layer discovery protocol (LLDP) settings.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/LldpServiceConfig"
+              "$ref": "#/components/schemas/LldpLinkConfig"
             }
           },
           "links": {
@@ -21010,12 +21137,33 @@
       },
       "Units": {
         "description": "Measurement units for timeseries samples.",
-        "type": "string",
-        "enum": [
-          "count",
-          "bytes",
-          "seconds",
-          "nanoseconds"
+        "oneOf": [
+          {
+            "type": "string",
+            "enum": [
+              "count",
+              "bytes",
+              "seconds",
+              "nanoseconds",
+              "volts",
+              "amps",
+              "degrees_celcius"
+            ]
+          },
+          {
+            "description": "No meaningful units, e.g. a dimensionless quanity.",
+            "type": "string",
+            "enum": [
+              "none"
+            ]
+          },
+          {
+            "description": "Rotations per minute.",
+            "type": "string",
+            "enum": [
+              "rpm"
+            ]
+          }
         ]
       },
       "User": {
@@ -21130,8 +21278,8 @@
         ]
       },
       "UserId": {
-        "title": "A name unique within the parent collection",
-        "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID, but they may contain a UUID. They can be at most 63 characters long.",
+        "title": "A username for a local-only user",
+        "description": "Usernames must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Usernames cannot be a UUID, but they may contain a UUID. They can be at most 63 characters long.",
         "type": "string",
         "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z]([a-zA-Z0-9-]*[a-zA-Z0-9]+)?$",
         "minLength": 1,
@@ -21391,10 +21539,20 @@
         "type": "object",
         "properties": {
           "metric_type": {
-            "$ref": "#/components/schemas/MetricType"
+            "description": "The type of this metric.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MetricType"
+              }
+            ]
           },
           "values": {
-            "$ref": "#/components/schemas/ValueArray"
+            "description": "The data values.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ValueArray"
+              }
+            ]
           }
         },
         "required": [
@@ -21544,7 +21702,7 @@
         "type": "object",
         "properties": {
           "action": {
-            "description": "whether traffic matching the rule should be allowed or dropped",
+            "description": "Whether traffic matching the rule should be allowed or dropped",
             "allOf": [
               {
                 "$ref": "#/components/schemas/VpcFirewallRuleAction"
@@ -21556,7 +21714,7 @@
             "type": "string"
           },
           "direction": {
-            "description": "whether this rule is for incoming or outgoing traffic",
+            "description": "Whether this rule is for incoming or outgoing traffic",
             "allOf": [
               {
                 "$ref": "#/components/schemas/VpcFirewallRuleDirection"
@@ -21564,7 +21722,7 @@
             ]
           },
           "filters": {
-            "description": "reductions on the scope of the rule",
+            "description": "Reductions on the scope of the rule",
             "allOf": [
               {
                 "$ref": "#/components/schemas/VpcFirewallRuleFilter"
@@ -21585,13 +21743,13 @@
             ]
           },
           "priority": {
-            "description": "the relative priority of this rule",
+            "description": "The relative priority of this rule",
             "type": "integer",
             "format": "uint16",
             "minimum": 0
           },
           "status": {
-            "description": "whether this rule is in effect",
+            "description": "Whether this rule is in effect",
             "allOf": [
               {
                 "$ref": "#/components/schemas/VpcFirewallRuleStatus"
@@ -21599,7 +21757,7 @@
             ]
           },
           "targets": {
-            "description": "list of sets of instances that the rule applies to",
+            "description": "Determine the set of instances that the rule applies to",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/VpcFirewallRuleTarget"
@@ -21616,7 +21774,7 @@
             "format": "date-time"
           },
           "vpc_id": {
-            "description": "the VPC to which this rule belongs",
+            "description": "The VPC to which this rule belongs",
             "type": "string",
             "format": "uuid"
           }
@@ -21651,24 +21809,26 @@
         ]
       },
       "VpcFirewallRuleFilter": {
-        "description": "Filter for a firewall rule. A given packet must match every field that is present for the rule to apply to it. A packet matches a field if any entry in that field matches the packet.",
+        "description": "Filters reduce the scope of a firewall rule. Without filters, the rule applies to all packets to the targets (or from the targets, if it's an outbound rule). With multiple filters, the rule applies only to packets matching ALL filters. The maximum number of each type of filter is 256.",
         "type": "object",
         "properties": {
           "hosts": {
             "nullable": true,
-            "description": "If present, the sources (if incoming) or destinations (if outgoing) this rule applies to.",
+            "description": "If present, host filters match the \"other end\" of traffic from the target’s perspective: for an inbound rule, they match the source of traffic. For an outbound rule, they match the destination.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/VpcFirewallRuleHostFilter"
-            }
+            },
+            "maxItems": 256
           },
           "ports": {
             "nullable": true,
-            "description": "If present, the destination ports this rule applies to.",
+            "description": "If present, the destination ports or port ranges this rule applies to.",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/L4PortRange"
-            }
+            },
+            "maxItems": 256
           },
           "protocols": {
             "nullable": true,
@@ -21676,7 +21836,8 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/VpcFirewallRuleProtocol"
-            }
+            },
+            "maxItems": 256
           }
         }
       },
@@ -21798,7 +21959,7 @@
         ]
       },
       "VpcFirewallRuleTarget": {
-        "description": "A `VpcFirewallRuleTarget` is used to specify the set of `Instance`s to which a firewall rule applies.",
+        "description": "A `VpcFirewallRuleTarget` is used to specify the set of instances to which a firewall rule applies. You can target instances directly by name, or specify a VPC, VPC subnet, IP, or IP subnet, which will apply the rule to traffic going to all matching instances. Targets are additive: the rule applies to instances matching ANY target.",
         "oneOf": [
           {
             "description": "The rule applies to all instances in the VPC",
@@ -21903,7 +22064,7 @@
         "type": "object",
         "properties": {
           "action": {
-            "description": "whether traffic matching the rule should be allowed or dropped",
+            "description": "Whether traffic matching the rule should be allowed or dropped",
             "allOf": [
               {
                 "$ref": "#/components/schemas/VpcFirewallRuleAction"
@@ -21911,11 +22072,11 @@
             ]
           },
           "description": {
-            "description": "human-readable free-form text about a resource",
+            "description": "Human-readable free-form text about a resource",
             "type": "string"
           },
           "direction": {
-            "description": "whether this rule is for incoming or outgoing traffic",
+            "description": "Whether this rule is for incoming or outgoing traffic",
             "allOf": [
               {
                 "$ref": "#/components/schemas/VpcFirewallRuleDirection"
@@ -21923,7 +22084,7 @@
             ]
           },
           "filters": {
-            "description": "reductions on the scope of the rule",
+            "description": "Reductions on the scope of the rule",
             "allOf": [
               {
                 "$ref": "#/components/schemas/VpcFirewallRuleFilter"
@@ -21931,7 +22092,7 @@
             ]
           },
           "name": {
-            "description": "name of the rule, unique to this VPC",
+            "description": "Name of the rule, unique to this VPC",
             "allOf": [
               {
                 "$ref": "#/components/schemas/Name"
@@ -21939,13 +22100,13 @@
             ]
           },
           "priority": {
-            "description": "the relative priority of this rule",
+            "description": "The relative priority of this rule",
             "type": "integer",
             "format": "uint16",
             "minimum": 0
           },
           "status": {
-            "description": "whether this rule is in effect",
+            "description": "Whether this rule is in effect",
             "allOf": [
               {
                 "$ref": "#/components/schemas/VpcFirewallRuleStatus"
@@ -21953,11 +22114,12 @@
             ]
           },
           "targets": {
-            "description": "list of sets of instances that the rule applies to",
+            "description": "Determine the set of instances that the rule applies to",
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/VpcFirewallRuleTarget"
-            }
+            },
+            "maxItems": 256
           }
         },
         "required": [
@@ -21972,14 +22134,15 @@
         ]
       },
       "VpcFirewallRuleUpdateParams": {
-        "description": "Updateable properties of a `Vpc`'s firewall Note that VpcFirewallRules are implicitly created along with a Vpc, so there is no explicit creation.",
+        "description": "Updated list of firewall rules. Will replace all existing rules.",
         "type": "object",
         "properties": {
           "rules": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/VpcFirewallRuleUpdate"
-            }
+            },
+            "maxItems": 1024
           }
         },
         "required": [

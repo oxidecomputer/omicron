@@ -127,13 +127,14 @@ Making this simpler is tracked in
 The easiest way to do this is to run:
 
 ```
-cargo run -p omicron-dev mgs-run
+cargo xtask mgs-dev run
 ```
 
-This will print out a line similar to `omicron-dev: MGS API: http://[::1]:12225`. Note the address for use below.
+This will print out a line similar to `mgs-dev: MGS API: http://[::1]:12225`. Note the address for use below.
 
-Another option, which may lead to quicker iteration cycles if you're modifying
-MGS or sp-sim, is to run the services by hand from the root of omicron:
+#### Running sp-sim and MGS by hand
+
+If you need to run sp-sim and MGS separately, you can do so with:
 
 ```
 cargo run --bin sp-sim -- sp-sim/examples/config.toml

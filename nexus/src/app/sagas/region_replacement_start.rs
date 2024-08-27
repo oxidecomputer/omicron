@@ -26,12 +26,13 @@
 //! ```
 //!
 //! The first thing this saga does is set itself as the "operating saga" for the
-//! request, and change the state to "Allocating". Then, it performs the following
-//! steps:
+//! request, and change the state to "Allocating". Then, it performs the
+//! following steps:
 //!
 //! 1. Allocate a new region
 //!
-//! 2. For the affected Volume, swap the region being replaced with the new region.
+//! 2. For the affected Volume, swap the region being replaced with the new
+//!    region.
 //!
 //! 3. Create a fake volume that can be later deleted with the region being
 //!    replaced.
@@ -48,6 +49,7 @@ use super::{
     ActionRegistry, NexusActionContext, NexusSaga, SagaInitError,
     ACTION_GENERATE_ID,
 };
+use crate::app::sagas::common_storage::find_only_new_region;
 use crate::app::sagas::declare_saga_actions;
 use crate::app::RegionAllocationStrategy;
 use crate::app::{authn, db};
@@ -57,7 +59,6 @@ use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::types::CrucibleOpts;
 use sled_agent_client::types::VolumeConstructionRequest;
-use slog::Logger;
 use std::net::SocketAddrV6;
 use steno::ActionError;
 use steno::Node;
@@ -221,6 +222,13 @@ async fn srrs_get_existing_datasets_and_regions(
         .await
         .map_err(ActionError::action_failed)?;
 
+    // XXX for now, bail out if requesting the replacement of a read-only region
+    if db_region.read_only() {
+        return Err(ActionError::action_failed(String::from(
+            "replacing read-only region currently unsupported",
+        )));
+    }
+
     // Find out the existing datasets and regions that back the volume
     let datasets_and_regions = osagactx
         .datastore()
@@ -276,36 +284,6 @@ async fn srrs_alloc_new_region(
         .map_err(ActionError::action_failed)?;
 
     Ok(datasets_and_regions)
-}
-
-fn find_only_new_region(
-    log: &Logger,
-    existing_datasets_and_regions: Vec<(db::model::Dataset, db::model::Region)>,
-    new_datasets_and_regions: Vec<(db::model::Dataset, db::model::Region)>,
-) -> Option<(db::model::Dataset, db::model::Region)> {
-    // Only filter on whether or not a Region is in the existing list! Datasets
-    // can change values (like size_used) if this saga interleaves with other
-    // saga runs of the same type.
-    let mut dataset_and_region: Vec<(db::model::Dataset, db::model::Region)> =
-        new_datasets_and_regions
-            .into_iter()
-            .filter(|(_, r)| {
-                !existing_datasets_and_regions.iter().any(|(_, er)| er == r)
-            })
-            .collect();
-
-    if dataset_and_region.len() != 1 {
-        error!(
-            log,
-            "find_only_new_region saw dataset_and_region len {}: {:?}",
-            dataset_and_region.len(),
-            dataset_and_region,
-        );
-
-        None
-    } else {
-        dataset_and_region.pop()
-    }
 }
 
 async fn srrs_alloc_new_region_undo(
@@ -534,12 +512,13 @@ async fn srrs_replace_region_in_volume(
         "ensured_dataset_and_region",
     )?;
 
-    let new_region_address = SocketAddrV6::new(
-        *new_dataset.address().ip(),
-        ensured_region.port_number,
-        0,
-        0,
-    );
+    let Some(new_address) = new_dataset.address() else {
+        return Err(ActionError::action_failed(Error::internal_error(
+            "Dataset missing IP address",
+        )));
+    };
+    let new_region_address =
+        SocketAddrV6::new(*new_address.ip(), ensured_region.port_number, 0, 0);
 
     // If this node is rerun, the forward action will have overwritten
     // db_region's volume id, so get the cached copy.
@@ -611,12 +590,11 @@ async fn srrs_replace_region_in_volume_undo(
         "ensured_dataset_and_region",
     )?;
 
-    let new_region_address = SocketAddrV6::new(
-        *new_dataset.address().ip(),
-        ensured_region.port_number,
-        0,
-        0,
-    );
+    let Some(new_address) = new_dataset.address() else {
+        anyhow::bail!("Dataset missing IP address");
+    };
+    let new_region_address =
+        SocketAddrV6::new(*new_address.ip(), ensured_region.port_number, 0, 0);
 
     // The forward action will have overwritten db_region's volume id, so get
     // the cached copy.
@@ -894,25 +872,25 @@ pub(crate) mod test {
             Dataset::new(
                 Uuid::new_v4(),
                 Uuid::new_v4(),
-                "[fd00:1122:3344:101::1]:12345".parse().unwrap(),
+                Some("[fd00:1122:3344:101::1]:12345".parse().unwrap()),
                 DatasetKind::Crucible,
             ),
             Dataset::new(
                 Uuid::new_v4(),
                 Uuid::new_v4(),
-                "[fd00:1122:3344:102::1]:12345".parse().unwrap(),
+                Some("[fd00:1122:3344:102::1]:12345".parse().unwrap()),
                 DatasetKind::Crucible,
             ),
             Dataset::new(
                 Uuid::new_v4(),
                 Uuid::new_v4(),
-                "[fd00:1122:3344:103::1]:12345".parse().unwrap(),
+                Some("[fd00:1122:3344:103::1]:12345".parse().unwrap()),
                 DatasetKind::Crucible,
             ),
             Dataset::new(
                 Uuid::new_v4(),
                 Uuid::new_v4(),
-                "[fd00:1122:3344:104::1]:12345".parse().unwrap(),
+                Some("[fd00:1122:3344:104::1]:12345".parse().unwrap()),
                 DatasetKind::Crucible,
             ),
         ];
@@ -925,6 +903,7 @@ pub(crate) mod test {
                 10,
                 10,
                 1001,
+                false,
             ),
             Region::new(
                 datasets[1].id(),
@@ -933,6 +912,7 @@ pub(crate) mod test {
                 10,
                 10,
                 1002,
+                false,
             ),
             Region::new(
                 datasets[2].id(),
@@ -941,6 +921,7 @@ pub(crate) mod test {
                 10,
                 10,
                 1003,
+                false,
             ),
             Region::new(
                 datasets[3].id(),
@@ -949,6 +930,7 @@ pub(crate) mod test {
                 10,
                 10,
                 1004,
+                false,
             ),
         ];
 

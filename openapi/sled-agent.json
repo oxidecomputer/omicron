@@ -68,7 +68,6 @@
     },
     "/boot-disk/{boot_disk}/os/write/status": {
       "get": {
-        "summary": "Get the status of writing a new host OS",
         "operationId": "host_os_write_status_get",
         "parameters": [
           {
@@ -409,49 +408,6 @@
         "responses": {
           "204": {
             "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/instances/{instance_id}/migration-ids": {
-      "put": {
-        "operationId": "instance_put_migration_ids",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "instance_id",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/TypedUuidForInstanceKind"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/InstancePutMigrationIdsBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SledInstanceState"
-                }
-              }
-            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -2658,7 +2614,7 @@
         ]
       },
       "EarlyNetworkConfig": {
-        "description": "Network configuration required to bring up the control plane\n\nThe fields in this structure are those from [`super::params::RackInitializeRequest`] necessary for use beyond RSS. This is just for the initial rack configuration and cold boot purposes. Updates come from Nexus.",
+        "description": "Network configuration required to bring up the control plane\n\nThe fields in this structure are those from [`crate::rack_init::RackInitializeRequest`] necessary for use beyond RSS. This is just for the initial rack configuration and cold boot purposes. Updates come from Nexus.",
         "type": "object",
         "properties": {
           "body": {
@@ -2795,6 +2751,14 @@
             "items": {
               "$ref": "#/components/schemas/UplinkAddressConfig"
             }
+          },
+          "lldp": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LldpPortConfig"
+              }
+            ]
           },
           "port": {
             "description": "Switchport to use for external connectivity",
@@ -2988,7 +2952,7 @@
           "firewall_rules": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/VpcFirewallRule"
+              "$ref": "#/components/schemas/ResolvedVpcFirewallRule"
             }
           },
           "floating_ips": {
@@ -3063,23 +3027,6 @@
           "silo_id"
         ]
       },
-      "InstanceMigrationSourceParams": {
-        "description": "Instance runtime state to update for a migration.",
-        "type": "object",
-        "properties": {
-          "dst_propolis_id": {
-            "$ref": "#/components/schemas/TypedUuidForPropolisKind"
-          },
-          "migration_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "dst_propolis_id",
-          "migration_id"
-        ]
-      },
       "InstanceMigrationTargetParams": {
         "description": "Parameters used when directing Propolis to initialize itself via live migration.",
         "type": "object",
@@ -3122,32 +3069,6 @@
           "hostname",
           "memory",
           "ncpus"
-        ]
-      },
-      "InstancePutMigrationIdsBody": {
-        "description": "The body of a request to set or clear the migration identifiers from a sled agent's instance state records.",
-        "type": "object",
-        "properties": {
-          "migration_params": {
-            "nullable": true,
-            "description": "The migration identifiers to set. If `None`, this operation clears the migration IDs.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/InstanceMigrationSourceParams"
-              }
-            ]
-          },
-          "old_runtime": {
-            "description": "The last instance runtime state known to this requestor. This request will succeed if either (a) the state generation in the sled agent's runtime state matches the generation in this record, or (b) the sled agent's runtime state matches what would result from applying this request to the caller's runtime state. This latter condition provides idempotency.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/InstanceRuntimeState"
-              }
-            ]
-          }
-        },
-        "required": [
-          "old_runtime"
         ]
       },
       "InstancePutStateBody": {
@@ -3485,11 +3406,72 @@
       "L4PortRange": {
         "example": "22",
         "title": "A range of IP ports",
-        "description": "An inclusive-inclusive range of IP ports. The second port may be omitted to represent a single port",
+        "description": "An inclusive-inclusive range of IP ports. The second port may be omitted to represent a single port.",
         "type": "string",
         "pattern": "^[0-9]{1,5}(-[0-9]{1,5})?$",
         "minLength": 1,
         "maxLength": 11
+      },
+      "LldpAdminStatus": {
+        "description": "To what extent should this port participate in LLDP",
+        "type": "string",
+        "enum": [
+          "enabled",
+          "disabled",
+          "rx_only",
+          "tx_only"
+        ]
+      },
+      "LldpPortConfig": {
+        "description": "Per-port LLDP configuration settings.  Only the \"status\" setting is mandatory.  All other fields have natural defaults or may be inherited from the switch.",
+        "type": "object",
+        "properties": {
+          "chassis_id": {
+            "nullable": true,
+            "description": "Chassis ID to advertise.  If this is set, it will be advertised as a LocallyAssigned ID type.  If this is not set, it will be inherited from the switch-level settings.",
+            "type": "string"
+          },
+          "management_addrs": {
+            "nullable": true,
+            "description": "Management IP addresses to advertise.  If this is not set, it will be inherited from the switch-level settings.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ip"
+            }
+          },
+          "port_description": {
+            "nullable": true,
+            "description": "Port description to advertise.  If this is not set, no description will be advertised.",
+            "type": "string"
+          },
+          "port_id": {
+            "nullable": true,
+            "description": "Port ID to advertise.  If this is set, it will be advertised as a LocallyAssigned ID type.  If this is not set, it will be set to the port name. e.g., qsfp0/0.",
+            "type": "string"
+          },
+          "status": {
+            "description": "To what extent should this port participate in LLDP",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LldpAdminStatus"
+              }
+            ]
+          },
+          "system_description": {
+            "nullable": true,
+            "description": "System description to advertise.  If this is not set, it will be inherited from the switch-level settings.",
+            "type": "string"
+          },
+          "system_name": {
+            "nullable": true,
+            "description": "System name to advertise.  If this is not set, it will be inherited from the switch-level settings.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ]
       },
       "MacAddr": {
         "example": "ff:ff:ff:ff:ff:ff",
@@ -3499,24 +3481,6 @@
         "pattern": "^([0-9a-fA-F]{0,2}:){5}[0-9a-fA-F]{0,2}$",
         "minLength": 5,
         "maxLength": 17
-      },
-      "MigrationRole": {
-        "oneOf": [
-          {
-            "description": "This update concerns the source VMM of a migration.",
-            "type": "string",
-            "enum": [
-              "source"
-            ]
-          },
-          {
-            "description": "This update concerns the target VMM of a migration.",
-            "type": "string",
-            "enum": [
-              "target"
-            ]
-          }
-        ]
       },
       "MigrationRuntimeState": {
         "description": "An update from a sled regarding the state of a migration, indicating the role of the VMM whose migration state was updated.",
@@ -3528,9 +3492,6 @@
           "migration_id": {
             "type": "string",
             "format": "uuid"
-          },
-          "role": {
-            "$ref": "#/components/schemas/MigrationRole"
           },
           "state": {
             "$ref": "#/components/schemas/MigrationState"
@@ -3544,7 +3505,6 @@
         "required": [
           "gen",
           "migration_id",
-          "role",
           "state",
           "time_updated"
         ]
@@ -3855,6 +3815,7 @@
             ]
           },
           {
+            "description": "Type of clickhouse zone used for a single node clickhouse deployment",
             "type": "object",
             "properties": {
               "address": {
@@ -3877,6 +3838,7 @@
             ]
           },
           {
+            "description": "A zone used to run a Clickhouse Keeper node\n\nKeepers are only used in replicated clickhouse setups",
             "type": "object",
             "properties": {
               "address": {
@@ -3889,6 +3851,29 @@
                 "type": "string",
                 "enum": [
                   "clickhouse_keeper"
+                ]
+              }
+            },
+            "required": [
+              "address",
+              "dataset",
+              "type"
+            ]
+          },
+          {
+            "description": "A zone used to run a Clickhouse Server in a replicated deployment",
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "dataset": {
+                "$ref": "#/components/schemas/OmicronZoneDataset"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "clickhouse_server"
                 ]
               }
             },
@@ -4188,6 +4173,15 @@
               "$ref": "#/components/schemas/BgpPeerConfig"
             }
           },
+          "lldp": {
+            "nullable": true,
+            "description": "LLDP configuration for this port",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LldpPortConfig"
+              }
+            ]
+          },
           "port": {
             "description": "Nmae of the port this config applies to.",
             "type": "string"
@@ -4334,6 +4328,60 @@
           "rack_subnet"
         ]
       },
+      "ResolvedVpcFirewallRule": {
+        "description": "VPC firewall rule after object name resolution has been performed by Nexus",
+        "type": "object",
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/VpcFirewallRuleAction"
+          },
+          "direction": {
+            "$ref": "#/components/schemas/VpcFirewallRuleDirection"
+          },
+          "filter_hosts": {
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HostIdentifier"
+            }
+          },
+          "filter_ports": {
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/L4PortRange"
+            }
+          },
+          "filter_protocols": {
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VpcFirewallRuleProtocol"
+            }
+          },
+          "priority": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "status": {
+            "$ref": "#/components/schemas/VpcFirewallRuleStatus"
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NetworkInterface"
+            }
+          }
+        },
+        "required": [
+          "action",
+          "direction",
+          "priority",
+          "status",
+          "targets"
+        ]
+      },
       "ResolvedVpcRoute": {
         "description": "A VPC route resolved into a concrete target.",
         "type": "object",
@@ -4408,6 +4456,14 @@
                 "$ref": "#/components/schemas/IpNet"
               }
             ]
+          },
+          "local_pref": {
+            "nullable": true,
+            "description": "The local preference associated with this route.",
+            "default": null,
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
           },
           "nexthop": {
             "description": "The nexthop/gateway address.",
@@ -4615,17 +4671,18 @@
         "description": "A wrapper type containing a sled's total knowledge of the state of a specific VMM and the instance it incarnates.",
         "type": "object",
         "properties": {
-          "instance_state": {
-            "description": "The sled's conception of the state of the instance.",
+          "migration_in": {
+            "nullable": true,
+            "description": "The current state of any inbound migration to this VMM.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/InstanceRuntimeState"
+                "$ref": "#/components/schemas/MigrationRuntimeState"
               }
             ]
           },
-          "migration_state": {
+          "migration_out": {
             "nullable": true,
-            "description": "The current state of any in-progress migration for this instance, as understood by this sled.",
+            "description": "The state of any outbound migration from this VMM.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/MigrationRuntimeState"
@@ -4650,13 +4707,12 @@
           }
         },
         "required": [
-          "instance_state",
           "propolis_id",
           "vmm_state"
         ]
       },
       "SledRole": {
-        "description": "Describes the role of the sled within the rack.\n\nNote that this may change if the sled is physically moved within the rack.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Describes the role of the sled within the rack.\\n\\nNote that this may change if the sled is physically moved within the rack.\", \"oneOf\": [ { \"description\": \"The sled is a general compute sled.\", \"type\": \"string\", \"enum\": [ \"gimlet\" ] }, { \"description\": \"The sled is attached to the network switch, and has additional responsibilities.\", \"type\": \"string\", \"enum\": [ \"scrimlet\" ] } ] } ``` </details>",
+        "description": "Describes the role of the sled within the rack.\n\nNote that this may change if the sled is physically moved within the rack.",
         "oneOf": [
           {
             "description": "The sled is a general compute sled.",
@@ -5184,60 +5240,6 @@
           }
         ]
       },
-      "VpcFirewallRule": {
-        "description": "VPC firewall rule after object name resolution has been performed by Nexus",
-        "type": "object",
-        "properties": {
-          "action": {
-            "$ref": "#/components/schemas/VpcFirewallRuleAction"
-          },
-          "direction": {
-            "$ref": "#/components/schemas/VpcFirewallRuleDirection"
-          },
-          "filter_hosts": {
-            "nullable": true,
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/HostIdentifier"
-            }
-          },
-          "filter_ports": {
-            "nullable": true,
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/L4PortRange"
-            }
-          },
-          "filter_protocols": {
-            "nullable": true,
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/VpcFirewallRuleProtocol"
-            }
-          },
-          "priority": {
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
-          },
-          "status": {
-            "$ref": "#/components/schemas/VpcFirewallRuleStatus"
-          },
-          "targets": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/NetworkInterface"
-            }
-          }
-        },
-        "required": [
-          "action",
-          "direction",
-          "priority",
-          "status",
-          "targets"
-        ]
-      },
       "VpcFirewallRuleAction": {
         "type": "string",
         "enum": [
@@ -5275,7 +5277,7 @@
           "rules": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/VpcFirewallRule"
+              "$ref": "#/components/schemas/ResolvedVpcFirewallRule"
             }
           },
           "vni": {
@@ -5400,7 +5402,7 @@
         "pattern": "^ox[ip]_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
       },
       "M2Slot": {
-        "description": "An M.2 slot that was written.",
+        "description": "Describes an M.2 slot, often in the context of writing a system image to it.",
         "type": "string",
         "enum": [
           "A",

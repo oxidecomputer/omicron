@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::impl_enum_type;
-use nexus_types::internal_api;
+use omicron_common::api::internal;
 use serde::{Deserialize, Serialize};
 
 impl_enum_type!(
@@ -20,29 +20,29 @@ impl_enum_type!(
     Cockroach => b"cockroach"
     Clickhouse => b"clickhouse"
     ClickhouseKeeper => b"clickhouse_keeper"
+    ClickhouseServer => b"clickhouse_server"
     ExternalDns => b"external_dns"
     InternalDns => b"internal_dns"
 );
 
-impl From<internal_api::params::DatasetKind> for DatasetKind {
-    fn from(k: internal_api::params::DatasetKind) -> Self {
+impl From<internal::shared::DatasetKind> for DatasetKind {
+    fn from(k: internal::shared::DatasetKind) -> Self {
         match k {
-            internal_api::params::DatasetKind::Crucible => {
-                DatasetKind::Crucible
-            }
-            internal_api::params::DatasetKind::Cockroach => {
-                DatasetKind::Cockroach
-            }
-            internal_api::params::DatasetKind::Clickhouse => {
+            internal::shared::DatasetKind::Crucible => DatasetKind::Crucible,
+            internal::shared::DatasetKind::Cockroach => DatasetKind::Cockroach,
+            internal::shared::DatasetKind::Clickhouse => {
                 DatasetKind::Clickhouse
             }
-            internal_api::params::DatasetKind::ClickhouseKeeper => {
+            internal::shared::DatasetKind::ClickhouseKeeper => {
                 DatasetKind::ClickhouseKeeper
             }
-            internal_api::params::DatasetKind::ExternalDns => {
+            internal::shared::DatasetKind::ClickhouseServer => {
+                DatasetKind::ClickhouseServer
+            }
+            internal::shared::DatasetKind::ExternalDns => {
                 DatasetKind::ExternalDns
             }
-            internal_api::params::DatasetKind::InternalDns => {
+            internal::shared::DatasetKind::InternalDns => {
                 DatasetKind::InternalDns
             }
         }

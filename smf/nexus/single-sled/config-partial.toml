@@ -50,6 +50,7 @@ inventory.nkeep = 3
 inventory.disable = false
 phantom_disks.period_secs = 30
 physical_disk_adoption.period_secs = 30
+decommissioned_disk_cleaner.period_secs = 60
 blueprints.period_secs_load = 10
 blueprints.period_secs_execute = 60
 blueprints.period_secs_collect_crdb_node_ids = 180
@@ -63,6 +64,9 @@ instance_watcher.period_secs = 30
 abandoned_vmm_reaper.period_secs = 60
 saga_recovery.period_secs = 600
 lookup_region_port.period_secs = 60
+instance_updater.period_secs = 30
+region_snapshot_replacement_start.period_secs = 30
+region_snapshot_replacement_garbage_collection.period_secs = 30
 
 [default_region_allocation_strategy]
 # by default, allocate without requirement for distinct sleds.

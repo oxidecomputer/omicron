@@ -5,14 +5,13 @@
 //! Management of per-sled updates
 
 use crate::nexus::NexusClient;
+use bootstrap_agent_api::Component;
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::NamedUtf8TempFile;
 use futures::{TryFutureExt, TryStreamExt};
-use omicron_common::api::external::SemverVersion;
 use omicron_common::api::internal::nexus::{
     KnownArtifactKind, UpdateArtifactId,
 };
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::io::Read;
 use tokio::io::AsyncWriteExt;
@@ -66,12 +65,6 @@ impl Default for ConfigUpdates {
     fn default() -> Self {
         Self { zone_artifact_path: default_zone_artifact_path() }
     }
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-pub struct Component {
-    pub name: String,
-    pub version: SemverVersion,
 }
 
 // Helper functions for returning errors
@@ -259,9 +252,9 @@ impl UpdateManager {
 mod test {
     use super::*;
     use crate::fakes::nexus::FakeNexusServer;
+    use crate::nexus::NexusClient;
     use flate2::write::GzEncoder;
-    use nexus_client::Client as NexusClient;
-    use omicron_common::api::external::Error;
+    use omicron_common::api::external::{Error, SemverVersion};
     use omicron_common::api::internal::nexus::UpdateArtifactId;
     use omicron_test_utils::dev::test_setup_log;
     use std::io::Write;

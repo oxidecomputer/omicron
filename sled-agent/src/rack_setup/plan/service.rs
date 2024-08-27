@@ -4,22 +4,18 @@
 
 //! Plan generation for "where should services be initialized".
 
-use crate::bootstrap::params::StartSledAgentRequest;
-use crate::params::{
-    OmicronPhysicalDiskConfig, OmicronPhysicalDisksConfig, OmicronZoneConfig,
-    OmicronZoneDataset, OmicronZoneType,
-};
-use crate::rack_setup::config::SetupServiceConfig as Config;
 use camino::Utf8PathBuf;
 use dns_service_client::types::DnsConfigParams;
 use illumos_utils::zpool::ZpoolName;
 use internal_dns::config::{Host, Zone};
 use internal_dns::ServiceName;
+use nexus_sled_agent_shared::inventory::{
+    Inventory, OmicronZoneConfig, OmicronZoneDataset, OmicronZoneType, SledRole,
+};
 use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, ReservedRackSubnet,
-    COCKROACHDB_REDUNDANCY, DENDRITE_PORT, DNS_HTTP_PORT, DNS_PORT,
-    DNS_REDUNDANCY, MAX_DNS_REDUNDANCY, MGD_PORT, MGS_PORT, NEXUS_REDUNDANCY,
-    NTP_PORT, NUM_SOURCE_NAT_PORTS, RSS_RESERVED_ADDRESSES, SLED_PREFIX,
+    DENDRITE_PORT, DNS_HTTP_PORT, DNS_PORT, MGD_PORT, MGS_PORT, NTP_PORT,
+    NUM_SOURCE_NAT_PORTS, RSS_RESERVED_ADDRESSES, SLED_PREFIX,
 };
 use omicron_common::api::external::{Generation, MacAddr, Vni};
 use omicron_common::api::internal::shared::{
@@ -29,7 +25,14 @@ use omicron_common::api::internal::shared::{
 use omicron_common::backoff::{
     retry_notify_ext, retry_policy_internal_service_aggressive, BackoffError,
 };
+use omicron_common::disk::{
+    DiskVariant, OmicronPhysicalDiskConfig, OmicronPhysicalDisksConfig,
+};
 use omicron_common::ledger::{self, Ledger, Ledgerable};
+use omicron_common::policy::{
+    BOUNDARY_NTP_REDUNDANCY, COCKROACHDB_REDUNDANCY, DNS_REDUNDANCY,
+    MAX_DNS_REDUNDANCY, NEXUS_REDUNDANCY,
+};
 use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid, SledUuid, ZpoolUuid};
 use rand::prelude::SliceRandom;
 use schemars::JsonSchema;
@@ -37,7 +40,9 @@ use serde::{Deserialize, Serialize};
 use sled_agent_client::{
     types as SledAgentTypes, Client as SledAgentClient, Error as SledAgentError,
 };
-use sled_storage::dataset::{DatasetKind, DatasetName, CONFIG_DATASET};
+use sled_agent_types::rack_init::RackInitializeRequest as Config;
+use sled_agent_types::sled::StartSledAgentRequest;
+use sled_storage::dataset::{DatasetName, DatasetType, CONFIG_DATASET};
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -46,20 +51,30 @@ use std::num::Wrapping;
 use thiserror::Error;
 use uuid::Uuid;
 
-// The number of boundary NTP servers to create from RSS.
-const BOUNDARY_NTP_COUNT: usize = 2;
-
 // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
 // when Nexus provisions Oximeter.
 const OXIMETER_COUNT: usize = 1;
 // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
 // when Nexus provisions Clickhouse.
-// TODO(https://github.com/oxidecomputer/omicron/issues/4000): Set to 2 once we enable replicated ClickHouse
+// TODO(https://github.com/oxidecomputer/omicron/issues/4000): Use
+// omicron_common::policy::CLICKHOUSE_SERVER_REDUNDANCY once we enable
+// replicated ClickHouse.
+// Set to 0 when testing replicated ClickHouse.
 const CLICKHOUSE_COUNT: usize = 1;
 // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
 // when Nexus provisions Clickhouse keeper.
-// TODO(https://github.com/oxidecomputer/omicron/issues/4000): Set to 3 once we enable replicated ClickHouse
+// TODO(https://github.com/oxidecomputer/omicron/issues/4000): Use
+// omicron_common::policy::CLICKHOUSE_KEEPER_REDUNDANCY once we enable
+// replicated ClickHouse
+// Set to 3 when testing replicated ClickHouse.
 const CLICKHOUSE_KEEPER_COUNT: usize = 0;
+// TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
+// when Nexus provisions Clickhouse server.
+// TODO(https://github.com/oxidecomputer/omicron/issues/4000): Use
+// omicron_common::policy::CLICKHOUSE_SERVER_REDUNDANCY once we enable
+// replicated ClickHouse.
+// Set to 2 when testing replicated ClickHouse
+const CLICKHOUSE_SERVER_COUNT: usize = 0;
 // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove.
 // when Nexus provisions Crucible.
 const MINIMUM_U2_COUNT: usize = 3;
@@ -246,15 +261,15 @@ impl Plan {
 
         let role = client.sled_role_get().await?.into_inner();
         match role {
-            SledAgentTypes::SledRole::Gimlet => Ok(false),
-            SledAgentTypes::SledRole::Scrimlet => Ok(true),
+            SledRole::Gimlet => Ok(false),
+            SledRole::Scrimlet => Ok(true),
         }
     }
 
     async fn get_inventory(
         log: &Logger,
         address: SocketAddrV6,
-    ) -> Result<SledAgentTypes::Inventory, PlanError> {
+    ) -> Result<Inventory, PlanError> {
         let dur = std::time::Duration::from_secs(60);
         let client = reqwest::ClientBuilder::new()
             .connect_timeout(dur)
@@ -279,9 +294,7 @@ impl Plan {
             if inventory
                 .disks
                 .iter()
-                .filter(|disk| {
-                    matches!(disk.variant, SledAgentTypes::DiskVariant::U2)
-                })
+                .filter(|disk| matches!(disk.variant, DiskVariant::U2))
                 .count()
                 < MINIMUM_U2_COUNT
             {
@@ -347,9 +360,7 @@ impl Plan {
                 .inventory
                 .disks
                 .iter()
-                .filter(|disk| {
-                    matches!(disk.variant, SledAgentTypes::DiskVariant::U2)
-                })
+                .filter(|disk| matches!(disk.variant, DiskVariant::U2))
                 .map(|disk| OmicronPhysicalDiskConfig {
                     identity: disk.identity.clone(),
                     id: Uuid::new_v4(),
@@ -405,7 +416,7 @@ impl Plan {
                 )
                 .unwrap();
             let dataset_name =
-                sled.alloc_dataset_from_u2s(DatasetKind::InternalDns)?;
+                sled.alloc_dataset_from_u2s(DatasetType::InternalDns)?;
             let filesystem_pool = Some(dataset_name.pool().clone());
 
             sled.request.zones.push(OmicronZoneConfig {
@@ -445,7 +456,7 @@ impl Plan {
                 )
                 .unwrap();
             let dataset_name =
-                sled.alloc_dataset_from_u2s(DatasetKind::CockroachDb)?;
+                sled.alloc_dataset_from_u2s(DatasetType::CockroachDb)?;
             let filesystem_pool = Some(dataset_name.pool().clone());
             sled.request.zones.push(OmicronZoneConfig {
                 // TODO-cleanup use TypedUuid everywhere
@@ -489,7 +500,7 @@ impl Plan {
                 .unwrap();
             let dns_port = omicron_common::address::DNS_PORT;
             let dns_address = SocketAddr::new(external_ip, dns_port);
-            let dataset_kind = DatasetKind::ExternalDns;
+            let dataset_kind = DatasetType::ExternalDns;
             let dataset_name = sled.alloc_dataset_from_u2s(dataset_kind)?;
             let filesystem_pool = Some(dataset_name.pool().clone());
 
@@ -610,13 +621,54 @@ impl Plan {
                 )
                 .unwrap();
             let dataset_name =
-                sled.alloc_dataset_from_u2s(DatasetKind::Clickhouse)?;
+                sled.alloc_dataset_from_u2s(DatasetType::Clickhouse)?;
             let filesystem_pool = Some(dataset_name.pool().clone());
             sled.request.zones.push(OmicronZoneConfig {
                 // TODO-cleanup use TypedUuid everywhere
                 id: id.into_untyped_uuid(),
                 underlay_address: ip,
                 zone_type: OmicronZoneType::Clickhouse {
+                    address,
+                    dataset: OmicronZoneDataset {
+                        pool_name: dataset_name.pool().clone(),
+                    },
+                },
+                filesystem_pool,
+            });
+        }
+
+        // Provision Clickhouse server zones, continuing to stripe across sleds.
+        // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
+        // Temporary linter rule until replicated Clickhouse is enabled
+        #[allow(clippy::reversed_empty_ranges)]
+        for _ in 0..CLICKHOUSE_SERVER_COUNT {
+            let sled = {
+                let which_sled =
+                    sled_allocator.next().ok_or(PlanError::NotEnoughSleds)?;
+                &mut sled_info[which_sled]
+            };
+            let id = OmicronZoneUuid::new_v4();
+            let ip = sled.addr_alloc.next().expect("Not enough addrs");
+            // TODO: This may need to be a different port if/when to have single node
+            // and replicated running side by side as per stage 1 of RFD 468.
+            let port = omicron_common::address::CLICKHOUSE_PORT;
+            let address = SocketAddrV6::new(ip, port, 0, 0);
+            dns_builder
+                .host_zone_with_one_backend(
+                    id,
+                    ip,
+                    ServiceName::ClickhouseServer,
+                    port,
+                )
+                .unwrap();
+            let dataset_name =
+                sled.alloc_dataset_from_u2s(DatasetType::ClickhouseServer)?;
+            let filesystem_pool = Some(dataset_name.pool().clone());
+            sled.request.zones.push(OmicronZoneConfig {
+                // TODO-cleanup use TypedUuid everywhere
+                id: id.into_untyped_uuid(),
+                underlay_address: ip,
+                zone_type: OmicronZoneType::ClickhouseServer {
                     address,
                     dataset: OmicronZoneDataset {
                         pool_name: dataset_name.pool().clone(),
@@ -649,7 +701,7 @@ impl Plan {
                 )
                 .unwrap();
             let dataset_name =
-                sled.alloc_dataset_from_u2s(DatasetKind::ClickhouseKeeper)?;
+                sled.alloc_dataset_from_u2s(DatasetType::ClickhouseKeeper)?;
             let filesystem_pool = Some(dataset_name.pool().clone());
             sled.request.zones.push(OmicronZoneConfig {
                 // TODO-cleanup use TypedUuid everywhere
@@ -736,7 +788,7 @@ impl Plan {
             let ntp_address = SocketAddrV6::new(address, NTP_PORT, 0, 0);
             let filesystem_pool = Some(sled.alloc_zpool_from_u2s()?);
 
-            let (zone_type, svcname) = if idx < BOUNDARY_NTP_COUNT {
+            let (zone_type, svcname) = if idx < BOUNDARY_NTP_REDUNDANCY {
                 boundary_ntp_servers
                     .push(Host::for_zone(Zone::Other(id)).fqdn());
                 let (nic, snat_cfg) = svc_port_builder.next_snat(id)?;
@@ -863,12 +915,12 @@ pub struct SledInfo {
     /// the address of the Sled Agent on the sled's subnet
     pub sled_address: SocketAddrV6,
     /// the inventory returned by the Sled
-    inventory: SledAgentTypes::Inventory,
+    inventory: Inventory,
     /// The Zpools available for usage by services
     u2_zpools: Vec<ZpoolName>,
     /// spreads components across a Sled's zpools
     u2_zpool_allocators:
-        HashMap<DatasetKind, Box<dyn Iterator<Item = usize> + Send + Sync>>,
+        HashMap<DatasetType, Box<dyn Iterator<Item = usize> + Send + Sync>>,
     /// whether this Sled is a scrimlet
     is_scrimlet: bool,
     /// allocator for addresses in this Sled's subnet
@@ -882,7 +934,7 @@ impl SledInfo {
         sled_id: SledUuid,
         subnet: Ipv6Subnet<SLED_PREFIX>,
         sled_address: SocketAddrV6,
-        inventory: SledAgentTypes::Inventory,
+        inventory: Inventory,
         is_scrimlet: bool,
     ) -> SledInfo {
         SledInfo {
@@ -909,7 +961,7 @@ impl SledInfo {
     /// this Sled
     fn alloc_dataset_from_u2s(
         &mut self,
-        kind: DatasetKind,
+        kind: DatasetType,
     ) -> Result<DatasetName, PlanError> {
         // We have two goals here:
         //
@@ -1180,12 +1232,12 @@ impl ServicePortBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bootstrap::params::BootstrapAddressDiscovery;
-    use crate::bootstrap::params::RecoverySiloConfig;
     use omicron_common::address::IpRange;
     use omicron_common::api::internal::shared::AllowedSourceIps;
     use omicron_common::api::internal::shared::RackNetworkConfig;
     use oxnet::Ipv6Net;
+    use sled_agent_types::rack_init::BootstrapAddressDiscovery;
+    use sled_agent_types::rack_init::RecoverySiloConfig;
 
     const EXPECTED_RESERVED_ADDRESSES: u16 = 2;
     const EXPECTED_USABLE_ADDRESSES: u16 =

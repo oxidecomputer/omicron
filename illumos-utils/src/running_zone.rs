@@ -4,12 +4,15 @@
 
 //! Utilities to manage running zones.
 
-use crate::addrobj::AddrObject;
+use crate::addrobj::{
+    AddrObject, DHCP_ADDROBJ_NAME, IPV4_STATIC_ADDROBJ_NAME,
+    IPV6_STATIC_ADDROBJ_NAME,
+};
 use crate::dladm::Etherstub;
 use crate::link::{Link, VnicAllocator};
 use crate::opte::{Port, PortTicket};
 use crate::svc::wait_for_service;
-use crate::zone::{AddressRequest, IPADM, ZONE_PREFIX};
+use crate::zone::{AddressRequest, ZONE_PREFIX};
 use crate::zpool::{PathInPool, ZpoolName};
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::Utf8TempDir;
@@ -46,7 +49,7 @@ pub enum ServiceError {
 pub struct RunCommandError {
     zone: String,
     #[source]
-    err: crate::ExecutionError,
+    pub err: crate::ExecutionError,
 }
 
 /// Errors returned from [`RunningZone::boot`].
@@ -359,8 +362,28 @@ impl RunningZone {
         self.inner.zonepath.pool.as_ref()
     }
 
+    /// Return the name of a bootstrap VNIC in the zone, if any.
+    pub fn bootstrap_vnic_name(&self) -> Option<&str> {
+        self.inner.get_bootstrap_vnic_name()
+    }
+
+    /// Return the name of the control VNIC.
+    pub fn control_vnic_name(&self) -> &str {
+        self.inner.get_control_vnic_name()
+    }
+
+    /// Return the names of any OPTE ports in the zone.
+    pub fn opte_port_names(&self) -> impl Iterator<Item = &str> {
+        self.inner.opte_ports().map(|port| port.name())
+    }
+
+    /// Return the control IP address.
     pub fn control_interface(&self) -> AddrObject {
-        AddrObject::new(self.inner.get_control_vnic_name(), "omicron6").unwrap()
+        AddrObject::new(
+            self.inner.get_control_vnic_name(),
+            IPV6_STATIC_ADDROBJ_NAME,
+        )
+        .unwrap()
     }
 
     /// Runs a command within the Zone, return the output.
@@ -462,7 +485,7 @@ impl RunningZone {
     /// Note that the zone must already be configured to be booted.
     pub async fn boot(zone: InstalledZone) -> Result<Self, BootError> {
         // Boot the zone.
-        info!(zone.log, "Zone booting");
+        info!(zone.log, "Booting {} zone", zone.name);
 
         Zones::boot(&zone.name).await?;
 
@@ -480,61 +503,11 @@ impl RunningZone {
                 zone: zone.name.to_string(),
             })?;
 
-        // If the zone is self-assembling, then SMF service(s) inside the zone
-        // will be creating the listen address for the zone's service(s),
-        // setting the appropriate ifprop MTU, and so on. The idea behind
-        // self-assembling zones is that once they boot there should be *no*
-        // zlogin required.
-
-        // Use the zone ID in order to check if /var/svc/profile/site.xml
-        // exists.
         let id = Zones::id(&zone.name)
             .await?
             .ok_or_else(|| BootError::NoZoneId { zone: zone.name.clone() })?;
-        let site_profile_xml_exists =
-            std::path::Path::new(&zone.site_profile_xml_path()).exists();
 
         let running_zone = RunningZone { id: Some(id), inner: zone };
-
-        if !site_profile_xml_exists {
-            // If the zone is not self-assembling, make sure the control vnic
-            // has an IP MTU of 9000 inside the zone.
-            const CONTROL_VNIC_MTU: usize = 9000;
-            let vnic = running_zone.inner.control_vnic.name().to_string();
-
-            let commands = vec![
-                vec![
-                    IPADM.to_string(),
-                    "create-if".to_string(),
-                    "-t".to_string(),
-                    vnic.clone(),
-                ],
-                vec![
-                    IPADM.to_string(),
-                    "set-ifprop".to_string(),
-                    "-t".to_string(),
-                    "-p".to_string(),
-                    format!("mtu={}", CONTROL_VNIC_MTU),
-                    "-m".to_string(),
-                    "ipv4".to_string(),
-                    vnic.clone(),
-                ],
-                vec![
-                    IPADM.to_string(),
-                    "set-ifprop".to_string(),
-                    "-t".to_string(),
-                    "-p".to_string(),
-                    format!("mtu={}", CONTROL_VNIC_MTU),
-                    "-m".to_string(),
-                    "ipv6".to_string(),
-                    vnic,
-                ],
-            ];
-
-            for args in &commands {
-                running_zone.run_cmd(args)?;
-            }
-        }
 
         Ok(running_zone)
     }
@@ -544,10 +517,10 @@ impl RunningZone {
         addrtype: AddressRequest,
     ) -> Result<IpNetwork, EnsureAddressError> {
         let name = match addrtype {
-            AddressRequest::Dhcp => "omicron",
+            AddressRequest::Dhcp => DHCP_ADDROBJ_NAME,
             AddressRequest::Static(net) => match net.ip() {
-                std::net::IpAddr::V4(_) => "omicron4",
-                std::net::IpAddr::V6(_) => "omicron6",
+                std::net::IpAddr::V4(_) => IPV4_STATIC_ADDROBJ_NAME,
+                std::net::IpAddr::V6(_) => IPV6_STATIC_ADDROBJ_NAME,
             },
         };
         self.ensure_address_with_name(addrtype, name).await
@@ -575,7 +548,6 @@ impl RunningZone {
         &self,
         address: Ipv6Addr,
     ) -> Result<(), EnsureAddressError> {
-        info!(self.inner.log, "Adding bootstrap address");
         let vnic = self.inner.bootstrap_vnic.as_ref().ok_or_else(|| {
             EnsureAddressError::MissingBootstrapVnic {
                 address: address.to_string(),
@@ -735,7 +707,7 @@ impl RunningZone {
         gz_bootstrap_addr: Ipv6Addr,
         zone_vnic_name: &str,
     ) -> Result<(), RunCommandError> {
-        self.run_cmd([
+        let args = [
             "/usr/sbin/route",
             "add",
             "-inet6",
@@ -743,7 +715,8 @@ impl RunningZone {
             &gz_bootstrap_addr.to_string(),
             "-ifp",
             zone_vnic_name,
-        ])?;
+        ];
+        self.run_cmd(args)?;
         Ok(())
     }
 
@@ -775,7 +748,7 @@ impl RunningZone {
 
     /// Return a reference to the links for this zone.
     pub fn links(&self) -> &Vec<Link> {
-        &self.inner.links
+        &self.inner.links()
     }
 
     /// Return a mutable reference to the links for this zone.
@@ -982,10 +955,17 @@ impl InstalledZone {
         zone_name
     }
 
+    /// Get the name of the bootstrap VNIC in the zone, if any.
+    pub fn get_bootstrap_vnic_name(&self) -> Option<&str> {
+        self.bootstrap_vnic.as_ref().map(|link| link.name())
+    }
+
+    /// Get the name of the control VNIC in the zone.
     pub fn get_control_vnic_name(&self) -> &str {
         self.control_vnic.name()
     }
 
+    /// Return the name of the zone itself.
     pub fn name(&self) -> &str {
         &self.name
     }
@@ -1009,6 +989,11 @@ impl InstalledZone {
     /// Returns the filesystem path to the zone's root in the GZ.
     pub fn root(&self) -> Utf8PathBuf {
         self.zonepath.path.join(Self::ROOT_FS_PATH)
+    }
+
+    /// Return a reference to the links for this zone.
+    pub fn links(&self) -> &Vec<Link> {
+        &self.links
     }
 }
 

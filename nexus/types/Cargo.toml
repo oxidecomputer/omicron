@@ -9,16 +9,22 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
+async-trait.workspace = true
 chrono.workspace = true
 clap.workspace = true
+cookie.workspace = true
 base64.workspace = true
 derive-where.workspace = true
 derive_more.workspace = true
+dropshot.workspace = true
 futures.workspace = true
+http.workspace = true
 humantime.workspace = true
 ipnetwork.workspace = true
+newtype_derive.workspace = true
 omicron-uuid-kinds.workspace = true
 openssl.workspace = true
+oxql-types.workspace = true
 oxnet.workspace = true
 parse-display.workspace = true
 schemars = { workspace = true, features = ["chrono", "uuid1"] }
@@ -36,10 +42,13 @@ uuid.workspace = true
 api_identity.workspace = true
 dns-service-client.workspace = true
 gateway-client.workspace = true
+nexus-sled-agent-shared.workspace = true
 omicron-common.workspace = true
 omicron-passwords.workspace = true
 omicron-workspace-hack.workspace = true
-sled-agent-client.workspace = true
+# Note: we're trying to avoid a dependency from nexus-types to sled-agent-types
+# because the correct direction of dependency is unclear. If there are types
+# common to both, put them in `omicron-common` or `nexus-sled-agent-shared`.
 
 [dev-dependencies]
 proptest.workspace = true

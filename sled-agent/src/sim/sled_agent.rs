@@ -7,31 +7,24 @@
 use super::collection::{PokeMode, SimCollection};
 use super::config::Config;
 use super::disk::SimDisk;
-use super::instance::SimInstance;
+use super::instance::{self, SimInstance};
 use super::storage::CrucibleData;
 use super::storage::Storage;
-use crate::bootstrap::early_networking::{
-    EarlyNetworkConfig, EarlyNetworkConfigBody,
-};
 use crate::nexus::NexusClient;
-use crate::params::{
-    DiskStateRequested, InstanceExternalIpBody, InstanceHardware,
-    InstanceMetadata, InstanceMigrationSourceParams, InstancePutStateResponse,
-    InstanceStateRequested, InstanceUnregisterResponse, Inventory,
-    OmicronPhysicalDisksConfig, OmicronZonesConfig, SledRole,
-};
 use crate::sim::simulatable::Simulatable;
 use crate::updates::UpdateManager;
 use anyhow::bail;
 use anyhow::Context;
 use dropshot::{HttpError, HttpServer};
 use futures::lock::Mutex;
-use illumos_utils::opte::params::VirtualNetworkInterfaceHost;
+use nexus_sled_agent_shared::inventory::{
+    Inventory, InventoryDisk, InventoryZpool, OmicronZonesConfig, SledRole,
+};
 use omicron_common::api::external::{
     ByteCount, DiskState, Error, Generation, ResourceType,
 };
 use omicron_common::api::internal::nexus::{
-    DiskRuntimeState, SledInstanceState,
+    DiskRuntimeState, MigrationRuntimeState, MigrationState, SledInstanceState,
 };
 use omicron_common::api::internal::nexus::{
     InstanceRuntimeState, VmmRuntimeState,
@@ -39,15 +32,27 @@ use omicron_common::api::internal::nexus::{
 use omicron_common::api::internal::shared::{
     RackNetworkConfig, ResolvedVpcRoute, ResolvedVpcRouteSet,
     ResolvedVpcRouteState, RouterId, RouterKind, RouterVersion,
+    VirtualNetworkInterfaceHost,
 };
-use omicron_common::disk::DiskIdentity;
+use omicron_common::disk::{
+    DiskIdentity, DiskVariant, DisksManagementResult,
+    OmicronPhysicalDisksConfig,
+};
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, ZpoolUuid};
 use oxnet::Ipv6Net;
 use propolis_client::{
     types::VolumeConstructionRequest, Client as PropolisClient,
 };
 use propolis_mock_server::Context as PropolisContext;
-use sled_storage::resources::DisksManagementResult;
+use sled_agent_types::disk::DiskStateRequested;
+use sled_agent_types::early_networking::{
+    EarlyNetworkConfig, EarlyNetworkConfigBody,
+};
+use sled_agent_types::instance::{
+    InstanceExternalIpBody, InstanceHardware, InstanceMetadata,
+    InstancePutStateResponse, InstanceStateRequested,
+    InstanceUnregisterResponse,
+};
 use slog::Logger;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
@@ -317,6 +322,24 @@ impl SledAgent {
                 .contains_key(&instance_id.into_untyped_uuid())
                 .await
             {
+                let metadata = propolis_client::types::InstanceMetadata {
+                    project_id: metadata.project_id,
+                    silo_id: metadata.silo_id,
+                    sled_id: self.id,
+                    sled_model: self
+                        .config
+                        .hardware
+                        .baseboard
+                        .model()
+                        .to_string(),
+                    sled_revision: self.config.hardware.baseboard.revision(),
+                    sled_serial: self
+                        .config
+                        .hardware
+                        .baseboard
+                        .identifier()
+                        .to_string(),
+                };
                 let properties = propolis_client::types::InstanceProperties {
                     id: propolis_id.into_untyped_uuid(),
                     name: hardware.properties.hostname.to_string(),
@@ -325,7 +348,7 @@ impl SledAgent {
                     bootrom_id: Uuid::default(),
                     memory: hardware.properties.memory.to_whole_mebibytes(),
                     vcpus: hardware.properties.ncpus.0 as u8,
-                    metadata: metadata.into(),
+                    metadata,
                 };
                 let body = propolis_client::types::InstanceEnsureRequest {
                     properties,
@@ -346,15 +369,24 @@ impl SledAgent {
             }
         }
 
+        let migration_in = instance_runtime.migration_id.map(|migration_id| {
+            MigrationRuntimeState {
+                migration_id,
+                state: MigrationState::Pending,
+                gen: Generation::new(),
+                time_updated: chrono::Utc::now(),
+            }
+        });
+
         let instance_run_time_state = self
             .instances
             .sim_ensure(
                 &instance_id.into_untyped_uuid(),
                 SledInstanceState {
-                    instance_state: instance_runtime,
                     vmm_state: vmm_runtime,
                     propolis_id,
-                    migration_state: None,
+                    migration_in,
+                    migration_out: None,
                 },
                 None,
             )
@@ -518,6 +550,24 @@ impl SledAgent {
         Ok(instance.current())
     }
 
+    pub async fn instance_simulate_migration_source(
+        &self,
+        instance_id: InstanceUuid,
+        migration: instance::SimulateMigrationSource,
+    ) -> Result<(), HttpError> {
+        let instance = self
+            .instances
+            .sim_get_cloned_object(&instance_id.into_untyped_uuid())
+            .await
+            .map_err(|_| {
+                crate::sled_agent::Error::Instance(
+                    crate::instance_manager::Error::NoSuchInstance(instance_id),
+                )
+            })?;
+        instance.set_simulated_migration_source(migration);
+        Ok(())
+    }
+
     pub async fn set_instance_ensure_state_error(&self, error: Option<Error>) {
         *self.instance_ensure_state_error.lock().await = error;
     }
@@ -539,20 +589,6 @@ impl SledAgent {
             .await?;
 
         Ok(())
-    }
-
-    pub async fn instance_put_migration_ids(
-        self: &Arc<Self>,
-        instance_id: InstanceUuid,
-        old_runtime: &InstanceRuntimeState,
-        migration_ids: &Option<InstanceMigrationSourceParams>,
-    ) -> Result<SledInstanceState, Error> {
-        let instance = self
-            .instances
-            .sim_get_cloned_object(&instance_id.into_untyped_uuid())
-            .await?;
-
-        instance.put_migration_ids(old_runtime, migration_ids).await
     }
 
     /// Idempotently ensures that the given API Disk (described by `api_disk`)
@@ -579,8 +615,8 @@ impl SledAgent {
         self.disks.size().await
     }
 
-    pub async fn instance_poke(&self, id: InstanceUuid) {
-        self.instances.sim_poke(id.into_untyped_uuid(), PokeMode::Drain).await;
+    pub async fn instance_poke(&self, id: InstanceUuid, mode: PokeMode) {
+        self.instances.sim_poke(id.into_untyped_uuid(), mode).await;
     }
 
     pub async fn disk_poke(&self, id: Uuid) {
@@ -593,7 +629,7 @@ impl SledAgent {
         id: Uuid,
         identity: DiskIdentity,
     ) {
-        let variant = sled_hardware::DiskVariant::U2;
+        let variant = DiskVariant::U2;
         self.storage
             .lock()
             .await
@@ -850,7 +886,7 @@ impl SledAgent {
             disks: storage
                 .physical_disks()
                 .values()
-                .map(|info| crate::params::InventoryDisk {
+                .map(|info| InventoryDisk {
                     identity: info.identity.clone(),
                     variant: info.variant,
                     slot: info.slot,
@@ -860,7 +896,7 @@ impl SledAgent {
                 .zpools()
                 .iter()
                 .map(|(id, zpool)| {
-                    Ok(crate::params::InventoryZpool {
+                    Ok(InventoryZpool {
                         id: *id,
                         total_size: ByteCount::try_from(zpool.total_size())?,
                     })

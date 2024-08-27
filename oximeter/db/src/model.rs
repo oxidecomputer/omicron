@@ -11,13 +11,13 @@ use crate::FieldSchema;
 use crate::FieldSource;
 use crate::Metric;
 use crate::Target;
-use crate::TimeseriesKey;
 use crate::TimeseriesSchema;
 use bytes::Bytes;
 use chrono::DateTime;
 use chrono::Utc;
 use num::traits::Zero;
 use oximeter::histogram::Histogram;
+use oximeter::schema::TimeseriesKey;
 use oximeter::traits;
 use oximeter::types::Cumulative;
 use oximeter::types::Datum;
@@ -45,7 +45,7 @@ use uuid::Uuid;
 /// - [`crate::Client::initialize_db_with_version`]
 /// - [`crate::Client::ensure_schema`]
 /// - The `clickhouse-schema-updater` binary in this crate
-pub const OXIMETER_VERSION: u64 = 5;
+pub const OXIMETER_VERSION: u64 = 10;
 
 // Wrapper type to represent a boolean in the database.
 //
@@ -1880,7 +1880,6 @@ mod tests {
     use super::*;
     use chrono::Timelike;
     use oximeter::histogram::Record;
-    use oximeter::test_util;
     use oximeter::Datum;
 
     #[test]
@@ -1983,7 +1982,7 @@ mod tests {
 
     #[test]
     fn test_unroll_from_source() {
-        let sample = test_util::make_sample();
+        let sample = oximeter_test_utils::make_sample();
         let out = unroll_from_source(&sample);
         assert_eq!(out["oximeter.fields_string"].len(), 2);
         assert_eq!(out["oximeter.fields_i64"].len(), 1);
@@ -2003,8 +2002,8 @@ mod tests {
     // datum.
     #[test]
     fn test_unroll_missing_measurement_row() {
-        let sample = test_util::make_sample();
-        let missing_sample = test_util::make_missing_sample();
+        let sample = oximeter_test_utils::make_sample();
+        let missing_sample = oximeter_test_utils::make_missing_sample();
         let (table_name, row) = unroll_measurement_row(&sample);
         let (missing_table_name, missing_row) =
             unroll_measurement_row(&missing_sample);
@@ -2022,7 +2021,7 @@ mod tests {
 
     #[test]
     fn test_unroll_measurement_row() {
-        let sample = test_util::make_hist_sample();
+        let sample = oximeter_test_utils::make_hist_sample();
         let (table_name, row) = unroll_measurement_row(&sample);
         assert_eq!(table_name, "oximeter.measurements_histogramf64");
         let unpacked: HistogramF64MeasurementRow =

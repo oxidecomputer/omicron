@@ -36,15 +36,17 @@ struct Opt {
 #[value(rename_all = "kebab-case")]
 enum ServiceName {
     Cockroach,
-    Clickhouse,
     ClickhouseKeeper,
+    ClickhouseServer,
 }
 
 impl From<ServiceName> for internal_dns::ServiceName {
     fn from(value: ServiceName) -> Self {
         match value {
             ServiceName::Cockroach => internal_dns::ServiceName::Cockroach,
-            ServiceName::Clickhouse => internal_dns::ServiceName::Clickhouse,
+            ServiceName::ClickhouseServer => {
+                internal_dns::ServiceName::ClickhouseServer
+            }
             ServiceName::ClickhouseKeeper => {
                 internal_dns::ServiceName::ClickhouseKeeper
             }
@@ -65,10 +67,8 @@ async fn main() -> Result<()> {
 
     let resolver = if opt.nameserver_addresses.is_empty() {
         info!(&log, "using system configuration");
-        let async_resolver =
-            trust_dns_resolver::AsyncResolver::tokio_from_system_conf()
-                .context("initializing resolver from system configuration")?;
-        Resolver::new_with_resolver(log.clone(), async_resolver)
+        Resolver::new_from_system_conf(log.clone())
+            .context("initializing resolver from system configuration")?
     } else {
         let addrs = opt.nameserver_addresses;
         info!(&log, "using explicit nameservers"; "nameservers" => ?addrs);

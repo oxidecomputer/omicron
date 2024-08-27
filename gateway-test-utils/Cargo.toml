@@ -11,6 +11,7 @@ workspace = true
 camino.workspace = true
 dropshot.workspace = true
 gateway-messages.workspace = true
+gateway-types.workspace = true
 omicron-gateway.workspace = true
 omicron-test-utils.workspace = true
 slog.workspace = true

@@ -29,6 +29,7 @@ impl_enum_type!(
     Complete => b"complete"
 );
 
+// FromStr impl required for use with clap (aka omdb)
 impl std::str::FromStr for RegionReplacementState {
     type Err = String;
 
@@ -110,6 +111,10 @@ impl std::str::FromStr for RegionReplacementState {
 /// sent if the start saga completed successfully, meaning the volume
 /// modification was committed to the database and will not change or be
 /// unwound.
+///
+/// It's also possible to transition from Running to ReplacementDone if a
+/// "finish" notification is seen by the region replacement drive background
+/// task. This check is done before invoking the region replacement drive saga.
 ///
 /// See also: RegionReplacementStep records
 #[derive(

@@ -9,6 +9,7 @@ use std::net::Ipv4Addr;
 
 use crate::integration_tests::instances::fetch_instance_external_ips;
 use crate::integration_tests::instances::instance_simulate;
+use crate::integration_tests::instances::instance_wait_for_state;
 use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use http::Method;
@@ -47,6 +48,7 @@ use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
+use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_uuid_kinds::GenericUuid;
@@ -696,6 +698,7 @@ async fn test_floating_ip_create_attachment(
     .unwrap();
 
     instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
 
     NexusRequest::object_delete(
         &client,

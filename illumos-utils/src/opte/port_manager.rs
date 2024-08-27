@@ -4,9 +4,8 @@
 
 //! Manager for all OPTE ports on a Helios system
 
+use crate::dladm::OPTE_LINK_PREFIX;
 use crate::opte::opte_firewall_rules;
-use crate::opte::params::VirtualNetworkInterfaceHost;
-use crate::opte::params::VpcFirewallRule;
 use crate::opte::port::PortData;
 use crate::opte::Error;
 use crate::opte::Gateway;
@@ -16,6 +15,7 @@ use ipnetwork::IpNetwork;
 use omicron_common::api::external;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
+use omicron_common::api::internal::shared::ResolvedVpcFirewallRule;
 use omicron_common::api::internal::shared::ResolvedVpcRoute;
 use omicron_common::api::internal::shared::ResolvedVpcRouteSet;
 use omicron_common::api::internal::shared::ResolvedVpcRouteState;
@@ -23,6 +23,7 @@ use omicron_common::api::internal::shared::RouterId;
 use omicron_common::api::internal::shared::RouterTarget as ApiRouterTarget;
 use omicron_common::api::internal::shared::RouterVersion;
 use omicron_common::api::internal::shared::SourceNatConfig;
+use omicron_common::api::internal::shared::VirtualNetworkInterfaceHost;
 use oxide_vpc::api::AddRouterEntryReq;
 use oxide_vpc::api::DelRouterEntryReq;
 use oxide_vpc::api::DhcpCfg;
@@ -51,9 +52,6 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::sync::Mutex;
 use uuid::Uuid;
-
-// Prefix used to identify xde data links.
-const XDE_LINK_PREFIX: &str = "opte";
 
 /// Stored routes (and usage count) for a given VPC/subnet.
 #[derive(Debug, Clone)]
@@ -85,7 +83,7 @@ impl PortManagerInner {
     fn next_port_name(&self) -> String {
         format!(
             "{}{}",
-            XDE_LINK_PREFIX,
+            OPTE_LINK_PREFIX,
             self.next_port_id.fetch_add(1, Ordering::SeqCst)
         )
     }
@@ -98,7 +96,7 @@ pub struct PortCreateParams<'a> {
     pub source_nat: Option<SourceNatConfig>,
     pub ephemeral_ip: Option<IpAddr>,
     pub floating_ips: &'a [IpAddr],
-    pub firewall_rules: &'a [VpcFirewallRule],
+    pub firewall_rules: &'a [ResolvedVpcFirewallRule],
     pub dhcp_config: DhcpCfg,
     pub is_service: bool,
 }
@@ -265,8 +263,9 @@ impl PortManager {
         // So we:
         //
         // - create the xde device
-        // - create the vnic, cleaning up the xde device if that fails
-        // - add both to the Port
+        // - create the port ticket
+        // - create the port
+        // - add both to the PortManager's map
         //
         // The Port object's drop implementation will clean up both of those, if
         // any of the remaining fallible operations fail.
@@ -289,21 +288,6 @@ impl PortManager {
             )?;
             hdl
         };
-
-        // Initialize firewall rules for the new port.
-        let rules = opte_firewall_rules(firewall_rules, &vni, &mac);
-        debug!(
-            self.inner.log,
-            "Setting firewall rules";
-            "port_name" => &port_name,
-            "rules" => ?&rules,
-        );
-        #[cfg(target_os = "illumos")]
-        hdl.set_fw_rules(&oxide_vpc::api::SetFwRulesReq {
-            port_name: port_name.clone(),
-            rules,
-        })?;
-
         let (port, ticket) = {
             let mut ports = self.inner.ports.lock().unwrap();
             let ticket = PortTicket::new(nic.id, nic.kind, self.inner.clone());
@@ -325,6 +309,20 @@ impl PortManager {
             );
             (port, ticket)
         };
+
+        // Initialize firewall rules for the new port.
+        let rules = opte_firewall_rules(firewall_rules, &vni, &mac);
+        debug!(
+            self.inner.log,
+            "Setting firewall rules";
+            "port_name" => &port_name,
+            "rules" => ?&rules,
+        );
+        #[cfg(target_os = "illumos")]
+        hdl.set_fw_rules(&oxide_vpc::api::SetFwRulesReq {
+            port_name: port_name.clone(),
+            rules,
+        })?;
 
         // Check locally to see whether we have any routes from the
         // control plane for this port already installed. If not,
@@ -666,7 +664,7 @@ impl PortManager {
     pub fn firewall_rules_ensure(
         &self,
         vni: external::Vni,
-        rules: &[VpcFirewallRule],
+        rules: &[ResolvedVpcFirewallRule],
     ) -> Result<(), Error> {
         use opte_ioctl::OpteHdl;
 
@@ -707,7 +705,7 @@ impl PortManager {
     pub fn firewall_rules_ensure(
         &self,
         vni: external::Vni,
-        rules: &[VpcFirewallRule],
+        rules: &[ResolvedVpcFirewallRule],
     ) -> Result<(), Error> {
         info!(
             self.inner.log,

@@ -28,6 +28,9 @@ use diesel::pg::Pg;
 use diesel::serialize::ToSql;
 use diesel::{serialize, sql_types};
 use ipnetwork::IpNetwork;
+use nexus_sled_agent_shared::inventory::{
+    OmicronZoneConfig, OmicronZonesConfig,
+};
 use nexus_types::inventory::{
     BaseboardId, Caboose, Collection, PowerState, RotPage, RotSlot,
 };
@@ -758,20 +761,28 @@ impl_enum_type!(
     Scrimlet =>  b"scrimlet"
 );
 
-impl From<nexus_types::inventory::SledRole> for SledRole {
-    fn from(value: nexus_types::inventory::SledRole) -> Self {
+impl From<nexus_sled_agent_shared::inventory::SledRole> for SledRole {
+    fn from(value: nexus_sled_agent_shared::inventory::SledRole) -> Self {
         match value {
-            nexus_types::inventory::SledRole::Gimlet => SledRole::Gimlet,
-            nexus_types::inventory::SledRole::Scrimlet => SledRole::Scrimlet,
+            nexus_sled_agent_shared::inventory::SledRole::Gimlet => {
+                SledRole::Gimlet
+            }
+            nexus_sled_agent_shared::inventory::SledRole::Scrimlet => {
+                SledRole::Scrimlet
+            }
         }
     }
 }
 
-impl From<SledRole> for nexus_types::inventory::SledRole {
+impl From<SledRole> for nexus_sled_agent_shared::inventory::SledRole {
     fn from(value: SledRole) -> Self {
         match value {
-            SledRole::Gimlet => nexus_types::inventory::SledRole::Gimlet,
-            SledRole::Scrimlet => nexus_types::inventory::SledRole::Scrimlet,
+            SledRole::Gimlet => {
+                nexus_sled_agent_shared::inventory::SledRole::Gimlet
+            }
+            SledRole::Scrimlet => {
+                nexus_sled_agent_shared::inventory::SledRole::Scrimlet
+            }
         }
     }
 }
@@ -953,7 +964,7 @@ impl InvSledOmicronZones {
             time_collected: self.time_collected,
             source: self.source,
             sled_id: self.sled_id.into(),
-            zones: nexus_types::inventory::OmicronZonesConfig {
+            zones: OmicronZonesConfig {
                 generation: *self.generation,
                 zones: Vec::new(),
             },
@@ -974,6 +985,7 @@ impl_enum_type!(
     BoundaryNtp => b"boundary_ntp"
     Clickhouse => b"clickhouse"
     ClickhouseKeeper => b"clickhouse_keeper"
+    ClickhouseServer => b"clickhouse_server"
     CockroachDb => b"cockroach_db"
     Crucible => b"crucible"
     CruciblePantry => b"crucible_pantry"
@@ -990,6 +1002,7 @@ impl From<ZoneType> for ServiceKind {
             ZoneType::BoundaryNtp | ZoneType::InternalNtp => Self::Ntp,
             ZoneType::Clickhouse => Self::Clickhouse,
             ZoneType::ClickhouseKeeper => Self::ClickhouseKeeper,
+            ZoneType::ClickhouseServer => Self::ClickhouseServer,
             ZoneType::CockroachDb => Self::Cockroach,
             ZoneType::Crucible => Self::Crucible,
             ZoneType::CruciblePantry => Self::CruciblePantry,
@@ -1001,7 +1014,49 @@ impl From<ZoneType> for ServiceKind {
     }
 }
 
-/// See [`nexus_types::inventory::OmicronZoneConfig`].
+impl From<ZoneType> for nexus_sled_agent_shared::inventory::ZoneKind {
+    fn from(zone_type: ZoneType) -> Self {
+        use nexus_sled_agent_shared::inventory::ZoneKind::*;
+
+        match zone_type {
+            ZoneType::BoundaryNtp => BoundaryNtp,
+            ZoneType::Clickhouse => Clickhouse,
+            ZoneType::ClickhouseKeeper => ClickhouseKeeper,
+            ZoneType::ClickhouseServer => ClickhouseServer,
+            ZoneType::CockroachDb => CockroachDb,
+            ZoneType::Crucible => Crucible,
+            ZoneType::CruciblePantry => CruciblePantry,
+            ZoneType::ExternalDns => ExternalDns,
+            ZoneType::InternalDns => InternalDns,
+            ZoneType::InternalNtp => InternalNtp,
+            ZoneType::Nexus => Nexus,
+            ZoneType::Oximeter => Oximeter,
+        }
+    }
+}
+
+impl From<nexus_sled_agent_shared::inventory::ZoneKind> for ZoneType {
+    fn from(zone_kind: nexus_sled_agent_shared::inventory::ZoneKind) -> Self {
+        use nexus_sled_agent_shared::inventory::ZoneKind::*;
+
+        match zone_kind {
+            BoundaryNtp => ZoneType::BoundaryNtp,
+            Clickhouse => ZoneType::Clickhouse,
+            ClickhouseKeeper => ZoneType::ClickhouseKeeper,
+            ClickhouseServer => ZoneType::ClickhouseServer,
+            CockroachDb => ZoneType::CockroachDb,
+            Crucible => ZoneType::Crucible,
+            CruciblePantry => ZoneType::CruciblePantry,
+            ExternalDns => ZoneType::ExternalDns,
+            InternalDns => ZoneType::InternalDns,
+            InternalNtp => ZoneType::InternalNtp,
+            Nexus => ZoneType::Nexus,
+            Oximeter => ZoneType::Oximeter,
+        }
+    }
+}
+
+/// See [`nexus_sled_agent_shared::inventory::OmicronZoneConfig`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_omicron_zone)]
 pub struct InvOmicronZone {
@@ -1033,7 +1088,7 @@ impl InvOmicronZone {
     pub fn new(
         inv_collection_id: CollectionUuid,
         sled_id: SledUuid,
-        zone: &nexus_types::inventory::OmicronZoneConfig,
+        zone: &OmicronZoneConfig,
     ) -> Result<InvOmicronZone, anyhow::Error> {
         // Inventory zones do not know the external IP ID.
         let external_ip_id = None;
@@ -1074,7 +1129,7 @@ impl InvOmicronZone {
     pub fn into_omicron_zone_config(
         self,
         nic_row: Option<InvOmicronZoneNic>,
-    ) -> Result<nexus_types::inventory::OmicronZoneConfig, anyhow::Error> {
+    ) -> Result<OmicronZoneConfig, anyhow::Error> {
         let zone = OmicronZone {
             sled_id: self.sled_id.into(),
             id: self.id,
@@ -1137,7 +1192,7 @@ impl From<InvOmicronZoneNic> for OmicronZoneNic {
 impl InvOmicronZoneNic {
     pub fn new(
         inv_collection_id: CollectionUuid,
-        zone: &nexus_types::inventory::OmicronZoneConfig,
+        zone: &OmicronZoneConfig,
     ) -> Result<Option<InvOmicronZoneNic>, anyhow::Error> {
         let Some(nic) = zone.zone_type.service_vnic() else {
             return Ok(None);

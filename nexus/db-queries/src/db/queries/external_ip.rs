@@ -881,6 +881,7 @@ mod tests {
     use nexus_db_model::InstanceCpuCount;
     use nexus_db_model::IpPoolResource;
     use nexus_db_model::IpPoolResourceType;
+    use nexus_sled_agent_shared::inventory::ZoneKind;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     use nexus_types::deployment::OmicronZoneExternalIp;
@@ -897,7 +898,6 @@ mod tests {
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::InstanceUuid;
     use omicron_uuid_kinds::OmicronZoneUuid;
-    use sled_agent_client::ZoneKind;
     use std::net::IpAddr;
     use std::net::Ipv4Addr;
     use std::sync::Arc;

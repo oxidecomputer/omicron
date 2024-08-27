@@ -7,10 +7,10 @@
 use crate::bootstrap::params::version;
 use crate::bootstrap::params::Request;
 use crate::bootstrap::params::RequestEnvelope;
-use crate::bootstrap::params::StartSledAgentRequest;
 use crate::bootstrap::views::Response;
 use crate::bootstrap::views::ResponseEnvelope;
 use crate::bootstrap::views::SledAgentResponse;
+use sled_agent_types::sled::StartSledAgentRequest;
 use slog::Logger;
 use std::io;
 use std::net::SocketAddrV6;

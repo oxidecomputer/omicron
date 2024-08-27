@@ -15,6 +15,7 @@ use nexus_db_queries::db;
 use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::api::external::Error;
 use omicron_common::retry_until_known_result;
+use slog::Logger;
 use std::net::SocketAddrV6;
 
 // Common Pantry operations
@@ -106,4 +107,34 @@ pub(crate) async fn call_pantry_detach_for_disk(
     })?;
 
     Ok(())
+}
+
+pub(crate) fn find_only_new_region(
+    log: &Logger,
+    existing_datasets_and_regions: Vec<(db::model::Dataset, db::model::Region)>,
+    new_datasets_and_regions: Vec<(db::model::Dataset, db::model::Region)>,
+) -> Option<(db::model::Dataset, db::model::Region)> {
+    // Only filter on whether or not a Region is in the existing list! Datasets
+    // can change values (like size_used) if this saga interleaves with other
+    // saga runs of the same type.
+    let mut dataset_and_region: Vec<(db::model::Dataset, db::model::Region)> =
+        new_datasets_and_regions
+            .into_iter()
+            .filter(|(_, r)| {
+                !existing_datasets_and_regions.iter().any(|(_, er)| er == r)
+            })
+            .collect();
+
+    if dataset_and_region.len() != 1 {
+        error!(
+            log,
+            "find_only_new_region saw dataset_and_region len {}: {:?}",
+            dataset_and_region.len(),
+            dataset_and_region,
+        );
+
+        None
+    } else {
+        dataset_and_region.pop()
+    }
 }

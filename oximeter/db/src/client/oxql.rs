@@ -18,7 +18,7 @@ use crate::query::field_table_name;
 use crate::Error;
 use crate::Metric;
 use crate::Target;
-use crate::TimeseriesKey;
+use oximeter::schema::TimeseriesKey;
 use oximeter::TimeseriesSchema;
 use slog::debug;
 use slog::trace;
@@ -68,7 +68,7 @@ pub struct OxqlResult {
     pub query_summaries: Vec<QuerySummary>,
 
     /// The list of OxQL tables returned from the query.
-    pub tables: Vec<oxql::Table>,
+    pub tables: Vec<oxql_types::Table>,
 }
 
 /// The maximum number of data values fetched from the database for an OxQL
@@ -479,7 +479,9 @@ impl Client {
                 query_id,
                 total_duration: query_start.elapsed(),
                 query_summaries,
-                tables: vec![oxql::Table::new(schema.timeseries_name.as_str())],
+                tables: vec![oxql_types::Table::new(
+                    schema.timeseries_name.as_str(),
+                )],
             };
             return Ok(result);
         }
@@ -503,7 +505,7 @@ impl Client {
 
         // At this point, let's construct a set of tables and run the results
         // through the transformation pipeline.
-        let mut tables = vec![oxql::Table::from_timeseries(
+        let mut tables = vec![oxql_types::Table::from_timeseries(
             schema.timeseries_name.as_str(),
             timeseries_by_key.into_values(),
         )?];
@@ -553,7 +555,7 @@ impl Client {
         limit: Option<Limit>,
         total_rows_fetched: &mut u64,
     ) -> Result<
-        (Vec<QuerySummary>, BTreeMap<TimeseriesKey, oxql::Timeseries>),
+        (Vec<QuerySummary>, BTreeMap<TimeseriesKey, oxql_types::Timeseries>),
         Error,
     > {
         // We'll create timeseries for each key on the fly. To enable computing
@@ -624,25 +626,25 @@ impl Client {
         for (key, measurements) in measurements_by_key.into_iter() {
             // Constuct a new timeseries, from the target/metric info.
             let (target, metric) = info.get(&key).unwrap();
-            let mut timeseries = oxql::Timeseries::new(
+            let mut timeseries = oxql_types::Timeseries::new(
                 target
                     .fields
                     .iter()
                     .chain(metric.fields.iter())
                     .map(|field| (field.name.clone(), field.value.clone())),
-                oxql::point::DataType::try_from(schema.datum_type)?,
+                oxql_types::point::DataType::try_from(schema.datum_type)?,
                 if schema.datum_type.is_cumulative() {
-                    oxql::point::MetricType::Delta
+                    oxql_types::point::MetricType::Delta
                 } else {
-                    oxql::point::MetricType::Gauge
+                    oxql_types::point::MetricType::Gauge
                 },
             )?;
 
             // Covert its oximeter measurements into OxQL data types.
             let points = if schema.datum_type.is_cumulative() {
-                oxql::point::Points::delta_from_cumulative(&measurements)?
+                oxql_types::point::Points::delta_from_cumulative(&measurements)?
             } else {
-                oxql::point::Points::gauge_from_gauge(&measurements)?
+                oxql_types::point::Points::gauge_from_gauge(&measurements)?
             };
             timeseries.points = points;
             debug!(
@@ -1108,10 +1110,7 @@ fn update_total_rows_and_check(
 mod tests {
     use super::ConsistentKeyGroup;
     use crate::client::oxql::chunk_consistent_key_groups_impl;
-    use crate::{
-        oxql::{point::Points, Table, Timeseries},
-        Client, DbWrite,
-    };
+    use crate::{Client, DbWrite};
     use crate::{Metric, Target};
     use chrono::{DateTime, Utc};
     use dropshot::test_util::LogContext;
@@ -1119,6 +1118,7 @@ mod tests {
     use omicron_test_utils::dev::test_setup_log;
     use oximeter::{types::Cumulative, FieldValue};
     use oximeter::{DatumType, Sample};
+    use oxql_types::{point::Points, Table, Timeseries};
     use std::collections::BTreeMap;
     use std::time::Duration;
 
