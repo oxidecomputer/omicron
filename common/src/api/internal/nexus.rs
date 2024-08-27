@@ -113,13 +113,9 @@ pub struct VmmRuntimeState {
     pub time_updated: DateTime<Utc>,
 }
 
-/// A wrapper type containing a sled's total knowledge of the state of a
-/// specific VMM and the instance it incarnates.
+/// A wrapper type containing a sled's total knowledge of the state of a VMM.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct SledInstanceState {
-    /// The ID of the VMM whose state is being reported.
-    pub propolis_id: PropolisUuid,
-
+pub struct SledVmmState {
     /// The most recent state of the sled's VMM process.
     pub vmm_state: VmmRuntimeState,
 
@@ -142,7 +138,7 @@ impl Migrations<'_> {
     }
 }
 
-impl SledInstanceState {
+impl SledVmmState {
     pub fn migrations(&self) -> Migrations<'_> {
         Migrations {
             migration_in: self.migration_in.as_ref(),
@@ -223,6 +219,8 @@ pub enum ProducerKind {
     Service,
     /// The producer is a Propolis VMM managing a guest instance.
     Instance,
+    /// The producer is a management gateway service.
+    ManagementGateway,
 }
 
 /// Information announced by a metric server, used so that clients can contact it and collect

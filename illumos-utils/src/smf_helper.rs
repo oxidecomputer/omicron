@@ -77,7 +77,7 @@ impl<'t> SmfHelper<'t> {
                 "addpropvalue",
                 &prop.to_string(),
                 &format!("{}:", valtype.to_string()),
-                &val.to_string(),
+                &format!("\"{}\"", val.to_string()),
             ])
             .map_err(|err| Error::ZoneCommand {
                 intent: format!("add {} smf property value", prop.to_string()),

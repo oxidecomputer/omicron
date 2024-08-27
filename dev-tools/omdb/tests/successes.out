@@ -141,9 +141,16 @@ SP DETAILS: type "Sled" slot 0
 
     COMPONENTS
 
-        NAME         DESCRIPTION             DEVICE          PRESENCE SERIAL 
-        sp3-host-cpu FAKE host cpu           sp3-host-cpu    Present  None   
-        dev-0        FAKE temperature sensor fake-tmp-sensor Failed   None   
+        NAME         DESCRIPTION                              DEVICE          PRESENCE SERIAL 
+        sp3-host-cpu FAKE host cpu                            sp3-host-cpu    Present  None   
+        dev-0        FAKE temperature sensor                  fake-tmp-sensor Failed   None   
+        dev-1        FAKE temperature sensor                  tmp117          Present  None   
+        dev-2        FAKE Southeast temperature sensor        tmp117          Present  None   
+        dev-6        FAKE U.2 Sharkfin A VPD                  at24csw080      Present  None   
+        dev-7        FAKE U.2 Sharkfin A hot swap controller  max5970         Present  None   
+        dev-8        FAKE U.2 A NVMe Basic Management Command nvme_bmc        Present  None   
+        dev-39       FAKE T6 temperature sensor               tmp451          Present  None   
+        dev-53       FAKE Fan controller                      max31790        Present  None   
 
     CABOOSES: none found
 
@@ -167,8 +174,16 @@ SP DETAILS: type "Sled" slot 1
 
     COMPONENTS
 
-        NAME         DESCRIPTION   DEVICE       PRESENCE SERIAL 
-        sp3-host-cpu FAKE host cpu sp3-host-cpu Present  None   
+        NAME         DESCRIPTION                              DEVICE       PRESENCE SERIAL 
+        sp3-host-cpu FAKE host cpu                            sp3-host-cpu Present  None   
+        dev-0        FAKE temperature sensor                  tmp117       Present  None   
+        dev-1        FAKE temperature sensor                  tmp117       Present  None   
+        dev-2        FAKE Southeast temperature sensor        tmp117       Present  None   
+        dev-6        FAKE U.2 Sharkfin A VPD                  at24csw080   Present  None   
+        dev-7        FAKE U.2 Sharkfin A hot swap controller  max5970      Present  None   
+        dev-8        FAKE U.2 A NVMe Basic Management Command nvme_bmc     Present  None   
+        dev-39       FAKE T6 temperature sensor               tmp451       Present  None   
+        dev-53       FAKE Fan controller                      max31790     Present  None   
 
     CABOOSES: none found
 
@@ -334,6 +349,11 @@ task: "region_snapshot_replacement_garbage_collection"
 
 task: "region_snapshot_replacement_start"
     detect if region snapshots need replacement and begin the process
+
+
+task: "region_snapshot_replacement_step"
+    detect what volumes were affected by a region snapshot replacement, and run
+    the step saga for them
 
 
 task: "saga_recovery"
@@ -589,6 +609,16 @@ task: "region_snapshot_replacement_start"
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total requests created ok: 0
     total start saga invoked ok: 0
+    errors: 0
+
+task: "region_snapshot_replacement_step"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    total step records created ok: 0
+    total step garbage collect saga invoked ok: 0
+    total step saga invoked ok: 0
     errors: 0
 
 task: "saga_recovery"
@@ -999,6 +1029,16 @@ task: "region_snapshot_replacement_start"
     total start saga invoked ok: 0
     errors: 0
 
+task: "region_snapshot_replacement_step"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    total step records created ok: 0
+    total step garbage collect saga invoked ok: 0
+    total step saga invoked ok: 0
+    errors: 0
+
 task: "saga_recovery"
   configured period: every 10m
   currently executing: no
@@ -1135,8 +1175,8 @@ WARNING: Zones exist without physical disks!
 
 
  COCKROACHDB SETTINGS:
-    state fingerprint:::::::::::::::::   d4d87aa2ad877a4cc2fddd0573952362739110de
-    cluster.preserve_downgrade_option:   "22.1"
+    state fingerprint:::::::::::::::::   <COCKROACHDB_FINGERPRINT_REDACTED>
+    cluster.preserve_downgrade_option:   <COCKROACHDB_VERSION_REDACTED>
 
  METADATA:
     created by:::::::::::   nexus-test-utils
@@ -1173,8 +1213,8 @@ WARNING: Zones exist without physical disks!
 
 
  COCKROACHDB SETTINGS:
-    state fingerprint:::::::::::::::::   d4d87aa2ad877a4cc2fddd0573952362739110de
-    cluster.preserve_downgrade_option:   "22.1"
+    state fingerprint:::::::::::::::::   <COCKROACHDB_FINGERPRINT_REDACTED>
+    cluster.preserve_downgrade_option:   <COCKROACHDB_VERSION_REDACTED>
 
  METADATA:
     created by:::::::::::   nexus-test-utils
@@ -1214,8 +1254,8 @@ to:   blueprint ......<REDACTED_BLUEPRINT_ID>.......
 
 
  COCKROACHDB SETTINGS:
-    state fingerprint:::::::::::::::::   d4d87aa2ad877a4cc2fddd0573952362739110de (unchanged)
-    cluster.preserve_downgrade_option:   "22.1" (unchanged)
+    state fingerprint:::::::::::::::::   <COCKROACHDB_FINGERPRINT_REDACTED> (unchanged)
+    cluster.preserve_downgrade_option:   <COCKROACHDB_VERSION_REDACTED> (unchanged)
 
  METADATA:
     internal DNS version:   1 (unchanged)

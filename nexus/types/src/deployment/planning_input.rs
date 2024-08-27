@@ -280,6 +280,13 @@ pub enum CockroachDbPreserveDowngrade {
 }
 
 impl CockroachDbPreserveDowngrade {
+    pub fn is_set(self) -> bool {
+        match self {
+            CockroachDbPreserveDowngrade::Set(_) => true,
+            _ => false,
+        }
+    }
+
     pub fn from_optional_string(
         value: &Option<String>,
     ) -> Result<Self, parse_display::ParseError> {

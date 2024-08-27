@@ -41,6 +41,7 @@ use nexus_db_queries::db::lookup::ImageLookup;
 use nexus_db_queries::db::lookup::ImageParentLookup;
 use nexus_db_queries::db::model::Name;
 use nexus_types::external_api::shared::{BfdStatus, ProbeInfo};
+use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::marker_for_name;
 use omicron_common::api::external::http_pagination::marker_for_name_or_id;
 use omicron_common::api::external::http_pagination::name_or_id_pagination;
@@ -55,9 +56,11 @@ use omicron_common::api::external::http_pagination::ScanParams;
 use omicron_common::api::external::AddressLot;
 use omicron_common::api::external::AddressLotBlock;
 use omicron_common::api::external::AddressLotCreateResponse;
+use omicron_common::api::external::AggregateBgpMessageHistory;
 use omicron_common::api::external::BgpAnnounceSet;
 use omicron_common::api::external::BgpAnnouncement;
 use omicron_common::api::external::BgpConfig;
+use omicron_common::api::external::BgpExported;
 use omicron_common::api::external::BgpImportedRouteIpv4;
 use omicron_common::api::external::BgpPeerStatus;
 use omicron_common::api::external::DataPageParams;
@@ -78,9 +81,6 @@ use omicron_common::api::external::TufRepoGetResponse;
 use omicron_common::api::external::TufRepoInsertResponse;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
-use omicron_common::api::external::{
-    http_pagination::data_page_params_for, AggregateBgpMessageHistory,
-};
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
 use parse_display::Display;
@@ -98,7 +98,8 @@ use uuid::Uuid;
 
 type NexusApiDescription = ApiDescription<ApiContext>;
 
-// Temporary module just to add a level of indentation and avoid ruining blame.
+// Temporary module just to add a level of indentation and avoid ruining blame
+// for https://github.com/oxidecomputer/omicron/pull/6373.
 mod imp {
     use super::*;
 
@@ -281,12 +282,15 @@ mod imp {
             api.register(networking_bgp_config_create)?;
             api.register(networking_bgp_config_list)?;
             api.register(networking_bgp_status)?;
+            api.register(networking_bgp_exported)?;
             api.register(networking_bgp_imported_routes_ipv4)?;
             api.register(networking_bgp_config_delete)?;
             api.register(networking_bgp_announce_set_update)?;
             api.register(networking_bgp_announce_set_list)?;
             api.register(networking_bgp_announce_set_delete)?;
             api.register(networking_bgp_message_history)?;
+
+            api.register(networking_bgp_announcement_list)?;
 
             api.register(networking_bfd_enable)?;
             api.register(networking_bfd_disable)?;
@@ -449,10 +453,10 @@ mod imp {
     ///
     /// Always responds with Ok if it responds at all.
     #[endpoint {
-        method = GET,
-        path = "/v1/ping",
-        tags = ["system/status"],
-    }]
+    method = GET,
+    path = "/v1/ping",
+    tags = ["system/status"],
+}]
     async fn ping(
         _rqctx: RequestContext<ApiContext>,
     ) -> Result<HttpResponseOk<views::Ping>, HttpError> {
@@ -461,10 +465,10 @@ mod imp {
 
     /// Fetch top-level IAM policy
     #[endpoint {
-        method = GET,
-        path = "/v1/system/policy",
-        tags = ["policy"],
-    }]
+    method = GET,
+    path = "/v1/system/policy",
+    tags = ["policy"],
+}]
     async fn system_policy_view(
         rqctx: RequestContext<ApiContext>,
     ) -> Result<HttpResponseOk<shared::Policy<shared::FleetRole>>, HttpError>
@@ -486,10 +490,10 @@ mod imp {
 
     /// Update top-level IAM policy
     #[endpoint {
-        method = PUT,
-        path = "/v1/system/policy",
-        tags = ["policy"],
-    }]
+    method = PUT,
+    path = "/v1/system/policy",
+    tags = ["policy"],
+}]
     async fn system_policy_update(
         rqctx: RequestContext<ApiContext>,
         new_policy: TypedBody<shared::Policy<shared::FleetRole>>,
@@ -516,10 +520,10 @@ mod imp {
 
     /// Fetch current silo's IAM policy
     #[endpoint {
-        method = GET,
-        path = "/v1/policy",
-        tags = ["silos"],
-    }]
+    method = GET,
+    path = "/v1/policy",
+    tags = ["silos"],
+ }]
     pub(crate) async fn policy_view(
         rqctx: RequestContext<ApiContext>,
     ) -> Result<HttpResponseOk<shared::Policy<shared::SiloRole>>, HttpError>
@@ -549,10 +553,10 @@ mod imp {
 
     /// Update current silo's IAM policy
     #[endpoint {
-        method = PUT,
-        path = "/v1/policy",
-        tags = ["silos"],
-    }]
+    method = PUT,
+    path = "/v1/policy",
+    tags = ["silos"],
+}]
     async fn policy_update(
         rqctx: RequestContext<ApiContext>,
         new_policy: TypedBody<shared::Policy<shared::SiloRole>>,
@@ -588,10 +592,10 @@ mod imp {
 
     /// Fetch resource utilization for user's current silo
     #[endpoint {
-        method = GET,
-        path = "/v1/utilization",
-        tags = ["silos"],
-    }]
+    method = GET,
+    path = "/v1/utilization",
+    tags = ["silos"],
+}]
     async fn utilization_view(
         rqctx: RequestContext<ApiContext>,
     ) -> Result<HttpResponseOk<Utilization>, HttpError> {
@@ -615,10 +619,10 @@ mod imp {
 
     /// Fetch current utilization for given silo
     #[endpoint {
-        method = GET,
-        path = "/v1/system/utilization/silos/{silo}",
-        tags = ["system/silos"],
-    }]
+    method = GET,
+    path = "/v1/system/utilization/silos/{silo}",
+    tags = ["system/silos"],
+}]
     async fn silo_utilization_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::SiloPath>,
@@ -644,10 +648,10 @@ mod imp {
     }
     /// List current utilization state for all silos
     #[endpoint {
-        method = GET,
-        path = "/v1/system/utilization/silos",
-        tags = ["system/silos"],
-    }]
+    method = GET,
+    path = "/v1/system/utilization/silos",
+    tags = ["system/silos"],
+}]
     async fn silo_utilization_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByNameOrId>,
@@ -685,10 +689,10 @@ mod imp {
 
     /// Lists resource quotas for all silos
     #[endpoint {
-        method = GET,
-        path = "/v1/system/silo-quotas",
-        tags = ["system/silos"],
-    }]
+    method = GET,
+    path = "/v1/system/silo-quotas",
+    tags = ["system/silos"],
+}]
     async fn system_quotas_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedById>,
@@ -724,10 +728,10 @@ mod imp {
 
     /// Fetch resource quotas for silo
     #[endpoint {
-        method = GET,
-        path = "/v1/system/silos/{silo}/quotas",
-        tags = ["system/silos"],
-    }]
+    method = GET,
+    path = "/v1/system/silos/{silo}/quotas",
+    tags = ["system/silos"],
+}]
     async fn silo_quotas_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::SiloPath>,
@@ -754,10 +758,10 @@ mod imp {
     ///
     /// If a quota value is not specified, it will remain unchanged.
     #[endpoint {
-        method = PUT,
-        path = "/v1/system/silos/{silo}/quotas",
-        tags = ["system/silos"],
-    }]
+    method = PUT,
+    path = "/v1/system/silos/{silo}/quotas",
+    tags = ["system/silos"],
+}]
     async fn silo_quotas_update(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::SiloPath>,
@@ -791,10 +795,10 @@ mod imp {
     ///
     /// Lists silos that are discoverable based on the current permissions.
     #[endpoint {
-        method = GET,
-        path = "/v1/system/silos",
-        tags = ["system/silos"],
-    }]
+    method = GET,
+    path = "/v1/system/silos",
+    tags = ["system/silos"],
+}]
     async fn silo_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByNameOrId>,
@@ -829,10 +833,10 @@ mod imp {
 
     /// Create a silo
     #[endpoint {
-        method = POST,
-        path = "/v1/system/silos",
-        tags = ["system/silos"],
-    }]
+    method = POST,
+    path = "/v1/system/silos",
+    tags = ["system/silos"],
+}]
     async fn silo_create(
         rqctx: RequestContext<ApiContext>,
         new_silo_params: TypedBody<params::SiloCreate>,
@@ -857,10 +861,10 @@ mod imp {
     ///
     /// Fetch silo by name or ID.
     #[endpoint {
-        method = GET,
-        path = "/v1/system/silos/{silo}",
-        tags = ["system/silos"],
-    }]
+    method = GET,
+    path = "/v1/system/silos/{silo}",
+    tags = ["system/silos"],
+}]
     async fn silo_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::SiloPath>,
@@ -888,10 +892,10 @@ mod imp {
     /// have at most one default pool. IPs are allocated from the default pool when
     /// users ask for one without specifying a pool.
     #[endpoint {
-        method = GET,
-        path = "/v1/system/silos/{silo}/ip-pools",
-        tags = ["system/silos"],
-    }]
+    method = GET,
+    path = "/v1/system/silos/{silo}/ip-pools",
+    tags = ["system/silos"],
+}]
     async fn silo_ip_pool_list(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::SiloPath>,
@@ -937,10 +941,10 @@ mod imp {
     ///
     /// Delete a silo by name or ID.
     #[endpoint {
-        method = DELETE,
-        path = "/v1/system/silos/{silo}",
-        tags = ["system/silos"],
-    }]
+    method = DELETE,
+    path = "/v1/system/silos/{silo}",
+    tags = ["system/silos"],
+}]
     async fn silo_delete(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::SiloPath>,
@@ -964,10 +968,10 @@ mod imp {
 
     /// Fetch silo IAM policy
     #[endpoint {
-        method = GET,
-        path = "/v1/system/silos/{silo}/policy",
-        tags = ["system/silos"],
-    }]
+    method = GET,
+    path = "/v1/system/silos/{silo}/policy",
+    tags = ["system/silos"],
+}]
     async fn silo_policy_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::SiloPath>,
@@ -992,10 +996,10 @@ mod imp {
 
     /// Update silo IAM policy
     #[endpoint {
-        method = PUT,
-        path = "/v1/system/silos/{silo}/policy",
-        tags = ["system/silos"],
-    }]
+    method = PUT,
+    path = "/v1/system/silos/{silo}/policy",
+    tags = ["system/silos"],
+}]
     async fn silo_policy_update(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::SiloPath>,
@@ -1029,10 +1033,10 @@ mod imp {
 
     /// List built-in (system) users in silo
     #[endpoint {
-        method = GET,
-        path = "/v1/system/users",
-        tags = ["system/silos"],
-    }]
+    method = GET,
+    path = "/v1/system/users",
+    tags = ["system/silos"],
+}]
     async fn silo_user_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedById<params::SiloSelector>>,
@@ -1075,10 +1079,10 @@ mod imp {
 
     /// Fetch built-in (system) user
     #[endpoint {
-        method = GET,
-        path = "/v1/system/users/{user_id}",
-        tags = ["system/silos"],
-    }]
+    method = GET,
+    path = "/v1/system/users/{user_id}",
+    tags = ["system/silos"],
+}]
     async fn silo_user_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<UserParam>,
@@ -1108,10 +1112,10 @@ mod imp {
 
     /// List a silo's IdP's name
     #[endpoint {
-        method = GET,
-        path = "/v1/system/identity-providers",
-        tags = ["system/silos"],
-    }]
+    method = GET,
+    path = "/v1/system/identity-providers",
+    tags = ["system/silos"],
+}]
     async fn silo_identity_provider_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByNameOrId<params::SiloSelector>>,
@@ -1150,10 +1154,10 @@ mod imp {
 
     /// Create SAML IdP
     #[endpoint {
-        method = POST,
-        path = "/v1/system/identity-providers/saml",
-        tags = ["system/silos"],
-    }]
+    method = POST,
+    path = "/v1/system/identity-providers/saml",
+    tags = ["system/silos"],
+}]
     async fn saml_identity_provider_create(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<params::SiloSelector>,
@@ -1185,10 +1189,10 @@ mod imp {
 
     /// Fetch SAML IdP
     #[endpoint {
-        method = GET,
-        path = "/v1/system/identity-providers/saml/{provider}",
-        tags = ["system/silos"],
-    }]
+    method = GET,
+    path = "/v1/system/identity-providers/saml/{provider}",
+    tags = ["system/silos"],
+}]
     async fn saml_identity_provider_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::ProviderPath>,
@@ -1232,10 +1236,10 @@ mod imp {
     /// Otherwise, Silo users are just-in-time (JIT) provisioned when a user first
     /// logs in using an external Identity Provider.
     #[endpoint {
-        method = POST,
-        path = "/v1/system/identity-providers/local/users",
-        tags = ["system/silos"],
-    }]
+    method = POST,
+    path = "/v1/system/identity-providers/local/users",
+    tags = ["system/silos"],
+}]
     async fn local_idp_user_create(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<params::SiloSelector>,
@@ -1266,10 +1270,10 @@ mod imp {
 
     /// Delete user
     #[endpoint {
-        method = DELETE,
-        path = "/v1/system/identity-providers/local/users/{user_id}",
-        tags = ["system/silos"],
-    }]
+    method = DELETE,
+    path = "/v1/system/identity-providers/local/users/{user_id}",
+    tags = ["system/silos"],
+}]
     async fn local_idp_user_delete(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<UserParam>,
@@ -1300,10 +1304,10 @@ mod imp {
     /// Passwords can only be updated for users in Silos with identity mode
     /// `LocalOnly`.
     #[endpoint {
-        method = POST,
-        path = "/v1/system/identity-providers/local/users/{user_id}/set-password",
-        tags = ["system/silos"],
-    }]
+    method = POST,
+    path = "/v1/system/identity-providers/local/users/{user_id}/set-password",
+    tags = ["system/silos"],
+}]
     async fn local_idp_user_set_password(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<UserParam>,
@@ -1337,10 +1341,10 @@ mod imp {
 
     /// List projects
     #[endpoint {
-        method = GET,
-        path = "/v1/projects",
-        tags = ["projects"],
-    }]
+    method = GET,
+    path = "/v1/projects",
+    tags = ["projects"],
+}]
     async fn project_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByNameOrId>,
@@ -1375,10 +1379,10 @@ mod imp {
 
     /// Create project
     #[endpoint {
-        method = POST,
-        path = "/v1/projects",
-        tags = ["projects"],
-    }]
+    method = POST,
+    path = "/v1/projects",
+    tags = ["projects"],
+}]
     async fn project_create(
         rqctx: RequestContext<ApiContext>,
         new_project: TypedBody<params::ProjectCreate>,
@@ -1401,10 +1405,10 @@ mod imp {
 
     /// Fetch project
     #[endpoint {
-        method = GET,
-        path = "/v1/projects/{project}",
-        tags = ["projects"],
-    }]
+    method = GET,
+    path = "/v1/projects/{project}",
+    tags = ["projects"],
+}]
     async fn project_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::ProjectPath>,
@@ -1430,10 +1434,10 @@ mod imp {
 
     /// Delete project
     #[endpoint {
-        method = DELETE,
-        path = "/v1/projects/{project}",
-        tags = ["projects"],
-    }]
+    method = DELETE,
+    path = "/v1/projects/{project}",
+    tags = ["projects"],
+}]
     async fn project_delete(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::ProjectPath>,
@@ -1465,10 +1469,10 @@ mod imp {
     // "application/json-patch")?  We should see what other APIs do.
     /// Update a project
     #[endpoint {
-        method = PUT,
-        path = "/v1/projects/{project}",
-        tags = ["projects"],
-    }]
+    method = PUT,
+    path = "/v1/projects/{project}",
+    tags = ["projects"],
+}]
     async fn project_update(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::ProjectPath>,
@@ -1499,10 +1503,10 @@ mod imp {
 
     /// Fetch project's IAM policy
     #[endpoint {
-        method = GET,
-        path = "/v1/projects/{project}/policy",
-        tags = ["projects"],
-    }]
+    method = GET,
+    path = "/v1/projects/{project}/policy",
+    tags = ["projects"],
+}]
     async fn project_policy_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::ProjectPath>,
@@ -1531,10 +1535,10 @@ mod imp {
 
     /// Update project's IAM policy
     #[endpoint {
-        method = PUT,
-        path = "/v1/projects/{project}/policy",
-        tags = ["projects"],
-    }]
+    method = PUT,
+    path = "/v1/projects/{project}/policy",
+    tags = ["projects"],
+}]
     async fn project_policy_update(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::ProjectPath>,
@@ -1568,10 +1572,10 @@ mod imp {
 
     /// List IP pools
     #[endpoint {
-        method = GET,
-        path = "/v1/ip-pools",
-        tags = ["projects"],
-    }]
+    method = GET,
+    path = "/v1/ip-pools",
+    tags = ["projects"],
+}]
     async fn project_ip_pool_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByNameOrId>,
@@ -1609,10 +1613,10 @@ mod imp {
 
     /// Fetch IP pool
     #[endpoint {
-        method = GET,
-        path = "/v1/ip-pools/{pool}",
-        tags = ["projects"],
-    }]
+    method = GET,
+    path = "/v1/ip-pools/{pool}",
+    tags = ["projects"],
+}]
     async fn project_ip_pool_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::IpPoolPath>,
@@ -1639,10 +1643,10 @@ mod imp {
 
     /// List IP pools
     #[endpoint {
-        method = GET,
-        path = "/v1/system/ip-pools",
-        tags = ["system/networking"],
-    }]
+    method = GET,
+    path = "/v1/system/ip-pools",
+    tags = ["system/networking"],
+}]
     async fn ip_pool_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByNameOrId>,
@@ -1677,10 +1681,10 @@ mod imp {
 
     /// Create IP pool
     #[endpoint {
-        method = POST,
-        path = "/v1/system/ip-pools",
-        tags = ["system/networking"],
-    }]
+    method = POST,
+    path = "/v1/system/ip-pools",
+    tags = ["system/networking"],
+}]
     async fn ip_pool_create(
         rqctx: RequestContext<ApiContext>,
         pool_params: TypedBody<params::IpPoolCreate>,
@@ -1703,10 +1707,10 @@ mod imp {
 
     /// Fetch IP pool
     #[endpoint {
-        method = GET,
-        path = "/v1/system/ip-pools/{pool}",
-        tags = ["system/networking"],
-    }]
+    method = GET,
+    path = "/v1/system/ip-pools/{pool}",
+    tags = ["system/networking"],
+}]
     async fn ip_pool_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::IpPoolPath>,
@@ -1732,10 +1736,10 @@ mod imp {
 
     /// Delete IP pool
     #[endpoint {
-        method = DELETE,
-        path = "/v1/system/ip-pools/{pool}",
-        tags = ["system/networking"],
-    }]
+    method = DELETE,
+    path = "/v1/system/ip-pools/{pool}",
+    tags = ["system/networking"],
+}]
     async fn ip_pool_delete(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::IpPoolPath>,
@@ -1759,10 +1763,10 @@ mod imp {
 
     /// Update IP pool
     #[endpoint {
-        method = PUT,
-        path = "/v1/system/ip-pools/{pool}",
-        tags = ["system/networking"],
-    }]
+    method = PUT,
+    path = "/v1/system/ip-pools/{pool}",
+    tags = ["system/networking"],
+}]
     async fn ip_pool_update(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::IpPoolPath>,
@@ -1789,10 +1793,10 @@ mod imp {
 
     /// Fetch IP pool utilization
     #[endpoint {
-        method = GET,
-        path = "/v1/system/ip-pools/{pool}/utilization",
-        tags = ["system/networking"],
-    }]
+    method = GET,
+    path = "/v1/system/ip-pools/{pool}/utilization",
+    tags = ["system/networking"],
+}]
     async fn ip_pool_utilization_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::IpPoolPath>,
@@ -1819,10 +1823,10 @@ mod imp {
 
     /// List IP pool's linked silos
     #[endpoint {
-        method = GET,
-        path = "/v1/system/ip-pools/{pool}/silos",
-        tags = ["system/networking"],
-    }]
+    method = GET,
+    path = "/v1/system/ip-pools/{pool}/silos",
+    tags = ["system/networking"],
+}]
     async fn ip_pool_silo_list(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::IpPoolPath>,
@@ -1877,10 +1881,10 @@ mod imp {
     /// instances. A silo can have at most one default pool. IPs are allocated from
     /// the default pool when users ask for one without specifying a pool.
     #[endpoint {
-        method = POST,
-        path = "/v1/system/ip-pools/{pool}/silos",
-        tags = ["system/networking"],
-    }]
+    method = POST,
+    path = "/v1/system/ip-pools/{pool}/silos",
+    tags = ["system/networking"],
+}]
     async fn ip_pool_silo_link(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::IpPoolPath>,
@@ -1910,10 +1914,10 @@ mod imp {
     ///
     /// Will fail if there are any outstanding IPs allocated in the silo.
     #[endpoint {
-        method = DELETE,
-        path = "/v1/system/ip-pools/{pool}/silos/{silo}",
-        tags = ["system/networking"],
-    }]
+    method = DELETE,
+    path = "/v1/system/ip-pools/{pool}/silos/{silo}",
+    tags = ["system/networking"],
+}]
     async fn ip_pool_silo_unlink(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::IpPoolSiloPath>,
@@ -1945,10 +1949,10 @@ mod imp {
     /// configured. When a pool is made the default for a silo, any existing default
     /// will remain linked to the silo, but will no longer be the default.
     #[endpoint {
-        method = PUT,
-        path = "/v1/system/ip-pools/{pool}/silos/{silo}",
-        tags = ["system/networking"],
-    }]
+    method = PUT,
+    path = "/v1/system/ip-pools/{pool}/silos/{silo}",
+    tags = ["system/networking"],
+}]
     async fn ip_pool_silo_update(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::IpPoolSiloPath>,
@@ -1982,10 +1986,10 @@ mod imp {
 
     /// Fetch Oxide service IP pool
     #[endpoint {
-        method = GET,
-        path = "/v1/system/ip-pools-service",
-        tags = ["system/networking"],
-    }]
+    method = GET,
+    path = "/v1/system/ip-pools-service",
+    tags = ["system/networking"],
+}]
     async fn ip_pool_service_view(
         rqctx: RequestContext<ApiContext>,
     ) -> Result<HttpResponseOk<views::IpPool>, HttpError> {
@@ -2011,10 +2015,10 @@ mod imp {
     ///
     /// Ranges are ordered by their first address.
     #[endpoint {
-        method = GET,
-        path = "/v1/system/ip-pools/{pool}/ranges",
-        tags = ["system/networking"],
-    }]
+    method = GET,
+    path = "/v1/system/ip-pools/{pool}/ranges",
+    tags = ["system/networking"],
+}]
     async fn ip_pool_range_list(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::IpPoolPath>,
@@ -2062,10 +2066,10 @@ mod imp {
     ///
     /// IPv6 ranges are not allowed yet.
     #[endpoint {
-        method = POST,
-        path = "/v1/system/ip-pools/{pool}/ranges/add",
-        tags = ["system/networking"],
-    }]
+    method = POST,
+    path = "/v1/system/ip-pools/{pool}/ranges/add",
+    tags = ["system/networking"],
+}]
     async fn ip_pool_range_add(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::IpPoolPath>,
@@ -2092,10 +2096,10 @@ mod imp {
 
     /// Remove range from IP pool
     #[endpoint {
-        method = POST,
-        path = "/v1/system/ip-pools/{pool}/ranges/remove",
-        tags = ["system/networking"],
-    }]
+    method = POST,
+    path = "/v1/system/ip-pools/{pool}/ranges/remove",
+    tags = ["system/networking"],
+}]
     async fn ip_pool_range_remove(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::IpPoolPath>,
@@ -2123,10 +2127,10 @@ mod imp {
     ///
     /// Ranges are ordered by their first address.
     #[endpoint {
-        method = GET,
-        path = "/v1/system/ip-pools-service/ranges",
-        tags = ["system/networking"],
-    }]
+    method = GET,
+    path = "/v1/system/ip-pools-service/ranges",
+    tags = ["system/networking"],
+}]
     async fn ip_pool_service_range_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<IpPoolRangePaginationParams>,
@@ -2171,10 +2175,10 @@ mod imp {
     ///
     /// IPv6 ranges are not allowed yet.
     #[endpoint {
-        method = POST,
-        path = "/v1/system/ip-pools-service/ranges/add",
-        tags = ["system/networking"],
-    }]
+    method = POST,
+    path = "/v1/system/ip-pools-service/ranges/add",
+    tags = ["system/networking"],
+}]
     async fn ip_pool_service_range_add(
         rqctx: RequestContext<ApiContext>,
         range_params: TypedBody<shared::IpRange>,
@@ -2197,10 +2201,10 @@ mod imp {
 
     /// Remove IP range from Oxide service pool
     #[endpoint {
-        method = POST,
-        path = "/v1/system/ip-pools-service/ranges/remove",
-        tags = ["system/networking"],
-    }]
+    method = POST,
+    path = "/v1/system/ip-pools-service/ranges/remove",
+    tags = ["system/networking"],
+}]
     async fn ip_pool_service_range_remove(
         rqctx: RequestContext<ApiContext>,
         range_params: TypedBody<shared::IpRange>,
@@ -2225,10 +2229,10 @@ mod imp {
 
     /// List floating IPs
     #[endpoint {
-        method = GET,
-        path = "/v1/floating-ips",
-        tags = ["floating-ips"],
-    }]
+    method = GET,
+    path = "/v1/floating-ips",
+    tags = ["floating-ips"],
+}]
     async fn floating_ip_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
@@ -2262,10 +2266,10 @@ mod imp {
 
     /// Create floating IP
     #[endpoint {
-        method = POST,
-        path = "/v1/floating-ips",
-        tags = ["floating-ips"],
-    }]
+    method = POST,
+    path = "/v1/floating-ips",
+    tags = ["floating-ips"],
+}]
     async fn floating_ip_create(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<params::ProjectSelector>,
@@ -2293,10 +2297,10 @@ mod imp {
 
     /// Update floating IP
     #[endpoint {
-        method = PUT,
-        path = "/v1/floating-ips/{floating_ip}",
-        tags = ["floating-ips"],
-    }]
+    method = PUT,
+    path = "/v1/floating-ips/{floating_ip}",
+    tags = ["floating-ips"],
+}]
     async fn floating_ip_update(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::FloatingIpPath>,
@@ -2335,10 +2339,10 @@ mod imp {
 
     /// Delete floating IP
     #[endpoint {
-        method = DELETE,
-        path = "/v1/floating-ips/{floating_ip}",
-        tags = ["floating-ips"],
-    }]
+    method = DELETE,
+    path = "/v1/floating-ips/{floating_ip}",
+    tags = ["floating-ips"],
+}]
     async fn floating_ip_delete(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::FloatingIpPath>,
@@ -2370,10 +2374,10 @@ mod imp {
 
     /// Fetch floating IP
     #[endpoint {
-        method = GET,
-        path = "/v1/floating-ips/{floating_ip}",
-        tags = ["floating-ips"]
-    }]
+    method = GET,
+    path = "/v1/floating-ips/{floating_ip}",
+    tags = ["floating-ips"]
+}]
     async fn floating_ip_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::FloatingIpPath>,
@@ -2407,10 +2411,10 @@ mod imp {
     ///
     /// Attach floating IP to an instance or other resource.
     #[endpoint {
-        method = POST,
-        path = "/v1/floating-ips/{floating_ip}/attach",
-        tags = ["floating-ips"],
-    }]
+    method = POST,
+    path = "/v1/floating-ips/{floating_ip}/attach",
+    tags = ["floating-ips"],
+}]
     async fn floating_ip_attach(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::FloatingIpPath>,
@@ -2448,10 +2452,10 @@ mod imp {
     ///
     // Detach floating IP from instance or other resource.
     #[endpoint {
-        method = POST,
-        path = "/v1/floating-ips/{floating_ip}/detach",
-        tags = ["floating-ips"],
-    }]
+    method = POST,
+    path = "/v1/floating-ips/{floating_ip}/detach",
+    tags = ["floating-ips"],
+}]
     async fn floating_ip_detach(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::FloatingIpPath>,
@@ -2484,10 +2488,10 @@ mod imp {
 
     /// List disks
     #[endpoint {
-        method = GET,
-        path = "/v1/disks",
-        tags = ["disks"],
-    }]
+    method = GET,
+    path = "/v1/disks",
+    tags = ["disks"],
+}]
     async fn disk_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
@@ -2525,10 +2529,10 @@ mod imp {
     // TODO-correctness See note about instance create.  This should be async.
     /// Create a disk
     #[endpoint {
-        method = POST,
-        path = "/v1/disks",
-        tags = ["disks"]
-    }]
+    method = POST,
+    path = "/v1/disks",
+    tags = ["disks"]
+}]
     async fn disk_create(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<params::ProjectSelector>,
@@ -2556,10 +2560,10 @@ mod imp {
 
     /// Fetch disk
     #[endpoint {
-        method = GET,
-        path = "/v1/disks/{disk}",
-        tags = ["disks"]
-    }]
+    method = GET,
+    path = "/v1/disks/{disk}",
+    tags = ["disks"]
+}]
     async fn disk_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::DiskPath>,
@@ -2589,10 +2593,10 @@ mod imp {
 
     /// Delete disk
     #[endpoint {
-        method = DELETE,
-        path = "/v1/disks/{disk}",
-        tags = ["disks"],
-    }]
+    method = DELETE,
+    path = "/v1/disks/{disk}",
+    tags = ["disks"],
+}]
     async fn disk_delete(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::DiskPath>,
@@ -2640,10 +2644,10 @@ mod imp {
 
     /// Fetch disk metrics
     #[endpoint {
-        method = GET,
-        path = "/v1/disks/{disk}/metrics/{metric}",
-        tags = ["disks"],
-    }]
+    method = GET,
+    path = "/v1/disks/{disk}/metrics/{metric}",
+    tags = ["disks"],
+}]
     async fn disk_metrics_list(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<DiskMetricsPath>,
@@ -2694,10 +2698,10 @@ mod imp {
     ///
     /// Start the process of importing blocks into a disk
     #[endpoint {
-        method = POST,
-        path = "/v1/disks/{disk}/bulk-write-start",
-        tags = ["disks"],
-    }]
+    method = POST,
+    path = "/v1/disks/{disk}/bulk-write-start",
+    tags = ["disks"],
+}]
     async fn disk_bulk_write_import_start(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::DiskPath>,
@@ -2730,10 +2734,10 @@ mod imp {
 
     /// Import blocks into disk
     #[endpoint {
-        method = POST,
-        path = "/v1/disks/{disk}/bulk-write",
-        tags = ["disks"],
-    }]
+    method = POST,
+    path = "/v1/disks/{disk}/bulk-write",
+    tags = ["disks"],
+}]
     async fn disk_bulk_write_import(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::DiskPath>,
@@ -2770,10 +2774,10 @@ mod imp {
     ///
     /// Stop the process of importing blocks into a disk
     #[endpoint {
-        method = POST,
-        path = "/v1/disks/{disk}/bulk-write-stop",
-        tags = ["disks"],
-    }]
+    method = POST,
+    path = "/v1/disks/{disk}/bulk-write-stop",
+    tags = ["disks"],
+}]
     async fn disk_bulk_write_import_stop(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::DiskPath>,
@@ -2806,10 +2810,10 @@ mod imp {
 
     /// Confirm disk block import completion
     #[endpoint {
-        method = POST,
-        path = "/v1/disks/{disk}/finalize",
-        tags = ["disks"],
-    }]
+    method = POST,
+    path = "/v1/disks/{disk}/finalize",
+    tags = ["disks"],
+}]
     async fn disk_finalize_import(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::DiskPath>,
@@ -2845,10 +2849,10 @@ mod imp {
 
     /// List instances
     #[endpoint {
-        method = GET,
-        path = "/v1/instances",
-        tags = ["instances"],
-    }]
+    method = GET,
+    path = "/v1/instances",
+    tags = ["instances"],
+}]
     async fn instance_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
@@ -2885,10 +2889,10 @@ mod imp {
 
     /// Create instance
     #[endpoint {
-        method = POST,
-        path = "/v1/instances",
-        tags = ["instances"],
-    }]
+    method = POST,
+    path = "/v1/instances",
+    tags = ["instances"],
+}]
     async fn instance_create(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<params::ProjectSelector>,
@@ -2921,10 +2925,10 @@ mod imp {
 
     /// Fetch instance
     #[endpoint {
-        method = GET,
-        path = "/v1/instances/{instance}",
-        tags = ["instances"],
-    }]
+    method = GET,
+    path = "/v1/instances/{instance}",
+    tags = ["instances"],
+}]
     async fn instance_view(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<params::OptionalProjectSelector>,
@@ -2960,10 +2964,10 @@ mod imp {
 
     /// Delete instance
     #[endpoint {
-        method = DELETE,
-        path = "/v1/instances/{instance}",
-        tags = ["instances"],
-    }]
+    method = DELETE,
+    path = "/v1/instances/{instance}",
+    tags = ["instances"],
+}]
     async fn instance_delete(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<params::OptionalProjectSelector>,
@@ -2994,10 +2998,10 @@ mod imp {
 
     /// Reboot an instance
     #[endpoint {
-        method = POST,
-        path = "/v1/instances/{instance}/reboot",
-        tags = ["instances"],
-    }]
+    method = POST,
+    path = "/v1/instances/{instance}/reboot",
+    tags = ["instances"],
+}]
     async fn instance_reboot(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<params::OptionalProjectSelector>,
@@ -3029,10 +3033,10 @@ mod imp {
 
     /// Boot instance
     #[endpoint {
-        method = POST,
-        path = "/v1/instances/{instance}/start",
-        tags = ["instances"],
-    }]
+    method = POST,
+    path = "/v1/instances/{instance}/start",
+    tags = ["instances"],
+}]
     async fn instance_start(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<params::OptionalProjectSelector>,
@@ -3064,10 +3068,10 @@ mod imp {
 
     /// Stop instance
     #[endpoint {
-        method = POST,
-        path = "/v1/instances/{instance}/stop",
-        tags = ["instances"],
-    }]
+    method = POST,
+    path = "/v1/instances/{instance}/stop",
+    tags = ["instances"],
+}]
     async fn instance_stop(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<params::OptionalProjectSelector>,
@@ -3099,10 +3103,10 @@ mod imp {
 
     /// Fetch instance serial console
     #[endpoint {
-        method = GET,
-        path = "/v1/instances/{instance}/serial-console",
-        tags = ["instances"],
-    }]
+    method = GET,
+    path = "/v1/instances/{instance}/serial-console",
+    tags = ["instances"],
+}]
     async fn instance_serial_console(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::InstancePath>,
@@ -3136,10 +3140,10 @@ mod imp {
 
     /// Stream instance serial console
     #[channel {
-        protocol = WEBSOCKETS,
-        path = "/v1/instances/{instance}/serial-console/stream",
-        tags = ["instances"],
-    }]
+    protocol = WEBSOCKETS,
+    path = "/v1/instances/{instance}/serial-console/stream",
+    tags = ["instances"],
+}]
     async fn instance_serial_console_stream(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::InstancePath>,
@@ -3192,10 +3196,10 @@ mod imp {
     /// that this list is a snapshot in time and will not reflect updates made after
     /// the instance is created.
     #[endpoint {
-        method = GET,
-        path = "/v1/instances/{instance}/ssh-public-keys",
-        tags = ["instances"],
-    }]
+    method = GET,
+    path = "/v1/instances/{instance}/ssh-public-keys",
+    tags = ["instances"],
+}]
     async fn instance_ssh_public_key_list(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::InstancePath>,
@@ -3240,10 +3244,10 @@ mod imp {
 
     /// List disks for instance
     #[endpoint {
-        method = GET,
-        path = "/v1/instances/{instance}/disks",
-        tags = ["instances"],
-    }]
+    method = GET,
+    path = "/v1/instances/{instance}/disks",
+    tags = ["instances"],
+}]
     async fn instance_disk_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<
@@ -3288,10 +3292,10 @@ mod imp {
 
     /// Attach disk to instance
     #[endpoint {
-        method = POST,
-        path = "/v1/instances/{instance}/disks/attach",
-        tags = ["instances"],
-    }]
+    method = POST,
+    path = "/v1/instances/{instance}/disks/attach",
+    tags = ["instances"],
+}]
     async fn instance_disk_attach(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::InstancePath>,
@@ -3326,10 +3330,10 @@ mod imp {
 
     /// Detach disk from instance
     #[endpoint {
-        method = POST,
-        path = "/v1/instances/{instance}/disks/detach",
-        tags = ["instances"],
-    }]
+    method = POST,
+    path = "/v1/instances/{instance}/disks/detach",
+    tags = ["instances"],
+}]
     async fn instance_disk_detach(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::InstancePath>,
@@ -3370,10 +3374,10 @@ mod imp {
     /// current Silo).  These are sorted by creation date, with the most recent
     /// certificates appearing first.
     #[endpoint {
-        method = GET,
-        path = "/v1/certificates",
-        tags = ["silos"],
-    }]
+    method = GET,
+    path = "/v1/certificates",
+    tags = ["silos"],
+}]
     async fn certificate_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByNameOrId>,
@@ -3411,10 +3415,10 @@ mod imp {
     /// This certificate is automatically used by the Oxide Control plane to serve
     /// external connections.
     #[endpoint {
-        method = POST,
-        path = "/v1/certificates",
-        tags = ["silos"]
-    }]
+    method = POST,
+    path = "/v1/certificates",
+    tags = ["silos"]
+}]
     async fn certificate_create(
         rqctx: RequestContext<ApiContext>,
         new_cert: TypedBody<params::CertificateCreate>,
@@ -3446,10 +3450,10 @@ mod imp {
     ///
     /// Returns the details of a specific certificate
     #[endpoint {
-        method = GET,
-        path = "/v1/certificates/{certificate}",
-        tags = ["silos"],
-    }]
+    method = GET,
+    path = "/v1/certificates/{certificate}",
+    tags = ["silos"],
+}]
     async fn certificate_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<CertificatePathParam>,
@@ -3477,10 +3481,10 @@ mod imp {
     ///
     /// Permanently delete a certificate. This operation cannot be undone.
     #[endpoint {
-        method = DELETE,
-        path = "/v1/certificates/{certificate}",
-        tags = ["silos"],
-    }]
+    method = DELETE,
+    path = "/v1/certificates/{certificate}",
+    tags = ["silos"],
+}]
     async fn certificate_delete(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<CertificatePathParam>,
@@ -3508,10 +3512,10 @@ mod imp {
 
     /// Create address lot
     #[endpoint {
-        method = POST,
-        path = "/v1/system/networking/address-lot",
-        tags = ["system/networking"],
-    }]
+    method = POST,
+    path = "/v1/system/networking/address-lot",
+    tags = ["system/networking"],
+}]
     async fn networking_address_lot_create(
         rqctx: RequestContext<ApiContext>,
         new_address_lot: TypedBody<params::AddressLotCreate>,
@@ -3539,10 +3543,10 @@ mod imp {
 
     /// Delete address lot
     #[endpoint {
-        method = DELETE,
-        path = "/v1/system/networking/address-lot/{address_lot}",
-        tags = ["system/networking"],
-    }]
+    method = DELETE,
+    path = "/v1/system/networking/address-lot/{address_lot}",
+    tags = ["system/networking"],
+}]
     async fn networking_address_lot_delete(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::AddressLotPath>,
@@ -3567,10 +3571,10 @@ mod imp {
 
     /// List address lots
     #[endpoint {
-        method = GET,
-        path = "/v1/system/networking/address-lot",
-        tags = ["system/networking"],
-    }]
+    method = GET,
+    path = "/v1/system/networking/address-lot",
+    tags = ["system/networking"],
+}]
     async fn networking_address_lot_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByNameOrId>,
@@ -3606,10 +3610,10 @@ mod imp {
 
     /// List blocks in address lot
     #[endpoint {
-        method = GET,
-        path = "/v1/system/networking/address-lot/{address_lot}/blocks",
-        tags = ["system/networking"],
-    }]
+    method = GET,
+    path = "/v1/system/networking/address-lot/{address_lot}/blocks",
+    tags = ["system/networking"],
+}]
     async fn networking_address_lot_block_list(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::AddressLotPath>,
@@ -3647,10 +3651,10 @@ mod imp {
 
     /// Create loopback address
     #[endpoint {
-        method = POST,
-        path = "/v1/system/networking/loopback-address",
-        tags = ["system/networking"],
-    }]
+    method = POST,
+    path = "/v1/system/networking/loopback-address",
+    tags = ["system/networking"],
+}]
     async fn networking_loopback_address_create(
         rqctx: RequestContext<ApiContext>,
         new_loopback_address: TypedBody<params::LoopbackAddressCreate>,
@@ -3693,10 +3697,10 @@ mod imp {
 
     /// Delete loopback address
     #[endpoint {
-        method = DELETE,
-        path = "/v1/system/networking/loopback-address/{rack_id}/{switch_location}/{address}/{subnet_mask}",
-        tags = ["system/networking"],
-    }]
+    method = DELETE,
+    path = "/v1/system/networking/loopback-address/{rack_id}/{switch_location}/{address}/{subnet_mask}",
+    tags = ["system/networking"],
+}]
     async fn networking_loopback_address_delete(
         rqctx: RequestContext<ApiContext>,
         path: Path<LoopbackAddressPath>,
@@ -3733,10 +3737,10 @@ mod imp {
 
     /// List loopback addresses
     #[endpoint {
-        method = GET,
-        path = "/v1/system/networking/loopback-address",
-        tags = ["system/networking"],
-    }]
+    method = GET,
+    path = "/v1/system/networking/loopback-address",
+    tags = ["system/networking"],
+}]
     async fn networking_loopback_address_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedById>,
@@ -3770,10 +3774,10 @@ mod imp {
 
     /// Create switch port settings
     #[endpoint {
-        method = POST,
-        path = "/v1/system/networking/switch-port-settings",
-        tags = ["system/networking"],
-    }]
+    method = POST,
+    path = "/v1/system/networking/switch-port-settings",
+    tags = ["system/networking"],
+}]
     async fn networking_switch_port_settings_create(
         rqctx: RequestContext<ApiContext>,
         new_settings: TypedBody<params::SwitchPortSettingsCreate>,
@@ -3799,10 +3803,10 @@ mod imp {
 
     /// Delete switch port settings
     #[endpoint {
-        method = DELETE,
-        path = "/v1/system/networking/switch-port-settings",
-        tags = ["system/networking"],
-    }]
+    method = DELETE,
+    path = "/v1/system/networking/switch-port-settings",
+    tags = ["system/networking"],
+}]
     async fn networking_switch_port_settings_delete(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<params::SwitchPortSettingsSelector>,
@@ -3825,10 +3829,10 @@ mod imp {
 
     /// List switch port settings
     #[endpoint {
-        method = GET,
-        path = "/v1/system/networking/switch-port-settings",
-        tags = ["system/networking"],
-    }]
+    method = GET,
+    path = "/v1/system/networking/switch-port-settings",
+    tags = ["system/networking"],
+}]
     async fn networking_switch_port_settings_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<
@@ -3867,10 +3871,10 @@ mod imp {
 
     /// Get information about switch port
     #[endpoint {
-        method = GET,
-        path = "/v1/system/networking/switch-port-settings/{port}",
-        tags = ["system/networking"],
-    }]
+    method = GET,
+    path = "/v1/system/networking/switch-port-settings/{port}",
+    tags = ["system/networking"],
+}]
     async fn networking_switch_port_settings_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::SwitchPortSettingsInfoSelector>,
@@ -3894,10 +3898,10 @@ mod imp {
 
     /// List switch ports
     #[endpoint {
-        method = GET,
-        path = "/v1/system/hardware/switch-port",
-        tags = ["system/hardware"],
-    }]
+    method = GET,
+    path = "/v1/system/hardware/switch-port",
+    tags = ["system/hardware"],
+}]
     async fn networking_switch_port_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedById<params::SwitchPortPageSelector>>,
@@ -3931,10 +3935,10 @@ mod imp {
 
     /// Get switch port status
     #[endpoint {
-        method = GET,
-        path = "/v1/system/hardware/switch-port/{port}/status",
-        tags = ["system/hardware"],
-    }]
+    method = GET,
+    path = "/v1/system/hardware/switch-port/{port}/status",
+    tags = ["system/hardware"],
+}]
     async fn networking_switch_port_status(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::SwitchPortPathSelector>,
@@ -3966,10 +3970,10 @@ mod imp {
 
     /// Apply switch port settings
     #[endpoint {
-        method = POST,
-        path = "/v1/system/hardware/switch-port/{port}/settings",
-        tags = ["system/hardware"],
-    }]
+    method = POST,
+    path = "/v1/system/hardware/switch-port/{port}/settings",
+    tags = ["system/hardware"],
+}]
     async fn networking_switch_port_apply_settings(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::SwitchPortPathSelector>,
@@ -3998,10 +4002,10 @@ mod imp {
 
     /// Clear switch port settings
     #[endpoint {
-        method = DELETE,
-        path = "/v1/system/hardware/switch-port/{port}/settings",
-        tags = ["system/hardware"],
-    }]
+    method = DELETE,
+    path = "/v1/system/hardware/switch-port/{port}/settings",
+    tags = ["system/hardware"],
+}]
     async fn networking_switch_port_clear_settings(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::SwitchPortPathSelector>,
@@ -4026,10 +4030,10 @@ mod imp {
 
     /// Create new BGP configuration
     #[endpoint {
-        method = POST,
-        path = "/v1/system/networking/bgp",
-        tags = ["system/networking"],
-    }]
+    method = POST,
+    path = "/v1/system/networking/bgp",
+    tags = ["system/networking"],
+}]
     async fn networking_bgp_config_create(
         rqctx: RequestContext<ApiContext>,
         config: TypedBody<params::BgpConfigCreate>,
@@ -4040,7 +4044,7 @@ mod imp {
             let config = config.into_inner();
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            let result = nexus.bgp_config_set(&opctx, &config).await?;
+            let result = nexus.bgp_config_create(&opctx, &config).await?;
             Ok(HttpResponseCreated::<BgpConfig>(result.into()))
         };
         apictx
@@ -4052,10 +4056,10 @@ mod imp {
 
     /// List BGP configurations
     #[endpoint {
-        method = GET,
-        path = "/v1/system/networking/bgp",
-        tags = ["system/networking"],
-    }]
+    method = GET,
+    path = "/v1/system/networking/bgp",
+    tags = ["system/networking"],
+}]
     async fn networking_bgp_config_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByNameOrId<params::BgpConfigListSelector>>,
@@ -4092,10 +4096,10 @@ mod imp {
     //TODO pagination? the normal by-name/by-id stuff does not work here
     /// Get BGP peer status
     #[endpoint {
-        method = GET,
-        path = "/v1/system/networking/bgp-status",
-        tags = ["system/networking"],
-    }]
+    method = GET,
+    path = "/v1/system/networking/bgp-status",
+    tags = ["system/networking"],
+}]
     async fn networking_bgp_status(
         rqctx: RequestContext<ApiContext>,
     ) -> Result<HttpResponseOk<Vec<BgpPeerStatus>>, HttpError> {
@@ -4113,12 +4117,36 @@ mod imp {
             .await
     }
 
+    //TODO pagination? the normal by-name/by-id stuff does not work here
+    /// Get BGP exported routes
+    #[endpoint {
+    method = GET,
+    path = "/v1/system/networking/bgp-exported",
+    tags = ["system/networking"],
+}]
+    async fn networking_bgp_exported(
+        rqctx: RequestContext<ApiContext>,
+    ) -> Result<HttpResponseOk<BgpExported>, HttpError> {
+        let apictx = rqctx.context();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let result = nexus.bgp_exported(&opctx).await?;
+            Ok(HttpResponseOk(result))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     /// Get BGP router message history
     #[endpoint {
-        method = GET,
-        path = "/v1/system/networking/bgp-message-history",
-        tags = ["system/networking"],
-    }]
+    method = GET,
+    path = "/v1/system/networking/bgp-message-history",
+    tags = ["system/networking"],
+}]
     async fn networking_bgp_message_history(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<params::BgpRouteSelector>,
@@ -4141,10 +4169,10 @@ mod imp {
     //TODO pagination? the normal by-name/by-id stuff does not work here
     /// Get imported IPv4 BGP routes
     #[endpoint {
-        method = GET,
-        path = "/v1/system/networking/bgp-routes-ipv4",
-        tags = ["system/networking"],
-    }]
+    method = GET,
+    path = "/v1/system/networking/bgp-routes-ipv4",
+    tags = ["system/networking"],
+}]
     async fn networking_bgp_imported_routes_ipv4(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<params::BgpRouteSelector>,
@@ -4166,10 +4194,10 @@ mod imp {
 
     /// Delete BGP configuration
     #[endpoint {
-        method = DELETE,
-        path = "/v1/system/networking/bgp",
-        tags = ["system/networking"],
-    }]
+    method = DELETE,
+    path = "/v1/system/networking/bgp",
+    tags = ["system/networking"],
+}]
     async fn networking_bgp_config_delete(
         rqctx: RequestContext<ApiContext>,
         sel: Query<params::BgpConfigSelector>,
@@ -4195,10 +4223,10 @@ mod imp {
     /// If the announce set exists, this endpoint replaces the existing announce
     /// set with the one specified.
     #[endpoint {
-        method = PUT,
-        path = "/v1/system/networking/bgp-announce",
-        tags = ["system/networking"],
-    }]
+    method = PUT,
+    path = "/v1/system/networking/bgp-announce-set",
+    tags = ["system/networking"],
+}]
     async fn networking_bgp_announce_set_update(
         rqctx: RequestContext<ApiContext>,
         config: TypedBody<params::BgpAnnounceSetCreate>,
@@ -4219,25 +4247,29 @@ mod imp {
             .await
     }
 
-    //TODO pagination? the normal by-name/by-id stuff does not work here
-    /// Get originated routes for a BGP configuration
+    /// List BGP announce sets
     #[endpoint {
-        method = GET,
-        path = "/v1/system/networking/bgp-announce",
-        tags = ["system/networking"],
-    }]
+    method = GET,
+    path = "/v1/system/networking/bgp-announce-set",
+    tags = ["system/networking"],
+}]
     async fn networking_bgp_announce_set_list(
         rqctx: RequestContext<ApiContext>,
-        query_params: Query<params::BgpAnnounceSetSelector>,
-    ) -> Result<HttpResponseOk<Vec<BgpAnnouncement>>, HttpError> {
+        query_params: Query<
+            PaginatedByNameOrId<params::OptionalBgpAnnounceSetSelector>,
+        >,
+    ) -> Result<HttpResponseOk<Vec<BgpAnnounceSet>>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
-            let sel = query_params.into_inner();
+            let query = query_params.into_inner();
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let scan_params = ScanByNameOrId::from_query(&query)?;
+            let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let result = nexus
-                .bgp_announce_list(&opctx, &sel)
+                .bgp_announce_set_list(&opctx, &paginated_by)
                 .await?
                 .into_iter()
                 .map(|p| p.into())
@@ -4253,18 +4285,18 @@ mod imp {
 
     /// Delete BGP announce set
     #[endpoint {
-        method = DELETE,
-        path = "/v1/system/networking/bgp-announce",
-        tags = ["system/networking"],
-    }]
+    method = DELETE,
+    path = "/v1/system/networking/bgp-announce-set/{name_or_id}",
+    tags = ["system/networking"],
+}]
     async fn networking_bgp_announce_set_delete(
         rqctx: RequestContext<ApiContext>,
-        selector: Query<params::BgpAnnounceSetSelector>,
+        path_params: Path<params::BgpAnnounceSetSelector>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
-            let sel = selector.into_inner();
+            let sel = path_params.into_inner();
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             nexus.bgp_delete_announce_set(&opctx, &sel).await?;
@@ -4277,12 +4309,47 @@ mod imp {
             .await
     }
 
+    // TODO: is pagination necessary here? How large do we expect the list of
+    // announcements to become in real usage?
+    /// Get originated routes for a specified BGP announce set
+    #[endpoint {
+    method = GET,
+    path = "/v1/system/networking/bgp-announce-set/{name_or_id}/announcement",
+    tags = ["system/networking"],
+}]
+    async fn networking_bgp_announcement_list(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::BgpAnnounceSetSelector>,
+    ) -> Result<HttpResponseOk<Vec<BgpAnnouncement>>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let sel = path_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            let result = nexus
+                .bgp_announcement_list(&opctx, &sel)
+                .await?
+                .into_iter()
+                .map(|p| p.into())
+                .collect();
+
+            Ok(HttpResponseOk(result))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     /// Enable a BFD session
     #[endpoint {
-        method = POST,
-        path = "/v1/system/networking/bfd-enable",
-        tags = ["system/networking"],
-    }]
+    method = POST,
+    path = "/v1/system/networking/bfd-enable",
+    tags = ["system/networking"],
+}]
     async fn networking_bfd_enable(
         rqctx: RequestContext<ApiContext>,
         session: TypedBody<params::BfdSessionEnable>,
@@ -4305,10 +4372,10 @@ mod imp {
 
     /// Disable a BFD session
     #[endpoint {
-        method = POST,
-        path = "/v1/system/networking/bfd-disable",
-        tags = ["system/networking"],
-    }]
+    method = POST,
+    path = "/v1/system/networking/bfd-disable",
+    tags = ["system/networking"],
+}]
     async fn networking_bfd_disable(
         rqctx: RequestContext<ApiContext>,
         session: TypedBody<params::BfdSessionDisable>,
@@ -4331,10 +4398,10 @@ mod imp {
 
     /// Get BFD status
     #[endpoint {
-        method = GET,
-        path = "/v1/system/networking/bfd-status",
-        tags = ["system/networking"],
-    }]
+    method = GET,
+    path = "/v1/system/networking/bfd-status",
+    tags = ["system/networking"],
+}]
     async fn networking_bfd_status(
         rqctx: RequestContext<ApiContext>,
     ) -> Result<HttpResponseOk<Vec<BfdStatus>>, HttpError> {
@@ -4356,10 +4423,10 @@ mod imp {
 
     /// Get user-facing services IP allowlist
     #[endpoint {
-        method = GET,
-        path = "/v1/system/networking/allow-list",
-        tags = ["system/networking"],
-    }]
+    method = GET,
+    path = "/v1/system/networking/allow-list",
+    tags = ["system/networking"],
+}]
     async fn networking_allow_list_view(
         rqctx: RequestContext<ApiContext>,
     ) -> Result<HttpResponseOk<views::AllowList>, HttpError> {
@@ -4383,10 +4450,10 @@ mod imp {
 
     /// Update user-facing services IP allowlist
     #[endpoint {
-        method = PUT,
-        path = "/v1/system/networking/allow-list",
-        tags = ["system/networking"],
-    }]
+    method = PUT,
+    path = "/v1/system/networking/allow-list",
+    tags = ["system/networking"],
+}]
     async fn networking_allow_list_update(
         rqctx: RequestContext<ApiContext>,
         params: TypedBody<params::AllowListUpdate>,
@@ -4419,10 +4486,10 @@ mod imp {
     /// List images which are global or scoped to the specified project. The images
     /// are returned sorted by creation date, with the most recent images appearing first.
     #[endpoint {
-        method = GET,
-        path = "/v1/images",
-        tags = ["images"],
-    }]
+    method = GET,
+    path = "/v1/images",
+    tags = ["images"],
+}]
     async fn image_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<
@@ -4474,10 +4541,10 @@ mod imp {
     ///
     /// Create a new image in a project.
     #[endpoint {
-        method = POST,
-        path = "/v1/images",
-        tags = ["images"]
-    }]
+    method = POST,
+    path = "/v1/images",
+    tags = ["images"]
+}]
     async fn image_create(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<params::OptionalProjectSelector>,
@@ -4518,10 +4585,10 @@ mod imp {
     ///
     /// Fetch the details for a specific image in a project.
     #[endpoint {
-        method = GET,
-        path = "/v1/images/{image}",
-        tags = ["images"],
-    }]
+    method = GET,
+    path = "/v1/images/{image}",
+    tags = ["images"],
+}]
     async fn image_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::ImagePath>,
@@ -4568,10 +4635,10 @@ mod imp {
     /// Any instances in the project using the image will continue to run, however
     /// new instances can not be created with this image.
     #[endpoint {
-        method = DELETE,
-        path = "/v1/images/{image}",
-        tags = ["images"],
-    }]
+    method = DELETE,
+    path = "/v1/images/{image}",
+    tags = ["images"],
+}]
     async fn image_delete(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::ImagePath>,
@@ -4607,10 +4674,10 @@ mod imp {
     ///
     /// Promote project image to be visible to all projects in the silo
     #[endpoint {
-        method = POST,
-        path = "/v1/images/{image}/promote",
-        tags = ["images"]
-    }]
+    method = POST,
+    path = "/v1/images/{image}/promote",
+    tags = ["images"]
+}]
     async fn image_promote(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::ImagePath>,
@@ -4646,10 +4713,10 @@ mod imp {
     ///
     /// Demote silo image to be visible only to a specified project
     #[endpoint {
-        method = POST,
-        path = "/v1/images/{image}/demote",
-        tags = ["images"]
-    }]
+    method = POST,
+    path = "/v1/images/{image}/demote",
+    tags = ["images"]
+}]
     async fn image_demote(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::ImagePath>,
@@ -4685,10 +4752,10 @@ mod imp {
 
     /// List network interfaces
     #[endpoint {
-        method = GET,
-        path = "/v1/network-interfaces",
-        tags = ["instances"],
-    }]
+    method = GET,
+    path = "/v1/network-interfaces",
+    tags = ["instances"],
+}]
     async fn instance_network_interface_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByNameOrId<params::InstanceSelector>>,
@@ -4730,10 +4797,10 @@ mod imp {
 
     /// Create network interface
     #[endpoint {
-        method = POST,
-        path = "/v1/network-interfaces",
-        tags = ["instances"],
-    }]
+    method = POST,
+    path = "/v1/network-interfaces",
+    tags = ["instances"],
+}]
     async fn instance_network_interface_create(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<params::InstanceSelector>,
@@ -4769,10 +4836,10 @@ mod imp {
     /// first. The primary interface can be deleted if there are no secondary
     /// interfaces.
     #[endpoint {
-        method = DELETE,
-        path = "/v1/network-interfaces/{interface}",
-        tags = ["instances"],
-    }]
+    method = DELETE,
+    path = "/v1/network-interfaces/{interface}",
+    tags = ["instances"],
+}]
     async fn instance_network_interface_delete(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::NetworkInterfacePath>,
@@ -4794,6 +4861,85 @@ mod imp {
                 &opctx,
                 interface_selector,
             )?;
+            nexus
+                .instance_network_interface_delete(&opctx, &interface_lookup)
+                .await?;
+            Ok(HttpResponseDeleted())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    /// Fetch network interface
+    #[endpoint {
+    method = GET,
+    path = "/v1/network-interfaces/{interface}",
+    tags = ["instances"],
+}]
+    async fn instance_network_interface_view(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::NetworkInterfacePath>,
+        query_params: Query<params::OptionalInstanceSelector>,
+    ) -> Result<HttpResponseOk<InstanceNetworkInterface>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let interface_selector = params::InstanceNetworkInterfaceSelector {
+                project: query.project,
+                instance: query.instance,
+                network_interface: path.interface,
+            };
+            let (.., interface) = nexus
+                .instance_network_interface_lookup(&opctx, interface_selector)?
+                .fetch()
+                .await?;
+            Ok(HttpResponseOk(interface.into()))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    /// Update network interface
+    #[endpoint {
+    method = PUT,
+    path = "/v1/network-interfaces/{interface}",
+    tags = ["instances"],
+}]
+    async fn instance_network_interface_update(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::NetworkInterfacePath>,
+        query_params: Query<params::OptionalInstanceSelector>,
+        updated_iface: TypedBody<params::InstanceNetworkInterfaceUpdate>,
+    ) -> Result<HttpResponseOk<InstanceNetworkInterface>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let updated_iface = updated_iface.into_inner();
+            let network_interface_selector =
+                params::InstanceNetworkInterfaceSelector {
+                    project: query.project,
+                    instance: query.instance,
+                    network_interface: path.interface,
+                };
+            let network_interface_lookup = nexus
+                .instance_network_interface_lookup(
+                    &opctx,
+                    network_interface_selector,
+                )?;
             let interface = nexus
                 .instance_network_interface_update(
                     &opctx,
@@ -4814,10 +4960,10 @@ mod imp {
 
     /// List external IP addresses
     #[endpoint {
-     method = GET,
-     path = "/v1/instances/{instance}/external-ips",
-     tags = ["instances"],
- }]
+    method = GET,
+    path = "/v1/instances/{instance}/external-ips",
+    tags = ["instances"],
+}]
     async fn instance_external_ip_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<params::OptionalProjectSelector>,
@@ -4850,10 +4996,10 @@ mod imp {
 
     /// Allocate and attach ephemeral IP to instance
     #[endpoint {
-     method = POST,
-     path = "/v1/instances/{instance}/external-ips/ephemeral",
-     tags = ["instances"],
- }]
+    method = POST,
+    path = "/v1/instances/{instance}/external-ips/ephemeral",
+    tags = ["instances"],
+}]
     async fn instance_ephemeral_ip_attach(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::InstancePath>,
@@ -4891,10 +5037,10 @@ mod imp {
 
     /// Detach and deallocate ephemeral IP from instance
     #[endpoint {
-     method = DELETE,
-     path = "/v1/instances/{instance}/external-ips/ephemeral",
-     tags = ["instances"],
- }]
+    method = DELETE,
+    path = "/v1/instances/{instance}/external-ips/ephemeral",
+    tags = ["instances"],
+}]
     async fn instance_ephemeral_ip_detach(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::InstancePath>,
@@ -4933,10 +5079,10 @@ mod imp {
 
     /// List snapshots
     #[endpoint {
-     method = GET,
-     path = "/v1/snapshots",
-     tags = ["snapshots"],
- }]
+    method = GET,
+    path = "/v1/snapshots",
+    tags = ["snapshots"],
+}]
     async fn snapshot_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
@@ -4975,10 +5121,10 @@ mod imp {
     ///
     /// Creates a point-in-time snapshot from a disk.
     #[endpoint {
-     method = POST,
-     path = "/v1/snapshots",
-     tags = ["snapshots"],
- }]
+    method = POST,
+    path = "/v1/snapshots",
+    tags = ["snapshots"],
+}]
     async fn snapshot_create(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<params::ProjectSelector>,
@@ -5006,10 +5152,10 @@ mod imp {
 
     /// Fetch snapshot
     #[endpoint {
-     method = GET,
-     path = "/v1/snapshots/{snapshot}",
-     tags = ["snapshots"],
- }]
+    method = GET,
+    path = "/v1/snapshots/{snapshot}",
+    tags = ["snapshots"],
+}]
     async fn snapshot_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::SnapshotPath>,
@@ -5041,10 +5187,10 @@ mod imp {
 
     /// Delete snapshot
     #[endpoint {
-     method = DELETE,
-     path = "/v1/snapshots/{snapshot}",
-     tags = ["snapshots"],
- }]
+    method = DELETE,
+    path = "/v1/snapshots/{snapshot}",
+    tags = ["snapshots"],
+}]
     async fn snapshot_delete(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::SnapshotPath>,
@@ -5077,10 +5223,10 @@ mod imp {
 
     /// List VPCs
     #[endpoint {
-     method = GET,
-     path = "/v1/vpcs",
-     tags = ["vpcs"],
- }]
+    method = GET,
+    path = "/v1/vpcs",
+    tags = ["vpcs"],
+}]
     async fn vpc_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
@@ -5118,10 +5264,10 @@ mod imp {
 
     /// Create VPC
     #[endpoint {
-     method = POST,
-     path = "/v1/vpcs",
-     tags = ["vpcs"],
- }]
+    method = POST,
+    path = "/v1/vpcs",
+    tags = ["vpcs"],
+}]
     async fn vpc_create(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<params::ProjectSelector>,
@@ -5149,10 +5295,10 @@ mod imp {
 
     /// Fetch VPC
     #[endpoint {
-     method = GET,
-     path = "/v1/vpcs/{vpc}",
-     tags = ["vpcs"],
- }]
+    method = GET,
+    path = "/v1/vpcs/{vpc}",
+    tags = ["vpcs"],
+}]
     async fn vpc_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::VpcPath>,
@@ -5180,10 +5326,10 @@ mod imp {
 
     /// Update a VPC
     #[endpoint {
-     method = PUT,
-     path = "/v1/vpcs/{vpc}",
-     tags = ["vpcs"],
- }]
+    method = PUT,
+    path = "/v1/vpcs/{vpc}",
+    tags = ["vpcs"],
+}]
     async fn vpc_update(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::VpcPath>,
@@ -5215,10 +5361,10 @@ mod imp {
 
     /// Delete VPC
     #[endpoint {
-     method = DELETE,
-     path = "/v1/vpcs/{vpc}",
-     tags = ["vpcs"],
- }]
+    method = DELETE,
+    path = "/v1/vpcs/{vpc}",
+    tags = ["vpcs"],
+}]
     async fn vpc_delete(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::VpcPath>,
@@ -5246,10 +5392,10 @@ mod imp {
 
     /// List subnets
     #[endpoint {
-     method = GET,
-     path = "/v1/vpc-subnets",
-     tags = ["vpcs"],
- }]
+    method = GET,
+    path = "/v1/vpc-subnets",
+    tags = ["vpcs"],
+}]
     async fn vpc_subnet_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByNameOrId<params::VpcSelector>>,
@@ -5286,10 +5432,10 @@ mod imp {
 
     /// Create subnet
     #[endpoint {
-     method = POST,
-     path = "/v1/vpc-subnets",
-     tags = ["vpcs"],
- }]
+    method = POST,
+    path = "/v1/vpc-subnets",
+    tags = ["vpcs"],
+}]
     async fn vpc_subnet_create(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<params::VpcSelector>,
@@ -5316,10 +5462,10 @@ mod imp {
 
     /// Fetch subnet
     #[endpoint {
-     method = GET,
-     path = "/v1/vpc-subnets/{subnet}",
-     tags = ["vpcs"],
- }]
+    method = GET,
+    path = "/v1/vpc-subnets/{subnet}",
+    tags = ["vpcs"],
+}]
     async fn vpc_subnet_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::SubnetPath>,
@@ -5352,10 +5498,10 @@ mod imp {
 
     /// Delete subnet
     #[endpoint {
-     method = DELETE,
-     path = "/v1/vpc-subnets/{subnet}",
-     tags = ["vpcs"],
- }]
+    method = DELETE,
+    path = "/v1/vpc-subnets/{subnet}",
+    tags = ["vpcs"],
+}]
     async fn vpc_subnet_delete(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::SubnetPath>,
@@ -5387,10 +5533,10 @@ mod imp {
 
     /// Update subnet
     #[endpoint {
-     method = PUT,
-     path = "/v1/vpc-subnets/{subnet}",
-     tags = ["vpcs"],
- }]
+    method = PUT,
+    path = "/v1/vpc-subnets/{subnet}",
+    tags = ["vpcs"],
+}]
     async fn vpc_subnet_update(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::SubnetPath>,
@@ -5430,10 +5576,10 @@ mod imp {
 
     /// List network interfaces
     #[endpoint {
-     method = GET,
-     path = "/v1/vpc-subnets/{subnet}/network-interfaces",
-     tags = ["vpcs"],
- }]
+    method = GET,
+    path = "/v1/vpc-subnets/{subnet}/network-interfaces",
+    tags = ["vpcs"],
+}]
     async fn vpc_subnet_list_network_interfaces(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::SubnetPath>,
@@ -5484,10 +5630,10 @@ mod imp {
 
     /// List firewall rules
     #[endpoint {
-     method = GET,
-     path = "/v1/vpc-firewall-rules",
-     tags = ["vpcs"],
- }]
+    method = GET,
+    path = "/v1/vpc-firewall-rules",
+    tags = ["vpcs"],
+}]
     async fn vpc_firewall_rules_view(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<params::VpcSelector>,
@@ -5533,10 +5679,10 @@ mod imp {
     /// outbound rule). With multiple filters, the rule applies only to packets
     /// matching ALL filters. The maximum number of each type of filter is 256.
     #[endpoint {
-     method = PUT,
-     path = "/v1/vpc-firewall-rules",
-     tags = ["vpcs"],
- }]
+    method = PUT,
+    path = "/v1/vpc-firewall-rules",
+    tags = ["vpcs"],
+}]
     async fn vpc_firewall_rules_update(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<params::VpcSelector>,
@@ -5570,10 +5716,10 @@ mod imp {
 
     /// List routers
     #[endpoint {
-     method = GET,
-     path = "/v1/vpc-routers",
-     tags = ["vpcs"],
- }]
+    method = GET,
+    path = "/v1/vpc-routers",
+    tags = ["vpcs"],
+}]
     async fn vpc_router_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByNameOrId<params::VpcSelector>>,
@@ -5610,10 +5756,10 @@ mod imp {
 
     /// Fetch router
     #[endpoint {
-     method = GET,
-     path = "/v1/vpc-routers/{router}",
-     tags = ["vpcs"],
- }]
+    method = GET,
+    path = "/v1/vpc-routers/{router}",
+    tags = ["vpcs"],
+}]
     async fn vpc_router_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::RouterPath>,
@@ -5646,10 +5792,10 @@ mod imp {
 
     /// Create VPC router
     #[endpoint {
-     method = POST,
-     path = "/v1/vpc-routers",
-     tags = ["vpcs"],
- }]
+    method = POST,
+    path = "/v1/vpc-routers",
+    tags = ["vpcs"],
+}]
     async fn vpc_router_create(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<params::VpcSelector>,
@@ -5682,10 +5828,10 @@ mod imp {
 
     /// Delete router
     #[endpoint {
-     method = DELETE,
-     path = "/v1/vpc-routers/{router}",
-     tags = ["vpcs"],
- }]
+    method = DELETE,
+    path = "/v1/vpc-routers/{router}",
+    tags = ["vpcs"],
+}]
     async fn vpc_router_delete(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::RouterPath>,
@@ -5717,10 +5863,10 @@ mod imp {
 
     /// Update router
     #[endpoint {
-     method = PUT,
-     path = "/v1/vpc-routers/{router}",
-     tags = ["vpcs"],
- }]
+    method = PUT,
+    path = "/v1/vpc-routers/{router}",
+    tags = ["vpcs"],
+}]
     async fn vpc_router_update(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::RouterPath>,
@@ -5758,10 +5904,10 @@ mod imp {
     ///
     /// List the routes associated with a router in a particular VPC.
     #[endpoint {
-     method = GET,
-     path = "/v1/vpc-router-routes",
-     tags = ["vpcs"],
- }]
+    method = GET,
+    path = "/v1/vpc-router-routes",
+    tags = ["vpcs"],
+}]
     async fn vpc_router_route_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByNameOrId<params::RouterSelector>>,
@@ -5800,10 +5946,10 @@ mod imp {
 
     /// Fetch route
     #[endpoint {
-     method = GET,
-     path = "/v1/vpc-router-routes/{route}",
-     tags = ["vpcs"],
- }]
+    method = GET,
+    path = "/v1/vpc-router-routes/{route}",
+    tags = ["vpcs"],
+}]
     async fn vpc_router_route_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::RoutePath>,
@@ -5837,10 +5983,10 @@ mod imp {
 
     /// Create route
     #[endpoint {
-     method = POST,
-     path = "/v1/vpc-router-routes",
-     tags = ["vpcs"],
- }]
+    method = POST,
+    path = "/v1/vpc-router-routes",
+    tags = ["vpcs"],
+}]
     async fn vpc_router_route_create(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<params::RouterSelector>,
@@ -5873,10 +6019,10 @@ mod imp {
 
     /// Delete route
     #[endpoint {
-     method = DELETE,
-     path = "/v1/vpc-router-routes/{route}",
-     tags = ["vpcs"],
- }]
+    method = DELETE,
+    path = "/v1/vpc-router-routes/{route}",
+    tags = ["vpcs"],
+}]
     async fn vpc_router_route_delete(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::RoutePath>,
@@ -5909,10 +6055,10 @@ mod imp {
 
     /// Update route
     #[endpoint {
-     method = PUT,
-     path = "/v1/vpc-router-routes/{route}",
-     tags = ["vpcs"],
- }]
+    method = PUT,
+    path = "/v1/vpc-router-routes/{route}",
+    tags = ["vpcs"],
+}]
     async fn vpc_router_route_update(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::RoutePath>,
@@ -5951,10 +6097,10 @@ mod imp {
 
     /// List racks
     #[endpoint {
-     method = GET,
-     path = "/v1/system/hardware/racks",
-     tags = ["system/hardware"],
- }]
+    method = GET,
+    path = "/v1/system/hardware/racks",
+    tags = ["system/hardware"],
+}]
     async fn rack_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedById>,
@@ -5993,10 +6139,10 @@ mod imp {
 
     /// Fetch rack
     #[endpoint {
-     method = GET,
-     path = "/v1/system/hardware/racks/{rack_id}",
-     tags = ["system/hardware"],
- }]
+    method = GET,
+    path = "/v1/system/hardware/racks/{rack_id}",
+    tags = ["system/hardware"],
+}]
     async fn rack_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<RackPathParam>,
@@ -6019,10 +6165,10 @@ mod imp {
 
     /// List uninitialized sleds
     #[endpoint {
-     method = GET,
-     path = "/v1/system/hardware/sleds-uninitialized",
-     tags = ["system/hardware"]
- }]
+    method = GET,
+    path = "/v1/system/hardware/sleds-uninitialized",
+    tags = ["system/hardware"]
+}]
     async fn sled_list_uninitialized(
         rqctx: RequestContext<ApiContext>,
         query: Query<PaginationParams<EmptyScanParams, String>>,
@@ -6065,10 +6211,10 @@ mod imp {
     // explicitly be tied to a rack via a `rack_id` path param. For now we assume
     // we are only operating on single rack systems.
     #[endpoint {
-     method = POST,
-     path = "/v1/system/hardware/sleds",
-     tags = ["system/hardware"]
- }]
+    method = POST,
+    path = "/v1/system/hardware/sleds",
+    tags = ["system/hardware"]
+}]
     async fn sled_add(
         rqctx: RequestContext<ApiContext>,
         sled: TypedBody<params::UninitializedSledId>,
@@ -6095,10 +6241,10 @@ mod imp {
 
     /// List sleds
     #[endpoint {
-     method = GET,
-     path = "/v1/system/hardware/sleds",
-     tags = ["system/hardware"],
- }]
+    method = GET,
+    path = "/v1/system/hardware/sleds",
+    tags = ["system/hardware"],
+}]
     async fn sled_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedById>,
@@ -6130,10 +6276,10 @@ mod imp {
 
     /// Fetch sled
     #[endpoint {
-     method = GET,
-     path = "/v1/system/hardware/sleds/{sled_id}",
-     tags = ["system/hardware"],
- }]
+    method = GET,
+    path = "/v1/system/hardware/sleds/{sled_id}",
+    tags = ["system/hardware"],
+}]
     async fn sled_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::SledPath>,
@@ -6157,10 +6303,10 @@ mod imp {
 
     /// Set sled provision policy
     #[endpoint {
-     method = PUT,
-     path = "/v1/system/hardware/sleds/{sled_id}/provision-policy",
-     tags = ["system/hardware"],
- }]
+    method = PUT,
+    path = "/v1/system/hardware/sleds/{sled_id}/provision-policy",
+    tags = ["system/hardware"],
+}]
     async fn sled_set_provision_policy(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::SledPath>,
@@ -6197,10 +6343,10 @@ mod imp {
 
     /// List instances running on given sled
     #[endpoint {
-     method = GET,
-     path = "/v1/system/hardware/sleds/{sled_id}/instances",
-     tags = ["system/hardware"],
- }]
+    method = GET,
+    path = "/v1/system/hardware/sleds/{sled_id}/instances",
+    tags = ["system/hardware"],
+}]
     async fn sled_instance_list(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::SledPath>,
@@ -6244,10 +6390,10 @@ mod imp {
 
     /// List physical disks
     #[endpoint {
-     method = GET,
-     path = "/v1/system/hardware/disks",
-     tags = ["system/hardware"],
- }]
+    method = GET,
+    path = "/v1/system/hardware/disks",
+    tags = ["system/hardware"],
+}]
     async fn physical_disk_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedById>,
@@ -6282,10 +6428,10 @@ mod imp {
 
     /// Get a physical disk
     #[endpoint {
-     method = GET,
-     path = "/v1/system/hardware/disks/{disk_id}",
-     tags = ["system/hardware"],
- }]
+    method = GET,
+    path = "/v1/system/hardware/disks/{disk_id}",
+    tags = ["system/hardware"],
+}]
     async fn physical_disk_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::PhysicalDiskPath>,
@@ -6312,10 +6458,10 @@ mod imp {
 
     /// List switches
     #[endpoint {
-     method = GET,
-     path = "/v1/system/hardware/switches",
-     tags = ["system/hardware"],
- }]
+    method = GET,
+    path = "/v1/system/hardware/switches",
+    tags = ["system/hardware"],
+}]
     async fn switch_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedById>,
@@ -6347,10 +6493,10 @@ mod imp {
 
     /// Fetch switch
     #[endpoint {
-     method = GET,
-     path = "/v1/system/hardware/switches/{switch_id}",
-     tags = ["system/hardware"],
-  }]
+    method = GET,
+    path = "/v1/system/hardware/switches/{switch_id}",
+    tags = ["system/hardware"],
+ }]
     async fn switch_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::SwitchPath>,
@@ -6379,10 +6525,10 @@ mod imp {
 
     /// List physical disks attached to sleds
     #[endpoint {
-     method = GET,
-     path = "/v1/system/hardware/sleds/{sled_id}/disks",
-     tags = ["system/hardware"],
- }]
+    method = GET,
+    path = "/v1/system/hardware/sleds/{sled_id}/disks",
+    tags = ["system/hardware"],
+}]
     async fn sled_physical_disk_list(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::SledPath>,
@@ -6438,10 +6584,10 @@ mod imp {
     ///
     /// View CPU, memory, or storage utilization metrics at the fleet or silo level.
     #[endpoint {
-      method = GET,
-      path = "/v1/system/metrics/{metric_name}",
-      tags = ["system/metrics"],
- }]
+     method = GET,
+     path = "/v1/system/metrics/{metric_name}",
+     tags = ["system/metrics"],
+}]
     async fn system_metric(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<SystemMetricsPathParam>,
@@ -6488,10 +6634,10 @@ mod imp {
     ///
     /// View CPU, memory, or storage utilization metrics at the silo or project level.
     #[endpoint {
-      method = GET,
-      path = "/v1/metrics/{metric_name}",
-      tags = ["metrics"],
- }]
+     method = GET,
+     path = "/v1/metrics/{metric_name}",
+     tags = ["metrics"],
+}]
     async fn silo_metric(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<SystemMetricsPathParam>,
@@ -6542,10 +6688,10 @@ mod imp {
 
     /// List timeseries schemas
     #[endpoint {
-     method = GET,
-     path = "/v1/timeseries/schema",
-     tags = ["metrics"],
- }]
+    method = GET,
+    path = "/v1/timeseries/schema",
+    tags = ["metrics"],
+}]
     async fn timeseries_schema_list(
         rqctx: RequestContext<ApiContext>,
         pag_params: Query<oximeter_db::TimeseriesSchemaPaginationParams>,
@@ -6579,10 +6725,10 @@ mod imp {
     ///
     /// Queries are written in OxQL.
     #[endpoint {
-     method = POST,
-     path = "/v1/timeseries/query",
-     tags = ["metrics"],
- }]
+    method = POST,
+    path = "/v1/timeseries/query",
+    tags = ["metrics"],
+}]
     async fn timeseries_query(
         rqctx: RequestContext<ApiContext>,
         body: TypedBody<params::TimeseriesQuery>,
@@ -6610,11 +6756,11 @@ mod imp {
 
     /// Upload TUF repository
     #[endpoint {
-     method = PUT,
-     path = "/v1/system/update/repository",
-     tags = ["system/update"],
-     unpublished = true,
- }]
+    method = PUT,
+    path = "/v1/system/update/repository",
+    tags = ["system/update"],
+    unpublished = true,
+}]
     async fn system_update_put_repository(
         rqctx: RequestContext<ApiContext>,
         query: Query<params::UpdatesPutRepositoryParams>,
@@ -6643,11 +6789,11 @@ mod imp {
     ///
     /// Fetch description of TUF repository by system version.
     #[endpoint {
-     method = GET,
-     path = "/v1/system/update/repository/{system_version}",
-     tags = ["system/update"],
-     unpublished = true,
- }]
+    method = GET,
+    path = "/v1/system/update/repository/{system_version}",
+    tags = ["system/update"],
+    unpublished = true,
+}]
     async fn system_update_get_repository(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::UpdatesGetRepositoryParams>,
@@ -6676,10 +6822,10 @@ mod imp {
 
     /// List users
     #[endpoint {
-     method = GET,
-     path = "/v1/users",
-     tags = ["silos"],
- }]
+    method = GET,
+    path = "/v1/users",
+    tags = ["silos"],
+}]
     async fn user_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedById<params::OptionalGroupSelector>>,
@@ -6724,10 +6870,10 @@ mod imp {
 
     /// List groups
     #[endpoint {
-        method = GET,
-        path = "/v1/groups",
-        tags = ["silos"],
-    }]
+    method = GET,
+    path = "/v1/groups",
+    tags = ["silos"],
+}]
     async fn group_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedById>,
@@ -6760,10 +6906,10 @@ mod imp {
 
     /// Fetch group
     #[endpoint {
-        method = GET,
-        path = "/v1/groups/{group_id}",
-        tags = ["silos"],
-    }]
+    method = GET,
+    path = "/v1/groups/{group_id}",
+    tags = ["silos"],
+}]
     async fn group_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::GroupPath>,
@@ -6789,10 +6935,10 @@ mod imp {
 
     /// List built-in users
     #[endpoint {
-        method = GET,
-        path = "/v1/system/users-builtin",
-        tags = ["system/silos"],
-    }]
+    method = GET,
+    path = "/v1/system/users-builtin",
+    tags = ["system/silos"],
+}]
     async fn user_builtin_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByName>,
@@ -6826,10 +6972,10 @@ mod imp {
 
     /// Fetch built-in user
     #[endpoint {
-        method = GET,
-        path = "/v1/system/users-builtin/{user}",
-        tags = ["system/silos"],
-    }]
+    method = GET,
+    path = "/v1/system/users-builtin/{user}",
+    tags = ["system/silos"],
+}]
     async fn user_builtin_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::UserBuiltinSelector>,
@@ -6871,10 +7017,10 @@ mod imp {
 
     /// List built-in roles
     #[endpoint {
-        method = GET,
-        path = "/v1/system/roles",
-        tags = ["roles"],
-    }]
+    method = GET,
+    path = "/v1/system/roles",
+    tags = ["roles"],
+}]
     async fn role_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginationParams<EmptyScanParams, RolePage>>,
@@ -6923,10 +7069,10 @@ mod imp {
 
     /// Fetch built-in role
     #[endpoint {
-        method = GET,
-        path = "/v1/system/roles/{role_name}",
-        tags = ["roles"],
-    }]
+    method = GET,
+    path = "/v1/system/roles/{role_name}",
+    tags = ["roles"],
+}]
     async fn role_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<RolePathParam>,
@@ -6952,10 +7098,10 @@ mod imp {
 
     /// Fetch user for current session
     #[endpoint {
-    method = GET,
-    path = "/v1/me",
-    tags = ["session"],
-    }]
+   method = GET,
+   path = "/v1/me",
+   tags = ["session"],
+}]
     pub(crate) async fn current_user_view(
         rqctx: RequestContext<ApiContext>,
     ) -> Result<HttpResponseOk<views::CurrentUser>, HttpError> {
@@ -6980,10 +7126,10 @@ mod imp {
 
     /// Fetch current user's groups
     #[endpoint {
-        method = GET,
-        path = "/v1/me/groups",
-        tags = ["session"],
-    }]
+    method = GET,
+    path = "/v1/me/groups",
+    tags = ["session"],
+ }]
     pub(crate) async fn current_user_groups(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedById>,
@@ -7022,10 +7168,10 @@ mod imp {
     ///
     /// Lists SSH public keys for the currently authenticated user.
     #[endpoint {
-        method = GET,
-        path = "/v1/me/ssh-keys",
-        tags = ["session"],
-    }]
+    method = GET,
+    path = "/v1/me/ssh-keys",
+    tags = ["session"],
+}]
     async fn current_user_ssh_key_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByNameOrId>,
@@ -7066,10 +7212,10 @@ mod imp {
     ///
     /// Create an SSH public key for the currently authenticated user.
     #[endpoint {
-        method = POST,
-        path = "/v1/me/ssh-keys",
-        tags = ["session"],
-    }]
+    method = POST,
+    path = "/v1/me/ssh-keys",
+    tags = ["session"],
+}]
     async fn current_user_ssh_key_create(
         rqctx: RequestContext<ApiContext>,
         new_key: TypedBody<params::SshKeyCreate>,
@@ -7099,10 +7245,10 @@ mod imp {
     ///
     /// Fetch SSH public key associated with the currently authenticated user.
     #[endpoint {
-        method = GET,
-        path = "/v1/me/ssh-keys/{ssh_key}",
-        tags = ["session"],
-    }]
+    method = GET,
+    path = "/v1/me/ssh-keys/{ssh_key}",
+    tags = ["session"],
+}]
     async fn current_user_ssh_key_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::SshKeyPath>,
@@ -7139,10 +7285,10 @@ mod imp {
     ///
     /// Delete an SSH public key associated with the currently authenticated user.
     #[endpoint {
-        method = DELETE,
-        path = "/v1/me/ssh-keys/{ssh_key}",
-        tags = ["session"],
-    }]
+    method = DELETE,
+    path = "/v1/me/ssh-keys/{ssh_key}",
+    tags = ["session"],
+}]
     async fn current_user_ssh_key_delete(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::SshKeyPath>,
@@ -7177,10 +7323,10 @@ mod imp {
 
     /// List instrumentation probes
     #[endpoint {
-        method = GET,
-        path = "/v1/probes",
-        tags = ["system/probes"],
-    }]
+    method = GET,
+    path = "/v1/probes",
+    tags = ["system/probes"],
+}]
     async fn probe_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByNameOrId<params::ProjectSelector>>,
@@ -7221,10 +7367,10 @@ mod imp {
 
     /// View instrumentation probe
     #[endpoint {
-        method = GET,
-        path = "/v1/probes/{probe}",
-        tags = ["system/probes"],
-    }]
+    method = GET,
+    path = "/v1/probes/{probe}",
+    tags = ["system/probes"],
+}]
     async fn probe_view(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::ProbePath>,
@@ -7254,10 +7400,10 @@ mod imp {
 
     /// Create instrumentation probe
     #[endpoint {
-        method = POST,
-        path = "/v1/probes",
-        tags = ["system/probes"],
-    }]
+    method = POST,
+    path = "/v1/probes",
+    tags = ["system/probes"],
+}]
     async fn probe_create(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<params::ProjectSelector>,
@@ -7288,10 +7434,10 @@ mod imp {
 
     /// Delete instrumentation probe
     #[endpoint {
-        method = DELETE,
-        path = "/v1/probes/{probe}",
-        tags = ["system/probes"],
-    }]
+    method = DELETE,
+    path = "/v1/probes/{probe}",
+    tags = ["system/probes"],
+}]
     async fn probe_delete(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<params::ProjectSelector>,
@@ -7319,7 +7465,7 @@ mod imp {
     }
 }
 
-pub(crate) use imp::*;
+pub use imp::*;
 
 #[cfg(test)]
 mod test {
