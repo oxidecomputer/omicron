@@ -19,9 +19,9 @@ use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InstanceState;
-use omicron_common::api::internal::nexus::SledInstanceState;
+use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_uuid_kinds::GenericUuid;
-use omicron_uuid_kinds::InstanceUuid;
+use omicron_uuid_kinds::PropolisUuid;
 use oximeter::types::ProducerRegistry;
 use sled_agent_client::Client as SledAgentClient;
 use std::borrow::Cow;
@@ -81,12 +81,12 @@ impl InstanceWatcher {
         let client = client.clone();
 
         async move {
-            slog::trace!(opctx.log, "checking on instance...");
-            let rsp = client
-                .instance_get_state(&InstanceUuid::from_untyped_uuid(
-                    target.instance_id,
-                ))
-                .await;
+            let vmm_id = PropolisUuid::from_untyped_uuid(target.vmm_id);
+            slog::trace!(
+                opctx.log, "checking on VMM"; "propolis_id" => %vmm_id
+            );
+
+            let rsp = client.vmm_get_state(&vmm_id).await;
             let mut check = Check {
                 target,
                 outcome: Default::default(),
@@ -151,7 +151,7 @@ impl InstanceWatcher {
                 }
             };
 
-            let new_runtime_state: SledInstanceState = state.into();
+            let new_runtime_state: SledVmmState = state.into();
             check.outcome =
                 CheckOutcome::Success(new_runtime_state.vmm_state.state.into());
             debug!(
@@ -159,10 +159,10 @@ impl InstanceWatcher {
                 "updating instance state";
                 "state" => ?new_runtime_state.vmm_state.state,
             );
-            match crate::app::instance::notify_instance_updated(
+            match crate::app::instance::process_vmm_update(
                 &datastore,
                 &opctx,
-                InstanceUuid::from_untyped_uuid(target.instance_id),
+                PropolisUuid::from_untyped_uuid(target.vmm_id),
                 &new_runtime_state,
             )
             .await
@@ -176,7 +176,7 @@ impl InstanceWatcher {
                         _ => Err(Incomplete::UpdateFailed),
                     };
                 }
-                Ok(Some(saga)) => {
+                Ok(Some((_, saga))) => {
                     check.update_saga_queued = true;
                     if let Err(e) = sagas.saga_start(saga).await {
                         warn!(opctx.log, "update saga failed"; "error" => ?e);

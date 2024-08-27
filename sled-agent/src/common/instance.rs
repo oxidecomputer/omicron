@@ -7,10 +7,9 @@
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::nexus::{
-    MigrationRuntimeState, MigrationState, SledInstanceState, VmmRuntimeState,
+    MigrationRuntimeState, MigrationState, SledVmmState, VmmRuntimeState,
     VmmState,
 };
-use omicron_uuid_kinds::PropolisUuid;
 use propolis_client::types::{
     InstanceMigrationStatus, InstanceState as PropolisApiState,
     InstanceStateMonitorResponse, MigrationState as PropolisMigrationState,
@@ -21,7 +20,6 @@ use uuid::Uuid;
 #[derive(Clone, Debug)]
 pub struct InstanceStates {
     vmm: VmmRuntimeState,
-    propolis_id: PropolisUuid,
     migration_in: Option<MigrationRuntimeState>,
     migration_out: Option<MigrationRuntimeState>,
 }
@@ -173,11 +171,7 @@ pub enum Action {
 }
 
 impl InstanceStates {
-    pub fn new(
-        vmm: VmmRuntimeState,
-        propolis_id: PropolisUuid,
-        migration_id: Option<Uuid>,
-    ) -> Self {
+    pub fn new(vmm: VmmRuntimeState, migration_id: Option<Uuid>) -> Self {
         // If this instance is created with a migration ID, we are the intended
         // target of a migration in. Set that up now.
         let migration_in =
@@ -187,15 +181,11 @@ impl InstanceStates {
                 gen: Generation::new(),
                 time_updated: Utc::now(),
             });
-        InstanceStates { vmm, propolis_id, migration_in, migration_out: None }
+        InstanceStates { vmm, migration_in, migration_out: None }
     }
 
     pub fn vmm(&self) -> &VmmRuntimeState {
         &self.vmm
-    }
-
-    pub fn propolis_id(&self) -> PropolisUuid {
-        self.propolis_id
     }
 
     pub fn migration_in(&self) -> Option<&MigrationRuntimeState> {
@@ -209,10 +199,9 @@ impl InstanceStates {
     /// Creates a `SledInstanceState` structure containing the entirety of this
     /// structure's runtime state. This requires cloning; for simple read access
     /// use the `instance` or `vmm` accessors instead.
-    pub fn sled_instance_state(&self) -> SledInstanceState {
-        SledInstanceState {
+    pub fn sled_instance_state(&self) -> SledVmmState {
+        SledVmmState {
             vmm_state: self.vmm.clone(),
-            propolis_id: self.propolis_id,
             migration_in: self.migration_in.clone(),
             migration_out: self.migration_out.clone(),
         }
@@ -377,7 +366,6 @@ mod test {
     use uuid::Uuid;
 
     fn make_instance() -> InstanceStates {
-        let propolis_id = PropolisUuid::new_v4();
         let now = Utc::now();
 
         let vmm = VmmRuntimeState {
@@ -386,7 +374,7 @@ mod test {
             time_updated: now,
         };
 
-        InstanceStates::new(vmm, propolis_id, None)
+        InstanceStates::new(vmm, None)
     }
 
     fn make_migration_source_instance() -> InstanceStates {
@@ -406,7 +394,6 @@ mod test {
     }
 
     fn make_migration_target_instance() -> InstanceStates {
-        let propolis_id = PropolisUuid::new_v4();
         let now = Utc::now();
 
         let vmm = VmmRuntimeState {
@@ -415,7 +402,7 @@ mod test {
             time_updated: now,
         };
 
-        InstanceStates::new(vmm, propolis_id, Some(Uuid::new_v4()))
+        InstanceStates::new(vmm, Some(Uuid::new_v4()))
     }
 
     fn make_observed_state(

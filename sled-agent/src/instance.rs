@@ -25,9 +25,7 @@ use illumos_utils::opte::{DhcpCfg, PortCreateParams, PortManager};
 use illumos_utils::running_zone::{RunningZone, ZoneBuilderFactory};
 use illumos_utils::svc::wait_for_service;
 use illumos_utils::zone::PROPOLIS_ZONE_PREFIX;
-use omicron_common::api::internal::nexus::{
-    SledInstanceState, VmmRuntimeState,
-};
+use omicron_common::api::internal::nexus::{SledVmmState, VmmRuntimeState};
 use omicron_common::api::internal::shared::{
     NetworkInterface, ResolvedVpcFirewallRule, SledIdentifiers, SourceNatConfig,
 };
@@ -104,11 +102,11 @@ pub enum Error {
     #[error("Error resolving DNS name: {0}")]
     ResolveError(#[from] internal_dns::resolver::ResolveError),
 
-    #[error("Instance {0} not running!")]
-    InstanceNotRunning(InstanceUuid),
+    #[error("Propolis job with ID {0} is registered but not running")]
+    VmNotRunning(PropolisUuid),
 
-    #[error("Instance already registered with Propolis ID {0}")]
-    InstanceAlreadyRegistered(PropolisUuid),
+    #[error("Propolis job with ID {0} already registered")]
+    PropolisAlreadyRegistered(PropolisUuid),
 
     #[error("No U.2 devices found")]
     U2NotFound,
@@ -217,15 +215,15 @@ enum InstanceRequest {
         tx: oneshot::Sender<Option<ZpoolName>>,
     },
     CurrentState {
-        tx: oneshot::Sender<SledInstanceState>,
+        tx: oneshot::Sender<SledVmmState>,
     },
     PutState {
-        state: InstanceStateRequested,
-        tx: oneshot::Sender<Result<InstancePutStateResponse, ManagerError>>,
+        state: VmmStateRequested,
+        tx: oneshot::Sender<Result<VmmPutStateResponse, ManagerError>>,
     },
     Terminate {
         mark_failed: bool,
-        tx: oneshot::Sender<Result<InstanceUnregisterResponse, ManagerError>>,
+        tx: oneshot::Sender<Result<VmmUnregisterResponse, ManagerError>>,
     },
     IssueSnapshotRequest {
         disk_id: Uuid,
@@ -414,12 +412,12 @@ impl InstanceRunner {
                         },
                         Some(PutState{ state, tx }) => {
                              tx.send(self.put_state(state).await
-                                .map(|r| InstancePutStateResponse { updated_runtime: Some(r) })
+                                .map(|r| VmmPutStateResponse { updated_runtime: Some(r) })
                                 .map_err(|e| e.into()))
                                 .map_err(|_| Error::FailedSendClientClosed)
                         },
                         Some(Terminate { mark_failed, tx }) => {
-                            tx.send(Ok(InstanceUnregisterResponse {
+                            tx.send(Ok(VmmUnregisterResponse {
                                 updated_runtime: Some(self.terminate(mark_failed).await)
                             }))
                             .map_err(|_| Error::FailedSendClientClosed)
@@ -499,13 +497,8 @@ impl InstanceRunner {
     }
 
     /// Yields this instance's ID.
-    fn id(&self) -> InstanceUuid {
+    fn instance_id(&self) -> InstanceUuid {
         InstanceUuid::from_untyped_uuid(self.properties.id)
-    }
-
-    /// Yields this instance's Propolis's ID.
-    fn propolis_id(&self) -> &PropolisUuid {
-        &self.propolis_id
     }
 
     async fn publish_state_to_nexus(&self) {
@@ -518,15 +511,13 @@ impl InstanceRunner {
             || async {
                 let state = self.state.sled_instance_state();
                 info!(self.log, "Publishing instance state update to Nexus";
-                    "instance_id" => %self.id(),
+                    "instance_id" => %self.instance_id(),
+                    "propolis_id" => %self.propolis_id,
                     "state" => ?state,
                 );
 
                 self.nexus_client
-                    .cpapi_instances_put(
-                        &self.id().into_untyped_uuid(),
-                        &state.into(),
-                    )
+                    .cpapi_instances_put(&self.propolis_id, &state.into())
                     .await
                     .map_err(|err| -> backoff::BackoffError<Error> {
                         match &err {
@@ -576,7 +567,8 @@ impl InstanceRunner {
                 warn!(self.log,
                       "Failed to publish instance state to Nexus: {}",
                       err.to_string();
-                      "instance_id" => %self.id(),
+                      "instance_id" => %self.instance_id(),
+                      "propolis_id" => %self.propolis_id,
                       "retry_after" => ?delay);
             },
         )
@@ -586,7 +578,8 @@ impl InstanceRunner {
             error!(
                 self.log,
                 "Failed to publish state to Nexus, will not retry: {:?}", e;
-                "instance_id" => %self.id()
+                "instance_id" => %self.instance_id(),
+                "propolis_id" => %self.propolis_id,
             );
         }
     }
@@ -622,7 +615,7 @@ impl InstanceRunner {
         info!(
             self.log,
             "updated state after observing Propolis state change";
-            "propolis_id" => %self.state.propolis_id(),
+            "propolis_id" => %self.propolis_id,
             "new_vmm_state" => ?self.state.vmm()
         );
 
@@ -634,7 +627,8 @@ impl InstanceRunner {
         match action {
             Some(InstanceAction::Destroy) => {
                 info!(self.log, "terminating VMM that has exited";
-                      "instance_id" => %self.id());
+                      "instance_id" => %self.instance_id(),
+                      "propolis_id" => %self.propolis_id);
                 let mark_failed = false;
                 self.terminate(mark_failed).await;
                 Reaction::Terminate
@@ -780,7 +774,7 @@ impl InstanceRunner {
     /// This routine is safe to call even if the instance's zone was never
     /// started. It is also safe to call multiple times on a single instance.
     async fn terminate_inner(&mut self) {
-        let zname = propolis_zone_name(self.propolis_id());
+        let zname = propolis_zone_name(&self.propolis_id);
 
         // First fetch the running state.
         //
@@ -948,8 +942,10 @@ impl InstanceRunner {
     }
 }
 
-/// A reference to a single instance running a running Propolis server.
+/// Describes a single Propolis server that incarnates a specific instance.
 pub struct Instance {
+    id: InstanceUuid,
+
     tx: mpsc::Sender<InstanceRequest>,
 
     #[allow(dead_code)]
@@ -1091,7 +1087,7 @@ impl Instance {
             dhcp_config,
             requested_disks: hardware.disks,
             cloud_init_bytes: hardware.cloud_init_bytes,
-            state: InstanceStates::new(vmm_runtime, propolis_id, migration_id),
+            state: InstanceStates::new(vmm_runtime, migration_id),
             running_state: None,
             nexus_client,
             storage,
@@ -1104,7 +1100,11 @@ impl Instance {
         let runner_handle =
             tokio::task::spawn(async move { runner.run().await });
 
-        Ok(Instance { tx, runner_handle })
+        Ok(Instance { id, tx, runner_handle })
+    }
+
+    pub fn id(&self) -> InstanceUuid {
+        self.id
     }
 
     /// Create bundle from an instance zone.
@@ -1130,7 +1130,7 @@ impl Instance {
         Ok(rx.await?)
     }
 
-    pub async fn current_state(&self) -> Result<SledInstanceState, Error> {
+    pub async fn current_state(&self) -> Result<SledVmmState, Error> {
         let (tx, rx) = oneshot::channel();
         self.tx
             .send(InstanceRequest::CurrentState { tx })
@@ -1152,8 +1152,8 @@ impl Instance {
     /// Rebooting to Running to Stopping to Stopped.
     pub async fn put_state(
         &self,
-        tx: oneshot::Sender<Result<InstancePutStateResponse, ManagerError>>,
-        state: InstanceStateRequested,
+        tx: oneshot::Sender<Result<VmmPutStateResponse, ManagerError>>,
+        state: VmmStateRequested,
     ) -> Result<(), Error> {
         self.tx
             .send(InstanceRequest::PutState { state, tx })
@@ -1166,7 +1166,7 @@ impl Instance {
     /// immediately transitions the instance to the Destroyed state.
     pub async fn terminate(
         &self,
-        tx: oneshot::Sender<Result<InstanceUnregisterResponse, ManagerError>>,
+        tx: oneshot::Sender<Result<VmmUnregisterResponse, ManagerError>>,
         mark_failed: bool,
     ) -> Result<(), Error> {
         self.tx
@@ -1224,7 +1224,7 @@ impl InstanceRunner {
     async fn request_zone_bundle(
         &self,
     ) -> Result<ZoneBundleMetadata, BundleError> {
-        let name = propolis_zone_name(self.propolis_id());
+        let name = propolis_zone_name(&self.propolis_id);
         match &self.running_state {
             None => Err(BundleError::Unavailable { name }),
             Some(RunningState { ref running_zone, .. }) => {
@@ -1242,7 +1242,7 @@ impl InstanceRunner {
         run_state.running_zone.root_zpool().map(|p| p.clone())
     }
 
-    fn current_state(&self) -> SledInstanceState {
+    fn current_state(&self) -> SledVmmState {
         self.state.sled_instance_state()
     }
 
@@ -1300,19 +1300,19 @@ impl InstanceRunner {
 
     async fn put_state(
         &mut self,
-        state: InstanceStateRequested,
-    ) -> Result<SledInstanceState, Error> {
+        state: VmmStateRequested,
+    ) -> Result<SledVmmState, Error> {
         use propolis_client::types::InstanceStateRequested as PropolisRequest;
         let (propolis_state, next_published) = match state {
-            InstanceStateRequested::MigrationTarget(migration_params) => {
+            VmmStateRequested::MigrationTarget(migration_params) => {
                 self.propolis_ensure(Some(migration_params)).await?;
                 (None, None)
             }
-            InstanceStateRequested::Running => {
+            VmmStateRequested::Running => {
                 self.propolis_ensure(None).await?;
                 (Some(PropolisRequest::Run), None)
             }
-            InstanceStateRequested::Stopped => {
+            VmmStateRequested::Stopped => {
                 // If the instance has not started yet, unregister it
                 // immediately. Since there is no Propolis to push updates when
                 // this happens, generate an instance record bearing the
@@ -1328,9 +1328,9 @@ impl InstanceRunner {
                     )
                 }
             }
-            InstanceStateRequested::Reboot => {
+            VmmStateRequested::Reboot => {
                 if self.running_state.is_none() {
-                    return Err(Error::InstanceNotRunning(self.id()));
+                    return Err(Error::VmNotRunning(self.propolis_id));
                 }
                 (
                     Some(PropolisRequest::Reboot),
@@ -1379,7 +1379,7 @@ impl InstanceRunner {
 
         // Create a zone for the propolis instance, using the previously
         // configured VNICs.
-        let zname = propolis_zone_name(self.propolis_id());
+        let zname = propolis_zone_name(&self.propolis_id);
         let mut rng = rand::rngs::StdRng::from_entropy();
         let latest_disks = self
             .storage
@@ -1399,7 +1399,7 @@ impl InstanceRunner {
             .with_zone_root_path(root)
             .with_zone_image_paths(&["/opt/oxide".into()])
             .with_zone_type("propolis-server")
-            .with_unique_name(self.propolis_id().into_untyped_uuid())
+            .with_unique_name(self.propolis_id.into_untyped_uuid())
             .with_datasets(&[])
             .with_filesystems(&[])
             .with_data_links(&[])
@@ -1483,7 +1483,7 @@ impl InstanceRunner {
         Ok(PropolisSetup { client, running_zone })
     }
 
-    async fn terminate(&mut self, mark_failed: bool) -> SledInstanceState {
+    async fn terminate(&mut self, mark_failed: bool) -> SledVmmState {
         self.terminate_inner().await;
         self.state.terminate_rudely(mark_failed);
 
@@ -1508,9 +1508,7 @@ impl InstanceRunner {
 
             Ok(())
         } else {
-            Err(Error::InstanceNotRunning(InstanceUuid::from_untyped_uuid(
-                self.properties.id,
-            )))
+            Err(Error::VmNotRunning(self.propolis_id))
         }
     }
 
@@ -1604,7 +1602,7 @@ mod tests {
     enum ReceivedInstanceState {
         #[default]
         None,
-        InstancePut(SledInstanceState),
+        InstancePut(SledVmmState),
     }
 
     struct NexusServer {
@@ -1614,8 +1612,8 @@ mod tests {
     impl FakeNexusServer for NexusServer {
         fn cpapi_instances_put(
             &self,
-            _instance_id: Uuid,
-            new_runtime_state: SledInstanceState,
+            _propolis_id: PropolisUuid,
+            new_runtime_state: SledVmmState,
         ) -> Result<(), omicron_common::api::external::Error> {
             self.observed_runtime_state
                 .send(ReceivedInstanceState::InstancePut(new_runtime_state))
@@ -1760,7 +1758,7 @@ mod tests {
         let id = InstanceUuid::new_v4();
         let propolis_id = PropolisUuid::from_untyped_uuid(PROPOLIS_ID);
 
-        let ticket = InstanceTicket::new_without_manager_for_test(id);
+        let ticket = InstanceTicket::new_without_manager_for_test(propolis_id);
 
         let initial_state = fake_instance_initial_state(propolis_addr);
 
@@ -1917,7 +1915,7 @@ mod tests {
 
         // pretending we're InstanceManager::ensure_state, start our "instance"
         // (backed by fakes and propolis_mock_server)
-        inst.put_state(put_tx, InstanceStateRequested::Running)
+        inst.put_state(put_tx, VmmStateRequested::Running)
             .await
             .expect("failed to send Instance::put_state");
 
@@ -2011,7 +2009,7 @@ mod tests {
 
         // pretending we're InstanceManager::ensure_state, try in vain to start
         // our "instance", but no propolis server is running
-        inst.put_state(put_tx, InstanceStateRequested::Running)
+        inst.put_state(put_tx, VmmStateRequested::Running)
             .await
             .expect("failed to send Instance::put_state");
 
@@ -2025,7 +2023,7 @@ mod tests {
             .await
             .expect_err("*should've* timed out waiting for Instance::put_state, but didn't?");
 
-        if let ReceivedInstanceState::InstancePut(SledInstanceState {
+        if let ReceivedInstanceState::InstancePut(SledVmmState {
             vmm_state: VmmRuntimeState { state: VmmState::Running, .. },
             ..
         }) = state_rx.borrow().to_owned()
@@ -2118,7 +2116,7 @@ mod tests {
 
         // pretending we're InstanceManager::ensure_state, try in vain to start
         // our "instance", but the zone never finishes installing
-        inst.put_state(put_tx, InstanceStateRequested::Running)
+        inst.put_state(put_tx, VmmStateRequested::Running)
             .await
             .expect("failed to send Instance::put_state");
 
@@ -2133,7 +2131,7 @@ mod tests {
             .expect_err("*should've* timed out waiting for Instance::put_state, but didn't?");
         debug!(log, "Zone-boot timeout awaited");
 
-        if let ReceivedInstanceState::InstancePut(SledInstanceState {
+        if let ReceivedInstanceState::InstancePut(SledVmmState {
             vmm_state: VmmRuntimeState { state: VmmState::Running, .. },
             ..
         }) = state_rx.borrow().to_owned()
@@ -2256,7 +2254,7 @@ mod tests {
         .await
         .unwrap();
 
-        mgr.ensure_state(instance_id, InstanceStateRequested::Running)
+        mgr.ensure_state(propolis_id, VmmStateRequested::Running)
             .await
             .unwrap();
 
