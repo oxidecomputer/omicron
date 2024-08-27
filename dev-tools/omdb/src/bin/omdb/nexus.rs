@@ -1556,6 +1556,62 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 }
             }
         }
+    } else if name == "blueprint_loader" {
+        #[derive(Deserialize)]
+        struct BlueprintLoaderStatus {
+            target_id: Uuid,
+            time_created: DateTime<Utc>,
+            status: String,
+            enabled: bool,
+        }
+
+        match serde_json::from_value::<BlueprintLoaderStatus>(details.clone()) {
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            ),
+            Ok(status) => {
+                println!("    target blueprint: {}", status.target_id);
+                println!(
+                    "    execution:        {}",
+                    if status.enabled { "enabled" } else { "disabled" }
+                );
+                println!(
+                    "    created at:       {}",
+                    humantime::format_rfc3339_millis(
+                        status.time_created.into()
+                    )
+                );
+                println!("    status:           {}", status.status);
+            }
+        }
+    } else if name == "blueprint_executor" {
+        #[derive(Deserialize)]
+        struct BlueprintExecutorStatus {
+            target_id: Uuid,
+            enabled: bool,
+            errors: Option<Vec<String>>,
+        }
+
+        match serde_json::from_value::<BlueprintExecutorStatus>(details.clone())
+        {
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            ),
+            Ok(status) => {
+                println!("    target blueprint: {}", status.target_id);
+                println!(
+                    "    execution:        {}",
+                    if status.enabled { "enabled" } else { "disabled" }
+                );
+                let errors = status.errors.as_deref().unwrap_or(&[]);
+                println!("    errors:           {}", errors.len());
+                for (i, e) in errors.iter().enumerate() {
+                    println!("        error {}: {}", i, e);
+                }
+            }
+        }
     } else {
         println!(
             "warning: unknown background task: {:?} \
