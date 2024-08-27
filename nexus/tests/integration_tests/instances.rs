@@ -780,12 +780,13 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     let instance_next = instance_get(&client, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
 
-    let original_sled = nexus
-        .instance_sled_id(&instance_id)
+    let sled_info = nexus
+        .active_instance_info(&instance_id, None)
         .await
         .unwrap()
         .expect("running instance should have a sled");
 
+    let original_sled = sled_info.sled_id;
     let dst_sled_id = if original_sled == default_sled_id {
         other_sled_id
     } else {
@@ -808,12 +809,13 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     .parsed_body::<Instance>()
     .unwrap();
 
-    let current_sled = nexus
-        .instance_sled_id(&instance_id)
+    let new_sled_info = nexus
+        .active_instance_info(&instance_id, None)
         .await
         .unwrap()
         .expect("running instance should have a sled");
 
+    let current_sled = new_sled_info.sled_id;
     assert_eq!(current_sled, original_sled);
 
     // Ensure that both sled agents report that the migration is in progress.
@@ -840,6 +842,15 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(migration.target_state, MigrationState::Pending.into());
     assert_eq!(migration.source_state, MigrationState::Pending.into());
 
+    let info = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("instance should be on a sled");
+    let src_propolis_id = info.propolis_id;
+    let dst_propolis_id =
+        info.dst_propolis_id.expect("instance should have a migration target");
+
     // Simulate the migration. We will use `instance_single_step_on_sled` to
     // single-step both sled-agents through the migration state machine and
     // ensure that the migration state looks nice at each step.
@@ -847,15 +858,15 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
         cptestctx,
         nexus,
         original_sled,
-        instance_id,
+        src_propolis_id,
         migration_id,
     )
     .await;
 
     // Move source to "migrating".
-    instance_single_step_on_sled(cptestctx, nexus, original_sled, instance_id)
+    vmm_single_step_on_sled(cptestctx, nexus, original_sled, src_propolis_id)
         .await;
-    instance_single_step_on_sled(cptestctx, nexus, original_sled, instance_id)
+    vmm_single_step_on_sled(cptestctx, nexus, original_sled, src_propolis_id)
         .await;
 
     let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
@@ -865,9 +876,9 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(instance.runtime.run_state, InstanceState::Migrating);
 
     // Move target to "migrating".
-    instance_single_step_on_sled(cptestctx, nexus, dst_sled_id, instance_id)
+    vmm_single_step_on_sled(cptestctx, nexus, dst_sled_id, dst_propolis_id)
         .await;
-    instance_single_step_on_sled(cptestctx, nexus, dst_sled_id, instance_id)
+    vmm_single_step_on_sled(cptestctx, nexus, dst_sled_id, dst_propolis_id)
         .await;
 
     let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
@@ -877,7 +888,7 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(instance.runtime.run_state, InstanceState::Migrating);
 
     // Move the source to "completed"
-    instance_simulate_on_sled(cptestctx, nexus, original_sled, instance_id)
+    vmm_simulate_on_sled(cptestctx, nexus, original_sled, src_propolis_id)
         .await;
 
     let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
@@ -887,15 +898,16 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(instance.runtime.run_state, InstanceState::Migrating);
 
     // Move the target to "completed".
-    instance_simulate_on_sled(cptestctx, nexus, dst_sled_id, instance_id).await;
+    vmm_simulate_on_sled(cptestctx, nexus, dst_sled_id, dst_propolis_id).await;
 
     instance_wait_for_state(&client, instance_id, InstanceState::Running).await;
 
     let current_sled = nexus
-        .instance_sled_id(&instance_id)
+        .active_instance_info(&instance_id, None)
         .await
         .unwrap()
-        .expect("migrated instance should still have a sled");
+        .expect("migrated instance should still have a sled")
+        .sled_id;
 
     assert_eq!(current_sled, dst_sled_id);
 
@@ -978,11 +990,13 @@ async fn test_instance_migrate_v2p_and_routes(
         .derive_guest_network_interface_info(&opctx, &authz_instance)
         .await
         .unwrap();
+
     let original_sled_id = nexus
-        .instance_sled_id(&instance_id)
+        .active_instance_info(&instance_id, None)
         .await
         .unwrap()
-        .expect("running instance should have a sled");
+        .expect("running instance should have a sled")
+        .sled_id;
 
     let mut sled_agents = vec![cptestctx.sled_agent.sled_agent.clone()];
     sled_agents.extend(other_sleds.iter().map(|tup| tup.1.sled_agent.clone()));
@@ -1035,25 +1049,35 @@ async fn test_instance_migrate_v2p_and_routes(
             .expect("since we've started a migration, the instance record must have a migration id!")
     };
 
+    let info = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("instance should be on a sled");
+    let src_propolis_id = info.propolis_id;
+    let dst_propolis_id =
+        info.dst_propolis_id.expect("instance should have a migration target");
+
     // Tell both sled-agents to pretend to do the migration.
     instance_simulate_migration_source(
         cptestctx,
         nexus,
         original_sled_id,
-        instance_id,
+        src_propolis_id,
         migration_id,
     )
     .await;
-    instance_simulate_on_sled(cptestctx, nexus, original_sled_id, instance_id)
+    vmm_simulate_on_sled(cptestctx, nexus, original_sled_id, src_propolis_id)
         .await;
-    instance_simulate_on_sled(cptestctx, nexus, dst_sled_id, instance_id).await;
+    vmm_simulate_on_sled(cptestctx, nexus, dst_sled_id, dst_propolis_id).await;
     instance_wait_for_state(&client, instance_id, InstanceState::Running).await;
 
     let current_sled = nexus
-        .instance_sled_id(&instance_id)
+        .active_instance_info(&instance_id, None)
         .await
         .unwrap()
-        .expect("migrated instance should have a sled");
+        .expect("migrated instance should have a sled")
+        .sled_id;
     assert_eq!(current_sled, dst_sled_id);
 
     for sled_agent in &sled_agents {
@@ -1373,10 +1397,11 @@ async fn test_instance_metrics_with_migration(
     // Request migration to the other sled. This reserves resources on the
     // target sled, but shouldn't change the virtual provisioning counters.
     let original_sled = nexus
-        .instance_sled_id(&instance_id)
+        .active_instance_info(&instance_id, None)
         .await
         .unwrap()
-        .expect("running instance should have a sled");
+        .expect("running instance should have a sled")
+        .sled_id;
 
     let dst_sled_id = if original_sled == default_sled_id {
         other_sled_id
@@ -1420,6 +1445,15 @@ async fn test_instance_metrics_with_migration(
             .expect("since we've started a migration, the instance record must have a migration id!")
     };
 
+    let info = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("instance should be on a sled");
+    let src_propolis_id = info.propolis_id;
+    let dst_propolis_id =
+        info.dst_propolis_id.expect("instance should have a migration target");
+
     // Wait for the instance to be in the `Migrating` state. Otherwise, the
     // subsequent `instance_wait_for_state(..., Running)` may see the `Running`
     // state from the *old* VMM, rather than waiting for the migration to
@@ -1428,13 +1462,13 @@ async fn test_instance_metrics_with_migration(
         cptestctx,
         nexus,
         original_sled,
-        instance_id,
+        src_propolis_id,
         migration_id,
     )
     .await;
-    instance_single_step_on_sled(cptestctx, nexus, original_sled, instance_id)
+    vmm_single_step_on_sled(cptestctx, nexus, original_sled, src_propolis_id)
         .await;
-    instance_single_step_on_sled(cptestctx, nexus, dst_sled_id, instance_id)
+    vmm_single_step_on_sled(cptestctx, nexus, dst_sled_id, dst_propolis_id)
         .await;
     instance_wait_for_state(&client, instance_id, InstanceState::Migrating)
         .await;
@@ -1444,9 +1478,9 @@ async fn test_instance_metrics_with_migration(
     // Complete migration on the target. Simulated migrations always succeed.
     // After this the instance should be running and should continue to appear
     // to be provisioned.
-    instance_simulate_on_sled(cptestctx, nexus, original_sled, instance_id)
+    vmm_simulate_on_sled(cptestctx, nexus, original_sled, src_propolis_id)
         .await;
-    instance_simulate_on_sled(cptestctx, nexus, dst_sled_id, instance_id).await;
+    vmm_simulate_on_sled(cptestctx, nexus, dst_sled_id, dst_propolis_id).await;
     instance_wait_for_state(&client, instance_id, InstanceState::Running).await;
 
     check_provisioning_state(4, 1).await;
@@ -3337,10 +3371,11 @@ async fn test_disks_detached_when_instance_destroyed(
     let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     let sa = nexus
-        .instance_sled_by_id(&instance_id)
+        .active_instance_info(&instance_id, None)
         .await
         .unwrap()
-        .expect("instance should be on a sled while it's running");
+        .expect("instance should be on a sled while it's running")
+        .sled_client;
 
     // Stop and delete instance
     instance_post(&client, instance_name, InstanceOp::Stop).await;
@@ -5080,28 +5115,29 @@ pub async fn assert_sled_vpc_routes(
 /// instance, and then tell it to finish simulating whatever async transition is
 /// going on.
 pub async fn instance_simulate(nexus: &Arc<Nexus>, id: &InstanceUuid) {
-    let sa = nexus
-        .instance_sled_by_id(id)
+    let sled_info = nexus
+        .active_instance_info(id, None)
         .await
         .unwrap()
         .expect("instance must be on a sled to simulate a state change");
-    sa.instance_finish_transition(id.into_untyped_uuid()).await;
+
+    sled_info.sled_client.vmm_finish_transition(sled_info.propolis_id).await;
 }
 
 /// Simulate one step of an ongoing instance state transition.  To do this, we
 /// have to look up the instance, then get the sled agent associated with that
 /// instance, and then tell it to finish simulating whatever async transition is
 /// going on.
-async fn instance_single_step_on_sled(
+async fn vmm_single_step_on_sled(
     cptestctx: &ControlPlaneTestContext,
     nexus: &Arc<Nexus>,
     sled_id: SledUuid,
-    instance_id: InstanceUuid,
+    propolis_id: PropolisUuid,
 ) {
     info!(&cptestctx.logctx.log, "Single-stepping simulated instance on sled";
-          "instance_id" => %instance_id, "sled_id" => %sled_id);
+          "propolis_id" => %propolis_id, "sled_id" => %sled_id);
     let sa = nexus.sled_client(&sled_id).await.unwrap();
-    sa.instance_single_step(instance_id.into_untyped_uuid()).await;
+    sa.vmm_single_step(propolis_id).await;
 }
 
 pub async fn instance_simulate_with_opctx(
@@ -5109,27 +5145,28 @@ pub async fn instance_simulate_with_opctx(
     id: &InstanceUuid,
     opctx: &OpContext,
 ) {
-    let sa = nexus
-        .instance_sled_by_id_with_opctx(id, opctx)
+    let sled_info = nexus
+        .active_instance_info(id, Some(opctx))
         .await
         .unwrap()
         .expect("instance must be on a sled to simulate a state change");
-    sa.instance_finish_transition(id.into_untyped_uuid()).await;
+
+    sled_info.sled_client.vmm_finish_transition(sled_info.propolis_id).await;
 }
 
 /// Simulates state transitions for the incarnation of the instance on the
 /// supplied sled (which may not be the sled ID currently stored in the
 /// instance's CRDB record).
-async fn instance_simulate_on_sled(
+async fn vmm_simulate_on_sled(
     cptestctx: &ControlPlaneTestContext,
     nexus: &Arc<Nexus>,
     sled_id: SledUuid,
-    instance_id: InstanceUuid,
+    propolis_id: PropolisUuid,
 ) {
     info!(&cptestctx.logctx.log, "Poking simulated instance on sled";
-          "instance_id" => %instance_id, "sled_id" => %sled_id);
+          "propolis_id" => %propolis_id, "sled_id" => %sled_id);
     let sa = nexus.sled_client(&sled_id).await.unwrap();
-    sa.instance_finish_transition(instance_id.into_untyped_uuid()).await;
+    sa.vmm_finish_transition(propolis_id).await;
 }
 
 /// Simulates a migration source for the provided instance ID, sled ID, and
@@ -5138,19 +5175,19 @@ async fn instance_simulate_migration_source(
     cptestctx: &ControlPlaneTestContext,
     nexus: &Arc<Nexus>,
     sled_id: SledUuid,
-    instance_id: InstanceUuid,
+    propolis_id: PropolisUuid,
     migration_id: Uuid,
 ) {
     info!(
         &cptestctx.logctx.log,
         "Simulating migration source sled";
-        "instance_id" => %instance_id,
+        "propolis_id" => %propolis_id,
         "sled_id" => %sled_id,
         "migration_id" => %migration_id,
     );
     let sa = nexus.sled_client(&sled_id).await.unwrap();
-    sa.instance_simulate_migration_source(
-        instance_id.into_untyped_uuid(),
+    sa.vmm_simulate_migration_source(
+        propolis_id,
         sled_agent_client::SimulateMigrationSource {
             migration_id,
             result: sled_agent_client::SimulatedMigrationResult::Success,
