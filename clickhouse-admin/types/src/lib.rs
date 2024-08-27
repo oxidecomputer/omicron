@@ -14,6 +14,8 @@ use std::net::Ipv6Addr;
 pub mod config;
 use config::*;
 
+pub const OXIMETER_CLUSTER: &str = "oximeter_cluster";
+
 /// A unique ID for a clickhouse keeper
 #[derive(
     Debug,
@@ -52,23 +54,8 @@ pub struct KeeperId(pub u64);
 )]
 pub struct ServerId(pub u64);
 
-#[derive(Debug, Clone, Copy)]
-pub struct KeeperNode {
-    pub id: KeeperId,
-    // TODO: We're writing DNS records here perhaps?
-    pub host: Ipv6Addr,
-    pub raft_port: u16,
-}
-
-impl KeeperNode {
-    pub fn new(id: KeeperId, host: Ipv6Addr, raft_port: u16) -> Self {
-        KeeperNode { id, host, raft_port }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct ClickhouseServerConfig {
-    pub cluster_name: String,
     pub config_dir: Utf8PathBuf,
     pub id: ServerId,
     pub tcp_port: u16,
@@ -83,7 +70,6 @@ pub struct ClickhouseServerConfig {
 impl ClickhouseServerConfig {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        cluster_name: String,
         config_dir: Utf8PathBuf,
         id: ServerId,
         tcp_port: u16,
@@ -95,7 +81,6 @@ impl ClickhouseServerConfig {
         servers: Vec<NodeConfig>,
     ) -> Self {
         Self {
-            cluster_name,
             config_dir,
             id,
             tcp_port,
@@ -109,38 +94,20 @@ impl ClickhouseServerConfig {
     }
 
     pub fn generate_xml_file(&self) -> Result<()> {
-        let remote_servers = RemoteServers {
-            cluster: self.cluster_name.clone(),
-            // TODO(https://github.com/oxidecomputer/omicron/issues/3823): secret handling TBD
-            secret: "some-unique-value".to_string(),
-            replicas: self.servers.clone(),
-        };
-
-        let keepers = KeeperConfigsForReplica { nodes: self.keepers.clone() };
-
         let logs: Utf8PathBuf = self.path.join("logs");
         let log = logs.join("clickhouse.log");
         let errorlog = logs.join("clickhouse.err.log");
         let data_path = self.path.join("data");
+
         let config = ReplicaConfig {
-            logger: LogConfig {
-                level: LogLevel::Trace,
-                log,
-                errorlog,
-                size: "100M".to_string(),
-                count: 1,
-            },
-            macros: Macros {
-                shard: 1,
-                replica: self.id,
-                cluster: self.cluster_name.clone(),
-            },
+            logger: LogConfig::new(log, errorlog),
+            macros: Macros::new(self.id),
             listen_host: self.listen_addr.to_string(),
             http_port: self.http_port,
             tcp_port: self.tcp_port,
             interserver_http_port: self.interserver_http_port,
-            remote_servers: remote_servers.clone(),
-            keepers: keepers.clone(),
+            remote_servers: RemoteServers::new(self.servers.clone()),
+            keepers: KeeperConfigsForReplica::new(self.keepers.clone()),
             data_path,
         };
         let mut f =
@@ -154,7 +121,7 @@ impl ClickhouseServerConfig {
 #[derive(Debug, Clone)]
 pub struct ClickhouseKeeperConfig {
     pub config_dir: Utf8PathBuf,
-    pub keepers: Vec<KeeperNode>,
+    pub raft_servers: Vec<RaftServerConfig>,
     pub path: Utf8PathBuf,
     pub listen_addr: Ipv6Addr,
     pub tcp_port: u16,
@@ -163,14 +130,14 @@ pub struct ClickhouseKeeperConfig {
 impl ClickhouseKeeperConfig {
     pub fn new(
         config_dir: Utf8PathBuf,
-        keepers: Vec<KeeperNode>,
+        raft_servers: Vec<RaftServerConfig>,
         path: Utf8PathBuf,
         listen_addr: Ipv6Addr,
         tcp_port: u16,
     ) -> Self {
         ClickhouseKeeperConfig {
             config_dir,
-            keepers,
+            raft_servers,
             path,
             listen_addr,
             tcp_port,
@@ -178,27 +145,10 @@ impl ClickhouseKeeperConfig {
     }
     /// Generate a config for `this_keeper` consisting of the keepers in `keeper_ids`
     pub fn generate_xml_file(&self, this_keeper: KeeperId) -> Result<()> {
-        let raft_servers: Vec<RaftServerConfig> = self
-            .keepers
-            .iter()
-            .map(|&k| RaftServerConfig {
-                // TODO: Implemement a "new()" method for RaftServerConfig
-                id: k.id,
-                hostname: k.host.to_string(),
-                port: k.raft_port,
-            })
-            .collect();
-
         let log = self.path.join("clickhouse-keeper.log");
         let errorlog = self.path.join("clickhouse-keeper.err.log");
         let config = KeeperConfig {
-            logger: LogConfig {
-                level: LogLevel::Trace,
-                log,
-                errorlog,
-                size: "100M".to_string(),
-                count: 1,
-            },
+            logger: LogConfig::new(log, errorlog),
             listen_host: self.listen_addr.to_string(),
             tcp_port: self.tcp_port,
             server_id: this_keeper,
@@ -212,7 +162,7 @@ impl ClickhouseKeeperConfig {
                 session_timeout_ms: 30000,
                 raft_logs_level: LogLevel::Trace,
             },
-            raft_config: RaftServers { servers: raft_servers.clone() },
+            raft_config: RaftServers { servers: self.raft_servers.clone() },
         };
         let mut f = File::create(self.config_dir.join("keeper-config.xml"))?;
         f.write_all(config.to_xml().as_bytes())?;
@@ -235,8 +185,8 @@ mod tests {
     };
 
     use crate::{
-        ClickhouseKeeperConfig, ClickhouseServerConfig, KeeperId, KeeperNode,
-        NodeConfig, ServerId,
+        ClickhouseKeeperConfig, ClickhouseServerConfig, KeeperId, NodeConfig,
+        RaftServerConfig, ServerId,
     };
 
     #[test]
@@ -248,19 +198,19 @@ mod tests {
             );
 
         let keepers = vec![
-            KeeperNode::new(
+            RaftServerConfig::new(
                 KeeperId(1),
-                Ipv6Addr::from_str("ff::01").unwrap(),
+                "ff::01".to_string(),
                 CLICKHOUSE_KEEPER_RAFT_PORT,
             ),
-            KeeperNode::new(
+            RaftServerConfig::new(
                 KeeperId(2),
-                Ipv6Addr::from_str("ff::02").unwrap(),
+                "ff::02".to_string(),
                 CLICKHOUSE_KEEPER_RAFT_PORT,
             ),
-            KeeperNode::new(
+            RaftServerConfig::new(
                 KeeperId(3),
-                Ipv6Addr::from_str("ff::03").unwrap(),
+                "ff::03".to_string(),
                 CLICKHOUSE_KEEPER_RAFT_PORT,
             ),
         ];
@@ -308,7 +258,6 @@ mod tests {
         ];
 
         let config = ClickhouseServerConfig::new(
-            "oximeter_cluster".to_string(),
             Utf8PathBuf::from(config_dir.path()),
             ServerId(1),
             CLICKHOUSE_TCP_PORT,

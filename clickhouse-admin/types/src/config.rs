@@ -6,7 +6,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::{KeeperId, ServerId};
+use crate::{KeeperId, ServerId, OXIMETER_CLUSTER};
 use camino::Utf8PathBuf;
 use schemars::{
     gen::SchemaGenerator,
@@ -59,7 +59,6 @@ impl ReplicaConfig {
         let keepers = keepers.to_xml();
         let remote_servers = remote_servers.to_xml();
         let user_files_path = data_path.clone().join("user_files");
-        //let access_path = data_path.clone().join("access");
         let format_schema_path = data_path.clone().join("format_schemas");
         format!(
             "
@@ -137,6 +136,10 @@ pub struct Macros {
 }
 
 impl Macros {
+    pub fn new(replica: ServerId) -> Self {
+        Self { shard: 1, replica, cluster: OXIMETER_CLUSTER.to_string() }
+    }
+
     pub fn to_xml(&self) -> String {
         let Macros { shard, replica, cluster } = self;
         format!(
@@ -158,7 +161,14 @@ pub struct RemoteServers {
 }
 
 impl RemoteServers {
-    // TODO: pub fn new()
+    pub fn new(replicas: Vec<NodeConfig>) -> Self {
+        Self {
+            cluster: OXIMETER_CLUSTER.to_string(),
+            // TODO(https://github.com/oxidecomputer/omicron/issues/3823): secret handling TBD
+            secret: "some-unique-value".to_string(),
+            replicas,
+        }
+    }
 
     pub fn to_xml(&self) -> String {
         let RemoteServers { cluster, secret, replicas } = self;
@@ -202,6 +212,10 @@ pub struct KeeperConfigsForReplica {
 }
 
 impl KeeperConfigsForReplica {
+    pub fn new(nodes: Vec<NodeConfig>) -> Self {
+        Self { nodes }
+    }
+
     pub fn to_xml(&self) -> String {
         let mut s = String::from("    <zookeeper>");
         for node in &self.nodes {
@@ -238,12 +252,21 @@ pub struct LogConfig {
     pub log: Utf8PathBuf,
     #[schemars(schema_with = "path_schema")]
     pub errorlog: Utf8PathBuf,
-    // TODO: stronger type?
-    pub size: String,
+    pub size: u16,
     pub count: usize,
 }
 
 impl LogConfig {
+    pub fn new(log: Utf8PathBuf, errorlog: Utf8PathBuf) -> Self {
+        LogConfig {
+            level: LogLevel::default(),
+            log,
+            errorlog,
+            size: 100,
+            count: 1,
+        }
+    }
+
     pub fn to_xml(&self) -> String {
         let LogConfig { level, log, errorlog, size, count } = &self;
         format!(
@@ -252,7 +275,7 @@ impl LogConfig {
         <level>{level}</level>
         <log>{log}</log>
         <errorlog>{errorlog}</errorlog>
-        <size>{size}</size>
+        <size>{size}M</size>
         <count>{count}</count>
     </logger>
 "
@@ -297,6 +320,12 @@ pub struct RaftServerConfig {
     pub id: KeeperId,
     pub hostname: String,
     pub port: u16,
+}
+
+impl RaftServerConfig {
+    pub fn new(id: KeeperId, hostname: String, port: u16) -> Self {
+        RaftServerConfig { id, hostname, port }
+    }
 }
 
 /// Config for an individual Clickhouse Keeper
@@ -365,6 +394,12 @@ impl KeeperConfig {
 pub enum LogLevel {
     Trace,
     Debug,
+}
+
+impl LogLevel {
+    fn default() -> Self {
+        LogLevel::Trace
+    }
 }
 
 impl Display for LogLevel {

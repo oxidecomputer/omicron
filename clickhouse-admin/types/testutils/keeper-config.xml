@@ -25,19 +25,19 @@
 
             <server>
                 <id>1</id>
-                <hostname>ff::1</hostname>
+                <hostname>ff::01</hostname>
                 <port>9234</port>
             </server>
             
             <server>
                 <id>2</id>
-                <hostname>ff::2</hostname>
+                <hostname>ff::02</hostname>
                 <port>9234</port>
             </server>
             
             <server>
                 <id>3</id>
-                <hostname>ff::3</hostname>
+                <hostname>ff::03</hostname>
                 <port>9234</port>
             </server>
             
