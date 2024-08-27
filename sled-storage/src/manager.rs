@@ -1668,7 +1668,8 @@ mod tests {
         // However, calling it with a different input and the same generation
         // number should fail.
         config.generation = current_config_generation;
-        config.datasets.values_mut().next().unwrap().reservation = Some(1024.into());
+        config.datasets.values_mut().next().unwrap().reservation =
+            Some(1024.into());
         let err =
             harness.handle().datasets_ensure(config.clone()).await.unwrap_err();
         assert!(matches!(err, Error::DatasetConfigurationChanged { .. }));
