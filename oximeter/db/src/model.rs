@@ -45,7 +45,7 @@ use uuid::Uuid;
 /// - [`crate::Client::initialize_db_with_version`]
 /// - [`crate::Client::ensure_schema`]
 /// - The `clickhouse-schema-updater` binary in this crate
-pub const OXIMETER_VERSION: u64 = 11;
+pub const OXIMETER_VERSION: u64 = 12;
 
 // Wrapper type to represent a boolean in the database.
 //

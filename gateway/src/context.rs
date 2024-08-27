@@ -39,10 +39,12 @@ impl ServerContext {
             OnceLock::new()
         };
 
-        const START_LATENCY_DECADE: i16 = -6;
-        const END_LATENCY_DECADE: i16 = 3;
+        // Track from 1 microsecond == 1e3 nanoseconds
+        const START_LATENCY_DECADE: u16 = 3;
+        // To 1000s == 1e9 * 1e3 == 1e12 nanoseconds
+        const END_LATENCY_DECADE: u16 = 12;
         let latencies =
-            oximeter_instruments::http::LatencyTracker::with_latency_decades(
+            oximeter_instruments::http::LatencyTracker::with_log_linear_bins(
                 oximeter_instruments::http::HttpService {
                     name: "management-gateway-service".into(),
                     id,

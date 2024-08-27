@@ -146,9 +146,11 @@ impl ServerContext {
                 name: name.to_string().into(),
                 id: config.deployment.id,
             };
-            const START_LATENCY_DECADE: i16 = -6;
-            const END_LATENCY_DECADE: i16 = 3;
-            LatencyTracker::with_latency_decades(
+            // Start at 1 microsecond == 1e3 nanoseconds.
+            const START_LATENCY_DECADE: u16 = 3;
+            // End at 1000s == (1e9 * 1e3) == 1e12 nanoseconds.
+            const END_LATENCY_DECADE: u16 = 12;
+            LatencyTracker::with_log_linear_bins(
                 target,
                 START_LATENCY_DECADE,
                 END_LATENCY_DECADE,

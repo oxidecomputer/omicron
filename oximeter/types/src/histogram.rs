@@ -1191,6 +1191,65 @@ where
     }
 }
 
+pub trait Bits: Integer {
+    const BITS: u32;
+    fn next_power(self) -> Option<Self>;
+}
+
+macro_rules! impl_bits {
+    ($type_:ty) => {
+        impl Bits for $type_ {
+            const BITS: u32 = Self::BITS;
+
+            fn next_power(self) -> Option<Self> {
+                self.checked_mul(2)
+            }
+        }
+    };
+}
+
+impl_bits!(u8);
+impl_bits!(u16);
+impl_bits!(u32);
+impl_bits!(u64);
+
+/// A trait for generating logarithmically-spaced bins.
+pub trait LogBins<T: HistogramSupport>: Bits {
+    /// Compute the left bin edges for a histogram with power-of-2 bins.
+    ///
+    /// Bins start at 1, and increase in powers-of-2 until the maximum of the
+    /// support type.
+    fn power_of_two() -> Vec<T>;
+}
+
+impl<T> LogBins<T> for T
+where
+    T: HistogramSupport + Bits,
+{
+    fn power_of_two() -> Vec<T> {
+        let mut out = Vec::with_capacity(T::BITS as _);
+        let mut x = T::one();
+        out.push(x);
+        while let Some(next) = x.next_power() {
+            out.push(next);
+            x = next;
+        }
+        out
+    }
+}
+
+impl<T> Histogram<T>
+where
+    T: LogBins<T> + HistogramSupport,
+{
+    /// Create a histogram with logarithmically spaced bins at each power of 2.
+    ///
+    /// This is only available for unsigned integer support types.
+    pub fn power_of_two() -> Result<Self, HistogramError> {
+        Self::new(&T::power_of_two())
+    }
+}
+
 // Helper to ensure all values are comparable, i.e., not NaN.
 fn ensure_finite<T>(value: T) -> Result<(), HistogramError>
 where
@@ -1796,5 +1855,19 @@ mod tests {
         Histogram::<u8>::span_decades(start, stop).expect_err(
             "expected to overflow a u8, since support type is not wide enough",
         );
+    }
+
+    #[test]
+    fn test_log_bins_u8() {
+        let bins = u8::power_of_two();
+        assert_eq!(bins, [1, 2, 4, 8, 16, 32, 64, 128],);
+    }
+
+    #[test]
+    fn test_log_bins_u64() {
+        let bins = u64::power_of_two();
+        for (i, bin) in bins.iter().enumerate() {
+            assert_eq!(*bin, 1u64 << i);
+        }
     }
 }
