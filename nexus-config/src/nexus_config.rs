@@ -396,6 +396,8 @@ pub struct BackgroundTaskConfig {
     /// configuration for region snapshot replacement garbage collection
     pub region_snapshot_replacement_garbage_collection:
         RegionSnapshotReplacementGarbageCollectionConfig,
+    /// configuration for region snapshot replacement step task
+    pub region_snapshot_replacement_step: RegionSnapshotReplacementStepConfig,
 }
 
 #[serde_as]
@@ -643,6 +645,14 @@ pub struct RegionSnapshotReplacementStartConfig {
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct RegionSnapshotReplacementGarbageCollectionConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RegionSnapshotReplacementStepConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
@@ -897,6 +907,7 @@ mod test {
             lookup_region_port.period_secs = 60
             region_snapshot_replacement_start.period_secs = 30
             region_snapshot_replacement_garbage_collection.period_secs = 30
+            region_snapshot_replacement_step.period_secs = 30
             [default_region_allocation_strategy]
             type = "random"
             seed = 0
@@ -1067,6 +1078,10 @@ mod test {
                             RegionSnapshotReplacementGarbageCollectionConfig {
                                 period_secs: Duration::from_secs(30),
                             },
+                        region_snapshot_replacement_step:
+                            RegionSnapshotReplacementStepConfig {
+                                period_secs: Duration::from_secs(30),
+                            },
                     },
                     default_region_allocation_strategy:
                         crate::nexus_config::RegionAllocationStrategy::Random {
@@ -1145,6 +1160,7 @@ mod test {
             lookup_region_port.period_secs = 60
             region_snapshot_replacement_start.period_secs = 30
             region_snapshot_replacement_garbage_collection.period_secs = 30
+            region_snapshot_replacement_step.period_secs = 30
             [default_region_allocation_strategy]
             type = "random"
             "##,

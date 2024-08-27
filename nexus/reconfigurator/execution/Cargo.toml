@@ -16,6 +16,7 @@ dns-service-client.workspace = true
 chrono.workspace = true
 futures.workspace = true
 internal-dns.workspace = true
+newtype-uuid.workspace = true
 nexus-config.workspace = true
 nexus-db-model.workspace = true
 nexus-db-queries.workspace = true

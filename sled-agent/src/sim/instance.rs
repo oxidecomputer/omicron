@@ -14,13 +14,14 @@ use nexus_client;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::ResourceType;
-use omicron_common::api::internal::nexus::{SledInstanceState, VmmState};
+use omicron_common::api::internal::nexus::{SledVmmState, VmmState};
+use omicron_uuid_kinds::{GenericUuid, PropolisUuid};
 use propolis_client::types::{
     InstanceMigrateStatusResponse as PropolisMigrateResponse,
     InstanceMigrationStatus as PropolisMigrationStatus,
     InstanceState as PropolisInstanceState, InstanceStateMonitorResponse,
 };
-use sled_agent_types::instance::InstanceStateRequested;
+use sled_agent_types::instance::VmmStateRequested;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -170,13 +171,13 @@ impl SimInstanceInner {
     /// returning an action for the caller to simulate.
     fn request_transition(
         &mut self,
-        target: &InstanceStateRequested,
+        target: &VmmStateRequested,
     ) -> Result<Option<InstanceAction>, Error> {
         match target {
             // When Nexus intends to migrate into a VMM, it should create that
             // VMM in the Migrating state and shouldn't request anything else
             // from it before asking to migrate in.
-            InstanceStateRequested::MigrationTarget(_) => {
+            VmmStateRequested::MigrationTarget(_) => {
                 if !self.queue.is_empty() {
                     return Err(Error::invalid_request(&format!(
                         "can't request migration in with a non-empty state
@@ -207,7 +208,7 @@ impl SimInstanceInner {
                     SimulatedMigrationResult::Success,
                 );
             }
-            InstanceStateRequested::Running => {
+            VmmStateRequested::Running => {
                 match self.next_resting_state() {
                     VmmState::Starting => {
                         self.queue_propolis_state(
@@ -234,7 +235,7 @@ impl SimInstanceInner {
                     }
                 }
             }
-            InstanceStateRequested::Stopped => {
+            VmmStateRequested::Stopped => {
                 match self.next_resting_state() {
                     VmmState::Starting => {
                         let mark_failed = false;
@@ -256,7 +257,7 @@ impl SimInstanceInner {
                     }
                 }
             }
-            InstanceStateRequested::Reboot => match self.next_resting_state() {
+            VmmStateRequested::Reboot => match self.next_resting_state() {
                 VmmState::Running => {
                     // Further requests to reboot are ignored if the instance
                     // is currently rebooting or about to reboot.
@@ -315,7 +316,7 @@ impl SimInstanceInner {
     /// If the state change queue contains at least once instance state change,
     /// returns the requested instance state associated with the last instance
     /// state on the queue. Returns None otherwise.
-    fn desired(&self) -> Option<InstanceStateRequested> {
+    fn desired(&self) -> Option<VmmStateRequested> {
         self.last_queued_instance_state().map(|terminal| match terminal {
             // State change requests may queue these states as intermediate
             // states, but the simulation (and the tests that rely on it) is
@@ -331,13 +332,11 @@ impl SimInstanceInner {
                 "pending resting state {:?} doesn't map to a requested state",
                 terminal
             ),
-            PropolisInstanceState::Running => InstanceStateRequested::Running,
+            PropolisInstanceState::Running => VmmStateRequested::Running,
             PropolisInstanceState::Stopping
             | PropolisInstanceState::Stopped
-            | PropolisInstanceState::Destroyed => {
-                InstanceStateRequested::Stopped
-            }
-            PropolisInstanceState::Rebooting => InstanceStateRequested::Reboot,
+            | PropolisInstanceState::Destroyed => VmmStateRequested::Stopped,
+            PropolisInstanceState::Rebooting => VmmStateRequested::Reboot,
         })
     }
 
@@ -388,7 +387,7 @@ impl SimInstanceInner {
 
     /// Simulates rude termination by moving the instance to the Destroyed state
     /// immediately and clearing the queue of pending state transitions.
-    fn terminate(&mut self) -> SledInstanceState {
+    fn terminate(&mut self) -> SledVmmState {
         let mark_failed = false;
         self.state.terminate_rudely(mark_failed);
         self.queue.clear();
@@ -418,7 +417,7 @@ pub struct SimInstance {
 }
 
 impl SimInstance {
-    pub fn terminate(&self) -> SledInstanceState {
+    pub fn terminate(&self) -> SledVmmState {
         self.inner.lock().unwrap().terminate()
     }
 
@@ -435,12 +434,12 @@ impl SimInstance {
 
 #[async_trait]
 impl Simulatable for SimInstance {
-    type CurrentState = SledInstanceState;
-    type RequestedState = InstanceStateRequested;
+    type CurrentState = SledVmmState;
+    type RequestedState = VmmStateRequested;
     type ProducerArgs = ();
     type Action = InstanceAction;
 
-    fn new(current: SledInstanceState) -> Self {
+    fn new(current: SledVmmState) -> Self {
         assert!(matches!(
             current.vmm_state.state,
             VmmState::Starting | VmmState::Migrating),
@@ -453,7 +452,6 @@ impl Simulatable for SimInstance {
             inner: Arc::new(Mutex::new(SimInstanceInner {
                 state: InstanceStates::new(
                     current.vmm_state,
-                    current.propolis_id,
                     current.migration_in.map(|m| m.migration_id),
                 ),
                 last_response: InstanceStateMonitorResponse {
@@ -480,7 +478,7 @@ impl Simulatable for SimInstance {
 
     fn request_transition(
         &mut self,
-        target: &InstanceStateRequested,
+        target: &VmmStateRequested,
     ) -> Result<Option<InstanceAction>, Error> {
         self.inner.lock().unwrap().request_transition(target)
     }
@@ -512,8 +510,8 @@ impl Simulatable for SimInstance {
     ) -> Result<(), Error> {
         nexus_client
             .cpapi_instances_put(
-                id,
-                &nexus_client::types::SledInstanceState::from(current),
+                &PropolisUuid::from_untyped_uuid(*id),
+                &nexus_client::types::SledVmmState::from(current),
             )
             .await
             .map(|_| ())
