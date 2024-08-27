@@ -690,59 +690,100 @@ async fn test_mgs_metrics(
             return;
         }
 
-        let table = timeseries_query(&cptestctx, &format!("get {metric_name}"))
-            .await
-            .into_iter()
-            .find(|t| t.name() == metric_name);
-        let table = match table {
-            Some(table) => table,
-            None => panic!("missing table for {metric_name}"),
+        let query = format!("get {metric_name}");
+
+        // MGS polls SP sensor data once every second. It's possible that, when
+        // we triggered Oximeter to collect samples from MGS, it may not have
+        // run a poll yet, so retry this a few times to avoid a flaky failure if
+        // no simulated SPs have been polled yet.
+        let result = wait_for_condition(
+            || async {
+                match check_inner(cptestctx, &metric_name, &query, &expected).await {
+                    Ok(_) => Ok(()),
+                    Err(e) => {
+                        eprintln!("{e}; will try again to ensure all samples are collected");
+                        Err(CondCheckError::<()>::NotYet)
+                    }
+                }
+            },
+            &Duration::from_secs(1),
+            // We really don't need to wait that long to know that the sensor
+            // metrics will never be present. This could probably be shorter
+            // than 30 seconds, but I want to be fairly generous to make sure
+            // there are no flaky failures even when things take way longer than
+            // expected...
+            &Duration::from_secs(30),
+        )
+        .await;
+        if result.is_err() {
+            panic!("failed to find timeseries for {query} within 60s")
         };
 
-        let mut found = expected
-            .keys()
-            .map(|serial| (serial.clone(), 0))
-            .collect::<HashMap<_, usize>>();
-        for timeseries in table.timeseries() {
-            let fields = &timeseries.fields;
-            let n_points = timeseries.points.len();
-            assert!(
-                n_points > 0,
-                "{metric_name} timeseries {fields:?} should have points"
-            );
-            let serial_str: &str = match timeseries.fields.get("chassis_serial")
+        // Note that *some* of these checks panic if they fail, but others call
+        // `anyhow::ensure!`. This is because, if we don't see all the expected
+        // timeseries, it's possible that this is because some sensor polls
+        // haven't completed yet, so we'll retry those checks a few times. On
+        // the other hand, if we see malformed timeseries, or timeseries that we
+        // don't expect to exist, that means something has gone wrong, and we
+        // will fail the test immediately.
+        async fn check_inner(
+            cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
+            name: &str,
+            query: &str,
+            expected: &HashMap<String, usize>,
+        ) -> anyhow::Result<()> {
+            cptestctx.oximeter.force_collect().await;
+            let table = timeseries_query(&cptestctx, &query)
+                .await
+                .into_iter()
+                .find(|t| t.name() == name)
+                .ok_or_else(|| {
+                    anyhow::anyhow!("failed to find table for {query}")
+                })?;
+
+            let mut found = expected
+                .keys()
+                .map(|serial| (serial.clone(), 0))
+                .collect::<HashMap<_, usize>>();
+            for timeseries in table.timeseries() {
+                let fields = &timeseries.fields;
+                let n_points = timeseries.points.len();
+                anyhow::ensure!(
+                    n_points > 0,
+                    "{name} timeseries {fields:?} should have points"
+                );
+                let serial_str: &str = match timeseries.fields.get("chassis_serial")
             {
                 Some(FieldValue::String(s)) => s.borrow(),
                 Some(x) => panic!(
-                    "{metric_name} `chassis_serial` field should be a string, but got: {x:?}"
+                    "{name} `chassis_serial` field should be a string, but got: {x:?}"
                 ),
                 None => {
-                    panic!("{metric_name} timeseries should have a `chassis_serial` field")
+                    panic!("{name} timeseries should have a `chassis_serial` field")
                 }
             };
-            if let Some(count) = found.get_mut(serial_str) {
-                *count += 1;
-            } else {
-                panic!(
-                    "{metric_name} timeseries had an unexpected chassis serial \
-                     number {serial_str:?} (not in the config file)",
-                );
+                if let Some(count) = found.get_mut(serial_str) {
+                    *count += 1;
+                } else {
+                    panic!(
+                        "{name} timeseries had an unexpected chassis serial \
+                        number {serial_str:?} (not in the config file)",
+                    );
+                }
             }
-        }
 
-        eprintln!("-> {metric_name}: found timeseries: {found:#?}");
-        assert_eq!(
-            found, expected,
-            "number of {metric_name} timeseries didn't match expected in {table:#?}",
-        );
-        eprintln!("-> okay, looks good!");
+            eprintln!("-> {name}: found timeseries: {found:#?}");
+            anyhow::ensure!(
+                &found == expected,
+                "number of {name} timeseries didn't match expected in {table:#?}",
+            );
+            eprintln!("-> okay, looks good!");
+            Ok(())
+        }
     }
 
     // Wait until the MGS registers as a producer with Oximeter.
     wait_for_producer(&cptestctx.oximeter, &mgs.gateway_id).await;
-
-    // ...and collect its samples.
-    cptestctx.oximeter.force_collect().await;
 
     check_all_timeseries_present(&cptestctx, "temperature", temp_sensors).await;
     check_all_timeseries_present(&cptestctx, "voltage", voltage_sensors).await;
