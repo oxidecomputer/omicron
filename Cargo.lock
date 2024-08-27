@@ -6536,7 +6536,6 @@ dependencies = [
  "similar",
  "slog",
  "smallvec 1.13.2",
- "socket2 0.5.7",
  "spin 0.9.8",
  "string_cache",
  "subtle",
