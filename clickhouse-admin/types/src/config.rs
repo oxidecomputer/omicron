@@ -9,9 +9,8 @@
 use crate::{KeeperId, ServerId, OXIMETER_CLUSTER};
 use camino::Utf8PathBuf;
 use omicron_common::address::{
-    CLICKHOUSE_HTTP_PORT,
-    CLICKHOUSE_INTERSERVER_PORT,
-    //   CLICKHOUSE_KEEPER_RAFT_PORT, CLICKHOUSE_KEEPER_TCP_PORT,
+    CLICKHOUSE_HTTP_PORT, CLICKHOUSE_INTERSERVER_PORT,
+    CLICKHOUSE_KEEPER_RAFT_PORT, CLICKHOUSE_KEEPER_TCP_PORT,
     CLICKHOUSE_TCP_PORT,
 };
 use schemars::{
@@ -335,12 +334,25 @@ pub struct KeeperCoordinationSettings {
     pub raft_logs_level: LogLevel,
 }
 
+impl KeeperCoordinationSettings {
+    pub fn default() -> Self {
+        Self {
+            operation_timeout_ms: 10000,
+            session_timeout_ms: 30000,
+            raft_logs_level: LogLevel::Trace,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, JsonSchema, Serialize, Deserialize)]
 pub struct RaftServers {
     pub servers: Vec<RaftServerConfig>,
 }
 
 impl RaftServers {
+    pub fn new(servers: Vec<RaftServerConfig>) -> Self {
+        Self { servers }
+    }
     pub fn to_xml(&self) -> String {
         let mut s = String::new();
         for server in &self.servers {
@@ -368,8 +380,8 @@ pub struct RaftServerConfig {
 }
 
 impl RaftServerConfig {
-    pub fn new(id: KeeperId, hostname: String, port: u16) -> Self {
-        RaftServerConfig { id, hostname, port }
+    pub fn new(id: KeeperId, hostname: String) -> Self {
+        RaftServerConfig { id, hostname, port: CLICKHOUSE_KEEPER_RAFT_PORT }
     }
 }
 
@@ -377,7 +389,7 @@ impl RaftServerConfig {
 #[derive(Debug, Clone, PartialEq, Eq, JsonSchema, Serialize, Deserialize)]
 pub struct KeeperConfig {
     pub logger: LogConfig,
-    pub listen_host: String,
+    pub listen_host: Ipv6Addr,
     pub tcp_port: u16,
     pub server_id: KeeperId,
     #[schemars(schema_with = "path_schema")]
@@ -389,6 +401,29 @@ pub struct KeeperConfig {
 }
 
 impl KeeperConfig {
+    pub fn new(
+        logger: LogConfig,
+        listen_host: Ipv6Addr,
+        server_id: KeeperId,
+        datastore_path: Utf8PathBuf,
+        raft_config: RaftServers,
+    ) -> Self {
+        let coordination_path = datastore_path.join("coordination");
+        let log_storage_path = coordination_path.join("log");
+        let snapshot_storage_path = coordination_path.join("snapshots");
+        let coordination_settings = KeeperCoordinationSettings::default();
+        Self {
+            logger,
+            listen_host,
+            tcp_port: CLICKHOUSE_KEEPER_TCP_PORT,
+            server_id,
+            log_storage_path,
+            snapshot_storage_path,
+            coordination_settings,
+            raft_config,
+        }
+    }
+
     pub fn to_xml(&self) -> String {
         let KeeperConfig {
             logger,

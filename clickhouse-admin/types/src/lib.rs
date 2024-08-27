@@ -104,7 +104,6 @@ pub struct ClickhouseKeeperConfig {
     pub raft_servers: Vec<RaftServerConfig>,
     pub path: Utf8PathBuf,
     pub listen_addr: Ipv6Addr,
-    pub tcp_port: u16,
 }
 
 impl ClickhouseKeeperConfig {
@@ -113,35 +112,21 @@ impl ClickhouseKeeperConfig {
         raft_servers: Vec<RaftServerConfig>,
         path: Utf8PathBuf,
         listen_addr: Ipv6Addr,
-        tcp_port: u16,
     ) -> Self {
-        ClickhouseKeeperConfig {
-            config_dir,
-            raft_servers,
-            path,
-            listen_addr,
-            tcp_port,
-        }
+        ClickhouseKeeperConfig { config_dir, raft_servers, path, listen_addr }
     }
-    /// Generate a config for `this_keeper` consisting of the keepers in `keeper_ids`
+
+    /// Generate a configuration file for `this_keeper` consisting of the keepers in `raft_servers`
     pub fn generate_xml_file(&self, this_keeper: KeeperId) -> Result<()> {
-        let config = KeeperConfig {
-            logger: LogConfig::new(self.path.clone(), NodeType::Keeper),
-            listen_host: self.listen_addr.to_string(),
-            tcp_port: self.tcp_port,
-            server_id: this_keeper,
-            log_storage_path: self.path.join("coordination").join("log"),
-            snapshot_storage_path: self
-                .path
-                .join("coordination")
-                .join("snapshots"),
-            coordination_settings: KeeperCoordinationSettings {
-                operation_timeout_ms: 10000,
-                session_timeout_ms: 30000,
-                raft_logs_level: LogLevel::Trace,
-            },
-            raft_config: RaftServers { servers: self.raft_servers.clone() },
-        };
+        let logger = LogConfig::new(self.path.clone(), NodeType::Keeper);
+        let raft_config = RaftServers::new(self.raft_servers.clone());
+        let config = KeeperConfig::new(
+            logger,
+            self.listen_addr,
+            this_keeper,
+            self.path.clone(),
+            raft_config,
+        );
 
         let mut f = File::create(self.config_dir.join("keeper-config.xml"))?;
         f.write_all(config.to_xml().as_bytes())?;
@@ -158,8 +143,7 @@ mod tests {
     use camino::Utf8PathBuf;
     use camino_tempfile::Builder;
     use omicron_common::address::{
-        CLICKHOUSE_KEEPER_RAFT_PORT, CLICKHOUSE_KEEPER_TCP_PORT,
-        CLICKHOUSE_TCP_PORT,
+        CLICKHOUSE_KEEPER_TCP_PORT, CLICKHOUSE_TCP_PORT,
     };
 
     use crate::{
@@ -176,21 +160,9 @@ mod tests {
             );
 
         let keepers = vec![
-            RaftServerConfig::new(
-                KeeperId(1),
-                "ff::01".to_string(),
-                CLICKHOUSE_KEEPER_RAFT_PORT,
-            ),
-            RaftServerConfig::new(
-                KeeperId(2),
-                "ff::02".to_string(),
-                CLICKHOUSE_KEEPER_RAFT_PORT,
-            ),
-            RaftServerConfig::new(
-                KeeperId(3),
-                "ff::03".to_string(),
-                CLICKHOUSE_KEEPER_RAFT_PORT,
-            ),
+            RaftServerConfig::new(KeeperId(1), "ff::01".to_string()),
+            RaftServerConfig::new(KeeperId(2), "ff::02".to_string()),
+            RaftServerConfig::new(KeeperId(3), "ff::03".to_string()),
         ];
 
         let config = ClickhouseKeeperConfig::new(
@@ -198,7 +170,6 @@ mod tests {
             keepers,
             Utf8PathBuf::from_str("./").unwrap(),
             Ipv6Addr::from_str("ff::08").unwrap(),
-            CLICKHOUSE_KEEPER_TCP_PORT,
         );
 
         config.generate_xml_file(KeeperId(1)).unwrap();
