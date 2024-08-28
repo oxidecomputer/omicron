@@ -285,10 +285,10 @@ impl BpOmicronZone {
                 .filesystem_pool
                 .as_ref()
                 .map(|pool| pool.id().into()),
+            disposition: to_db_bp_zone_disposition(blueprint_zone.disposition),
+            zone_type: blueprint_zone.zone_type.kind().into(),
 
             // Set the remainder of the fields to a default
-            disposition: DbBpZoneDisposition::InService,
-            zone_type: ZoneType::BoundaryNtp,
             primary_service_ip: "::1"
                 .parse::<std::net::Ipv6Addr>()
                 .unwrap()
@@ -323,7 +323,6 @@ impl BpOmicronZone {
             ) => {
                 // Set the common fields
                 bp_omicron_zone.set_primary_service_ip_and_port(address);
-                bp_omicron_zone.zone_type = ZoneType::BoundaryNtp;
 
                 // Set the zone specific fields
                 let snat_cfg = external_ip.snat_cfg;
@@ -349,7 +348,6 @@ impl BpOmicronZone {
                 // Set the common fields
                 bp_omicron_zone.set_primary_service_ip_and_port(address);
                 bp_omicron_zone.set_zpool_name(dataset);
-                bp_omicron_zone.zone_type = ZoneType::Clickhouse;
             }
             BlueprintZoneType::ClickhouseKeeper(
                 blueprint_zone_type::ClickhouseKeeper { address, dataset },
@@ -357,7 +355,6 @@ impl BpOmicronZone {
                 // Set the common fields
                 bp_omicron_zone.set_primary_service_ip_and_port(address);
                 bp_omicron_zone.set_zpool_name(dataset);
-                bp_omicron_zone.zone_type = ZoneType::ClickhouseKeeper;
             }
             BlueprintZoneType::ClickhouseServer(
                 blueprint_zone_type::ClickhouseServer { address, dataset },
@@ -365,7 +362,6 @@ impl BpOmicronZone {
                 // Set the common fields
                 bp_omicron_zone.set_primary_service_ip_and_port(address);
                 bp_omicron_zone.set_zpool_name(dataset);
-                bp_omicron_zone.zone_type = ZoneType::ClickhouseServer;
             }
             BlueprintZoneType::CockroachDb(
                 blueprint_zone_type::CockroachDb { address, dataset },
@@ -373,7 +369,6 @@ impl BpOmicronZone {
                 // Set the common fields
                 bp_omicron_zone.set_primary_service_ip_and_port(address);
                 bp_omicron_zone.set_zpool_name(dataset);
-                bp_omicron_zone.zone_type = ZoneType::CockroachDb;
             }
             BlueprintZoneType::Crucible(blueprint_zone_type::Crucible {
                 address,
@@ -382,14 +377,12 @@ impl BpOmicronZone {
                 // Set the common fields
                 bp_omicron_zone.set_primary_service_ip_and_port(address);
                 bp_omicron_zone.set_zpool_name(dataset);
-                bp_omicron_zone.zone_type = ZoneType::Crucible;
             }
             BlueprintZoneType::CruciblePantry(
                 blueprint_zone_type::CruciblePantry { address },
             ) => {
                 // Set the common fields
                 bp_omicron_zone.set_primary_service_ip_and_port(address);
-                bp_omicron_zone.zone_type = ZoneType::CruciblePantry;
             }
             BlueprintZoneType::ExternalDns(
                 blueprint_zone_type::ExternalDns {
@@ -402,7 +395,6 @@ impl BpOmicronZone {
                 // Set the common fields
                 bp_omicron_zone.set_primary_service_ip_and_port(http_address);
                 bp_omicron_zone.set_zpool_name(dataset);
-                bp_omicron_zone.zone_type = ZoneType::ExternalDns;
 
                 // Set the zone specific fields
                 bp_omicron_zone.bp_nic_id = Some(nic.id);
@@ -423,7 +415,6 @@ impl BpOmicronZone {
                 // Set the common fields
                 bp_omicron_zone.set_primary_service_ip_and_port(http_address);
                 bp_omicron_zone.set_zpool_name(dataset);
-                bp_omicron_zone.zone_type = ZoneType::InternalDns;
 
                 // Set the zone specific fields
                 bp_omicron_zone.second_service_ip =
@@ -446,7 +437,6 @@ impl BpOmicronZone {
             ) => {
                 // Set the common fields
                 bp_omicron_zone.set_primary_service_ip_and_port(address);
-                bp_omicron_zone.zone_type = ZoneType::InternalNtp;
 
                 // Set the zone specific fields
                 bp_omicron_zone.ntp_ntp_servers = Some(ntp_servers.clone());
@@ -465,7 +455,6 @@ impl BpOmicronZone {
                 // Set the common fields
                 bp_omicron_zone
                     .set_primary_service_ip_and_port(internal_address);
-                bp_omicron_zone.zone_type = ZoneType::Nexus;
 
                 // Set the zone specific fields
                 bp_omicron_zone.bp_nic_id = Some(nic.id);
@@ -485,7 +474,6 @@ impl BpOmicronZone {
             }) => {
                 // Set the common fields
                 bp_omicron_zone.set_primary_service_ip_and_port(address);
-                bp_omicron_zone.zone_type = ZoneType::Oximeter;
             }
         }
 
@@ -520,21 +508,26 @@ impl BpOmicronZone {
         //
         // Some of these are results that we only evaluate when used, because
         // not all zone types use all common fields.
-        let primary_address =
-            omicron_zone_config::primary_ip_and_port_to_socketaddr_v6(
-                self.primary_service_ip.into(),
-                self.primary_service_port,
-            );
+        let primary_address = SocketAddrV6::new(
+            self.primary_service_ip.into(),
+            *self.primary_service_port,
+            0,
+            0,
+        );
         let dataset =
             omicron_zone_config::dataset_zpool_name_to_omicron_zone_dataset(
                 self.dataset_zpool_name,
             );
 
+        // There is a nested result here. If there is a caller error (the outer
+        // Result) we immediately return. We check the inner result later, but
+        // only if some code path tries to use `nic` and it's not present.
         let nic = omicron_zone_config::nic_row_to_network_interface(
             self.id,
             self.bp_nic_id,
             nic_row.map(Into::into),
-        );
+        )?;
+
         let external_ip_id =
             Self::external_ip_to_blueprint_zone_type(self.external_ip_id);
 

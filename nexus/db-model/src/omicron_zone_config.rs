@@ -18,17 +18,8 @@ use ipnetwork::IpNetwork;
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
 use nexus_types::inventory::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
-use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
+use std::net::{IpAddr, SocketAddr, SocketAddrV6};
 use uuid::Uuid;
-
-/// Convert a primary ip address and port from a DB representation
-/// into an omicron internal representation
-pub fn primary_ip_and_port_to_socketaddr_v6(
-    primary_service_ip: Ipv6Addr,
-    primary_service_port: SqlU16,
-) -> SocketAddrV6 {
-    SocketAddrV6::new(primary_service_ip, *primary_service_port, 0, 0)
-}
 
 /// Convert ntp server config from the DB representation to the
 /// omicron internal representation
@@ -59,24 +50,16 @@ pub fn ntp_dns_servers_to_omicron_internal(
 /// so we definitely want to handle that as an operational error.  The
 /// others could arguably be programmer errors (i.e., we could `assert`),
 /// but it seems excessive to crash here.
-///
-/// Note that we immediately return for any of the caller errors here.
-/// For the other error, we will return only later, if some code path
-/// below tries to use `nic` when it's not present.
 pub fn nic_row_to_network_interface(
     zone_id: Uuid,
     nic_id: Option<Uuid>,
     nic_row: Option<OmicronZoneNic>,
-) -> anyhow::Result<NetworkInterface> {
+) -> anyhow::Result<anyhow::Result<NetworkInterface>> {
     match (nic_id, nic_row) {
         (Some(expected_id), Some(nic_row)) => {
             ensure!(expected_id == nic_row.id, "caller provided wrong NIC");
-            Ok(nic_row.into_network_interface_for_zone(zone_id)?)
+            Ok(nic_row.into_network_interface_for_zone(zone_id))
         }
-        // We don't expect and don't have a NIC. This is reasonable, so we
-        // don't `bail!` like we do in the next two cases, but we also
-        // _don't have a NIC_. Put an error into `nic`, and then if we land
-        // in a zone below that expects one, we'll fail then.
         (None, None) => Err(anyhow!(
             "expected zone to have an associated NIC, but it doesn't"
         )),
@@ -112,8 +95,7 @@ pub fn secondary_ip_and_port_to_dns_address(
             Ok(std::net::SocketAddr::new(dns_ip.ip(), *dns_port))
         }
         _ => Err(anyhow!(
-            "expected second service IP and port, \
-                            found one missing"
+            "expected second service IP and port, found one missing"
         )),
     }
 }

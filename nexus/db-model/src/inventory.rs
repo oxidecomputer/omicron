@@ -1303,25 +1303,30 @@ impl InvOmicronZone {
         self,
         nic_row: Option<InvOmicronZoneNic>,
     ) -> Result<OmicronZoneConfig, anyhow::Error> {
-        // Build up a set of common fields for our `BlueprintZoneType`s
+        // Build up a set of common fields for our `OmicronZoneType`s
         //
         // Some of these are results that we only evaluate when used, because
         // not all zone types use all common fields.
-        let primary_address =
-            omicron_zone_config::primary_ip_and_port_to_socketaddr_v6(
-                self.primary_service_ip.into(),
-                self.primary_service_port,
-            );
+        let primary_address = SocketAddrV6::new(
+            self.primary_service_ip.into(),
+            *self.primary_service_port,
+            0,
+            0,
+        );
+
         let dataset =
             omicron_zone_config::dataset_zpool_name_to_omicron_zone_dataset(
                 self.dataset_zpool_name,
             );
 
+        // There is a nested result here. If there is a caller error (the outer
+        // Result) we immediately return. We check the inner result later, but
+        // only if some code path tries to use `nic` and it's not present.
         let nic = omicron_zone_config::nic_row_to_network_interface(
             self.id,
             self.nic_id,
             nic_row.map(Into::into),
-        );
+        )?;
 
         let dns_address =
             omicron_zone_config::secondary_ip_and_port_to_dns_address(
