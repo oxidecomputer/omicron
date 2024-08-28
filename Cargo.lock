@@ -1135,6 +1135,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "derive_more",
+ "expectorate",
  "omicron-common",
  "omicron-workspace-hack",
  "schemars",

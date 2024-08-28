@@ -190,14 +190,12 @@ mod tests {
         let expected_file = Utf8PathBuf::from_str("./testutils")
             .unwrap()
             .join("keeper-config.xml");
-        let expected_content = std::fs::read_to_string(expected_file)
-            .expect("Failed to read from expected ClickHouse keeper file");
         let generated_file =
             Utf8PathBuf::from(config_dir.path()).join("keeper-config.xml");
         let generated_content = std::fs::read_to_string(generated_file)
             .expect("Failed to read from generated ClickHouse keeper file");
 
-        assert_eq!(expected_content, generated_content);
+        expectorate::assert_contents(expected_file, &generated_content);
     }
 
     #[test]
@@ -233,15 +231,12 @@ mod tests {
         let expected_file = Utf8PathBuf::from_str("./testutils")
             .unwrap()
             .join("replica-server-config.xml");
-        let expected_content = std::fs::read_to_string(expected_file).expect(
-            "Failed to read from expected ClickHouse replica server file",
-        );
         let generated_file = Utf8PathBuf::from(config_dir.path())
             .join("replica-server-config.xml");
         let generated_content = std::fs::read_to_string(generated_file).expect(
             "Failed to read from generated ClickHouse replica server file",
         );
 
-        assert_eq!(expected_content, generated_content);
+        expectorate::assert_contents(expected_file, &generated_content);
     }
 }

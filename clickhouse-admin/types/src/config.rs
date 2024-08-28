@@ -255,6 +255,7 @@ impl KeeperConfigsForReplica {
             // they must be wrapped in square brackets.
             // Otherwise, when running any query, a "Service not found" error
             // appears.
+            // https://github.com/ClickHouse/ClickHouse/blob/a011990fd75628c63c7995c4f15475f1d4125d10/src/Coordination/KeeperStateManager.cpp#L149
             let parsed_host = match host.parse::<Ipv6Addr>() {
                 Ok(_) => format!("[{host}]"),
                 Err(_) => host.to_string(),

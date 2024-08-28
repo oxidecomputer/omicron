@@ -17,3 +17,4 @@ omicron-workspace-hack.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+expectorate.workspace = true
