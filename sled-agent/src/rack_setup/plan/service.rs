@@ -706,7 +706,7 @@ impl Plan {
             };
             let id = OmicronZoneUuid::new_v4();
             let ip = sled.addr_alloc.next().expect("Not enough addrs");
-            let port = omicron_common::address::CLICKHOUSE_PORT;
+            let port = omicron_common::address::CLICKHOUSE_HTTP_PORT;
             let address = SocketAddrV6::new(ip, port, 0, 0);
             dns_builder
                 .host_zone_with_one_backend(
@@ -749,7 +749,7 @@ impl Plan {
             let ip = sled.addr_alloc.next().expect("Not enough addrs");
             // TODO: This may need to be a different port if/when to have single node
             // and replicated running side by side as per stage 1 of RFD 468.
-            let port = omicron_common::address::CLICKHOUSE_PORT;
+            let port = omicron_common::address::CLICKHOUSE_HTTP_PORT;
             let address = SocketAddrV6::new(ip, port, 0, 0);
             dns_builder
                 .host_zone_with_one_backend(
@@ -790,7 +790,7 @@ impl Plan {
             };
             let id = OmicronZoneUuid::new_v4();
             let ip = sled.addr_alloc.next().expect("Not enough addrs");
-            let port = omicron_common::address::CLICKHOUSE_KEEPER_PORT;
+            let port = omicron_common::address::CLICKHOUSE_KEEPER_TCP_PORT;
             let address = SocketAddrV6::new(ip, port, 0, 0);
             dns_builder
                 .host_zone_with_one_backend(

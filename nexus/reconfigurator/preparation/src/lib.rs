@@ -35,6 +35,7 @@ use omicron_common::address::IpRange;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::LookupType;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::policy::BOUNDARY_NTP_REDUNDANCY;
@@ -72,6 +73,74 @@ pub struct PlanningInputFromDb<'a> {
 }
 
 impl PlanningInputFromDb<'_> {
+    pub async fn assemble(
+        opctx: &OpContext,
+        datastore: &DataStore,
+    ) -> Result<PlanningInput, Error> {
+        opctx.check_complex_operations_allowed()?;
+        let sled_rows = datastore
+            .sled_list_all_batched(opctx, SledFilter::Commissioned)
+            .await
+            .internal_context("fetching all sleds")?;
+        let zpool_rows = datastore
+            .zpool_list_all_external_batched(opctx)
+            .await
+            .internal_context("fetching all external zpool rows")?;
+        let ip_pool_range_rows = {
+            let (authz_service_ip_pool, _) = datastore
+                .ip_pools_service_lookup(opctx)
+                .await
+                .internal_context("fetching IP services pool")?;
+            datastore
+                .ip_pool_list_ranges_batched(opctx, &authz_service_ip_pool)
+                .await
+                .internal_context("listing services IP pool ranges")?
+        };
+        let external_ip_rows = datastore
+            .external_ip_list_service_all_batched(opctx)
+            .await
+            .internal_context("fetching service external IPs")?;
+        let service_nic_rows = datastore
+            .service_network_interfaces_all_list_batched(opctx)
+            .await
+            .internal_context("fetching service NICs")?;
+        let internal_dns_version = datastore
+            .dns_group_latest_version(opctx, DnsGroup::Internal)
+            .await
+            .internal_context("fetching internal DNS version")?
+            .version;
+        let external_dns_version = datastore
+            .dns_group_latest_version(opctx, DnsGroup::External)
+            .await
+            .internal_context("fetching external DNS version")?
+            .version;
+        let cockroachdb_settings = datastore
+            .cockroachdb_settings(opctx)
+            .await
+            .internal_context("fetching cockroachdb settings")?;
+
+        let planning_input = PlanningInputFromDb {
+            sled_rows: &sled_rows,
+            zpool_rows: &zpool_rows,
+            ip_pool_range_rows: &ip_pool_range_rows,
+            target_boundary_ntp_zone_count: BOUNDARY_NTP_REDUNDANCY,
+            target_nexus_zone_count: NEXUS_REDUNDANCY,
+            target_cockroachdb_zone_count: COCKROACHDB_REDUNDANCY,
+            target_cockroachdb_cluster_version:
+                CockroachDbClusterVersion::POLICY,
+            external_ip_rows: &external_ip_rows,
+            service_nic_rows: &service_nic_rows,
+            log: &opctx.log,
+            internal_dns_version,
+            external_dns_version,
+            cockroachdb_settings: &cockroachdb_settings,
+        }
+        .build()
+        .internal_context("assembling planning_input")?;
+
+        Ok(planning_input)
+    }
+
     pub fn build(&self) -> Result<PlanningInput, Error> {
         let service_ip_pool_ranges =
             self.ip_pool_range_rows.iter().map(IpRange::from).collect();
@@ -195,65 +264,8 @@ pub async fn reconfigurator_state_load(
     datastore: &DataStore,
 ) -> Result<UnstableReconfiguratorState, anyhow::Error> {
     opctx.check_complex_operations_allowed()?;
-    let sled_rows = datastore
-        .sled_list_all_batched(opctx, SledFilter::Commissioned)
-        .await
-        .context("listing sleds")?;
-    let zpool_rows = datastore
-        .zpool_list_all_external_batched(opctx)
-        .await
-        .context("listing zpools")?;
-    let ip_pool_range_rows = {
-        let (authz_service_ip_pool, _) = datastore
-            .ip_pools_service_lookup(opctx)
-            .await
-            .context("fetching IP services pool")?;
-        datastore
-            .ip_pool_list_ranges_batched(opctx, &authz_service_ip_pool)
-            .await
-            .context("listing services IP pool ranges")?
-    };
-    let external_ip_rows = datastore
-        .external_ip_list_service_all_batched(opctx)
-        .await
-        .context("fetching service external IPs")?;
-    let service_nic_rows = datastore
-        .service_network_interfaces_all_list_batched(opctx)
-        .await
-        .context("fetching service NICs")?;
-    let internal_dns_version = datastore
-        .dns_group_latest_version(opctx, DnsGroup::Internal)
-        .await
-        .context("fetching internal DNS version")?
-        .version;
-    let external_dns_version = datastore
-        .dns_group_latest_version(opctx, DnsGroup::External)
-        .await
-        .context("fetching external DNS version")?
-        .version;
-    let cockroachdb_settings = datastore
-        .cockroachdb_settings(opctx)
-        .await
-        .context("fetching cockroachdb settings")?;
-
-    let planning_input = PlanningInputFromDb {
-        sled_rows: &sled_rows,
-        zpool_rows: &zpool_rows,
-        ip_pool_range_rows: &ip_pool_range_rows,
-        target_boundary_ntp_zone_count: BOUNDARY_NTP_REDUNDANCY,
-        target_nexus_zone_count: NEXUS_REDUNDANCY,
-        target_cockroachdb_zone_count: COCKROACHDB_REDUNDANCY,
-        target_cockroachdb_cluster_version: CockroachDbClusterVersion::POLICY,
-        external_ip_rows: &external_ip_rows,
-        service_nic_rows: &service_nic_rows,
-        log: &opctx.log,
-        internal_dns_version,
-        external_dns_version,
-        cockroachdb_settings: &cockroachdb_settings,
-    }
-    .build()
-    .context("assembling planning_input")?;
-
+    let planning_input =
+        PlanningInputFromDb::assemble(opctx, datastore).await?;
     let collection_ids = datastore
         .inventory_collections()
         .await

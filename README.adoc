@@ -62,6 +62,8 @@ Nextest https://github.com/nextest-rs/nextest/issues/16[does not support doctest
 
 Similarly, you can run tests inside a https://github.com/oxidecomputer/falcon[Falcon] based VM. This is described in the `test-utils` https://github.com/oxidecomputer/omicron/tree/main/test-utils[README].
 
+There's also a xref:./live-tests/README.adoc[`live-tests`] test suite that can be run by hand in a _deployed_ Omicron system.
+
 === rustfmt and clippy
 
 You can **format the code** using `cargo fmt`.  Make sure to run this before pushing changes.  The CI checks that the code is correctly formatted.

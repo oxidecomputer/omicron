@@ -11,7 +11,7 @@ use anyhow::Context;
 use camino::Utf8PathBuf;
 use clap::Parser;
 use clap::Subcommand;
-use omicron_common::address::CLICKHOUSE_PORT;
+use omicron_common::address::CLICKHOUSE_HTTP_PORT;
 use oximeter_db::model::OXIMETER_VERSION;
 use oximeter_db::Client;
 use slog::Drain;
@@ -24,7 +24,7 @@ use std::net::SocketAddrV6;
 
 const DEFAULT_HOST: SocketAddr = SocketAddr::V6(SocketAddrV6::new(
     Ipv6Addr::LOCALHOST,
-    CLICKHOUSE_PORT,
+    CLICKHOUSE_HTTP_PORT,
     0,
     0,
 ));
