@@ -36,3 +36,13 @@ pub struct RegionSnapshotReplacementGarbageCollectStatus {
     pub garbage_collect_requested: Vec<String>,
     pub errors: Vec<String>,
 }
+
+/// The status of a `region_snapshot_replacement_step` background task
+/// activation
+#[derive(Serialize, Deserialize, Default, Debug, PartialEq, Eq)]
+pub struct RegionSnapshotReplacementStepStatus {
+    pub step_records_created_ok: Vec<String>,
+    pub step_garbage_collect_invoked_ok: Vec<String>,
+    pub step_invoked_ok: Vec<String>,
+    pub errors: Vec<String>,
+}

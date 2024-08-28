@@ -437,20 +437,10 @@ async fn sim_ensure_destination_propolis_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
-    let params = sagactx.saga_params::<Params>()?;
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
-
+    let dst_propolis_id = sagactx.lookup::<PropolisUuid>("dst_propolis_id")?;
     let dst_sled_id = sagactx.lookup::<SledUuid>("dst_sled_id")?;
     let db_instance =
         sagactx.lookup::<db::model::Instance>("set_migration_ids")?;
-    let (.., authz_instance) = LookupPath::new(&opctx, &osagactx.datastore())
-        .instance_id(db_instance.id())
-        .lookup_for(authz::Action::Modify)
-        .await
-        .map_err(ActionError::action_failed)?;
 
     info!(osagactx.log(), "unregistering destination vmm for migration unwind";
           "instance_id" => %db_instance.id(),
@@ -465,7 +455,7 @@ async fn sim_ensure_destination_propolis_undo(
     // needed.
     match osagactx
         .nexus()
-        .instance_ensure_unregistered(&opctx, &authz_instance, &dst_sled_id)
+        .instance_ensure_unregistered(&dst_propolis_id, &dst_sled_id)
         .await
     {
         Ok(_) => Ok(()),
@@ -500,12 +490,6 @@ async fn sim_instance_migrate(
 
     let src_propolis_id = db_instance.runtime().propolis_id.unwrap();
     let dst_vmm = sagactx.lookup::<db::model::Vmm>("dst_vmm_record")?;
-    let (.., authz_instance) = LookupPath::new(&opctx, &osagactx.datastore())
-        .instance_id(db_instance.id())
-        .lookup_for(authz::Action::Modify)
-        .await
-        .map_err(ActionError::action_failed)?;
-
     info!(osagactx.log(), "initiating migration from destination sled";
           "instance_id" => %db_instance.id(),
           "dst_vmm_record" => ?dst_vmm,
@@ -529,7 +513,6 @@ async fn sim_instance_migrate(
         .nexus()
         .instance_request_state(
             &opctx,
-            &authz_instance,
             &db_instance,
             &Some(dst_vmm),
             InstanceStateChangeRequest::Migrate(

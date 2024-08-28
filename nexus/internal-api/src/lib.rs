@@ -33,14 +33,14 @@ use omicron_common::{
             DiskRuntimeState, DownstairsClientStopRequest,
             DownstairsClientStopped, ProducerEndpoint,
             ProducerRegistrationResponse, RepairFinishInfo, RepairProgress,
-            RepairStartInfo, SledInstanceState,
+            RepairStartInfo, SledVmmState,
         },
     },
     update::ArtifactId,
 };
 use omicron_uuid_kinds::{
-    DemoSagaUuid, DownstairsKind, SledUuid, TypedUuid, UpstairsKind,
-    UpstairsRepairKind,
+    DemoSagaUuid, DownstairsKind, PropolisUuid, SledUuid, TypedUuid,
+    UpstairsKind, UpstairsRepairKind,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -108,15 +108,15 @@ pub trait NexusInternalApi {
         body: TypedBody<SwitchPutRequest>,
     ) -> Result<HttpResponseOk<SwitchPutResponse>, HttpError>;
 
-    /// Report updated state for an instance.
+    /// Report updated state for a VMM.
     #[endpoint {
         method = PUT,
-        path = "/instances/{instance_id}",
+        path = "/vmms/{propolis_id}",
     }]
     async fn cpapi_instances_put(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<InstancePathParam>,
-        new_runtime_state: TypedBody<SledInstanceState>,
+        path_params: Path<VmmPathParam>,
+        new_runtime_state: TypedBody<SledVmmState>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 
     #[endpoint {
@@ -566,6 +566,12 @@ pub struct SwitchPathParam {
 #[derive(Deserialize, JsonSchema)]
 pub struct InstancePathParam {
     pub instance_id: Uuid,
+}
+
+/// Path parameters for VMM requests (internal API)
+#[derive(Deserialize, JsonSchema)]
+pub struct VmmPathParam {
+    pub propolis_id: PropolisUuid,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, JsonSchema, Serialize)]

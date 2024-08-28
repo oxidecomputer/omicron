@@ -517,7 +517,7 @@ mod test {
     ) -> (dev::db::CockroachInstance, Arc<db::DataStore>) {
         let db = test_setup_database(&log).await;
         let cfg = nexus_db_queries::db::Config { url: db.pg_config().clone() };
-        let pool = Arc::new(db::Pool::new(log, &cfg));
+        let pool = Arc::new(db::Pool::new_single_host(log, &cfg));
         let db_datastore = Arc::new(
             db::DataStore::new(&log, Arc::clone(&pool), None).await.unwrap(),
         );

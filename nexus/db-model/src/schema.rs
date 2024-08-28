@@ -144,7 +144,7 @@ table! {
         fec -> crate::SwitchLinkFecEnum,
         speed -> crate::SwitchLinkSpeedEnum,
         autoneg -> Bool,
-        lldp_link_config_id -> Uuid,
+        lldp_link_config_id -> Nullable<Uuid>,
     }
 }
 

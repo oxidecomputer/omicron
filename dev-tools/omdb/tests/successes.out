@@ -351,6 +351,11 @@ task: "region_snapshot_replacement_start"
     detect if region snapshots need replacement and begin the process
 
 
+task: "region_snapshot_replacement_step"
+    detect what volumes were affected by a region snapshot replacement, and run
+    the step saga for them
+
+
 task: "saga_recovery"
     recovers sagas assigned to this Nexus
 
@@ -604,6 +609,16 @@ task: "region_snapshot_replacement_start"
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total requests created ok: 0
     total start saga invoked ok: 0
+    errors: 0
+
+task: "region_snapshot_replacement_step"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    total step records created ok: 0
+    total step garbage collect saga invoked ok: 0
+    total step saga invoked ok: 0
     errors: 0
 
 task: "saga_recovery"
@@ -1012,6 +1027,16 @@ task: "region_snapshot_replacement_start"
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total requests created ok: 0
     total start saga invoked ok: 0
+    errors: 0
+
+task: "region_snapshot_replacement_step"
+  configured period: every <REDACTED_DURATION>s
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    total step records created ok: 0
+    total step garbage collect saga invoked ok: 0
+    total step saga invoked ok: 0
     errors: 0
 
 task: "saga_recovery"

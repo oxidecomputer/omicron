@@ -68,7 +68,7 @@ itertools-5ef9efb8ec2df382 = { package = "itertools", version = "0.12.1" }
 itertools-93f6ce9d446188ac = { package = "itertools", version = "0.10.5" }
 lalrpop-util = { version = "0.19.12" }
 lazy_static = { version = "1.5.0", default-features = false, features = ["spin_no_std"] }
-libc = { version = "0.2.156", features = ["extra_traits"] }
+libc = { version = "0.2.158", features = ["extra_traits"] }
 log = { version = "0.4.21", default-features = false, features = ["std"] }
 managed = { version = "0.8.0", default-features = false, features = ["alloc", "map"] }
 memchr = { version = "2.7.2" }
@@ -102,15 +102,14 @@ sha2 = { version = "0.10.8", features = ["oid"] }
 similar = { version = "2.6.0", features = ["bytes", "inline", "unicode"] }
 slog = { version = "2.7.0", features = ["dynamic-keys", "max_level_trace", "release_max_level_debug", "release_max_level_trace"] }
 smallvec = { version = "1.13.2", default-features = false, features = ["const_new"] }
-socket2 = { version = "0.5.7", default-features = false, features = ["all"] }
 spin = { version = "0.9.8" }
 string_cache = { version = "0.8.7" }
 subtle = { version = "2.5.0" }
 syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.74", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 time = { version = "0.3.36", features = ["formatting", "local-offset", "macros", "parsing"] }
-tokio = { version = "1.38.1", features = ["full", "test-util"] }
+tokio = { version = "1.39.3", features = ["full", "test-util"] }
 tokio-postgres = { version = "0.7.11", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
-tokio-stream = { version = "0.1.15", features = ["net"] }
+tokio-stream = { version = "0.1.15", features = ["net", "sync"] }
 tokio-util = { version = "0.7.11", features = ["codec", "io-util"] }
 toml = { version = "0.7.8" }
 toml_datetime = { version = "0.6.8", default-features = false, features = ["serde"] }
@@ -177,7 +176,7 @@ itertools-5ef9efb8ec2df382 = { package = "itertools", version = "0.12.1" }
 itertools-93f6ce9d446188ac = { package = "itertools", version = "0.10.5" }
 lalrpop-util = { version = "0.19.12" }
 lazy_static = { version = "1.5.0", default-features = false, features = ["spin_no_std"] }
-libc = { version = "0.2.156", features = ["extra_traits"] }
+libc = { version = "0.2.158", features = ["extra_traits"] }
 log = { version = "0.4.21", default-features = false, features = ["std"] }
 managed = { version = "0.8.0", default-features = false, features = ["alloc", "map"] }
 memchr = { version = "2.7.2" }
@@ -211,7 +210,6 @@ sha2 = { version = "0.10.8", features = ["oid"] }
 similar = { version = "2.6.0", features = ["bytes", "inline", "unicode"] }
 slog = { version = "2.7.0", features = ["dynamic-keys", "max_level_trace", "release_max_level_debug", "release_max_level_trace"] }
 smallvec = { version = "1.13.2", default-features = false, features = ["const_new"] }
-socket2 = { version = "0.5.7", default-features = false, features = ["all"] }
 spin = { version = "0.9.8" }
 string_cache = { version = "0.8.7" }
 subtle = { version = "2.5.0" }
@@ -219,9 +217,9 @@ syn-dff4ba8e3ae991db = { package = "syn", version = "1.0.109", features = ["extr
 syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.74", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 time = { version = "0.3.36", features = ["formatting", "local-offset", "macros", "parsing"] }
 time-macros = { version = "0.2.18", default-features = false, features = ["formatting", "parsing"] }
-tokio = { version = "1.38.1", features = ["full", "test-util"] }
+tokio = { version = "1.39.3", features = ["full", "test-util"] }
 tokio-postgres = { version = "0.7.11", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
-tokio-stream = { version = "0.1.15", features = ["net"] }
+tokio-stream = { version = "0.1.15", features = ["net", "sync"] }
 tokio-util = { version = "0.7.11", features = ["codec", "io-util"] }
 toml = { version = "0.7.8" }
 toml_datetime = { version = "0.6.8", default-features = false, features = ["serde"] }
@@ -239,7 +237,7 @@ zeroize = { version = "1.7.0", features = ["std", "zeroize_derive"] }
 [target.x86_64-unknown-linux-gnu.dependencies]
 dof = { version = "0.3.0", default-features = false, features = ["des"] }
 linux-raw-sys = { version = "0.4.13", default-features = false, features = ["elf", "errno", "general", "ioctl", "no_std", "std", "system"] }
-mio = { version = "0.8.11", features = ["net", "os-ext"] }
+mio = { version = "1.0.2", features = ["net", "os-ext"] }
 nix = { version = "0.28.0", features = ["feature", "fs", "ioctl", "poll", "signal", "term", "uio"] }
 once_cell = { version = "1.19.0" }
 rustix = { version = "0.38.34", features = ["fs", "stdio", "system", "termios"] }
@@ -248,35 +246,35 @@ signal-hook-mio = { version = "0.2.4", default-features = false, features = ["su
 [target.x86_64-unknown-linux-gnu.build-dependencies]
 dof = { version = "0.3.0", default-features = false, features = ["des"] }
 linux-raw-sys = { version = "0.4.13", default-features = false, features = ["elf", "errno", "general", "ioctl", "no_std", "std", "system"] }
-mio = { version = "0.8.11", features = ["net", "os-ext"] }
+mio = { version = "1.0.2", features = ["net", "os-ext"] }
 nix = { version = "0.28.0", features = ["feature", "fs", "ioctl", "poll", "signal", "term", "uio"] }
 once_cell = { version = "1.19.0" }
 rustix = { version = "0.38.34", features = ["fs", "stdio", "system", "termios"] }
 signal-hook-mio = { version = "0.2.4", default-features = false, features = ["support-v0_8", "support-v1_0"] }
 
 [target.x86_64-apple-darwin.dependencies]
-mio = { version = "0.8.11", features = ["net", "os-ext"] }
+mio = { version = "1.0.2", features = ["net", "os-ext"] }
 nix = { version = "0.28.0", features = ["feature", "fs", "ioctl", "poll", "signal", "term", "uio"] }
 once_cell = { version = "1.19.0" }
 rustix = { version = "0.38.34", features = ["fs", "stdio", "system", "termios"] }
 signal-hook-mio = { version = "0.2.4", default-features = false, features = ["support-v0_8", "support-v1_0"] }
 
 [target.x86_64-apple-darwin.build-dependencies]
-mio = { version = "0.8.11", features = ["net", "os-ext"] }
+mio = { version = "1.0.2", features = ["net", "os-ext"] }
 nix = { version = "0.28.0", features = ["feature", "fs", "ioctl", "poll", "signal", "term", "uio"] }
 once_cell = { version = "1.19.0" }
 rustix = { version = "0.38.34", features = ["fs", "stdio", "system", "termios"] }
 signal-hook-mio = { version = "0.2.4", default-features = false, features = ["support-v0_8", "support-v1_0"] }
 
 [target.aarch64-apple-darwin.dependencies]
-mio = { version = "0.8.11", features = ["net", "os-ext"] }
+mio = { version = "1.0.2", features = ["net", "os-ext"] }
 nix = { version = "0.28.0", features = ["feature", "fs", "ioctl", "poll", "signal", "term", "uio"] }
 once_cell = { version = "1.19.0" }
 rustix = { version = "0.38.34", features = ["fs", "stdio", "system", "termios"] }
 signal-hook-mio = { version = "0.2.4", default-features = false, features = ["support-v0_8", "support-v1_0"] }
 
 [target.aarch64-apple-darwin.build-dependencies]
-mio = { version = "0.8.11", features = ["net", "os-ext"] }
+mio = { version = "1.0.2", features = ["net", "os-ext"] }
 nix = { version = "0.28.0", features = ["feature", "fs", "ioctl", "poll", "signal", "term", "uio"] }
 once_cell = { version = "1.19.0" }
 rustix = { version = "0.38.34", features = ["fs", "stdio", "system", "termios"] }
@@ -284,7 +282,7 @@ signal-hook-mio = { version = "0.2.4", default-features = false, features = ["su
 
 [target.x86_64-unknown-illumos.dependencies]
 dof = { version = "0.3.0", default-features = false, features = ["des"] }
-mio = { version = "0.8.11", features = ["net", "os-ext"] }
+mio = { version = "1.0.2", features = ["net", "os-ext"] }
 nix = { version = "0.28.0", features = ["feature", "fs", "ioctl", "poll", "signal", "term", "uio"] }
 once_cell = { version = "1.19.0" }
 rustix = { version = "0.38.34", features = ["fs", "stdio", "system", "termios"] }
@@ -293,7 +291,7 @@ toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", featu
 
 [target.x86_64-unknown-illumos.build-dependencies]
 dof = { version = "0.3.0", default-features = false, features = ["des"] }
-mio = { version = "0.8.11", features = ["net", "os-ext"] }
+mio = { version = "1.0.2", features = ["net", "os-ext"] }
 nix = { version = "0.28.0", features = ["feature", "fs", "ioctl", "poll", "signal", "term", "uio"] }
 once_cell = { version = "1.19.0" }
 rustix = { version = "0.38.34", features = ["fs", "stdio", "system", "termios"] }

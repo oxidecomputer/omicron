@@ -746,44 +746,6 @@
         }
       }
     },
-    "/instances/{instance_id}": {
-      "put": {
-        "summary": "Report updated state for an instance.",
-        "operationId": "cpapi_instances_put",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "instance_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SledInstanceState"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/instances/{instance_id}/migrate": {
       "post": {
         "operationId": "instance_migrate",
@@ -1460,6 +1422,43 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/vmms/{propolis_id}": {
+      "put": {
+        "summary": "Report updated state for a VMM.",
+        "operationId": "cpapi_instances_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "propolis_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SledVmmState"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -5031,50 +5030,6 @@
           "id"
         ]
       },
-      "SledInstanceState": {
-        "description": "A wrapper type containing a sled's total knowledge of the state of a specific VMM and the instance it incarnates.",
-        "type": "object",
-        "properties": {
-          "migration_in": {
-            "nullable": true,
-            "description": "The current state of any inbound migration to this VMM.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/MigrationRuntimeState"
-              }
-            ]
-          },
-          "migration_out": {
-            "nullable": true,
-            "description": "The state of any outbound migration from this VMM.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/MigrationRuntimeState"
-              }
-            ]
-          },
-          "propolis_id": {
-            "description": "The ID of the VMM whose state is being reported.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TypedUuidForPropolisKind"
-              }
-            ]
-          },
-          "vmm_state": {
-            "description": "The most recent state of the sled's VMM process.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/VmmRuntimeState"
-              }
-            ]
-          }
-        },
-        "required": [
-          "propolis_id",
-          "vmm_state"
-        ]
-      },
       "SledPolicy": {
         "description": "The operator-defined policy of a sled.",
         "oneOf": [
@@ -5189,6 +5144,41 @@
           }
         ]
       },
+      "SledVmmState": {
+        "description": "A wrapper type containing a sled's total knowledge of the state of a VMM.",
+        "type": "object",
+        "properties": {
+          "migration_in": {
+            "nullable": true,
+            "description": "The current state of any inbound migration to this VMM.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MigrationRuntimeState"
+              }
+            ]
+          },
+          "migration_out": {
+            "nullable": true,
+            "description": "The state of any outbound migration from this VMM.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MigrationRuntimeState"
+              }
+            ]
+          },
+          "vmm_state": {
+            "description": "The most recent state of the sled's VMM process.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VmmRuntimeState"
+              }
+            ]
+          }
+        },
+        "required": [
+          "vmm_state"
+        ]
+      },
       "SourceNatConfig": {
         "description": "An IP address and port range used for source NAT, i.e., making outbound network connections from guests or services.",
         "type": "object",
@@ -5298,10 +5288,6 @@
         "format": "uuid"
       },
       "TypedUuidForOmicronZoneKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForPropolisKind": {
         "type": "string",
         "format": "uuid"
       },
@@ -5566,6 +5552,10 @@
             ]
           }
         ]
+      },
+      "TypedUuidForPropolisKind": {
+        "type": "string",
+        "format": "uuid"
       }
     },
     "responses": {
