@@ -50,6 +50,10 @@ pub fn ntp_dns_servers_to_omicron_internal(
 /// so we definitely want to handle that as an operational error.  The
 /// others could arguably be programmer errors (i.e., we could `assert`),
 /// but it seems excessive to crash here.
+///
+/// The outer result represents a programmer error and should be unwrapped
+/// immediately. The inner result represents an operational error and should
+/// only be unwrapped when the nic is used.
 pub fn nic_row_to_network_interface(
     zone_id: Uuid,
     nic_id: Option<Uuid>,
