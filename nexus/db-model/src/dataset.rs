@@ -51,7 +51,7 @@ pub struct Dataset {
 
     quota: Option<ByteCount>,
     reservation: Option<ByteCount>,
-    compression: Option<String>,
+    compression: String,
 }
 
 impl Dataset {
@@ -80,7 +80,7 @@ impl Dataset {
             zone_name,
             quota: None,
             reservation: None,
-            compression: None,
+            compression: String::new(),
         }
     }
 
@@ -131,9 +131,11 @@ impl TryFrom<Dataset> for omicron_common::disk::DatasetConfig {
                 ),
                 dataset.kind.try_into_api(dataset.zone_name)?,
             ),
-            quota: dataset.quota.map(|q| q.to_bytes()),
-            reservation: dataset.reservation.map(|r| r.to_bytes()),
-            compression: dataset.compression,
+            quota: dataset.quota.map(|q| q.into()),
+            reservation: dataset.reservation.map(|r| r.into()),
+            compression: dataset.compression.parse().map_err(
+                |e: anyhow::Error| Error::internal_error(&e.to_string()),
+            )?,
         })
     }
 }

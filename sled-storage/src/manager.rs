@@ -1028,7 +1028,7 @@ impl StorageManager {
         let size_details = Some(illumos_utils::zfs::SizeDetails {
             quota: config.quota,
             reservation: config.reservation,
-            compression: config.compression.clone(),
+            compression: config.compression,
         });
         Zfs::ensure_filesystem(
             fs_name,
@@ -1122,6 +1122,7 @@ mod tests {
     use super::*;
     use camino_tempfile::tempdir_in;
     use omicron_common::api::external::Generation;
+    use omicron_common::disk::CompressionAlgorithm;
     use omicron_common::disk::DatasetKind;
     use omicron_common::disk::DiskManagementError;
     use omicron_common::ledger;
@@ -1632,7 +1633,7 @@ mod tests {
             DatasetConfig {
                 id,
                 name,
-                compression: None,
+                compression: CompressionAlgorithm::Off,
                 quota: None,
                 reservation: None,
             },
@@ -1668,7 +1669,8 @@ mod tests {
         // However, calling it with a different input and the same generation
         // number should fail.
         config.generation = current_config_generation;
-        config.datasets.values_mut().next().unwrap().reservation = Some(1024);
+        config.datasets.values_mut().next().unwrap().reservation =
+            Some(1024.into());
         let err =
             harness.handle().datasets_ensure(config.clone()).await.unwrap_err();
         assert!(matches!(err, Error::DatasetConfigurationChanged { .. }));

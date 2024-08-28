@@ -30,10 +30,9 @@
 //! Nexus' `cpapi_instances_put` internal API endpoint, when a Nexus'
 //! `instance-watcher` background task *pulls* instance states from sled-agents
 //! periodically, or as the return value of an API call from Nexus to a
-//! sled-agent. When a Nexus receives a new [`SledInstanceState`] from a
-//! sled-agent through any of these mechanisms, the Nexus will write any changed
-//! state to the `vmm` and/or `migration` tables directly on behalf of the
-//! sled-agent.
+//! sled-agent. When a Nexus receives a new [`SledVmmState`] from a sled-agent
+//! through any of these mechanisms, the Nexus will write any changed state to
+//! the `vmm` and/or `migration` tables directly on behalf of the sled-agent.
 //!
 //! Although Nexus is technically the party responsible for the database query
 //! that writes VMM and migration state updates received from sled-agent, it is
@@ -236,9 +235,9 @@
 //! updates is perhaps the simplest one: _avoiding unnecessary update sagas_.
 //! The `cpapi_instances_put` API endpoint and instance-watcher background tasks
 //! handle changes to VMM and migration states by calling the
-//! [`notify_instance_updated`] method, which writes the new states to the
-//! database and (potentially) starts an update saga. Naively, this method would
-//! *always* start an update saga, but remember that --- as we discussed
+//! [`process_vmm_update`] method, which writes the new states to the database
+//! and (potentially) starts an update saga. Naively, this method would *always*
+//! start an update saga, but remember that --- as we discussed
 //! [above](#background) --- many VMM/migration state changes don't actually
 //! require modifying the instance record. For example, if an instance's VMM
 //! transitions from [`VmmState::Starting`] to [`VmmState::Running`], that
@@ -271,7 +270,7 @@
 //! delayed. To improve the timeliness of update sagas, we will also explicitly
 //! activate the background task at any point where we know that an update saga
 //! *should* run but we were not able to run it. If an update saga cannot be
-//! started, whether by [`notify_instance_updated`], a `start-instance-update`
+//! started, whether by [`notify_vmm_updated`], a `start-instance-update`
 //! saga attempting to start its real saga, or an `instance-update` saga
 //! chaining into a new one as its last action, the `instance-watcher`
 //! background task is activated. Similarly, when a `start-instance-update` saga
@@ -326,7 +325,8 @@
 //!     crate::app::db::datastore::DataStore::instance_updater_inherit_lock
 //! [instance_updater_unlock]:
 //!     crate::app::db::datastore::DataStore::instance_updater_unlock
-//! [`notify_instance_updated`]: crate::app::Nexus::notify_instance_updated
+//! [`notify_vmm_updated`]: crate::app::Nexus::notify_vmm_updated
+//! [`process_vmm_update`]: crate::app::instance::process_vmm_update
 //!
 //! [dist-locking]:
 //!     https://martin.kleppmann.com/2016/02/08/how-to-do-distributed-locking.html
@@ -362,7 +362,7 @@ use nexus_db_queries::{authn, authz};
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus;
-use omicron_common::api::internal::nexus::SledInstanceState;
+use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
@@ -388,8 +388,8 @@ pub(crate) use self::start::{Params, SagaInstanceUpdate};
 mod destroyed;
 
 /// Returns `true` if an `instance-update` saga should be executed as a result
-/// of writing the provided [`SledInstanceState`] to the database with the
-/// provided [`VmmStateUpdateResult`].
+/// of writing the provided [`SledVmmState`] to the database with the provided
+/// [`VmmStateUpdateResult`].
 ///
 /// We determine this only after actually updating the database records,
 /// because we don't know whether a particular VMM or migration state is
@@ -407,8 +407,8 @@ mod destroyed;
 /// VMM/migration states.
 pub fn update_saga_needed(
     log: &slog::Logger,
-    instance_id: InstanceUuid,
-    state: &SledInstanceState,
+    propolis_id: PropolisUuid,
+    state: &SledVmmState,
     result: &VmmStateUpdateResult,
 ) -> bool {
     // Currently, an instance-update saga is required if (and only if):
@@ -443,8 +443,7 @@ pub fn update_saga_needed(
         debug!(log,
             "new VMM runtime state from sled agent requires an \
              instance-update saga";
-            "instance_id" => %instance_id,
-            "propolis_id" => %state.propolis_id,
+            "propolis_id" => %propolis_id,
             "vmm_needs_update" => vmm_needs_update,
             "migration_in_needs_update" => migration_in_needs_update,
             "migration_out_needs_update" => migration_out_needs_update,

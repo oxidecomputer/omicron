@@ -144,7 +144,7 @@ table! {
         fec -> crate::SwitchLinkFecEnum,
         speed -> crate::SwitchLinkSpeedEnum,
         autoneg -> Bool,
-        lldp_link_config_id -> Uuid,
+        lldp_link_config_id -> Nullable<Uuid>,
     }
 }
 
@@ -1027,7 +1027,7 @@ table! {
 
         quota -> Nullable<Int8>,
         reservation -> Nullable<Int8>,
-        compression -> Nullable<Text>,
+        compression -> Text,
     }
 }
 
@@ -1602,7 +1602,7 @@ table! {
 
         quota -> Nullable<Int8>,
         reservation -> Nullable<Int8>,
-        compression -> Nullable<Text>,
+        compression -> Text,
     }
 }
 

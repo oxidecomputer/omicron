@@ -11,10 +11,11 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
+use std::str::FromStr;
 use uuid::Uuid;
 
 use crate::{
-    api::external::Generation,
+    api::external::{ByteCount, Generation},
     ledger::Ledgerable,
     zpool_name::{ZpoolKind, ZpoolName},
 };
@@ -135,6 +136,126 @@ impl DatasetName {
     }
 }
 
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+)]
+pub struct GzipLevel(u8);
+
+// Fastest compression level
+const GZIP_LEVEL_MIN: u8 = 1;
+
+// Best compression ratio
+const GZIP_LEVEL_MAX: u8 = 9;
+
+impl GzipLevel {
+    pub const fn new<const N: u8>() -> Self {
+        assert!(N >= GZIP_LEVEL_MIN, "Compression level too small");
+        assert!(N <= GZIP_LEVEL_MAX, "Compression level too large");
+        Self(N)
+    }
+}
+
+impl FromStr for GzipLevel {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let level = s.parse::<u8>()?;
+        if level < GZIP_LEVEL_MIN || level > GZIP_LEVEL_MAX {
+            bail!("Invalid gzip compression level: {level}");
+        }
+        Ok(Self(level))
+    }
+}
+
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Default,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum CompressionAlgorithm {
+    // Selects a default compression algorithm. This is dependent on both the
+    // zpool and OS version.
+    On,
+
+    // Disables compression.
+    #[default]
+    Off,
+
+    // Selects the default Gzip compression level.
+    //
+    // According to the ZFS docs, this is "gzip-6", but that's a default value,
+    // which may change with OS updates.
+    Gzip,
+
+    GzipN {
+        level: GzipLevel,
+    },
+    Lz4,
+    Lzjb,
+    Zle,
+}
+
+impl fmt::Display for CompressionAlgorithm {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use CompressionAlgorithm::*;
+        let s = match self {
+            On => "on",
+            Off => "off",
+            Gzip => "gzip",
+            GzipN { level } => {
+                return write!(f, "gzip-{}", level.0);
+            }
+            Lz4 => "lz4",
+            Lzjb => "lzjb",
+            Zle => "zle",
+        };
+        write!(f, "{}", s)
+    }
+}
+
+impl FromStr for CompressionAlgorithm {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        use CompressionAlgorithm::*;
+        let c = match s {
+            "on" => On,
+            "" | "off" => Off,
+            "gzip" => Gzip,
+            "lz4" => Lz4,
+            "lzjb" => Lzjb,
+            "zle" => Zle,
+            _ => {
+                let Some(suffix) = s.strip_prefix("gzip-") else {
+                    bail!("Unknown compression algorithm {s}");
+                };
+                GzipN { level: suffix.parse()? }
+            }
+        };
+        Ok(c)
+    }
+}
+
 /// Configuration information necessary to request a single dataset
 #[derive(
     Clone,
@@ -155,14 +276,14 @@ pub struct DatasetConfig {
     /// The dataset's name
     pub name: DatasetName,
 
+    /// The compression mode to be used by the dataset
+    pub compression: CompressionAlgorithm,
+
     /// The upper bound on the amount of storage used by this dataset
-    pub quota: Option<u64>,
+    pub quota: Option<ByteCount>,
 
     /// The lower bound on the amount of storage usable by this dataset
-    pub reservation: Option<u64>,
-
-    /// The compression mode to be supplied, if any
-    pub compression: Option<String>,
+    pub reservation: Option<ByteCount>,
 }
 
 #[derive(

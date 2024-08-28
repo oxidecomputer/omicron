@@ -290,7 +290,7 @@ pub struct BpOmicronDataset {
 
     pub quota: Option<ByteCount>,
     pub reservation: Option<ByteCount>,
-    pub compression: Option<String>,
+    pub compression: String,
 }
 
 impl BpOmicronDataset {

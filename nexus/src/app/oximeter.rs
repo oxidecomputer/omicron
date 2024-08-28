@@ -12,7 +12,7 @@ use internal_dns::ServiceName;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
-use omicron_common::address::CLICKHOUSE_PORT;
+use omicron_common::address::CLICKHOUSE_HTTP_PORT;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::{DataPageParams, ListResultVec};
 use omicron_common::api::internal::nexus::{self, ProducerEndpoint};
@@ -65,7 +65,7 @@ impl LazyTimeseriesClient {
             ClientSource::FromIp { address } => *address,
             ClientSource::FromDns { resolver } => SocketAddr::new(
                 resolver.lookup_ip(ServiceName::Clickhouse).await?,
-                CLICKHOUSE_PORT,
+                CLICKHOUSE_HTTP_PORT,
             ),
         };
 

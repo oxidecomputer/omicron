@@ -543,7 +543,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.dataset (
 
     quota INT8,
     reservation INT8,
-    compression TEXT,
+    compression TEXT NOT NULL DEFAULT '',
 
     /* Crucible must make use of 'size_used'; other datasets manage their own storage */
     CONSTRAINT size_used_column_set_for_crucible CHECK (
@@ -2672,7 +2672,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_link_config (
     fec omicron.public.switch_link_fec,
     speed omicron.public.switch_link_speed,
     autoneg BOOL NOT NULL DEFAULT false,
-    lldp_link_config_id UUID NOT NULL,
+    lldp_link_config_id UUID,
 
     PRIMARY KEY (port_settings_id, link_name)
 );
@@ -3517,7 +3517,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_dataset (
 
     quota INT8,
     reservation INT8,
-    compression TEXT,
+    compression TEXT NOT NULL,
 
     CONSTRAINT zone_name_for_zone_kind CHECK (
       (kind != 'zone') OR
@@ -4305,7 +4305,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '93.0.0', NULL)
+    (TRUE, NOW(), NOW(), '95.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

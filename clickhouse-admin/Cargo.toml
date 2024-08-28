@@ -10,6 +10,7 @@ camino.workspace = true
 chrono.workspace = true
 clap.workspace = true
 clickhouse-admin-api.workspace = true
+clickhouse-admin-types.workspace = true
 dropshot.workspace = true
 http.workspace = true
 illumos-utils.workspace = true

@@ -781,16 +781,18 @@ pub struct BlueprintDatasetsConfig {
     pub datasets: BTreeMap<DatasetUuid, BlueprintDatasetConfig>,
 }
 
-impl From<BlueprintDatasetsConfig> for DatasetsConfig {
-    fn from(config: BlueprintDatasetsConfig) -> Self {
-        Self {
+impl TryFrom<BlueprintDatasetsConfig> for DatasetsConfig {
+    type Error = anyhow::Error;
+
+    fn try_from(config: BlueprintDatasetsConfig) -> Result<Self, Self::Error> {
+        Ok(Self {
             generation: config.generation,
             datasets: config
                 .datasets
                 .into_iter()
-                .map(|(id, d)| (id, d.into()))
-                .collect(),
-        }
+                .map(|(id, d)| Ok((id, d.try_into()?)))
+                .collect::<Result<_, anyhow::Error>>()?,
+        })
     }
 }
 
@@ -831,18 +833,20 @@ pub struct BlueprintDatasetConfig {
     pub address: Option<SocketAddrV6>,
     pub quota: Option<ByteCount>,
     pub reservation: Option<ByteCount>,
-    pub compression: Option<String>,
+    pub compression: String,
 }
 
-impl From<BlueprintDatasetConfig> for DatasetConfig {
-    fn from(config: BlueprintDatasetConfig) -> Self {
-        Self {
+impl TryFrom<BlueprintDatasetConfig> for DatasetConfig {
+    type Error = anyhow::Error;
+
+    fn try_from(config: BlueprintDatasetConfig) -> Result<Self, Self::Error> {
+        Ok(Self {
             id: config.id,
             name: DatasetName::new(config.pool, config.kind),
-            quota: config.quota.map(|q| q.to_bytes()),
-            reservation: config.reservation.map(|r| r.to_bytes()),
-            compression: config.compression,
-        }
+            quota: config.quota,
+            reservation: config.reservation,
+            compression: config.compression.parse()?,
+        })
     }
 }
 

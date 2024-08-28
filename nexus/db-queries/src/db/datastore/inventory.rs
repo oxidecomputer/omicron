@@ -2232,7 +2232,7 @@ mod test {
     }
 
     impl CollectionCounts {
-        async fn new(conn: &DataStoreConnection<'_>) -> anyhow::Result<Self> {
+        async fn new(conn: &DataStoreConnection) -> anyhow::Result<Self> {
             conn.transaction_async(|conn| async move {
                 conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL)
                     .await

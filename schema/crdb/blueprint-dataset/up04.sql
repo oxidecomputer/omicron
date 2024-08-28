@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_dataset (
 
     quota INT8,
     reservation INT8,
-    compression TEXT,
+    compression TEXT NOT NULL,
 
     CONSTRAINT zone_name_for_zone_kind CHECK (
       (kind != 'zone') OR

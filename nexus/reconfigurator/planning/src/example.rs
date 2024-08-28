@@ -145,7 +145,7 @@ impl ExampleSystem {
                     .get_mut(&bp_dataset.pool.id())
                     .unwrap();
                 let bp_config: omicron_common::disk::DatasetConfig =
-                    bp_dataset.clone().into();
+                    bp_dataset.clone().try_into().unwrap();
                 if !datasets.contains(&bp_config) {
                     datasets.push(bp_config);
                 }

@@ -4,7 +4,6 @@
 
 //! Configuration of the deployment system
 
-use nexus_db_model::DnsGroup;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_reconfigurator_planning::planner::Planner;
@@ -13,9 +12,7 @@ use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintTargetSet;
-use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::PlanningInput;
-use nexus_types::deployment::SledFilter;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -25,9 +22,6 @@ use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
-use omicron_common::policy::BOUNDARY_NTP_REDUNDANCY;
-use omicron_common::policy::COCKROACHDB_REDUNDANCY;
-use omicron_common::policy::NEXUS_REDUNDANCY;
 use slog_error_chain::InlineErrorChain;
 use uuid::Uuid;
 
@@ -132,64 +126,8 @@ impl super::Nexus {
     ) -> Result<PlanningContext, Error> {
         let creator = self.id.to_string();
         let datastore = self.datastore();
-
-        let sled_rows = datastore
-            .sled_list_all_batched(opctx, SledFilter::Commissioned)
-            .await?;
-        let zpool_rows =
-            datastore.zpool_list_all_external_batched(opctx).await?;
-        let dataset_rows =
-            datastore.dataset_list_all_batched(opctx, None).await?;
-        let ip_pool_range_rows = {
-            let (authz_service_ip_pool, _) =
-                datastore.ip_pools_service_lookup(opctx).await?;
-            datastore
-                .ip_pool_list_ranges_batched(opctx, &authz_service_ip_pool)
-                .await?
-        };
-        let external_ip_rows =
-            datastore.external_ip_list_service_all_batched(opctx).await?;
-        let service_nic_rows = datastore
-            .service_network_interfaces_all_list_batched(opctx)
-            .await?;
-
-        let internal_dns_version = datastore
-            .dns_group_latest_version(opctx, DnsGroup::Internal)
-            .await
-            .internal_context(
-                "fetching internal DNS version for blueprint planning",
-            )?
-            .version;
-        let external_dns_version = datastore
-            .dns_group_latest_version(opctx, DnsGroup::External)
-            .await
-            .internal_context(
-                "fetching external DNS version for blueprint planning",
-            )?
-            .version;
-        let cockroachdb_settings =
-            datastore.cockroachdb_settings(opctx).await.internal_context(
-                "fetching cockroachdb settings for blueprint planning",
-            )?;
-
-        let planning_input = PlanningInputFromDb {
-            sled_rows: &sled_rows,
-            zpool_rows: &zpool_rows,
-            dataset_rows: &dataset_rows,
-            ip_pool_range_rows: &ip_pool_range_rows,
-            external_ip_rows: &external_ip_rows,
-            service_nic_rows: &service_nic_rows,
-            target_boundary_ntp_zone_count: BOUNDARY_NTP_REDUNDANCY,
-            target_nexus_zone_count: NEXUS_REDUNDANCY,
-            target_cockroachdb_zone_count: COCKROACHDB_REDUNDANCY,
-            target_cockroachdb_cluster_version:
-                CockroachDbClusterVersion::POLICY,
-            log: &opctx.log,
-            internal_dns_version,
-            external_dns_version,
-            cockroachdb_settings: &cockroachdb_settings,
-        }
-        .build()?;
+        let planning_input =
+            PlanningInputFromDb::assemble(opctx, datastore).await?;
 
         // The choice of which inventory collection to use here is not
         // necessarily trivial.  Inventory collections may be incomplete due to

@@ -83,7 +83,7 @@ impl BlueprintExecutor {
                       "target_id" => %blueprint.id);
             return json!({
                 "target_id": blueprint.id.to_string(),
-                "error": "blueprint disabled"
+                "enabled": false,
             });
         }
 
@@ -111,6 +111,7 @@ impl BlueprintExecutor {
 
                 json!({
                     "target_id": blueprint.id.to_string(),
+                    "enabled": true,
                     "needs_saga_recovery": needs_saga_recovery,
                 })
             }
@@ -119,6 +120,7 @@ impl BlueprintExecutor {
                     errors.into_iter().map(|e| format!("{:#}", e)).collect();
                 json!({
                     "target_id": blueprint.id.to_string(),
+                    "enabled": true,
                     "errors": errors
                 })
             }
@@ -320,6 +322,7 @@ mod test {
             value,
             json!({
                 "target_id": blueprint_id,
+                "enabled": true,
                 "needs_saga_recovery": false,
             })
         );
@@ -415,6 +418,7 @@ mod test {
             value,
             json!({
                 "target_id": blueprint.1.id.to_string(),
+                "enabled": true,
                 "needs_saga_recovery": false,
             })
         );
@@ -432,7 +436,7 @@ mod test {
         assert_eq!(
             value,
             json!({
-                "error": "blueprint disabled",
+                "enabled": false,
                 "target_id": blueprint.1.id.to_string()
             })
         );

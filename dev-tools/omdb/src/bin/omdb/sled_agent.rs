@@ -61,7 +61,11 @@ enum ZpoolCommands {
 
 #[derive(Debug, Subcommand)]
 enum DatasetCommands {
-    /// Print list of all datasets managed by the sled agent
+    /// Print list of all datasets the sled agent is configured to manage
+    ///
+    /// Note that the set of actual datasets on the sled may be distinct,
+    /// use the `omdb db inventory collections show` command to see the latest
+    /// set of datasets collected from sleds.
     List,
 }
 

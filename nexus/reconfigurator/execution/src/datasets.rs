@@ -55,7 +55,12 @@ pub(crate) async fn deploy_datasets(
                 db_sled.sled_agent_address,
                 &log,
             );
-            let config: DatasetsConfig = config.clone().into();
+
+            let config: DatasetsConfig = match config.clone().try_into() {
+                Ok(config) => config,
+                Err(err) => return Some(err.into())
+            };
+
             let result =
                 client.datasets_put(&config).await.with_context(
                     || format!("Failed to put {config:#?} to sled {sled_id}"),
@@ -160,7 +165,7 @@ pub(crate) async fn ensure_dataset_records_exist(
         // in the database already.
         let action = if let Some(db_dataset) = existing_datasets.remove(&id) {
             let db_config: DatasetConfig = db_dataset.try_into()?;
-            let bp_config: DatasetConfig = bp_dataset.clone().into();
+            let bp_config: DatasetConfig = bp_dataset.clone().try_into()?;
 
             if db_config == bp_config {
                 num_unchanged += 1;
@@ -269,7 +274,7 @@ mod tests {
                         address: Some(dataset.address),
                         quota: None,
                         reservation: None,
-                        compression: None,
+                        compression: String::new(),
                     })
                 } else {
                     None
@@ -384,7 +389,7 @@ mod tests {
                 address: None,
                 quota: None,
                 reservation: None,
-                compression: None,
+                compression: String::new(),
             },
             BlueprintDatasetConfig {
                 disposition: BlueprintDatasetDisposition::InService,
@@ -394,7 +399,7 @@ mod tests {
                 address: None,
                 quota: None,
                 reservation: None,
-                compression: None,
+                compression: String::new(),
             },
         ];
 
@@ -456,11 +461,11 @@ mod tests {
         let first_dataset = &mut all_datasets[0];
         assert_eq!(first_dataset.quota, None);
         assert_eq!(first_dataset.reservation, None);
-        assert_eq!(first_dataset.compression, None);
+        assert_eq!(first_dataset.compression, "");
 
         first_dataset.quota = Some(ByteCount::from_kibibytes_u32(1));
         first_dataset.reservation = Some(ByteCount::from_kibibytes_u32(2));
-        first_dataset.compression = Some(String::from("pied_piper"));
+        first_dataset.compression = String::from("pied_piper");
         let _ = first_dataset;
 
         // Update the datastore
@@ -484,15 +489,12 @@ mod tests {
             .expect("Couldn't find dataset we tried to update?");
         let observed_dataset: DatasetConfig =
             observed_dataset.try_into().unwrap();
+        assert_eq!(observed_dataset.quota, first_dataset.quota,);
+        assert_eq!(observed_dataset.reservation, first_dataset.reservation,);
         assert_eq!(
-            observed_dataset.quota,
-            first_dataset.quota.map(|q| q.to_bytes())
+            observed_dataset.compression.to_string(),
+            first_dataset.compression,
         );
-        assert_eq!(
-            observed_dataset.reservation,
-            first_dataset.reservation.map(|r| r.to_bytes())
-        );
-        assert_eq!(observed_dataset.compression, first_dataset.compression);
     }
 
     #[nexus_test]
@@ -529,7 +531,7 @@ mod tests {
             address: None,
             quota: None,
             reservation: None,
-            compression: None,
+            compression: String::new(),
         });
         let EnsureDatasetsResult { inserted, updated, removed } =
             ensure_dataset_records_exist(opctx, datastore, all_datasets.iter())
@@ -631,7 +633,7 @@ mod tests {
             address: None,
             quota: None,
             reservation: None,
-            compression: None,
+            compression: String::new(),
         });
 
         let EnsureDatasetsResult { inserted, updated, removed } =

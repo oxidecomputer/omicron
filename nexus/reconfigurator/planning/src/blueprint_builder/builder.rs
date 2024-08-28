@@ -49,6 +49,7 @@ use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
+use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetName;
 use omicron_uuid_kinds::DatasetUuid;
@@ -727,14 +728,14 @@ impl<'a> BlueprintBuilder<'a> {
                     address,
                     Some(ByteCount::from_gibibytes_u32(100)),
                     None,
-                    None,
+                    CompressionAlgorithm::Off,
                 );
                 datasets_builder.ensure(
                     DatasetName::new(zpool, DatasetKind::ZoneRoot),
                     address,
                     None,
                     None,
-                    None,
+                    CompressionAlgorithm::Off,
                 );
             }
 
@@ -755,7 +756,7 @@ impl<'a> BlueprintBuilder<'a> {
                         address,
                         None,
                         None,
-                        None,
+                        CompressionAlgorithm::Off,
                     );
                 }
 
@@ -773,7 +774,7 @@ impl<'a> BlueprintBuilder<'a> {
                         address,
                         None,
                         None,
-                        None,
+                        CompressionAlgorithm::Off,
                     );
                 }
             }
@@ -1844,7 +1845,7 @@ impl<'a> BlueprintSledDatasetsBuilder<'a> {
         address: Option<SocketAddrV6>,
         quota: Option<ByteCount>,
         reservation: Option<ByteCount>,
-        compression: Option<String>,
+        compression: CompressionAlgorithm,
     ) {
         let zpool = dataset.pool();
         let zpool_id = zpool.id();
@@ -1858,7 +1859,7 @@ impl<'a> BlueprintSledDatasetsBuilder<'a> {
             address,
             quota,
             reservation,
-            compression,
+            compression: compression.to_string(),
         };
 
         // This dataset already exists in the blueprint
