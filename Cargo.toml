@@ -52,6 +52,8 @@ members = [
     "internal-dns",
     "ipcc",
     "key-manager",
+    "live-tests",
+    "live-tests/macros",
     "nexus",
     "nexus-config",
     "nexus-sled-agent-shared",
@@ -120,6 +122,7 @@ default-members = [
     "certificates",
     "clickhouse-admin",
     "clickhouse-admin/api",
+    "clickhouse-admin/types",
     "clients/bootstrap-agent-client",
     "clients/cockroach-admin-client",
     "clients/ddm-admin-client",
@@ -170,6 +173,9 @@ default-members = [
     "internal-dns",
     "ipcc",
     "key-manager",
+    # Do not include live-tests in the list of default members because its tests
+    # only work in a deployed system.  The macros can be here, though.
+    "live-tests/macros",
     "nexus",
     "nexus-config",
     "nexus-sled-agent-shared",
@@ -306,6 +312,7 @@ chrono = { version = "0.4", features = [ "serde" ] }
 ciborium = "0.2.2"
 clap = { version = "4.5", features = ["cargo", "derive", "env", "wrap_help"] }
 clickhouse-admin-api = { path = "clickhouse-admin/api" }
+clickhouse-admin-types = { path = "clickhouse-admin/types" }
 clickward = { git = "https://github.com/oxidecomputer/clickward", rev = "ceec762e6a87d2a22bf56792a3025e145caa095e" }
 cockroach-admin-api = { path = "cockroach-admin/api" }
 cockroach-admin-client = { path = "clients/cockroach-admin-client" }
@@ -330,7 +337,7 @@ debug-ignore = "1.0.5"
 derive_more = "0.99.18"
 derive-where = "1.2.7"
 # Having the i-implement-... feature here makes diesel go away from the workspace-hack
-diesel = { version = "2.2.2", features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes", "postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
+diesel = { version = "2.2.3", features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes", "postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 diesel-dtrace = { git = "https://github.com/oxidecomputer/diesel-dtrace", branch = "main" }
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
@@ -403,6 +410,7 @@ libc = "0.2.158"
 libfalcon = { git = "https://github.com/oxidecomputer/falcon", rev = "e69694a1f7cc9fe31fab27f321017280531fb5f7" }
 libnvme = { git = "https://github.com/oxidecomputer/libnvme", rev = "dd5bb221d327a1bc9287961718c3c10d6bd37da0" }
 linear-map = "1.2.0"
+live-tests-macros = { path = "live-tests/macros" }
 macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
 mockall = "0.13"
