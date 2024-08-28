@@ -2061,6 +2061,112 @@
           }
         ]
       },
+      "CompressionAlgorithm": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "on"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "off"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "gzip"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "level": {
+                "$ref": "#/components/schemas/GzipLevel"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "gzip_n"
+                ]
+              }
+            },
+            "required": [
+              "level",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "lz4"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "lzjb"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "zle"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
       "CrucibleOpts": {
         "description": "CrucibleOpts\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"id\", \"lossy\", \"read_only\", \"target\" ], \"properties\": { \"cert_pem\": { \"type\": [ \"string\", \"null\" ] }, \"control\": { \"type\": [ \"string\", \"null\" ] }, \"flush_timeout\": { \"type\": [ \"number\", \"null\" ], \"format\": \"float\" }, \"id\": { \"type\": \"string\", \"format\": \"uuid\" }, \"key\": { \"type\": [ \"string\", \"null\" ] }, \"key_pem\": { \"type\": [ \"string\", \"null\" ] }, \"lossy\": { \"type\": \"boolean\" }, \"read_only\": { \"type\": \"boolean\" }, \"root_cert_pem\": { \"type\": [ \"string\", \"null\" ] }, \"target\": { \"type\": \"array\", \"items\": { \"type\": \"string\" } } } } ``` </details>",
         "type": "object",
@@ -2119,9 +2225,12 @@
         "type": "object",
         "properties": {
           "compression": {
-            "nullable": true,
-            "description": "The compression mode to be supplied, if any",
-            "type": "string"
+            "description": "The compression mode to be used by the dataset",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CompressionAlgorithm"
+              }
+            ]
           },
           "id": {
             "description": "The UUID of the dataset being requested",
@@ -2155,6 +2264,7 @@
           }
         },
         "required": [
+          "compression",
           "id",
           "name"
         ]
@@ -2872,6 +2982,11 @@
         "description": "Generation numbers stored in the database, used for optimistic concurrency control",
         "type": "integer",
         "format": "uint64",
+        "minimum": 0
+      },
+      "GzipLevel": {
+        "type": "integer",
+        "format": "uint8",
         "minimum": 0
       },
       "HostIdentifier": {

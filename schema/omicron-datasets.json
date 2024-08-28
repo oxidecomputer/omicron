@@ -23,19 +23,127 @@
     }
   },
   "definitions": {
+    "CompressionAlgorithm": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "on"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "off"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "gzip"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "level",
+            "type"
+          ],
+          "properties": {
+            "level": {
+              "$ref": "#/definitions/GzipLevel"
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "gzip_n"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "lz4"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "lzjb"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "zle"
+              ]
+            }
+          }
+        }
+      ]
+    },
     "DatasetConfig": {
       "description": "Configuration information necessary to request a single dataset",
       "type": "object",
       "required": [
+        "compression",
         "id",
         "name"
       ],
       "properties": {
         "compression": {
-          "description": "The compression mode to be supplied, if any",
-          "type": [
-            "string",
-            "null"
+          "description": "The compression mode to be used by the dataset",
+          "allOf": [
+            {
+              "$ref": "#/definitions/CompressionAlgorithm"
+            }
           ]
         },
         "id": {
@@ -97,6 +205,11 @@
       "description": "Generation numbers stored in the database, used for optimistic concurrency control",
       "type": "integer",
       "format": "uint64",
+      "minimum": 0.0
+    },
+    "GzipLevel": {
+      "type": "integer",
+      "format": "uint8",
       "minimum": 0.0
     },
     "TypedUuidForDatasetKind": {
