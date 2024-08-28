@@ -8,15 +8,13 @@ use crate::deployment::{
     BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZonesConfig,
 };
 use camino::Utf8PathBuf;
-use clickward::config::{
-    KeeperConfig, KeeperConfigsForReplica, KeeperCoordinationSettings,
-    LogConfig, LogLevel, Macros, RaftServerConfig, RaftServers, RemoteServers,
-    ReplicaConfig, ServerConfig,
+use clickhouse_admin_types::{
+    ClickhouseKeeperConfig, ClickhouseServerConfig, KeeperId, ServerId,
 };
-use clickward::{KeeperId, ServerId};
 use omicron_common::address::{
-    CLICKHOUSE_HTTP_PORT, CLICKHOUSE_INTERSERVER_HTTP_PORT,
-    CLICKHOUSE_KEEPER_PORT, CLICKHOUSE_KEEPER_RAFT_PORT, CLICKHOUSE_TCP_PORT,
+    CLICKHOUSE_HTTP_PORT, CLICKHOUSE_INTERSERVER_PORT,
+    CLICKHOUSE_KEEPER_RAFT_PORT, CLICKHOUSE_KEEPER_TCP_PORT,
+    CLICKHOUSE_TCP_PORT,
 };
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::SledUuid;

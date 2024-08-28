@@ -341,7 +341,7 @@ pub mod blueprint_zone_type {
         Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize,
     )]
     pub struct ClickhouseKeeper {
-        pub keeper_id: clickward::KeeperId,
+        pub keeper_id: clickhouse_admin_types::KeeperId,
         pub address: SocketAddrV6,
         pub dataset: OmicronZoneDataset,
     }
@@ -351,7 +351,7 @@ pub mod blueprint_zone_type {
         Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize,
     )]
     pub struct ClickhouseServer {
-        pub server_id: clickward::ServerId,
+        pub server_id: clickhouse_admin_types::ServerId,
         pub address: SocketAddrV6,
         pub dataset: OmicronZoneDataset,
     }

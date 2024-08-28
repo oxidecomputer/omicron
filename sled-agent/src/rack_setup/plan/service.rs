@@ -739,13 +739,13 @@ impl Plan {
         // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
         // Temporary linter rule until replicated Clickhouse is enabled
         #[allow(clippy::reversed_empty_ranges)]
-        for _ in 0..CLICKHOUSE_SERVER_COUNT {
+        for id in 0..CLICKHOUSE_SERVER_COUNT as u64 {
             let sled = {
                 let which_sled =
                     sled_allocator.next().ok_or(PlanError::NotEnoughSleds)?;
                 &mut sled_info[which_sled]
             };
-            let id = OmicronZoneUuid::new_v4();
+            let zone_id = OmicronZoneUuid::new_v4();
             let ip = sled.addr_alloc.next().expect("Not enough addrs");
             // TODO: This may need to be a different port if/when to have single node
             // and replicated running side by side as per stage 1 of RFD 468.
@@ -753,7 +753,7 @@ impl Plan {
             let address = SocketAddrV6::new(ip, port, 0, 0);
             dns_builder
                 .host_zone_with_one_backend(
-                    id,
+                    zone_id,
                     ip,
                     ServiceName::ClickhouseServer,
                     port,
@@ -764,10 +764,11 @@ impl Plan {
             let filesystem_pool = Some(dataset_name.pool().clone());
             sled.request.zones.push(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
-                id,
+                id: zone_id,
                 underlay_address: ip,
                 zone_type: BlueprintZoneType::ClickhouseServer(
                     blueprint_zone_type::ClickhouseServer {
+                        server_id: id.into(),
                         address,
                         dataset: OmicronZoneDataset {
                             pool_name: dataset_name.pool().clone(),
@@ -782,19 +783,19 @@ impl Plan {
         // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
         // Temporary linter rule until replicated Clickhouse is enabled
         #[allow(clippy::reversed_empty_ranges)]
-        for _ in 0..CLICKHOUSE_KEEPER_COUNT {
+        for id in 0..CLICKHOUSE_KEEPER_COUNT as u64 {
             let sled = {
                 let which_sled =
                     sled_allocator.next().ok_or(PlanError::NotEnoughSleds)?;
                 &mut sled_info[which_sled]
             };
-            let id = OmicronZoneUuid::new_v4();
+            let zone_id = OmicronZoneUuid::new_v4();
             let ip = sled.addr_alloc.next().expect("Not enough addrs");
             let port = omicron_common::address::CLICKHOUSE_KEEPER_TCP_PORT;
             let address = SocketAddrV6::new(ip, port, 0, 0);
             dns_builder
                 .host_zone_with_one_backend(
-                    id,
+                    zone_id,
                     ip,
                     ServiceName::ClickhouseKeeper,
                     port,
@@ -805,10 +806,11 @@ impl Plan {
             let filesystem_pool = Some(dataset_name.pool().clone());
             sled.request.zones.push(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
-                id,
+                id: zone_id,
                 underlay_address: ip,
                 zone_type: BlueprintZoneType::ClickhouseKeeper(
                     blueprint_zone_type::ClickhouseKeeper {
+                        keeper_id: id.into(),
                         address,
                         dataset: OmicronZoneDataset {
                             pool_name: dataset_name.pool().clone(),

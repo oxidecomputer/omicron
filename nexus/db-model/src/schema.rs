@@ -1595,6 +1595,10 @@ table! {
         disposition -> crate::DbBpZoneDispositionEnum,
         external_ip_id -> Nullable<Uuid>,
         filesystem_pool -> Nullable<Uuid>,
+
+        clickhouse_keeper_id -> Nullable<Int8>,
+        clickhouse_server_id -> Nullable<Int8>
+
     }
 }
 

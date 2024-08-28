@@ -255,12 +255,12 @@ async fn handoff_to_nexus(
     log: &Logger,
     config: &Config,
     request: &NexusTypes::RackInitializationRequest,
+    rack_id: &Uuid,
 ) -> Result<(), anyhow::Error> {
     let nexus_client = NexusClient::new(
         &format!("http://{}", config.nexus_address),
         log.new(o!("component" => "NexusClient")),
     );
-    let rack_id = uuid::uuid!("c19a698f-c6f9-4a17-ae30-20d711b8f7dc");
 
     let notify_nexus = || async {
         nexus_client
@@ -548,8 +548,10 @@ pub async fn run_standalone_server(
         SledConfig { disks, zones },
     );
 
+    let rack_id = uuid::uuid!("c19a698f-c6f9-4a17-ae30-20d711b8f7dc");
     let rack_init_request = NexusTypes::RackInitializationRequest {
         blueprint: build_initial_blueprint_from_sled_configs(
+            &rack_id,
             &sled_configs,
             internal_dns_version,
         ),
@@ -576,7 +578,7 @@ pub async fn run_standalone_server(
         allowed_source_ips: NexusTypes::AllowedSourceIps::Any,
     };
 
-    handoff_to_nexus(&log, &config, &rack_init_request).await?;
+    handoff_to_nexus(&log, &config, &rack_init_request, &rack_id).await?;
     info!(log, "Handoff to Nexus is complete");
 
     server.wait_for_finish().await

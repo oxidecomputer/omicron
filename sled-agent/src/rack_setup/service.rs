@@ -91,7 +91,7 @@ use nexus_sled_agent_shared::inventory::{
 };
 use nexus_types::deployment::{
     blueprint_zone_type, Blueprint, BlueprintZoneType, BlueprintZonesConfig,
-    CockroachDbPreserveDowngrade,
+    ClickhouseClusterConfig, CockroachDbPreserveDowngrade,
 };
 use nexus_types::external_api::views::SledState;
 use omicron_common::address::get_sled_address;
@@ -692,6 +692,7 @@ impl ServiceInner {
                 .map_err(SetupServiceError::ConvertPlanToBlueprint)?;
         // ... and use that to derive the initial blueprint from our plan.
         let blueprint = build_initial_blueprint_from_plan(
+            &sled_plan.rack_id,
             &sled_configs_by_id,
             service_plan,
         )
@@ -1388,6 +1389,7 @@ fn build_sled_configs_by_id(
 
 // Build an initial blueprint
 fn build_initial_blueprint_from_plan(
+    rack_id: &Uuid,
     sled_configs_by_id: &BTreeMap<SledUuid, SledConfig>,
     service_plan: &ServicePlan,
 ) -> anyhow::Result<Blueprint> {
@@ -1396,6 +1398,7 @@ fn build_initial_blueprint_from_plan(
             .context("invalid internal dns version")?;
 
     let blueprint = build_initial_blueprint_from_sled_configs(
+        rack_id,
         sled_configs_by_id,
         internal_dns_version,
     );
@@ -1404,6 +1407,7 @@ fn build_initial_blueprint_from_plan(
 }
 
 pub(crate) fn build_initial_blueprint_from_sled_configs(
+    rack_id: &Uuid,
     sled_configs_by_id: &BTreeMap<SledUuid, SledConfig>,
     internal_dns_version: Generation,
 ) -> Blueprint {
@@ -1449,6 +1453,9 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
         cockroachdb_fingerprint: String::new(),
         cockroachdb_setting_preserve_downgrade:
             CockroachDbPreserveDowngrade::DoNotModify,
+        clickhouse_cluster_config: ClickhouseClusterConfig::new(
+            rack_id.to_string(),
+        ),
         time_created: Utc::now(),
         creator: "RSS".to_string(),
         comment: "initial blueprint from rack setup".to_string(),

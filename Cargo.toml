@@ -5,6 +5,7 @@ members = [
     "certificates",
     "clickhouse-admin",
     "clickhouse-admin/api",
+    "clickhouse-admin/types",
     "clients/bootstrap-agent-client",
     "clients/cockroach-admin-client",
     "clients/ddm-admin-client",

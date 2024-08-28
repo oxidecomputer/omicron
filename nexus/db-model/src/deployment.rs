@@ -259,6 +259,9 @@ pub struct BpOmicronZone {
 
     pub external_ip_id: Option<DbTypedUuid<ExternalIpKind>>,
     pub filesystem_pool: Option<DbTypedUuid<ZpoolKind>>,
+
+    clickhouse_keeper_id: Option<i64>,
+    clickhouse_server_id: Option<i64>,
 }
 
 impl BpOmicronZone {
@@ -308,6 +311,8 @@ impl BpOmicronZone {
             snat_ip: None,
             snat_first_port: None,
             snat_last_port: None,
+            clickhouse_keeper_id: None,
+            clickhouse_server_id: None,
         };
 
         match &blueprint_zone.zone_type {
@@ -350,18 +355,40 @@ impl BpOmicronZone {
                 bp_omicron_zone.set_zpool_name(dataset);
             }
             BlueprintZoneType::ClickhouseKeeper(
-                blueprint_zone_type::ClickhouseKeeper { address, dataset },
+                blueprint_zone_type::ClickhouseKeeper {
+                    keeper_id,
+                    address,
+                    dataset,
+                },
             ) => {
                 // Set the common fields
                 bp_omicron_zone.set_primary_service_ip_and_port(address);
                 bp_omicron_zone.set_zpool_name(dataset);
+
+                // Set the zone specific fields
+                bp_omicron_zone.clickhouse_keeper_id = Some(
+                    keeper_id
+                        .0
+                        .try_into()
+                        .expect("no more than 2^63 keeper IDs please"),
+                );
             }
             BlueprintZoneType::ClickhouseServer(
-                blueprint_zone_type::ClickhouseServer { address, dataset },
+                blueprint_zone_type::ClickhouseServer {
+                    server_id,
+                    address,
+                    dataset,
+                },
             ) => {
                 // Set the common fields
                 bp_omicron_zone.set_primary_service_ip_and_port(address);
                 bp_omicron_zone.set_zpool_name(dataset);
+
+                // Set the zone specific fields
+                bp_omicron_zone.clickhouse_server_id =
+                    Some(server_id.0.try_into().expect(
+                        "no more than 2^63 clickhouse server IDs please",
+                    ));
             }
             BlueprintZoneType::CockroachDb(
                 blueprint_zone_type::CockroachDb { address, dataset },
