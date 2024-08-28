@@ -1228,7 +1228,23 @@ impl super::Nexus {
                         authz_instance,
                     },
                 )?;
-                self.start_instance_update(&opctx.log, saga, instance_id)
+                // Unlike `notify_vmm_updated`, which spawns the update
+                // saga in a "fire and forget" fashion so that it can return a
+                // HTTP 200 OK as soon as the changed VMM records are persisted
+                // to the database, `mark_vmm_failed` performs the instance
+                // update "synchronously". This is so that we can make a
+                // best-effort attempt to ensure that the instance record will
+                // be in the failed state prior to returning an error to the
+                // caller. That way, the caller will not see an error when
+                // attempting to transition their instance's state, and then,
+                // upon fetching the instance, transiently see an instance state
+                // suggesting it's "doing fine" until the update saga completes.
+                //
+                // TODO(eliza): to provide more assurance that the update has
+                // run to completion before returning an error, we could retry
+                // here...at least when the update saga fails due to the lock
+                // being held.
+                self.update_instance(&opctx.log, saga, instance_id).await;
             }
             // XXX: It's not clear what to do with this error; should it be
             // bubbled back up to the caller?
@@ -1388,7 +1404,7 @@ impl super::Nexus {
                 "vmm_state" => ?new_runtime_state.vmm_state,
                 "migration_state" => ?new_runtime_state.migrations(),
             );
-            self.start_instance_update(&opctx.log, saga, instance_id);
+            tokio::spawn(self.update_instance(&opctx.log, saga, instance_id));
         }
 
         Ok(())
@@ -1828,17 +1844,25 @@ impl super::Nexus {
             })
     }
 
-    fn start_instance_update(
+    /// Returns a future that executes the [instance-update saga] represented by
+    /// the provided [`steno::SagaDag`].
+    ///
+    /// The instance-update saga may be executed in the calling function by
+    /// `await`ing the returned future, or spawned to run in the background
+    /// using `tokio::spawn`.
+    ///
+    /// [instance-update saga]: crate::app::sagas::instance_update
+    fn update_instance(
         &self,
         log: &slog::Logger,
         saga: steno::SagaDag,
         instance_id: InstanceUuid,
-    ) {
+    ) -> impl std::future::Future<Output = ()> + Send {
         let sagas = self.sagas.clone();
         let task_instance_updater =
             self.background_tasks.task_instance_updater.clone();
         let log = log.clone();
-        tokio::spawn(async move {
+        async move {
             debug!(
                 &log,
                 "preparing instance-update saga for {instance_id}...";
@@ -1878,7 +1902,7 @@ impl super::Nexus {
                 // to try and start it again in a timely manner.
                 task_instance_updater.activate();
             }
-        });
+        }
     }
 }
 
