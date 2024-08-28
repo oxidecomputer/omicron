@@ -40,17 +40,17 @@ impl ServerContext {
         };
 
         // Track from 1 microsecond == 1e3 nanoseconds
-        const START_LATENCY_DECADE: u16 = 3;
+        const LATENCY_START_POWER: u16 = 3;
         // To 1000s == 1e9 * 1e3 == 1e12 nanoseconds
-        const END_LATENCY_DECADE: u16 = 12;
+        const LATENCY_END_POWER: u16 = 12;
         let latencies =
             oximeter_instruments::http::LatencyTracker::with_log_linear_bins(
                 oximeter_instruments::http::HttpService {
                     name: "management-gateway-service".into(),
                     id,
                 },
-                START_LATENCY_DECADE,
-                END_LATENCY_DECADE,
+                LATENCY_START_POWER,
+                LATENCY_END_POWER,
             )
             .expect("start and end decades are hardcoded and should be valid");
 

@@ -147,13 +147,13 @@ impl ServerContext {
                 id: config.deployment.id,
             };
             // Start at 1 microsecond == 1e3 nanoseconds.
-            const START_LATENCY_DECADE: u16 = 3;
+            const LATENCY_START_POWER: u16 = 3;
             // End at 1000s == (1e9 * 1e3) == 1e12 nanoseconds.
-            const END_LATENCY_DECADE: u16 = 12;
+            const LATENCY_END_POWER: u16 = 12;
             LatencyTracker::with_log_linear_bins(
                 target,
-                START_LATENCY_DECADE,
-                END_LATENCY_DECADE,
+                LATENCY_START_POWER,
+                LATENCY_END_POWER,
             )
             .unwrap()
         };
