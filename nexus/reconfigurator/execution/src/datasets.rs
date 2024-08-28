@@ -58,7 +58,7 @@ pub(crate) async fn deploy_datasets(
 
             let config: DatasetsConfig = match config.clone().try_into() {
                 Ok(config) => config,
-                Err(err) => return Some(err.into())
+                Err(err) => return Some(err)
             };
 
             let result =

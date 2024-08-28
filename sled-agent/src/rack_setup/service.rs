@@ -96,7 +96,6 @@ use nexus_types::deployment::{
 };
 use nexus_types::external_api::views::SledState;
 use omicron_common::address::get_sled_address;
-use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use omicron_common::api::internal::shared::LldpAdminStatus;
@@ -1440,10 +1439,8 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
                     kind: d.name.dataset().clone(),
                     address,
                     compression: d.compression.to_string(),
-                    quota: d.quota.map(|q| ByteCount::try_from(q).unwrap()),
-                    reservation: d
-                        .reservation
-                        .map(|r| ByteCount::try_from(r).unwrap()),
+                    quota: d.quota,
+                    reservation: d.reservation,
                 },
             );
         }
