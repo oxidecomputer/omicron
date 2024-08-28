@@ -1128,6 +1128,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "clickhouse-admin-types"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "camino",
+ "camino-tempfile",
+ "derive_more",
+ "expectorate",
+ "omicron-common",
+ "omicron-workspace-hack",
+ "schemars",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "clickward"
 version = "0.1.0"
 source = "git+https://github.com/oxidecomputer/clickward?rev=ceec762e6a87d2a22bf56792a3025e145caa095e#ceec762e6a87d2a22bf56792a3025e145caa095e"
@@ -5850,6 +5866,7 @@ dependencies = [
  "chrono",
  "clap",
  "clickhouse-admin-api",
+ "clickhouse-admin-types",
  "dropshot 0.10.2-dev",
  "expectorate",
  "http 0.2.12",
