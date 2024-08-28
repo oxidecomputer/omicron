@@ -1,12 +1,11 @@
 See README.adoc for more information
 
-Usage: nexus [OPTIONS] [CONFIG_FILE_PATH]
+Usage: nexus [CONFIG_FILE_PATH]
 
 Arguments:
   [CONFIG_FILE_PATH]  
 
 Options:
-  -O, --openapi  Print the external OpenAPI Spec document and exit
-  -h, --help     Print help
+  -h, --help  Print help
 
 nexus: CONFIG_FILE_PATH is required
