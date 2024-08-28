@@ -53,18 +53,6 @@ use uuid::Uuid;
 #[macro_use]
 extern crate slog;
 
-/// Run the OpenAPI generator for the external API, which emits the OpenAPI spec
-/// to stdout.
-pub fn run_openapi_external() -> Result<(), String> {
-    external_api()
-        .openapi("Oxide Region API", "20240821.0")
-        .description("API for interacting with the Oxide control plane")
-        .contact_url("https://oxide.computer")
-        .contact_email("api@oxide.computer")
-        .write(&mut std::io::stdout())
-        .map_err(|e| e.to_string())
-}
-
 /// A partially-initialized Nexus server, which exposes an internal interface,
 /// but is not ready to receive external requests.
 pub struct InternalServer {
