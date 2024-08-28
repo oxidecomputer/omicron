@@ -116,7 +116,8 @@ impl LatencyTracker {
     /// This creates a tracker for the `service`, using 10 bins per power of 10,
     /// from `[10 ** start_power, 10 ** end_power)`.
     ///
-    /// [`RequestLatencyHistogram::with_latency_decades`] for details on the arguments.
+    /// [`RequestLatencyHistogram::with_log_linear_bins`] for details on the
+    /// arguments.
     pub fn with_log_linear_bins(
         service: HttpService,
         start_power: u16,
