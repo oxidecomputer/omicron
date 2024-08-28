@@ -4464,7 +4464,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c2a198fb6b0eada2a8df47933734e6d35d350665a33a3593d7164fa52c75c19"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -5220,6 +5220,24 @@ dependencies = [
  "oxnet",
  "rand",
  "serde_json",
+]
+
+[[package]]
+name = "nexus-external-api"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "dropshot 0.10.2-dev",
+ "http 0.2.12",
+ "hyper 0.14.30",
+ "ipnetwork",
+ "nexus-types",
+ "omicron-common",
+ "omicron-workspace-hack",
+ "openapi-manager-types",
+ "openapiv3",
+ "oximeter-types",
+ "oxql-types",
 ]
 
 [[package]]
@@ -6178,6 +6196,7 @@ dependencies = [
  "nexus-db-model",
  "nexus-db-queries",
  "nexus-defaults",
+ "nexus-external-api",
  "nexus-internal-api",
  "nexus-inventory",
  "nexus-metrics-producer-gc",
@@ -6763,6 +6782,7 @@ dependencies = [
  "gateway-api",
  "indent_write",
  "installinator-api",
+ "nexus-external-api",
  "nexus-internal-api",
  "omicron-workspace-hack",
  "openapi-lint",

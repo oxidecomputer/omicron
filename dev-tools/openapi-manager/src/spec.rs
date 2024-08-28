@@ -80,6 +80,16 @@ pub fn all_apis() -> Vec<ApiSpec> {
             extra_validation: None,
         },
         ApiSpec {
+            title: "Oxide Region API",
+            version: "20240821.0",
+            description: "API for interacting with the Oxide control plane",
+            boundary: ApiBoundary::External,
+            api_description:
+                nexus_external_api::nexus_external_api_mod::stub_api_description,
+            filename: "nexus.json",
+            extra_validation: Some(nexus_external_api::validate_api),
+        },
+        ApiSpec {
             title: "Nexus internal API",
             version: "0.0.1",
             description: "Nexus internal API",

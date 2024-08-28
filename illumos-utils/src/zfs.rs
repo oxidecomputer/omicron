@@ -513,10 +513,10 @@ impl Zfs {
         compression: CompressionAlgorithm,
     ) -> Result<(), EnsureFilesystemError> {
         let quota = quota
-            .map(|q| q.to_string())
+            .map(|q| q.to_bytes().to_string())
             .unwrap_or_else(|| String::from("none"));
         let reservation = reservation
-            .map(|r| r.to_string())
+            .map(|r| r.to_bytes().to_string())
             .unwrap_or_else(|| String::from("none"));
         let compression = compression.to_string();
 

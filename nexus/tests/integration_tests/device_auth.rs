@@ -4,11 +4,11 @@
 
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::views::{
-    DeviceAccessTokenGrant, DeviceAccessTokenType, DeviceAuthResponse,
-};
-use omicron_nexus::external_api::device_auth::{
-    DeviceAccessTokenRequest, DeviceAuthRequest, DeviceAuthVerify,
+use nexus_types::external_api::{
+    params::{DeviceAccessTokenRequest, DeviceAuthRequest, DeviceAuthVerify},
+    views::{
+        DeviceAccessTokenGrant, DeviceAccessTokenType, DeviceAuthResponse,
+    },
 };
 
 use http::{header, method::Method, StatusCode};
