@@ -7,7 +7,6 @@
 use std::net::{IpAddr, Ipv6Addr};
 
 use crate::Nexus;
-use chrono::Utc;
 use nexus_db_model::{
     ByteCount, ExternalIp, InstanceState, IpAttachState, Ipv4NatEntry,
     SledReservationConstraints, SledResource, VmmState,
@@ -113,32 +112,6 @@ pub async fn create_and_insert_vmm_record(
         .map_err(ActionError::action_failed)?;
 
     Ok(vmm)
-}
-
-/// Given a previously-inserted VMM record, set its state to `SagaUnwound` and
-/// then delete it.
-///
-/// This function succeeds idempotently if called with the same parameters,
-/// provided that the VMM record was not changed by some other actor after the
-/// calling saga inserted it.
-///
-/// This function is intended to be called when a saga which created a VMM
-/// record unwinds.
-pub async fn unwind_vmm_record(
-    datastore: &DataStore,
-    opctx: &OpContext,
-    prev_record: &db::model::Vmm,
-) -> Result<(), anyhow::Error> {
-    let new_runtime = db::model::VmmRuntimeState {
-        state: db::model::VmmState::SagaUnwound,
-        time_state_updated: Utc::now(),
-        gen: prev_record.runtime.gen.next().into(),
-    };
-
-    let prev_id = PropolisUuid::from_untyped_uuid(prev_record.id);
-    datastore.vmm_update_runtime(&prev_id, &new_runtime).await?;
-    datastore.vmm_mark_deleted(&opctx, &prev_id).await?;
-    Ok(())
 }
 
 /// Allocates a new IPv6 address for a propolis instance that will run on the

@@ -342,18 +342,15 @@ async fn sim_destroy_vmm_record(
         &params.serialized_authn,
     );
 
-    let vmm = sagactx
-        .lookup::<db::model::Vmm>(REGISTERED_VMM_RECORD)
-        .or_else(|_| sagactx.lookup::<db::model::Vmm>(INITIAL_VMM_RECORD))?;
-    info!(osagactx.log(), "destroying vmm record for migration unwind";
-          "propolis_id" => %vmm.id);
+    let propolis_id = sagactx.lookup::<PropolisUuid>("dst_propolis_id")?;
+    info!(
+        osagactx.log(),
+        "destroying vmm record for migration unwind";
+        "propolis_id" => %propolis_id,
+    );
 
-    super::instance_common::unwind_vmm_record(
-        osagactx.datastore(),
-        &opctx,
-        &vmm,
-    )
-    .await
+    osagactx.datastore().vmm_mark_saga_unwound(&opctx, &propolis_id).await?;
+    Ok(())
 }
 
 async fn sim_set_migration_ids(

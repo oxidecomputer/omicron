@@ -217,15 +217,15 @@ async fn sis_destroy_vmm_record(
         &params.serialized_authn,
     );
 
-    let vmm = sagactx
-        .lookup::<db::model::Vmm>(REGISTERED_VMM_RECORD)
-        .or_else(|_| sagactx.lookup::<db::model::Vmm>(INITIAL_VMM_RECORD))?;
-    super::instance_common::unwind_vmm_record(
-        osagactx.datastore(),
-        &opctx,
-        &vmm,
-    )
-    .await
+    let propolis_id = sagactx.lookup::<PropolisUuid>("propolis_id")?;
+    info!(
+        osagactx.log(),
+        "destroying vmm record for start saga unwind";
+        "propolis_id" => %propolis_id,
+    );
+
+    osagactx.datastore().vmm_mark_saga_unwound(&opctx, &propolis_id).await?;
+    Ok(())
 }
 
 async fn sis_move_to_starting(

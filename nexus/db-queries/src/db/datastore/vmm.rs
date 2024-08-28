@@ -82,11 +82,9 @@ impl DataStore {
         opctx: &OpContext,
         vmm_id: &PropolisUuid,
     ) -> UpdateResult<bool> {
-        let valid_states = vec![DbVmmState::Destroyed, DbVmmState::Failed];
-
         let updated = diesel::update(dsl::vmm)
             .filter(dsl::id.eq(vmm_id.into_untyped_uuid()))
-            .filter(dsl::state.eq_any(valid_states))
+            .filter(dsl::state.eq_any(DbVmmState::DESTROYABLE_STATES))
             .filter(dsl::time_deleted.is_null())
             .set(dsl::time_deleted.eq(Utc::now()))
             .check_if_exists::<Vmm>(vmm_id.into_untyped_uuid())
@@ -307,6 +305,40 @@ impl DataStore {
             })
     }
 
+    /// Transitions a VMM to the `SagaUnwound` state.
+    ///
+    /// This may *only* be called by the saga that created a VMM record.
+    pub async fn vmm_mark_saga_unwound(
+        &self,
+        opctx: &OpContext,
+        vmm_id: &PropolisUuid,
+    ) -> Result<bool, Error> {
+        diesel::update(dsl::vmm)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(vmm_id.into_untyped_uuid()))
+            .set((
+                dsl::state.eq(DbVmmState::SagaUnwound),
+                dsl::time_state_updated.eq(chrono::Utc::now()),
+                dsl::state_generation.eq(dsl::state_generation + 1),
+            ))
+            .check_if_exists::<Vmm>(vmm_id.into_untyped_uuid())
+            .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map(|r| match r.status {
+                UpdateStatus::Updated => true,
+                UpdateStatus::NotUpdatedButExists => false,
+            })
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Vmm,
+                        LookupType::ById(vmm_id.into_untyped_uuid()),
+                    ),
+                )
+            })
+    }
+
     /// Forcibly overwrites the Propolis IP/Port in the supplied VMM's record with
     /// the supplied Propolis IP.
     ///
@@ -357,7 +389,7 @@ impl DataStore {
 
         paginated(dsl::vmm, dsl::id, pagparams)
             // In order to be considered "abandoned", a VMM must be:
-            // - in the `Destroyed` or `SagaUnwound` state
+            // - in the `Destroyed`, `SagaUnwound`, or `Failed` states
             .filter(dsl::state.eq_any(DbVmmState::DESTROYABLE_STATES))
             // - not deleted yet
             .filter(dsl::time_deleted.is_null())

@@ -48,7 +48,7 @@ impl VmmState {
     /// States in which it is safe to deallocate a VMM's sled resources and mark
     /// it as deleted.
     pub const DESTROYABLE_STATES: &'static [Self] =
-        &[Self::Destroyed, Self::SagaUnwound];
+        &[Self::Destroyed, Self::Failed, Self::SagaUnwound];
 
     pub const TERMINAL_STATES: &'static [Self] =
         &[Self::Destroyed, Self::Failed];
