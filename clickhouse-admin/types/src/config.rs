@@ -2,10 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// This Source Code Form is subject to the terms of the Mozilla Public
-// License, v. 2.0. If a copy of the MPL was not distributed with this
-// file, You can obtain one at https://mozilla.org/MPL/2.0/.
-
 use crate::{KeeperId, ServerId, OXIMETER_CLUSTER};
 use camino::Utf8PathBuf;
 use omicron_common::address::{
@@ -253,10 +249,21 @@ impl KeeperConfigsForReplica {
         let mut s = String::from("    <zookeeper>");
         for node in &self.nodes {
             let KeeperNodeConfig { host, port } = node;
+
+            // ClickHouse servers have a small quirk, where when setting the
+            // keeper hosts as IPv6 addresses in the replica configuration file,
+            // they must be wrapped in square brackets.
+            // Otherwise, when running any query, a "Service not found" error
+            // appears.
+            let parsed_host = match host.parse::<Ipv6Addr>() {
+                Ok(_) => format!("[{host}]"),
+                Err(_) => host.to_string(),
+            };
+
             s.push_str(&format!(
                 "
         <node>
-            <host>{host}</host>
+            <host>{parsed_host}</host>
             <port>{port}</port>
         </node>",
             ));

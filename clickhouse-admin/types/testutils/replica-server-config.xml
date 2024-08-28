@@ -90,15 +90,15 @@
         
     <zookeeper>
         <node>
-            <host>ff::01</host>
+            <host>[ff::01]</host>
             <port>9181</port>
         </node>
         <node>
-            <host>ff::02</host>
+            <host>127.0.0.1</host>
             <port>9181</port>
         </node>
         <node>
-            <host>ff::03</host>
+            <host>we.dont.want.brackets.com</host>
             <port>9181</port>
         </node>
     </zookeeper>

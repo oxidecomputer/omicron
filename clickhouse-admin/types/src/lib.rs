@@ -4,10 +4,11 @@
 
 use anyhow::Result;
 use camino::Utf8PathBuf;
+use camino_tempfile::NamedUtf8TempFile;
 use derive_more::{Add, AddAssign, Display, From};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::fs::File;
+use std::fs::rename;
 use std::io::Write;
 use std::net::Ipv6Addr;
 
@@ -90,10 +91,13 @@ impl ClickhouseServerConfig {
             self.keepers.clone(),
             self.datastore_path.clone(),
         );
-        let mut f =
-            File::create(self.config_dir.join("replica-server-config.xml"))?;
+
+        // Writing to a temporary file and then renaming it will ensure we
+        // don't end up with a partially written file after a crash
+        let mut f = NamedUtf8TempFile::new()?;
         f.write_all(config.to_xml().as_bytes())?;
         f.flush()?;
+        rename(f.path(), self.config_dir.join("replica-server-config.xml"))?;
         Ok(())
     }
 }
@@ -137,10 +141,12 @@ impl ClickhouseKeeperConfig {
             raft_config,
         );
 
-        let mut f = File::create(self.config_dir.join("keeper-config.xml"))?;
+        // Writing to a temporary file and then renaming it will ensure we
+        // don't end up with a partially written file after a crash
+        let mut f = NamedUtf8TempFile::new()?;
         f.write_all(config.to_xml().as_bytes())?;
         f.flush()?;
-
+        rename(f.path(), self.config_dir.join("keeper-config.xml"))?;
         Ok(())
     }
 }
@@ -204,8 +210,8 @@ mod tests {
 
         let keepers = vec![
             KeeperNodeConfig::new("ff::01".to_string()),
-            KeeperNodeConfig::new("ff::02".to_string()),
-            KeeperNodeConfig::new("ff::03".to_string()),
+            KeeperNodeConfig::new("127.0.0.1".to_string()),
+            KeeperNodeConfig::new("we.dont.want.brackets.com".to_string()),
         ];
 
         let servers = vec![
