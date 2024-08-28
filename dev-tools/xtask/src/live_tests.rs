@@ -135,10 +135,10 @@ pub fn run_cmd(_args: Args) -> Result<()> {
     // default /tmp which requires that stuff be in-memory.  That can lead to
     // great sadness if the tests wind up writing a lot of data.
     //
-    // --bound=all is required to cause nextest to *not* ignore these tests,
-    // since they're not in the default filter set.
+    // nextest configuration for these tests is specified in the "live-tests"
+    // profile.
     let raw = &[
-        "TMPDIR=/var/tmp ./cargo-nextest nextest run --bound=all \\",
+        "TMPDIR=/var/tmp ./cargo-nextest nextest run --profile=live-tests \\",
         &format!(
             "--archive-file {}/{} \\",
             NAME,
