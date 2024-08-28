@@ -4,7 +4,7 @@
 
 //! Types for representing the hardware/software inventory in the database
 
-use crate::omicron_zone_config::{OmicronZone, OmicronZoneNic};
+use crate::omicron_zone_config::{self, OmicronZoneNic};
 use crate::schema::{
     hw_baseboard_id, inv_caboose, inv_collection, inv_collection_error,
     inv_omicron_zone, inv_omicron_zone_nic, inv_physical_disk,
@@ -18,7 +18,7 @@ use crate::{
     impl_enum_type, ipv6, ByteCount, Generation, MacAddr, Name, ServiceKind,
     SqlU16, SqlU32, SqlU8,
 };
-use anyhow::anyhow;
+use anyhow::{anyhow, bail, Context, Result};
 use chrono::DateTime;
 use chrono::Utc;
 use diesel::backend::Backend;
@@ -28,13 +28,15 @@ use diesel::pg::Pg;
 use diesel::serialize::ToSql;
 use diesel::{serialize, sql_types};
 use ipnetwork::IpNetwork;
+use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
 use nexus_sled_agent_shared::inventory::{
-    OmicronZoneConfig, OmicronZonesConfig,
+    OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
 };
 use nexus_types::inventory::{
     BaseboardId, Caboose, Collection, PowerState, RotPage, RotSlot,
 };
 use omicron_common::api::internal::shared::NetworkInterface;
+use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::CollectionKind;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid;
@@ -42,6 +44,7 @@ use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolKind;
 use omicron_uuid_kinds::ZpoolUuid;
+use std::net::{IpAddr, SocketAddrV6};
 use uuid::Uuid;
 
 // See [`nexus_types::inventory::PowerState`].
@@ -1090,73 +1093,358 @@ impl InvOmicronZone {
         sled_id: SledUuid,
         zone: &OmicronZoneConfig,
     ) -> Result<InvOmicronZone, anyhow::Error> {
-        // Inventory zones do not know the external IP ID.
-        let external_ip_id = None;
-        let zone = OmicronZone::new(
-            sled_id,
-            zone.id,
-            zone.underlay_address,
-            zone.filesystem_pool.as_ref().map(|pool| pool.id()),
-            &zone.zone_type,
-            external_ip_id,
-        )?;
-        Ok(Self {
+        // Create a dummy record to start, then fill in the rest
+        // according to the zone type
+        let mut inv_omicron_zone = InvOmicronZone {
+            // Fill in the known fields that don't require inspecting
+            // `zone.zone_type`
             inv_collection_id: inv_collection_id.into(),
-            sled_id: zone.sled_id.into(),
+            sled_id: sled_id.into(),
             id: zone.id,
-            underlay_address: zone.underlay_address,
-            zone_type: zone.zone_type,
-            primary_service_ip: zone.primary_service_ip,
-            primary_service_port: zone.primary_service_port,
-            second_service_ip: zone.second_service_ip,
-            second_service_port: zone.second_service_port,
-            dataset_zpool_name: zone.dataset_zpool_name,
-            nic_id: zone.nic_id,
-            dns_gz_address: zone.dns_gz_address,
-            dns_gz_address_index: zone.dns_gz_address_index,
-            ntp_ntp_servers: zone.ntp_ntp_servers,
-            ntp_dns_servers: zone.ntp_dns_servers,
-            ntp_domain: zone.ntp_domain,
-            nexus_external_tls: zone.nexus_external_tls,
-            nexus_external_dns_servers: zone.nexus_external_dns_servers,
-            snat_ip: zone.snat_ip,
-            snat_first_port: zone.snat_first_port,
-            snat_last_port: zone.snat_last_port,
-            filesystem_pool: zone.filesystem_pool.map(|id| id.into()),
-        })
+            underlay_address: zone.underlay_address.into(),
+            filesystem_pool: zone
+                .filesystem_pool
+                .as_ref()
+                .map(|pool| pool.id().into()),
+
+            // Set the remainder of the fields to a default
+            zone_type: ZoneType::BoundaryNtp,
+            primary_service_ip: "::1"
+                .parse::<std::net::Ipv6Addr>()
+                .unwrap()
+                .into(),
+            primary_service_port: 0.into(),
+            second_service_ip: None,
+            second_service_port: None,
+            dataset_zpool_name: None,
+            nic_id: None,
+            dns_gz_address: None,
+            dns_gz_address_index: None,
+            ntp_ntp_servers: None,
+            ntp_dns_servers: None,
+            ntp_domain: None,
+            nexus_external_tls: None,
+            nexus_external_dns_servers: None,
+            snat_ip: None,
+            snat_first_port: None,
+            snat_last_port: None,
+        };
+
+        match &zone.zone_type {
+            OmicronZoneType::BoundaryNtp {
+                address,
+                ntp_servers,
+                dns_servers,
+                domain,
+                nic,
+                snat_cfg,
+            } => {
+                // Set the common fields
+                inv_omicron_zone.set_primary_service_ip_and_port(address);
+                inv_omicron_zone.zone_type = ZoneType::BoundaryNtp;
+
+                // Set the zone specific fields
+                let (first_port, last_port) = snat_cfg.port_range_raw();
+                inv_omicron_zone.ntp_ntp_servers = Some(ntp_servers.clone());
+                inv_omicron_zone.ntp_dns_servers = Some(
+                    dns_servers
+                        .into_iter()
+                        .cloned()
+                        .map(IpNetwork::from)
+                        .collect(),
+                );
+                inv_omicron_zone.ntp_domain.clone_from(domain);
+                inv_omicron_zone.snat_ip = Some(IpNetwork::from(snat_cfg.ip));
+                inv_omicron_zone.snat_first_port =
+                    Some(SqlU16::from(first_port));
+                inv_omicron_zone.snat_last_port = Some(SqlU16::from(last_port));
+                inv_omicron_zone.nic_id = Some(nic.id);
+            }
+            OmicronZoneType::Clickhouse { address, dataset } => {
+                // Set the common fields
+                inv_omicron_zone.set_primary_service_ip_and_port(address);
+                inv_omicron_zone.set_zpool_name(dataset);
+                inv_omicron_zone.zone_type = ZoneType::Clickhouse;
+            }
+            OmicronZoneType::ClickhouseKeeper { address, dataset } => {
+                // Set the common fields
+                inv_omicron_zone.set_primary_service_ip_and_port(address);
+                inv_omicron_zone.set_zpool_name(dataset);
+                inv_omicron_zone.zone_type = ZoneType::ClickhouseKeeper;
+            }
+            OmicronZoneType::ClickhouseServer { address, dataset } => {
+                // Set the common fields
+                inv_omicron_zone.set_primary_service_ip_and_port(address);
+                inv_omicron_zone.set_zpool_name(dataset);
+                inv_omicron_zone.zone_type = ZoneType::ClickhouseServer;
+            }
+            OmicronZoneType::CockroachDb { address, dataset } => {
+                // Set the common fields
+                inv_omicron_zone.set_primary_service_ip_and_port(address);
+                inv_omicron_zone.set_zpool_name(dataset);
+                inv_omicron_zone.zone_type = ZoneType::CockroachDb;
+            }
+            OmicronZoneType::Crucible { address, dataset } => {
+                // Set the common fields
+                inv_omicron_zone.set_primary_service_ip_and_port(address);
+                inv_omicron_zone.set_zpool_name(dataset);
+                inv_omicron_zone.zone_type = ZoneType::Crucible;
+            }
+            OmicronZoneType::CruciblePantry { address } => {
+                // Set the common fields
+                inv_omicron_zone.set_primary_service_ip_and_port(address);
+                inv_omicron_zone.zone_type = ZoneType::CruciblePantry;
+            }
+            OmicronZoneType::ExternalDns {
+                dataset,
+                http_address,
+                dns_address,
+                nic,
+            } => {
+                // Set the common fields
+                inv_omicron_zone.set_primary_service_ip_and_port(http_address);
+                inv_omicron_zone.set_zpool_name(dataset);
+                inv_omicron_zone.zone_type = ZoneType::ExternalDns;
+
+                // Set the zone specific fields
+                inv_omicron_zone.nic_id = Some(nic.id);
+                inv_omicron_zone.second_service_ip =
+                    Some(IpNetwork::from(dns_address.ip()));
+                inv_omicron_zone.second_service_port =
+                    Some(SqlU16::from(dns_address.port()));
+            }
+            OmicronZoneType::InternalDns {
+                dataset,
+                http_address,
+                dns_address,
+                gz_address,
+                gz_address_index,
+            } => {
+                // Set the common fields
+                inv_omicron_zone.set_primary_service_ip_and_port(http_address);
+                inv_omicron_zone.set_zpool_name(dataset);
+                inv_omicron_zone.zone_type = ZoneType::InternalDns;
+
+                // Set the zone specific fields
+                inv_omicron_zone.second_service_ip =
+                    Some(IpNetwork::from(IpAddr::V6(*dns_address.ip())));
+                inv_omicron_zone.second_service_port =
+                    Some(SqlU16::from(dns_address.port()));
+
+                inv_omicron_zone.dns_gz_address =
+                    Some(ipv6::Ipv6Addr::from(gz_address));
+                inv_omicron_zone.dns_gz_address_index =
+                    Some(SqlU32::from(*gz_address_index));
+            }
+            OmicronZoneType::InternalNtp {
+                address,
+                ntp_servers,
+                dns_servers,
+                domain,
+            } => {
+                // Set the common fields
+                inv_omicron_zone.set_primary_service_ip_and_port(address);
+                inv_omicron_zone.zone_type = ZoneType::InternalNtp;
+
+                // Set the zone specific fields
+                inv_omicron_zone.ntp_ntp_servers = Some(ntp_servers.clone());
+                inv_omicron_zone.ntp_dns_servers = Some(
+                    dns_servers.iter().cloned().map(IpNetwork::from).collect(),
+                );
+                inv_omicron_zone.ntp_domain.clone_from(domain);
+            }
+            OmicronZoneType::Nexus {
+                internal_address,
+                external_ip,
+                nic,
+                external_tls,
+                external_dns_servers,
+            } => {
+                // Set the common fields
+                inv_omicron_zone
+                    .set_primary_service_ip_and_port(internal_address);
+                inv_omicron_zone.zone_type = ZoneType::Nexus;
+
+                // Set the zone specific fields
+                inv_omicron_zone.nic_id = Some(nic.id);
+                inv_omicron_zone.second_service_ip =
+                    Some(IpNetwork::from(*external_ip));
+                inv_omicron_zone.nexus_external_tls = Some(*external_tls);
+                inv_omicron_zone.nexus_external_dns_servers = Some(
+                    external_dns_servers
+                        .iter()
+                        .cloned()
+                        .map(IpNetwork::from)
+                        .collect(),
+                );
+            }
+            OmicronZoneType::Oximeter { address } => {
+                // Set the common fields
+                inv_omicron_zone.set_primary_service_ip_and_port(address);
+                inv_omicron_zone.zone_type = ZoneType::Oximeter;
+            }
+        }
+
+        Ok(inv_omicron_zone)
+    }
+
+    fn set_primary_service_ip_and_port(&mut self, address: &SocketAddrV6) {
+        let (primary_service_ip, primary_service_port) =
+            (ipv6::Ipv6Addr::from(*address.ip()), SqlU16::from(address.port()));
+        self.primary_service_ip = primary_service_ip;
+        self.primary_service_port = primary_service_port;
+    }
+
+    fn set_zpool_name(&mut self, dataset: &OmicronZoneDataset) {
+        self.dataset_zpool_name = Some(dataset.pool_name.to_string());
     }
 
     pub fn into_omicron_zone_config(
         self,
         nic_row: Option<InvOmicronZoneNic>,
     ) -> Result<OmicronZoneConfig, anyhow::Error> {
-        let zone = OmicronZone {
-            sled_id: self.sled_id.into(),
-            id: self.id,
-            underlay_address: self.underlay_address,
-            filesystem_pool: self.filesystem_pool.map(|id| id.into()),
-            zone_type: self.zone_type,
-            primary_service_ip: self.primary_service_ip,
-            primary_service_port: self.primary_service_port,
-            second_service_ip: self.second_service_ip,
-            second_service_port: self.second_service_port,
-            dataset_zpool_name: self.dataset_zpool_name,
-            nic_id: self.nic_id,
-            dns_gz_address: self.dns_gz_address,
-            dns_gz_address_index: self.dns_gz_address_index,
-            ntp_ntp_servers: self.ntp_ntp_servers,
-            ntp_dns_servers: self.ntp_dns_servers,
-            ntp_domain: self.ntp_domain,
-            nexus_external_tls: self.nexus_external_tls,
-            nexus_external_dns_servers: self.nexus_external_dns_servers,
-            snat_ip: self.snat_ip,
-            snat_first_port: self.snat_first_port,
-            snat_last_port: self.snat_last_port,
-            // Inventory zones don't know an external IP ID, and Omicron zone
-            // configs don't need it.
-            external_ip_id: None,
+        // Build up a set of common fields for our `BlueprintZoneType`s
+        //
+        // Some of these are results that we only evaluate when used, because
+        // not all zone types use all common fields.
+        let primary_address =
+            omicron_zone_config::primary_ip_and_port_to_socketaddr_v6(
+                self.primary_service_ip.into(),
+                self.primary_service_port,
+            );
+        let dataset =
+            omicron_zone_config::dataset_zpool_name_to_omicron_zone_dataset(
+                self.dataset_zpool_name,
+            );
+
+        let nic = omicron_zone_config::nic_row_to_network_interface(
+            self.id,
+            self.nic_id,
+            nic_row.map(Into::into),
+        );
+
+        let dns_address =
+            omicron_zone_config::secondary_ip_and_port_to_dns_address(
+                self.second_service_ip,
+                self.second_service_port,
+            );
+
+        let ntp_dns_servers =
+            omicron_zone_config::ntp_dns_servers_to_omicron_internal(
+                self.ntp_dns_servers,
+            );
+
+        let ntp_servers = omicron_zone_config::ntp_servers_to_omicron_internal(
+            self.ntp_ntp_servers,
+        );
+
+        let zone_type = match self.zone_type {
+            ZoneType::BoundaryNtp => {
+                let snat_cfg = match (
+                    self.snat_ip,
+                    self.snat_first_port,
+                    self.snat_last_port,
+                ) {
+                    (Some(ip), Some(first_port), Some(last_port)) => {
+                        nexus_types::inventory::SourceNatConfig::new(
+                            ip.ip(),
+                            *first_port,
+                            *last_port,
+                        )
+                        .context("bad SNAT config for boundary NTP")?
+                    }
+                    _ => bail!(
+                        "expected non-NULL snat properties, \
+                         found at least one NULL"
+                    ),
+                };
+                OmicronZoneType::BoundaryNtp {
+                    address: primary_address,
+                    ntp_servers: ntp_servers?,
+                    dns_servers: ntp_dns_servers?,
+                    domain: self.ntp_domain,
+                    nic: nic?,
+                    snat_cfg,
+                }
+            }
+            ZoneType::Clickhouse => OmicronZoneType::Clickhouse {
+                address: primary_address,
+                dataset: dataset?,
+            },
+            ZoneType::ClickhouseKeeper => OmicronZoneType::ClickhouseKeeper {
+                address: primary_address,
+                dataset: dataset?,
+            },
+            ZoneType::ClickhouseServer => OmicronZoneType::ClickhouseServer {
+                address: primary_address,
+                dataset: dataset?,
+            },
+            ZoneType::CockroachDb => OmicronZoneType::CockroachDb {
+                address: primary_address,
+                dataset: dataset?,
+            },
+            ZoneType::Crucible => OmicronZoneType::Crucible {
+                address: primary_address,
+                dataset: dataset?,
+            },
+            ZoneType::CruciblePantry => {
+                OmicronZoneType::CruciblePantry { address: primary_address }
+            }
+            ZoneType::ExternalDns => OmicronZoneType::ExternalDns {
+                dataset: dataset?,
+                http_address: primary_address,
+                dns_address: dns_address?,
+                nic: nic?,
+            },
+            ZoneType::InternalDns => OmicronZoneType::InternalDns {
+                dataset: dataset?,
+                http_address: primary_address,
+                dns_address: omicron_zone_config::to_internal_dns_address(
+                    dns_address?,
+                )?,
+                gz_address: self.dns_gz_address.map(Into::into).ok_or_else(
+                    || anyhow!("expected dns_gz_address, found none"),
+                )?,
+                gz_address_index: *self.dns_gz_address_index.ok_or_else(
+                    || anyhow!("expected dns_gz_address_index, found none"),
+                )?,
+            },
+            ZoneType::InternalNtp => OmicronZoneType::InternalNtp {
+                address: primary_address,
+                ntp_servers: ntp_servers?,
+                dns_servers: ntp_dns_servers?,
+                domain: self.ntp_domain,
+            },
+            ZoneType::Nexus => OmicronZoneType::Nexus {
+                internal_address: primary_address,
+                external_ip: self
+                    .second_service_ip
+                    .ok_or_else(|| anyhow!("expected second service IP"))?
+                    .ip(),
+                nic: nic?,
+                external_tls: self
+                    .nexus_external_tls
+                    .ok_or_else(|| anyhow!("expected 'external_tls'"))?,
+                external_dns_servers: self
+                    .nexus_external_dns_servers
+                    .ok_or_else(|| anyhow!("expected 'external_dns_servers'"))?
+                    .into_iter()
+                    .map(|i| i.ip())
+                    .collect(),
+            },
+            ZoneType::Oximeter => {
+                OmicronZoneType::Oximeter { address: primary_address }
+            }
         };
-        zone.into_omicron_zone_config(nic_row.map(OmicronZoneNic::from))
+
+        Ok(OmicronZoneConfig {
+            id: self.id,
+            underlay_address: self.underlay_address.into(),
+            filesystem_pool: self
+                .filesystem_pool
+                .map(|id| ZpoolName::new_external(id.into())),
+            zone_type,
+        })
     }
 }
 
