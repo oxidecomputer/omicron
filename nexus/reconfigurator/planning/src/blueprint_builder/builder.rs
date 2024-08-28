@@ -139,7 +139,9 @@ pub enum EnsureMultiple {
         updated: usize,
         /// An item was expunged in the blueprint
         expunged: usize,
-        /// An item was removed from the blueprint
+        /// An item was removed from the blueprint.
+        ///
+        /// This usually happens after the work of expungment has completed.
         removed: usize,
     },
 
@@ -1775,8 +1777,6 @@ struct BlueprintSledDatasetsBuilder<'a> {
         BTreeMap<ZpoolUuid, BTreeMap<DatasetKind, &'a BlueprintDatasetConfig>>,
     database_datasets:
         BTreeMap<ZpoolUuid, BTreeMap<DatasetKind, &'a DatasetConfig>>,
-
-    // TODO: Could combine these maps?
 
     // Datasets which are unchanged from the prior blueprint
     unchanged_datasets:
