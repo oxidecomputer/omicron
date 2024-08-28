@@ -123,7 +123,7 @@ pub(crate) struct EnsureDatasetsResult {
 /// database record exists in `datastore`.
 ///
 /// Updates all existing dataset records that don't match the blueprint.
-/// Returns the number of datasets inserted.
+/// Returns the number of datasets changed.
 pub(crate) async fn ensure_dataset_records_exist(
     opctx: &OpContext,
     datastore: &DataStore,

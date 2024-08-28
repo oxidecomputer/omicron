@@ -2628,7 +2628,9 @@ pub mod test {
                 }
             })
             .collect::<Vec<_>>();
-        // We saw two datasets being expunged earlier -- validate that
+        // We saw two datasets being expunged earlier when we called
+        // `sled_ensure_datasets` -- validate that this is true when inspecting
+        // the bluepirnt too.
         assert_eq!(expunged_datasets.len(), 2);
 
         // Remove these two datasets from the input.
@@ -2665,6 +2667,9 @@ pub mod test {
                 removed: 2
             }
         );
+
+        // They should only be removed once -- repeated calls won't change the
+        // builder further.
         let r = builder.sled_ensure_datasets(sled_id, sled_resources).unwrap();
         assert_eq!(r, EnsureMultiple::NotNeeded);
 
