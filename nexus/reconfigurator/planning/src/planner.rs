@@ -752,7 +752,7 @@ mod test {
     use nexus_types::inventory::OmicronZonesFound;
     use omicron_common::api::external::Generation;
     use omicron_common::disk::DiskIdentity;
-    use omicron_common::policy::MAX_DNS_REDUNDANCY;
+    use omicron_common::policy::MAX_INTERNAL_DNS_REDUNDANCY;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -1198,7 +1198,7 @@ mod test {
         // Try again with a reasonable number.
         let mut builder = input.into_builder();
         builder.policy_mut().target_internal_dns_zone_count =
-            MAX_DNS_REDUNDANCY;
+            MAX_INTERNAL_DNS_REDUNDANCY;
         let blueprint2 = Planner::new_based_on(
             logctx.log.clone(),
             &blueprint1,

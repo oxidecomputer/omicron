@@ -714,8 +714,8 @@ pub struct Policy {
     pub target_nexus_zone_count: usize,
 
     /// desired total number of internal DNS zones.
-    /// Must be <= [`omicron_common::policy::MAX_DNS_REDUNDANCY`],
-    /// and should be >= [`omicron_common::policy::DNS_REDUNDANCY`].
+    /// Must be <= [`omicron_common::policy::MAX_INTERNAL_DNS_REDUNDANCY`],
+    /// and should be >= [`omicron_common::policy::INTERNAL_DNS_REDUNDANCY`].
     pub target_internal_dns_zone_count: usize,
 
     /// desired total number of deployed CockroachDB zones

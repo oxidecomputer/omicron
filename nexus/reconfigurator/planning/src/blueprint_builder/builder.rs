@@ -47,7 +47,7 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
-use omicron_common::policy::MAX_DNS_REDUNDANCY;
+use omicron_common::policy::MAX_INTERNAL_DNS_REDUNDANCY;
 use omicron_uuid_kinds::ExternalIpKind;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneKind;
@@ -113,7 +113,9 @@ pub enum Error {
     Planner(#[source] anyhow::Error),
     #[error("no reserved subnets available for DNS")]
     NoAvailableDnsSubnets,
-    #[error("can only have {MAX_DNS_REDUNDANCY} internal DNS servers")]
+    #[error(
+        "can only have {MAX_INTERNAL_DNS_REDUNDANCY} internal DNS servers"
+    )]
     TooManyDnsServers,
 }
 

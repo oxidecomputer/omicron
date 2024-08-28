@@ -10,14 +10,14 @@ use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::PlanningInput;
 use omicron_common::address::DnsSubnet;
 use omicron_common::address::ReservedRackSubnet;
-use omicron_common::policy::MAX_DNS_REDUNDANCY;
+use omicron_common::policy::MAX_INTERNAL_DNS_REDUNDANCY;
 use std::collections::BTreeSet;
 
 /// Internal DNS zones are not allocated an address in the sled's subnet.
 /// Instead, they get a /64 subnet of the "reserved" rack subnet (so that
 /// it's routable with IPv6), and use the first address in that. There may
-/// be at most `MAX_DNS_REDUNDANCY` subnets (and so servers) allocated.
-/// This structure tracks which subnets are currently allocated.
+/// be at most `MAX_INTERNAL_DNS_REDUNDANCY` subnets (and so servers)
+/// allocated. This structure tracks which subnets are currently allocated.
 #[derive(Debug)]
 pub struct DnsSubnetAllocator {
     in_use: BTreeSet<DnsSubnet>,
@@ -40,7 +40,7 @@ impl DnsSubnetAllocator {
             .collect::<BTreeSet<DnsSubnet>>();
 
         let redundancy = input.target_internal_dns_zone_count();
-        if redundancy > MAX_DNS_REDUNDANCY {
+        if redundancy > MAX_INTERNAL_DNS_REDUNDANCY {
             return Err(Error::TooManyDnsServers);
         }
 
@@ -58,8 +58,8 @@ impl DnsSubnetAllocator {
     ) -> Result<DnsSubnet, Error> {
         let new = if let Some(first) = self.in_use.first() {
             // Take the first available DNS subnet. We currently generate
-            // all `MAX_DNS_REDUNDANCY` subnets and subtract any that are
-            // in use; this is fine as long as that constant is small.
+            // all `MAX_INTERNAL_DNS_REDUNDANCY` subnets and subtract any
+            // that are in use; this is fine as long as that constant is small.
             let subnets = BTreeSet::from_iter(
                 ReservedRackSubnet::from_subnet(first.subnet())
                     .get_dns_subnets(),
@@ -103,7 +103,9 @@ pub mod test {
     use super::*;
     use crate::blueprint_builder::test::verify_blueprint;
     use crate::example::ExampleSystem;
-    use omicron_common::policy::{DNS_REDUNDANCY, MAX_DNS_REDUNDANCY};
+    use omicron_common::policy::{
+        INTERNAL_DNS_REDUNDANCY, MAX_INTERNAL_DNS_REDUNDANCY,
+    };
     use omicron_test_utils::dev::test_setup_log;
 
     #[test]
@@ -113,7 +115,7 @@ pub mod test {
 
         // Use our example system to create a blueprint and input.
         let example =
-            ExampleSystem::new(&logctx.log, TEST_NAME, DNS_REDUNDANCY);
+            ExampleSystem::new(&logctx.log, TEST_NAME, INTERNAL_DNS_REDUNDANCY);
         let blueprint1 = &example.blueprint;
         verify_blueprint(blueprint1);
 
@@ -135,11 +137,11 @@ pub mod test {
         );
 
         // Allocate two new subnets.
-        assert_eq!(MAX_DNS_REDUNDANCY - DNS_REDUNDANCY, 2);
+        assert_eq!(MAX_INTERNAL_DNS_REDUNDANCY - INTERNAL_DNS_REDUNDANCY, 2);
         assert_eq!(
             allocator.len(),
-            DNS_REDUNDANCY,
-            "should be {DNS_REDUNDANCY} subnets allocated"
+            INTERNAL_DNS_REDUNDANCY,
+            "should be {INTERNAL_DNS_REDUNDANCY} subnets allocated"
         );
         let new1 =
             allocator.alloc(rack_subnet).expect("failed to allocate a subnet");
@@ -154,8 +156,8 @@ pub mod test {
         assert_ne!(new1, new2, "allocated duplicate subnets");
         assert_eq!(
             allocator.len(),
-            MAX_DNS_REDUNDANCY,
-            "should be {DNS_REDUNDANCY} subnets allocated"
+            MAX_INTERNAL_DNS_REDUNDANCY,
+            "should be {INTERNAL_DNS_REDUNDANCY} subnets allocated"
         );
         allocator.alloc(rack_subnet).expect_err("no subnets available");
 

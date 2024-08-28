@@ -515,7 +515,7 @@ mod test {
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::policy::BOUNDARY_NTP_REDUNDANCY;
     use omicron_common::policy::COCKROACHDB_REDUNDANCY;
-    use omicron_common::policy::DNS_REDUNDANCY;
+    use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
     use omicron_common::policy::NEXUS_REDUNDANCY;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev::test_setup_log;
@@ -1527,7 +1527,7 @@ mod test {
                 service_nic_rows: &[],
                 target_boundary_ntp_zone_count: BOUNDARY_NTP_REDUNDANCY,
                 target_nexus_zone_count: NEXUS_REDUNDANCY,
-                target_internal_dns_zone_count: DNS_REDUNDANCY,
+                target_internal_dns_zone_count: INTERNAL_DNS_REDUNDANCY,
                 target_cockroachdb_zone_count: COCKROACHDB_REDUNDANCY,
                 target_cockroachdb_cluster_version:
                     CockroachDbClusterVersion::POLICY,
