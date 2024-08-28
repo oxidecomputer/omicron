@@ -134,8 +134,11 @@ pub fn run_cmd(_args: Args) -> Result<()> {
     // TMPDIR=/var/tmp puts stuff on disk, cached as needed, rather than the
     // default /tmp which requires that stuff be in-memory.  That can lead to
     // great sadness if the tests wind up writing a lot of data.
+    //
+    // --bound=all is required to cause nextest to *not* ignore these tests,
+    // since they're not in the default filter set.
     let raw = &[
-        "TMPDIR=/var/tmp ./cargo-nextest nextest run \\",
+        "TMPDIR=/var/tmp ./cargo-nextest nextest run --bound=all \\",
         &format!(
             "--archive-file {}/{} \\",
             NAME,

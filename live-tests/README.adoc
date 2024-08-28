@@ -57,7 +57,7 @@ To use this:
 
 4. On that system, run tests with:
 
-     TMPDIR=/var/tmp ./cargo-nextest nextest run \
+     TMPDIR=/var/tmp ./cargo-nextest nextest run --bound=all \
          --archive-file live-tests-archive/omicron-live-tests.tar.zst \
          --workspace-remap live-tests-archive
 ```
