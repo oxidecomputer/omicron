@@ -15,7 +15,9 @@ use illumos_utils::zfs::{
 use illumos_utils::zpool::ZpoolName;
 use key_manager::StorageKeyRequester;
 use omicron_common::api::internal::shared::DatasetKind;
-use omicron_common::disk::{DatasetName, DiskIdentity, DiskVariant};
+use omicron_common::disk::{
+    CompressionAlgorithm, DatasetName, DiskIdentity, DiskVariant, GzipLevel,
+};
 use rand::distributions::{Alphanumeric, DistString};
 use slog::{debug, info, Logger};
 use std::process::Stdio;
@@ -43,7 +45,8 @@ cfg_if! {
 // tuned as needed.
 pub const DUMP_DATASET_QUOTA: usize = 100 * (1 << 30);
 // passed to zfs create -o compression=
-pub const DUMP_DATASET_COMPRESSION: &'static str = "gzip-9";
+pub const DUMP_DATASET_COMPRESSION: CompressionAlgorithm =
+    CompressionAlgorithm::GzipN { level: GzipLevel::new::<9>() };
 
 // U.2 datasets live under the encrypted dataset and inherit encryption
 pub const ZONE_DATASET: &'static str = "crypt/zone";
@@ -100,12 +103,17 @@ struct ExpectedDataset {
     // Identifies if the dataset should be deleted on boot
     wipe: bool,
     // Optional compression mode
-    compression: Option<&'static str>,
+    compression: CompressionAlgorithm,
 }
 
 impl ExpectedDataset {
     const fn new(name: &'static str) -> Self {
-        ExpectedDataset { name, quota: None, wipe: false, compression: None }
+        ExpectedDataset {
+            name,
+            quota: None,
+            wipe: false,
+            compression: CompressionAlgorithm::Off,
+        }
     }
 
     const fn quota(mut self, quota: usize) -> Self {
@@ -118,8 +126,8 @@ impl ExpectedDataset {
         self
     }
 
-    const fn compression(mut self, compression: &'static str) -> Self {
-        self.compression = Some(compression);
+    const fn compression(mut self, compression: CompressionAlgorithm) -> Self {
+        self.compression = compression;
         self
     }
 }
@@ -291,7 +299,7 @@ pub(crate) async fn ensure_zpool_has_datasets(
         let size_details = Some(SizeDetails {
             quota: dataset.quota,
             reservation: None,
-            compression: dataset.compression.map(|s| s.to_string()),
+            compression: dataset.compression,
         });
         Zfs::ensure_filesystem(
             name,

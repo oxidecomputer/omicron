@@ -6,6 +6,7 @@
 
 use crate::{execute, PFEXEC};
 use camino::{Utf8Path, Utf8PathBuf};
+use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::disk::DiskIdentity;
 use std::fmt;
 
@@ -204,7 +205,7 @@ pub struct EncryptionDetails {
 pub struct SizeDetails {
     pub quota: Option<usize>,
     pub reservation: Option<usize>,
-    pub compression: Option<String>,
+    pub compression: CompressionAlgorithm,
 }
 
 #[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
@@ -403,7 +404,7 @@ impl Zfs {
         mountpoint: &Mountpoint,
         quota: Option<usize>,
         reservation: Option<usize>,
-        compression: Option<String>,
+        compression: CompressionAlgorithm,
     ) -> Result<(), EnsureFilesystemError> {
         let quota = quota
             .map(|q| q.to_string())
@@ -411,7 +412,7 @@ impl Zfs {
         let reservation = reservation
             .map(|r| r.to_string())
             .unwrap_or_else(|| String::from("none"));
-        let compression = compression.unwrap_or_else(|| String::from("off"));
+        let compression = compression.to_string();
 
         if let Err(err) = Self::set_value(name, "quota", &quota) {
             return Err(EnsureFilesystemError {
