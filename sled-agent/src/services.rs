@@ -90,6 +90,7 @@ use omicron_common::api::internal::shared::{
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
+use omicron_common::disk::{DatasetKind, DatasetName};
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use once_cell::sync::OnceCell;
@@ -103,9 +104,7 @@ use sled_hardware::underlay;
 use sled_hardware::SledMode;
 use sled_hardware_types::Baseboard;
 use sled_storage::config::MountConfig;
-use sled_storage::dataset::{
-    DatasetName, DatasetType, CONFIG_DATASET, INSTALL_DATASET, ZONE_DATASET,
-};
+use sled_storage::dataset::{CONFIG_DATASET, INSTALL_DATASET, ZONE_DATASET};
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::collections::BTreeMap;
@@ -1881,7 +1880,7 @@ impl ServiceManager {
 
                 let dataset_name = DatasetName::new(
                     dataset.pool_name.clone(),
-                    DatasetType::Crucible,
+                    DatasetKind::Crucible,
                 )
                 .full_name();
                 let uuid = &Uuid::new_v4().to_string();

@@ -21,7 +21,10 @@ use omicron_common::{
             SwitchPorts, VirtualNetworkInterfaceHost,
         },
     },
-    disk::{DiskVariant, DisksManagementResult, OmicronPhysicalDisksConfig},
+    disk::{
+        DatasetsConfig, DatasetsManagementResult, DiskVariant,
+        DisksManagementResult, OmicronPhysicalDisksConfig,
+    },
 };
 use omicron_uuid_kinds::{PropolisUuid, ZpoolUuid};
 use schemars::JsonSchema;
@@ -167,6 +170,25 @@ pub trait SledAgentApi {
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<OmicronZonesConfig>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Configures datasets to be used on this sled
+    #[endpoint {
+        method = PUT,
+        path = "/datasets",
+    }]
+    async fn datasets_put(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<DatasetsConfig>,
+    ) -> Result<HttpResponseOk<DatasetsManagementResult>, HttpError>;
+
+    /// Lists the datasets that this sled is configured to use
+    #[endpoint {
+        method = GET,
+        path = "/datasets",
+    }]
+    async fn datasets_get(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<DatasetsConfig>, HttpError>;
 
     #[endpoint {
         method = GET,

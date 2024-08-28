@@ -15,10 +15,10 @@ use illumos_utils::zfs::{
 use illumos_utils::zpool::ZpoolName;
 use key_manager::StorageKeyRequester;
 use omicron_common::api::internal::shared::DatasetKind;
-use omicron_common::disk::{DiskIdentity, DiskVariant};
+use omicron_common::disk::{
+    CompressionAlgorithm, DatasetName, DiskIdentity, DiskVariant, GzipLevel,
+};
 use rand::distributions::{Alphanumeric, DistString};
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
 use slog::{debug, info, Logger};
 use std::process::Stdio;
 use std::str::FromStr;
@@ -45,7 +45,8 @@ cfg_if! {
 // tuned as needed.
 pub const DUMP_DATASET_QUOTA: usize = 100 * (1 << 30);
 // passed to zfs create -o compression=
-pub const DUMP_DATASET_COMPRESSION: &'static str = "gzip-9";
+pub const DUMP_DATASET_COMPRESSION: CompressionAlgorithm =
+    CompressionAlgorithm::GzipN { level: GzipLevel::new::<9>() };
 
 // U.2 datasets live under the encrypted dataset and inherit encryption
 pub const ZONE_DATASET: &'static str = "crypt/zone";
@@ -102,12 +103,17 @@ struct ExpectedDataset {
     // Identifies if the dataset should be deleted on boot
     wipe: bool,
     // Optional compression mode
-    compression: Option<&'static str>,
+    compression: CompressionAlgorithm,
 }
 
 impl ExpectedDataset {
     const fn new(name: &'static str) -> Self {
-        ExpectedDataset { name, quota: None, wipe: false, compression: None }
+        ExpectedDataset {
+            name,
+            quota: None,
+            wipe: false,
+            compression: CompressionAlgorithm::Off,
+        }
     }
 
     const fn quota(mut self, quota: usize) -> Self {
@@ -120,148 +126,9 @@ impl ExpectedDataset {
         self
     }
 
-    const fn compression(mut self, compression: &'static str) -> Self {
-        self.compression = Some(compression);
+    const fn compression(mut self, compression: CompressionAlgorithm) -> Self {
+        self.compression = compression;
         self
-    }
-}
-
-/// The type of a dataset, and an auxiliary information necessary to
-/// successfully launch a zone managing the associated data.
-///
-/// There is currently no auxiliary data here, but there's a separation from
-/// omicron-common's `DatasetKind` in case there might be some in the future.
-#[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
-)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum DatasetType {
-    // TODO: `DatasetKind` uses `Cockroach`, not `CockroachDb`, for historical
-    // reasons. It may be worth using the same name for both.
-    CockroachDb,
-    Crucible,
-    Clickhouse,
-    ClickhouseKeeper,
-    ClickhouseServer,
-    ExternalDns,
-    InternalDns,
-}
-
-impl DatasetType {
-    pub fn dataset_should_be_encrypted(&self) -> bool {
-        match self {
-            // We encrypt all datasets except Crucible.
-            //
-            // Crucible already performs encryption internally, and we
-            // avoid double-encryption.
-            DatasetType::Crucible => false,
-            _ => true,
-        }
-    }
-
-    pub fn kind(&self) -> DatasetKind {
-        match self {
-            Self::Crucible => DatasetKind::Crucible,
-            Self::CockroachDb => DatasetKind::Cockroach,
-            Self::Clickhouse => DatasetKind::Clickhouse,
-            Self::ClickhouseKeeper => DatasetKind::ClickhouseKeeper,
-            Self::ClickhouseServer => DatasetKind::ClickhouseServer,
-            Self::ExternalDns => DatasetKind::ExternalDns,
-            Self::InternalDns => DatasetKind::InternalDns,
-        }
-    }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum DatasetKindParseError {
-    #[error("Dataset unknown: {0}")]
-    UnknownDataset(String),
-}
-
-impl FromStr for DatasetType {
-    type Err = DatasetKindParseError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        use DatasetType::*;
-        let kind = match s {
-            "crucible" => Crucible,
-            "cockroachdb" => CockroachDb,
-            "clickhouse" => Clickhouse,
-            "clickhouse_keeper" => ClickhouseKeeper,
-            "external_dns" => ExternalDns,
-            "internal_dns" => InternalDns,
-            _ => {
-                return Err(DatasetKindParseError::UnknownDataset(
-                    s.to_string(),
-                ))
-            }
-        };
-        Ok(kind)
-    }
-}
-
-impl std::fmt::Display for DatasetType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use DatasetType::*;
-        let s = match self {
-            Crucible => "crucible",
-            CockroachDb => "cockroachdb",
-            Clickhouse => "clickhouse",
-            ClickhouseKeeper => "clickhouse_keeper",
-            ClickhouseServer => "clickhouse_server",
-            ExternalDns => "external_dns",
-            InternalDns => "internal_dns",
-        };
-        write!(f, "{}", s)
-    }
-}
-
-#[derive(
-    Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Clone, JsonSchema,
-)]
-pub struct DatasetName {
-    // A unique identifier for the Zpool on which the dataset is stored.
-    pool_name: ZpoolName,
-    // A name for the dataset within the Zpool.
-    kind: DatasetType,
-}
-
-impl DatasetName {
-    pub fn new(pool_name: ZpoolName, kind: DatasetType) -> Self {
-        Self { pool_name, kind }
-    }
-
-    pub fn pool(&self) -> &ZpoolName {
-        &self.pool_name
-    }
-
-    pub fn dataset(&self) -> &DatasetType {
-        &self.kind
-    }
-
-    /// Returns the full name of the dataset, as would be returned from
-    /// "zfs get" or "zfs list".
-    ///
-    /// If this dataset should be encrypted, this automatically adds the
-    /// "crypt" dataset component.
-    pub fn full_name(&self) -> String {
-        // Currently, we encrypt all datasets except Crucible.
-        //
-        // Crucible already performs encryption internally, and we
-        // avoid double-encryption.
-        if self.kind.dataset_should_be_encrypted() {
-            self.full_encrypted_name()
-        } else {
-            self.full_unencrypted_name()
-        }
-    }
-
-    fn full_encrypted_name(&self) -> String {
-        format!("{}/crypt/{}", self.pool_name, self.kind)
-    }
-
-    fn full_unencrypted_name(&self) -> String {
-        format!("{}/{}", self.pool_name, self.kind)
     }
 }
 
@@ -431,6 +298,7 @@ pub(crate) async fn ensure_zpool_has_datasets(
         let encryption_details = None;
         let size_details = Some(SizeDetails {
             quota: dataset.quota,
+            reservation: None,
             compression: dataset.compression,
         });
         Zfs::ensure_filesystem(
@@ -577,7 +445,7 @@ async fn ensure_zpool_dataset_is_encrypted(
     zpool_name: &ZpoolName,
     unencrypted_dataset: &str,
 ) -> Result<(), DatasetEncryptionMigrationError> {
-    let Ok(kind) = DatasetType::from_str(&unencrypted_dataset) else {
+    let Ok(kind) = DatasetKind::from_str(&unencrypted_dataset) else {
         info!(log, "Unrecognized dataset kind");
         return Ok(());
     };
@@ -818,7 +686,7 @@ mod test {
     #[test]
     fn serialize_dataset_name() {
         let pool = ZpoolName::new_internal(ZpoolUuid::new_v4());
-        let kind = DatasetType::Crucible;
+        let kind = DatasetKind::Crucible;
         let name = DatasetName::new(pool, kind);
         serde_json::to_string(&name).unwrap();
     }

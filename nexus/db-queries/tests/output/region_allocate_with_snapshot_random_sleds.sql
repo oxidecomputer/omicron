@@ -279,7 +279,8 @@ WITH
         dataset.ip,
         dataset.port,
         dataset.kind,
-        dataset.size_used
+        dataset.size_used,
+        dataset.zone_name
     )
 (
   SELECT
@@ -293,6 +294,7 @@ WITH
     dataset.port,
     dataset.kind,
     dataset.size_used,
+    dataset.zone_name,
     old_regions.id,
     old_regions.time_created,
     old_regions.time_modified,
@@ -319,6 +321,7 @@ UNION
       updated_datasets.port,
       updated_datasets.kind,
       updated_datasets.size_used,
+      updated_datasets.zone_name,
       inserted_regions.id,
       inserted_regions.time_created,
       inserted_regions.time_modified,
