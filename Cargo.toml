@@ -157,8 +157,7 @@ default-members = [
     # See omicron#4392.
     "dns-server",
     "dns-server-api",
-    # Do not include end-to-end-tests in the list of default members, as its
-    # tests only work on a deployed control plane.
+    "end-to-end-tests",
     "gateway",
     "gateway-api",
     "gateway-cli",
@@ -172,8 +171,7 @@ default-members = [
     "internal-dns",
     "ipcc",
     "key-manager",
-    # Do not include live-tests in the list of default members because its tests
-    # only work in a deployed system.  The macros can be here, though.
+    "live-tests",
     "live-tests/macros",
     "nexus",
     "nexus-config",

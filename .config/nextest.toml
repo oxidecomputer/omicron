@@ -3,7 +3,7 @@
 #
 # The required version should be bumped up if we need new features, performance
 # improvements or bugfixes that are present in newer versions of nextest.
-nextest-version = { required = "0.9.64", recommended = "0.9.70" }
+nextest-version = { required = "0.9.76", recommended = "0.9.76" }
 
 experimental = ["setup-scripts"]
 
@@ -34,6 +34,9 @@ clickhouse-cluster = { max-threads = 1 }
 # live-tests operate on a more realistic, shared control plane and test
 # behaviors that conflict with each other.  They need to be run serially.
 live-tests = { max-threads = 1 }
+
+#[profile.default]
+#default-set = 'all() - package(omicron-live-tests) - package(end-to-end-tests)'
 
 [[profile.default.overrides]]
 filter = 'package(oximeter-db) and test(replicated)'

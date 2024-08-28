@@ -9,7 +9,7 @@ target_os=$1
 # NOTE: This version should be in sync with the recommended version in
 # .config/nextest.toml. (Maybe build an automated way to pull the recommended
 # version in the future.)
-NEXTEST_VERSION='0.9.70'
+NEXTEST_VERSION='0.9.76'
 
 cargo --version
 rustc --version
