@@ -2605,11 +2605,11 @@ mod test {
             assert_instance_unlocked(instance);
             assert_instance_record_is_consistent(instance);
 
-            let target_destroyed = self
+            let target_terminated = self
                 .outcome
                 .target
                 .as_ref()
-                .map(|(_, state)| state == &VmmState::Destroyed)
+                .map(|(_, state)| state.is_terminal())
                 .unwrap_or(false);
 
             if self.outcome.failed {
@@ -2622,7 +2622,7 @@ mod test {
                     "target VMM ID must be unset when a migration has failed"
                 );
             } else {
-                if dbg!(target_destroyed) {
+                if dbg!(target_terminated) {
                     assert_eq!(
                         active_vmm_id, None,
                         "if the target VMM was destroyed, it should be unset, \
@@ -2674,36 +2674,38 @@ mod test {
                 }
             }
 
-            let src_destroyed = self
+            let src_terminated = self
                 .outcome
                 .source
                 .as_ref()
-                .map(|(_, state)| state == &VmmState::Destroyed)
+                .map(|(_, state)| state.is_terminal())
                 .unwrap_or(false);
             assert_eq!(
                 self.src_resource_records_exist(cptestctx).await,
-                !src_destroyed,
-                "source VMM should exist if and only if the source hasn't been destroyed",
+                !src_terminated,
+                "source VMM resource records should exist if and only if the \
+                 source VMM is not in a terminal state (Destroyed/Failed)",
             );
 
             assert_eq!(
                 self.target_resource_records_exist(cptestctx).await,
-                !target_destroyed,
-                "target VMM should exist if and only if the target hasn't been destroyed",
+                !target_terminated,
+                "target VMM resource records should exist if and only if the \
+                 target VMM is not in a terminal state (Destroyed/Failed)",
             );
 
-            // VThe instance has a VMM if (and only if):
+            // The instance has a VMM if (and only if):
             let has_vmm = if self.outcome.failed {
                 // If the migration failed, the instance should have a VMM if
                 // and only if the source VMM is still okay. It doesn't matter
                 // whether the target is still there or not, because we didn't
                 // migrate to it successfully.
-                !src_destroyed
+                !src_terminated
             } else {
                 // Otherwise, if the migration succeeded, the instance should be
                 // on the target VMM, and virtual provisioning records should
                 // exist as long as the
-                !target_destroyed
+                !target_terminated
             };
 
             assert_eq!(
