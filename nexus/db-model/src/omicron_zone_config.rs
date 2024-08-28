@@ -60,9 +60,9 @@ pub fn nic_row_to_network_interface(
             ensure!(expected_id == nic_row.id, "caller provided wrong NIC");
             Ok(nic_row.into_network_interface_for_zone(zone_id))
         }
-        (None, None) => Err(anyhow!(
+        (None, None) => Ok(Err(anyhow!(
             "expected zone to have an associated NIC, but it doesn't"
-        )),
+        ))),
         (Some(_), None) => bail!("caller provided no NIC"),
         (None, Some(_)) => bail!("caller unexpectedly provided a NIC"),
     }
