@@ -2357,11 +2357,36 @@ mod test {
             let instance = create_instance(client).await;
             let instance_id =
                 InstanceUuid::from_untyped_uuid(instance.identity.id);
+            let log = &cptestctx.logctx.log;
+            info!(
+                &log,
+                "created test instance";
+                "instance_id" => %instance_id,
+                "instance" => ?instance
+            );
 
             // Poke the instance to get it into the Running state.
-            let state =
-                test_helpers::instance_fetch(cptestctx, instance_id).await;
+
+            info!(
+                &log,
+                "advancing test instance to Running...";
+                "instance_id" => %instance_id,
+            );
             test_helpers::instance_simulate(cptestctx, &instance_id).await;
+            let state = test_helpers::instance_wait_for_state(
+                cptestctx,
+                instance_id,
+                InstanceState::Vmm,
+            )
+            .await;
+
+            info!(
+                &log,
+                "simulated test instance";
+                "instance_id" => %instance_id,
+                "instance_state" => ?state.instance(),
+                "vmm_state" => ?state.vmm(),
+            );
 
             let vmm = state.vmm().as_ref().unwrap();
             let dst_sled_id =
@@ -2605,12 +2630,12 @@ mod test {
             assert_instance_unlocked(instance);
             assert_instance_record_is_consistent(instance);
 
-            let target_terminated = self
+            let target_vmm_state = self
                 .outcome
                 .target
                 .as_ref()
-                .map(|(_, state)| state.is_terminal())
-                .unwrap_or(false);
+                .map(|&(_, state)| state)
+                .unwrap_or(VmmState::Migrating);
 
             if self.outcome.failed {
                 assert_eq!(
@@ -2622,11 +2647,11 @@ mod test {
                     "target VMM ID must be unset when a migration has failed"
                 );
             } else {
-                if dbg!(target_terminated) {
+                if dbg!(target_vmm_state).is_terminal() {
                     assert_eq!(
                         active_vmm_id, None,
-                        "if the target VMM was destroyed, it should be unset, \
-                         even if a migration succeeded",
+                        "if the target VMM was {target_vmm_state}, it should \
+                         be unset, even if a migration succeeded",
                     );
                     assert_eq!(
                         instance_runtime.nexus_state,
@@ -2674,39 +2699,48 @@ mod test {
                 }
             }
 
-            let src_terminated = self
+            let src_vmm_state = self
                 .outcome
                 .source
                 .as_ref()
-                .map(|(_, state)| state.is_terminal())
-                .unwrap_or(false);
+                .map(|&(_, state)| state)
+                .unwrap_or(VmmState::Migrating);
             assert_eq!(
                 self.src_resource_records_exist(cptestctx).await,
-                !src_terminated,
+                !dbg!(src_vmm_state).is_terminal(),
                 "source VMM resource records should exist if and only if the \
                  source VMM is not in a terminal state (Destroyed/Failed)",
             );
 
             assert_eq!(
                 self.target_resource_records_exist(cptestctx).await,
-                !target_terminated,
-                "target VMM resource records should exist if and only if the \
-                 target VMM is not in a terminal state (Destroyed/Failed)",
+                !target_vmm_state.is_terminal(),
+                "source VMM resource records should exist if and only if the \
+                 source VMM is not in a terminal state (Destroyed/Failed)",
             );
 
+            fn expected_instance_state(vmm: VmmState) -> InstanceState {
+                match vmm {
+                    VmmState::Destroyed => InstanceState::NoVmm,
+                    VmmState::Failed => InstanceState::Failed,
+                    _ => InstanceState::Vmm,
+                }
+            }
+
             // The instance has a VMM if (and only if):
-            let has_vmm = if self.outcome.failed {
+            let instance_state = if self.outcome.failed {
                 // If the migration failed, the instance should have a VMM if
                 // and only if the source VMM is still okay. It doesn't matter
                 // whether the target is still there or not, because we didn't
                 // migrate to it successfully.
-                !src_terminated
+                expected_instance_state(src_vmm_state)
             } else {
                 // Otherwise, if the migration succeeded, the instance should be
                 // on the target VMM, and virtual provisioning records should
-                // exist as long as the
-                !target_terminated
+                // exist as long as the target is okay.
+                expected_instance_state(target_vmm_state)
             };
+            let has_vmm = instance_state == InstanceState::Vmm;
 
             assert_eq!(
                 no_virtual_provisioning_resource_records_exist(cptestctx).await,
@@ -2724,8 +2758,6 @@ mod test {
                  as the instance has a VMM",
             );
 
-            let instance_state =
-                if has_vmm { InstanceState::Vmm } else { InstanceState::NoVmm };
             assert_eq!(instance_runtime.nexus_state, instance_state);
         }
 

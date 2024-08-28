@@ -95,6 +95,7 @@ impl From<omicron_common::api::internal::nexus::VmmState> for types::VmmState {
     fn from(s: omicron_common::api::internal::nexus::VmmState) -> Self {
         use omicron_common::api::internal::nexus::VmmState as Input;
         match s {
+            Input::Creating => types::VmmState::Creating,
             Input::Starting => types::VmmState::Starting,
             Input::Running => types::VmmState::Running,
             Input::Stopping => types::VmmState::Stopping,
@@ -111,6 +112,7 @@ impl From<types::VmmState> for omicron_common::api::internal::nexus::VmmState {
     fn from(s: types::VmmState) -> Self {
         use omicron_common::api::internal::nexus::VmmState as Output;
         match s {
+            types::VmmState::Creating => Output::Creating,
             types::VmmState::Starting => Output::Starting,
             types::VmmState::Running => Output::Running,
             types::VmmState::Stopping => Output::Stopping,

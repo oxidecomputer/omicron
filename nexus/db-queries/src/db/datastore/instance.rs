@@ -741,7 +741,7 @@ impl DataStore {
                     format!(
                         "cannot set migration ID {migration_id} for instance \
                          {instance_id} (perhaps another migration ID is \
-                         already present): {error:#}"
+                         already present): {error:#?}"
                     ),
                 ),
             })
@@ -825,7 +825,15 @@ impl DataStore {
                 vmm_dsl::vmm
                     .on(vmm_dsl::sled_id
                         .eq(sled_dsl::id)
-                        .and(vmm_dsl::time_deleted.is_null()))
+                        .and(vmm_dsl::time_deleted.is_null())
+                        // Ignore instances which are in states that are not
+                        // known to exist on a sled. Since this query drives
+                        // instance-watcher health checking, it is not necessary
+                        // to perform health checks for VMMs that don't actually
+                        // exist in real life.
+                        .and(
+                            vmm_dsl::state.ne_all(VmmState::NONEXISTENT_STATES),
+                        ))
                     .inner_join(
                         instance_dsl::instance
                             .on(instance_dsl::id

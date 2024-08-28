@@ -1064,7 +1064,14 @@ impl From<crate::api::internal::nexus::VmmState> for InstanceState {
     fn from(state: crate::api::internal::nexus::VmmState) -> Self {
         use crate::api::internal::nexus::VmmState as InternalVmmState;
         match state {
-            InternalVmmState::Starting => Self::Starting,
+            // An instance with a VMM which is in the `Creating` state maps to
+            // `InstanceState::Starting`, rather than `InstanceState::Creating`.
+            // If we are still creating the VMM, this is because we are
+            // attempting to *start* the instance; instances may be created
+            // without creating a VMM to run them, and then started later.
+            InternalVmmState::Creating | InternalVmmState::Starting => {
+                Self::Starting
+            }
             InternalVmmState::Running => Self::Running,
             InternalVmmState::Stopping => Self::Stopping,
             InternalVmmState::Stopped => Self::Stopped,

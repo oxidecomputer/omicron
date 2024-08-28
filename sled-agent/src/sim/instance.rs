@@ -210,6 +210,7 @@ impl SimInstanceInner {
             }
             VmmStateRequested::Running => {
                 match self.next_resting_state() {
+                    VmmState::Creating => todo!("eliza: should sled-agents even know about this state??"),
                     VmmState::Starting => {
                         self.queue_propolis_state(
                             PropolisInstanceState::Running,

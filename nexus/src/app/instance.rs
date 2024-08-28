@@ -914,7 +914,7 @@ impl super::Nexus {
         propolis_id: &PropolisUuid,
         initial_vmm: &db::model::Vmm,
         operation: InstanceRegisterReason,
-    ) -> Result<(), Error> {
+    ) -> Result<db::model::Vmm, Error> {
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
 
         // Check that the hostname is valid.
@@ -1147,13 +1147,31 @@ impl super::Nexus {
         let sa = self
             .sled_client(&SledUuid::from_untyped_uuid(initial_vmm.sled_id))
             .await?;
+        // The state of a freshly-created VMM record in the database is always
+        // `VmmState::Creating`. Based on whether this VMM is created in order
+        // to start or migrate an instance, determine the VMM state we will want
+        // the sled-agent to create the VMM in. Once sled-agent acknoledges our
+        // registration request, we will advance the database record to the new
+        // state.
+        let vmm_runtime = sled_agent_client::types::VmmRuntimeState {
+            time_updated: chrono::Utc::now(),
+            r#gen: initial_vmm.runtime.gen.next(),
+            state: match operation {
+                InstanceRegisterReason::Migrate { .. } => {
+                    sled_agent_client::types::VmmState::Migrating
+                }
+                InstanceRegisterReason::Start { .. } => {
+                    sled_agent_client::types::VmmState::Starting
+                }
+            },
+        };
         let instance_register_result = sa
             .vmm_register(
                 propolis_id,
                 &sled_agent_client::types::InstanceEnsureBody {
                     hardware: instance_hardware,
                     instance_runtime: db_instance.runtime().clone().into(),
-                    vmm_runtime: initial_vmm.clone().into(),
+                    vmm_runtime,
                     instance_id,
                     propolis_addr: SocketAddr::new(
                         initial_vmm.propolis_ip.ip(),
@@ -1170,6 +1188,10 @@ impl super::Nexus {
         match instance_register_result {
             Ok(state) => {
                 self.notify_vmm_updated(opctx, *propolis_id, &state).await?;
+                Ok(db::model::Vmm {
+                    runtime: state.vmm_state.into(),
+                    ..initial_vmm.clone()
+                })
             }
             Err(e) => {
                 if e.instance_unhealthy() {
@@ -1182,11 +1204,9 @@ impl super::Nexus {
                         )
                         .await;
                 }
-                return Err(e.into());
+                Err(e.into())
             }
         }
-
-        Ok(())
     }
 
     /// Attempts to move an instance from `prev_instance_runtime` to the
@@ -1529,8 +1549,7 @@ impl super::Nexus {
             .instance_fetch_with_vmm(opctx, &authz_instance)
             .await?;
 
-        let (instance, vmm) = (state.instance(), state.vmm());
-        if let Some(vmm) = vmm {
+        if let Some(vmm) = state.vmm() {
             match vmm.runtime.state {
                 DbVmmState::Running
                 | DbVmmState::Rebooting
@@ -1541,10 +1560,11 @@ impl super::Nexus {
                 DbVmmState::Starting
                 | DbVmmState::Stopping
                 | DbVmmState::Stopped
-                | DbVmmState::Failed => {
+                | DbVmmState::Failed
+                | DbVmmState::Creating => {
                     Err(Error::invalid_request(format!(
                         "cannot connect to serial console of instance in state \"{}\"",
-                        vmm.runtime.state,
+                        state.effective_state(),
                     )))
                 }
 
@@ -1556,7 +1576,7 @@ impl super::Nexus {
             Err(Error::invalid_request(format!(
                 "instance is {} and has no active serial console \
                     server",
-                instance.runtime().nexus_state
+                state.effective_state(),
             )))
         }
     }
@@ -2068,7 +2088,7 @@ mod tests {
     use futures::{SinkExt, StreamExt};
     use nexus_db_model::{
         Instance as DbInstance, InstanceState as DbInstanceState,
-        VmmInitialState, VmmState as DbVmmState,
+        VmmState as DbVmmState,
     };
     use omicron_common::api::external::{
         Hostname, IdentityMetadataCreateParams, InstanceCpuCount, Name,
@@ -2206,7 +2226,6 @@ mod tests {
             ipnetwork::IpNetwork::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 0)
                 .unwrap(),
             0,
-            VmmInitialState::Starting,
         );
 
         (instance, vmm)

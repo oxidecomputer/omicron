@@ -17,6 +17,7 @@ impl_enum_type!(
     #[diesel(sql_type = VmmStateEnum)]
     pub enum VmmState;
 
+    Creating => b"creating"
     Starting => b"starting"
     Running => b"running"
     Stopping => b"stopping"
@@ -31,6 +32,7 @@ impl_enum_type!(
 impl VmmState {
     pub fn label(&self) -> &'static str {
         match self {
+            VmmState::Creating => "creating",
             VmmState::Starting => "starting",
             VmmState::Running => "running",
             VmmState::Stopping => "stopping",
@@ -51,8 +53,20 @@ impl VmmState {
     pub const TERMINAL_STATES: &'static [Self] =
         &[Self::Destroyed, Self::Failed];
 
+    /// States in which a VMM record is present in the database but is not
+    /// resident on a sled, either because it does not yet exist, was produced
+    /// by an unwound update saga and will never exist, or has already been
+    /// destroyed.
+    pub const NONEXISTENT_STATES: &'static [Self] =
+        &[Self::Creating, Self::SagaUnwound, Self::Destroyed];
+
     pub fn is_terminal(&self) -> bool {
         Self::TERMINAL_STATES.contains(self)
+    }
+    /// Returns `true` if the instance is in a state in which it exists on a
+    /// sled.
+    pub fn exists_on_sled(&self) -> bool {
+        !Self::NONEXISTENT_STATES.contains(self)
     }
 }
 
@@ -66,6 +80,7 @@ impl From<VmmState> for omicron_common::api::internal::nexus::VmmState {
     fn from(value: VmmState) -> Self {
         use omicron_common::api::internal::nexus::VmmState as Output;
         match value {
+            VmmState::Creating => Output::Creating,
             VmmState::Starting => Output::Starting,
             VmmState::Running => Output::Running,
             VmmState::Stopping => Output::Stopping,
@@ -82,6 +97,7 @@ impl From<VmmState> for sled_agent_client::types::VmmState {
     fn from(value: VmmState) -> Self {
         use sled_agent_client::types::VmmState as Output;
         match value {
+            VmmState::Creating => Output::Creating,
             VmmState::Starting => Output::Starting,
             VmmState::Running => Output::Running,
             VmmState::Stopping => Output::Stopping,
@@ -98,6 +114,7 @@ impl From<ApiState> for VmmState {
     fn from(value: ApiState) -> Self {
         use VmmState as Output;
         match value {
+            ApiState::Creating => Output::Creating,
             ApiState::Starting => Output::Starting,
             ApiState::Running => Output::Running,
             ApiState::Stopping => Output::Stopping,
@@ -115,7 +132,12 @@ impl From<VmmState> for omicron_common::api::external::InstanceState {
         use omicron_common::api::external::InstanceState as Output;
 
         match value {
-            VmmState::Starting => Output::Starting,
+            // An instance with a VMM which is in the `Creating` state maps to
+            // `InstanceState::Starting`, rather than `InstanceState::Creating`.
+            // If we are still creating the VMM, this is because we are
+            // attempting to *start* the instance; instances may be created
+            // without creating a VMM to run them, and then started later.
+            VmmState::Creating | VmmState::Starting => Output::Starting,
             VmmState::Running => Output::Running,
             VmmState::Stopping => Output::Stopping,
             // `SagaUnwound` should map to `Stopped` so that an `instance_view`

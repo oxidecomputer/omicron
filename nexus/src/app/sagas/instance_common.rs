@@ -98,7 +98,6 @@ pub async fn create_and_insert_vmm_record(
     propolis_id: PropolisUuid,
     sled_id: SledUuid,
     propolis_ip: Ipv6Addr,
-    initial_state: nexus_db_model::VmmInitialState,
 ) -> Result<db::model::Vmm, ActionError> {
     let vmm = db::model::Vmm::new(
         propolis_id,
@@ -106,7 +105,6 @@ pub async fn create_and_insert_vmm_record(
         sled_id,
         IpAddr::V6(propolis_ip).into(),
         DEFAULT_PROPOLIS_PORT,
-        initial_state,
     );
 
     let vmm = datastore
@@ -277,9 +275,9 @@ pub(super) async fn instance_ip_get_instance_state(
             Some(VmmState::Running) | Some(VmmState::Rebooting),
         ) => {}
 
-        // If the VMM is in the Stopping, Migrating, or Starting states, its
-        // sled assignment is in doubt, so report a transient state error and
-        // ask the caller to retry.
+        // If the VMM is in the Creating, Stopping, Migrating, or Starting
+        // states, its  sled assignment is in doubt, so report a transient state
+        // error and ask the caller to retry.
         //
         // Although an instance with a Starting VMM has a sled assignment,
         // there's no way to tell at this point whether or not there's a
@@ -304,9 +302,12 @@ pub(super) async fn instance_ip_get_instance_state(
         (
             InstanceState::Vmm,
             Some(state @ VmmState::Starting)
+            // TODO(eliza): now that a `Creating` state exists that's separate
+            // from `Starting`, perhaps we can remove `Starting` from this list?
             | Some(state @ VmmState::Migrating)
             | Some(state @ VmmState::Stopping)
-            | Some(state @ VmmState::Stopped),
+            | Some(state @ VmmState::Stopped)
+            | Some(state @ VmmState::Creating),
         ) => {
             return Err(ActionError::action_failed(Error::unavail(&format!(
                 "can't {verb} in transient state {state}"

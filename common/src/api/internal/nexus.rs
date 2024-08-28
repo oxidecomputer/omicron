@@ -83,6 +83,12 @@ pub struct InstanceRuntimeState {
 )]
 #[serde(rename_all = "snake_case")]
 pub enum VmmState {
+    /// The VMM is known to Nexus, but may not yet exist on a sled.
+    ///
+    /// VMM records are always inserted into the database in this state, and
+    /// then transition to 'starting' or 'migrating' once a sled-agent reports
+    /// that the VMM has been registered.
+    Creating,
     /// The VMM is initializing and has not started running guest CPUs yet.
     Starting,
     /// The VMM has finished initializing and may be running guest CPUs.
