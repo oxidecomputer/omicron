@@ -175,7 +175,11 @@ pub fn run_cmd(args: Args) -> Result<()> {
 
             println!("creating virtual hardware");
             if matches!(args.scope, Scope::All | Scope::Disks) {
-                ensure_vdevs(&sled_agent_config, &args.vdev_dir, args.vdev_size)?;
+                ensure_vdevs(
+                    &sled_agent_config,
+                    &args.vdev_dir,
+                    args.vdev_size,
+                )?;
             }
             if matches!(args.scope, Scope::All | Scope::Network)
                 && softnpu_mode == "zone"
