@@ -130,7 +130,6 @@ declare_saga_actions! {
     }
 }
 
-
 /// Node for looking up the initial VMM record output by
 /// `sim_create_vmm_record`.
 const INITIAL_VMM_RECORD: &'static str = "dst_vmm_record";
