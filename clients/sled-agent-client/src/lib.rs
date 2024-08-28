@@ -5,6 +5,7 @@
 //! Interface for making API requests to a Sled Agent
 
 use async_trait::async_trait;
+use omicron_uuid_kinds::PropolisUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -161,12 +162,11 @@ impl From<types::VmmRuntimeState>
     }
 }
 
-impl From<types::SledInstanceState>
-    for omicron_common::api::internal::nexus::SledInstanceState
+impl From<types::SledVmmState>
+    for omicron_common::api::internal::nexus::SledVmmState
 {
-    fn from(s: types::SledInstanceState) -> Self {
+    fn from(s: types::SledVmmState) -> Self {
         Self {
-            propolis_id: s.propolis_id,
             vmm_state: s.vmm_state.into(),
             migration_in: s.migration_in.map(Into::into),
             migration_out: s.migration_out.map(Into::into),
@@ -448,11 +448,11 @@ impl From<types::SledIdentifiers>
 /// are bonus endpoints, not generated in the real client.
 #[async_trait]
 pub trait TestInterfaces {
-    async fn instance_single_step(&self, id: Uuid);
-    async fn instance_finish_transition(&self, id: Uuid);
-    async fn instance_simulate_migration_source(
+    async fn vmm_single_step(&self, id: PropolisUuid);
+    async fn vmm_finish_transition(&self, id: PropolisUuid);
+    async fn vmm_simulate_migration_source(
         &self,
-        id: Uuid,
+        id: PropolisUuid,
         params: SimulateMigrationSource,
     );
     async fn disk_finish_transition(&self, id: Uuid);
@@ -460,10 +460,10 @@ pub trait TestInterfaces {
 
 #[async_trait]
 impl TestInterfaces for Client {
-    async fn instance_single_step(&self, id: Uuid) {
+    async fn vmm_single_step(&self, id: PropolisUuid) {
         let baseurl = self.baseurl();
         let client = self.client();
-        let url = format!("{}/instances/{}/poke-single-step", baseurl, id);
+        let url = format!("{}/vmms/{}/poke-single-step", baseurl, id);
         client
             .post(url)
             .send()
@@ -471,10 +471,10 @@ impl TestInterfaces for Client {
             .expect("instance_single_step() failed unexpectedly");
     }
 
-    async fn instance_finish_transition(&self, id: Uuid) {
+    async fn vmm_finish_transition(&self, id: PropolisUuid) {
         let baseurl = self.baseurl();
         let client = self.client();
-        let url = format!("{}/instances/{}/poke", baseurl, id);
+        let url = format!("{}/vmms/{}/poke", baseurl, id);
         client
             .post(url)
             .send()
@@ -493,14 +493,14 @@ impl TestInterfaces for Client {
             .expect("disk_finish_transition() failed unexpectedly");
     }
 
-    async fn instance_simulate_migration_source(
+    async fn vmm_simulate_migration_source(
         &self,
-        id: Uuid,
+        id: PropolisUuid,
         params: SimulateMigrationSource,
     ) {
         let baseurl = self.baseurl();
         let client = self.client();
-        let url = format!("{baseurl}/instances/{id}/sim-migration-source");
+        let url = format!("{baseurl}/vmms/{id}/sim-migration-source");
         client
             .post(url)
             .json(&params)

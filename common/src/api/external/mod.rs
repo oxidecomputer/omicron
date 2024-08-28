@@ -2371,7 +2371,7 @@ pub struct SwitchPortLinkConfig {
 
     /// The link-layer discovery protocol service configuration id for this
     /// link.
-    pub lldp_link_config_id: Uuid,
+    pub lldp_link_config_id: Option<Uuid>,
 
     /// The name of this link.
     pub link_name: String,

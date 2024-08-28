@@ -16,11 +16,13 @@ pub struct ServerContext {
     pub mgmt_switch: ManagementSwitch,
     pub host_phase2_provider: Arc<InMemoryHostPhase2Provider>,
     pub rack_id: OnceLock<Uuid>,
+    pub latencies: oximeter_instruments::http::LatencyTracker,
     pub log: Logger,
 }
 
 impl ServerContext {
     pub async fn new(
+        id: Uuid,
         host_phase2_provider: Arc<InMemoryHostPhase2Provider>,
         switch_config: SwitchConfig,
         rack_id_config: Option<Uuid>,
@@ -37,7 +39,21 @@ impl ServerContext {
             OnceLock::new()
         };
 
+        const START_LATENCY_DECADE: i16 = -6;
+        const END_LATENCY_DECADE: i16 = 3;
+        let latencies =
+            oximeter_instruments::http::LatencyTracker::with_latency_decades(
+                oximeter_instruments::http::HttpService {
+                    name: "management-gateway-service".into(),
+                    id,
+                },
+                START_LATENCY_DECADE,
+                END_LATENCY_DECADE,
+            )
+            .expect("start and end decades are hardcoded and should be valid");
+
         Ok(Arc::new(ServerContext {
+            latencies,
             mgmt_switch,
             host_phase2_provider,
             rack_id,

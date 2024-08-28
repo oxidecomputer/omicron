@@ -128,6 +128,7 @@ pub fn run_cmd() -> Result<()> {
                 // The tests here should not be run by default, as they require
                 // a running control plane.
                 "end-to-end-tests",
+                "omicron-live-tests",
             ]
             .contains(&package.name.as_str())
             .then_some(&package.id)

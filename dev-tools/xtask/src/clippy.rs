@@ -4,7 +4,8 @@
 
 //! Subcommand: cargo xtask clippy
 
-use anyhow::{bail, Context, Result};
+use crate::common::run_subcmd;
+use anyhow::Result;
 use clap::Parser;
 use std::process::Command;
 
@@ -51,25 +52,5 @@ pub fn run_cmd(args: ClippyArgs) -> Result<()> {
         .arg("--deny")
         .arg("warnings");
 
-    eprintln!(
-        "running: {:?} {}",
-        &cargo,
-        command
-            .get_args()
-            .map(|arg| format!("{:?}", arg.to_str().unwrap()))
-            .collect::<Vec<_>>()
-            .join(" ")
-    );
-
-    let exit_status = command
-        .spawn()
-        .context("failed to spawn child process")?
-        .wait()
-        .context("failed to wait for child process")?;
-
-    if !exit_status.success() {
-        bail!("clippy failed: {}", exit_status);
-    }
-
-    Ok(())
+    run_subcmd(command)
 }

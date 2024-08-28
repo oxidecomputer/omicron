@@ -22,6 +22,7 @@ impl_enum_type!(
     #[diesel(sql_type = ProducerKindEnum)]
     pub enum ProducerKind;
 
+    ManagementGateway => b"management_gateway"
     SledAgent => b"sled_agent"
     Service => b"service"
     Instance => b"instance"
@@ -30,6 +31,9 @@ impl_enum_type!(
 impl From<internal::nexus::ProducerKind> for ProducerKind {
     fn from(kind: internal::nexus::ProducerKind) -> Self {
         match kind {
+            internal::nexus::ProducerKind::ManagementGateway => {
+                ProducerKind::ManagementGateway
+            }
             internal::nexus::ProducerKind::SledAgent => ProducerKind::SledAgent,
             internal::nexus::ProducerKind::Service => ProducerKind::Service,
             internal::nexus::ProducerKind::Instance => ProducerKind::Instance,
@@ -40,6 +44,9 @@ impl From<internal::nexus::ProducerKind> for ProducerKind {
 impl From<ProducerKind> for internal::nexus::ProducerKind {
     fn from(kind: ProducerKind) -> Self {
         match kind {
+            ProducerKind::ManagementGateway => {
+                internal::nexus::ProducerKind::ManagementGateway
+            }
             ProducerKind::SledAgent => internal::nexus::ProducerKind::SledAgent,
             ProducerKind::Service => internal::nexus::ProducerKind::Service,
             ProducerKind::Instance => internal::nexus::ProducerKind::Instance,
