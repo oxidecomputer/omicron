@@ -632,16 +632,14 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(EnsureMultiple::Changed { added, removed })
     }
 
-    fn sled_ensure_zone_internal_dns(
+    fn sled_add_zone_internal_dns(
         &mut self,
         sled_id: SledUuid,
         gz_address_index: u32,
     ) -> Result<Ensure, Error> {
         let sled_subnet = self.sled_resources(sled_id)?.subnet;
-        let rack_subnet = ReservedRackSubnet::from(sled_subnet);
-        let dns_subnet = self
-            .internal_dns_subnets
-            .alloc_or_else(|| rack_subnet.get_dns_subnet(1))?;
+        let rack_subnet = ReservedRackSubnet::from_subnet(sled_subnet);
+        let dns_subnet = self.internal_dns_subnets.alloc(rack_subnet)?;
         let address = dns_subnet.dns_address();
         let zpool = self.sled_select_zpool(sled_id, ZoneKind::InternalDns)?;
         let zone_type =
@@ -686,7 +684,7 @@ impl<'a> BlueprintBuilder<'a> {
         };
 
         for i in count..desired_zone_count {
-            self.sled_ensure_zone_internal_dns(
+            self.sled_add_zone_internal_dns(
                 sled_id,
                 i.try_into().map_err(|_| {
                     Error::Planner(anyhow!("zone index overflow"))

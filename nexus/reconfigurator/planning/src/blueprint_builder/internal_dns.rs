@@ -34,7 +34,7 @@ impl DnsSubnetAllocator {
                 BlueprintZoneType::InternalDns(InternalDns {
                     dns_address,
                     ..
-                }) => Some(DnsSubnet::from(*dns_address.ip())),
+                }) => Some(DnsSubnet::from_addr(*dns_address.ip())),
                 _ => None,
             })
             .collect::<BTreeSet<DnsSubnet>>();
@@ -52,33 +52,39 @@ impl DnsSubnetAllocator {
     /// correct reserved rack subnet (e.g., there might not be any internal DNS
     /// zones in the parent blueprint, though that would itself be odd), but we
     /// can derive it at runtime from the sled address.
-    pub fn alloc_or_else<F>(&mut self, default: F) -> Result<DnsSubnet, Error>
-    where
-        F: FnOnce() -> DnsSubnet,
-    {
+    pub fn alloc(
+        &mut self,
+        rack_subnet: ReservedRackSubnet,
+    ) -> Result<DnsSubnet, Error> {
         let new = if let Some(first) = self.in_use.first() {
             // Take the first available DNS subnet. We currently generate
             // all `MAX_DNS_REDUNDANCY` subnets and subtract any that are
             // in use; this is fine as long as that constant is small.
-            let subnet = first.subnet();
-            let subnets = ReservedRackSubnet::from(subnet).get_dns_subnets();
-            let subnets = BTreeSet::from_iter(subnets);
+            let subnets = BTreeSet::from_iter(
+                ReservedRackSubnet::from_subnet(first.subnet())
+                    .get_dns_subnets(),
+            );
             let mut avail = subnets.difference(&self.in_use);
             if let Some(first) = avail.next() {
-                first.clone()
+                *first
             } else {
                 return Err(Error::NoAvailableDnsSubnets);
             }
         } else {
-            default()
+            rack_subnet.get_dns_subnet(1)
         };
-        self.in_use.insert(new.clone());
+        self.in_use.insert(new);
         Ok(new)
     }
 
     #[cfg(test)]
     fn first(&self) -> Option<DnsSubnet> {
-        self.in_use.first().cloned()
+        self.in_use.first().copied()
+    }
+
+    #[cfg(test)]
+    fn pop_first(&mut self) -> Option<DnsSubnet> {
+        self.in_use.pop_first()
     }
 
     #[cfg(test)]
@@ -89,11 +95,6 @@ impl DnsSubnetAllocator {
     #[cfg(test)]
     fn len(&self) -> usize {
         self.in_use.len()
-    }
-
-    #[cfg(test)]
-    fn clear(&mut self) {
-        self.in_use.clear()
     }
 }
 
@@ -125,6 +126,14 @@ pub mod test {
         let last = allocator.last().expect("should be a last subnet");
         assert!(last > first, "first should come before last");
 
+        // Derive the reserved rack subnet.
+        let rack_subnet = first.rack_subnet();
+        assert_eq!(
+            rack_subnet,
+            last.rack_subnet(),
+            "first & last DNS subnets should be in the same rack subnet"
+        );
+
         // Allocate two new subnets.
         assert_eq!(MAX_DNS_REDUNDANCY - DNS_REDUNDANCY, 2);
         assert_eq!(
@@ -132,12 +141,11 @@ pub mod test {
             DNS_REDUNDANCY,
             "should be {DNS_REDUNDANCY} subnets allocated"
         );
-        let new1 = allocator
-            .alloc_or_else(|| panic!("shouldn't need a default"))
-            .expect("failed to allocate a subnet");
+        let new1 =
+            allocator.alloc(rack_subnet).expect("failed to allocate a subnet");
         let new2 = allocator
-            .alloc_or_else(|| panic!("shouldn't need a default"))
-            .expect("failed to allocate a subnet");
+            .alloc(rack_subnet)
+            .expect("failed to allocate another subnet");
         assert!(
             new1 > last,
             "newly allocated subnets should be after initial ones"
@@ -149,41 +157,23 @@ pub mod test {
             MAX_DNS_REDUNDANCY,
             "should be {DNS_REDUNDANCY} subnets allocated"
         );
-        allocator
-            .alloc_or_else(|| panic!("shouldn't need a default"))
-            .expect_err("no subnets available");
-
-        // Clear and test default.
-        allocator.clear();
-        let default = allocator
-            .alloc_or_else(|| new1.clone())
-            .expect("failed to alloc default");
-        assert_eq!(default, new1, "should default");
+        allocator.alloc(rack_subnet).expect_err("no subnets available");
 
         // Test packing.
-        allocator.clear();
-        assert!(first < new2);
+        let first = allocator.pop_first().expect("should be a first subnet");
+        let second = allocator.pop_first().expect("should be a second subnet");
+        assert!(first < second, "first should be before second");
         assert_eq!(
-            allocator
-                .alloc_or_else(|| new2.clone())
-                .expect("failed to alloc default"),
-            new2,
-            "should default"
-        );
-        assert_eq!(
-            allocator
-                .alloc_or_else(|| panic!("shouldn't need a default"))
-                .expect("allocation failed"),
+            allocator.alloc(rack_subnet).expect("allocation failed"),
             first,
-            "should be first subnet"
+            "should get first subnet"
         );
-        assert!(
-            allocator
-                .alloc_or_else(|| panic!("shouldn't need a default"))
-                .expect("allocation failed")
-                > first,
-            "should be after first subnet"
+        assert_eq!(
+            allocator.alloc(rack_subnet).expect("allocation failed"),
+            second,
+            "should get second subnet"
         );
+        allocator.alloc(rack_subnet).expect_err("no subnets available");
 
         // Done!
         logctx.cleanup_successful();
