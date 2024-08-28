@@ -4597,6 +4597,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "01cda141df6706de531b6c46c3a33ecca755538219bd484262fa09410c13539c"
 
 [[package]]
+name = "live-tests-macros"
+version = "0.1.0"
+dependencies = [
+ "omicron-workspace-hack",
+ "quote",
+ "syn 2.0.74",
+]
+
+[[package]]
 name = "lock_api"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6063,6 +6072,38 @@ dependencies = [
  "tokio-stream",
  "tokio-tungstenite 0.20.1",
  "toml 0.8.19",
+ "uuid",
+]
+
+[[package]]
+name = "omicron-live-tests"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "assert_matches",
+ "dropshot 0.10.2-dev",
+ "futures",
+ "internal-dns",
+ "live-tests-macros",
+ "nexus-client",
+ "nexus-config",
+ "nexus-db-model",
+ "nexus-db-queries",
+ "nexus-reconfigurator-planning",
+ "nexus-reconfigurator-preparation",
+ "nexus-sled-agent-shared",
+ "nexus-types",
+ "omicron-common",
+ "omicron-rpaths",
+ "omicron-test-utils",
+ "omicron-workspace-hack",
+ "pq-sys",
+ "reqwest",
+ "serde",
+ "slog",
+ "slog-error-chain",
+ "textwrap",
+ "tokio",
  "uuid",
 ]
 
@@ -12305,6 +12346,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "camino",
+ "camino-tempfile",
  "cargo_metadata",
  "cargo_toml",
  "clap",
@@ -12313,6 +12355,7 @@ dependencies = [
  "serde",
  "swrite",
  "tabled",
+ "textwrap",
  "toml 0.8.19",
  "usdt",
 ]

@@ -52,6 +52,8 @@ members = [
     "internal-dns",
     "ipcc",
     "key-manager",
+    "live-tests",
+    "live-tests/macros",
     "nexus",
     "nexus-config",
     "nexus-sled-agent-shared",
@@ -170,6 +172,9 @@ default-members = [
     "internal-dns",
     "ipcc",
     "key-manager",
+    # Do not include live-tests in the list of default members because its tests
+    # only work in a deployed system.  The macros can be here, though.
+    "live-tests/macros",
     "nexus",
     "nexus-config",
     "nexus-sled-agent-shared",
@@ -403,6 +408,7 @@ libc = "0.2.158"
 libfalcon = { git = "https://github.com/oxidecomputer/falcon", rev = "e69694a1f7cc9fe31fab27f321017280531fb5f7" }
 libnvme = { git = "https://github.com/oxidecomputer/libnvme", rev = "dd5bb221d327a1bc9287961718c3c10d6bd37da0" }
 linear-map = "1.2.0"
+live-tests-macros = { path = "live-tests/macros" }
 macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
 mockall = "0.13"
