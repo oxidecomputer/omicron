@@ -30,6 +30,8 @@ use omicron_common::api::internal::shared::VirtualNetworkInterfaceHost;
 use omicron_common::api::internal::shared::{
     ResolvedVpcRouteSet, ResolvedVpcRouteState, SwitchPorts,
 };
+use omicron_common::disk::DatasetsConfig;
+use omicron_common::disk::DatasetsManagementResult;
 use omicron_common::disk::DisksManagementResult;
 use omicron_common::disk::OmicronPhysicalDisksConfig;
 use sled_agent_api::*;
@@ -297,6 +299,23 @@ impl SledAgentApi for SledAgentSimImpl {
                 HttpError::for_internal_error(format!("{:#}", e))
             })?,
         ))
+    }
+
+    async fn datasets_put(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<DatasetsConfig>,
+    ) -> Result<HttpResponseOk<DatasetsManagementResult>, HttpError> {
+        let sa = rqctx.context();
+        let body_args = body.into_inner();
+        let result = sa.datasets_ensure(body_args).await?;
+        Ok(HttpResponseOk(result))
+    }
+
+    async fn datasets_get(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<DatasetsConfig>, HttpError> {
+        let sa = rqctx.context();
+        Ok(HttpResponseOk(sa.datasets_config_list().await?))
     }
 
     async fn omicron_physical_disks_put(

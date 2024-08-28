@@ -2711,39 +2711,8 @@
         ]
       },
       "DatasetKind": {
-        "description": "Describes the purpose of the dataset.",
-        "oneOf": [
-          {
-            "type": "string",
-            "enum": [
-              "crucible",
-              "cockroach",
-              "external_dns",
-              "internal_dns"
-            ]
-          },
-          {
-            "description": "Used for single-node clickhouse deployments",
-            "type": "string",
-            "enum": [
-              "clickhouse"
-            ]
-          },
-          {
-            "description": "Used for replicated clickhouse deployments",
-            "type": "string",
-            "enum": [
-              "clickhouse_keeper"
-            ]
-          },
-          {
-            "description": "Used for replicated clickhouse deployments",
-            "type": "string",
-            "enum": [
-              "clickhouse_server"
-            ]
-          }
-        ]
+        "description": "The kind of dataset. See the `DatasetKind` enum in omicron-common for possible values.",
+        "type": "string"
       },
       "DatasetPutRequest": {
         "description": "Describes a dataset within a pool.",

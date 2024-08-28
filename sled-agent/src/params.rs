@@ -3,9 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use nexus_sled_agent_shared::inventory::{OmicronZoneConfig, OmicronZoneType};
+use omicron_common::disk::{DatasetKind, DatasetName};
 pub use sled_hardware::DendriteAsic;
-use sled_storage::dataset::DatasetName;
-use sled_storage::dataset::DatasetType;
 use std::net::SocketAddrV6;
 
 /// Extension trait for `OmicronZoneConfig`.
@@ -49,25 +48,25 @@ pub(crate) trait OmicronZoneTypeExt {
             | OmicronZoneType::Oximeter { .. }
             | OmicronZoneType::CruciblePantry { .. } => None,
             OmicronZoneType::Clickhouse { dataset, address, .. } => {
-                Some((dataset, DatasetType::Clickhouse, address))
+                Some((dataset, DatasetKind::Clickhouse, address))
             }
             OmicronZoneType::ClickhouseKeeper { dataset, address, .. } => {
-                Some((dataset, DatasetType::ClickhouseKeeper, address))
+                Some((dataset, DatasetKind::ClickhouseKeeper, address))
             }
             OmicronZoneType::ClickhouseServer { dataset, address, .. } => {
-                Some((dataset, DatasetType::ClickhouseServer, address))
+                Some((dataset, DatasetKind::ClickhouseServer, address))
             }
             OmicronZoneType::CockroachDb { dataset, address, .. } => {
-                Some((dataset, DatasetType::CockroachDb, address))
+                Some((dataset, DatasetKind::Cockroach, address))
             }
             OmicronZoneType::Crucible { dataset, address, .. } => {
-                Some((dataset, DatasetType::Crucible, address))
+                Some((dataset, DatasetKind::Crucible, address))
             }
             OmicronZoneType::ExternalDns { dataset, http_address, .. } => {
-                Some((dataset, DatasetType::ExternalDns, http_address))
+                Some((dataset, DatasetKind::ExternalDns, http_address))
             }
             OmicronZoneType::InternalDns { dataset, http_address, .. } => {
-                Some((dataset, DatasetType::InternalDns, http_address))
+                Some((dataset, DatasetKind::InternalDns, http_address))
             }
         }?;
 
