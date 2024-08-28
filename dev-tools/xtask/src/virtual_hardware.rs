@@ -166,6 +166,7 @@ pub fn run_cmd(args: Args) -> Result<()> {
             gateway_mac,
             pxa,
             pxa_mac,
+            vdev_size,
         } => {
             let physical_link = if let Some(l) = physical_link {
                 l
@@ -178,7 +179,7 @@ pub fn run_cmd(args: Args) -> Result<()> {
                 ensure_vdevs(
                     &sled_agent_config,
                     &args.vdev_dir,
-                    args.vdev_size,
+                    vdev_size,
                 )?;
             }
             if matches!(args.scope, Scope::All | Scope::Network)
