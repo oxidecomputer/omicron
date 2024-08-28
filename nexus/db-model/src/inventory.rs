@@ -1106,9 +1106,9 @@ impl InvOmicronZone {
                 .filesystem_pool
                 .as_ref()
                 .map(|pool| pool.id().into()),
+            zone_type: zone.zone_type.kind().into(),
 
             // Set the remainder of the fields to a default
-            zone_type: ZoneType::BoundaryNtp,
             primary_service_ip: "::1"
                 .parse::<std::net::Ipv6Addr>()
                 .unwrap()
@@ -1141,7 +1141,6 @@ impl InvOmicronZone {
             } => {
                 // Set the common fields
                 inv_omicron_zone.set_primary_service_ip_and_port(address);
-                inv_omicron_zone.zone_type = ZoneType::BoundaryNtp;
 
                 // Set the zone specific fields
                 let (first_port, last_port) = snat_cfg.port_range_raw();
@@ -1164,36 +1163,30 @@ impl InvOmicronZone {
                 // Set the common fields
                 inv_omicron_zone.set_primary_service_ip_and_port(address);
                 inv_omicron_zone.set_zpool_name(dataset);
-                inv_omicron_zone.zone_type = ZoneType::Clickhouse;
             }
             OmicronZoneType::ClickhouseKeeper { address, dataset } => {
                 // Set the common fields
                 inv_omicron_zone.set_primary_service_ip_and_port(address);
                 inv_omicron_zone.set_zpool_name(dataset);
-                inv_omicron_zone.zone_type = ZoneType::ClickhouseKeeper;
             }
             OmicronZoneType::ClickhouseServer { address, dataset } => {
                 // Set the common fields
                 inv_omicron_zone.set_primary_service_ip_and_port(address);
                 inv_omicron_zone.set_zpool_name(dataset);
-                inv_omicron_zone.zone_type = ZoneType::ClickhouseServer;
             }
             OmicronZoneType::CockroachDb { address, dataset } => {
                 // Set the common fields
                 inv_omicron_zone.set_primary_service_ip_and_port(address);
                 inv_omicron_zone.set_zpool_name(dataset);
-                inv_omicron_zone.zone_type = ZoneType::CockroachDb;
             }
             OmicronZoneType::Crucible { address, dataset } => {
                 // Set the common fields
                 inv_omicron_zone.set_primary_service_ip_and_port(address);
                 inv_omicron_zone.set_zpool_name(dataset);
-                inv_omicron_zone.zone_type = ZoneType::Crucible;
             }
             OmicronZoneType::CruciblePantry { address } => {
                 // Set the common fields
                 inv_omicron_zone.set_primary_service_ip_and_port(address);
-                inv_omicron_zone.zone_type = ZoneType::CruciblePantry;
             }
             OmicronZoneType::ExternalDns {
                 dataset,
@@ -1204,7 +1197,6 @@ impl InvOmicronZone {
                 // Set the common fields
                 inv_omicron_zone.set_primary_service_ip_and_port(http_address);
                 inv_omicron_zone.set_zpool_name(dataset);
-                inv_omicron_zone.zone_type = ZoneType::ExternalDns;
 
                 // Set the zone specific fields
                 inv_omicron_zone.nic_id = Some(nic.id);
@@ -1223,7 +1215,6 @@ impl InvOmicronZone {
                 // Set the common fields
                 inv_omicron_zone.set_primary_service_ip_and_port(http_address);
                 inv_omicron_zone.set_zpool_name(dataset);
-                inv_omicron_zone.zone_type = ZoneType::InternalDns;
 
                 // Set the zone specific fields
                 inv_omicron_zone.second_service_ip =
@@ -1244,7 +1235,6 @@ impl InvOmicronZone {
             } => {
                 // Set the common fields
                 inv_omicron_zone.set_primary_service_ip_and_port(address);
-                inv_omicron_zone.zone_type = ZoneType::InternalNtp;
 
                 // Set the zone specific fields
                 inv_omicron_zone.ntp_ntp_servers = Some(ntp_servers.clone());
@@ -1263,7 +1253,6 @@ impl InvOmicronZone {
                 // Set the common fields
                 inv_omicron_zone
                     .set_primary_service_ip_and_port(internal_address);
-                inv_omicron_zone.zone_type = ZoneType::Nexus;
 
                 // Set the zone specific fields
                 inv_omicron_zone.nic_id = Some(nic.id);
@@ -1281,7 +1270,6 @@ impl InvOmicronZone {
             OmicronZoneType::Oximeter { address } => {
                 // Set the common fields
                 inv_omicron_zone.set_primary_service_ip_and_port(address);
-                inv_omicron_zone.zone_type = ZoneType::Oximeter;
             }
         }
 
