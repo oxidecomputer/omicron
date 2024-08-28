@@ -49,6 +49,10 @@ enum Commands {
 
         #[clap(long, default_value = PXA_MAC_DEFAULT)]
         pxa_mac: String,
+
+        /// Size in bytes for created vdevs
+        #[clap(long, default_value_t = 20 * GB)]
+        vdev_size: u64,
     },
     /// Destroy virtual hardware which was initialized with "Create"
     Destroy,
@@ -89,10 +93,6 @@ pub struct Args {
     /// The directory in which virtual devices are stored
     #[clap(long, default_value = "/var/tmp")]
     vdev_dir: Utf8PathBuf,
-
-    /// Allow customization of the vdev size
-    #[clap(long, default_value_t = 20 * GB)]
-    vdev_size: u64,
 
     #[command(subcommand)]
     command: Commands,
