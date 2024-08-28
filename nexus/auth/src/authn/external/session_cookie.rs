@@ -12,7 +12,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 use dropshot::HttpError;
 use http::HeaderValue;
-use nexus_auth_types::authn::cookies::parse_cookies;
+use nexus_types::authn::cookies::parse_cookies;
 use slog::debug;
 use uuid::Uuid;
 

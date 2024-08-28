@@ -11,12 +11,12 @@ use chrono::Utc;
 
 use crate::oxql::ast::ident::Ident;
 use anyhow::Error;
+use oximeter::schema::TimeseriesKey;
 use oxql_types::point::DataType;
 use oxql_types::point::MetricType;
 use oxql_types::point::ValueArray;
 use oxql_types::Table;
 use oxql_types::Timeseries;
-use oxql_types::TimeseriesKey;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 

@@ -383,13 +383,13 @@ impl SpecCheckStatus {
 
     pub(crate) fn iter_errors(
         &self,
-    ) -> impl Iterator<Item = (ApiSpecFile<'_>, &CheckError)> {
+    ) -> impl Iterator<Item = (ApiSpecFile<'_>, &CheckStale)> {
         std::iter::once((ApiSpecFile::Openapi, &self.openapi_doc))
             .chain(self.extra_files.iter().map(|(file_name, status)| {
                 (ApiSpecFile::Extra(file_name), status)
             }))
             .filter_map(|(spec_file, status)| {
-                if let CheckStatus::Error(e) = status {
+                if let CheckStatus::Stale(e) = status {
                     Some((spec_file, e))
                 } else {
                     None
@@ -407,15 +407,15 @@ pub(crate) enum ApiSpecFile<'a> {
 #[derive(Debug)]
 #[must_use]
 pub(crate) enum CheckStatus {
-    Ok,
-    Error(CheckError),
+    Fresh,
+    Stale(CheckStale),
 }
 
 #[derive(Debug)]
 #[must_use]
-pub(crate) enum CheckError {
-    Stale { full_path: Utf8PathBuf, actual: Vec<u8>, expected: Vec<u8> },
-    Missing,
+pub(crate) enum CheckStale {
+    Modified { full_path: Utf8PathBuf, actual: Vec<u8>, expected: Vec<u8> },
+    New,
 }
 
 #[derive(Debug)]
@@ -511,14 +511,16 @@ fn check_file(
 
     match existing_contents {
         Some(existing_contents) if existing_contents == contents => {
-            Ok(CheckStatus::Ok)
+            Ok(CheckStatus::Fresh)
         }
-        Some(existing_contents) => Ok(CheckStatus::Error(CheckError::Stale {
-            full_path,
-            actual: existing_contents,
-            expected: contents,
-        })),
-        None => Ok(CheckStatus::Error(CheckError::Missing)),
+        Some(existing_contents) => {
+            Ok(CheckStatus::Stale(CheckStale::Modified {
+                full_path,
+                actual: existing_contents,
+                expected: contents,
+            }))
+        }
+        None => Ok(CheckStatus::Stale(CheckStale::New)),
     }
 }
 

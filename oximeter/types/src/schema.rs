@@ -28,6 +28,8 @@ use std::num::NonZeroU8;
 pub const SCHEMA_DIRECTORY: &str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/../oximeter/schema");
 
+pub type TimeseriesKey = u64;
+
 /// The name and type information for a field of a timeseries schema.
 #[derive(
     Clone,
@@ -187,7 +189,8 @@ pub enum Units {
     Nanoseconds,
     Volts,
     Amps,
-    DegreesCelcius,
+    Watts,
+    DegreesCelsius,
     /// Rotations per minute.
     Rpm,
 }

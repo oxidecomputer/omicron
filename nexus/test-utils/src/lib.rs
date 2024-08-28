@@ -84,6 +84,7 @@ use uuid::Uuid;
 pub use sim::TEST_HARDWARE_THREADS;
 pub use sim::TEST_RESERVOIR_RAM;
 
+pub mod background;
 pub mod db;
 pub mod http_testing;
 pub mod resource_helpers;
@@ -1428,6 +1429,7 @@ pub async fn start_oximeter(
         address: Some(SocketAddr::new(Ipv6Addr::LOCALHOST.into(), db_port)),
         batch_size: 10,
         batch_interval: 1,
+        replicated: false,
     };
     let config = oximeter_collector::Config {
         nexus_address: Some(nexus_address),

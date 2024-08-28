@@ -6,6 +6,7 @@
 //! configuration
 
 use crate::management_switch::SwitchConfig;
+use crate::metrics::MetricsConfig;
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use dropshot::ConfigLogging;
@@ -25,6 +26,8 @@ pub struct Config {
     pub switch: SwitchConfig,
     /// Server-wide logging configuration.
     pub log: ConfigLogging,
+    /// Configuration for SP sensor metrics.
+    pub metrics: Option<MetricsConfig>,
 }
 
 impl Config {
@@ -47,13 +50,13 @@ pub struct PartialDropshotConfig {
 
 #[derive(Debug, Error, SlogInlineError)]
 pub enum LoadError {
-    #[error("error reading \"{path}\"")]
+    #[error("error reading \"{path}\": {err}")]
     Io {
         path: Utf8PathBuf,
         #[source]
         err: std::io::Error,
     },
-    #[error("error parsing \"{path}\"")]
+    #[error("error parsing \"{path}\": {err}")]
     Parse {
         path: Utf8PathBuf,
         #[source]

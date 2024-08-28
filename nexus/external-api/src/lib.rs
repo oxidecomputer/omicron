@@ -12,8 +12,10 @@ use dropshot::{
 use http::Response;
 use hyper::Body;
 use ipnetwork::IpNetwork;
-use nexus_auth_types::authn::cookies::Cookies;
-use nexus_types::external_api::{params, shared, views};
+use nexus_types::{
+    authn::cookies::Cookies,
+    external_api::{params, shared, views},
+};
 use omicron_common::api::external::{
     http_pagination::{PaginatedById, PaginatedByName, PaginatedByNameOrId},
     *,
@@ -1490,6 +1492,17 @@ pub trait NexusExternalApi {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<BgpPeerStatus>>, HttpError>;
 
+    //TODO pagination? the normal by-name/by-id stuff does not work here
+    /// Get BGP exported routes
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/bgp-exported",
+        tags = ["system/networking"],
+    }]
+    async fn networking_bgp_exported(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<BgpExported>, HttpError>;
+
     /// Get BGP router message history
     #[endpoint {
         method = GET,
@@ -1530,7 +1543,7 @@ pub trait NexusExternalApi {
     /// set with the one specified.
     #[endpoint {
         method = PUT,
-        path = "/v1/system/networking/bgp-announce",
+        path = "/v1/system/networking/bgp-announce-set",
         tags = ["system/networking"],
     }]
     async fn networking_bgp_announce_set_update(
@@ -1538,28 +1551,42 @@ pub trait NexusExternalApi {
         config: TypedBody<params::BgpAnnounceSetCreate>,
     ) -> Result<HttpResponseCreated<BgpAnnounceSet>, HttpError>;
 
-    //TODO pagination? the normal by-name/by-id stuff does not work here
-    /// Get originated routes for a BGP configuration
+    /// List BGP announce sets
     #[endpoint {
         method = GET,
-        path = "/v1/system/networking/bgp-announce",
+        path = "/v1/system/networking/bgp-announce-set",
         tags = ["system/networking"],
     }]
     async fn networking_bgp_announce_set_list(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<params::BgpAnnounceSetSelector>,
-    ) -> Result<HttpResponseOk<Vec<BgpAnnouncement>>, HttpError>;
+        query_params: Query<
+            PaginatedByNameOrId<params::OptionalBgpAnnounceSetSelector>,
+        >,
+    ) -> Result<HttpResponseOk<Vec<BgpAnnounceSet>>, HttpError>;
 
     /// Delete BGP announce set
     #[endpoint {
         method = DELETE,
-        path = "/v1/system/networking/bgp-announce",
+        path = "/v1/system/networking/bgp-announce-set/{name_or_id}",
         tags = ["system/networking"],
     }]
     async fn networking_bgp_announce_set_delete(
         rqctx: RequestContext<Self::Context>,
-        selector: Query<params::BgpAnnounceSetSelector>,
+        path_params: Path<params::BgpAnnounceSetSelector>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    // TODO: is pagination necessary here? How large do we expect the list of
+    // announcements to become in real usage?
+    /// Get originated routes for a specified BGP announce set
+    #[endpoint {
+        method = GET,
+        path = "/v1/system/networking/bgp-announce-set/{name_or_id}/announcement",
+        tags = ["system/networking"],
+    }]
+    async fn networking_bgp_announcement_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::BgpAnnounceSetSelector>,
+    ) -> Result<HttpResponseOk<Vec<BgpAnnouncement>>, HttpError>;
 
     /// Enable a BFD session
     #[endpoint {
@@ -2392,7 +2419,7 @@ pub trait NexusExternalApi {
     async fn timeseries_query(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<params::TimeseriesQuery>,
-    ) -> Result<HttpResponseOk<Vec<oxql_types::Table>>, HttpError>;
+    ) -> Result<HttpResponseOk<views::OxqlQueryResult>, HttpError>;
 
     // Updates
 
@@ -2507,7 +2534,7 @@ pub trait NexusExternalApi {
     }]
     async fn role_view(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::RolePathParam>,
+        path_params: Path<params::RolePath>,
     ) -> Result<HttpResponseOk<views::Role>, HttpError>;
 
     // Current user
@@ -2688,7 +2715,7 @@ pub trait NexusExternalApi {
     }]
     async fn login_local_begin(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::LoginPathParam>,
+        path_params: Path<params::LoginPath>,
         query_params: Query<params::LoginUrlQuery>,
     ) -> Result<Response<Body>, HttpError>;
 
@@ -2700,7 +2727,7 @@ pub trait NexusExternalApi {
     }]
     async fn login_local(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::LoginPathParam>,
+        path_params: Path<params::LoginPath>,
         credentials: TypedBody<params::UsernamePasswordCredentials>,
     ) -> Result<HttpResponseHeaders<HttpResponseUpdatedNoContent>, HttpError>;
 

@@ -41,6 +41,8 @@ pub mod region_replacement_finish;
 pub mod region_replacement_start;
 pub mod region_snapshot_replacement_garbage_collect;
 pub mod region_snapshot_replacement_start;
+pub mod region_snapshot_replacement_step;
+pub mod region_snapshot_replacement_step_garbage_collect;
 pub mod snapshot_create;
 pub mod snapshot_delete;
 pub mod test_saga;
@@ -196,6 +198,12 @@ fn make_action_registry() -> ActionRegistry {
         &mut registry,
     );
     <region_snapshot_replacement_garbage_collect::SagaRegionSnapshotReplacementGarbageCollect as NexusSaga>::register_actions(
+        &mut registry,
+    );
+    <region_snapshot_replacement_step::SagaRegionSnapshotReplacementStep as NexusSaga>::register_actions(
+        &mut registry,
+    );
+    <region_snapshot_replacement_step_garbage_collect::SagaRegionSnapshotReplacementStepGarbageCollect as NexusSaga>::register_actions(
         &mut registry,
     );
 

@@ -34,7 +34,6 @@ use dropshot::{WebsocketChannelResult, WebsocketConnection};
 use http::Response;
 use hyper::Body;
 use ipnetwork::IpNetwork;
-use nexus_auth_types::authn::cookies::Cookies;
 use nexus_db_queries::authz;
 use nexus_db_queries::db;
 use nexus_db_queries::db::identity::Resource;
@@ -42,10 +41,14 @@ use nexus_db_queries::db::lookup::ImageLookup;
 use nexus_db_queries::db::lookup::ImageParentLookup;
 use nexus_db_queries::db::model::Name;
 use nexus_external_api::*;
-use nexus_types::external_api::{
-    params::SystemMetricsPathParam,
-    shared::{BfdStatus, ProbeInfo},
+use nexus_types::{
+    authn::cookies::Cookies,
+    external_api::{
+        params::SystemMetricsPathParam,
+        shared::{BfdStatus, ProbeInfo},
+    },
 };
+use omicron_common::api::external::http_pagination::data_page_params_for;
 use omicron_common::api::external::http_pagination::marker_for_name;
 use omicron_common::api::external::http_pagination::marker_for_name_or_id;
 use omicron_common::api::external::http_pagination::name_or_id_pagination;
@@ -60,9 +63,11 @@ use omicron_common::api::external::http_pagination::ScanParams;
 use omicron_common::api::external::AddressLot;
 use omicron_common::api::external::AddressLotBlock;
 use omicron_common::api::external::AddressLotCreateResponse;
+use omicron_common::api::external::AggregateBgpMessageHistory;
 use omicron_common::api::external::BgpAnnounceSet;
 use omicron_common::api::external::BgpAnnouncement;
 use omicron_common::api::external::BgpConfig;
+use omicron_common::api::external::BgpExported;
 use omicron_common::api::external::BgpImportedRouteIpv4;
 use omicron_common::api::external::BgpPeerStatus;
 use omicron_common::api::external::DataPageParams;
@@ -83,9 +88,6 @@ use omicron_common::api::external::TufRepoGetResponse;
 use omicron_common::api::external::TufRepoInsertResponse;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
-use omicron_common::api::external::{
-    http_pagination::data_page_params_for, AggregateBgpMessageHistory,
-};
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
 use propolis_client::support::tungstenite::protocol::frame::coding::CloseCode;
@@ -255,7 +257,6 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .instrument_dropshot_handler(&rqctx, handler)
             .await
     }
-
     async fn silo_utilization_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByNameOrId>,
@@ -561,6 +562,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    // Silo-specific user endpoints
+
     async fn silo_user_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedById<params::SiloSelector>>,
@@ -619,6 +622,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    // Silo identity providers
+
     async fn silo_identity_provider_list(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<PaginatedByNameOrId<params::SiloSelector>>,
@@ -652,6 +657,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .instrument_dropshot_handler(&rqctx, handler)
             .await
     }
+
+    // Silo SAML identity providers
 
     async fn saml_identity_provider_create(
         rqctx: RequestContext<ApiContext>,
@@ -714,6 +721,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .instrument_dropshot_handler(&rqctx, handler)
             .await
     }
+
+    // TODO: no DELETE for identity providers?
+
+    // "Local" Identity Provider
 
     async fn local_idp_user_create(
         rqctx: RequestContext<ApiContext>,
@@ -898,6 +909,11 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    // TODO-correctness: Is it valid for PUT to accept application/json that's a
+    // subset of what the resource actually represents?  If not, is that a problem?
+    // (HTTP may require that this be idempotent.)  If so, can we get around that
+    // having this be a slightly different content-type (e.g.,
+    // "application/json-patch")?  We should see what other APIs do.
     async fn project_update(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::ProjectPath>,
@@ -980,6 +996,8 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .instrument_dropshot_handler(&rqctx, handler)
             .await
     }
+
+    // IP Pools
 
     async fn project_ip_pool_list(
         rqctx: RequestContext<ApiContext>,
@@ -1685,10 +1703,6 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    /// Detach floating IP
-    ///
-    // Detach floating IP from instance or other resource.
-
     async fn floating_ip_detach(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::FloatingIpPath>,
@@ -1754,7 +1768,6 @@ impl NexusExternalApi for NexusExternalApiImpl {
     }
 
     // TODO-correctness See note about instance create.  This should be async.
-
     async fn disk_create(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<params::ProjectSelector>,
@@ -2966,7 +2979,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let config = config.into_inner();
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
-            let result = nexus.bgp_config_set(&opctx, &config).await?;
+            let result = nexus.bgp_config_create(&opctx, &config).await?;
             Ok(HttpResponseCreated::<BgpConfig>(result.into()))
         };
         apictx
@@ -3010,7 +3023,6 @@ impl NexusExternalApi for NexusExternalApiImpl {
     }
 
     //TODO pagination? the normal by-name/by-id stuff does not work here
-
     async fn networking_bgp_status(
         rqctx: RequestContext<ApiContext>,
     ) -> Result<HttpResponseOk<Vec<BgpPeerStatus>>, HttpError> {
@@ -3019,6 +3031,24 @@ impl NexusExternalApi for NexusExternalApiImpl {
         let handler = async {
             let nexus = &apictx.context.nexus;
             let result = nexus.bgp_peer_status(&opctx).await?;
+            Ok(HttpResponseOk(result))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    //TODO pagination? the normal by-name/by-id stuff does not work here
+    async fn networking_bgp_exported(
+        rqctx: RequestContext<ApiContext>,
+    ) -> Result<HttpResponseOk<BgpExported>, HttpError> {
+        let apictx = rqctx.context();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let result = nexus.bgp_exported(&opctx).await?;
             Ok(HttpResponseOk(result))
         };
         apictx
@@ -3048,7 +3078,6 @@ impl NexusExternalApi for NexusExternalApiImpl {
     }
 
     //TODO pagination? the normal by-name/by-id stuff does not work here
-
     async fn networking_bgp_imported_routes_ipv4(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<params::BgpRouteSelector>,
@@ -3108,20 +3137,23 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    //TODO pagination? the normal by-name/by-id stuff does not work here
-
     async fn networking_bgp_announce_set_list(
         rqctx: RequestContext<ApiContext>,
-        query_params: Query<params::BgpAnnounceSetSelector>,
-    ) -> Result<HttpResponseOk<Vec<BgpAnnouncement>>, HttpError> {
+        query_params: Query<
+            PaginatedByNameOrId<params::OptionalBgpAnnounceSetSelector>,
+        >,
+    ) -> Result<HttpResponseOk<Vec<BgpAnnounceSet>>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
-            let sel = query_params.into_inner();
+            let query = query_params.into_inner();
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let scan_params = ScanByNameOrId::from_query(&query)?;
+            let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let result = nexus
-                .bgp_announce_list(&opctx, &sel)
+                .bgp_announce_set_list(&opctx, &paginated_by)
                 .await?
                 .into_iter()
                 .map(|p| p.into())
@@ -3137,16 +3169,43 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn networking_bgp_announce_set_delete(
         rqctx: RequestContext<ApiContext>,
-        selector: Query<params::BgpAnnounceSetSelector>,
+        path_params: Path<params::BgpAnnounceSetSelector>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
-            let sel = selector.into_inner();
+            let sel = path_params.into_inner();
             let opctx =
                 crate::context::op_context_for_external_api(&rqctx).await?;
             nexus.bgp_delete_announce_set(&opctx, &sel).await?;
             Ok(HttpResponseUpdatedNoContent {})
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn networking_bgp_announcement_list(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::BgpAnnounceSetSelector>,
+    ) -> Result<HttpResponseOk<Vec<BgpAnnouncement>>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let sel = path_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+
+            let result = nexus
+                .bgp_announcement_list(&opctx, &sel)
+                .await?
+                .into_iter()
+                .map(|p| p.into())
+                .collect();
+
+            Ok(HttpResponseOk(result))
         };
         apictx
             .context
@@ -5085,12 +5144,10 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
-    // TODO: can we link to an OxQL reference? Do we have one? Can we even do links?
-
     async fn timeseries_query(
         rqctx: RequestContext<ApiContext>,
         body: TypedBody<params::TimeseriesQuery>,
-    ) -> Result<HttpResponseOk<Vec<oxql_types::Table>>, HttpError> {
+    ) -> Result<HttpResponseOk<views::OxqlQueryResult>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
             let nexus = &apictx.context.nexus;
@@ -5100,7 +5157,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             nexus
                 .timeseries_query(&opctx, &query)
                 .await
-                .map(HttpResponseOk)
+                .map(|tables| HttpResponseOk(views::OxqlQueryResult { tables }))
                 .map_err(HttpError::from)
         };
         apictx
@@ -5365,7 +5422,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn role_view(
         rqctx: RequestContext<ApiContext>,
-        path_params: Path<params::RolePathParam>,
+        path_params: Path<params::RolePath>,
     ) -> Result<HttpResponseOk<Role>, HttpError> {
         let apictx = rqctx.context();
         let nexus = &apictx.context.nexus;
@@ -5439,8 +5496,6 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .instrument_dropshot_handler(&rqctx, handler)
             .await
     }
-
-    // Per-user SSH public keys
 
     async fn current_user_ssh_key_list(
         rqctx: RequestContext<ApiContext>,
@@ -5712,7 +5767,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn login_local_begin(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::LoginPathParam>,
+        path_params: Path<params::LoginPath>,
         query_params: Query<params::LoginUrlQuery>,
     ) -> Result<Response<Body>, HttpError> {
         console_api::login_local_begin(rqctx, path_params, query_params).await
@@ -5720,7 +5775,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn login_local(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::LoginPathParam>,
+        path_params: Path<params::LoginPath>,
         credentials: TypedBody<params::UsernamePasswordCredentials>,
     ) -> Result<HttpResponseHeaders<HttpResponseUpdatedNoContent>, HttpError>
     {

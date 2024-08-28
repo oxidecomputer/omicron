@@ -31,7 +31,6 @@ use dropshot::{
 };
 use http::{header, HeaderName, HeaderValue, Response, StatusCode};
 use hyper::Body;
-use nexus_auth_types::authn::cookies::Cookies;
 use nexus_db_model::AuthenticationMode;
 use nexus_db_queries::authn::silos::IdentityProviderType;
 use nexus_db_queries::context::OpContext;
@@ -42,6 +41,7 @@ use nexus_db_queries::{
     },
     db::identity::Asset,
 };
+use nexus_types::authn::cookies::Cookies;
 use nexus_types::external_api::params::{self, RelativeUri};
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -365,7 +365,7 @@ pub(crate) async fn login_saml(
 
 pub(crate) async fn login_local_begin(
     rqctx: RequestContext<ApiContext>,
-    _path_params: Path<params::LoginPathParam>,
+    _path_params: Path<params::LoginPath>,
     _query_params: Query<params::LoginUrlQuery>,
 ) -> Result<Response<Body>, HttpError> {
     // TODO: figure out why instrumenting doesn't work
@@ -377,7 +377,7 @@ pub(crate) async fn login_local_begin(
 
 pub(crate) async fn login_local(
     rqctx: RequestContext<ApiContext>,
-    path_params: Path<params::LoginPathParam>,
+    path_params: Path<params::LoginPath>,
     credentials: dropshot::TypedBody<params::UsernamePasswordCredentials>,
 ) -> Result<HttpResponseHeaders<HttpResponseUpdatedNoContent>, HttpError> {
     let apictx = rqctx.context();

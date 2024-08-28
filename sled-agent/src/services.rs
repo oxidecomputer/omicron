@@ -66,8 +66,8 @@ use nexus_sled_agent_shared::inventory::{
     OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig, ZoneKind,
 };
 use omicron_common::address::CLICKHOUSE_ADMIN_PORT;
-use omicron_common::address::CLICKHOUSE_KEEPER_PORT;
-use omicron_common::address::CLICKHOUSE_PORT;
+use omicron_common::address::CLICKHOUSE_HTTP_PORT;
+use omicron_common::address::CLICKHOUSE_KEEPER_TCP_PORT;
 use omicron_common::address::COCKROACH_PORT;
 use omicron_common::address::CRUCIBLE_PANTRY_PORT;
 use omicron_common::address::CRUCIBLE_PORT;
@@ -1550,7 +1550,7 @@ impl ServiceManager {
                 };
 
                 let listen_addr = *underlay_address;
-                let listen_port = &CLICKHOUSE_PORT.to_string();
+                let listen_port = &CLICKHOUSE_HTTP_PORT.to_string();
 
                 let nw_setup_service = Self::zone_network_setup_install(
                     Some(&info.underlay_address),
@@ -1574,9 +1574,11 @@ impl ServiceManager {
                             .add_property_group(config),
                     );
 
-                let ch_address =
-                    SocketAddr::new(IpAddr::V6(listen_addr), CLICKHOUSE_PORT)
-                        .to_string();
+                let ch_address = SocketAddr::new(
+                    IpAddr::V6(listen_addr),
+                    CLICKHOUSE_HTTP_PORT,
+                )
+                .to_string();
 
                 let admin_address = SocketAddr::new(
                     IpAddr::V6(listen_addr),
@@ -1618,18 +1620,84 @@ impl ServiceManager {
                 zone:
                     OmicronZoneConfig {
                         zone_type: OmicronZoneType::ClickhouseServer { .. },
-                        underlay_address: _,
+                        underlay_address,
                         ..
                     },
                 ..
             }) => {
-                // We aren't yet deploying this service
-                error!(
-                    &self.inner.log,
-                    "Deploying ClickhouseServer zones is not yet supported"
-                );
+                let Some(info) = self.inner.sled_info.get() else {
+                    return Err(Error::SledAgentNotReady);
+                };
 
-                todo!()
+                let listen_addr = *underlay_address;
+                let listen_port = CLICKHOUSE_HTTP_PORT.to_string();
+
+                let nw_setup_service = Self::zone_network_setup_install(
+                    Some(&info.underlay_address),
+                    &installed_zone,
+                    &[listen_addr],
+                )?;
+
+                let dns_service = Self::dns_install(info, None, &None).await?;
+
+                let config = PropertyGroupBuilder::new("config")
+                    .add_property(
+                        "listen_addr",
+                        "astring",
+                        listen_addr.to_string(),
+                    )
+                    .add_property("listen_port", "astring", listen_port)
+                    .add_property("store", "astring", "/data");
+                let clickhouse_server_service =
+                    ServiceBuilder::new("oxide/clickhouse_server")
+                        .add_instance(
+                            ServiceInstanceBuilder::new("default")
+                                .add_property_group(config),
+                        );
+
+                let ch_address = SocketAddr::new(
+                    IpAddr::V6(listen_addr),
+                    CLICKHOUSE_HTTP_PORT,
+                )
+                .to_string();
+
+                let admin_address = SocketAddr::new(
+                    IpAddr::V6(listen_addr),
+                    CLICKHOUSE_ADMIN_PORT,
+                )
+                .to_string();
+
+                let clickhouse_admin_config =
+                    PropertyGroupBuilder::new("config")
+                        .add_property(
+                            "clickhouse_address",
+                            "astring",
+                            ch_address,
+                        )
+                        .add_property("http_address", "astring", admin_address);
+                let clickhouse_admin_service =
+                    ServiceBuilder::new("oxide/clickhouse-admin").add_instance(
+                        ServiceInstanceBuilder::new("default")
+                            .add_property_group(clickhouse_admin_config),
+                    );
+
+                let profile = ProfileBuilder::new("omicron")
+                    .add_service(nw_setup_service)
+                    .add_service(disabled_ssh_service)
+                    .add_service(clickhouse_server_service)
+                    .add_service(dns_service)
+                    .add_service(enabled_dns_client_service)
+                    .add_service(clickhouse_admin_service);
+                profile
+                    .add_to_zone(&self.inner.log, &installed_zone)
+                    .await
+                    .map_err(|err| {
+                        Error::io(
+                            "Failed to setup clickhouse server profile",
+                            err,
+                        )
+                    })?;
+                RunningZone::boot(installed_zone).await?
             }
 
             ZoneArgs::Omicron(OmicronZoneConfigLocal {
@@ -1646,7 +1714,7 @@ impl ServiceManager {
                 };
 
                 let listen_addr = *underlay_address;
-                let listen_port = &CLICKHOUSE_KEEPER_PORT.to_string();
+                let listen_port = &CLICKHOUSE_KEEPER_TCP_PORT.to_string();
 
                 let nw_setup_service = Self::zone_network_setup_install(
                     Some(&info.underlay_address),
@@ -1671,9 +1739,11 @@ impl ServiceManager {
                                 .add_property_group(config),
                         );
 
-                let ch_address =
-                    SocketAddr::new(IpAddr::V6(listen_addr), CLICKHOUSE_PORT)
-                        .to_string();
+                let ch_address = SocketAddr::new(
+                    IpAddr::V6(listen_addr),
+                    CLICKHOUSE_HTTP_PORT,
+                )
+                .to_string();
 
                 let admin_address = SocketAddr::new(
                     IpAddr::V6(listen_addr),
@@ -3931,6 +4001,19 @@ impl ServiceManager {
         &self,
         our_ports: Vec<HostPortConfig>,
     ) -> Result<(), Error> {
+        // Helper function to add a property-value pair
+        // if the config actually has a value set.
+        fn apv(
+            smfh: &SmfHelper,
+            prop: &str,
+            val: &Option<String>,
+        ) -> Result<(), Error> {
+            if let Some(v) = val {
+                smfh.addpropvalue_type(prop, v, "astring")?
+            }
+            Ok(())
+        }
+
         // We expect the switch zone to be running, as we're called immediately
         // after `ensure_zone()` above and we just successfully configured
         // uplinks via DPD running in our switch zone. If somehow we're in any
@@ -3953,26 +4036,76 @@ impl ServiceManager {
             }
         };
 
-        info!(self.inner.log, "Setting up uplinkd service");
-        let smfh = SmfHelper::new(&zone, &SwitchService::Uplink);
+        info!(self.inner.log, "ensuring scrimlet uplinks");
+        let usmfh = SmfHelper::new(&zone, &SwitchService::Uplink);
+        let lsmfh = SmfHelper::new(
+            &zone,
+            &SwitchService::Lldpd { baseboard: Baseboard::Unknown },
+        );
 
         // We want to delete all the properties in the `uplinks` group, but we
         // don't know their names, so instead we'll delete and recreate the
         // group, then add all our properties.
-        smfh.delpropgroup("uplinks")?;
-        smfh.addpropgroup("uplinks", "application")?;
+        let _ = usmfh.delpropgroup("uplinks");
+        usmfh.addpropgroup("uplinks", "application")?;
 
         for port_config in &our_ports {
             for addr in &port_config.addrs {
-                info!(self.inner.log, "configuring port: {port_config:?}");
-                smfh.addpropvalue_type(
+                usmfh.addpropvalue_type(
                     &format!("uplinks/{}_0", port_config.port,),
                     &addr.to_string(),
                     "astring",
                 )?;
             }
+
+            if let Some(lldp_config) = &port_config.lldp {
+                let group_name = format!("port_{}", port_config.port);
+                info!(self.inner.log, "setting up {group_name}");
+                let _ = lsmfh.delpropgroup(&group_name);
+                lsmfh.addpropgroup(&group_name, "application")?;
+                apv(
+                    &lsmfh,
+                    &format!("{group_name}/status"),
+                    &Some(lldp_config.status.to_string()),
+                )?;
+                apv(
+                    &lsmfh,
+                    &format!("{group_name}/chassis_id"),
+                    &lldp_config.chassis_id,
+                )?;
+                apv(
+                    &lsmfh,
+                    &format!("{group_name}/system_name"),
+                    &lldp_config.system_name,
+                )?;
+                apv(
+                    &lsmfh,
+                    &format!("{group_name}/system_description"),
+                    &lldp_config.system_description,
+                )?;
+                apv(
+                    &lsmfh,
+                    &format!("{group_name}/port_description"),
+                    &lldp_config.port_description,
+                )?;
+                apv(
+                    &lsmfh,
+                    &format!("{group_name}/port_id"),
+                    &lldp_config.port_id,
+                )?;
+                if let Some(a) = &lldp_config.management_addrs {
+                    for address in a {
+                        apv(
+                            &lsmfh,
+                            &format!("{group_name}/management_addrs"),
+                            &Some(address.to_string()),
+                        )?;
+                    }
+                }
+            }
         }
-        smfh.refresh()?;
+        usmfh.refresh()?;
+        lsmfh.refresh()?;
 
         Ok(())
     }

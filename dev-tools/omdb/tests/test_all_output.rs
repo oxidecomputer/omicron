@@ -7,9 +7,12 @@
 //! Feel free to change the tool's output.  This test just makes it easy to make
 //! sure you're only breaking what you intend.
 
+use dropshot::Method;
 use expectorate::assert_contents;
+use http::StatusCode;
 use nexus_test_utils::{OXIMETER_UUID, PRODUCER_UUID};
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::UnstableReconfiguratorState;
 use omicron_test_utils::dev::test_cmds::path_to_executable;
@@ -134,6 +137,20 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
     let tmppath = tmpdir.path().join("reconfigurator-save.out");
     let initial_blueprint_id = cptestctx.initial_blueprint_id.to_string();
 
+    // Get the CockroachDB metadata from the blueprint so we can redact it
+    let initial_blueprint: Blueprint = dropshot::test_util::read_json(
+        &mut cptestctx
+            .internal_client
+            .make_request_no_body(
+                Method::GET,
+                &format!("/deployment/blueprints/all/{initial_blueprint_id}"),
+                StatusCode::OK,
+            )
+            .await
+            .unwrap(),
+    )
+    .await;
+
     let mut output = String::new();
 
     let invocations: &[&[&str]] = &[
@@ -186,6 +203,19 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
         // ControlPlaneTestContext.
     ];
 
+    let mut redactions = ExtraRedactions::new();
+    redactions
+        .variable_length("tmp_path", tmppath.as_str())
+        .fixed_length("blueprint_id", &initial_blueprint_id)
+        .variable_length(
+            "cockroachdb_fingerprint",
+            &initial_blueprint.cockroachdb_fingerprint,
+        );
+    let crdb_version =
+        initial_blueprint.cockroachdb_setting_preserve_downgrade.to_string();
+    if initial_blueprint.cockroachdb_setting_preserve_downgrade.is_set() {
+        redactions.variable_length("cockroachdb_version", &crdb_version);
+    }
     for args in invocations {
         println!("running commands with args: {:?}", args);
         let p = postgres_url.to_string();
@@ -204,11 +234,7 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
             },
             &cmd_path,
             args,
-            Some(
-                ExtraRedactions::new()
-                    .variable_length("tmp_path", tmppath.as_str())
-                    .fixed_length("blueprint_id", &initial_blueprint_id),
-            ),
+            Some(&redactions),
         )
         .await;
     }

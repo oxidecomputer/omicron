@@ -2,6 +2,7 @@
 name = "nexus-external-api"
 version = "0.1.0"
 edition = "2021"
+license = "MPL-2.0"
 
 [lints]
 workspace = true
@@ -12,7 +13,6 @@ dropshot.workspace = true
 http.workspace = true
 hyper.workspace = true
 ipnetwork.workspace = true
-nexus-auth-types.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
 omicron-workspace-hack.workspace = true
