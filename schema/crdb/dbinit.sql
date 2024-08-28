@@ -1339,8 +1339,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.oximeter (
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     ip INET NOT NULL,
-    port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL
+    port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
+    time_deleted TIMESTAMPTZ
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_non_deleted_oximeter ON omicron.public.oximeter (
+    id
+) WHERE
+    time_deleted IS NULL;
 
 /*
  * The kind of metric producer each record corresponds to.
@@ -4233,7 +4239,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '94.0.0', NULL)
+    (TRUE, NOW(), NOW(), '95.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

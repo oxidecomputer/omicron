@@ -794,6 +794,7 @@ table! {
         id -> Uuid,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
         ip -> Inet,
         port -> Int4,
     }
