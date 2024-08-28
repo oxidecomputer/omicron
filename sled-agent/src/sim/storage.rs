@@ -27,8 +27,8 @@ use omicron_common::disk::DiskVariant;
 use omicron_common::disk::DisksManagementResult;
 use omicron_common::disk::OmicronPhysicalDisksConfig;
 use omicron_uuid_kinds::GenericUuid;
-use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use propolis_client::types::VolumeConstructionRequest;
 use slog::Logger;
@@ -913,7 +913,7 @@ impl Pantry {
 
         self.sled_agent
             .instance_issue_disk_snapshot_request(
-                InstanceUuid::new_v4(), // instance id, not used by function
+                PropolisUuid::new_v4(), // instance id, not used by function
                 volume_id.parse().unwrap(),
                 snapshot_id.parse().unwrap(),
             )

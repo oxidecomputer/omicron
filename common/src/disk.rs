@@ -135,6 +135,91 @@ impl DatasetName {
     }
 }
 
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+)]
+pub struct GzipLevel(u8);
+
+// Fastest compression level
+const GZIP_LEVEL_MIN: u8 = 1;
+
+// Best compression ratio
+const GZIP_LEVEL_MAX: u8 = 9;
+
+impl GzipLevel {
+    pub const fn new<const N: u8>() -> Self {
+        assert!(N >= GZIP_LEVEL_MIN, "Compression level too small");
+        assert!(N <= GZIP_LEVEL_MAX, "Compression level too large");
+        Self(N)
+    }
+}
+
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Default,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum CompressionAlgorithm {
+    // Selects a default compression algorithm. This is dependent on both the
+    // zpool and OS version.
+    On,
+
+    // Disables compression.
+    #[default]
+    Off,
+
+    // Selects the default Gzip compression level.
+    //
+    // According to the ZFS docs, this is "gzip-6", but that's a default value,
+    // which may change with OS updates.
+    Gzip,
+
+    GzipN {
+        level: GzipLevel,
+    },
+    Lz4,
+    Lzjb,
+    Zle,
+}
+
+impl fmt::Display for CompressionAlgorithm {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use CompressionAlgorithm::*;
+        let s = match self {
+            On => "on",
+            Off => "off",
+            Gzip => "gzip",
+            GzipN { level } => {
+                return write!(f, "gzip-{}", level.0);
+            }
+            Lz4 => "lz4",
+            Lzjb => "lzjb",
+            Zle => "zle",
+        };
+        write!(f, "{}", s)
+    }
+}
+
 /// Configuration information necessary to request a single dataset
 #[derive(
     Clone,
@@ -155,8 +240,8 @@ pub struct DatasetConfig {
     /// The dataset's name
     pub name: DatasetName,
 
-    /// The compression mode to be supplied, if any
-    pub compression: Option<String>,
+    /// The compression mode to be used by the dataset
+    pub compression: CompressionAlgorithm,
 
     /// The upper bound on the amount of storage used by this dataset
     pub quota: Option<ByteCount>,

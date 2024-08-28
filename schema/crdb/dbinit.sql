@@ -2668,7 +2668,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_link_config (
     fec omicron.public.switch_link_fec,
     speed omicron.public.switch_link_speed,
     autoneg BOOL NOT NULL DEFAULT false,
-    lldp_link_config_id UUID NOT NULL,
+    lldp_link_config_id UUID,
 
     PRIMARY KEY (port_settings_id, link_name)
 );
@@ -4250,7 +4250,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '93.0.0', NULL)
+    (TRUE, NOW(), NOW(), '94.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

@@ -5,11 +5,8 @@
 //! Helper functions for writing saga undo tests and working with instances in
 //! saga tests.
 
-use super::NexusSaga;
-use crate::{
-    app::{saga::create_saga_dag, test_interfaces::TestInterfaces as _},
-    Nexus,
-};
+use super::{instance_common::VmmAndSledIds, NexusSaga};
+use crate::{app::saga::create_saga_dag, Nexus};
 use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
 use camino::Utf8Path;
 use diesel::{
@@ -137,13 +134,14 @@ pub(crate) async fn instance_simulate(
     info!(&cptestctx.logctx.log, "Poking simulated instance";
           "instance_id" => %instance_id);
     let nexus = &cptestctx.server.server_context().nexus;
+    let VmmAndSledIds { vmm_id, sled_id } =
+        instance_fetch_vmm_and_sled_ids(cptestctx, instance_id).await;
     let sa = nexus
-        .instance_sled_by_id(instance_id)
+        .sled_client(&sled_id)
         .await
-        .unwrap()
         .expect("instance must be on a sled to simulate a state change");
 
-    sa.instance_finish_transition(instance_id.into_untyped_uuid()).await;
+    sa.vmm_finish_transition(vmm_id).await;
 }
 
 pub(crate) async fn instance_single_step_on_sled(
@@ -158,12 +156,14 @@ pub(crate) async fn instance_single_step_on_sled(
         "sled_id" => %sled_id,
     );
     let nexus = &cptestctx.server.server_context().nexus;
+    let VmmAndSledIds { vmm_id, sled_id } =
+        instance_fetch_vmm_and_sled_ids(cptestctx, instance_id).await;
     let sa = nexus
-        .sled_client(sled_id)
+        .sled_client(&sled_id)
         .await
-        .expect("sled must exist to simulate a state change");
+        .expect("instance must be on a sled to simulate a state change");
 
-    sa.instance_single_step(instance_id.into_untyped_uuid()).await;
+    sa.vmm_single_step(vmm_id).await;
 }
 
 pub(crate) async fn instance_simulate_by_name(
@@ -186,12 +186,14 @@ pub(crate) async fn instance_simulate_by_name(
     let instance_lookup =
         nexus.instance_lookup(&opctx, instance_selector).unwrap();
     let (.., instance) = instance_lookup.fetch().await.unwrap();
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.id());
+    let VmmAndSledIds { vmm_id, sled_id } =
+        instance_fetch_vmm_and_sled_ids(cptestctx, &instance_id).await;
     let sa = nexus
-        .instance_sled_by_id(&InstanceUuid::from_untyped_uuid(instance.id()))
+        .sled_client(&sled_id)
         .await
-        .unwrap()
         .expect("instance must be on a sled to simulate a state change");
-    sa.instance_finish_transition(instance.id()).await;
+    sa.vmm_finish_transition(vmm_id).await;
 }
 
 pub async fn instance_fetch(
@@ -216,6 +218,21 @@ pub async fn instance_fetch(
               "instance_and_vmm" => ?db_state);
 
     db_state
+}
+
+pub(super) async fn instance_fetch_vmm_and_sled_ids(
+    cptestctx: &ControlPlaneTestContext,
+    instance_id: &InstanceUuid,
+) -> VmmAndSledIds {
+    let instance_and_vmm = instance_fetch(cptestctx, *instance_id).await;
+    let vmm = instance_and_vmm
+        .vmm()
+        .as_ref()
+        .expect("can only fetch VMM and sled IDs for an active instance");
+
+    let vmm_id = PropolisUuid::from_untyped_uuid(vmm.id);
+    let sled_id = SledUuid::from_untyped_uuid(vmm.sled_id);
+    VmmAndSledIds { vmm_id, sled_id }
 }
 
 pub async fn instance_fetch_all(

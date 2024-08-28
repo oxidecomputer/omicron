@@ -25,7 +25,7 @@ use omicron_common::api::external::{
     ByteCount, DiskState, Error, Generation, ResourceType,
 };
 use omicron_common::api::internal::nexus::{
-    DiskRuntimeState, MigrationRuntimeState, MigrationState, SledInstanceState,
+    DiskRuntimeState, MigrationRuntimeState, MigrationState, SledVmmState,
 };
 use omicron_common::api::internal::nexus::{
     InstanceRuntimeState, VmmRuntimeState,
@@ -51,8 +51,7 @@ use sled_agent_types::early_networking::{
 };
 use sled_agent_types::instance::{
     InstanceExternalIpBody, InstanceHardware, InstanceMetadata,
-    InstancePutStateResponse, InstanceStateRequested,
-    InstanceUnregisterResponse,
+    VmmPutStateResponse, VmmStateRequested, VmmUnregisterResponse,
 };
 use slog::Logger;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -72,8 +71,8 @@ use uuid::Uuid;
 pub struct SledAgent {
     pub id: Uuid,
     pub ip: IpAddr,
-    /// collection of simulated instances, indexed by instance uuid
-    instances: Arc<SimCollection<SimInstance>>,
+    /// collection of simulated VMMs, indexed by Propolis uuid
+    vmms: Arc<SimCollection<SimInstance>>,
     /// collection of simulated disks, indexed by disk uuid
     disks: Arc<SimCollection<SimDisk>>,
     storage: Mutex<Storage>,
@@ -85,7 +84,8 @@ pub struct SledAgent {
     mock_propolis:
         Mutex<Option<(HttpServer<Arc<PropolisContext>>, PropolisClient)>>,
     /// lists of external IPs assigned to instances
-    pub external_ips: Mutex<HashMap<Uuid, HashSet<InstanceExternalIpBody>>>,
+    pub external_ips:
+        Mutex<HashMap<PropolisUuid, HashSet<InstanceExternalIpBody>>>,
     pub vpc_routes: Mutex<HashMap<RouterId, RouteSet>>,
     config: Config,
     fake_zones: Mutex<OmicronZonesConfig>,
@@ -171,7 +171,7 @@ impl SledAgent {
         Arc::new(SledAgent {
             id,
             ip: config.dropshot.bind_address.ip(),
-            instances: Arc::new(SimCollection::new(
+            vmms: Arc::new(SimCollection::new(
                 Arc::clone(&nexus_client),
                 instance_log,
                 sim_mode,
@@ -270,7 +270,7 @@ impl SledAgent {
         instance_runtime: InstanceRuntimeState,
         vmm_runtime: VmmRuntimeState,
         metadata: InstanceMetadata,
-    ) -> Result<SledInstanceState, Error> {
+    ) -> Result<SledVmmState, Error> {
         // respond with a fake 500 level failure if asked to ensure an instance
         // with more than 16 CPUs.
         let ncpus: i64 = (&hardware.properties.ncpus).into();
@@ -318,11 +318,7 @@ impl SledAgent {
         //      point to the correct address.
         let mock_lock = self.mock_propolis.lock().await;
         if let Some((_srv, client)) = mock_lock.as_ref() {
-            if !self
-                .instances
-                .contains_key(&instance_id.into_untyped_uuid())
-                .await
-            {
+            if !self.vmms.contains_key(&instance_id.into_untyped_uuid()).await {
                 let metadata = propolis_client::types::InstanceMetadata {
                     project_id: metadata.project_id,
                     silo_id: metadata.silo_id,
@@ -380,12 +376,11 @@ impl SledAgent {
         });
 
         let instance_run_time_state = self
-            .instances
+            .vmms
             .sim_ensure(
-                &instance_id.into_untyped_uuid(),
-                SledInstanceState {
+                &propolis_id.into_untyped_uuid(),
+                SledVmmState {
                     vmm_state: vmm_runtime,
-                    propolis_id,
                     migration_in,
                     migration_out: None,
                 },
@@ -418,56 +413,53 @@ impl SledAgent {
     /// not notified.
     pub async fn instance_unregister(
         self: &Arc<Self>,
-        instance_id: InstanceUuid,
-    ) -> Result<InstanceUnregisterResponse, Error> {
+        propolis_id: PropolisUuid,
+    ) -> Result<VmmUnregisterResponse, Error> {
         let instance = match self
-            .instances
-            .sim_get_cloned_object(&instance_id.into_untyped_uuid())
+            .vmms
+            .sim_get_cloned_object(&propolis_id.into_untyped_uuid())
             .await
         {
             Ok(instance) => instance,
             Err(Error::ObjectNotFound { .. }) => {
-                return Ok(InstanceUnregisterResponse { updated_runtime: None })
+                return Ok(VmmUnregisterResponse { updated_runtime: None })
             }
             Err(e) => return Err(e),
         };
 
-        self.detach_disks_from_instance(instance_id).await?;
-        let response = InstanceUnregisterResponse {
+        let response = VmmUnregisterResponse {
             updated_runtime: Some(instance.terminate()),
         };
 
-        self.instances.sim_force_remove(instance_id.into_untyped_uuid()).await;
+        self.vmms.sim_force_remove(propolis_id.into_untyped_uuid()).await;
         Ok(response)
     }
 
     /// Asks the supplied instance to transition to the requested state.
     pub async fn instance_ensure_state(
         self: &Arc<Self>,
-        instance_id: InstanceUuid,
-        state: InstanceStateRequested,
-    ) -> Result<InstancePutStateResponse, Error> {
+        propolis_id: PropolisUuid,
+        state: VmmStateRequested,
+    ) -> Result<VmmPutStateResponse, Error> {
         if let Some(e) = self.instance_ensure_state_error.lock().await.as_ref()
         {
             return Err(e.clone());
         }
 
         let current = match self
-            .instances
-            .sim_get_cloned_object(&instance_id.into_untyped_uuid())
+            .vmms
+            .sim_get_cloned_object(&propolis_id.into_untyped_uuid())
             .await
         {
             Ok(i) => i.current().clone(),
             Err(_) => match state {
-                InstanceStateRequested::Stopped => {
-                    return Ok(InstancePutStateResponse {
-                        updated_runtime: None,
-                    });
+                VmmStateRequested::Stopped => {
+                    return Ok(VmmPutStateResponse { updated_runtime: None });
                 }
                 _ => {
                     return Err(Error::invalid_request(&format!(
-                        "instance {} not registered on sled",
-                        instance_id,
+                        "Propolis {} not registered on sled",
+                        propolis_id,
                     )));
                 }
             },
@@ -476,43 +468,41 @@ impl SledAgent {
         let mock_lock = self.mock_propolis.lock().await;
         if let Some((_srv, client)) = mock_lock.as_ref() {
             let body = match state {
-                InstanceStateRequested::MigrationTarget(_) => {
+                VmmStateRequested::MigrationTarget(_) => {
                     return Err(Error::internal_error(
                         "migration not implemented for mock Propolis",
                     ));
                 }
-                InstanceStateRequested::Running => {
-                    let instances = self.instances.clone();
+                VmmStateRequested::Running => {
+                    let vmms = self.vmms.clone();
                     let log = self.log.new(
                         o!("component" => "SledAgent-insure_instance_state"),
                     );
                     tokio::spawn(async move {
                         tokio::time::sleep(Duration::from_secs(10)).await;
-                        match instances
+                        match vmms
                             .sim_ensure(
-                                &instance_id.into_untyped_uuid(),
+                                &propolis_id.into_untyped_uuid(),
                                 current,
                                 Some(state),
                             )
                             .await
                         {
                             Ok(state) => {
-                                let instance_state: nexus_client::types::SledInstanceState = state.into();
-                                info!(log, "sim_ensure success"; "instance_state" => #?instance_state);
+                                let vmm_state: nexus_client::types::SledVmmState = state.into();
+                                info!(log, "sim_ensure success"; "vmm_state" => #?vmm_state);
                             }
                             Err(instance_put_error) => {
                                 error!(log, "sim_ensure failure"; "error" => #?instance_put_error);
                             }
                         }
                     });
-                    return Ok(InstancePutStateResponse {
-                        updated_runtime: None,
-                    });
+                    return Ok(VmmPutStateResponse { updated_runtime: None });
                 }
-                InstanceStateRequested::Stopped => {
+                VmmStateRequested::Stopped => {
                     propolis_client::types::InstanceStateRequested::Stop
                 }
-                InstanceStateRequested::Reboot => {
+                VmmStateRequested::Reboot => {
                     propolis_client::types::InstanceStateRequested::Reboot
                 }
             };
@@ -522,30 +512,24 @@ impl SledAgent {
         }
 
         let new_state = self
-            .instances
-            .sim_ensure(&instance_id.into_untyped_uuid(), current, Some(state))
+            .vmms
+            .sim_ensure(&propolis_id.into_untyped_uuid(), current, Some(state))
             .await?;
 
-        // If this request will shut down the simulated instance, look for any
-        // disks that are attached to it and drive them to the Detached state.
-        if matches!(state, InstanceStateRequested::Stopped) {
-            self.detach_disks_from_instance(instance_id).await?;
-        }
-
-        Ok(InstancePutStateResponse { updated_runtime: Some(new_state) })
+        Ok(VmmPutStateResponse { updated_runtime: Some(new_state) })
     }
 
     pub async fn instance_get_state(
         &self,
-        instance_id: InstanceUuid,
-    ) -> Result<SledInstanceState, HttpError> {
+        propolis_id: PropolisUuid,
+    ) -> Result<SledVmmState, HttpError> {
         let instance = self
-            .instances
-            .sim_get_cloned_object(&instance_id.into_untyped_uuid())
+            .vmms
+            .sim_get_cloned_object(&propolis_id.into_untyped_uuid())
             .await
             .map_err(|_| {
                 crate::sled_agent::Error::Instance(
-                    crate::instance_manager::Error::NoSuchInstance(instance_id),
+                    crate::instance_manager::Error::NoSuchVmm(propolis_id),
                 )
             })?;
         Ok(instance.current())
@@ -553,16 +537,16 @@ impl SledAgent {
 
     pub async fn instance_simulate_migration_source(
         &self,
-        instance_id: InstanceUuid,
+        propolis_id: PropolisUuid,
         migration: instance::SimulateMigrationSource,
     ) -> Result<(), HttpError> {
         let instance = self
-            .instances
-            .sim_get_cloned_object(&instance_id.into_untyped_uuid())
+            .vmms
+            .sim_get_cloned_object(&propolis_id.into_untyped_uuid())
             .await
             .map_err(|_| {
                 crate::sled_agent::Error::Instance(
-                    crate::instance_manager::Error::NoSuchInstance(instance_id),
+                    crate::instance_manager::Error::NoSuchVmm(propolis_id),
                 )
             })?;
         instance.set_simulated_migration_source(migration);
@@ -571,25 +555,6 @@ impl SledAgent {
 
     pub async fn set_instance_ensure_state_error(&self, error: Option<Error>) {
         *self.instance_ensure_state_error.lock().await = error;
-    }
-
-    async fn detach_disks_from_instance(
-        &self,
-        instance_id: InstanceUuid,
-    ) -> Result<(), Error> {
-        self.disks
-            .sim_ensure_for_each_where(
-                |disk| match disk.current().disk_state {
-                    DiskState::Attached(id) | DiskState::Attaching(id) => {
-                        id == instance_id.into_untyped_uuid()
-                    }
-                    _ => false,
-                },
-                &DiskStateRequested::Detached,
-            )
-            .await?;
-
-        Ok(())
     }
 
     /// Idempotently ensures that the given API Disk (described by `api_disk`)
@@ -608,16 +573,16 @@ impl SledAgent {
         &self.updates
     }
 
-    pub async fn instance_count(&self) -> usize {
-        self.instances.size().await
+    pub async fn vmm_count(&self) -> usize {
+        self.vmms.size().await
     }
 
     pub async fn disk_count(&self) -> usize {
         self.disks.size().await
     }
 
-    pub async fn instance_poke(&self, id: InstanceUuid, mode: PokeMode) {
-        self.instances.sim_poke(id.into_untyped_uuid(), mode).await;
+    pub async fn vmm_poke(&self, id: PropolisUuid, mode: PokeMode) {
+        self.vmms.sim_poke(id.into_untyped_uuid(), mode).await;
     }
 
     pub async fn disk_poke(&self, id: Uuid) {
@@ -700,7 +665,7 @@ impl SledAgent {
     /// snapshot here.
     pub async fn instance_issue_disk_snapshot_request(
         &self,
-        _instance_id: InstanceUuid,
+        _propolis_id: PropolisUuid,
         disk_id: Uuid,
         snapshot_id: Uuid,
     ) -> Result<(), Error> {
@@ -761,18 +726,17 @@ impl SledAgent {
 
     pub async fn instance_put_external_ip(
         &self,
-        instance_id: InstanceUuid,
+        propolis_id: PropolisUuid,
         body_args: &InstanceExternalIpBody,
     ) -> Result<(), Error> {
-        if !self.instances.contains_key(&instance_id.into_untyped_uuid()).await
-        {
+        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
             return Err(Error::internal_error(
-                "can't alter IP state for nonexistent instance",
+                "can't alter IP state for VMM that's not registered",
             ));
         }
 
         let mut eips = self.external_ips.lock().await;
-        let my_eips = eips.entry(instance_id.into_untyped_uuid()).or_default();
+        let my_eips = eips.entry(propolis_id).or_default();
 
         // High-level behaviour: this should always succeed UNLESS
         // trying to add a double ephemeral.
@@ -795,18 +759,17 @@ impl SledAgent {
 
     pub async fn instance_delete_external_ip(
         &self,
-        instance_id: InstanceUuid,
+        propolis_id: PropolisUuid,
         body_args: &InstanceExternalIpBody,
     ) -> Result<(), Error> {
-        if !self.instances.contains_key(&instance_id.into_untyped_uuid()).await
-        {
+        if !self.vmms.contains_key(&propolis_id.into_untyped_uuid()).await {
             return Err(Error::internal_error(
-                "can't alter IP state for nonexistent instance",
+                "can't alter IP state for VMM that's not registered",
             ));
         }
 
         let mut eips = self.external_ips.lock().await;
-        let my_eips = eips.entry(instance_id.into_untyped_uuid()).or_default();
+        let my_eips = eips.entry(propolis_id).or_default();
 
         my_eips.remove(&body_args);
 
@@ -922,9 +885,7 @@ impl SledAgent {
                             used: ByteCount::from_kibibytes_u32(0),
                             quota: config.quota,
                             reservation: config.reservation,
-                            compression: config
-                                .compression
-                                .unwrap_or_else(|| String::new()),
+                            compression: config.compression.to_string(),
                         })
                         .collect::<Vec<_>>()
                 })
