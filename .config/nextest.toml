@@ -35,8 +35,8 @@ clickhouse-cluster = { max-threads = 1 }
 # behaviors that conflict with each other.  They need to be run serially.
 live-tests = { max-threads = 1 }
 
-#[profile.default]
-#default-set = 'all() - package(omicron-live-tests) - package(end-to-end-tests)'
+[profile.default]
+default-set = 'all() - package(omicron-live-tests) - package(end-to-end-tests)'
 
 [[profile.default.overrides]]
 filter = 'package(oximeter-db) and test(replicated)'
