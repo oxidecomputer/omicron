@@ -1775,6 +1775,22 @@ pub struct Address {
     pub vlan_id: Option<u16>,
 }
 
+/// An address to be added or removed from an interface
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AddressAddRemove {
+    /// The name of the interface
+    pub interface: Name,
+
+    /// The address lot this address is drawn from.
+    pub address_lot: NameOrId,
+
+    /// The address and prefix length of this address.
+    pub address: IpNet,
+
+    /// Optional VLAN ID for this address
+    pub vlan_id: Option<u16>,
+}
+
 /// Select a port settings object by an optional name or id.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct SwitchPortSettingsSelector {

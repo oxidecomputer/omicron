@@ -899,11 +899,10 @@ impl DataStore {
         Ok(())
     }
 
-    pub async fn switch_port_configuration_interface_address_list(
+    pub async fn switch_port_configuration_address_list(
         &self,
         opctx: &OpContext,
         configuration: NameOrId,
-        interface: Name,
     ) -> ListResultVec<SwitchPortAddressConfig> {
         use db::schema::switch_port_settings as port_settings;
         use db::schema::switch_port_settings_address_config as address_config;
@@ -929,7 +928,6 @@ impl DataStore {
 
         let configs: Vec<SwitchPortAddressConfig> = query
             .select(SwitchPortAddressConfig::as_select())
-            .filter(address_config::interface_name.eq(interface))
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e: diesel::result::Error| {
@@ -947,12 +945,11 @@ impl DataStore {
         Ok(configs)
     }
 
-    pub async fn switch_port_configuration_interface_address_add(
+    pub async fn switch_port_configuration_address_add(
         &self,
         opctx: &OpContext,
         configuration: NameOrId,
-        interface: Name,
-        address: params::Address,
+        address: params::AddressAddRemove,
     ) -> CreateResult<SwitchPortAddressConfig> {
         use db::schema::address_lot;
         use db::schema::switch_port_settings_address_config as address_config;
@@ -965,7 +962,6 @@ impl DataStore {
             )
             .transaction(&conn, |conn| {
                 let parent_configuration = configuration.clone();
-                let interface = interface.clone();
                 let new_settings = address.clone();
                 let err = err.clone();
 
@@ -1071,7 +1067,7 @@ impl DataStore {
                         address_lot_block_id: block.id,
                         rsvd_address_lot_block_id: rsvd_block.id,
                         address: new_settings.address.into(),
-                        interface_name: interface.to_string(),
+                        interface_name: new_settings.interface.to_string(),
                         vlan_id: new_settings.vlan_id.map(|i| i.into()),
                     };
 
@@ -1102,12 +1098,11 @@ impl DataStore {
             })
     }
 
-    pub async fn switch_port_configuration_interface_address_remove(
+    pub async fn switch_port_configuration_address_remove(
         &self,
         opctx: &OpContext,
         configuration: NameOrId,
-        interface: Name,
-        address: params::Address,
+        address: params::AddressAddRemove,
     ) -> DeleteResult {
         use db::schema::address_lot;
         use db::schema::switch_port_settings_address_config as address_config;
@@ -1120,7 +1115,6 @@ impl DataStore {
             )
             .transaction(&conn, |conn| {
                 let parent_configuration = configuration.clone();
-                let interface = interface.clone();
                 let settings_to_remove = address.clone();
                 let err = err.clone();
 
@@ -1200,7 +1194,7 @@ impl DataStore {
                         .filter(address_config::address.eq(IpNetwork::from(settings_to_remove.address)))
                         .filter(address_config::port_settings_id.eq(port_settings_id))
                         .filter(address_config::address_lot_block_id.eq(address_lot_id))
-                        .filter(address_config::interface_name.eq(interface.clone()))
+                        .filter(address_config::interface_name.eq(settings_to_remove.interface.clone().to_string()))
                         .select(SwitchPortAddressConfig::as_select())
                         .limit(1)
                         .first_async::<SwitchPortAddressConfig>(&conn)
@@ -1230,7 +1224,7 @@ impl DataStore {
                         .filter(address_config::address.eq(IpNetwork::from(settings_to_remove.address)))
                         .filter(address_config::port_settings_id.eq(port_settings_id))
                         .filter(address_config::address_lot_block_id.eq(address_lot_id))
-                        .filter(address_config::interface_name.eq(interface))
+                        .filter(address_config::interface_name.eq(settings_to_remove.interface.to_string()))
                         .execute_async(&conn)
                         .await?;
 

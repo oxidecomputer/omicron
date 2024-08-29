@@ -296,17 +296,11 @@ pub(crate) fn external_api() -> NexusApiDescription {
 
         // /v1/system/networking/switch-port-configuration/{name_or_id}/interface/{interface}/address
         // TODO: Levon - test
-        api.register(
-            networking_switch_port_configuration_interface_address_add,
-        )?;
+        api.register(networking_switch_port_configuration_address_add)?;
         // TODO: Levon - test
-        api.register(
-            networking_switch_port_configuration_interface_address_remove,
-        )?;
+        api.register(networking_switch_port_configuration_address_remove)?;
         // TODO: Levon - test
-        api.register(
-            networking_switch_port_configuration_interface_address_list,
-        )?;
+        api.register(networking_switch_port_configuration_address_list)?;
 
         // /v1/system/networking/switch-port-configuration/{name_or_id}/interface/{interface}/route
         // TODO: Levon - test
@@ -4055,28 +4049,21 @@ async fn networking_switch_port_configuration_link_delete(
 /// List addresses assigned to a provided interface configuration
 #[endpoint {
     method = GET,
-    path ="/v1/system/networking/switch-port-configuration/{configuration}/interface/{interface}/address",
+    path ="/v1/system/networking/switch-port-configuration/{configuration}/address",
     tags = ["system/networking"],
 }]
-async fn networking_switch_port_configuration_interface_address_list(
+async fn networking_switch_port_configuration_address_list(
     rqctx: RequestContext<ApiContext>,
-    path_params: Path<params::SwitchPortSettingsInterfaceInfoSelector>,
+    path_params: Path<params::SwitchPortSettingsInfoSelector>,
 ) -> Result<HttpResponseOk<Vec<SwitchPortAddressConfig>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.context.nexus;
-        let params::SwitchPortSettingsInterfaceInfoSelector {
-            configuration,
-            interface,
-        } = path_params.into_inner();
+        let configuration = path_params.into_inner().configuration;
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
 
         let settings = nexus
-            .switch_port_configuration_interface_address_list(
-                &opctx,
-                configuration,
-                interface,
-            )
+            .switch_port_configuration_address_list(&opctx, configuration)
             .await?;
         Ok(HttpResponseOk(settings.into_iter().map(Into::into).collect()))
     };
@@ -4090,29 +4077,25 @@ async fn networking_switch_port_configuration_interface_address_list(
 /// Add address to an interface configuration
 #[endpoint {
     method = POST,
-    path ="/v1/system/networking/switch-port-configuration/{configuration}/interface/{interface}/address/add",
+    path ="/v1/system/networking/switch-port-configuration/{configuration}/address/add",
     tags = ["system/networking"],
 }]
-async fn networking_switch_port_configuration_interface_address_add(
+async fn networking_switch_port_configuration_address_add(
     rqctx: RequestContext<ApiContext>,
-    path_params: Path<params::SwitchPortSettingsInterfaceInfoSelector>,
-    address: TypedBody<params::Address>,
+    path_params: Path<params::SwitchPortSettingsInfoSelector>,
+    address: TypedBody<params::AddressAddRemove>,
 ) -> Result<HttpResponseCreated<SwitchPortAddressConfig>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.context.nexus;
-        let params::SwitchPortSettingsInterfaceInfoSelector {
-            configuration,
-            interface,
-        } = path_params.into_inner();
+        let configuration = path_params.into_inner().configuration;
         let address = address.into_inner();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
 
         let settings = nexus
-            .switch_port_configuration_interface_address_add(
+            .switch_port_configuration_address_add(
                 &opctx,
                 configuration,
-                interface,
                 address,
             )
             .await?;
@@ -4128,29 +4111,25 @@ async fn networking_switch_port_configuration_interface_address_add(
 /// Remove address from an interface configuration
 #[endpoint {
     method = POST,
-    path ="/v1/system/networking/switch-port-configuration/{configuration}/interface/{interface}/address/remove",
+    path ="/v1/system/networking/switch-port-configuration/{configuration}/address/remove",
     tags = ["system/networking"],
 }]
-async fn networking_switch_port_configuration_interface_address_remove(
+async fn networking_switch_port_configuration_address_remove(
     rqctx: RequestContext<ApiContext>,
-    path_params: Path<params::SwitchPortSettingsInterfaceInfoSelector>,
-    address: TypedBody<params::Address>,
+    path_params: Path<params::SwitchPortSettingsInfoSelector>,
+    address: TypedBody<params::AddressAddRemove>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.context.nexus;
-        let params::SwitchPortSettingsInterfaceInfoSelector {
-            configuration,
-            interface,
-        } = path_params.into_inner();
+        let configuration = path_params.into_inner().configuration;
         let address = address.into_inner();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
 
         nexus
-            .switch_port_configuration_interface_address_remove(
+            .switch_port_configuration_address_remove(
                 &opctx,
                 configuration,
-                interface,
                 address,
             )
             .await?;

@@ -209,53 +209,44 @@ impl super::Nexus {
             .await
     }
 
-    pub(crate) async fn switch_port_configuration_interface_address_list(
+    pub(crate) async fn switch_port_configuration_address_list(
         &self,
         opctx: &OpContext,
         configuration: NameOrId,
-        interface: Name,
     ) -> ListResultVec<SwitchPortAddressConfig> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         self.db_datastore
-            .switch_port_configuration_interface_address_list(
-                opctx,
-                configuration,
-                interface.into(),
-            )
+            .switch_port_configuration_address_list(opctx, configuration)
             .await
     }
 
-    pub(crate) async fn switch_port_configuration_interface_address_add(
+    pub(crate) async fn switch_port_configuration_address_add(
         &self,
         opctx: &OpContext,
         configuration: NameOrId,
-        interface: Name,
-        address: params::Address,
+        address: params::AddressAddRemove,
     ) -> CreateResult<SwitchPortAddressConfig> {
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
         self.db_datastore
-            .switch_port_configuration_interface_address_add(
+            .switch_port_configuration_address_add(
                 opctx,
                 configuration,
-                interface.into(),
                 address,
             )
             .await
     }
 
-    pub(crate) async fn switch_port_configuration_interface_address_remove(
+    pub(crate) async fn switch_port_configuration_address_remove(
         &self,
         opctx: &OpContext,
         configuration: NameOrId,
-        interface: Name,
-        address: params::Address,
+        address: params::AddressAddRemove,
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Delete, &authz::FLEET).await?;
         self.db_datastore
-            .switch_port_configuration_interface_address_remove(
+            .switch_port_configuration_address_remove(
                 opctx,
                 configuration,
-                interface.into(),
                 address,
             )
             .await
