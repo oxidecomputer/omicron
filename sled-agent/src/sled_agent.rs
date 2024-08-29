@@ -76,6 +76,7 @@ use sled_hardware_types::Baseboard;
 use sled_storage::dataset::{CRYPT_DATASET, ZONE_DATASET};
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
+use sprockets_tls::keys::SprocketsConfig;
 use std::collections::BTreeMap;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use std::sync::Arc;
@@ -365,6 +366,7 @@ impl SledAgentInner {
 pub struct SledAgent {
     inner: Arc<SledAgentInner>,
     log: Logger,
+    sprockets: SprocketsConfig,
 }
 
 impl SledAgent {
@@ -604,6 +606,7 @@ impl SledAgent {
                 boot_disk_os_writer: BootDiskOsWriter::new(&parent_log),
             }),
             log: log.clone(),
+            sprockets: config.sprockets.clone(),
         };
 
         sled_agent.inner.probes.run().await;
@@ -685,6 +688,10 @@ impl SledAgent {
 
     pub fn start_request(&self) -> &StartSledAgentRequest {
         &self.inner.start_request
+    }
+
+    pub fn sprockets(&self) -> SprocketsConfig {
+        self.sprockets.clone()
     }
 
     /// Requests firewall rules from Nexus.
@@ -1328,6 +1335,7 @@ pub enum AddSledError {
 /// Add a sled to an initialized rack.
 pub async fn sled_add(
     log: Logger,
+    sprockets_config: SprocketsConfig,
     sled_id: BaseboardId,
     request: StartSledAgentRequest,
 ) -> Result<(), AddSledError> {
@@ -1387,6 +1395,7 @@ pub async fn sled_add(
         SocketAddrV6::new(bootstrap_addr, BOOTSTRAP_AGENT_RACK_INIT_PORT, 0, 0);
     let client = crate::bootstrap::client::Client::new(
         bootstrap_addr,
+        sprockets_config,
         log.new(o!("BootstrapAgentClient" => bootstrap_addr.to_string())),
     );
 
