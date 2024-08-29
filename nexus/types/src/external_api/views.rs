@@ -303,6 +303,29 @@ pub struct VpcRouter {
     pub vpc_id: Uuid,
 }
 
+// INTERNET GATEWAYS
+
+/// An internet gateway provides a path between VPC networks and external
+/// networks.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InternetGateway {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    /// IP address mode the gateway operates in.
+    pub ip_source: InternetGatewayIpSource,
+}
+
+/// The source of IP addresses for an `InternetGateway`
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum InternetGatewayIpSource {
+    /// Automatically select IP addresses to use for the internet gateway.
+    Pool(Vec<Uuid>),
+    /// Users explicitly manage IP addresses.
+    Manual(Vec<IpAddr>),
+}
+
 // IP POOLS
 
 /// A collection of IP ranges. If a pool is linked to a silo, IP addresses from

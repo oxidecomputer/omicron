@@ -971,6 +971,7 @@ pub enum ResourceType {
     IpPool,
     IpPoolResource,
     InstanceNetworkInterface,
+    InternetGateway,
     PhysicalDisk,
     Rack,
     Service,

@@ -720,6 +720,15 @@ lookup_resource! {
 }
 
 lookup_resource! {
+    name = "InternetGateway",
+    ancestors = [ "Silo", "Project", "Vpc" ],
+    children = [ ],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
     name = "FloatingIp",
     ancestors = [ "Silo", "Project" ],
     children = [],

@@ -2208,6 +2208,68 @@ pub trait NexusExternalApi {
         router_params: TypedBody<params::RouterRouteUpdate>,
     ) -> Result<HttpResponseOk<RouterRoute>, HttpError>;
 
+    // Internet gateways
+
+    /// List internet gateways
+    #[endpoint {
+        method = GET,
+        path = "/v1/internet-gateways",
+        tags = ["vpcs"],
+    }]
+    async fn internet_gateway_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId<params::VpcSelector>>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::InternetGateway>>, HttpError>;
+
+    /// Fetch internet gateway
+    #[endpoint {
+        method = GET,
+        path = "/v1/internet-gateways/{gateway}",
+        tags = ["vpcs"],
+    }]
+    async fn internet_gateway_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::InternetGatewayPath>,
+        query_params: Query<params::OptionalVpcSelector>,
+    ) -> Result<HttpResponseOk<views::InternetGateway>, HttpError>;
+
+    /// Create VPC internet gateway
+    #[endpoint {
+        method = POST,
+        path = "/v1/internet-gateways",
+        tags = ["vpcs"],
+    }]
+    async fn internet_gateway_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::VpcSelector>,
+        create_params: TypedBody<params::InternetGatewayCreate>,
+    ) -> Result<HttpResponseCreated<views::InternetGateway>, HttpError>;
+
+    /// Delete internet gateway
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/internet-gateways/{gateway}",
+        tags = ["vpcs"],
+    }]
+    async fn internet_gateway_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::InternetGatewayPath>,
+        query_params: Query<params::OptionalVpcSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Update internet gateway
+    #[endpoint {
+        method = PUT,
+        path = "/v1/internet-gateways/{gateway}",
+        tags = ["vpcs"],
+    }]
+    async fn internet_gateway_update(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::InternetGatewayPath>,
+        query_params: Query<params::OptionalVpcSelector>,
+        router_params: TypedBody<params::InternetGatewayCreate>,
+    ) -> Result<HttpResponseOk<views::InternetGateway>, HttpError>;
+
     // Racks
 
     /// List racks

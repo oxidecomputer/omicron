@@ -4689,6 +4689,71 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    // Internet gateways
+
+    /// List internet gateways
+    async fn internet_gateway_list(
+        _rqctx: RequestContext<ApiContext>,
+        _query_params: Query<PaginatedByNameOrId<params::VpcSelector>>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::InternetGateway>>, HttpError>
+    {
+        todo!();
+    }
+
+    /// Fetch internet gateway
+    async fn internet_gateway_view(
+        _rqctx: RequestContext<ApiContext>,
+        _path_params: Path<params::InternetGatewayPath>,
+        _query_params: Query<params::OptionalVpcSelector>,
+    ) -> Result<HttpResponseOk<views::InternetGateway>, HttpError> {
+        todo!()
+    }
+
+    /// Create VPC internet gateway
+    async fn internet_gateway_create(
+        _rqctx: RequestContext<ApiContext>,
+        _query_params: Query<params::VpcSelector>,
+        _create_params: TypedBody<params::InternetGatewayCreate>,
+    ) -> Result<HttpResponseCreated<views::InternetGateway>, HttpError> {
+        /*
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let query = query_params.into_inner();
+            let vpc_lookup = nexus.vpc_lookup(&opctx, query)?;
+            nexus.internet_gateway_create(opctx, vpc_lookup, create_params)
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+        todo!();
+        */
+        todo!()
+    }
+
+    /// Delete internet gateway
+    async fn internet_gateway_delete(
+        _rqctx: RequestContext<ApiContext>,
+        _path_params: Path<params::InternetGatewayPath>,
+        _query_params: Query<params::OptionalVpcSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        todo!()
+    }
+
+    /// Update internet gateway
+    async fn internet_gateway_update(
+        _rqctx: RequestContext<Self::Context>,
+        _path_params: Path<params::InternetGatewayPath>,
+        _query_params: Query<params::OptionalVpcSelector>,
+        _router_params: TypedBody<params::InternetGatewayCreate>,
+    ) -> Result<HttpResponseOk<views::InternetGateway>, HttpError> {
+        todo!()
+    }
+
     // Racks
 
     async fn rack_list(

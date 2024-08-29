@@ -2676,6 +2676,298 @@
         }
       }
     },
+    "/v1/internet-gateways": {
+      "get": {
+        "tags": [
+          "vpcs"
+        ],
+        "summary": "List internet gateways",
+        "operationId": "internet_gateway_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vpc",
+            "description": "Name or ID of the VPC",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternetGatewayResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": [
+            "vpc"
+          ]
+        }
+      },
+      "post": {
+        "tags": [
+          "vpcs"
+        ],
+        "summary": "Create VPC internet gateway",
+        "operationId": "internet_gateway_create",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vpc",
+            "description": "Name or ID of the VPC",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InternetGatewayCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternetGateway"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/internet-gateways/{gateway}": {
+      "get": {
+        "tags": [
+          "vpcs"
+        ],
+        "summary": "Fetch internet gateway",
+        "operationId": "internet_gateway_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "gateway",
+            "description": "Name or ID of the gateway",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vpc",
+            "description": "Name or ID of the VPC",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternetGateway"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "vpcs"
+        ],
+        "summary": "Update internet gateway",
+        "operationId": "internet_gateway_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "gateway",
+            "description": "Name or ID of the gateway",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vpc",
+            "description": "Name or ID of the VPC",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InternetGatewayCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternetGateway"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "vpcs"
+        ],
+        "summary": "Delete internet gateway",
+        "operationId": "internet_gateway_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "gateway",
+            "description": "Name or ID of the gateway",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vpc",
+            "description": "Name or ID of the VPC",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/ip-pools": {
       "get": {
         "tags": [
@@ -15835,6 +16127,178 @@
             ]
           }
         }
+      },
+      "InternetGateway": {
+        "description": "An internet gateway provides a path between VPC networks and external networks.",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "ip_source": {
+            "description": "IP address mode the gateway operates in.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InternetGatewayIpSource"
+              }
+            ]
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "description",
+          "id",
+          "ip_source",
+          "name",
+          "time_created",
+          "time_modified"
+        ]
+      },
+      "InternetGatewayCreate": {
+        "description": "Create-time parameters for an `InternetGateway`",
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "ip_source": {
+            "description": "IP address mode the gateway operates in.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InternetGatewayIpSource2"
+              }
+            ]
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          }
+        },
+        "required": [
+          "description",
+          "ip_source",
+          "name"
+        ]
+      },
+      "InternetGatewayIpSource": {
+        "description": "The source of IP addresses for an `InternetGateway`",
+        "oneOf": [
+          {
+            "description": "Automatically select IP addresses to use for the internet gateway.",
+            "type": "object",
+            "properties": {
+              "pool": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              }
+            },
+            "required": [
+              "pool"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "description": "Users explicitly manage IP addresses.",
+            "type": "object",
+            "properties": {
+              "manual": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "ip"
+                }
+              }
+            },
+            "required": [
+              "manual"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "InternetGatewayIpSource2": {
+        "description": "The source of IP addresses for an `InternetGateway`",
+        "oneOf": [
+          {
+            "description": "Automatically select IP addresses to use for the internet gateway.",
+            "type": "object",
+            "properties": {
+              "pool": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/NameOrId"
+                }
+              }
+            },
+            "required": [
+              "pool"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "description": "Users explicitly manage IP addresses.",
+            "type": "object",
+            "properties": {
+              "manual": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "ip"
+                }
+              }
+            },
+            "required": [
+              "manual"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "InternetGatewayResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InternetGateway"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
       },
       "IpNet": {
         "x-rust-type": {

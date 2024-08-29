@@ -1148,6 +1148,34 @@ table! {
 }
 
 table! {
+    internet_gateway(id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        vpc_id -> Uuid,
+        rcgen -> Int8,
+        resolved_version -> Int8,
+    }
+}
+
+table! {
+    internet_gateway_pool(gateway_id, ip_pool_id) {
+        gateway_id -> Uuid,
+        ip_pool_id -> Uuid,
+    }
+}
+
+table! {
+    internet_gateway_addr(gateway_id, addr) {
+        gateway_id -> Uuid,
+        addr -> Inet,
+    }
+}
+
+table! {
     use diesel::sql_types::*;
 
     vpc_firewall_rule (id) {

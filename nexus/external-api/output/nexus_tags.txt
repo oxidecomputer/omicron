@@ -232,6 +232,11 @@ ping                                     GET      /v1/ping
 
 API operations found with tag "vpcs"
 OPERATION ID                             METHOD   URL PATH
+internet_gateway_create                  POST     /v1/internet-gateways
+internet_gateway_delete                  DELETE   /v1/internet-gateways/{gateway}
+internet_gateway_list                    GET      /v1/internet-gateways
+internet_gateway_update                  PUT      /v1/internet-gateways/{gateway}
+internet_gateway_view                    GET      /v1/internet-gateways/{gateway}
 vpc_create                               POST     /v1/vpcs
 vpc_delete                               DELETE   /v1/vpcs/{vpc}
 vpc_firewall_rules_update                PUT      /v1/vpc-firewall-rules

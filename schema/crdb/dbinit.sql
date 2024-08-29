@@ -1794,6 +1794,38 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_route_by_router ON omicron.public.route
 ) WHERE
     time_deleted IS NULL;
 
+CREATE TABLE IF NOT EXISTS omicron.public.internet_gateway (
+    /* Identity metadata (resource) */
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    /* Indicates that the object has been deleted */
+    time_deleted TIMESTAMPTZ,
+    vpc_id UUID NOT NULL,
+    rcgen INT NOT NULL,
+    /*
+     * version information used to trigger VPC router RPW.
+     * this is sensitive to CRUD on named resources beyond
+     * routers e.g. instances, subnets, ...
+     */
+    resolved_version INT NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.internet_gateway_pool (
+    gateway_id UUID,
+    ip_pool_id UUID,
+    PRIMARY KEY (gateway_id, ip_pool_id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.internet_gateway_addr (
+    gateway_id UUID,
+    addr INET,
+    PRIMARY KEY (gateway_id, addr)
+);
+
+
 /*
  * An IP Pool, a collection of zero or more IP ranges for external IPs.
  */

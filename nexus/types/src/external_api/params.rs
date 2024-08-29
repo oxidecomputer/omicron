@@ -76,6 +76,7 @@ path_param!(VpcPath, vpc, "VPC");
 path_param!(SubnetPath, subnet, "subnet");
 path_param!(RouterPath, router, "router");
 path_param!(RoutePath, route, "route");
+path_param!(InternetGatewayPath, gateway, "gateway");
 path_param!(FloatingIpPath, floating_ip, "floating IP");
 path_param!(DiskPath, disk, "disk");
 path_param!(SnapshotPath, snapshot, "snapshot");
@@ -298,6 +299,28 @@ pub struct RouteSelector {
     pub router: Option<NameOrId>,
     /// Name or ID of the route
     pub route: NameOrId,
+}
+
+// Internet gateways
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct InternetGatewaySelector {
+    /// Name or ID of the project, only required if `vpc` is provided as a `Name`
+    pub project: Option<NameOrId>,
+    /// Name or ID of the VPC, only required if `gateway` is provided as a `Name`
+    pub vpc: Option<NameOrId>,
+    /// Name or ID of the internet gateway
+    pub gateway: NameOrId,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct OptionalInternetGatewaySelector {
+    /// Name or ID of the project, only required if `vpc` is provided as a `Name`
+    pub project: Option<NameOrId>,
+    /// Name or ID of the VPC, only required if `gateway` is provided as a `Name`
+    pub vpc: Option<NameOrId>,
+    /// Name or ID of the internet gateway
+    pub gateway: Option<NameOrId>,
 }
 
 // Silos
@@ -1300,6 +1323,28 @@ pub struct RouterRouteUpdate {
     pub target: RouteTarget,
     /// Selects which traffic this routing rule will apply to.
     pub destination: RouteDestination,
+}
+
+// INTERNET GATEWAYS
+
+/// Create-time parameters for an `InternetGateway`
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InternetGatewayCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+
+    /// IP address mode the gateway operates in.
+    pub ip_source: InternetGatewayIpSource,
+}
+
+/// The source of IP addresses for an `InternetGateway`
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum InternetGatewayIpSource {
+    /// Automatically select IP addresses to use for the internet gateway.
+    Pool(Vec<NameOrId>),
+    /// Users explicitly manage IP addresses.
+    Manual(Vec<IpAddr>),
 }
 
 // DISKS
