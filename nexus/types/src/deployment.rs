@@ -328,7 +328,6 @@ impl Blueprint {
             })
             .collect();
 
-
         BlueprintDiff::new(
             DiffBeforeMetadata::Collection { id: before.id },
             before_zones,
@@ -1156,10 +1155,14 @@ impl BlueprintOrCollectionDatasetsConfig {
 
     pub fn datasets(&self) -> BTreeSet<CollectionDatasetIdentifier> {
         match self {
-            BlueprintOrCollectionDatasetsConfig::Collection(c) => c.datasets.clone(),
-            BlueprintOrCollectionDatasetsConfig::Blueprint(c) => {
-                c.datasets.values().map(CollectionDatasetIdentifier::from).collect()
+            BlueprintOrCollectionDatasetsConfig::Collection(c) => {
+                c.datasets.clone()
             }
+            BlueprintOrCollectionDatasetsConfig::Blueprint(c) => c
+                .datasets
+                .values()
+                .map(CollectionDatasetIdentifier::from)
+                .collect(),
         }
     }
 }
@@ -1186,10 +1189,7 @@ impl From<&BlueprintDatasetConfig> for CollectionDatasetIdentifier {
 
 impl From<&crate::inventory::Dataset> for CollectionDatasetIdentifier {
     fn from(d: &crate::inventory::Dataset) -> Self {
-        Self {
-            id: d.id,
-            name: d.name.clone(),
-        }
+        Self { id: d.id, name: d.name.clone() }
     }
 }
 

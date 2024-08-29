@@ -5,10 +5,11 @@
 //! Types helpful for diffing blueprints.
 
 use super::blueprint_display::{
-    constants::*, linear_table_modified, linear_table_unchanged, BpDiffState,
-    BpGeneration, BpDatasetsSubtableSchema, BpOmicronZonesSubtableSchema,
-    BpPhysicalDisksSubtableSchema, BpSledSubtable, BpSledSubtableColumn,
-    BpSledSubtableData, BpSledSubtableRow, KvListWithHeading, KvPair,
+    constants::*, linear_table_modified, linear_table_unchanged,
+    BpDatasetsSubtableSchema, BpDiffState, BpGeneration,
+    BpOmicronZonesSubtableSchema, BpPhysicalDisksSubtableSchema,
+    BpSledSubtable, BpSledSubtableColumn, BpSledSubtableData,
+    BpSledSubtableRow, KvListWithHeading, KvPair,
 };
 use super::{zone_sort_key, CockroachDbPreserveDowngrade};
 use nexus_sled_agent_shared::inventory::ZoneKind;
@@ -20,11 +21,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use crate::deployment::{
-    CollectionDatasetIdentifier, BlueprintDatasetsConfig, BlueprintMetadata,
+    BlueprintDatasetsConfig, BlueprintMetadata,
     BlueprintOrCollectionDatasetsConfig, BlueprintOrCollectionDisksConfig,
     BlueprintOrCollectionZoneConfig, BlueprintOrCollectionZonesConfig,
-    BlueprintPhysicalDisksConfig, BlueprintZoneConfig, BlueprintZoneDisposition,
-    BlueprintZonesConfig, DiffBeforeMetadata, ZoneSortKey,
+    BlueprintPhysicalDisksConfig, BlueprintZoneConfig,
+    BlueprintZoneDisposition, BlueprintZonesConfig,
+    CollectionDatasetIdentifier, DiffBeforeMetadata, ZoneSortKey,
 };
 
 /// Diffs for omicron zones on a given sled with a given `BpDiffState`
@@ -579,7 +581,11 @@ impl BpSledSubtableData for DiffDatasetsDetails {
         self.datasets.iter().map(move |d| {
             BpSledSubtableRow::from_strings(
                 state,
-                vec![d.id.map(|id| id.to_string()).unwrap_or_else(|| "none".to_string()), d.name.clone()],
+                vec![
+                    d.id.map(|id| id.to_string())
+                        .unwrap_or_else(|| "none".to_string()),
+                    d.name.clone(),
+                ],
             )
         })
     }
@@ -648,7 +654,10 @@ impl BpDiffDatasets {
                     DiffDatasetsDetails {
                         before_generation,
                         after_generation: None,
-                        datasets: before_datasets.datasets().into_iter().collect(),
+                        datasets: before_datasets
+                            .datasets()
+                            .into_iter()
+                            .collect(),
                     },
                 );
             }
@@ -657,8 +666,11 @@ impl BpDiffDatasets {
         // Any sleds remaining in `after` have just been added, since we remove
         // sleds from `after`, that were also in `before`, in the above loop.
         for (sled_id, after_datasets) in after {
-            let added: BTreeSet<CollectionDatasetIdentifier> =
-                after_datasets.datasets.values().map(CollectionDatasetIdentifier::from).collect();
+            let added: BTreeSet<CollectionDatasetIdentifier> = after_datasets
+                .datasets
+                .values()
+                .map(CollectionDatasetIdentifier::from)
+                .collect();
             if !added.is_empty() {
                 diffs.added.insert(
                     sled_id,
@@ -726,21 +738,27 @@ pub struct BlueprintDiff {
 impl BlueprintDiff {
     /// Build a diff with the provided contents, verifying that the provided
     /// data is valid.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         before_meta: DiffBeforeMetadata,
         before_zones: BTreeMap<SledUuid, BlueprintOrCollectionZonesConfig>,
         before_disks: BTreeMap<SledUuid, BlueprintOrCollectionDisksConfig>,
-        before_datasets: BTreeMap<SledUuid, BlueprintOrCollectionDatasetsConfig>,
+        before_datasets: BTreeMap<
+            SledUuid,
+            BlueprintOrCollectionDatasetsConfig,
+        >,
         after_meta: BlueprintMetadata,
         after_zones: BTreeMap<SledUuid, BlueprintZonesConfig>,
         after_disks: BTreeMap<SledUuid, BlueprintPhysicalDisksConfig>,
         after_datasets: BTreeMap<SledUuid, BlueprintDatasetsConfig>,
     ) -> Self {
-        let before_sleds: BTreeSet<_> = before_zones.keys()
+        let before_sleds: BTreeSet<_> = before_zones
+            .keys()
             .chain(before_disks.keys())
             .chain(before_datasets.keys())
             .collect();
-        let after_sleds: BTreeSet<_> = after_zones.keys()
+        let after_sleds: BTreeSet<_> = after_zones
+            .keys()
             .chain(after_disks.keys())
             .chain(after_datasets.keys())
             .collect();
@@ -917,9 +935,7 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
         }
 
         // Write the datasets table if it exists
-        if let Some(table) =
-            self.diff.datasets.to_bp_sled_subtable(sled_id)
-        {
+        if let Some(table) = self.diff.datasets.to_bp_sled_subtable(sled_id) {
             writeln!(f, "{table}\n")?;
         }
 
