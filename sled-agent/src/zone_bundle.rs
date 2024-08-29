@@ -1545,61 +1545,44 @@ async fn compute_bundle_utilization(
 
 // Return the number of bytes occupied by the provided directory.
 //
-// This returns an error if:
-//
-// - The "du" command fails
-// - Parsing stdout fails
-// - Parsing the actual size as a u64 fails
+// This returns an error if reading any file or directory within the provided
+// directory fails.
 async fn disk_usage(path: &Utf8PathBuf) -> Result<u64, BundleError> {
-    // Each OS implements slightly different `du` options.
+    let mut sum = 0;
+    // Rather than recursing, we use a VecDeque as a queue of paths to scan
+    // next. This is for two reasons:
     //
-    // Linux and illumos support the "apparent" size in bytes, though using
-    // different options. macOS doesn't support bytes at all, and has a minimum
-    // block size of 512.
-    //
-    // We'll suffer the lower resolution on macOS, and get higher resolution on
-    // the others.
-    cfg_if::cfg_if! {
-        if #[cfg(target_os = "illumos")] {
-            const BLOCK_SIZE: u64 = 1;
-            const DU_ARG: &str = "-A";
-        } else if #[cfg(target_os = "linux")] {
-            const BLOCK_SIZE: u64 = 1;
-            const DU_ARG: &str = "-b";
-        } else if #[cfg(target_os = "macos")] {
-            const BLOCK_SIZE: u64 = 512;
-            const DU_ARG: &str = "-k";
-        } else {
-            compile_error!("unsupported target OS");
+    // 1. If we're walking a very deeply nested directory structure, this helps
+    //    to avoid a potential stack overflow.
+    // 2. Since this is an `async fn` (due to the use of `tokio::fs`), it can't
+    //    contain a recursive call to itself without boxing it. We could work
+    //    around that bit by wrapping the whole thing in `spawn_blocking`,
+    //    instead of using `tokio::fs`.
+    let mut dirs_to_scan = std::collections::VecDeque::new();
+    dirs_to_scan.push_back(path.to_owned());
+
+    // TODO(eliza): since we're using `tokio::fs` here, this could, conceivably,
+    // be parallelized by spawning a bunch of tasks to walk each sub-directory.
+    while let Some(dir) = dirs_to_scan.pop_front() {
+        let mk_dir_error =
+            |err| BundleError::ReadDirectory { directory: dir.clone(), err };
+        let mut dir = tokio::fs::read_dir(&dir).await.map_err(mk_dir_error)?;
+        while let Some(entry) = dir.next_entry().await.map_err(mk_dir_error)? {
+            let mk_error = |err| BundleError::ReadDirectory {
+                directory: Utf8PathBuf::try_from(entry.path())
+                    .unwrap_or_else(|_| path.clone()),
+                err,
+            };
+            if entry.file_type().await.map_err(mk_error)?.is_dir() {
+                let path = entry.path().try_into()?;
+                dirs_to_scan.push_back(path);
+            } else {
+                sum += entry.metadata().await.map_err(mk_error)?.len()
+            }
         }
     }
-    const DU: &str = "/usr/bin/du";
-    let args = &[DU_ARG, "-s", path.as_str()];
-    let output = Command::new(DU).args(args).output().await.map_err(|err| {
-        BundleError::Command { cmd: format!("{DU} {}", args.join(" ")), err }
-    })?;
-    let err = |msg: &str| {
-        BundleError::Cleanup(anyhow!(
-            "failed to fetch disk usage for {}: {}",
-            path,
-            msg,
-        ))
-    };
-    if !output.status.success() {
-        return Err(err("du command failed"));
-    }
-    let Ok(s) = std::str::from_utf8(&output.stdout) else {
-        return Err(err("non-UTF8 stdout"));
-    };
-    let Some(line) = s.lines().next() else {
-        return Err(err("no lines in du output"));
-    };
-    let Some(part) = line.trim().split_ascii_whitespace().next() else {
-        return Err(err("no disk usage size computed in output"));
-    };
-    part.parse()
-        .map(|x: u64| x.saturating_mul(BLOCK_SIZE))
-        .map_err(|_| err("failed to parse du output"))
+
+    Ok(sum)
 }
 
 // Return the quota for a ZFS dataset, or the available size.
@@ -1659,8 +1642,7 @@ async fn zfs_quota(path: &Utf8PathBuf) -> Result<u64, BundleError> {
 
 #[cfg(test)]
 mod tests {
-    use super::disk_usage;
-    use super::Utf8PathBuf;
+    use super::*;
 
     #[tokio::test]
     async fn test_disk_usage() {
@@ -1675,6 +1657,93 @@ mod tests {
         );
         let path = Utf8PathBuf::from("/some/nonexistent/path");
         assert!(disk_usage(&path).await.is_err());
+    }
+
+    #[tokio::test]
+    #[cfg(any(
+        target_os = "illumos",
+        target_os = "linux",
+        target_os = "macos"
+    ))]
+    async fn test_disk_usage_matches_du() {
+        // Each OS implements slightly different `du` options.
+        //
+        // Linux and illumos support the "apparent" size in bytes, though using
+        // different options. macOS doesn't support bytes at all, and has a minimum
+        // block size of 512.
+        //
+        // We'll suffer the lower resolution on macOS, and get higher resolution on
+        // the others.
+        cfg_if::cfg_if! {
+            if #[cfg(target_os = "illumos")] {
+                const BLOCK_SIZE: u64 = 1;
+                const DU_ARG: &str = "-A";
+            } else if #[cfg(target_os = "linux")] {
+                const BLOCK_SIZE: u64 = 1;
+                const DU_ARG: &str = "-b";
+            } else if #[cfg(target_os = "macos")] {
+                const BLOCK_SIZE: u64 = 512;
+                const DU_ARG: &str = "-k";
+            } else {
+                compile_error!("unsupported target OS");
+            }
+        }
+
+        async fn disk_usage_du(path: &Utf8PathBuf) -> Result<u64, BundleError> {
+            const DU: &str = "du";
+            let args = &[DU_ARG, "-s", path.as_str()];
+            let output =
+                Command::new(DU).args(args).output().await.map_err(|err| {
+                    BundleError::Command {
+                        cmd: format!("{DU} {}", args.join(" ")),
+                        err,
+                    }
+                })?;
+            let err = |msg: &str| {
+                BundleError::Cleanup(anyhow!(
+                    "failed to fetch disk usage for {}: {}",
+                    path,
+                    msg,
+                ))
+            };
+            if !output.status.success() {
+                return Err(err("du command failed"));
+            }
+            let Ok(s) = std::str::from_utf8(&output.stdout) else {
+                return Err(err("non-UTF8 stdout"));
+            };
+            let Some(line) = s.lines().next() else {
+                return Err(err("no lines in du output"));
+            };
+            let Some(part) = line.trim().split_ascii_whitespace().next() else {
+                return Err(err("no disk usage size computed in output"));
+            };
+            part.parse()
+                .map(|x: u64| x.saturating_mul(BLOCK_SIZE))
+                .map_err(|_| err("failed to parse du output"))
+        }
+
+        let path =
+            Utf8PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/src"));
+        let usage = dbg!(disk_usage(&path).await)
+            .expect("disk usage for src dir failed");
+        let du_usage =
+            dbg!(disk_usage_du(&path).await).expect("running du failed!");
+
+        // Round down the Rust disk usage result to `du`'s block size on this
+        // system.
+        let usage = if BLOCK_SIZE > 1 {
+            eprintln!("rounding up to `du(1)`'s block size of {BLOCK_SIZE}B");
+            dbg!(usage.div_ceil(BLOCK_SIZE) * BLOCK_SIZE)
+        } else {
+            usage
+        };
+
+        assert_eq!(
+            usage, du_usage,
+            "expected `disk_usage({path})` to == `du -s {path}`\n\
+             {usage}B (`disk_usage`) != {du_usage}B (`du`)",
+        );
     }
 }
 
