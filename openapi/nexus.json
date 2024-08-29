@@ -7100,6 +7100,174 @@
         }
       }
     },
+    "/v1/system/networking/switch-port-configuration": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "List switch port settings",
+        "operationId": "networking_switch_port_configuration_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "configuration",
+            "description": "An optional name or id to use when selecting a switch port configuration.",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwitchPortSettingsResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": []
+        }
+      },
+      "post": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Create switch port settings",
+        "operationId": "networking_switch_port_configuration_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SwitchPortSettingsCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwitchPortSettingsView"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Delete switch port settings",
+        "operationId": "networking_switch_port_configuration_delete",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "configuration",
+            "description": "An optional name or id to use when selecting a switch port configuration.",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/switch-port-configuration/{configuration}": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Get information about a named set of switch-port-settings",
+        "operationId": "networking_switch_port_configuration_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "configuration",
+            "description": "A name or id to use when selecting a switch port configuration.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwitchPortSettingsView"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/networking/switch-port-configuration/{configuration}/geometry": {
       "get": {
         "tags": [
@@ -10320,6 +10488,22 @@
         "required": [
           "address",
           "address_lot"
+        ]
+      },
+      "AddressConfig": {
+        "description": "A set of addresses associated with a port configuration.",
+        "type": "object",
+        "properties": {
+          "addresses": {
+            "description": "The set of addresses assigned to the port configuration.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Address"
+            }
+          }
+        },
+        "required": [
+          "addresses"
         ]
       },
       "AddressLot": {
@@ -16691,6 +16875,53 @@
         "minLength": 1,
         "maxLength": 11
       },
+      "LinkConfigCreate": {
+        "description": "Switch link configuration.",
+        "type": "object",
+        "properties": {
+          "autoneg": {
+            "description": "Whether or not to set autonegotiation",
+            "type": "boolean"
+          },
+          "fec": {
+            "description": "The forward error correction mode of the link.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LinkFec"
+              }
+            ]
+          },
+          "lldp": {
+            "description": "The link-layer discovery protocol (LLDP) configuration for the link.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LldpLinkConfigCreate"
+              }
+            ]
+          },
+          "mtu": {
+            "description": "Maximum transmission unit for the link.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "speed": {
+            "description": "The speed of the link.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LinkSpeed"
+              }
+            ]
+          }
+        },
+        "required": [
+          "autoneg",
+          "fec",
+          "lldp",
+          "mtu",
+          "speed"
+        ]
+      },
       "LinkFec": {
         "description": "The forward error correction mode of a link.",
         "oneOf": [
@@ -16783,6 +17014,103 @@
               "speed400_g"
             ]
           }
+        ]
+      },
+      "LldpLinkConfig": {
+        "description": "A link layer discovery protocol (LLDP) service configuration.",
+        "type": "object",
+        "properties": {
+          "chassis_id": {
+            "nullable": true,
+            "description": "The LLDP chassis identifier TLV.",
+            "type": "string"
+          },
+          "enabled": {
+            "description": "Whether or not the LLDP service is enabled.",
+            "type": "boolean"
+          },
+          "id": {
+            "description": "The id of this LLDP service instance.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "link_description": {
+            "nullable": true,
+            "description": "The LLDP link description TLV.",
+            "type": "string"
+          },
+          "link_name": {
+            "nullable": true,
+            "description": "The LLDP link name TLV.",
+            "type": "string"
+          },
+          "management_ip": {
+            "nullable": true,
+            "description": "The LLDP management IP TLV.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpNet"
+              }
+            ]
+          },
+          "system_description": {
+            "nullable": true,
+            "description": "The LLDP system description TLV.",
+            "type": "string"
+          },
+          "system_name": {
+            "nullable": true,
+            "description": "The LLDP system name TLV.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled",
+          "id"
+        ]
+      },
+      "LldpLinkConfigCreate": {
+        "description": "The LLDP configuration associated with a port.",
+        "type": "object",
+        "properties": {
+          "chassis_id": {
+            "nullable": true,
+            "description": "The LLDP chassis identifier TLV.",
+            "type": "string"
+          },
+          "enabled": {
+            "description": "Whether or not LLDP is enabled.",
+            "type": "boolean"
+          },
+          "link_description": {
+            "nullable": true,
+            "description": "The LLDP link description TLV.",
+            "type": "string"
+          },
+          "link_name": {
+            "nullable": true,
+            "description": "The LLDP link name TLV.",
+            "type": "string"
+          },
+          "management_ip": {
+            "nullable": true,
+            "description": "The LLDP management IP TLV.",
+            "type": "string",
+            "format": "ip"
+          },
+          "system_description": {
+            "nullable": true,
+            "description": "The LLDP system description TLV.",
+            "type": "string"
+          },
+          "system_name": {
+            "nullable": true,
+            "description": "The LLDP system name TLV.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "enabled"
         ]
       },
       "LoopbackAddress": {
@@ -19488,6 +19816,150 @@
           "switch"
         ]
       },
+      "SwitchInterfaceConfig": {
+        "description": "A switch port interface configuration for a port settings object.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "A unique identifier for this switch interface.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "interface_name": {
+            "description": "The name of this switch interface.",
+            "type": "string"
+          },
+          "kind": {
+            "description": "The switch interface kind.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SwitchInterfaceKind2"
+              }
+            ]
+          },
+          "port_settings_id": {
+            "description": "The port settings object this switch interface configuration belongs to.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "v6_enabled": {
+            "description": "Whether or not IPv6 is enabled on this interface.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "interface_name",
+          "kind",
+          "port_settings_id",
+          "v6_enabled"
+        ]
+      },
+      "SwitchInterfaceConfigCreate": {
+        "description": "A layer-3 switch interface configuration. When IPv6 is enabled, a link local address will be created for the interface.",
+        "type": "object",
+        "properties": {
+          "kind": {
+            "description": "What kind of switch interface this configuration represents.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SwitchInterfaceKind"
+              }
+            ]
+          },
+          "v6_enabled": {
+            "description": "Whether or not IPv6 is enabled.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "kind",
+          "v6_enabled"
+        ]
+      },
+      "SwitchInterfaceKind": {
+        "description": "Indicates the kind for a switch interface.",
+        "oneOf": [
+          {
+            "description": "Primary interfaces are associated with physical links. There is exactly one primary interface per physical link.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "primary"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "VLAN interfaces allow physical interfaces to be multiplexed onto multiple logical links, each distinguished by a 12-bit 802.1Q Ethernet tag.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "vlan"
+                ]
+              },
+              "vid": {
+                "description": "The virtual network id (VID) that distinguishes this interface and is used for producing and consuming 802.1Q Ethernet tags. This field has a maximum value of 4095 as 802.1Q tags are twelve bits.",
+                "type": "integer",
+                "format": "uint16",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "type",
+              "vid"
+            ]
+          },
+          {
+            "description": "Loopback interfaces are anchors for IP addresses that are not specific to any particular port.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "loopback"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
+      "SwitchInterfaceKind2": {
+        "description": "Describes the kind of an switch interface.",
+        "oneOf": [
+          {
+            "description": "Primary interfaces are associated with physical links. There is exactly one primary interface per physical link.",
+            "type": "string",
+            "enum": [
+              "primary"
+            ]
+          },
+          {
+            "description": "VLAN interfaces allow physical interfaces to be multiplexed onto multiple logical links, each distinguished by a 12-bit 802.1Q Ethernet tag.",
+            "type": "string",
+            "enum": [
+              "vlan"
+            ]
+          },
+          {
+            "description": "Loopback interfaces are anchors for IP addresses that are not specific to any particular port.",
+            "type": "string",
+            "enum": [
+              "loopback"
+            ]
+          }
+        ]
+      },
       "SwitchLinkState": {},
       "SwitchLocation": {
         "description": "Identifies switch physical location",
@@ -19610,7 +20082,7 @@
             "description": "The physical link geometry of the port.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/SwitchPortGeometry"
+                "$ref": "#/components/schemas/SwitchPortGeometry2"
               }
             ]
           },
@@ -19633,7 +20105,7 @@
             "description": "Link geometry for the switch port.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/SwitchPortGeometry2"
+                "$ref": "#/components/schemas/SwitchPortGeometry"
               }
             ]
           }
@@ -19770,6 +20242,295 @@
           "items"
         ]
       },
+      "SwitchPortRouteConfig": {
+        "description": "A route configuration for a port settings object.",
+        "type": "object",
+        "properties": {
+          "dst": {
+            "description": "The route's destination network.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpNet"
+              }
+            ]
+          },
+          "gw": {
+            "description": "The route's gateway address.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpNet"
+              }
+            ]
+          },
+          "interface_name": {
+            "description": "The interface name this route configuration is assigned to.",
+            "type": "string"
+          },
+          "local_pref": {
+            "nullable": true,
+            "description": "Local preference indicating priority within and across protocols.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "port_settings_id": {
+            "description": "The port settings object this route configuration belongs to.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "The VLAN identifier for the route. Use this if the gateway is reachable over an 802.1Q tagged L2 segment.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "dst",
+          "gw",
+          "interface_name",
+          "port_settings_id"
+        ]
+      },
+      "SwitchPortSettings": {
+        "description": "A switch port settings identity whose id may be used to view additional details.",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "description",
+          "id",
+          "name",
+          "time_created",
+          "time_modified"
+        ]
+      },
+      "SwitchPortSettingsCreate": {
+        "description": "Parameters for creating switch port settings. Switch port settings are the central data structure for setting up external networking. Switch port settings include link, interface, route, address and dynamic network protocol configuration.",
+        "type": "object",
+        "properties": {
+          "addresses": {
+            "description": "Addresses indexed by interface name.",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/AddressConfig"
+            }
+          },
+          "bgp_peers": {
+            "description": "BGP peers indexed by interface name.",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/BgpPeerConfig"
+            }
+          },
+          "description": {
+            "type": "string"
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          "interfaces": {
+            "description": "Interfaces indexed by link name.",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/SwitchInterfaceConfigCreate"
+            }
+          },
+          "links": {
+            "description": "Links indexed by phy name. On ports that are not broken out, this is always phy0. On a 2x breakout the options are phy0 and phy1, on 4x phy0-phy3, etc.",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/LinkConfigCreate"
+            }
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          },
+          "port_config": {
+            "$ref": "#/components/schemas/SwitchPortConfigCreate"
+          },
+          "routes": {
+            "description": "Routes indexed by interface name.",
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/RouteConfig"
+            }
+          }
+        },
+        "required": [
+          "addresses",
+          "bgp_peers",
+          "description",
+          "groups",
+          "interfaces",
+          "links",
+          "name",
+          "port_config",
+          "routes"
+        ]
+      },
+      "SwitchPortSettingsGroups": {
+        "description": "This structure maps a port settings object to a port settings groups. Port settings objects may inherit settings from groups. This mapping defines the relationship between settings objects and the groups they reference.",
+        "type": "object",
+        "properties": {
+          "port_settings_group_id": {
+            "description": "The id of a port settings group being referenced by a port settings object.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "port_settings_id": {
+            "description": "The id of a port settings object referencing a port settings group.",
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "port_settings_group_id",
+          "port_settings_id"
+        ]
+      },
+      "SwitchPortSettingsResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SwitchPortSettings"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "SwitchPortSettingsView": {
+        "description": "This structure contains all port settings information in one place. It's a convenience data structure for getting a complete view of a particular port's settings.",
+        "type": "object",
+        "properties": {
+          "addresses": {
+            "description": "Layer 3 IP address settings.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SwitchPortAddressConfig"
+            }
+          },
+          "bgp_peers": {
+            "description": "BGP peer settings.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BgpPeer"
+            }
+          },
+          "groups": {
+            "description": "Switch port settings included from other switch port settings groups.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SwitchPortSettingsGroups"
+            }
+          },
+          "interfaces": {
+            "description": "Layer 3 interface settings.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SwitchInterfaceConfig"
+            }
+          },
+          "link_lldp": {
+            "description": "Link-layer discovery protocol (LLDP) settings.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LldpLinkConfig"
+            }
+          },
+          "links": {
+            "description": "Layer 2 link settings.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SwitchPortLinkConfig"
+            }
+          },
+          "port": {
+            "description": "Layer 1 physical port settings.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SwitchPortConfig"
+              }
+            ]
+          },
+          "routes": {
+            "description": "IP route settings.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SwitchPortRouteConfig"
+            }
+          },
+          "settings": {
+            "description": "The primary switch port settings handle.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SwitchPortSettings"
+              }
+            ]
+          },
+          "vlan_interfaces": {
+            "description": "Vlan interface settings.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SwitchVlanInterfaceConfig"
+            }
+          }
+        },
+        "required": [
+          "addresses",
+          "bgp_peers",
+          "groups",
+          "interfaces",
+          "link_lldp",
+          "links",
+          "port",
+          "routes",
+          "settings",
+          "vlan_interfaces"
+        ]
+      },
       "SwitchResultsPage": {
         "description": "A single page of results",
         "type": "object",
@@ -19789,6 +20550,27 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "SwitchVlanInterfaceConfig": {
+        "description": "A switch port VLAN interface configuration for a port settings object.",
+        "type": "object",
+        "properties": {
+          "interface_config_id": {
+            "description": "The switch interface configuration this VLAN interface configuration belongs to.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "vlan_id": {
+            "description": "The virtual network id for this interface that is used for producing and consuming 802.1Q Ethernet tags. This field has a maximum value of 4095 as 802.1Q tags are twelve bits.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "interface_config_id",
+          "vlan_id"
         ]
       },
       "Table": {

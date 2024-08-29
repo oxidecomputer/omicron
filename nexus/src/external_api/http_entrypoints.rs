@@ -272,6 +272,12 @@ pub(crate) fn external_api() -> NexusApiDescription {
         // TODO: Levon - Group composition (omicron#4405)?
         // /v1/system/networking/switch-port-configuration-group/{name_or_id}/..
 
+        // /v1/system/networking/switch-port-configuration
+        api.register(networking_switch_port_configuration_list)?;
+        api.register(networking_switch_port_configuration_view)?;
+        api.register(networking_switch_port_configuration_create)?;
+        api.register(networking_switch_port_configuration_delete)?;
+
         // /v1/system/networking/switch-port-configuration/{name_or_id}/geometry
         // TODO: Levon - test
         api.register(networking_switch_port_configuration_geometry_view)?;
