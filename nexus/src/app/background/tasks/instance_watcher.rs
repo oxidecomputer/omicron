@@ -5,7 +5,7 @@
 //! Background task for pulling instance state from sled-agents.
 
 use crate::app::background::BackgroundTask;
-use crate::app::instance::SledAgentInstancePutError;
+use crate::app::instance::SledAgentInstanceError;
 use crate::app::saga::StartSaga;
 use futures::{future::BoxFuture, FutureExt};
 use nexus_db_model::Instance;
@@ -97,7 +97,7 @@ impl InstanceWatcher {
                 // TODO(eliza): since we now also wrap errors returned by
                 // `vmm_get_state` in this, perhaps it ought not be called
                 // `SledAgentInstancePutError` any longer...
-                .map_err(SledAgentInstancePutError);
+                .map_err(SledAgentInstanceError);
             let mut check = Check {
                 target,
                 outcome: Default::default(),
@@ -133,7 +133,7 @@ impl InstanceWatcher {
                         migration_out: None,
                     }
                 }
-                Err(SledAgentInstancePutError(ClientError::ErrorResponse(
+                Err(SledAgentInstanceError(ClientError::ErrorResponse(
                     rsp,
                 ))) => {
                     let status = rsp.status();
@@ -152,7 +152,7 @@ impl InstanceWatcher {
                     );
                     return check;
                 }
-                Err(SledAgentInstancePutError(
+                Err(SledAgentInstanceError(
                     ClientError::CommunicationError(e),
                 )) => {
                     // TODO(eliza): eventually, we may want to transition the
@@ -170,7 +170,7 @@ impl InstanceWatcher {
                         CheckOutcome::Failure(Failure::SledAgentUnreachable);
                     return check;
                 }
-                Err(SledAgentInstancePutError(e)) => {
+                Err(SledAgentInstanceError(e)) => {
                     slog::warn!(
                         opctx.log,
                         "error checking up on instance";

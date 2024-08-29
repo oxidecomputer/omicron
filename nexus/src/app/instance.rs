@@ -74,28 +74,28 @@ type SledAgentClientError =
 
 // Newtype wrapper to avoid the orphan type rule.
 #[derive(Debug, thiserror::Error)]
-pub struct SledAgentInstancePutError(pub SledAgentClientError);
+pub struct SledAgentInstanceError(pub SledAgentClientError);
 
-impl std::fmt::Display for SledAgentInstancePutError {
+impl std::fmt::Display for SledAgentInstanceError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
 }
 
-impl From<SledAgentClientError> for SledAgentInstancePutError {
+impl From<SledAgentClientError> for SledAgentInstanceError {
     fn from(value: SledAgentClientError) -> Self {
         Self(value)
     }
 }
 
-impl From<SledAgentInstancePutError> for omicron_common::api::external::Error {
-    fn from(value: SledAgentInstancePutError) -> Self {
+impl From<SledAgentInstanceError> for omicron_common::api::external::Error {
+    fn from(value: SledAgentInstanceError) -> Self {
         value.0.into()
     }
 }
 
-impl From<SledAgentInstancePutError> for dropshot::HttpError {
-    fn from(value: SledAgentInstancePutError) -> Self {
+impl From<SledAgentInstanceError> for dropshot::HttpError {
+    fn from(value: SledAgentInstanceError) -> Self {
         use dropshot::HttpError;
         // See RFD 486 §6.3:
         // https://rfd.shared.oxide.computer/rfd/486#_stopping_or_rebooting_a_running_instance
@@ -121,7 +121,7 @@ impl From<SledAgentInstancePutError> for dropshot::HttpError {
     }
 }
 
-impl SledAgentInstancePutError {
+impl SledAgentInstanceError {
     /// Returns `true` if this error is of a class that indicates that the
     /// instance is known to have failed.
     pub fn instance_unhealthy(&self) -> bool {
@@ -151,7 +151,7 @@ impl SledAgentInstancePutError {
 pub enum InstanceStateChangeError {
     /// Sled agent returned an error from one of its instance endpoints.
     #[error("sled agent client error")]
-    SledAgent(#[source] SledAgentInstancePutError),
+    SledAgent(#[source] SledAgentInstanceError),
 
     /// Some other error occurred outside of the attempt to communicate with
     /// sled agent.
@@ -698,9 +698,7 @@ impl super::Nexus {
             .await
             .map(|res| res.into_inner().updated_runtime.map(Into::into))
             .map_err(|e| {
-                InstanceStateChangeError::SledAgent(SledAgentInstancePutError(
-                    e,
-                ))
+                InstanceStateChangeError::SledAgent(SledAgentInstanceError(e))
             })
     }
 
@@ -877,7 +875,7 @@ impl super::Nexus {
                     )
                     .await
                     .map(|res| res.into_inner().updated_runtime.map(Into::into))
-                    .map_err(|e| SledAgentInstancePutError(e));
+                    .map_err(|e| SledAgentInstanceError(e));
 
                 // If the operation succeeded, write the instance state back,
                 // returning any subsequent errors that occurred during that
@@ -1183,7 +1181,7 @@ impl super::Nexus {
             )
             .await
             .map(|res| res.into_inner().into())
-            .map_err(|e| SledAgentInstancePutError(e));
+            .map_err(|e| SledAgentInstanceError(e));
 
         match instance_register_result {
             Ok(state) => {
@@ -1217,7 +1215,7 @@ impl super::Nexus {
         opctx: &OpContext,
         authz_instance: authz::Instance,
         vmm: &db::model::Vmm,
-        reason: &SledAgentInstancePutError,
+        reason: &SledAgentInstanceError,
     ) -> Result<(), Error> {
         let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
         let vmm_id = PropolisUuid::from_untyped_uuid(vmm.id);
