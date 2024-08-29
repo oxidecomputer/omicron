@@ -323,10 +323,10 @@ cookie = "0.18"
 criterion = { version = "0.5.1", features = [ "async_tokio" ] }
 crossbeam = "0.8"
 crossterm = { version = "0.28.1", features = ["event-stream"] }
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "88c45eebf34027c3bc80e60a5f527738bcfaf16a" }
-crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "88c45eebf34027c3bc80e60a5f527738bcfaf16a" }
-crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "88c45eebf34027c3bc80e60a5f527738bcfaf16a" }
-crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "88c45eebf34027c3bc80e60a5f527738bcfaf16a" }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "ea2282e24ecb50bf4aa2cbe069df10b80d96e162" }
+crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "ea2282e24ecb50bf4aa2cbe069df10b80d96e162" }
+crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "ea2282e24ecb50bf4aa2cbe069df10b80d96e162" }
+crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "ea2282e24ecb50bf4aa2cbe069df10b80d96e162" }
 csv = "1.3.0"
 curve25519-dalek = "4"
 datatest-stable = "0.2.9"
@@ -503,8 +503,8 @@ proc-macro2 = "1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "24a74d0c76b6a63961ecef76acb1516b6e66c5c9" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "2ccd1d18830ff65813db315b6f0bcaa7f5cb9303" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "2ccd1d18830ff65813db315b6f0bcaa7f5cb9303" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "6caef4bad42899e9c4f36d90c3877bee0e10624e" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "6caef4bad42899e9c4f36d90c3877bee0e10624e" }
 proptest = "1.5.0"
 qorb = { git = "https://github.com/oxidecomputer/qorb", branch = "master" }
 quote = "1.0"
