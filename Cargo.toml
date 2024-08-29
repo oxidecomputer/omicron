@@ -321,7 +321,7 @@ dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
 dpd-client = { path = "clients/dpd-client" }
-dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
+dropshot = { git = "https://github.com/oxidecomputer/dropshot", features = [ "usdt-probes" ] }
 dyn-clone = "1.0.17"
 either = "1.13.0"
 expectorate = "1.1.0"
@@ -470,7 +470,7 @@ progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "ma
 progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "24a74d0c76b6a63961ecef76acb1516b6e66c5c9" }
 propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "24a74d0c76b6a63961ecef76acb1516b6e66c5c9" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "24a74d0c76b6a63961ecef76acb1516b6e66c5c9" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis" }
 proptest = "1.5.0"
 quote = "1.0"
 rand = "0.8.5"
@@ -812,3 +812,9 @@ omicron-common = { path = "common" }
 [patch.crates-io.zone]
 git = 'https://github.com/oxidecomputer/zone'
 branch = 'state-derive-eq-hash'
+
+[patch."https://github.com/oxidecomputer/dropshot"]
+dropshot = { path = "../dropshot/dropshot" }
+
+[patch."https://github.com/oxidecomputer/propolis"]
+propolis-mock-server = { path = "../propolis/bin/mock-server" }

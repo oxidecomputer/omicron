@@ -223,6 +223,7 @@ impl Server {
             request_body_max_bytes,
             default_handler_task_mode: dropshot::HandlerTaskMode::Detached,
             log_headers: vec![],
+            ..Default::default()
         };
         let server = Self::build_dropshot_server(&log, &registry, &dropshot)?;
 

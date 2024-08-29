@@ -420,6 +420,7 @@ fn test_config(
         request_body_max_bytes: 1024,
         default_handler_task_mode: HandlerTaskMode::Detached,
         log_headers: vec![],
+        ..Default::default()
     };
 
     Ok((tmp_dir, config_storage, config_dropshot, logctx))

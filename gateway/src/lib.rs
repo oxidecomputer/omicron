@@ -87,6 +87,7 @@ fn start_dropshot_server(
         request_body_max_bytes,
         default_handler_task_mode: HandlerTaskMode::Detached,
         log_headers: vec![],
+        ..Default::default()
     };
     let http_server_starter = dropshot::HttpServerStarter::new(
         &dropshot,

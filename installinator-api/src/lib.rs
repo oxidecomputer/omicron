@@ -132,6 +132,7 @@ pub fn default_config(bind_address: std::net::SocketAddr) -> ConfigDropshot {
         request_body_max_bytes: 4 * 1024 * 1024,
         default_handler_task_mode: HandlerTaskMode::Detached,
         log_headers: vec![],
+        ..Default::default()
     }
 }
 
@@ -155,6 +156,7 @@ pub fn make_server_starter<T: InstallinatorApi>(
         request_body_max_bytes: 4 * 1024 * 1024,
         default_handler_task_mode: HandlerTaskMode::Detached,
         log_headers: vec![],
+        ..Default::default()
     };
 
     let api = crate::installinator_api_mod::api_description::<T>()?;

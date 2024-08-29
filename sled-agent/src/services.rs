@@ -2212,6 +2212,7 @@ impl ServiceManager {
                             default_handler_task_mode:
                                 HandlerTaskMode::Detached,
                             log_headers: vec![],
+                            ..Default::default()
                         },
                     },
                     dropshot_internal: dropshot::ConfigDropshot {
@@ -2223,6 +2224,7 @@ impl ServiceManager {
                         request_body_max_bytes: 10 * 1024 * 1024,
                         default_handler_task_mode: HandlerTaskMode::Detached,
                         log_headers: vec![],
+                        ..Default::default()
                     },
                     internal_dns: nexus_config::InternalDns::FromSubnet {
                         subnet: Ipv6Subnet::<RACK_PREFIX>::new(
