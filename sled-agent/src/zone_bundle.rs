@@ -62,6 +62,9 @@ const ARCHIVE_SNAPSHOT_PREFIX: &'static str = "zone-archives-";
 const ZONE_BUNDLE_ZFS_PROPERTY_NAME: &'static str = "oxide:for-zone-bundle";
 const ZONE_BUNDLE_ZFS_PROPERTY_VALUE: &'static str = "true";
 
+// Path to the `du(1)` executable.
+const DU: &str = "/usr/bin/du";
+
 // Initialize the ZFS resources we need for zone bundling.
 //
 // This deletes any snapshots matching the names we expect to create ourselves
@@ -1573,7 +1576,6 @@ async fn disk_usage(path: &Utf8PathBuf) -> Result<u64, BundleError> {
             compile_error!("unsupported target OS");
         }
     }
-    const DU: &str = "/usr/bin/du";
     let args = &[DU_ARG, "-s", path.as_str()];
     let output = Command::new(DU).args(args).output().await.map_err(|err| {
         BundleError::Command { cmd: format!("{DU} {}", args.join(" ")), err }
@@ -1660,10 +1662,33 @@ async fn zfs_quota(path: &Utf8PathBuf) -> Result<u64, BundleError> {
 #[cfg(test)]
 mod tests {
     use super::disk_usage;
+    use super::Utf8Path;
     use super::Utf8PathBuf;
+    use super::DU;
 
     #[tokio::test]
     async fn test_disk_usage() {
+        // On some systems, such as NixOS, the `du(1)` executable may not live
+        // at the path `/usr/bin/du``. We could, potentially, change the
+        // `disk_usage` function to find a du binary on the PATH, or fall back
+        // to other locations...but, on Helios, it is always at `/usr/bin/du`,
+        // so hardcoding it is a good solution for the environment that
+        // sled-agents are actually intended to run in.
+        //
+        // However, hardcoding the path means that this test will always fail on
+        // systems where there is no `/usr/bin/du`, so let's just return early
+        // on such systems.
+        //
+        // TODO(eliza): if, someday, Rust's libtest grows a mechanism for tests
+        // to mark themselves as skipped at runtime dynamically (rather than
+        // using the `#[ignore]` attribute at compile-time), we should use
+        // that here. See:
+        // https://internals.rust-lang.org/t/pre-rfc-skippable-tests/14611
+        if !Utf8Path::new(DU).exists() {
+            eprintln!("No {DU} executable found, skipping disk usage test!");
+            return;
+        }
+
         let path =
             Utf8PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/src"));
         let usage = disk_usage(&path).await.unwrap();
