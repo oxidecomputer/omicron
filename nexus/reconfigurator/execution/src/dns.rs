@@ -458,7 +458,7 @@ pub fn blueprint_nexus_external_ips(blueprint: &Blueprint) -> Vec<IpAddr> {
 mod test {
     use super::*;
     use crate::overridables::Overridables;
-    use crate::RealizeBlueprintOutput;
+    use crate::test_utils::realize_blueprint_and_expect;
     use crate::Sled;
     use dns_service_client::DnsDiff;
     use internal_dns::config::Host;
@@ -515,6 +515,7 @@ mod test {
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::policy::BOUNDARY_NTP_REDUNDANCY;
     use omicron_common::policy::COCKROACHDB_REDUNDANCY;
+    use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
     use omicron_common::policy::NEXUS_REDUNDANCY;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev::test_setup_log;
@@ -1458,17 +1459,10 @@ mod test {
 
         // Now, execute the initial blueprint.
         let overrides = Overridables::for_test(cptestctx);
-        let _: RealizeBlueprintOutput =
-            crate::realize_blueprint_with_overrides(
-                &opctx,
-                datastore,
-                resolver,
-                &blueprint,
-                Uuid::new_v4(),
-                &overrides,
-            )
-            .await
-            .expect("failed to execute initial blueprint");
+        _ = realize_blueprint_and_expect(
+            &opctx, datastore, resolver, &blueprint, &overrides,
+        )
+        .await;
 
         // DNS ought not to have changed.
         verify_dns_unchanged(
@@ -1533,6 +1527,7 @@ mod test {
                 service_nic_rows: &[],
                 target_boundary_ntp_zone_count: BOUNDARY_NTP_REDUNDANCY,
                 target_nexus_zone_count: NEXUS_REDUNDANCY,
+                target_internal_dns_zone_count: INTERNAL_DNS_REDUNDANCY,
                 target_cockroachdb_zone_count: COCKROACHDB_REDUNDANCY,
                 target_cockroachdb_cluster_version:
                     CockroachDbClusterVersion::POLICY,
@@ -1599,17 +1594,14 @@ mod test {
             .await
             .expect("failed to set blueprint as target");
 
-        let _: RealizeBlueprintOutput =
-            crate::realize_blueprint_with_overrides(
-                &opctx,
-                datastore,
-                resolver,
-                &blueprint2,
-                Uuid::new_v4(),
-                &overrides,
-            )
-            .await
-            .expect("failed to execute second blueprint");
+        _ = realize_blueprint_and_expect(
+            &opctx,
+            datastore,
+            resolver,
+            &blueprint2,
+            &overrides,
+        )
+        .await;
 
         // Now fetch DNS again.  Both should have changed this time.
         let dns_latest_internal = datastore
@@ -1674,17 +1666,14 @@ mod test {
         }
 
         // If we execute it again, we should see no more changes.
-        let _: RealizeBlueprintOutput =
-            crate::realize_blueprint_with_overrides(
-                &opctx,
-                datastore,
-                resolver,
-                &blueprint2,
-                Uuid::new_v4(),
-                &overrides,
-            )
-            .await
-            .expect("failed to execute second blueprint again");
+        _ = realize_blueprint_and_expect(
+            &opctx,
+            datastore,
+            resolver,
+            &blueprint2,
+            &overrides,
+        )
+        .await;
         verify_dns_unchanged(
             &opctx,
             datastore,
@@ -1711,17 +1700,14 @@ mod test {
 
         // One more time, make sure that executing the blueprint does not do
         // anything.
-        let _: RealizeBlueprintOutput =
-            crate::realize_blueprint_with_overrides(
-                &opctx,
-                datastore,
-                resolver,
-                &blueprint2,
-                Uuid::new_v4(),
-                &overrides,
-            )
-            .await
-            .expect("failed to execute second blueprint again");
+        _ = realize_blueprint_and_expect(
+            &opctx,
+            datastore,
+            resolver,
+            &blueprint2,
+            &overrides,
+        )
+        .await;
         verify_dns_unchanged(
             &opctx,
             datastore,
@@ -1806,17 +1792,10 @@ mod test {
         );
 
         // If we execute the blueprint, DNS should not be changed.
-        let _: RealizeBlueprintOutput =
-            crate::realize_blueprint_with_overrides(
-                &opctx,
-                datastore,
-                resolver,
-                &blueprint,
-                Uuid::new_v4(),
-                &overrides,
-            )
-            .await
-            .expect("failed to execute blueprint");
+        _ = realize_blueprint_and_expect(
+            &opctx, datastore, resolver, &blueprint, &overrides,
+        )
+        .await;
         let dns_latest_internal = datastore
             .dns_config_read(&opctx, DnsGroup::Internal)
             .await

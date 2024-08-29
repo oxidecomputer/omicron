@@ -5,7 +5,7 @@
 use super::instance_common::{
     instance_ip_add_nat, instance_ip_add_opte, instance_ip_get_instance_state,
     instance_ip_move_state, instance_ip_remove_opte, ExternalIpAttach,
-    ModifyStateForExternalIp,
+    ModifyStateForExternalIp, VmmAndSledIds,
 };
 use super::{ActionRegistry, NexusActionContext, NexusSaga};
 use crate::app::sagas::declare_saga_actions;
@@ -13,7 +13,7 @@ use crate::app::{authn, authz};
 use nexus_db_model::{IpAttachState, Ipv4NatEntry};
 use nexus_types::external_api::views;
 use omicron_common::api::external::Error;
-use omicron_uuid_kinds::{GenericUuid, InstanceUuid, SledUuid};
+use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use serde::Deserialize;
 use serde::Serialize;
 use steno::ActionError;
@@ -161,7 +161,7 @@ async fn siia_begin_attach_ip_undo(
 
 async fn siia_get_instance_state(
     sagactx: NexusActionContext,
-) -> Result<Option<SledUuid>, ActionError> {
+) -> Result<Option<VmmAndSledIds>, ActionError> {
     let params = sagactx.saga_params::<Params>()?;
     instance_ip_get_instance_state(
         &sagactx,
@@ -177,7 +177,10 @@ async fn siia_nat(
     sagactx: NexusActionContext,
 ) -> Result<Option<Ipv4NatEntry>, ActionError> {
     let params = sagactx.saga_params::<Params>()?;
-    let sled_id = sagactx.lookup::<Option<SledUuid>>("instance_state")?;
+    let sled_id = sagactx
+        .lookup::<Option<VmmAndSledIds>>("instance_state")?
+        .map(|ids| ids.sled_id);
+
     let target_ip = sagactx.lookup::<ModifyStateForExternalIp>("target_ip")?;
     instance_ip_add_nat(
         &sagactx,
@@ -245,28 +248,18 @@ async fn siia_nat_undo(
 async fn siia_update_opte(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
-    let params = sagactx.saga_params::<Params>()?;
-    let sled_id = sagactx.lookup::<Option<SledUuid>>("instance_state")?;
+    let ids = sagactx.lookup::<Option<VmmAndSledIds>>("instance_state")?;
     let target_ip = sagactx.lookup::<ModifyStateForExternalIp>("target_ip")?;
-    instance_ip_add_opte(&sagactx, &params.authz_instance, sled_id, target_ip)
-        .await
+    instance_ip_add_opte(&sagactx, ids, target_ip).await
 }
 
 async fn siia_update_opte_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let log = sagactx.user_data().log();
-    let params = sagactx.saga_params::<Params>()?;
-    let sled_id = sagactx.lookup::<Option<SledUuid>>("instance_state")?;
+    let ids = sagactx.lookup::<Option<VmmAndSledIds>>("instance_state")?;
     let target_ip = sagactx.lookup::<ModifyStateForExternalIp>("target_ip")?;
-    if let Err(e) = instance_ip_remove_opte(
-        &sagactx,
-        &params.authz_instance,
-        sled_id,
-        target_ip,
-    )
-    .await
-    {
+    if let Err(e) = instance_ip_remove_opte(&sagactx, ids, target_ip).await {
         error!(log, "siia_update_opte_undo: failed to notify sled-agent: {e}");
     }
     Ok(())
@@ -436,8 +429,14 @@ pub(crate) mod test {
         }
 
         // Sled agent has a record of the new external IPs.
+        let VmmAndSledIds { vmm_id, .. } =
+            crate::app::sagas::test_helpers::instance_fetch_vmm_and_sled_ids(
+                cptestctx,
+                &instance_id,
+            )
+            .await;
         let mut eips = sled_agent.external_ips.lock().await;
-        let my_eips = eips.entry(instance_id.into_untyped_uuid()).or_default();
+        let my_eips = eips.entry(vmm_id).or_default();
         assert!(my_eips
             .iter()
             .any(|v| matches!(v, InstanceExternalIpBody::Floating(_))));
@@ -458,7 +457,7 @@ pub(crate) mod test {
 
     pub(crate) async fn verify_clean_slate(
         cptestctx: &ControlPlaneTestContext,
-        instance_id: Uuid,
+        instance_id: InstanceUuid,
     ) {
         use nexus_db_queries::db::schema::external_ip::dsl;
 
@@ -471,7 +470,7 @@ pub(crate) mod test {
         assert!(dsl::external_ip
             .filter(dsl::kind.eq(IpKind::Floating))
             .filter(dsl::time_deleted.is_null())
-            .filter(dsl::parent_id.eq(instance_id))
+            .filter(dsl::parent_id.eq(instance_id.into_untyped_uuid()))
             .filter(dsl::state.ne(IpAttachState::Detached))
             .select(ExternalIp::as_select())
             .first_async::<ExternalIp>(&*conn)
@@ -492,8 +491,14 @@ pub(crate) mod test {
             .is_none());
 
         // No IP bindings remain on sled-agent.
+        let VmmAndSledIds { vmm_id, .. } =
+            crate::app::sagas::test_helpers::instance_fetch_vmm_and_sled_ids(
+                cptestctx,
+                &instance_id,
+            )
+            .await;
         let mut eips = sled_agent.external_ips.lock().await;
-        let my_eips = eips.entry(instance_id).or_default();
+        let my_eips = eips.entry(vmm_id).or_default();
         assert!(my_eips.is_empty());
     }
 
@@ -512,9 +517,10 @@ pub(crate) mod test {
         let instance =
             create_instance(client, PROJECT_NAME, INSTANCE_NAME).await;
 
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
         crate::app::sagas::test_helpers::instance_simulate(
             cptestctx,
-            &InstanceUuid::from_untyped_uuid(instance.identity.id),
+            &instance_id,
         )
         .await;
 
@@ -522,7 +528,7 @@ pub(crate) mod test {
             test_helpers::action_failure_can_unwind::<SagaInstanceIpAttach, _, _>(
                 nexus,
                 || Box::pin(new_test_params(&opctx, datastore, use_float) ),
-                || Box::pin(verify_clean_slate(&cptestctx, instance.id())),
+                || Box::pin(verify_clean_slate(&cptestctx, instance_id)),
                 log,
             )
             .await;
@@ -544,9 +550,10 @@ pub(crate) mod test {
         let instance =
             create_instance(client, PROJECT_NAME, INSTANCE_NAME).await;
 
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
         crate::app::sagas::test_helpers::instance_simulate(
             cptestctx,
-            &InstanceUuid::from_untyped_uuid(instance.identity.id),
+            &instance_id,
         )
         .await;
 
@@ -558,7 +565,7 @@ pub(crate) mod test {
             >(
                 nexus,
                 || Box::pin(new_test_params(&opctx, datastore, use_float)),
-                || Box::pin(verify_clean_slate(&cptestctx, instance.id())),
+                || Box::pin(verify_clean_slate(&cptestctx, instance_id)),
                 log,
             )
             .await;

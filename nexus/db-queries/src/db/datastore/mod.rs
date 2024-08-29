@@ -27,7 +27,8 @@ use crate::db::{
     error::{public_error_from_diesel, ErrorHandler},
 };
 use ::oximeter::types::ProducerRegistry;
-use async_bb8_diesel::{AsyncRunQueryDsl, ConnectionManager};
+use anyhow::{anyhow, bail, Context};
+use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::pg::Pg;
 use diesel::prelude::*;
 use diesel::query_builder::{QueryFragment, QueryId};
@@ -174,8 +175,8 @@ impl<U, T> RunnableQuery<U> for T where
 {
 }
 
-pub type DataStoreConnection<'a> =
-    bb8::PooledConnection<'a, ConnectionManager<DbConnection>>;
+pub type DataStoreConnection =
+    qorb::claim::Handle<async_bb8_diesel::Connection<DbConnection>>;
 
 pub struct DataStore {
     log: Logger,
@@ -207,7 +208,7 @@ impl DataStore {
 
     /// Constructs a new Datastore object.
     ///
-    /// Only returns if the database schema is compatible with Nexus's known
+    /// Only returns when the database schema is compatible with Nexus's known
     /// schema version.
     pub async fn new(
         log: &Logger,
@@ -237,6 +238,38 @@ impl DataStore {
         )
         .await
         .map_err(|_| "Failed to read valid DB schema".to_string())?;
+
+        Ok(datastore)
+    }
+
+    /// Constructs a new Datastore, failing if the schema version does not match
+    /// this program's expected version
+    pub async fn new_failfast(
+        log: &Logger,
+        pool: Arc<Pool>,
+    ) -> Result<Self, anyhow::Error> {
+        let datastore =
+            Self::new_unchecked(log.new(o!("component" => "datastore")), pool)
+                .map_err(|e| anyhow!("{}", e))?;
+        const EXPECTED_VERSION: SemverVersion = nexus_db_model::SCHEMA_VERSION;
+        let (found_version, found_target) = datastore
+            .database_schema_version()
+            .await
+            .context("loading database schema version")?;
+
+        if let Some(found_target) = found_target {
+            bail!(
+                "database schema check failed: apparently mid-upgrade \
+                 (found_target = {found_target})"
+            );
+        }
+
+        if found_version != EXPECTED_VERSION {
+            bail!(
+                "database schema check failed: \
+                 expected {EXPECTED_VERSION}, found {found_version}",
+            );
+        }
 
         Ok(datastore)
     }
@@ -279,8 +312,7 @@ impl DataStore {
         opctx: &OpContext,
     ) -> Result<DataStoreConnection, Error> {
         opctx.authorize(authz::Action::Query, &authz::DATABASE).await?;
-        let pool = self.pool.pool();
-        let connection = pool.get().await.map_err(|err| {
+        let connection = self.pool.claim().await.map_err(|err| {
             Error::unavail(&format!("Failed to access DB connection: {err}"))
         })?;
         Ok(connection)
@@ -294,7 +326,7 @@ impl DataStore {
     pub(super) async fn pool_connection_unauthorized(
         &self,
     ) -> Result<DataStoreConnection, Error> {
-        let connection = self.pool.pool().get().await.map_err(|err| {
+        let connection = self.pool.claim().await.map_err(|err| {
             Error::unavail(&format!("Failed to access DB connection: {err}"))
         })?;
         Ok(connection)
@@ -399,10 +431,10 @@ mod test {
     use crate::db::identity::Asset;
     use crate::db::lookup::LookupPath;
     use crate::db::model::{
-        BlockSize, ConsoleSession, Dataset, DatasetKind, ExternalIp,
-        PhysicalDisk, PhysicalDiskKind, PhysicalDiskPolicy, PhysicalDiskState,
-        Project, Rack, Region, SiloUser, SledBaseboard, SledSystemHardware,
-        SledUpdate, SshKey, Zpool,
+        BlockSize, ConsoleSession, Dataset, ExternalIp, PhysicalDisk,
+        PhysicalDiskKind, PhysicalDiskPolicy, PhysicalDiskState, Project, Rack,
+        Region, SiloUser, SledBaseboard, SledSystemHardware, SledUpdate,
+        SshKey, Zpool,
     };
     use crate::db::queries::vpc_subnet::InsertVpcSubnetQuery;
     use chrono::{Duration, Utc};
@@ -418,6 +450,7 @@ mod test {
     use omicron_common::api::external::{
         ByteCount, Error, IdentityMetadataCreateParams, LookupType, Name,
     };
+    use omicron_common::api::internal::shared::DatasetKind;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::CollectionUuid;
     use omicron_uuid_kinds::GenericUuid;
@@ -1587,7 +1620,7 @@ mod test {
             dev::test_setup_log("test_queries_do_not_require_full_table_scan");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&logctx.log, &cfg);
+        let pool = db::Pool::new_single_host(&logctx.log, &cfg);
         let datastore =
             DataStore::new(&logctx.log, Arc::new(pool), None).await.unwrap();
         let conn = datastore.pool_connection_for_tests().await.unwrap();
@@ -1632,7 +1665,7 @@ mod test {
         let logctx = dev::test_setup_log("test_sled_ipv6_address_allocation");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = Arc::new(db::Pool::new(&logctx.log, &cfg));
+        let pool = Arc::new(db::Pool::new_single_host(&logctx.log, &cfg));
         let datastore =
             Arc::new(DataStore::new(&logctx.log, pool, None).await.unwrap());
         let opctx = OpContext::for_tests(

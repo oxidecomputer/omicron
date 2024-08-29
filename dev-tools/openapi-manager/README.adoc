@@ -4,19 +4,15 @@ This tool manages the OpenAPI documents (JSON files) checked into Omicron's `ope
 
 NOTE: For more information about API traits, see https://rfd.shared.oxide.computer/rfd/0479[RFD 479].
 
-Currently, a subset of OpenAPI documents is managed by this tool. Eventually, all of the OpenAPI documents in Omicron will be managed by this tool; work to make that happen is ongoing.
-
-To check whether your document is managed, run `cargo xtask openapi list`: it will list out all managed OpenAPI documents. If your document is not on the list, it is unmanaged.
-
 == Basic usage
 
 The OpenAPI manager is meant to be invoked via `cargo xtask openapi`. Currently, three commands are provided:
 
-* `cargo xtask openapi list`: List information about currently-managed documents.
-* `cargo xtask openapi check`: Check that all of the managed documents are up-to-date.
+* `cargo xtask openapi list`: List information about OpenAPI documents.
+* `cargo xtask openapi check`: Check that all of the documents are up-to-date.
 * `cargo xtask openapi generate`: Update and generate OpenAPI documents.
 
-There is also a test which makes sure that all managed documents are up-to-date, and tells you to run `cargo xtask openapi generate` if they aren't.
+There is also a test which makes sure that all documents are up-to-date, and tells you to run `cargo xtask openapi generate` if they aren't.
 
 === API crates [[api_crates]]
 
@@ -49,40 +45,13 @@ In the implementation crate:
 . Add a dependency on the API crate.
 . Following the example in https://rfd.shared.oxide.computer/rfd/0479#guide_api_implementation[RFD 479's _API implementation_], provide an implementation of the trait.
 
-Once the API crate is defined, perform the steps in <<add_to_manager>> below.
-
-=== Converting existing documents
-
-Existing, unmanaged documents are generated via *function-based servers*: a set of functions that some code combines into a Dropshot `ApiDescription`. (There is also likely an expectorate test which ensures that the document is up-to-date.)
-
-The first step is to convert the function-based server into an API trait. To do so, create an API crate (see <<api_crates>> above).
-
-. Add the API crate to the workspace's `Cargo.toml`: `members` and `default-members`, and a reference in `[workspace.dependencies]`.
-. Follow the instructions in https://rfd.shared.oxide.computer/rfd/0479#guide_converting_functions_to_traits[RFD 479's _Converting functions to API traits_] for the API crate.
-
-In the implementation crate:
-
-. Continue following the instructions in https://rfd.shared.oxide.computer/rfd/0479#guide_converting_functions_to_traits[RFD 479's _Converting functions to API traits_] for where the endpoint functions are currently defined.
-. Find the test which currently manages the document (try searching the repo for `openapi_lint::validate`). If it performs any checks on the document beyond `openapi_lint::validate` or `openapi_lint::validate_external`, see <<extra_validation>>.
-
-Next, perform the steps in <<add_to_manager>> below.
-
-Finally, remove:
-
-. The test which used to manage the document. The OpenAPI manager includes a test that will automatically run in CI.
-. The binary subcommand (typically called `openapi`) that generated the OpenAPI document. The test was the only practical use of this subcommand.
-
-=== Adding the API crate to the manager [[add_to_manager]]
-
 Once the API crate is defined, inform the OpenAPI manager of its existence. Within this directory:
 
 . In `Cargo.toml`, add a dependency on the API crate.
 . In `src/spec.rs`, add the crate to the `all_apis` function. (Please keep the list sorted by filename.)
 
-To ensure everything works well, run `cargo xtask openapi generate`.
-
-* Your OpenAPI document should be generated on disk and listed in the output.
-* If you're converting an existing API, the only changes should be the ones you might have introduced as part of the refactor. If there are significant changes, something's gone wrong--maybe you missed an endpoint?
+To ensure everything works well, run `cargo xtask openapi generate`. Your
+OpenAPI document should be generated on disk and listed in the output.
 
 ==== Performing extra validation [[extra_validation]]
 
@@ -90,9 +59,18 @@ By default, the OpenAPI manager does basic validation on the generated document.
 
 It's best to put extra validation next to the trait, within the API crate.
 
-. In the API crate, add dependencies on `anyhow` and `openapiv3`.
-. Define a function with signature `fn extra_validation(openapi: &openapiv3::OpenAPI) -> anyhow::Result<()>` which performs the extra validation steps.
+. In the API crate, add dependencies on `openapiv3` and `openapi-manager-types`.
+. Define a function with signature `fn validate_api(spec: &openapiv3::OpenAPI, mut cx: openapi_manager_types::ValidationContext<'_>) which performs the extra validation steps.
 . In `all_apis`, set the `extra_validation` field to this function.
+
+Currently, the validator can do two things:
+
+. Via the `ValidationContext::report_error` function, report validation errors.
+. Via the `ValidationContext::record_file_contents` function, assert the contents of other generated files.
+
+(This can be made richer as needed.)
+
+For an example, see `validate_api` in the `nexus-external-api` crate.
 
 == Design notes
 

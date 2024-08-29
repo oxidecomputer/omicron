@@ -125,9 +125,6 @@ pub fn run_cmd() -> Result<()> {
                 // Including xtask causes hakari to not work as well and build
                 // times to be longer (omicron#4392).
                 "xtask",
-                // The tests here should not be run by default, as they require
-                // a running control plane.
-                "end-to-end-tests",
             ]
             .contains(&package.name.as_str())
             .then_some(&package.id)

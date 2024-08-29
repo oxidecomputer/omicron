@@ -95,6 +95,10 @@ impl PlanningInput {
         self.policy.target_nexus_zone_count
     }
 
+    pub fn target_internal_dns_zone_count(&self) -> usize {
+        self.policy.target_internal_dns_zone_count
+    }
+
     pub fn target_cockroachdb_zone_count(&self) -> usize {
         self.policy.target_cockroachdb_zone_count
     }
@@ -709,6 +713,11 @@ pub struct Policy {
     /// desired total number of deployed Nexus zones
     pub target_nexus_zone_count: usize,
 
+    /// desired total number of internal DNS zones.
+    /// Must be <= [`omicron_common::policy::MAX_INTERNAL_DNS_REDUNDANCY`],
+    /// and should be >= [`omicron_common::policy::INTERNAL_DNS_REDUNDANCY`].
+    pub target_internal_dns_zone_count: usize,
+
     /// desired total number of deployed CockroachDB zones
     pub target_cockroachdb_zone_count: usize,
 
@@ -782,6 +791,7 @@ impl PlanningInputBuilder {
                 service_ip_pool_ranges: Vec::new(),
                 target_boundary_ntp_zone_count: 0,
                 target_nexus_zone_count: 0,
+                target_internal_dns_zone_count: 0,
                 target_cockroachdb_zone_count: 0,
                 target_cockroachdb_cluster_version:
                     CockroachDbClusterVersion::POLICY,

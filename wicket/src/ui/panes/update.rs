@@ -29,7 +29,7 @@ use ratatui::widgets::{
 use ratatui::Frame;
 use slog::{info, o, Logger};
 use tui_tree_widget::{Tree, TreeItem, TreeState};
-use update_engine::display::StepIndexDisplay;
+use update_engine::display::ProgressRatioDisplay;
 use update_engine::{
     AbortReason, CompletionReason, ExecutionStatus, FailureReason, StepKey,
     TerminalKind, WillNotBeRunReason,
@@ -1986,7 +1986,7 @@ impl ComponentUpdateListState {
                     status_text.push(Span::styled(
                         format!(
                             " (step {})",
-                            StepIndexDisplay::new(
+                            ProgressRatioDisplay::index_and_total(
                                 step_key.index,
                                 summary.total_steps,
                             )
@@ -2019,7 +2019,7 @@ impl ComponentUpdateListState {
                             status_text.push(Span::styled(
                                 format!(
                                     " at step {}",
-                                    StepIndexDisplay::new(
+                                    ProgressRatioDisplay::index_and_total(
                                         info.step_key.index,
                                         summary.total_steps,
                                     )
@@ -2039,7 +2039,7 @@ impl ComponentUpdateListState {
                             status_text.push(Span::styled(
                                 format!(
                                     " at step {}",
-                                    StepIndexDisplay::new(
+                                    ProgressRatioDisplay::index_and_total(
                                         info.step_key.index,
                                         summary.total_steps,
                                     )
