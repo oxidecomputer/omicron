@@ -4361,6 +4361,8 @@ CREATE INDEX IF NOT EXISTS lookup_region_snapshot_by_snapshot_id on omicron.publ
     snapshot_id
 );
 
+CREATE INDEX IF NOT EXISTS lookup_bgp_config_by_name on omicron.public.bgp_config(name);
+
 /*
  * Keep this at the end of file so that the database does not contain a version
  * until it is fully populated.
@@ -4372,7 +4374,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '103.0.0', NULL)
+    (TRUE, NOW(), NOW(), '104.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
