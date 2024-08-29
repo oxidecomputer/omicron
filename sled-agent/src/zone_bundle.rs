@@ -1575,8 +1575,8 @@ async fn disk_usage(path: &Utf8PathBuf) -> Result<u64, BundleError> {
             };
             for entry in std::fs::read_dir(&dir).map_err(mk_dir_error)? {
                 let entry = entry.map_err(mk_dir_error)?;
-                let mk_error = |err| BundleError::ReadDirectory {
-                    directory: Utf8PathBuf::try_from(entry.path())
+                let mk_error = |err| BundleError::Metadata {
+                    path: Utf8PathBuf::try_from(entry.path())
                         .unwrap_or_else(|_| path.clone()),
                     err,
                 };
@@ -1745,7 +1745,7 @@ mod tests {
             dbg!(disk_usage_du(&path).await).expect("running du failed!");
         eprintln!("du -s {path} took {:?}", t0.elapsed());
 
-        // Round down the Rust disk usage result to `du`'s block size on this
+        // Round up the Rust disk usage result to `du`'s block size on this
         // system.
         let usage = if BLOCK_SIZE > 1 {
             eprintln!("rounding up to `du(1)`'s block size of {BLOCK_SIZE}B");
