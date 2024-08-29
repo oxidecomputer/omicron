@@ -1191,6 +1191,47 @@ where
     }
 }
 
+pub trait Bits: Integer {
+    const BITS: u32;
+    fn next_power(self) -> Option<Self>;
+}
+
+macro_rules! impl_bits {
+    ($type_:ty) => {
+        impl Bits for $type_ {
+            const BITS: u32 = Self::BITS;
+
+            fn next_power(self) -> Option<Self> {
+                self.checked_mul(2)
+            }
+        }
+    };
+}
+
+impl_bits!(u8);
+impl_bits!(u16);
+impl_bits!(u32);
+impl_bits!(u64);
+
+impl<T> Histogram<T>
+where
+    T: Bits + HistogramSupport,
+{
+    /// Create a histogram with logarithmically spaced bins at each power of 2.
+    ///
+    /// This is only available for unsigned integer support types.
+    pub fn power_of_two() -> Self {
+        let mut bins = Vec::with_capacity(T::BITS as _);
+        let mut x = T::one();
+        bins.push(x);
+        while let Some(next) = x.next_power() {
+            bins.push(next);
+            x = next;
+        }
+        Self::new(&bins).expect("Bits is statically known")
+    }
+}
+
 // Helper to ensure all values are comparable, i.e., not NaN.
 fn ensure_finite<T>(value: T) -> Result<(), HistogramError>
 where
@@ -1796,5 +1837,20 @@ mod tests {
         Histogram::<u8>::span_decades(start, stop).expect_err(
             "expected to overflow a u8, since support type is not wide enough",
         );
+    }
+
+    #[test]
+    fn test_log_bins_u8() {
+        let (bins, _) = Histogram::<u8>::power_of_two().bins_and_counts();
+        assert_eq!(bins, [0, 1, 2, 4, 8, 16, 32, 64, 128],);
+    }
+
+    #[test]
+    fn test_log_bins_u64() {
+        let (bins, _) = Histogram::<u64>::power_of_two().bins_and_counts();
+        assert_eq!(bins[0], 0);
+        for (i, bin) in bins.iter().skip(1).enumerate() {
+            assert_eq!(*bin, 1u64 << i);
+        }
     }
 }
