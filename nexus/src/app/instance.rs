@@ -577,7 +577,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
-    ) -> UpdateResult<InstanceAndActiveVmm> {
+    ) -> Result<InstanceAndActiveVmm, InstanceStateChangeError> {
         let (.., authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
 
@@ -605,10 +605,13 @@ impl super::Nexus {
                 }
             }
 
-            return Err(e.into());
+            return Err(e);
         }
 
-        self.db_datastore.instance_fetch_with_vmm(opctx, &authz_instance).await
+        self.db_datastore
+            .instance_fetch_with_vmm(opctx, &authz_instance)
+            .await
+            .map_err(Into::into)
     }
 
     /// Attempts to start an instance if it is currently stopped.
@@ -616,7 +619,7 @@ impl super::Nexus {
         self: &Arc<Self>,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
-    ) -> UpdateResult<InstanceAndActiveVmm> {
+    ) -> Result<InstanceAndActiveVmm, InstanceStateChangeError> {
         let (.., authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
 
@@ -642,6 +645,7 @@ impl super::Nexus {
                 self.db_datastore
                     .instance_fetch_with_vmm(opctx, &authz_instance)
                     .await
+                    .map_err(Into::into)
             }
         }
     }
@@ -651,7 +655,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
-    ) -> UpdateResult<InstanceAndActiveVmm> {
+    ) -> Result<InstanceAndActiveVmm, InstanceStateChangeError> {
         let (.., authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
 
@@ -679,10 +683,13 @@ impl super::Nexus {
                 }
             }
 
-            return Err(e.into());
+            return Err(e);
         }
 
-        self.db_datastore.instance_fetch_with_vmm(opctx, &authz_instance).await
+        self.db_datastore
+            .instance_fetch_with_vmm(opctx, &authz_instance)
+            .await
+            .map_err(Into::into)
     }
 
     /// Idempotently ensures that the sled specified in `db_instance` does not
@@ -912,7 +919,7 @@ impl super::Nexus {
         propolis_id: &PropolisUuid,
         initial_vmm: &db::model::Vmm,
         operation: InstanceRegisterReason,
-    ) -> Result<db::model::Vmm, Error> {
+    ) -> Result<db::model::Vmm, InstanceStateChangeError> {
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
 
         // Check that the hostname is valid.
@@ -929,7 +936,7 @@ impl super::Nexus {
                 at that time.",
                 db_instance.hostname,
             );
-            return Err(Error::invalid_request(&msg));
+            return Err(Error::invalid_request(&msg).into());
         };
 
         // Gather disk information and turn that into DiskRequests
@@ -963,7 +970,8 @@ impl super::Nexus {
                     return Err(Error::internal_error(&format!(
                         "disk {} is attached but has no PCI slot assignment",
                         disk.id()
-                    )));
+                    ))
+                    .into());
                 }
             };
 
@@ -987,7 +995,8 @@ impl super::Nexus {
                 device: "nvme".to_string(),
                 volume_construction_request: serde_json::from_str(
                     &volume.data(),
-                )?,
+                )
+                .map_err(Error::from)?,
             });
         }
 
@@ -1017,7 +1026,8 @@ impl super::Nexus {
                     external_ips.len(),
                 )
                 .as_str(),
-            ));
+            )
+            .into());
         }
 
         // If there are any external IPs not yet fully attached/detached,then
@@ -1026,7 +1036,7 @@ impl super::Nexus {
         if external_ips.iter().any(|v| v.state != IpAttachState::Attached) {
             return Err(Error::unavail(
                 "External IP attach/detach is in progress during instance_ensure_registered"
-            ));
+            ).into());
         }
 
         // Partition remaining external IPs by class: we can have at most
@@ -1043,7 +1053,8 @@ impl super::Nexus {
                 ephemeral_ips.len()
             )
                 .as_str(),
-            ));
+            )
+            .into());
         }
 
         let ephemeral_ip = ephemeral_ips.get(0).map(|model| model.ip.ip());
@@ -1053,7 +1064,8 @@ impl super::Nexus {
         if snat_ip.len() != 1 {
             return Err(Error::internal_error(
                 "Expected exactly one SNAT IP address for an instance",
-            ));
+            )
+            .into());
         }
         let source_nat =
             SourceNatConfig::try_from(snat_ip.into_iter().next().unwrap())
@@ -1202,7 +1214,7 @@ impl super::Nexus {
                         )
                         .await;
                 }
-                Err(e.into())
+                Err(InstanceStateChangeError::SledAgent(e))
             }
         }
     }
