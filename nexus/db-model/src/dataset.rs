@@ -51,7 +51,7 @@ pub struct Dataset {
 
     quota: Option<ByteCount>,
     reservation: Option<ByteCount>,
-    compression: String,
+    compression: Option<String>,
 }
 
 impl Dataset {
@@ -80,7 +80,7 @@ impl Dataset {
             zone_name,
             quota: None,
             reservation: None,
-            compression: String::new(),
+            compression: None,
         }
     }
 
@@ -114,7 +114,11 @@ impl From<BlueprintDatasetConfig> for Dataset {
             zone_name,
             quota: bp.quota.map(ByteCount::from),
             reservation: bp.reservation.map(ByteCount::from),
-            compression: bp.compression,
+            compression: if bp.compression.is_empty() {
+                None
+            } else {
+                Some(bp.compression)
+            },
         }
     }
 }
@@ -123,6 +127,14 @@ impl TryFrom<Dataset> for omicron_common::disk::DatasetConfig {
     type Error = Error;
 
     fn try_from(dataset: Dataset) -> Result<Self, Self::Error> {
+        let compression = if let Some(c) = dataset.compression {
+            c.parse().map_err(|e: anyhow::Error| {
+                Error::internal_error(&e.to_string())
+            })?
+        } else {
+            omicron_common::disk::CompressionAlgorithm::Off
+        };
+
         Ok(Self {
             id: DatasetUuid::from_untyped_uuid(dataset.identity.id),
             name: omicron_common::disk::DatasetName::new(
@@ -133,9 +145,7 @@ impl TryFrom<Dataset> for omicron_common::disk::DatasetConfig {
             ),
             quota: dataset.quota.map(|q| q.into()),
             reservation: dataset.reservation.map(|r| r.into()),
-            compression: dataset.compression.parse().map_err(
-                |e: anyhow::Error| Error::internal_error(&e.to_string()),
-            )?,
+            compression,
         })
     }
 }

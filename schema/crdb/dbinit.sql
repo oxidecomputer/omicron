@@ -543,7 +543,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.dataset (
 
     quota INT8,
     reservation INT8,
-    compression TEXT NOT NULL DEFAULT '',
+    compression TEXT,
 
     /* Crucible must make use of 'size_used'; other datasets manage their own storage */
     CONSTRAINT size_used_column_set_for_crucible CHECK (

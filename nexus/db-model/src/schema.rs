@@ -1027,7 +1027,7 @@ table! {
 
         quota -> Nullable<Int8>,
         reservation -> Nullable<Int8>,
-        compression -> Text,
+        compression -> Nullable<Text>,
     }
 }
 

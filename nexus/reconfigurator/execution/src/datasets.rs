@@ -465,7 +465,7 @@ mod tests {
 
         first_dataset.quota = Some(ByteCount::from_kibibytes_u32(1));
         first_dataset.reservation = Some(ByteCount::from_kibibytes_u32(2));
-        first_dataset.compression = String::from("pied_piper");
+        first_dataset.compression = String::from("lz4");
         let _ = first_dataset;
 
         // Update the datastore
