@@ -2,7 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use dropshot::{HttpError, HttpResponseCreated, HttpResponseOk, RequestContext, TypedBody};
+use dropshot::{
+    HttpError, HttpResponseCreated, HttpResponseOk, RequestContext, TypedBody,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddrV6;

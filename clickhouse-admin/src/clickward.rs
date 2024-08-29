@@ -3,13 +3,15 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use camino::Utf8PathBuf;
-use clickhouse_admin_api::{ClickhouseAddress, ServerConfigGenerateResponse, ServerSettings};
-use clickhouse_admin_types::{ClickhouseServerConfig, ServerId};
+use clickhouse_admin_api::{
+    ClickhouseAddress, ServerConfigGenerateResponse, ServerSettings,
+};
 use clickhouse_admin_types::config::{KeeperNodeConfig, ServerNodeConfig};
+use clickhouse_admin_types::{ClickhouseServerConfig, ServerId};
 use dropshot::HttpError;
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use std::io;
-use std::net::{SocketAddrV6, Ipv6Addr};
+use std::net::{Ipv6Addr, SocketAddrV6};
 use std::str::FromStr;
 
 #[derive(Debug, thiserror::Error, SlogInlineError)]
@@ -81,7 +83,7 @@ impl Clickward {
         );
 
         config.generate_xml_file().unwrap();
-        
+
         Ok(ServerConfigGenerateResponse::success())
     }
 }
