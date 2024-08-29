@@ -307,23 +307,39 @@ pub struct VpcRouter {
 
 /// An internet gateway provides a path between VPC networks and external
 /// networks.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InternetGateway {
     #[serde(flatten)]
     pub identity: IdentityMetadata,
 
-    /// IP address mode the gateway operates in.
-    pub ip_source: InternetGatewayIpSource,
+    /// The VPC to which the gateway belongs.
+    pub vpc_id: Uuid,
 }
 
-/// The source of IP addresses for an `InternetGateway`
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum InternetGatewayIpSource {
-    /// Automatically select IP addresses to use for the internet gateway.
-    Pool(Vec<Uuid>),
-    /// Users explicitly manage IP addresses.
-    Manual(Vec<IpAddr>),
+/// An IP pool that is attached to an internet gateway
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InternetGatewayIpPool {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    /// The associated internet gateway.
+    pub internet_gateway_id: Uuid,
+
+    /// The associated IP pool.
+    pub ip_pool_id: Uuid,
+}
+
+/// An IP address that is attached to an internet gateway
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InternetGatewayIpAddress {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    /// The associated internet gateway.
+    pub internet_gateway_id: Uuid,
+
+    /// The associated IP address,
+    pub address: IpAddr,
 }
 
 // IP POOLS

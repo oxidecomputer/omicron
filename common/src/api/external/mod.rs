@@ -972,6 +972,8 @@ pub enum ResourceType {
     IpPoolResource,
     InstanceNetworkInterface,
     InternetGateway,
+    InternetGatewayIpPool,
+    InternetGatewayIpAddress,
     PhysicalDisk,
     Rack,
     Service,
@@ -1572,6 +1574,28 @@ pub struct RouterRoute {
     pub target: RouteTarget,
     /// Selects which traffic this routing rule will apply to.
     pub destination: RouteDestination,
+}
+
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InternetGatewayIpPool {
+    /// Common identifying metadata
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    /// The ID of the internet gateway to which the IP pool entry belongs.
+    pub internet_gateway_id: Uuid,
+    /// The ID of the referenced IP pool.
+    pub ip_pool_id: Uuid,
+}
+
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InternetGatewayIp {
+    /// Common identifying metadata
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    /// The ID of the internet gateway to which the IP belongs.
+    pub internet_gateway_id: Uuid,
+    /// The IP address.
+    pub address: IpAddr,
 }
 
 /// A single rule in a VPC firewall

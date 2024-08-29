@@ -1162,16 +1162,28 @@ table! {
 }
 
 table! {
-    internet_gateway_pool(gateway_id, ip_pool_id) {
-        gateway_id -> Uuid,
+    internet_gateway_ip_pool(internet_gateway_id, ip_pool_id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        internet_gateway_id -> Uuid,
         ip_pool_id -> Uuid,
     }
 }
 
 table! {
-    internet_gateway_addr(gateway_id, addr) {
-        gateway_id -> Uuid,
-        addr -> Inet,
+    internet_gateway_ip_address(internet_gateway_id, address) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        internet_gateway_id -> Uuid,
+        address -> Inet,
     }
 }
 

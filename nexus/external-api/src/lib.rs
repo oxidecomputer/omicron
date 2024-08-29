@@ -2257,18 +2257,85 @@ pub trait NexusExternalApi {
         query_params: Query<params::OptionalVpcSelector>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
-    /// Update internet gateway
+    /// List IP pools attached to an internet gateway.
     #[endpoint {
-        method = PUT,
-        path = "/v1/internet-gateways/{gateway}",
+        method = GET,
+        path = "/v1/internet-gateway-ip-pools",
         tags = ["vpcs"],
     }]
-    async fn internet_gateway_update(
+    async fn internet_gateway_ip_pool_list(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<params::InternetGatewayPath>,
-        query_params: Query<params::OptionalVpcSelector>,
-        router_params: TypedBody<params::InternetGatewayCreate>,
-    ) -> Result<HttpResponseOk<views::InternetGateway>, HttpError>;
+        query_params: Query<
+            PaginatedByNameOrId<params::InternetGatewaySelector>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<views::InternetGatewayIpPool>>,
+        HttpError,
+    >;
+
+    /// Attach ip pool to internet gateway
+    #[endpoint {
+        method = POST,
+        path = "/v1/vpc-internet-gateway-ip-pools",
+        tags = ["vpcs"],
+    }]
+    async fn internet_gateway_ip_pool_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::InternetGatewaySelector>,
+        create_params: TypedBody<params::InternetGatewayIpPoolCreate>,
+    ) -> Result<HttpResponseCreated<views::InternetGatewayIpPool>, HttpError>;
+
+    /// Detach ip pool from internet gateway
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/vpc-internet-gateway-ip-pools/{pool}",
+        tags = ["vpcs"],
+    }]
+    async fn internet_gateway_ip_pool_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::IpPoolPath>,
+        query_params: Query<params::OptionalInternetGatewaySelector>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// List addresses attached to an internet gateway.
+    #[endpoint {
+        method = GET,
+        path = "/v1/internet-gateway-ip-addrs",
+        tags = ["vpcs"],
+    }]
+    async fn internet_gateway_ip_address_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<params::InternetGatewaySelector>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<views::InternetGatewayIpAddress>>,
+        HttpError,
+    >;
+
+    /// Attach ip pool to internet gateway
+    #[endpoint {
+        method = POST,
+        path = "/v1/vpc-internet-gateway-ip-addrs",
+        tags = ["vpcs"],
+    }]
+    async fn internet_gateway_ip_address_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::InternetGatewaySelector>,
+        create_params: TypedBody<params::InternetGatewayIpAddressCreate>,
+    ) -> Result<HttpResponseCreated<views::InternetGatewayIpAddress>, HttpError>;
+
+    /// Detach ip pool from internet gateway
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/vpc-internet-gateway-ip-addrs/{address}",
+        tags = ["vpcs"],
+    }]
+    async fn internet_gateway_ip_address_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::IpAddressPath>,
+        query_params: Query<params::OptionalInternetGatewaySelector>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
 
     // Racks
 

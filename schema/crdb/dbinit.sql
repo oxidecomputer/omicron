@@ -1813,16 +1813,16 @@ CREATE TABLE IF NOT EXISTS omicron.public.internet_gateway (
     resolved_version INT NOT NULL DEFAULT 0
 );
 
-CREATE TABLE IF NOT EXISTS omicron.public.internet_gateway_pool (
-    gateway_id UUID,
+CREATE TABLE IF NOT EXISTS omicron.public.internet_gateway_ip_pool (
+    internet_gateway_id UUID,
     ip_pool_id UUID,
-    PRIMARY KEY (gateway_id, ip_pool_id)
+    PRIMARY KEY (internet_gateway_id, ip_pool_id)
 );
 
-CREATE TABLE IF NOT EXISTS omicron.public.internet_gateway_addr (
-    gateway_id UUID,
-    addr INET,
-    PRIMARY KEY (gateway_id, addr)
+CREATE TABLE IF NOT EXISTS omicron.public.internet_gateway_ip_address (
+    internet_gateway_id UUID,
+    address INET,
+    PRIMARY KEY (internet_gateway_id, addr)
 );
 
 

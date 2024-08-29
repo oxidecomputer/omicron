@@ -84,6 +84,7 @@ path_param!(ImagePath, image, "image");
 path_param!(SiloPath, silo, "silo");
 path_param!(ProviderPath, provider, "SAML identity provider");
 path_param!(IpPoolPath, pool, "IP pool");
+path_param!(IpAddressPath, address, "IP address");
 path_param!(SshKeyPath, ssh_key, "SSH key");
 path_param!(AddressLotPath, address_lot, "address lot");
 path_param!(ProbePath, probe, "probe");
@@ -313,7 +314,7 @@ pub struct InternetGatewaySelector {
     pub gateway: NameOrId,
 }
 
-#[derive(Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct OptionalInternetGatewaySelector {
     /// Name or ID of the project, only required if `vpc` is provided as a `Name`
     pub project: Option<NameOrId>,
@@ -321,6 +322,30 @@ pub struct OptionalInternetGatewaySelector {
     pub vpc: Option<NameOrId>,
     /// Name or ID of the internet gateway
     pub gateway: Option<NameOrId>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct InternetGatewayIpPoolSelector {
+    /// Name or ID of the project, only required if `vpc` is provided as a `Name`
+    pub project: Option<NameOrId>,
+    /// Name or ID of the VPC, only required if `gateway` is provided as a `Name`
+    pub vpc: Option<NameOrId>,
+    /// Name or ID of the gateway, only required if `pool` is provided as a `Name`
+    pub gateway: Option<NameOrId>,
+    /// Name or ID of the pool
+    pub pool: NameOrId,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct InternetGatewayIpAddressSelector {
+    /// Name or ID of the project, only required if `vpc` is provided as a `Name`
+    pub project: Option<NameOrId>,
+    /// Name or ID of the VPC, only required if `gateway` is provided as a `Name`
+    pub vpc: Option<NameOrId>,
+    /// Name or ID of the gateway, only required if `address` is provided as a `Name`
+    pub gateway: Option<NameOrId>,
+    /// Name or ID of the address
+    pub address: NameOrId,
 }
 
 // Silos
@@ -1332,19 +1357,22 @@ pub struct RouterRouteUpdate {
 pub struct InternetGatewayCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
-
-    /// IP address mode the gateway operates in.
-    pub ip_source: InternetGatewayIpSource,
 }
 
-/// The source of IP addresses for an `InternetGateway`
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum InternetGatewayIpSource {
-    /// Automatically select IP addresses to use for the internet gateway.
-    Pool(Vec<NameOrId>),
-    /// Users explicitly manage IP addresses.
-    Manual(Vec<IpAddr>),
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InternetGatewayIpPoolCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+    pub gateway_id: Uuid,
+    pub ip_pool_id: Uuid,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InternetGatewayIpAddressCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+    pub gateway_id: Uuid,
+    pub address: IpAddr,
 }
 
 // DISKS

@@ -729,6 +729,24 @@ lookup_resource! {
 }
 
 lookup_resource! {
+    name = "InternetGatewayIpPool",
+    ancestors = [ "Silo", "Project", "Vpc", "InternetGateway" ],
+    children = [ ],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "InternetGatewayIpAddress",
+    ancestors = [ "Silo", "Project", "Vpc", "InternetGateway" ],
+    children = [ ],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
     name = "FloatingIp",
     ancestors = [ "Silo", "Project" ],
     children = [],
