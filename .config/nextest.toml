@@ -3,7 +3,7 @@
 #
 # The required version should be bumped up if we need new features, performance
 # improvements or bugfixes that are present in newer versions of nextest.
-nextest-version = { required = "0.9.64", recommended = "0.9.70" }
+nextest-version = { required = "0.9.77", recommended = "0.9.77" }
 
 experimental = ["setup-scripts"]
 
@@ -35,13 +35,12 @@ clickhouse-cluster = { max-threads = 1 }
 # behaviors that conflict with each other.  They need to be run serially.
 live-tests = { max-threads = 1 }
 
+[profile.default]
+default-filter = 'all() - package(omicron-live-tests) - package(end-to-end-tests)'
+
 [[profile.default.overrides]]
 filter = 'package(oximeter-db) and test(replicated)'
 test-group = 'clickhouse-cluster'
-
-[[profile.default.overrides]]
-filter = 'package(omicron-live-tests)'
-test-group = 'live-tests'
 
 [[profile.default.overrides]]
 # These tests can time out under heavy contention.
@@ -53,3 +52,10 @@ filter = 'binary_id(omicron-nexus::test_all)'
 # As of 2023-01-08, the slowest test in test_all takes 196s on a Ryzen 7950X.
 # 900s is a good upper limit that adds a comfortable buffer.
 slow-timeout = { period = '60s', terminate-after = 15 }
+
+[profile.live-tests]
+default-filter = 'package(omicron-live-tests)'
+
+[[profile.live-tests.overrides]]
+filter = 'package(omicron-live-tests)'
+test-group = 'live-tests'
