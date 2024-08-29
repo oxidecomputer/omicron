@@ -1548,41 +1548,51 @@ async fn compute_bundle_utilization(
 // This returns an error if reading any file or directory within the provided
 // directory fails.
 async fn disk_usage(path: &Utf8PathBuf) -> Result<u64, BundleError> {
-    let mut sum = 0;
-    // Rather than recursing, we use a VecDeque as a queue of paths to scan
-    // next. This is for two reasons:
-    //
-    // 1. If we're walking a very deeply nested directory structure, this helps
-    //    to avoid a potential stack overflow.
-    // 2. Since this is an `async fn` (due to the use of `tokio::fs`), it can't
-    //    contain a recursive call to itself without boxing it. We could work
-    //    around that bit by wrapping the whole thing in `spawn_blocking`,
-    //    instead of using `tokio::fs`.
-    let mut dirs_to_scan = std::collections::VecDeque::new();
-    dirs_to_scan.push_back(path.to_owned());
+    let path = path.clone();
+    // We could, alternatively, just implement this using `tokio::fs` to read
+    // the directory and so on. However, the `tokio::fs` APIs are basically just
+    // a wrapper around `spawn_blocking`-ing code that does the `std::fs`
+    // functions. So, putting the whole thing in one big `spawn_blocking`
+    // closure that just does all the blocking fs ops lets us spend less time
+    // creating and destroying tiny blocking tasks.
+    tokio::task::spawn_blocking(move || {
+        let mut sum = 0;
+        // Rather than recursing, we use a VecDeque as a queue of paths to scan
+        // next. This is so that if we're walking a very deeply nested directory
+        // structure, we don't overflow our stack.
+        //
+        // TODO(eliza): this could, conceivably, be parallelized by spawning a
+        // bunch of blocking tasks to walk each sub-directory, instead of using
+        // a queue. But, is optimizing this really all that important? It's
+        // probably far from the slowest part of zone bundle collection anyway...
+        let mut dirs_to_scan = std::collections::VecDeque::new();
+        dirs_to_scan.push_back(path.to_owned());
 
-    // TODO(eliza): since we're using `tokio::fs` here, this could, conceivably,
-    // be parallelized by spawning a bunch of tasks to walk each sub-directory.
-    while let Some(dir) = dirs_to_scan.pop_front() {
-        let mk_dir_error =
-            |err| BundleError::ReadDirectory { directory: dir.clone(), err };
-        let mut dir = tokio::fs::read_dir(&dir).await.map_err(mk_dir_error)?;
-        while let Some(entry) = dir.next_entry().await.map_err(mk_dir_error)? {
-            let mk_error = |err| BundleError::ReadDirectory {
-                directory: Utf8PathBuf::try_from(entry.path())
-                    .unwrap_or_else(|_| path.clone()),
+        while let Some(dir) = dirs_to_scan.pop_front() {
+            let mk_dir_error = |err| BundleError::ReadDirectory {
+                directory: dir.clone(),
                 err,
             };
-            if entry.file_type().await.map_err(mk_error)?.is_dir() {
-                let path = entry.path().try_into()?;
-                dirs_to_scan.push_back(path);
-            } else {
-                sum += entry.metadata().await.map_err(mk_error)?.len()
+            for entry in std::fs::read_dir(&dir).map_err(mk_dir_error)? {
+                let entry = entry.map_err(mk_dir_error)?;
+                let mk_error = |err| BundleError::ReadDirectory {
+                    directory: Utf8PathBuf::try_from(entry.path())
+                        .unwrap_or_else(|_| path.clone()),
+                    err,
+                };
+                if entry.file_type().map_err(mk_error)?.is_dir() {
+                    let path = entry.path().try_into()?;
+                    dirs_to_scan.push_back(path);
+                } else {
+                    sum += entry.metadata().map_err(mk_error)?.len()
+                }
             }
         }
-    }
 
-    Ok(sum)
+        Ok(sum)
+    })
+    .await
+    .expect("spawned blocking task should not be cancelled or panic")
 }
 
 // Return the quota for a ZFS dataset, or the available size.
@@ -1725,10 +1735,15 @@ mod tests {
 
         let path =
             Utf8PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/src"));
+        let t0 = std::time::Instant::now();
         let usage = dbg!(disk_usage(&path).await)
             .expect("disk usage for src dir failed");
+        eprintln!("disk_usage({path}) took {:?}", t0.elapsed());
+
+        let t0 = std::time::Instant::now();
         let du_usage =
             dbg!(disk_usage_du(&path).await).expect("running du failed!");
+        eprintln!("du -s {path} took {:?}", t0.elapsed());
 
         // Round down the Rust disk usage result to `du`'s block size on this
         // system.
