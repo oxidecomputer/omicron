@@ -288,10 +288,16 @@ impl Blueprint {
                 .iter()
                 .map(|(sled_id, disks)| (*sled_id, disks.clone().into()))
                 .collect(),
+            before
+                .blueprint_datasets
+                .iter()
+                .map(|(sled_id, datasets)| (*sled_id, datasets.clone().into()))
+                .collect(),
             self.metadata(),
             self.sled_state.clone(),
             self.blueprint_zones.clone(),
             self.blueprint_disks.clone(),
+            self.blueprint_datasets.clone(),
         )
     }
 
@@ -337,15 +343,35 @@ impl Blueprint {
             })
             .collect();
 
+        let before_datasets = before
+            .sled_agents
+            .iter()
+            .map(|(sled_id, sa)| {
+                (
+                    *sled_id,
+                    CollectionDatasetsConfig {
+                        datasets: sa
+                            .datasets
+                            .iter()
+                            .map(|d| CollectionDatasetIdentifier::from(d))
+                            .collect::<BTreeSet<_>>(),
+                    }
+                    .into(),
+                )
+            })
+            .collect();
+
         BlueprintDiff::new(
             DiffBeforeMetadata::Collection { id: before.id },
             before_state,
             before_zones,
             before_disks,
+            before_datasets,
             self.metadata(),
             self.sled_state.clone(),
             self.blueprint_zones.clone(),
             self.blueprint_disks.clone(),
+            self.blueprint_datasets.clone(),
         )
     }
 
@@ -1190,6 +1216,71 @@ impl BlueprintOrCollectionDisksConfig {
 #[derive(Clone, Debug, From)]
 pub struct CollectionPhysicalDisksConfig {
     disks: BTreeSet<DiskIdentity>,
+}
+
+/// Single sled's datasets config for "before" version within a [`BlueprintDiff`].
+#[derive(Clone, Debug, From)]
+pub enum BlueprintOrCollectionDatasetsConfig {
+    /// The diff was made from a collection.
+    Collection(CollectionDatasetsConfig),
+    /// The diff was made from a blueprint.
+    Blueprint(BlueprintDatasetsConfig),
+}
+
+impl BlueprintOrCollectionDatasetsConfig {
+    pub fn generation(&self) -> Option<Generation> {
+        match self {
+            BlueprintOrCollectionDatasetsConfig::Collection(_) => None,
+            BlueprintOrCollectionDatasetsConfig::Blueprint(c) => {
+                Some(c.generation)
+            }
+        }
+    }
+
+    pub fn datasets(&self) -> BTreeSet<CollectionDatasetIdentifier> {
+        match self {
+            BlueprintOrCollectionDatasetsConfig::Collection(c) => {
+                c.datasets.clone()
+            }
+            BlueprintOrCollectionDatasetsConfig::Blueprint(c) => c
+                .datasets
+                .values()
+                .map(CollectionDatasetIdentifier::from)
+                .collect(),
+        }
+    }
+}
+
+/// A unique identifier for a dataset within a collection.
+///
+/// If a UUID is known for the dataset, it should be used.
+/// However, some datasets exist without UUIDs, and should still
+/// be reported by the inventory collection subsystem.
+#[derive(Clone, Debug, Ord, PartialOrd, Eq, PartialEq)]
+pub struct CollectionDatasetIdentifier {
+    id: Option<DatasetUuid>,
+    name: String,
+}
+
+impl From<&BlueprintDatasetConfig> for CollectionDatasetIdentifier {
+    fn from(d: &BlueprintDatasetConfig) -> Self {
+        Self {
+            id: Some(d.id),
+            name: DatasetName::new(d.pool.clone(), d.kind.clone()).full_name(),
+        }
+    }
+}
+
+impl From<&crate::inventory::Dataset> for CollectionDatasetIdentifier {
+    fn from(d: &crate::inventory::Dataset) -> Self {
+        Self { id: d.id, name: d.name.clone() }
+    }
+}
+
+/// Single sled's dataset config for "before" version within a [`BlueprintDiff`].
+#[derive(Clone, Debug, From)]
+pub struct CollectionDatasetsConfig {
+    datasets: BTreeSet<CollectionDatasetIdentifier>,
 }
 
 /// Encapsulates Reconfigurator state
