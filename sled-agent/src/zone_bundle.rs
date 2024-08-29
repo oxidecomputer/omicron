@@ -582,6 +582,11 @@ pub enum BundleError {
 
     #[error("Instance is terminating")]
     InstanceTerminating,
+
+    /// The `walkdir` crate's errors already include the path which could not be
+    /// read (if one exists), so we can just wrap them directly.
+    #[error(transparent)]
+    WalkDir(#[from] walkdir::Error),
 }
 
 // Helper function to write an array of bytes into the tar archive, with
@@ -1557,35 +1562,10 @@ async fn disk_usage(path: &Utf8PathBuf) -> Result<u64, BundleError> {
     // creating and destroying tiny blocking tasks.
     tokio::task::spawn_blocking(move || {
         let mut sum = 0;
-        // Rather than recursing, we use a VecDeque as a queue of paths to scan
-        // next. This is so that if we're walking a very deeply nested directory
-        // structure, we don't overflow our stack.
-        //
-        // TODO(eliza): this could, conceivably, be parallelized by spawning a
-        // bunch of blocking tasks to walk each sub-directory, instead of using
-        // a queue. But, is optimizing this really all that important? It's
-        // probably far from the slowest part of zone bundle collection anyway...
-        let mut dirs_to_scan = std::collections::VecDeque::new();
-        dirs_to_scan.push_back(path.to_owned());
-
-        while let Some(dir) = dirs_to_scan.pop_front() {
-            let mk_dir_error = |err| BundleError::ReadDirectory {
-                directory: dir.clone(),
-                err,
-            };
-            for entry in std::fs::read_dir(&dir).map_err(mk_dir_error)? {
-                let entry = entry.map_err(mk_dir_error)?;
-                let mk_error = |err| BundleError::Metadata {
-                    path: Utf8PathBuf::try_from(entry.path())
-                        .unwrap_or_else(|_| path.clone()),
-                    err,
-                };
-                if entry.file_type().map_err(mk_error)?.is_dir() {
-                    let path = entry.path().try_into()?;
-                    dirs_to_scan.push_back(path);
-                } else {
-                    sum += entry.metadata().map_err(mk_error)?.len()
-                }
+        for entry in walkdir::WalkDir::new(&path).into_iter() {
+            let entry = entry?;
+            if !entry.file_type().is_dir() {
+                sum += entry.metadata()?.len()
             }
         }
 

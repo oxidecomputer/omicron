@@ -6525,6 +6525,7 @@ dependencies = [
  "toml 0.8.19",
  "usdt",
  "uuid",
+ "walkdir",
  "zeroize",
  "zone 0.3.0",
 ]
