@@ -1842,13 +1842,14 @@ mod tests {
     #[test]
     fn test_log_bins_u8() {
         let (bins, _) = Histogram::<u8>::power_of_two().bins_and_counts();
-        assert_eq!(bins, [1, 2, 4, 8, 16, 32, 64, 128],);
+        assert_eq!(bins, [0, 1, 2, 4, 8, 16, 32, 64, 128],);
     }
 
     #[test]
     fn test_log_bins_u64() {
         let (bins, _) = Histogram::<u64>::power_of_two().bins_and_counts();
-        for (i, bin) in bins.iter().enumerate() {
+        assert_eq!(bins[0], 0);
+        for (i, bin) in bins.iter().skip(1).enumerate() {
             assert_eq!(*bin, 1u64 << i);
         }
     }
