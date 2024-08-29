@@ -54,6 +54,9 @@ pub struct Blueprint {
     pub external_dns_version: Generation,
     pub cockroachdb_fingerprint: String,
     pub cockroachdb_setting_preserve_downgrade: Option<String>,
+    pub clickhouse_max_used_server_id: i64,
+    pub clickhouse_max_used_keeper_id: i64,
+    pub clickhouse_cluster_secret: String,
     pub time_created: DateTime<Utc>,
     pub creator: String,
     pub comment: String,
@@ -70,6 +73,22 @@ impl From<&'_ nexus_types::deployment::Blueprint> for Blueprint {
             cockroachdb_setting_preserve_downgrade: bp
                 .cockroachdb_setting_preserve_downgrade
                 .to_optional_string(),
+            clickhouse_max_used_server_id: bp
+                .clickhouse_cluster_config
+                .max_used_server_id
+                .0
+                .try_into()
+                .expect("clickhouse IDs must fit in an i64"),
+            clickhouse_max_used_keeper_id: bp
+                .clickhouse_cluster_config
+                .max_used_keeper_id
+                .0
+                .try_into()
+                .expect("clickhouse IDs must fit in an i64"),
+            clickhouse_cluster_secret: bp
+                .clickhouse_cluster_config
+                .secret
+                .clone(),
             time_created: bp.time_created,
             creator: bp.creator.clone(),
             comment: bp.comment.clone(),
@@ -77,6 +96,7 @@ impl From<&'_ nexus_types::deployment::Blueprint> for Blueprint {
     }
 }
 
+// TODO: Fill in clickhouse details?
 impl From<Blueprint> for nexus_types::deployment::BlueprintMetadata {
     fn from(value: Blueprint) -> Self {
         Self {
@@ -615,12 +635,22 @@ impl BpOmicronZone {
             }
             ZoneType::ClickhouseKeeper => BlueprintZoneType::ClickhouseKeeper(
                 blueprint_zone_type::ClickhouseKeeper {
+                    keeper_id: clickhouse_admin_types::KeeperId(
+                        self.clickhouse_keeper_id.ok_or_else(|| {
+                            anyhow!("missing clickhouse_keeper_id")
+                        })? as u64,
+                    ),
                     address: primary_address,
                     dataset: dataset?,
                 },
             ),
             ZoneType::ClickhouseServer => BlueprintZoneType::ClickhouseServer(
                 blueprint_zone_type::ClickhouseServer {
+                    server_id: clickhouse_admin_types::ServerId(
+                        self.clickhouse_server_id.ok_or_else(|| {
+                            anyhow!("missing clickhouse_keeper_id")
+                        })? as u64,
+                    ),
                     address: primary_address,
                     dataset: dataset?,
                 },

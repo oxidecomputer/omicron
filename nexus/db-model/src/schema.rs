@@ -1512,6 +1512,19 @@ table! {
         cockroachdb_fingerprint -> Text,
 
         cockroachdb_setting_preserve_downgrade -> Nullable<Text>,
+
+    }
+}
+
+table! {
+    bp_clickhouse_cluster_config (blueprint_id) {
+        blueprint_id -> Uuid,
+
+        generation-> Int8,
+        max_used_server_id -> Int8,
+        max_used_keeper_id -> Int8,
+        cluster_name -> Text,
+        cluster_secret -> Text,
     }
 }
 

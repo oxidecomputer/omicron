@@ -389,7 +389,10 @@ impl<'a> BlueprintBuilder<'a> {
             cockroachdb_setting_preserve_downgrade: self
                 .cockroachdb_setting_preserve_downgrade,
             // TODO: This will change when generations and IDs get bumped
-            clickhouse_cluster_config: self.parent.clickhouse_cluster_config,
+            clickhouse_cluster_config: self
+                .parent_blueprint
+                .clickhouse_cluster_config
+                .clone(),
             time_created: now_db_precision(),
             creator: self.creator,
             comment: self
@@ -1032,13 +1035,13 @@ impl<'a> BlueprintBuilder<'a> {
             if self.is_active_clickhouse_keeper_reconfiguration(inventory) {
                 // We are currently trying to add or remove a node and cannot
                 // perform a concurrent addition
-                return 0;
+                return Ok(EnsureMultiple::NotNeeded);
             }
             let zone_id = self.rng.zone_rng.next();
             let underlay_ip = self.sled_alloc_ip(sled_id)?;
             let pool_name =
                 self.sled_select_zpool(sled_id, ZoneKind::ClickhouseKeeper)?;
-            let port = omicron_common::address::CLICKHOUSE_KEEPER_PORT;
+            let port = omicron_common::address::CLICKHOUSE_KEEPER_TCP_PORT;
             let address = SocketAddrV6::new(underlay_ip, port, 0, 0);
             let zone_type = BlueprintZoneType::ClickhouseKeeper(
                 blueprint_zone_type::ClickhouseKeeper {
@@ -1331,7 +1334,7 @@ impl<'a> BlueprintBuilder<'a> {
         &self,
         inventory: &Collection,
     ) -> bool {
-        /// Has this builder already made a modification?
+        // Has this builder already made a modification?
         if self
             .parent_blueprint
             .clickhouse_cluster_config
@@ -1340,8 +1343,8 @@ impl<'a> BlueprintBuilder<'a> {
             return true;
         }
 
-        /// Get the latest clickhouse cluster membership
-        let Some((keeper_zone_id, membership)) =
+        // Get the latest clickhouse cluster membership
+        let Some((_, membership)) =
             inventory.latest_clickhouse_keeper_membership()
         else {
             // We can't retrieve the latest membership and so we assume
@@ -1364,6 +1367,10 @@ impl<'a> BlueprintBuilder<'a> {
                     // Check the inventory to see if a keeper that should be
                     // running is not part of the raft configuration.
                     membership.raft_config.contains(&keeper_id)
+                } else {
+                    // We ignore other types of zones, so we don't want to fail
+                    // our check
+                    true
                 }
             })
         {
@@ -1377,7 +1384,7 @@ impl<'a> BlueprintBuilder<'a> {
             return true;
         }
 
-        /// Ensure all expunged zones are no longer part of the configuration
+        // Ensure all expunged zones are no longer part of the configuration
         if !self
             .parent_blueprint
             .all_omicron_zones(BlueprintZoneFilter::Expunged)
@@ -1387,6 +1394,10 @@ impl<'a> BlueprintBuilder<'a> {
                 ) = bp_zone_config.zone_type
                 {
                     !membership.raft_config.contains(&keeper_id)
+                } else {
+                    // We ignore other types of zones, so we don't want to fail
+                    // our check
+                    true
                 }
             })
         {
@@ -1394,7 +1405,7 @@ impl<'a> BlueprintBuilder<'a> {
             return true;
         }
 
-        /// There is no ongoing reconfiguration of the keeper raft cluster
+        // There is no ongoing reconfiguration of the keeper raft cluster
         false
     }
 }

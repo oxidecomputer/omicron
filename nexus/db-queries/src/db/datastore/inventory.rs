@@ -2087,6 +2087,8 @@ impl DataStore {
             rot_pages_found,
             sled_agents,
             omicron_zones,
+            // TODO: fill this in once we collect it
+            clickhouse_keeper_cluster_membership: BTreeMap::new(),
         })
     }
 }
