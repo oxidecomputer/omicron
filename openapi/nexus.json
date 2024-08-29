@@ -7268,6 +7268,137 @@
         }
       }
     },
+    "/v1/system/networking/switch-port-configuration/{configuration}/address": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "List addresses assigned to a provided interface configuration",
+        "operationId": "networking_switch_port_configuration_address_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "configuration",
+            "description": "A name or id to use when selecting a switch port configuration.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_SwitchPortAddressConfig",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SwitchPortAddressConfig"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/switch-port-configuration/{configuration}/address/add": {
+      "post": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Add address to an interface configuration",
+        "operationId": "networking_switch_port_configuration_address_add",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "configuration",
+            "description": "A name or id to use when selecting a switch port configuration.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddressAddRemove"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwitchPortAddressConfig"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/switch-port-configuration/{configuration}/address/remove": {
+      "post": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Remove address from an interface configuration",
+        "operationId": "networking_switch_port_configuration_address_remove",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "configuration",
+            "description": "A name or id to use when selecting a switch port configuration.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddressAddRemove"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/networking/switch-port-configuration/{configuration}/geometry": {
       "get": {
         "tags": [
@@ -7342,164 +7473,6 @@
                 }
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/v1/system/networking/switch-port-configuration/{configuration}/interface/{interface}/address": {
-      "get": {
-        "tags": [
-          "system/networking"
-        ],
-        "summary": "List addresses assigned to a provided interface configuration",
-        "operationId": "networking_switch_port_configuration_interface_address_list",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "configuration",
-            "description": "A name or id to use when selecting a switch port configuration.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "path",
-            "name": "interface",
-            "description": "Interface name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "title": "Array_of_SwitchPortAddressConfig",
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/SwitchPortAddressConfig"
-                  }
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/v1/system/networking/switch-port-configuration/{configuration}/interface/{interface}/address/add": {
-      "post": {
-        "tags": [
-          "system/networking"
-        ],
-        "summary": "Add address to an interface configuration",
-        "operationId": "networking_switch_port_configuration_interface_address_add",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "configuration",
-            "description": "A name or id to use when selecting a switch port configuration.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "path",
-            "name": "interface",
-            "description": "Interface name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Address"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SwitchPortAddressConfig"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/v1/system/networking/switch-port-configuration/{configuration}/interface/{interface}/address/remove": {
-      "post": {
-        "tags": [
-          "system/networking"
-        ],
-        "summary": "Remove address from an interface configuration",
-        "operationId": "networking_switch_port_configuration_interface_address_remove",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "configuration",
-            "description": "A name or id to use when selecting a switch port configuration.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "path",
-            "name": "interface",
-            "description": "Interface name",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Name"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Address"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "successful deletion"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -10488,6 +10461,48 @@
         "required": [
           "address",
           "address_lot"
+        ]
+      },
+      "AddressAddRemove": {
+        "description": "An address to be added or removed from an interface",
+        "type": "object",
+        "properties": {
+          "address": {
+            "description": "The address and prefix length of this address.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpNet"
+              }
+            ]
+          },
+          "address_lot": {
+            "description": "The address lot this address is drawn from.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NameOrId"
+              }
+            ]
+          },
+          "interface": {
+            "description": "The name of the interface",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "Optional VLAN ID for this address",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "address",
+          "address_lot",
+          "interface"
         ]
       },
       "AddressConfig": {
