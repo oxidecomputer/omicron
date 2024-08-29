@@ -12,7 +12,7 @@
   "paths": {
     "/node/address": {
       "get": {
-        "summary": "Retrieve the address the ClickHouse server or keeper node is listening on",
+        "summary": "Retrieve the address the ClickHouse server or keeper node is listening on.",
         "operationId": "clickhouse_address",
         "responses": {
           "200": {
@@ -21,6 +21,41 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ClickhouseAddress"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/server-node/generate-config": {
+      "post": {
+        "summary": "Generate a ClickHouse configuration file for a server node on a specified",
+        "description": "directory.",
+        "operationId": "generate_server_config",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerSettings"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServerConfigGenerateResponse"
                 }
               }
             }
@@ -65,6 +100,31 @@
         "required": [
           "message",
           "request_id"
+        ]
+      },
+      "ServerConfigGenerateResponse": {
+        "description": "Success response for server node configuration file generation",
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success"
+        ]
+      },
+      "ServerSettings": {
+        "type": "object",
+        "properties": {
+          "node_id": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "node_id"
         ]
       }
     },

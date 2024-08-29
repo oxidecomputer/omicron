@@ -5,8 +5,7 @@
 use crate::context::ServerContext;
 use clickhouse_admin_api::*;
 use dropshot::HttpError;
-use dropshot::HttpResponseOk;
-use dropshot::RequestContext;
+use dropshot::{HttpResponseOk, HttpResponseCreated, RequestContext, TypedBody};
 use std::sync::Arc;
 
 type ClickhouseApiDescription = dropshot::ApiDescription<Arc<ServerContext>>;
@@ -27,5 +26,15 @@ impl ClickhouseAdminApi for ClickhouseAdminImpl {
         let ctx = rqctx.context();
         let output = ctx.clickward().clickhouse_address()?;
         Ok(HttpResponseOk(output))
+    }
+
+    async fn generate_server_config(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<ServerSettings>,
+    ) -> Result<HttpResponseCreated<ServerConfigGenerateResponse>, HttpError> {
+        let ctx = rqctx.context();
+        let server_settings = body.into_inner();
+        let output = ctx.clickward().generate_server_config(server_settings)?;
+        Ok(HttpResponseCreated(output))
     }
 }
