@@ -130,15 +130,6 @@ declare_saga_actions! {
     }
 }
 
-/// Node for looking up the initial VMM record output by
-/// `sim_create_vmm_record`.
-const INITIAL_VMM_RECORD: &'static str = "dst_vmm_record";
-/// Node name for looking up the VMM record once it has been registered with the
-/// sled-agent by `sim_ensure_destination_propolis`. This is necessary as
-/// registering the VMM transitions it from the `Creating` state to the
-/// `Migrating` state,  changing its generation.
-const REGISTERED_VMM_RECORD: &'static str = "ensure_destination";
-
 #[derive(Debug)]
 pub struct SagaInstanceMigrate;
 impl NexusSaga for SagaInstanceMigrate {
@@ -399,7 +390,7 @@ async fn sim_ensure_destination_propolis(
         &params.serialized_authn,
     );
 
-    let vmm = sagactx.lookup::<db::model::Vmm>(INITIAL_VMM_RECORD)?;
+    let vmm = sagactx.lookup::<db::model::Vmm>("dst_vmm_record")?;
     let db_instance =
         sagactx.lookup::<db::model::Instance>("set_migration_ids")?;
 
@@ -494,7 +485,7 @@ async fn sim_instance_migrate(
     );
 
     let src_propolis_id = db_instance.runtime().propolis_id.unwrap();
-    let dst_vmm = sagactx.lookup::<db::model::Vmm>(REGISTERED_VMM_RECORD)?;
+    let dst_vmm = sagactx.lookup::<db::model::Vmm>("ensure_destination")?;
     info!(osagactx.log(), "initiating migration from destination sled";
           "instance_id" => %db_instance.id(),
           "dst_vmm_record" => ?dst_vmm,

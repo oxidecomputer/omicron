@@ -93,9 +93,6 @@ declare_saga_actions! {
     }
 }
 
-/// Node for looking up the initial VMM record output by
-/// `sis_create_vmm_record`.
-const INITIAL_VMM_RECORD: &'static str = "vmm_record";
 /// Node name for looking up the VMM record once it has been registered with the
 /// sled-agent by `sis_ensure_registered`. This is necessary as registering the
 /// VMM transitions it from the `Creating` state to the `Starting` state,
@@ -507,7 +504,7 @@ async fn sis_ensure_registered(
         sagactx.lookup::<db::model::Instance>("started_record")?;
     let instance_id = db_instance.id();
     let sled_id = sagactx.lookup::<SledUuid>("sled_id")?;
-    let vmm_record = sagactx.lookup::<db::model::Vmm>(INITIAL_VMM_RECORD)?;
+    let vmm_record = sagactx.lookup::<db::model::Vmm>("vmm_record")?;
     let propolis_id = sagactx.lookup::<PropolisUuid>("propolis_id")?;
 
     info!(osagactx.log(), "start saga: ensuring instance is registered on sled";
