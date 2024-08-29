@@ -323,6 +323,18 @@ impl BpSledSubtableSchema for BpPhysicalDisksSubtableSchema {
     }
 }
 
+/// The [`BpSledSubtable`] schema for datasets
+pub struct BpDatasetsSubtableSchema {}
+impl BpSledSubtableSchema for BpDatasetsSubtableSchema {
+    fn table_name(&self) -> &'static str {
+        "datasets"
+    }
+
+    fn column_names(&self) -> &'static [&'static str] {
+        &["dataset id", "dataset name"]
+    }
+}
+
 /// The [`BpSledSubtable`] schema for omicron zones
 pub struct BpOmicronZonesSubtableSchema {}
 impl BpSledSubtableSchema for BpOmicronZonesSubtableSchema {
