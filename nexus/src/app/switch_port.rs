@@ -225,6 +225,42 @@ impl super::Nexus {
             .await
     }
 
+    pub(crate) async fn switch_port_configuration_interface_address_add(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+        interface: Name,
+        address: params::Address,
+    ) -> CreateResult<SwitchPortAddressConfig> {
+        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
+        self.db_datastore
+            .switch_port_configuration_interface_address_add(
+                opctx,
+                configuration,
+                interface.into(),
+                address,
+            )
+            .await
+    }
+
+    pub(crate) async fn switch_port_configuration_interface_address_remove(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+        interface: Name,
+        address: params::Address,
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Delete, &authz::FLEET).await?;
+        self.db_datastore
+            .switch_port_configuration_interface_address_remove(
+                opctx,
+                configuration,
+                interface.into(),
+                address,
+            )
+            .await
+    }
+
     async fn switch_port_create(
         &self,
         opctx: &OpContext,

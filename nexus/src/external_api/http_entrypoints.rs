@@ -44,11 +44,6 @@ use nexus_types::external_api::{
     params::{BgpPeerConfig, RouteConfig},
     shared::{BfdStatus, ProbeInfo},
 };
-use omicron_common::api::external::http_pagination::{
-    data_page_params_for, marker_for_name, marker_for_name_or_id,
-    name_or_id_pagination, PaginatedBy, PaginatedById, PaginatedByName,
-    PaginatedByNameOrId, ScanById, ScanByName, ScanByNameOrId, ScanParams,
-};
 use omicron_common::api::external::AddressLot;
 use omicron_common::api::external::AddressLotBlock;
 use omicron_common::api::external::AddressLotCreateResponse;
@@ -71,7 +66,6 @@ use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::Probe;
 use omicron_common::api::external::RouterRoute;
 use omicron_common::api::external::RouterRouteKind;
-use omicron_common::api::external::SwitchInterfaceConfig;
 use omicron_common::api::external::SwitchPort;
 use omicron_common::api::external::SwitchPortConfig;
 use omicron_common::api::external::SwitchPortLinkConfig;
@@ -81,6 +75,14 @@ use omicron_common::api::external::TufRepoGetResponse;
 use omicron_common::api::external::TufRepoInsertResponse;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_common::api::external::VpcFirewallRules;
+use omicron_common::api::external::{
+    http_pagination::{
+        data_page_params_for, marker_for_name, marker_for_name_or_id,
+        name_or_id_pagination, PaginatedBy, PaginatedById, PaginatedByName,
+        PaginatedByNameOrId, ScanById, ScanByName, ScanByNameOrId, ScanParams,
+    },
+    SwitchPortAddressConfig,
+};
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
 use parse_display::Display;
@@ -4053,7 +4055,7 @@ async fn networking_switch_port_configuration_link_delete(
 async fn networking_switch_port_configuration_interface_address_list(
     rqctx: RequestContext<ApiContext>,
     path_params: Path<params::SwitchPortSettingsInterfaceInfoSelector>,
-) -> Result<HttpResponseOk<Vec<SwitchInterfaceConfig>>, HttpError> {
+) -> Result<HttpResponseOk<Vec<SwitchPortAddressConfig>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.context.nexus;
@@ -4070,7 +4072,7 @@ async fn networking_switch_port_configuration_interface_address_list(
                 interface,
             )
             .await?;
-        todo!("list interface addresses")
+        Ok(HttpResponseOk(settings.into_iter().map(Into::into).collect()))
     };
     apictx
         .context
@@ -4088,16 +4090,27 @@ async fn networking_switch_port_configuration_interface_address_list(
 async fn networking_switch_port_configuration_interface_address_add(
     rqctx: RequestContext<ApiContext>,
     path_params: Path<params::SwitchPortSettingsInterfaceInfoSelector>,
-    address: TypedBody<params::AddressConfig>,
-) -> Result<HttpResponseOk<ResultsPage<SwitchInterfaceConfig>>, HttpError> {
+    address: TypedBody<params::Address>,
+) -> Result<HttpResponseCreated<SwitchPortAddressConfig>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.context.nexus;
-        let query = path_params.into_inner().configuration;
+        let params::SwitchPortSettingsInterfaceInfoSelector {
+            configuration,
+            interface,
+        } = path_params.into_inner();
+        let address = address.into_inner();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
 
-        let settings = nexus.switch_port_settings_get(&opctx, &query).await?;
-        todo!("add interface address")
+        let settings = nexus
+            .switch_port_configuration_interface_address_add(
+                &opctx,
+                configuration,
+                interface,
+                address,
+            )
+            .await?;
+        Ok(HttpResponseCreated(settings.into()))
     };
     apictx
         .context
@@ -4115,16 +4128,27 @@ async fn networking_switch_port_configuration_interface_address_add(
 async fn networking_switch_port_configuration_interface_address_remove(
     rqctx: RequestContext<ApiContext>,
     path_params: Path<params::SwitchPortSettingsInterfaceInfoSelector>,
-    address: TypedBody<params::AddressConfig>,
-) -> Result<HttpResponseOk<ResultsPage<SwitchInterfaceConfig>>, HttpError> {
+    address: TypedBody<params::Address>,
+) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.context.nexus;
-        let query = path_params.into_inner().configuration;
+        let params::SwitchPortSettingsInterfaceInfoSelector {
+            configuration,
+            interface,
+        } = path_params.into_inner();
+        let address = address.into_inner();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
 
-        let settings = nexus.switch_port_settings_get(&opctx, &query).await?;
-        todo!("remove interface address")
+        nexus
+            .switch_port_configuration_interface_address_remove(
+                &opctx,
+                configuration,
+                interface,
+                address,
+            )
+            .await?;
+        Ok(HttpResponseDeleted())
     };
     apictx
         .context
