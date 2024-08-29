@@ -103,8 +103,8 @@ impl<'a> BuilderExternalNetworking<'a> {
             ExternalIpAllocator::new(input.service_ip_pool_ranges());
         let mut used_macs: HashSet<MacAddr> = HashSet::new();
 
-        for (_, z) in
-            parent_blueprint.all_omicron_zones(BlueprintZoneFilter::All)
+        for (_, z) in parent_blueprint
+            .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
         {
             let zone_type = &z.zone_type;
             match zone_type {
