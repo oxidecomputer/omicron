@@ -4173,9 +4173,8 @@ checksum = "fc6d6206008e25125b1f97fbe5d309eb7b85141cf9199d52dbd3729a1584dd16"
 name = "ipcc"
 version = "0.1.0"
 dependencies = [
- "cfg-if",
  "ciborium",
- "libc",
+ "libipcc",
  "omicron-common",
  "omicron-workspace-hack",
  "proptest",
@@ -4455,6 +4454,16 @@ dependencies = [
  "libc",
  "libz-sys",
  "pkg-config",
+]
+
+[[package]]
+name = "libipcc"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/libipcc?rev=fdffa212373a8f92473ea5f411088912bf458d5f#fdffa212373a8f92473ea5f411088912bf458d5f"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "thiserror",
 ]
 
 [[package]]

@@ -9,13 +9,12 @@ workspace = true
 
 [dependencies]
 ciborium.workspace = true
-libc.workspace = true
 omicron-common.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
-cfg-if.workspace = true
+libipcc.workspace = true
 
 [dev-dependencies]
 omicron-common = { workspace = true, features = ["testing"] }
