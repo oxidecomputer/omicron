@@ -5,8 +5,7 @@
 use omicron_uuid_kinds::{RackInitUuid, RackResetUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use strum::{EnumCount, IntoEnumIterator};
-use strum_macros::{EnumCount as EnumCountMacro, EnumIter};
+use strum::{EnumCount, EnumIter, IntoEnumIterator};
 
 /// Current status of any rack-level operation being performed by this bootstrap
 /// agent.
@@ -53,7 +52,7 @@ pub enum RackOperationStatus {
     Clone,
     Debug,
     Deserialize,
-    EnumCountMacro,
+    EnumCount,
     EnumIter,
     Eq,
     Hash,
