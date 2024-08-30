@@ -5235,13 +5235,6 @@
         "description": "One of the states that a VMM can be in.",
         "oneOf": [
           {
-            "description": "The VMM is known to Nexus, but may not yet exist on a sled.\n\nVMM records are always inserted into the database in this state, and then transition to 'starting' or 'migrating' once a sled-agent reports that the VMM has been registered.",
-            "type": "string",
-            "enum": [
-              "creating"
-            ]
-          },
-          {
             "description": "The VMM is initializing and has not started running guest CPUs yet.",
             "type": "string",
             "enum": [

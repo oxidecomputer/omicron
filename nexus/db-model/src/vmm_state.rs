@@ -80,8 +80,9 @@ impl From<VmmState> for omicron_common::api::internal::nexus::VmmState {
     fn from(value: VmmState) -> Self {
         use omicron_common::api::internal::nexus::VmmState as Output;
         match value {
-            VmmState::Creating => Output::Creating,
-            VmmState::Starting => Output::Starting,
+            // The `Creating` state is internal to Nexus; the outside world
+            // should treat it as equivalent to `Starting`.
+            VmmState::Creating | VmmState::Starting => Output::Starting,
             VmmState::Running => Output::Running,
             VmmState::Stopping => Output::Stopping,
             VmmState::Stopped => Output::Stopped,
@@ -97,8 +98,9 @@ impl From<VmmState> for sled_agent_client::types::VmmState {
     fn from(value: VmmState) -> Self {
         use sled_agent_client::types::VmmState as Output;
         match value {
-            VmmState::Creating => Output::Creating,
-            VmmState::Starting => Output::Starting,
+            // The `Creating` state is internal to Nexus; the outside world
+            // should treat it as equivalent to `Starting`.
+            VmmState::Creating | VmmState::Starting => Output::Starting,
             VmmState::Running => Output::Running,
             VmmState::Stopping => Output::Stopping,
             VmmState::Stopped => Output::Stopped,
@@ -114,7 +116,6 @@ impl From<ApiState> for VmmState {
     fn from(value: ApiState) -> Self {
         use VmmState as Output;
         match value {
-            ApiState::Creating => Output::Creating,
             ApiState::Starting => Output::Starting,
             ApiState::Running => Output::Running,
             ApiState::Stopping => Output::Stopping,
