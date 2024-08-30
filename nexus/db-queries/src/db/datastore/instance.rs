@@ -367,21 +367,21 @@ impl DataStore {
         .collect())
     }
 
-    /// List all instances with active VMMs in the `Destroyed` state that don't
-    /// have currently-running instance-updater sagas.
+    /// List all instances with active VMMs in the provided [`VmmState`] which
+    /// don't have currently-running instance-updater sagas.
     ///
     /// This is used by the `instance_updater` background task to ensure that
     /// update sagas are scheduled for these instances.
-    pub async fn find_instances_with_destroyed_active_vmms(
+    pub async fn find_instances_by_active_vmm_state(
         &self,
         opctx: &OpContext,
+        vmm_state: VmmState,
     ) -> ListResultVec<Instance> {
-        use db::model::VmmState;
         use db::schema::instance::dsl;
         use db::schema::vmm::dsl as vmm_dsl;
 
         vmm_dsl::vmm
-            .filter(vmm_dsl::state.eq(VmmState::Destroyed))
+            .filter(vmm_dsl::state.eq(vmm_state))
             // If the VMM record has already been deleted, we don't need to do
             // anything about it --- someone already has.
             .filter(vmm_dsl::time_deleted.is_null())
