@@ -12,7 +12,9 @@ use indexmap::IndexMap;
 use nexus_inventory::CollectionBuilder;
 use nexus_sled_agent_shared::inventory::Baseboard;
 use nexus_sled_agent_shared::inventory::Inventory;
+use nexus_sled_agent_shared::inventory::InventoryDataset;
 use nexus_sled_agent_shared::inventory::InventoryDisk;
+use nexus_sled_agent_shared::inventory::InventoryZpool;
 use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbSettings;
@@ -205,6 +207,16 @@ impl SystemDescription {
     ) -> &mut Self {
         self.service_ip_pool_ranges = ranges;
         self
+    }
+
+    pub fn get_sled_mut(
+        &mut self,
+        sled_id: SledUuid,
+    ) -> anyhow::Result<&mut Sled> {
+        let Some(sled) = self.sleds.get_mut(&sled_id) else {
+            bail!("Sled not found with id {sled_id}");
+        };
+        Ok(sled)
     }
 
     /// Add a sled to the system, as described by a SledBuilder
@@ -450,11 +462,13 @@ pub struct SledHwInventory<'a> {
 /// This needs to be rich enough to generate a PlanningInput and inventory
 /// Collection.
 #[derive(Clone, Debug)]
-struct Sled {
+pub struct Sled {
     sled_id: SledUuid,
     sled_subnet: Ipv6Subnet<SLED_PREFIX>,
     inventory_sp: Option<(u16, SpState)>,
     inventory_sled_agent: Inventory,
+    // This represents "intended configuration of pools and datasets", rather
+    // than "observed status of pools and datasets".
     zpools: BTreeMap<ZpoolUuid, (SledDisk, Vec<DatasetConfig>)>,
     policy: SledPolicy,
 }
@@ -561,9 +575,13 @@ impl Sled {
                         slot: i64::try_from(i).unwrap(),
                     })
                     .collect(),
-                // Zpools & Datasets won't necessarily show up until our first
-                // request to provision storage, so we omit them.
-                zpools: vec![],
+                zpools: zpools
+                    .keys()
+                    .map(|id| InventoryZpool {
+                        id: *id,
+                        total_size: ByteCount::from_gibibytes_u32(100),
+                    })
+                    .collect(),
                 datasets: vec![],
             }
         };
@@ -711,6 +729,25 @@ impl Sled {
             inventory_sled_agent,
             policy: sled_policy,
         }
+    }
+
+    /// Adds a dataset to the system description.
+    ///
+    /// The inventory values for "available space" and "used space" are
+    /// made up, since this is a synthetic dataset.
+    pub fn add_synthetic_dataset(
+        &mut self,
+        config: omicron_common::disk::DatasetConfig,
+    ) {
+        self.inventory_sled_agent.datasets.push(InventoryDataset {
+            id: Some(config.id),
+            name: config.name.full_name(),
+            available: ByteCount::from_gibibytes_u32(1),
+            used: ByteCount::from_gibibytes_u32(0),
+            quota: config.quota,
+            reservation: config.reservation,
+            compression: config.compression.to_string(),
+        });
     }
 
     fn sp_state(&self) -> Option<&(u16, SpState)> {

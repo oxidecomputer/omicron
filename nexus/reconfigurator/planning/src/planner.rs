@@ -845,6 +845,9 @@ mod test {
         assert_eq!(diff.zones.errors.len(), 0);
         assert_eq!(diff.physical_disks.added.len(), 0);
         assert_eq!(diff.physical_disks.removed.len(), 0);
+        assert_eq!(diff.datasets.added.len(), 0);
+        assert_eq!(diff.datasets.removed.len(), 0);
+        assert_eq!(diff.datasets.unchanged.len(), 3);
         verify_blueprint(&blueprint2);
 
         // Now add a new sled.
@@ -876,6 +879,8 @@ mod test {
             &diff.display().to_string(),
         );
         assert_eq!(diff.sleds_added.len(), 1);
+        assert_eq!(diff.physical_disks.added.len(), 1);
+        assert_eq!(diff.datasets.added.len(), 1);
         let sled_id = *diff.sleds_added.first().unwrap();
         let sled_zones = diff.zones.added.get(&sled_id).unwrap();
         // We have defined elsewhere that the first generation contains no
@@ -1021,6 +1026,7 @@ mod test {
             assert_eq!(collection.omicron_zones.len(), 1);
             blueprint.blueprint_zones.retain(|k, _v| keep_sled_id == *k);
             blueprint.blueprint_disks.retain(|k, _v| keep_sled_id == *k);
+            blueprint.blueprint_datasets.retain(|k, _v| keep_sled_id == *k);
 
             // Also remove all the networking resources for the zones we just
             // stripped out; i.e., only keep those for `keep_sled_id`.
@@ -1099,7 +1105,6 @@ mod test {
         assert_eq!(diff.sleds_removed.len(), 0);
         assert_eq!(diff.sleds_modified.len(), 1);
         let changed_sled_id = diff.sleds_modified.first().unwrap();
-
         // TODO-cleanup use `TypedUuid` everywhere
         assert_eq!(*changed_sled_id, sled_id);
         assert_eq!(diff.zones.removed.len(), 0);
@@ -1114,6 +1119,11 @@ mod test {
                 panic!("unexpectedly added a non-Nexus zone: {zone:?}");
             }
         }
+
+        assert_eq!(diff.physical_disks.added.len(), 0);
+        assert_eq!(diff.physical_disks.removed.len(), 0);
+        assert_eq!(diff.datasets.added.len(), 1);
+        assert_eq!(diff.datasets.removed.len(), 0);
 
         logctx.cleanup_successful();
     }
@@ -1272,6 +1282,11 @@ mod test {
         );
         assert!(!diff.zones.removed.contains_key(sled_id));
 
+        assert_eq!(diff.physical_disks.added.len(), 1);
+        assert_eq!(diff.physical_disks.removed.len(), 0);
+        assert_eq!(diff.datasets.added.len(), 1);
+        assert_eq!(diff.datasets.removed.len(), 0);
+
         logctx.cleanup_successful();
     }
 
@@ -1360,6 +1375,13 @@ mod test {
             BlueprintZoneDisposition::Expunged,
             "Should have expunged this zone"
         );
+
+        assert_eq!(diff.physical_disks.added.len(), 0);
+        assert_eq!(diff.physical_disks.removed.len(), 1);
+        assert_eq!(diff.datasets.added.len(), 0);
+        // NOTE: Expunging a disk doesn't immediately delete datasets; see the
+        // "decommissioned_disk_cleaner" background task for more context.
+        assert_eq!(diff.datasets.removed.len(), 0);
 
         logctx.cleanup_successful();
     }
