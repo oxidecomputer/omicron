@@ -1162,7 +1162,7 @@ table! {
 }
 
 table! {
-    internet_gateway_ip_pool(internet_gateway_id, ip_pool_id) {
+    internet_gateway_ip_pool(id) {
         id -> Uuid,
         name -> Text,
         description -> Text,
@@ -1175,7 +1175,7 @@ table! {
 }
 
 table! {
-    internet_gateway_ip_address(internet_gateway_id, address) {
+    internet_gateway_ip_address(id) {
         id -> Uuid,
         name -> Text,
         description -> Text,
