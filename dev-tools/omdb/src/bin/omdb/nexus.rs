@@ -34,6 +34,7 @@ use nexus_saga_recovery::LastPass;
 use nexus_types::deployment::Blueprint;
 use nexus_types::internal_api::background::LookupRegionPortStatus;
 use nexus_types::internal_api::background::RegionReplacementDriverStatus;
+use nexus_types::internal_api::background::RegionSnapshotReplacementFinishStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementGarbageCollectStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStartStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStepStatus;
@@ -1609,6 +1610,30 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 println!("    errors:           {}", errors.len());
                 for (i, e) in errors.iter().enumerate() {
                     println!("        error {}: {}", i, e);
+                }
+            }
+        }
+    } else if name == "region_snapshot_replacement_finish" {
+        match serde_json::from_value::<RegionSnapshotReplacementFinishStatus>(
+            details.clone(),
+        ) {
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            ),
+
+            Ok(status) => {
+                println!(
+                    "    total records transitioned to done: {}",
+                    status.records_set_to_done.len(),
+                );
+                for line in &status.records_set_to_done {
+                    println!("    > {line}");
+                }
+
+                println!("    errors: {}", status.errors.len());
+                for line in &status.errors {
+                    println!("    > {line}");
                 }
             }
         }

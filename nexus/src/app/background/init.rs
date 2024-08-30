@@ -108,6 +108,7 @@ use super::tasks::phantom_disks;
 use super::tasks::physical_disk_adoption;
 use super::tasks::region_replacement;
 use super::tasks::region_replacement_driver;
+use super::tasks::region_snapshot_replacement_finish::*;
 use super::tasks::region_snapshot_replacement_garbage_collect::*;
 use super::tasks::region_snapshot_replacement_start::*;
 use super::tasks::region_snapshot_replacement_step::*;
@@ -167,6 +168,7 @@ pub struct BackgroundTasks {
     pub task_region_snapshot_replacement_start: Activator,
     pub task_region_snapshot_replacement_garbage_collection: Activator,
     pub task_region_snapshot_replacement_step: Activator,
+    pub task_region_snapshot_replacement_finish: Activator,
 
     // Handles to activate background tasks that do not get used by Nexus
     // at-large.  These background tasks are implementation details as far as
@@ -252,6 +254,7 @@ impl BackgroundTasksInitializer {
             task_region_snapshot_replacement_garbage_collection: Activator::new(
             ),
             task_region_snapshot_replacement_step: Activator::new(),
+            task_region_snapshot_replacement_finish: Activator::new(),
 
             task_internal_dns_propagation: Activator::new(),
             task_external_dns_propagation: Activator::new(),
@@ -316,6 +319,7 @@ impl BackgroundTasksInitializer {
             task_region_snapshot_replacement_start,
             task_region_snapshot_replacement_garbage_collection,
             task_region_snapshot_replacement_step,
+            task_region_snapshot_replacement_finish,
             // Add new background tasks here.  Be sure to use this binding in a
             // call to `Driver::register()` below.  That's what actually wires
             // up the Activator to the corresponding background task.
@@ -780,12 +784,26 @@ impl BackgroundTasksInitializer {
                 replacement, and run the step saga for them",
             period: config.region_snapshot_replacement_step.period_secs,
             task_impl: Box::new(RegionSnapshotReplacementFindAffected::new(
-                datastore,
+                datastore.clone(),
                 sagas.clone(),
             )),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
             activator: task_region_snapshot_replacement_step,
+        });
+
+        driver.register(TaskDefinition {
+            name: "region_snapshot_replacement_finish",
+            description:
+                "complete a region snapshot replacement if all the steps are \
+                done",
+            period: config.region_snapshot_replacement_finish.period_secs,
+            task_impl: Box::new(RegionSnapshotReplacementFinishDetector::new(
+                datastore,
+            )),
+            opctx: opctx.child(BTreeMap::new()),
+            watchers: vec![],
+            activator: task_region_snapshot_replacement_finish,
         });
 
         driver
