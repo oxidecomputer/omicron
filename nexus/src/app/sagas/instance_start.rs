@@ -621,7 +621,7 @@ async fn sis_ensure_registered_undo(
         // more details.
         match e {
             InstanceStateChangeError::SledAgent(inner)
-                if inner.instance_unhealthy() =>
+                if inner.vmm_gone() =>
             {
                 error!(osagactx.log(),
                        "start saga: failing instance after unregister failure";

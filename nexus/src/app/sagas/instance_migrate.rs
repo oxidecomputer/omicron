@@ -481,7 +481,7 @@ async fn sim_ensure_destination_propolis_undo(
     {
         Ok(_) => Ok(()),
         Err(InstanceStateChangeError::SledAgent(inner)) => {
-            if !inner.instance_unhealthy() {
+            if !inner.vmm_gone() {
                 Ok(())
             } else {
                 Err(inner.0.into())

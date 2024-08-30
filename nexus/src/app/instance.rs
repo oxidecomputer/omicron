@@ -110,11 +110,9 @@ impl From<SledAgentInstanceError> for dropshot::HttpError {
                 // constructor, which panics if we pass a status code that isn't
                 // a 4xx error. So, instead, we construct an internal error and
                 // then munge its status code.
+                // See https://github.com/oxidecomputer/dropshot/issues/693
                 let mut error = HttpError::for_internal_error(e.to_string());
                 error.status_code = if e.is_timeout() {
-                    // This isn't actually in the RFD, but I thought it might be
-                    // nice to return 504 Gateway Timeout when the communication
-                    // error is a timeout...
                     http::StatusCode::GATEWAY_TIMEOUT
                 } else {
                     http::StatusCode::BAD_GATEWAY
@@ -128,9 +126,7 @@ impl From<SledAgentInstanceError> for dropshot::HttpError {
             }
             // Error responses from sled-agent that indicate the instance is
             // unhealthy should be mapped to a 500 error.
-            e if e.instance_unhealthy() => {
-                HttpError::for_internal_error(e.to_string())
-            }
+            e if e.vmm_gone() => HttpError::for_internal_error(e.to_string()),
             // Other client errors can be handled by the normal
             // `external::Error` to `HttpError` conversions.
             SledAgentInstanceError(e) => HttpError::from(Error::from(e)),
@@ -140,8 +136,8 @@ impl From<SledAgentInstanceError> for dropshot::HttpError {
 
 impl SledAgentInstanceError {
     /// Returns `true` if this error is of a class that indicates that the
-    /// instance is known to have failed.
-    pub fn instance_unhealthy(&self) -> bool {
+    /// VMM is no longer known to the sled-agent.
+    pub fn vmm_gone(&self) -> bool {
         match &self.0 {
             // See RFD 486 §6.3:
             // https://rfd.shared.oxide.computer/rfd/486#_stopping_or_rebooting_a_running_instance
@@ -615,7 +611,7 @@ impl super::Nexus {
             if let (InstanceStateChangeError::SledAgent(inner), Some(vmm)) =
                 (&e, state.vmm())
             {
-                if inner.instance_unhealthy() {
+                if inner.vmm_gone() {
                     let _ = self
                         .mark_vmm_failed(opctx, authz_instance, vmm, inner)
                         .await;
@@ -693,7 +689,7 @@ impl super::Nexus {
             if let (InstanceStateChangeError::SledAgent(inner), Some(vmm)) =
                 (&e, state.vmm())
             {
-                if inner.instance_unhealthy() {
+                if inner.vmm_gone() {
                     let _ = self
                         .mark_vmm_failed(opctx, authz_instance, vmm, inner)
                         .await;
@@ -1177,7 +1173,7 @@ impl super::Nexus {
         // The state of a freshly-created VMM record in the database is always
         // `VmmState::Creating`. Based on whether this VMM is created in order
         // to start or migrate an instance, determine the VMM state we will want
-        // the sled-agent to create the VMM in. Once sled-agent acknoledges our
+        // the sled-agent to create the VMM in. Once sled-agent acknowledges our
         // registration request, we will advance the database record to the new
         // state.
         let vmm_runtime = sled_agent_client::types::VmmRuntimeState {
@@ -1221,7 +1217,7 @@ impl super::Nexus {
                 })
             }
             Err(e) => {
-                if e.instance_unhealthy() {
+                if e.vmm_gone() {
                     let _ = self
                         .mark_vmm_failed(
                             &opctx,
@@ -1236,9 +1232,22 @@ impl super::Nexus {
         }
     }
 
-    /// Attempts to move an instance from `prev_instance_runtime` to the
-    /// `Failed` state in response to an error returned from a call to a sled
+    /// Attempts to transition an instance to to the `Failed` state in
+    /// response to an error returned from a call to a sled
     /// agent instance API, supplied in `reason`.
+    ///
+    /// This is done by first marking the associated `vmm` as `Failed`, and then
+    /// running an `instance-update` saga which transitions the instance record
+    /// to `Failed` in response to the active VMM being marked as `Failed`. If
+    /// the update saga cannot complete the instance state transition, the
+    /// `instance-updater` RPW will be activated to ensure another update saga
+    /// is attempted.
+    ///
+    /// This method returns an error if the VMM record could not be marked as
+    /// failed. No error is returned if the instance-update saga could not
+    /// execute, as this may just mean that another saga is already updating the
+    /// instance. The update will be performed eventually even if this method
+    /// could not update the instance.
     pub(crate) async fn mark_vmm_failed(
         &self,
         opctx: &OpContext,

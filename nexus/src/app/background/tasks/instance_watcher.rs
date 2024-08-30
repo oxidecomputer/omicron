@@ -106,7 +106,7 @@ impl InstanceWatcher {
                 // Oh, this error indicates that the VMM should transition to
                 // `Failed`. Let's synthesize a `SledInstanceState` that does
                 // that.
-                Err(e) if e.instance_unhealthy() => {
+                Err(e) if e.vmm_gone() => {
                     slog::info!(
                         opctx.log,
                         "sled-agent error indicates that this instance's \

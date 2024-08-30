@@ -307,7 +307,16 @@ impl DataStore {
 
     /// Transitions a VMM to the `SagaUnwound` state.
     ///
-    /// This may *only* be called by the saga that created a VMM record.
+    /// # Warning
+    ///
+    /// This may *only* be called by the saga that created a VMM record, as it
+    /// unconditionally increments the generation number and advances the VMM to
+    /// the `SagaUnwound` state.
+    ///
+    /// This is necessary as it is executed in compensating actions for
+    /// unwinding saga nodes which cannot easily determine whether other
+    /// actions, which advance the VMM's generation, have executed before the
+    /// saga unwound.
     pub async fn vmm_mark_saga_unwound(
         &self,
         opctx: &OpContext,

@@ -252,10 +252,10 @@ pub(super) async fn instance_ip_get_instance_state(
         // states, its  sled assignment is in doubt, so report a transient state
         // error and ask the caller to retry.
         //
-        // Although an instance with a Starting VMM has a sled assignment,
-        // there's no way to tell at this point whether or not there's a
-        // concurrent instance-start saga that has passed the point where it
-        // sends IP assignments to the instance's new sled:
+        // Although an instance with a Starting (or Creating) VMM has a sled
+        // assignment, there's no way to tell at this point whether or not
+        // there's a  concurrent instance-start saga that has passed the point
+        // where it sends IP assignments to the instance's new sled:
         //
         // - If the start saga is still in progress and hasn't pushed any IP
         //   information to the instance's new sled yet, then either of two
@@ -275,8 +275,6 @@ pub(super) async fn instance_ip_get_instance_state(
         (
             InstanceState::Vmm,
             Some(state @ VmmState::Starting)
-            // TODO(eliza): now that a `Creating` state exists that's separate
-            // from `Starting`, perhaps we can remove `Starting` from this list?
             | Some(state @ VmmState::Migrating)
             | Some(state @ VmmState::Stopping)
             | Some(state @ VmmState::Stopped)
