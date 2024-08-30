@@ -4,10 +4,8 @@
 
 // Copyright 2023 Oxide Computer Company
 
-use std::{fmt, fmt::Write, marker::PhantomData};
+use std::{fmt, marker::PhantomData};
 
-use anyhow::anyhow;
-use indent_write::fmt::IndentWriter;
 use schemars::JsonSchema;
 use serde::{de::DeserializeOwned, Serialize};
 
@@ -146,8 +144,6 @@ pub type NestedSpec = GenericSpec<NestedError>;
 /// set of nested errors.
 #[derive(Clone, Debug)]
 pub struct NestedError {
-    // TODO: in reality is this used more as a "serializable error" -- we
-    // should rename this.
     message: String,
     source: Option<Box<NestedError>>,
 }
@@ -175,16 +171,6 @@ impl NestedError {
         }
         Self { message, source: next.map(Box::new) }
     }
-
-    /// Returns the message associated with this error.
-    pub fn message(&self) -> &str {
-        &self.message
-    }
-
-    /// Returns the causes of this error as an iterator.
-    pub fn sources(&self) -> NestedErrorSources<'_> {
-        NestedErrorSources { current: self.source.as_deref() }
-    }
 }
 
 impl fmt::Display for NestedError {
@@ -196,22 +182,6 @@ impl fmt::Display for NestedError {
 impl std::error::Error for NestedError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         self.source.as_ref().map(|s| s as &(dyn std::error::Error + 'static))
-    }
-}
-
-/// The sources of a nested error as an iterator.
-#[derive(Debug)]
-pub struct NestedErrorSources<'a> {
-    current: Option<&'a NestedError>,
-}
-
-impl<'a> Iterator for NestedErrorSources<'a> {
-    type Item = &'a NestedError;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let current = self.current?;
-        self.current = current.source.as_deref();
-        Some(current)
     }
 }
 
@@ -272,128 +242,5 @@ pub trait AsError: fmt::Debug + Send + Sync + 'static {
 impl AsError for anyhow::Error {
     fn as_error(&self) -> &(dyn std::error::Error + 'static) {
         self.as_ref()
-    }
-}
-
-/// A temporary hack to convert a list of anyhow errors into a single
-/// `anyhow::Error`. If no errors are provided, panic (this should be handled
-/// at a higher level).
-///
-/// Eventually we should gain first-class support for representing errors as
-/// trees, but this will do for now.
-pub fn merge_anyhow_list<I>(errors: I) -> anyhow::Error
-where
-    I: IntoIterator<Item = anyhow::Error>,
-{
-    let mut iter = errors.into_iter().peekable();
-    // How many errors are there?
-    let Some(first_error) = iter.next() else {
-        // No errors: panic.
-        panic!("error_list_to_anyhow called with no errors");
-    };
-
-    if iter.peek().is_none() {
-        // One error.
-        return first_error;
-    }
-
-    // Multiple errors.
-    let mut out = String::new();
-    let mut nerrors = 0;
-    for error in std::iter::once(first_error).chain(iter) {
-        if nerrors > 0 {
-            // Separate errors with a newline (we want there to not be a
-            // trailing newline to match anyhow generally).
-            writeln!(&mut out).unwrap();
-        }
-        nerrors += 1;
-        let mut current = error.as_error();
-
-        let mut writer = IndentWriter::new_skip_initial("  ", &mut out);
-        write!(writer, "Error: {current}").unwrap();
-
-        while let Some(cause) = current.source() {
-            // This newline is not part of the `IndentWriter`'s output so that
-            // it is unaffected by the indent logic.
-            writeln!(&mut out).unwrap();
-
-            // The spaces align the causes with the "Error: " above.
-            let mut writer =
-                IndentWriter::new_skip_initial("       ", &mut out);
-            write!(writer, "     - {cause}").unwrap();
-            current = cause;
-        }
-    }
-    anyhow!(out).context(format!("{nerrors} errors encountered"))
-}
-
-#[cfg(test)]
-mod tests {
-    use indoc::indoc;
-
-    use super::*;
-
-    #[test]
-    fn test_merge_anyhow_list() {
-        // A single error stays as-is.
-        let error = anyhow!("base").context("parent").context("root");
-
-        let merged = merge_anyhow_list(vec![error]);
-        assert_eq!(
-            format!("{:?}", merged),
-            indoc! {"
-                root
-                
-                Caused by:
-                    0: parent
-                    1: base"
-            },
-        );
-
-        // Multiple errors are merged.
-        let error1 =
-            anyhow!("base1").context("parent1\nparent1 line2").context("root1");
-        let error2 = anyhow!("base2").context("parent2").context("root2");
-
-        let merged = merge_anyhow_list(vec![error1, error2]);
-        let merged_debug = format!("{:?}", merged);
-        println!("merged debug: {}", merged_debug);
-
-        assert_eq!(
-            merged_debug,
-            indoc! {"
-                2 errors encountered
-
-                Caused by:
-                    Error: root1
-                         - parent1
-                           parent1 line2
-                         - base1
-                    Error: root2
-                         - parent2
-                         - base2"
-            },
-        );
-
-        // Ensure that this still looks fine if there's even more context.
-        let error3 = merged.context("overall root");
-        let error3_debug = format!("{:?}", error3);
-        println!("error3 debug: {}", error3_debug);
-        assert_eq!(
-            error3_debug,
-            indoc! {"
-                overall root
-
-                Caused by:
-                    0: 2 errors encountered
-                    1: Error: root1
-                            - parent1
-                              parent1 line2
-                            - base1
-                       Error: root2
-                            - parent2
-                            - base2"
-            },
-        );
     }
 }
