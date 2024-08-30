@@ -11,9 +11,7 @@ use authn::external::token::HttpAuthnToken;
 use authn::external::HttpAuthnScheme;
 use camino::Utf8PathBuf;
 use chrono::Duration;
-use internal_dns::ServiceName;
 use nexus_config::NexusConfig;
-use nexus_config::PostgresConfigWithUrl;
 use nexus_config::SchemeName;
 use nexus_db_queries::authn::external::session_cookie::SessionStore;
 use nexus_db_queries::authn::ConsoleSessionWithSiloId;
@@ -25,7 +23,6 @@ use oximeter::types::ProducerRegistry;
 use oximeter_instruments::http::{HttpService, LatencyTracker};
 use slog::Logger;
 use std::env;
-use std::str::FromStr;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -149,12 +146,14 @@ impl ServerContext {
                 name: name.to_string().into(),
                 id: config.deployment.id,
             };
-            const START_LATENCY_DECADE: i16 = -6;
-            const END_LATENCY_DECADE: i16 = 3;
-            LatencyTracker::with_latency_decades(
+            // Start at 1 microsecond == 1e3 nanoseconds.
+            const LATENCY_START_POWER: u16 = 3;
+            // End at 1000s == (1e9 * 1e3) == 1e12 nanoseconds.
+            const LATENCY_END_POWER: u16 = 12;
+            LatencyTracker::with_log_linear_bins(
                 target,
-                START_LATENCY_DECADE,
-                END_LATENCY_DECADE,
+                LATENCY_START_POWER,
+                LATENCY_END_POWER,
             )
             .unwrap()
         };
@@ -210,7 +209,7 @@ impl ServerContext {
         // nexus in dev for everyone
 
         // Set up DNS Client
-        let resolver = match config.deployment.internal_dns {
+        let (resolver, dns_addrs) = match config.deployment.internal_dns {
             nexus_config::InternalDns::FromSubnet { subnet } => {
                 let az_subnet =
                     Ipv6Subnet::<AZ_PREFIX>::new(subnet.net().addr());
@@ -219,11 +218,21 @@ impl ServerContext {
                     "Setting up resolver using DNS servers for subnet: {:?}",
                     az_subnet
                 );
-                internal_dns::resolver::Resolver::new_from_subnet(
-                    log.new(o!("component" => "DnsResolver")),
-                    az_subnet,
+                let resolver =
+                    internal_dns::resolver::Resolver::new_from_subnet(
+                        log.new(o!("component" => "DnsResolver")),
+                        az_subnet,
+                    )
+                    .map_err(|e| {
+                        format!("Failed to create DNS resolver: {}", e)
+                    })?;
+
+                (
+                    resolver,
+                    internal_dns::resolver::Resolver::servers_from_subnet(
+                        az_subnet,
+                    ),
                 )
-                .map_err(|e| format!("Failed to create DNS resolver: {}", e))?
             }
             nexus_config::InternalDns::FromAddress { address } => {
                 info!(
@@ -231,56 +240,33 @@ impl ServerContext {
                     "Setting up resolver using DNS address: {:?}", address
                 );
 
-                internal_dns::resolver::Resolver::new_from_addrs(
-                    log.new(o!("component" => "DnsResolver")),
-                    &[address],
-                )
-                .map_err(|e| format!("Failed to create DNS resolver: {}", e))?
+                let resolver =
+                    internal_dns::resolver::Resolver::new_from_addrs(
+                        log.new(o!("component" => "DnsResolver")),
+                        &[address],
+                    )
+                    .map_err(|e| {
+                        format!("Failed to create DNS resolver: {}", e)
+                    })?;
+
+                (resolver, vec![address])
             }
         };
 
-        // Set up DB pool
-        let url = match &config.deployment.database {
-            nexus_config::Database::FromUrl { url } => url.clone(),
+        let pool = match &config.deployment.database {
+            nexus_config::Database::FromUrl { url } => {
+                info!(log, "Setting up qorb pool from a single host"; "url" => #?url);
+                db::Pool::new_single_host(
+                    &log,
+                    &db::Config { url: url.clone() },
+                )
+            }
             nexus_config::Database::FromDns => {
-                info!(log, "Accessing DB url from DNS");
-                // It's been requested but unfortunately not supported to
-                // directly connect using SRV based lookup.
-                // TODO-robustness: the set of cockroachdb hosts we'll use will
-                // be fixed to whatever we got back from DNS at Nexus start.
-                // This means a new cockroachdb instance won't picked up until
-                // Nexus restarts.
-                let addrs = loop {
-                    match resolver
-                        .lookup_all_socket_v6(ServiceName::Cockroach)
-                        .await
-                    {
-                        Ok(addrs) => break addrs,
-                        Err(e) => {
-                            warn!(
-                                log,
-                                "Failed to lookup cockroach addresses: {e}"
-                            );
-                            tokio::time::sleep(std::time::Duration::from_secs(
-                                1,
-                            ))
-                            .await;
-                        }
-                    }
-                };
-                let addrs_str = addrs
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join(",");
-                info!(log, "DB addresses: {}", addrs_str);
-                PostgresConfigWithUrl::from_str(&format!(
-                    "postgresql://root@{addrs_str}/omicron?sslmode=disable",
-                ))
-                .map_err(|e| format!("Cannot parse Postgres URL: {}", e))?
+                info!(log, "Setting up qorb pool from DNS"; "dns_addrs" => #?dns_addrs);
+                db::Pool::new(&log, dns_addrs)
             }
         };
-        let pool = db::Pool::new(&log, &db::Config { url });
+
         let nexus = Nexus::new_with_id(
             rack_id,
             log.new(o!("component" => "nexus")),

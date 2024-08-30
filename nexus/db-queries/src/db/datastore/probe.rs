@@ -62,7 +62,7 @@ impl super::DataStore {
         use db::schema::probe::dsl;
         use db::schema::vpc_subnet::dsl as vpc_subnet_dsl;
 
-        let pool = self.pool_connection_authorized(opctx).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
 
         let probes = match pagparams {
             PaginatedBy::Id(pagparams) => {
@@ -77,7 +77,7 @@ impl super::DataStore {
         .filter(dsl::project_id.eq(authz_project.id()))
         .filter(dsl::time_deleted.is_null())
         .select(Probe::as_select())
-        .load_async(&*pool)
+        .load_async(&*conn)
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
@@ -99,7 +99,7 @@ impl super::DataStore {
             let db_subnet = vpc_subnet_dsl::vpc_subnet
                 .filter(vpc_subnet_dsl::id.eq(interface.subnet_id))
                 .select(VpcSubnet::as_select())
-                .first_async(&*pool)
+                .first_async(&*conn)
                 .await
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
@@ -126,7 +126,7 @@ impl super::DataStore {
         &self,
         opctx: &OpContext,
         probe: &Probe,
-        pool: &DataStoreConnection<'_>,
+        conn: &DataStoreConnection,
     ) -> LookupResult<ProbeInfo> {
         use db::schema::vpc_subnet::dsl as vpc_subnet_dsl;
 
@@ -143,7 +143,7 @@ impl super::DataStore {
         let db_subnet = vpc_subnet_dsl::vpc_subnet
             .filter(vpc_subnet_dsl::id.eq(interface.subnet_id))
             .select(VpcSubnet::as_select())
-            .first_async(&**pool)
+            .first_async(&**conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
@@ -172,20 +172,20 @@ impl super::DataStore {
     ) -> ListResultVec<ProbeInfo> {
         use db::schema::probe::dsl;
 
-        let pool = self.pool_connection_authorized(opctx).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
 
         let probes = paginated(dsl::probe, dsl::id, pagparams)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::sled.eq(sled))
             .select(Probe::as_select())
-            .load_async(&*pool)
+            .load_async(&*conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         let mut result = Vec::with_capacity(probes.len());
 
         for probe in probes.into_iter() {
-            result.push(self.resolve_probe_info(opctx, &probe, &pool).await?);
+            result.push(self.resolve_probe_info(opctx, &probe, &conn).await?);
         }
 
         Ok(result)
@@ -200,7 +200,7 @@ impl super::DataStore {
     ) -> LookupResult<ProbeInfo> {
         use db::schema::probe;
         use db::schema::probe::dsl;
-        let pool = self.pool_connection_authorized(opctx).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
 
         let name_or_id = name_or_id.clone();
 
@@ -211,7 +211,7 @@ impl super::DataStore {
                 .filter(probe::project_id.eq(authz_project.id()))
                 .select(Probe::as_select())
                 .limit(1)
-                .first_async::<Probe>(&*pool)
+                .first_async::<Probe>(&*conn)
                 .await
                 .map_err(|e| {
                     public_error_from_diesel(
@@ -227,7 +227,7 @@ impl super::DataStore {
                 .filter(probe::project_id.eq(authz_project.id()))
                 .select(Probe::as_select())
                 .limit(1)
-                .first_async::<Probe>(&*pool)
+                .first_async::<Probe>(&*conn)
                 .await
                 .map_err(|e| {
                     public_error_from_diesel(
@@ -240,7 +240,7 @@ impl super::DataStore {
                 }),
         }?;
 
-        self.resolve_probe_info(opctx, &probe, &pool).await
+        self.resolve_probe_info(opctx, &probe, &conn).await
     }
 
     /// Add a probe to the data store.
@@ -253,7 +253,7 @@ impl super::DataStore {
     ) -> CreateResult<Probe> {
         //TODO in transaction
         use db::schema::probe::dsl;
-        let pool = self.pool_connection_authorized(opctx).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
 
         let _eip = self
             .allocate_probe_ephemeral_ip(
@@ -306,7 +306,7 @@ impl super::DataStore {
         let result = diesel::insert_into(dsl::probe)
             .values(probe.clone())
             .returning(Probe::as_returning())
-            .get_result_async(&*pool)
+            .get_result_async(&*conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
@@ -322,7 +322,7 @@ impl super::DataStore {
     ) -> DeleteResult {
         use db::schema::probe;
         use db::schema::probe::dsl;
-        let pool = self.pool_connection_authorized(opctx).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
 
         let name_or_id = name_or_id.clone();
 
@@ -334,7 +334,7 @@ impl super::DataStore {
                 .filter(probe::project_id.eq(authz_project.id()))
                 .select(probe::id)
                 .limit(1)
-                .first_async::<Uuid>(&*pool)
+                .first_async::<Uuid>(&*conn)
                 .await
                 .map_err(|e| {
                     public_error_from_diesel(e, ErrorHandler::Server)
@@ -350,7 +350,7 @@ impl super::DataStore {
             .filter(dsl::id.eq(id))
             .filter(dsl::project_id.eq(authz_project.id()))
             .set(dsl::time_deleted.eq(Utc::now()))
-            .execute_async(&*pool)
+            .execute_async(&*conn)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 

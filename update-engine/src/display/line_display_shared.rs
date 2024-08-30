@@ -16,7 +16,7 @@ use owo_colors::OwoColorize;
 use swrite::{swrite, SWrite as _};
 
 use crate::{
-    display::StepIndexDisplay,
+    display::ProgressRatioDisplay,
     events::{
         ProgressCounter, ProgressEvent, ProgressEventKind, StepEvent,
         StepEventKind, StepInfo, StepOutcome,
@@ -634,10 +634,12 @@ fn format_progress_counter(counter: &ProgressCounter) -> String {
             let percent = (counter.current as f64 / total as f64) * 100.0;
             // <12.34> is 5 characters wide.
             let percent_width = 5;
-            let counter_width = total.to_string().len();
             format!(
-                "{:>percent_width$.2}% ({:>counter_width$}/{} {})",
-                percent, counter.current, total, counter.units,
+                "{:>percent_width$.2}% ({} {})",
+                percent,
+                ProgressRatioDisplay::current_and_total(counter.current, total)
+                    .padded(true),
+                counter.units,
             )
         }
         None => format!("{} {}", counter.current, counter.units),
@@ -722,7 +724,7 @@ impl LineDisplayFormatter {
         swrite!(
             line,
             "({}) ",
-            StepIndexDisplay::new(
+            ProgressRatioDisplay::index_and_total(
                 ld_step_info.step_info.index,
                 ld_step_info.total_steps
             )

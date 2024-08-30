@@ -313,8 +313,9 @@ mod test {
         let log = logctx.log.new(o!());
         let mut db = test_setup_database(&log).await;
         let cfg = crate::db::Config { url: db.pg_config().clone() };
-        let pool = Arc::new(crate::db::Pool::new(&logctx.log, &cfg));
-        let conn = pool.pool().get().await.unwrap();
+        let pool =
+            Arc::new(crate::db::Pool::new_single_host(&logctx.log, &cfg));
+        let conn = pool.claim().await.unwrap();
         let explain = query.explain_async(&conn).await.unwrap();
         println!("{explain}");
         db.cleanup().await.unwrap();
@@ -352,7 +353,8 @@ mod test {
         let log = logctx.log.new(o!());
         let mut db = test_setup_database(&log).await;
         let cfg = crate::db::Config { url: db.pg_config().clone() };
-        let pool = Arc::new(crate::db::Pool::new(&logctx.log, &cfg));
+        let pool =
+            Arc::new(crate::db::Pool::new_single_host(&logctx.log, &cfg));
         let db_datastore = Arc::new(
             crate::db::DataStore::new(&log, Arc::clone(&pool), None)
                 .await
@@ -544,7 +546,8 @@ mod test {
         let log = logctx.log.new(o!());
         let mut db = test_setup_database(&log).await;
         let cfg = crate::db::Config { url: db.pg_config().clone() };
-        let pool = Arc::new(crate::db::Pool::new(&logctx.log, &cfg));
+        let pool =
+            Arc::new(crate::db::Pool::new_single_host(&logctx.log, &cfg));
         let db_datastore = Arc::new(
             crate::db::DataStore::new(&log, Arc::clone(&pool), None)
                 .await

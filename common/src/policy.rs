@@ -21,13 +21,13 @@ pub const COCKROACHDB_REDUNDANCY: usize = 5;
 
 /// The amount of redundancy for internal DNS servers.
 ///
-/// Must be less than or equal to MAX_DNS_REDUNDANCY.
-pub const DNS_REDUNDANCY: usize = 3;
+/// Must be less than or equal to MAX_INTERNAL_DNS_REDUNDANCY.
+pub const INTERNAL_DNS_REDUNDANCY: usize = 3;
 
-/// The maximum amount of redundancy for DNS servers.
+/// The maximum amount of redundancy for internal DNS servers.
 ///
-/// This determines the number of addresses which are reserved for DNS servers.
-pub const MAX_DNS_REDUNDANCY: usize = 5;
+/// This determines the number of addresses which are reserved for internal DNS servers.
+pub const MAX_INTERNAL_DNS_REDUNDANCY: usize = 5;
 
 /// The amount of redundancy for clickhouse servers
 ///

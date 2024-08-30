@@ -468,6 +468,7 @@
           {
             "in": "path",
             "name": "certificate",
+            "description": "Name or ID of the certificate",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -504,6 +505,7 @@
           {
             "in": "path",
             "name": "certificate",
+            "description": "Name or ID of the certificate",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -4167,7 +4169,7 @@
           {
             "in": "path",
             "name": "rack_id",
-            "description": "The rack's unique ID.",
+            "description": "ID of the rack",
             "required": true,
             "schema": {
               "type": "string",
@@ -5028,7 +5030,7 @@
           {
             "in": "path",
             "name": "user_id",
-            "description": "The user's internal id",
+            "description": "The user's internal ID",
             "required": true,
             "schema": {
               "type": "string",
@@ -5070,7 +5072,7 @@
           {
             "in": "path",
             "name": "user_id",
-            "description": "The user's internal id",
+            "description": "The user's internal ID",
             "required": true,
             "schema": {
               "type": "string",
@@ -7872,7 +7874,7 @@
           {
             "in": "path",
             "name": "user_id",
-            "description": "The user's internal id",
+            "description": "The user's internal ID",
             "required": true,
             "schema": {
               "type": "string",

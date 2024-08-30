@@ -27,9 +27,9 @@ pub(crate) async fn realize_blueprint_and_expect(
         overrides,
     )
     .await
-    // We expect here rather than in the caller because we want to assert
-    // that the result is a `RealizeBlueprintOutput` (which is `must_use`
-    // so it must be assigned to `_`).
+    // We expect here rather than in the caller because we want to assert that
+    // the result is a `RealizeBlueprintOutput`. Because the latter is
+    // `must_use`, the caller may assign it to `_` and miss the `expect` call.
     .expect("failed to execute blueprint");
 
     eprintln!("realize_blueprint output: {:#?}", output);

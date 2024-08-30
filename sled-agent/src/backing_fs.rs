@@ -25,6 +25,7 @@ use camino::Utf8PathBuf;
 use illumos_utils::zfs::{
     EnsureFilesystemError, GetValueError, Mountpoint, SizeDetails, Zfs,
 };
+use omicron_common::disk::CompressionAlgorithm;
 use std::io;
 
 #[derive(Debug, thiserror::Error)]
@@ -50,7 +51,7 @@ struct BackingFs<'a> {
     // Optional quota, in _bytes_
     quota: Option<usize>,
     // Optional compression mode
-    compression: Option<&'static str>,
+    compression: CompressionAlgorithm,
     // Linked service
     service: Option<&'static str>,
     // Subdirectories to ensure
@@ -63,7 +64,7 @@ impl<'a> BackingFs<'a> {
             name,
             mountpoint: "legacy",
             quota: None,
-            compression: None,
+            compression: CompressionAlgorithm::Off,
             service: None,
             subdirs: None,
         }
@@ -79,8 +80,8 @@ impl<'a> BackingFs<'a> {
         self
     }
 
-    const fn compression(mut self, compression: &'static str) -> Self {
-        self.compression = Some(compression);
+    const fn compression(mut self, compression: CompressionAlgorithm) -> Self {
+        self.compression = compression;
         self
     }
 
@@ -101,7 +102,7 @@ const BACKING_FMD_SUBDIRS: [&'static str; 3] = ["rsrc", "ckpt", "xprt"];
 const BACKING_FMD_SERVICE: &'static str = "svc:/system/fmd:default";
 const BACKING_FMD_QUOTA: usize = 500 * (1 << 20); // 500 MiB
 
-const BACKING_COMPRESSION: &'static str = "on";
+const BACKING_COMPRESSION: CompressionAlgorithm = CompressionAlgorithm::On;
 
 const BACKINGFS_COUNT: usize = 1;
 static BACKINGFS: [BackingFs; BACKINGFS_COUNT] =
@@ -137,6 +138,7 @@ pub(crate) fn ensure_backing_fs(
 
         let size_details = Some(SizeDetails {
             quota: bfs.quota,
+            reservation: None,
             compression: bfs.compression,
         });
 
