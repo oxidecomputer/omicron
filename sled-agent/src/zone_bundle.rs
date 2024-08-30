@@ -1538,7 +1538,7 @@ async fn compute_bundle_utilization(
         // TODO-correctness: This takes into account the directories themselves,
         // and may be not quite what we want. But it is very easy and pretty
         // close.
-        let bytes_used = disk_usage(dir).await?;
+        let bytes_used = dir_size(dir).await?;
         debug!(log, "computed bytes used"; "bytes_used" => bytes_used);
         out.insert(
             dir.clone(),
@@ -1552,7 +1552,7 @@ async fn compute_bundle_utilization(
 //
 // This returns an error if reading any file or directory within the provided
 // directory fails.
-async fn disk_usage(path: &Utf8PathBuf) -> Result<u64, BundleError> {
+async fn dir_size(path: &Utf8PathBuf) -> Result<u64, BundleError> {
     let path = path.clone();
     // We could, alternatively, just implement this using `tokio::fs` to read
     // the directory and so on. However, the `tokio::fs` APIs are basically just
@@ -1635,10 +1635,10 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_disk_usage() {
+    async fn test_dir_size() {
         let path =
             Utf8PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/src"));
-        let usage = disk_usage(&path).await.unwrap();
+        let usage = dir_size(&path).await.unwrap();
         // Run `du -As /path/to/omicron/sled-agent/src`, which currently shows this
         // directory is ~450 KiB.
         assert!(
@@ -1646,7 +1646,7 @@ mod tests {
             "sled-agent manifest directory disk usage not correct?"
         );
         let path = Utf8PathBuf::from("/some/nonexistent/path");
-        assert!(disk_usage(&path).await.is_err());
+        assert!(dir_size(&path).await.is_err());
     }
 
     #[tokio::test]
@@ -1655,7 +1655,7 @@ mod tests {
         target_os = "linux",
         target_os = "macos"
     ))]
-    async fn test_disk_usage_matches_du() {
+    async fn test_dir_size_matches_du() {
         // Each OS implements slightly different `du` options.
         //
         // Linux and illumos support the "apparent" size in bytes, though using
@@ -1679,7 +1679,7 @@ mod tests {
             }
         }
 
-        async fn disk_usage_du(path: &Utf8PathBuf) -> Result<u64, BundleError> {
+        async fn dir_size_du(path: &Utf8PathBuf) -> Result<u64, BundleError> {
             const DU: &str = "du";
             let args = &[DU_ARG, "-s", path.as_str()];
             let output =
@@ -1716,13 +1716,13 @@ mod tests {
         let path =
             Utf8PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/src"));
         let t0 = std::time::Instant::now();
-        let usage = dbg!(disk_usage(&path).await)
-            .expect("disk usage for src dir failed");
-        eprintln!("disk_usage({path}) took {:?}", t0.elapsed());
+        let usage =
+            dbg!(dir_size(&path).await).expect("disk usage for src dir failed");
+        eprintln!("dir_size({path}) took {:?}", t0.elapsed());
 
         let t0 = std::time::Instant::now();
         let du_usage =
-            dbg!(disk_usage_du(&path).await).expect("running du failed!");
+            dbg!(dir_size_du(&path).await).expect("running du failed!");
         eprintln!("du -s {path} took {:?}", t0.elapsed());
 
         // Round up the Rust disk usage result to `du`'s block size on this
@@ -1736,8 +1736,8 @@ mod tests {
 
         assert_eq!(
             usage, du_usage,
-            "expected `disk_usage({path})` to == `du -s {path}`\n\
-             {usage}B (`disk_usage`) != {du_usage}B (`du`)",
+            "expected `dir_size({path})` to == `du -s {path}`\n\
+             {usage}B (`dir_size`) != {du_usage}B (`du`)",
         );
     }
 }
