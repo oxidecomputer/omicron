@@ -1104,7 +1104,6 @@ impl DataStore {
         configuration: NameOrId,
         address: params::AddressAddRemove,
     ) -> DeleteResult {
-        use db::schema::address_lot;
         use db::schema::switch_port_settings_address_config as address_config;
 
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -1140,60 +1139,10 @@ impl DataStore {
                             }
                         })?;
 
-                    // resolve id of referenced address lot
-                    let address_lot_id = match settings_to_remove.address_lot {
-
-                        NameOrId::Id(id) => {
-                            // verify id is valid
-                            address_lot::table
-                                .filter(address_lot::time_deleted.is_null())
-                                .filter(address_lot::id.eq(id))
-                                .select(address_lot::id)
-                                .limit(1)
-                                .first_async::<Uuid>(&conn)
-                                .await
-                                .map_err(|e: diesel::result::Error| {
-                                    match e {
-                                        diesel::result::Error::NotFound => {
-                                            err.bail(Error::not_found_by_id(ResourceType::AddressLot, &id))
-                                        },
-                                        _ => {
-                                            let message = "error while looking up address lot for interface address";
-                                            error!(opctx.log, "{message}"; "error" => ?e);
-                                            err.bail(Error::internal_error(message))
-                                        },
-                                    }
-                                })
-                        },
-
-                        NameOrId::Name(name) => {
-                            address_lot::table
-                                .filter(address_lot::time_deleted.is_null())
-                                .filter(address_lot::name.eq(name.to_string()))
-                                .select(address_lot::id)
-                                .limit(1)
-                                .first_async::<Uuid>(&conn)
-                                .await
-                                .map_err(|e: diesel::result::Error| {
-                                    match e {
-                                        diesel::result::Error::NotFound => {
-                                            err.bail(Error::not_found_by_name(ResourceType::AddressLot, &name))
-                                        },
-                                        _ => {
-                                            let message = "error while looking up address lot for interface address";
-                                            error!(opctx.log, "{message}"; "error" => ?e);
-                                            err.bail(Error::internal_error(message))
-                                        },
-                                    }
-                                })
-                        }
-                    }?;
-
                     // find address config
                     let found_address_config = address_config::table
                         .filter(address_config::address.eq(IpNetwork::from(settings_to_remove.address)))
                         .filter(address_config::port_settings_id.eq(port_settings_id))
-                        .filter(address_config::address_lot_block_id.eq(address_lot_id))
                         .filter(address_config::interface_name.eq(settings_to_remove.interface.clone().to_string()))
                         .select(SwitchPortAddressConfig::as_select())
                         .limit(1)
@@ -1223,7 +1172,6 @@ impl DataStore {
                     diesel::delete(address_config::table)
                         .filter(address_config::address.eq(IpNetwork::from(settings_to_remove.address)))
                         .filter(address_config::port_settings_id.eq(port_settings_id))
-                        .filter(address_config::address_lot_block_id.eq(address_lot_id))
                         .filter(address_config::interface_name.eq(settings_to_remove.interface.to_string()))
                         .execute_async(&conn)
                         .await?;

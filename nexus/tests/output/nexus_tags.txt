@@ -197,21 +197,21 @@ networking_loopback_address_list         GET      /v1/system/networking/loopback
 networking_switch_port_configuration_address_add POST     /v1/system/networking/switch-port-configuration/{configuration}/address/add
 networking_switch_port_configuration_address_list GET      /v1/system/networking/switch-port-configuration/{configuration}/address
 networking_switch_port_configuration_address_remove POST     /v1/system/networking/switch-port-configuration/{configuration}/address/remove
+networking_switch_port_configuration_bgp_peer_add POST     /v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/add
+networking_switch_port_configuration_bgp_peer_list GET      /v1/system/networking/switch-port-configuration/{configuration}/bgp-peer
+networking_switch_port_configuration_bgp_peer_remove POST     /v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/remove
 networking_switch_port_configuration_create POST     /v1/system/networking/switch-port-configuration
 networking_switch_port_configuration_delete DELETE   /v1/system/networking/switch-port-configuration
 networking_switch_port_configuration_geometry_set POST     /v1/system/networking/switch-port-configuration/{configuration}/geometry
 networking_switch_port_configuration_geometry_view GET      /v1/system/networking/switch-port-configuration/{configuration}/geometry
-networking_switch_port_configuration_interface_bgp_peer_add POST     /v1/system/networking/switch-port-configuration/{configuration}/interface/{interface}/bgp-peer/add
-networking_switch_port_configuration_interface_bgp_peer_list GET      /v1/system/networking/switch-port-configuration/{configuration}/interface/{interface}/bgp-peer
-networking_switch_port_configuration_interface_bgp_peer_remove POST     /v1/system/networking/switch-port-configuration/{configuration}/interface/{interface}/bgp-peer/remove
-networking_switch_port_configuration_interface_route_add POST     /v1/system/networking/switch-port-configuration/{configuration}/interface/{interface}/route/add
-networking_switch_port_configuration_interface_route_list GET      /v1/system/networking/switch-port-configuration/{configuration}/interface/{interface}/route
-networking_switch_port_configuration_interface_route_remove POST     /v1/system/networking/switch-port-configuration/{configuration}/interface/{interface}/route/remove
 networking_switch_port_configuration_link_create POST     /v1/system/networking/switch-port-configuration/{configuration}/link
 networking_switch_port_configuration_link_delete DELETE   /v1/system/networking/switch-port-configuration/{configuration}/link/{link}
 networking_switch_port_configuration_link_list GET      /v1/system/networking/switch-port-configuration/{configuration}/link
 networking_switch_port_configuration_link_view GET      /v1/system/networking/switch-port-configuration/{configuration}/link/{link}
 networking_switch_port_configuration_list GET      /v1/system/networking/switch-port-configuration
+networking_switch_port_configuration_route_add POST     /v1/system/networking/switch-port-configuration/{configuration}/route/add
+networking_switch_port_configuration_route_list GET      /v1/system/networking/switch-port-configuration/{configuration}/route
+networking_switch_port_configuration_route_remove POST     /v1/system/networking/switch-port-configuration/{configuration}/route/remove
 networking_switch_port_configuration_view GET      /v1/system/networking/switch-port-configuration/{configuration}
 
 API operations found with tag "system/silos"
