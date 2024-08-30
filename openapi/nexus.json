@@ -5210,7 +5210,7 @@
     "/v1/system/ip-pools": {
       "get": {
         "tags": [
-          "system/networking"
+          "system/ip-pools"
         ],
         "summary": "List IP pools",
         "operationId": "ip_pool_list",
@@ -5267,7 +5267,7 @@
       },
       "post": {
         "tags": [
-          "system/networking"
+          "system/ip-pools"
         ],
         "summary": "Create IP pool",
         "operationId": "ip_pool_create",
@@ -5304,7 +5304,7 @@
     "/v1/system/ip-pools/{pool}": {
       "get": {
         "tags": [
-          "system/networking"
+          "system/ip-pools"
         ],
         "summary": "Fetch IP pool",
         "operationId": "ip_pool_view",
@@ -5340,7 +5340,7 @@
       },
       "put": {
         "tags": [
-          "system/networking"
+          "system/ip-pools"
         ],
         "summary": "Update IP pool",
         "operationId": "ip_pool_update",
@@ -5386,7 +5386,7 @@
       },
       "delete": {
         "tags": [
-          "system/networking"
+          "system/ip-pools"
         ],
         "summary": "Delete IP pool",
         "operationId": "ip_pool_delete",
@@ -5417,7 +5417,7 @@
     "/v1/system/ip-pools/{pool}/ranges": {
       "get": {
         "tags": [
-          "system/networking"
+          "system/ip-pools"
         ],
         "summary": "List ranges for IP pool",
         "description": "Ranges are ordered by their first address.",
@@ -5479,7 +5479,7 @@
     "/v1/system/ip-pools/{pool}/ranges/add": {
       "post": {
         "tags": [
-          "system/networking"
+          "system/ip-pools"
         ],
         "summary": "Add range to IP pool",
         "description": "IPv6 ranges are not allowed yet.",
@@ -5528,7 +5528,7 @@
     "/v1/system/ip-pools/{pool}/ranges/remove": {
       "post": {
         "tags": [
-          "system/networking"
+          "system/ip-pools"
         ],
         "summary": "Remove range from IP pool",
         "operationId": "ip_pool_range_remove",
@@ -5569,7 +5569,7 @@
     "/v1/system/ip-pools/{pool}/silos": {
       "get": {
         "tags": [
-          "system/networking"
+          "system/ip-pools"
         ],
         "summary": "List IP pool's linked silos",
         "operationId": "ip_pool_silo_list",
@@ -5635,7 +5635,7 @@
       },
       "post": {
         "tags": [
-          "system/networking"
+          "system/ip-pools"
         ],
         "summary": "Link IP pool to silo",
         "description": "Users in linked silos can allocate external IPs from this pool for their instances. A silo can have at most one default pool. IPs are allocated from the default pool when users ask for one without specifying a pool.",
@@ -5684,7 +5684,7 @@
     "/v1/system/ip-pools/{pool}/silos/{silo}": {
       "put": {
         "tags": [
-          "system/networking"
+          "system/ip-pools"
         ],
         "summary": "Make IP pool default for silo",
         "description": "When a user asks for an IP (e.g., at instance create time) without specifying a pool, the IP comes from the default pool if a default is configured. When a pool is made the default for a silo, any existing default will remain linked to the silo, but will no longer be the default.",
@@ -5738,7 +5738,7 @@
       },
       "delete": {
         "tags": [
-          "system/networking"
+          "system/ip-pools"
         ],
         "summary": "Unlink IP pool from silo",
         "description": "Will fail if there are any outstanding IPs allocated in the silo.",
@@ -5777,7 +5777,7 @@
     "/v1/system/ip-pools/{pool}/utilization": {
       "get": {
         "tags": [
-          "system/networking"
+          "system/ip-pools"
         ],
         "summary": "Fetch IP pool utilization",
         "operationId": "ip_pool_utilization_view",
@@ -5815,7 +5815,7 @@
     "/v1/system/ip-pools-service": {
       "get": {
         "tags": [
-          "system/networking"
+          "system/ip-pools"
         ],
         "summary": "Fetch Oxide service IP pool",
         "operationId": "ip_pool_service_view",
@@ -5842,7 +5842,7 @@
     "/v1/system/ip-pools-service/ranges": {
       "get": {
         "tags": [
-          "system/networking"
+          "system/ip-pools"
         ],
         "summary": "List IP ranges for the Oxide service pool",
         "description": "Ranges are ordered by their first address.",
@@ -5895,7 +5895,7 @@
     "/v1/system/ip-pools-service/ranges/add": {
       "post": {
         "tags": [
-          "system/networking"
+          "system/ip-pools"
         ],
         "summary": "Add IP range to Oxide service pool",
         "description": "IPv6 ranges are not allowed yet.",
@@ -5933,7 +5933,7 @@
     "/v1/system/ip-pools-service/ranges/remove": {
       "post": {
         "tags": [
-          "system/networking"
+          "system/ip-pools"
         ],
         "summary": "Remove IP range from Oxide service pool",
         "operationId": "ip_pool_service_range_remove",
@@ -21462,6 +21462,13 @@
       "description": "These operations pertain to hardware inventory and management. Racks are the unit of expansion of an Oxide deployment. Racks are in turn composed of sleds, switches, power supplies, and a cabled backplane.",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/system-hardware"
+      }
+    },
+    {
+      "name": "system/ip-pools",
+      "description": "IP pools are collections of external IPs that can be assigned to silos. When a pool is linked to a silo, users in that silo can allocate IPs from the pool for their instances.",
+      "externalDocs": {
+        "url": "http://docs.oxide.computer/api/system-ip-pools"
       }
     },
     {
