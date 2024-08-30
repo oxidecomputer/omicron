@@ -78,7 +78,7 @@ impl ClickhouseServerConfig {
     }
 
     /// Generate a configuration file for a replica server node
-    pub fn generate_xml_file(&self) -> Result<()> {
+    pub fn generate_xml_file(&self) -> Result<ReplicaConfig> {
         let logger =
             LogConfig::new(self.datastore_path.clone(), NodeType::Server);
         let macros = Macros::new(self.id);
@@ -98,7 +98,7 @@ impl ClickhouseServerConfig {
         f.write_all(config.to_xml().as_bytes())?;
         f.flush()?;
         rename(f.path(), self.config_dir.join("replica-server-config.xml"))?;
-        Ok(())
+        Ok(config)
     }
 }
 

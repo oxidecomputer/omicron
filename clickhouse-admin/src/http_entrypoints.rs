@@ -4,6 +4,7 @@
 
 use crate::context::ServerContext;
 use clickhouse_admin_api::*;
+use clickhouse_admin_types::config::ReplicaConfig;
 use dropshot::HttpError;
 use dropshot::{
     HttpResponseCreated, HttpResponseOk, RequestContext, TypedBody,
@@ -33,8 +34,7 @@ impl ClickhouseAdminApi for ClickhouseAdminImpl {
     async fn generate_server_config(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<ServerSettings>,
-    ) -> Result<HttpResponseCreated<ServerConfigGenerateResponse>, HttpError>
-    {
+    ) -> Result<HttpResponseCreated<ReplicaConfig>, HttpError> {
         let ctx = rqctx.context();
         let server_settings = body.into_inner();
         let output = ctx.clickward().generate_server_config(server_settings)?;

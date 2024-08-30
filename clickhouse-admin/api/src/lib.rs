@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use clickhouse_admin_types::config::ClickhouseHost;
+use clickhouse_admin_types::config::{ClickhouseHost, ReplicaConfig};
 use dropshot::{
     HttpError, HttpResponseCreated, HttpResponseOk, RequestContext, TypedBody,
 };
@@ -32,28 +32,13 @@ pub trait ClickhouseAdminApi {
     async fn generate_server_config(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<ServerSettings>,
-    ) -> Result<HttpResponseCreated<ServerConfigGenerateResponse>, HttpError>;
+    ) -> Result<HttpResponseCreated<ReplicaConfig>, HttpError>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct ClickhouseAddress {
     pub clickhouse_address: SocketAddrV6,
-}
-
-// TODO: Perhaps change this response type for something better
-// like an object with all the settings or something like that
-/// Success response for server node configuration file generation
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub struct ServerConfigGenerateResponse {
-    pub success: bool,
-}
-
-impl ServerConfigGenerateResponse {
-    pub fn success() -> Self {
-        Self { success: true }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
