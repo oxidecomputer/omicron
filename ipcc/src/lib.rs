@@ -9,23 +9,12 @@
 //! values are variously static, passed from the control plane to the SP
 //! (through MGS) or set from userland via libipcc.
 
-use cfg_if::cfg_if;
+use libipcc::{IpccError, IpccHandle};
 use omicron_common::update::ArtifactHash;
 use serde::Deserialize;
 use serde::Serialize;
 use thiserror::Error;
 use uuid::Uuid;
-
-cfg_if! {
-    if #[cfg(target_os = "illumos")] {
-        mod ffi;
-        mod handle;
-        use handle::IpccHandle;
-    } else {
-        mod handle_stub;
-        use handle_stub::IpccHandle;
-    }
-}
 
 #[cfg(test)]
 use proptest::arbitrary::any;
@@ -143,36 +132,6 @@ pub enum InstallinatorImageIdError {
     Ipcc(#[from] IpccError),
     #[error("deserializing installinator image ID failed: {0}")]
     DeserializationFailed(String),
-}
-
-#[derive(Error, Debug)]
-pub enum IpccError {
-    #[error("Memory allocation error")]
-    NoMem(#[source] IpccErrorInner),
-    #[error("Invalid parameter")]
-    InvalidParam(#[source] IpccErrorInner),
-    #[error("Internal error occurred")]
-    Internal(#[source] IpccErrorInner),
-    #[error("Requested lookup key was not known to the SP")]
-    KeyUnknown(#[source] IpccErrorInner),
-    #[error("Value for the requested lookup key was too large for the supplied buffer")]
-    KeyBufTooSmall(#[source] IpccErrorInner),
-    #[error("Attempted to write to read-only key")]
-    KeyReadonly(#[source] IpccErrorInner),
-    #[error("Attempted write to key failed because the value is too long")]
-    KeyValTooLong(#[source] IpccErrorInner),
-    #[error("Compression or decompression failed")]
-    KeyZerr(#[source] IpccErrorInner),
-    #[error("Unknown libipcc error")]
-    UnknownErr(#[source] IpccErrorInner),
-}
-
-#[derive(Error, Debug)]
-#[error("{context}: {errmsg} ({syserr})")]
-pub struct IpccErrorInner {
-    pub context: String,
-    pub errmsg: String,
-    pub syserr: String,
 }
 
 /// These are the IPCC keys we can look up.

@@ -79,6 +79,9 @@ impl ExampleSystem {
                     vec![],
                 )
                 .unwrap();
+            let _ = builder
+                .sled_ensure_zone_multiple_internal_dns(sled_id, 1)
+                .unwrap();
             let _ = builder.sled_ensure_disks(sled_id, sled_resources).unwrap();
             for pool_name in sled_resources.zpools.keys() {
                 let _ = builder

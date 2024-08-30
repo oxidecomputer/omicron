@@ -31,6 +31,7 @@ use omicron_common::api::internal::shared::{
 };
 use omicron_common::backoff;
 use omicron_common::zpool_name::ZpoolName;
+use omicron_common::NoDebug;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid};
 use propolis_client::Client as PropolisClient;
 use rand::prelude::IteratorRandom;
@@ -335,7 +336,7 @@ struct InstanceRunner {
 
     // Disk related properties
     requested_disks: Vec<propolis_client::types::DiskRequest>,
-    cloud_init_bytes: Option<String>,
+    cloud_init_bytes: Option<NoDebug<String>>,
 
     // Internal State management
     state: InstanceStates,
@@ -718,10 +719,10 @@ impl InstanceRunner {
                 .map(Into::into)
                 .collect(),
             migrate,
-            cloud_init_bytes: self.cloud_init_bytes.clone(),
+            cloud_init_bytes: self.cloud_init_bytes.clone().map(|x| x.0),
         };
 
-        info!(self.log, "Sending ensure request to propolis: {:?}", request);
+        debug!(self.log, "Sending ensure request to propolis: {:?}", request);
         let result = client.instance_ensure().body(request).send().await;
         info!(self.log, "result of instance_ensure call is {:?}", result);
         result?;

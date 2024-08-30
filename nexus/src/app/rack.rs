@@ -147,7 +147,7 @@ impl super::Nexus {
                     dataset.dataset_id,
                     dataset.zpool_id,
                     Some(dataset.request.address),
-                    dataset.request.kind.into(),
+                    dataset.request.kind,
                 )
             })
             .collect();

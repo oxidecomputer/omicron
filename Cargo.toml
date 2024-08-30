@@ -52,6 +52,8 @@ members = [
     "internal-dns",
     "ipcc",
     "key-manager",
+    "live-tests",
+    "live-tests/macros",
     "nexus",
     "nexus-config",
     "nexus-sled-agent-shared",
@@ -62,6 +64,7 @@ members = [
     "nexus/db-model",
     "nexus/db-queries",
     "nexus/defaults",
+    "nexus/external-api",
     "nexus/internal-api",
     "nexus/inventory",
     "nexus/macros-common",
@@ -120,6 +123,7 @@ default-members = [
     "certificates",
     "clickhouse-admin",
     "clickhouse-admin/api",
+    "clickhouse-admin/types",
     "clients/bootstrap-agent-client",
     "clients/cockroach-admin-client",
     "clients/ddm-admin-client",
@@ -155,8 +159,7 @@ default-members = [
     # See omicron#4392.
     "dns-server",
     "dns-server-api",
-    # Do not include end-to-end-tests in the list of default members, as its
-    # tests only work on a deployed control plane.
+    "end-to-end-tests",
     "gateway",
     "gateway-api",
     "gateway-cli",
@@ -170,6 +173,8 @@ default-members = [
     "internal-dns",
     "ipcc",
     "key-manager",
+    "live-tests",
+    "live-tests/macros",
     "nexus",
     "nexus-config",
     "nexus-sled-agent-shared",
@@ -180,6 +185,7 @@ default-members = [
     "nexus/db-model",
     "nexus/db-queries",
     "nexus/defaults",
+    "nexus/external-api",
     "nexus/internal-api",
     "nexus/inventory",
     "nexus/macros-common",
@@ -282,13 +288,12 @@ api_identity = { path = "api_identity" }
 approx = "0.5.1"
 assert_matches = "1.5.0"
 assert_cmd = "2.0.16"
-async-bb8-diesel = { git = "https://github.com/oxidecomputer/async-bb8-diesel", rev = "ed7ab5ef0513ba303d33efd41d3e9e381169d59b" }
+async-bb8-diesel = "0.2"
 async-trait = "0.1.81"
 atomicwrites = "0.4.3"
 authz-macros = { path = "nexus/authz-macros" }
 backoff = { version = "0.4.0", features = [ "tokio" ] }
 base64 = "0.22.1"
-bb8 = "0.8.5"
 bcs = "0.1.6"
 bincode = "1.3.3"
 bootstore = { path = "bootstore" }
@@ -307,6 +312,7 @@ chrono = { version = "0.4", features = [ "serde" ] }
 ciborium = "0.2.2"
 clap = { version = "4.5", features = ["cargo", "derive", "env", "wrap_help"] }
 clickhouse-admin-api = { path = "clickhouse-admin/api" }
+clickhouse-admin-types = { path = "clickhouse-admin/types" }
 clickward = { git = "https://github.com/oxidecomputer/clickward", rev = "ceec762e6a87d2a22bf56792a3025e145caa095e" }
 cockroach-admin-api = { path = "cockroach-admin/api" }
 cockroach-admin-client = { path = "clients/cockroach-admin-client" }
@@ -324,14 +330,14 @@ crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "e5
 csv = "1.3.0"
 curve25519-dalek = "4"
 datatest-stable = "0.2.9"
-display-error-chain = "0.2.0"
+display-error-chain = "0.2.1"
 omicron-ddm-admin-client = { path = "clients/ddm-admin-client" }
 db-macros = { path = "nexus/db-macros" }
 debug-ignore = "1.0.5"
 derive_more = "0.99.18"
 derive-where = "1.2.7"
 # Having the i-implement-... feature here makes diesel go away from the workspace-hack
-diesel = { version = "2.2.2", features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes", "postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
+diesel = { version = "2.2.3", features = ["i-implement-a-third-party-backend-and-opt-into-breaking-changes", "postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 diesel-dtrace = { git = "https://github.com/oxidecomputer/diesel-dtrace", branch = "main" }
 dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
@@ -342,7 +348,7 @@ dyn-clone = "1.0.17"
 either = "1.13.0"
 expectorate = "1.1.0"
 fatfs = "0.3.6"
-filetime = "0.2.24"
+filetime = "0.2.25"
 flate2 = "1.0.31"
 float-ord = "0.3.2"
 flume = "0.11.0"
@@ -400,10 +406,12 @@ ipnetwork = { version = "0.20", features = ["schemars"] }
 ispf = { git = "https://github.com/oxidecomputer/ispf" }
 key-manager = { path = "key-manager" }
 kstat-rs = "0.2.4"
-libc = "0.2.156"
+libc = "0.2.158"
+libipcc = { git = "https://github.com/oxidecomputer/libipcc", rev = "fdffa212373a8f92473ea5f411088912bf458d5f" }
 libfalcon = { git = "https://github.com/oxidecomputer/falcon", rev = "e69694a1f7cc9fe31fab27f321017280531fb5f7" }
 libnvme = { git = "https://github.com/oxidecomputer/libnvme", rev = "dd5bb221d327a1bc9287961718c3c10d6bd37da0" }
 linear-map = "1.2.0"
+live-tests-macros = { path = "live-tests/macros" }
 macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
 mockall = "0.13"
@@ -418,6 +426,7 @@ nexus-db-fixed-data = { path = "nexus/db-fixed-data" }
 nexus-db-model = { path = "nexus/db-model" }
 nexus-db-queries = { path = "nexus/db-queries" }
 nexus-defaults = { path = "nexus/defaults" }
+nexus-external-api = { path = "nexus/external-api" }
 nexus-inventory = { path = "nexus/inventory" }
 nexus-internal-api = { path = "nexus/internal-api" }
 nexus-macros-common = { path = "nexus/macros-common" }
@@ -497,6 +506,7 @@ bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "24a74d0c
 propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "24a74d0c76b6a63961ecef76acb1516b6e66c5c9" }
 propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "24a74d0c76b6a63961ecef76acb1516b6e66c5c9" }
 proptest = "1.5.0"
+qorb = { git = "https://github.com/oxidecomputer/qorb", branch = "master" }
 quote = "1.0"
 rand = "0.8.5"
 rand_core = "0.6.4"
@@ -580,7 +590,7 @@ textwrap = "0.16.1"
 test-strategy = "0.3.1"
 thiserror = "1.0"
 tofino = { git = "https://github.com/oxidecomputer/tofino", branch = "main" }
-tokio = "1.38.1"
+tokio = "1.39.3"
 tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1" ] }
 tokio-stream = "0.1.15"
 tokio-tungstenite = "0.20"
@@ -828,7 +838,3 @@ path = "workspace-hack"
 [patch."https://github.com/oxidecomputer/omicron"]
 omicron-uuid-kinds = { path = "uuid-kinds" }
 omicron-common = { path = "common" }
-
-[patch.crates-io.zone]
-git = 'https://github.com/oxidecomputer/zone'
-branch = 'state-derive-eq-hash'

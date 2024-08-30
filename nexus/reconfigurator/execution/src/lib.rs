@@ -34,6 +34,8 @@ mod omicron_zones;
 mod overridables;
 mod sagas;
 mod sled_state;
+#[cfg(test)]
+mod test_utils;
 
 pub use dns::blueprint_external_dns_config;
 pub use dns::blueprint_internal_dns_config;
@@ -270,6 +272,7 @@ mod tests {
     use nexus_db_model::SledSystemHardware;
     use nexus_db_model::SledUpdate;
     use nexus_db_model::Zpool;
+    use omicron_common::api::external::Error;
     use std::collections::BTreeSet;
     use uuid::Uuid;
 
@@ -340,10 +343,10 @@ mod tests {
                 PhysicalDiskKind::U2,
                 sled_id.into_untyped_uuid(),
             );
-            datastore
-                .physical_disk_insert(&opctx, disk.clone())
-                .await
-                .expect("failed to upsert physical disk");
+            match datastore.physical_disk_insert(&opctx, disk.clone()).await {
+                Ok(_) | Err(Error::ObjectAlreadyExists { .. }) => (),
+                Err(e) => panic!("failed to upsert physical disk: {e}"),
+            }
 
             if pool_inserted.insert(pool_id) {
                 let zpool = Zpool::new(

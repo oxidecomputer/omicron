@@ -176,6 +176,62 @@
         }
       }
     },
+    "/datasets": {
+      "get": {
+        "summary": "Lists the datasets that this sled is configured to use",
+        "operationId": "datasets_get",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetsConfig"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "summary": "Configures datasets to be used on this sled",
+        "operationId": "datasets_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DatasetsConfig"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetsManagementResult"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/disks/{disk_id}": {
       "put": {
         "operationId": "disk_put",
@@ -2005,6 +2061,112 @@
           }
         ]
       },
+      "CompressionAlgorithm": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "on"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "off"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "gzip"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "level": {
+                "$ref": "#/components/schemas/GzipLevel"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "gzip_n"
+                ]
+              }
+            },
+            "required": [
+              "level",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "lz4"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "lzjb"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "zle"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
       "CrucibleOpts": {
         "description": "CrucibleOpts\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"id\", \"lossy\", \"read_only\", \"target\" ], \"properties\": { \"cert_pem\": { \"type\": [ \"string\", \"null\" ] }, \"control\": { \"type\": [ \"string\", \"null\" ] }, \"flush_timeout\": { \"type\": [ \"number\", \"null\" ], \"format\": \"float\" }, \"id\": { \"type\": \"string\", \"format\": \"uuid\" }, \"key\": { \"type\": [ \"string\", \"null\" ] }, \"key_pem\": { \"type\": [ \"string\", \"null\" ] }, \"lossy\": { \"type\": \"boolean\" }, \"read_only\": { \"type\": \"boolean\" }, \"root_cert_pem\": { \"type\": [ \"string\", \"null\" ] }, \"target\": { \"type\": \"array\", \"items\": { \"type\": \"string\" } } } } ``` </details>",
         "type": "object",
@@ -2056,6 +2218,128 @@
           "lossy",
           "read_only",
           "target"
+        ]
+      },
+      "DatasetConfig": {
+        "description": "Configuration information necessary to request a single dataset",
+        "type": "object",
+        "properties": {
+          "compression": {
+            "description": "The compression mode to be used by the dataset",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CompressionAlgorithm"
+              }
+            ]
+          },
+          "id": {
+            "description": "The UUID of the dataset being requested",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+              }
+            ]
+          },
+          "name": {
+            "description": "The dataset's name",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DatasetName"
+              }
+            ]
+          },
+          "quota": {
+            "nullable": true,
+            "description": "The upper bound on the amount of storage used by this dataset",
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "reservation": {
+            "nullable": true,
+            "description": "The lower bound on the amount of storage usable by this dataset",
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "compression",
+          "id",
+          "name"
+        ]
+      },
+      "DatasetKind": {
+        "description": "The kind of dataset. See the `DatasetKind` enum in omicron-common for possible values.",
+        "type": "string"
+      },
+      "DatasetManagementStatus": {
+        "description": "Identifies how a single dataset management operation may have succeeded or failed.",
+        "type": "object",
+        "properties": {
+          "dataset_name": {
+            "$ref": "#/components/schemas/DatasetName"
+          },
+          "err": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "dataset_name"
+        ]
+      },
+      "DatasetName": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/DatasetKind"
+          },
+          "pool_name": {
+            "$ref": "#/components/schemas/ZpoolName"
+          }
+        },
+        "required": [
+          "kind",
+          "pool_name"
+        ]
+      },
+      "DatasetsConfig": {
+        "type": "object",
+        "properties": {
+          "datasets": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/DatasetConfig"
+            }
+          },
+          "generation": {
+            "description": "generation number of this configuration\n\nThis generation number is owned by the control plane (i.e., RSS or Nexus, depending on whether RSS-to-Nexus handoff has happened).  It should not be bumped within Sled Agent.\n\nSled Agent rejects attempts to set the configuration to a generation older than the one it's currently running.\n\nNote that \"Generation::new()\", AKA, the first generation number, is reserved for \"no datasets\". This is the default configuration for a sled before any requests have been made.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          }
+        },
+        "required": [
+          "datasets",
+          "generation"
+        ]
+      },
+      "DatasetsManagementResult": {
+        "description": "The result from attempting to manage datasets.",
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DatasetManagementStatus"
+            }
+          }
+        },
+        "required": [
+          "status"
         ]
       },
       "DhcpConfig": {
@@ -2698,6 +2982,11 @@
         "description": "Generation numbers stored in the database, used for optimistic concurrency control",
         "type": "integer",
         "format": "uint64",
+        "minimum": 0
+      },
+      "GzipLevel": {
+        "type": "integer",
+        "format": "uint8",
         "minimum": 0
       },
       "HostIdentifier": {
@@ -4761,6 +5050,10 @@
           "stratum",
           "sync"
         ]
+      },
+      "TypedUuidForDatasetKind": {
+        "type": "string",
+        "format": "uuid"
       },
       "TypedUuidForInstanceKind": {
         "type": "string",

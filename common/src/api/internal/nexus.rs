@@ -275,31 +275,15 @@ pub struct UpdateArtifactId {
 // Adding a new KnownArtifactKind
 // ===============================
 //
-// Adding a new update artifact kind is a tricky process. To do so:
+// To add a new kind of update artifact:
 //
 // 1. Add it here.
+// 2. Regenerate OpenAPI documents with `cargo xtask openapi generate` -- this
+//    should work without any compile errors.
+// 3. Run `cargo check --all-targets` to resolve compile errors.
 //
-// 2. Add the new kind to <repo root>/clients/src/lib.rs.
-//    The mapping from `UpdateArtifactKind::*` to `types::UpdateArtifactKind::*`
-//    must be left as a `todo!()` for now; `types::UpdateArtifactKind` will not
-//    be updated with the new variant until step 5 below.
-//
-// 4. Add the new kind and the mapping to its `update_artifact_kind` to
-//    <repo root>/nexus/db-model/src/update_artifact.rs
-//
-// 5. Regenerate the OpenAPI specs for nexus and sled-agent:
-//
-//    ```
-//    EXPECTORATE=overwrite cargo nextest run -p omicron-nexus -p omicron-sled-agent openapi
-//    ```
-//
-// 6. Return to <repo root>/{nexus-client,sled-agent-client}/lib.rs from step 2
-//    and replace the `todo!()`s with the new `types::UpdateArtifactKind::*`
-//    variant.
-//
-// See https://github.com/oxidecomputer/omicron/pull/2300 as an example.
-//
-// NOTE: KnownArtifactKind has to be in snake_case due to openapi-lint requirements.
+// NOTE: KnownArtifactKind has to be in snake_case due to openapi-lint
+// requirements.
 
 /// Kinds of update artifacts, as used by Nexus to determine what updates are available and by
 /// sled-agent to determine how to apply an update when asked.
