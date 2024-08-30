@@ -81,7 +81,6 @@ slog-dtrace.workspace = true
 slog-term.workspace = true
 smf.workspace = true
 strum.workspace = true
-strum_macros.workspace = true
 tar.workspace = true
 thiserror.workspace = true
 tofino.workspace = true
