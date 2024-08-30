@@ -981,7 +981,7 @@ impl DataStore {
                                 },
                                 _ => {
                                     err.bail(Error::internal_error(
-                                        "error while looking up address lot for interface address"
+                                        "error while looking up configuration for interface address"
                                     ))
                                 },
                             }
@@ -1133,7 +1133,7 @@ impl DataStore {
                                 },
                                 _ => {
                                     err.bail(Error::internal_error(
-                                        "error while looking up address lot for interface address"
+                                        "error while looking up configuration for interface address"
                                     ))
                                 },
                             }
@@ -1246,7 +1246,6 @@ impl DataStore {
         configuration: NameOrId,
         route: params::RouteAddRemove,
     ) -> CreateResult<SwitchPortRouteConfig> {
-        use db::schema::address_lot;
         use db::schema::switch_port_settings_route_config as route_config;
 
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -1260,7 +1259,61 @@ impl DataStore {
             let new_settings = route.clone();
             let err = err.clone();
 
-            async move { todo!() }
+            async move {
+                // resolve id of port_settings record
+                let port_settings_id = switch_port_configuration_id(&conn, parent_configuration.clone())
+                    .await
+                    .map_err(|e: diesel::result::Error| {
+                        match e {
+                            diesel::result::Error::NotFound => {
+                                err.bail(
+                                    Error::non_resourcetype_not_found(
+                                        format!("unable to lookup configuration with identifier {parent_configuration}")
+                                    )
+                                )
+                            },
+                            _ => {
+                                err.bail(Error::internal_error(
+                                    "error while looking up configuration for interface address"
+                                ))
+                            },
+                        }
+                    })?;
+
+                let route_config = SwitchPortRouteConfig{
+                    port_settings_id,
+                    interface_name: new_settings.interface.to_string(),
+                    dst: new_settings.dst.into(),
+                    gw: new_settings.gw.into(),
+                    vid: new_settings.vid.map(Into::into),
+                    local_pref: new_settings.local_pref.map(Into::into),
+                };
+
+                let config = diesel::insert_into(route_config::table)
+                    .values(route_config)
+                    .returning(SwitchPortRouteConfig::as_returning())
+                    .get_result_async(&conn)
+                    .await
+                    .map_err(|e: diesel::result::Error| {
+                        let message = "error while adding route to interface";
+                        match e {
+                            diesel::result::Error::DatabaseError(kind, _) => {
+                                match kind {
+                                    diesel::result::DatabaseErrorKind::UniqueViolation => {
+                                        err.bail(Error::conflict("route configuration conflicts with an existing route"))
+                                    },
+                                    diesel::result::DatabaseErrorKind::NotNullViolation => {
+                                        err.bail(Error::invalid_request("a required field is not populated"))
+                                    },
+                                    _ => err.bail(Error::internal_error(message)),
+                                }
+                            },
+                            _ => err.bail(Error::internal_error(message)),
+                        }
+                    })?;
+
+                Ok(config)
+            }
         })
         .await
         .map_err(|e| {
@@ -1300,7 +1353,40 @@ impl DataStore {
             let settings_to_remove = route.clone();
             let err = err.clone();
 
-            async move { todo!() }
+            async move {
+                    // resolve id of port_settings record
+                    let port_settings_id = switch_port_configuration_id(&conn, parent_configuration.clone())
+                        .await
+                        .map_err(|e: diesel::result::Error| {
+                            match e {
+                                diesel::result::Error::NotFound => {
+                                    err.bail(
+                                        Error::non_resourcetype_not_found(
+                                            format!("unable to lookup configuration with identifier {parent_configuration}")
+                                        )
+                                    )
+                                },
+                                _ => {
+                                    err.bail(Error::internal_error(
+                                        "error while looking up configuration for interface address"
+                                    ))
+                                },
+                            }
+                        })?;
+
+                    // delete route config
+                    // PRIMARY KEY (port_settings_id, interface_name, dst, gw)
+                    diesel::delete(route_config::table)
+                        .filter(route_config::dst.eq(IpNetwork::from(settings_to_remove.dst)))
+                        .filter(route_config::gw.eq(IpNetwork::from(settings_to_remove.gw)))
+                        .filter(route_config::port_settings_id.eq(port_settings_id))
+                        .filter(route_config::interface_name.eq(settings_to_remove.interface.to_string()))
+                        .execute_async(&conn)
+                        .await?;
+
+                    Ok(())
+
+            }
         })
         .await
         .map_err(|e| {
