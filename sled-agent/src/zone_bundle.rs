@@ -1564,9 +1564,7 @@ async fn dir_size(path: &Utf8PathBuf) -> Result<u64, BundleError> {
         let mut sum = 0;
         for entry in walkdir::WalkDir::new(&path).into_iter() {
             let entry = entry?;
-            if !entry.file_type().is_dir() {
-                sum += entry.metadata()?.len()
-            }
+            sum += entry.metadata()?.len()
         }
 
         Ok(sum)
