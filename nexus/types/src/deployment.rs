@@ -42,6 +42,7 @@ use uuid::Uuid;
 
 mod blueprint_diff;
 mod blueprint_display;
+pub mod execution;
 mod network_resources;
 mod planning_input;
 mod tri_map;

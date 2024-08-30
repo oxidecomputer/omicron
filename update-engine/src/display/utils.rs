@@ -6,6 +6,8 @@
 
 use std::fmt;
 
+use crate::{AbortReason, EventBuffer, StepSpec};
+
 /// Given current and total, displays `{current}/{total}`.
 ///
 /// * If the `index_and_total` constructor is called, then `current` is `index
@@ -104,5 +106,48 @@ impl ToU64 for u64 {
     #[inline]
     fn to_u64(self) -> u64 {
         self
+    }
+}
+
+/// Displays the message for an execution abort.
+///
+/// Returned by [`AbortReason::message_display`].
+pub struct AbortMessageDisplay<'a, S: StepSpec> {
+    reason: &'a AbortReason,
+    buffer: &'a EventBuffer<S>,
+    // TODO: color
+}
+
+impl<'a, S: StepSpec> AbortMessageDisplay<'a, S> {
+    /// Create a new `AbortMessageDisplay`.
+    pub(crate) fn new(
+        reason: &'a AbortReason,
+        buffer: &'a EventBuffer<S>,
+    ) -> Self {
+        Self { reason, buffer }
+    }
+}
+
+impl<'a, S: StepSpec> fmt::Display for AbortMessageDisplay<'a, S> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.reason {
+            AbortReason::StepAborted(info) => {
+                write!(f, "{}", info.message)
+            }
+            AbortReason::ParentAborted { parent_step, parent_info } => {
+                let parent_description =
+                    if let Some(step) = self.buffer.get(parent_step) {
+                        &step.step_info().description
+                    } else {
+                        "unknown step"
+                    };
+
+                write!(
+                    f,
+                    "parent step \"{}\" aborted with: {}",
+                    parent_description, parent_info.message
+                )
+            }
+        }
     }
 }

@@ -51,8 +51,19 @@ use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::str::FromStr;
+use tabled::settings::object::Columns;
+use tabled::settings::Padding;
 use tabled::Tabled;
 use tokio::sync::OnceCell;
+use update_engine::display::ProgressRatioDisplay;
+use update_engine::events::EventReport;
+use update_engine::events::StepOutcome;
+use update_engine::EventBuffer;
+use update_engine::ExecutionStatus;
+use update_engine::ExecutionTerminalInfo;
+use update_engine::NestedError;
+use update_engine::NestedSpec;
+use update_engine::TerminalKind;
 use uuid::Uuid;
 
 /// Arguments to the "omdb nexus" subcommand
@@ -1586,30 +1597,68 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
             }
         }
     } else if name == "blueprint_executor" {
+        let mut value = details.clone();
+        // Extract and remove the event report. (If we don't do this, the
+        // `Debug` output can be quite large.)
+        //
+        // TODO: show more of the event buffer.
+        let event_buffer = extract_event_buffer(&mut value);
+
         #[derive(Deserialize)]
         struct BlueprintExecutorStatus {
             target_id: Uuid,
             enabled: bool,
-            errors: Option<Vec<String>>,
+            execution_error: Option<NestedError>,
         }
 
-        match serde_json::from_value::<BlueprintExecutorStatus>(details.clone())
-        {
+        match serde_json::from_value::<BlueprintExecutorStatus>(value) {
             Err(error) => eprintln!(
                 "warning: failed to interpret task details: {:?}: {:?}",
                 error, details
             ),
             Ok(status) => {
-                println!("    target blueprint: {}", status.target_id);
-                println!(
-                    "    execution:        {}",
-                    if status.enabled { "enabled" } else { "disabled" }
-                );
-                let errors = status.errors.as_deref().unwrap_or(&[]);
-                println!("    errors:           {}", errors.len());
-                for (i, e) in errors.iter().enumerate() {
-                    println!("        error {}: {}", i, e);
+                // TODO: switch the other outputs to tabled as well.
+                let mut builder = tabled::builder::Builder::default();
+                builder.push_record([
+                    "target blueprint:".to_string(),
+                    status.target_id.to_string(),
+                ]);
+                builder.push_record([
+                    "execution:".to_string(),
+                    if status.enabled {
+                        "enabled".to_string()
+                    } else {
+                        "disabled".to_string()
+                    },
+                ]);
+
+                push_event_buffer_summary(event_buffer, &mut builder);
+
+                match status.execution_error {
+                    Some(error) => {
+                        builder.push_record([
+                            "error:".to_string(),
+                            error.to_string(),
+                        ]);
+
+                        for source in error.sources() {
+                            builder.push_record([
+                                "  caused by:".to_string(),
+                                source.to_string(),
+                            ]);
+                        }
+                    }
+                    None => {
+                        builder.push_record([
+                            "error:".to_string(),
+                            "(none)".to_string(),
+                        ]);
+                    }
                 }
+
+                let mut table = builder.build();
+                bgtask_apply_kv_style(&mut table);
+                println!("{}", table);
             }
         }
     } else {
@@ -1629,6 +1678,177 @@ fn reason_str(reason: &ActivationReason) -> &'static str {
         ActivationReason::Signaled => "an explicit signal",
         ActivationReason::Dependency => "a dependent task completing",
         ActivationReason::Timeout => "a periodic timer firing",
+    }
+}
+
+fn bgtask_apply_kv_style(table: &mut tabled::Table) {
+    let style = tabled::settings::Style::empty();
+    table.with(style).with(
+        tabled::settings::Modify::new(Columns::first())
+            // Background task tables are offset by 4 characters.
+            .with(Padding::new(4, 0, 0, 0)),
+    );
+}
+
+// Extract and remove the event report. (If we don't do this, the `Debug`
+// output can be quite large.)
+fn extract_event_buffer(
+    value: &mut serde_json::Value,
+) -> anyhow::Result<EventBuffer<NestedSpec>> {
+    let Some(obj) = value.as_object_mut() else {
+        bail!("expected value to be an object")
+    };
+    let Some(event_report) = obj.remove("event_report") else {
+        bail!("expected 'event_report' field in value")
+    };
+
+    // Try deserializing the event report generically. We could deserialize to
+    // a more explicit spec, e.g. `ReconfiguratorExecutionSpec`, but that's
+    // unnecessary for omdb's purposes.
+    let value: Result<EventReport<NestedSpec>, NestedError> =
+        serde_json::from_value(event_report)
+            .context("failed to deserialize event report")?;
+    let event_report = value.context(
+        "event report stored as Err rather than Ok (did receiver task panic?)",
+    )?;
+
+    let mut event_buffer = EventBuffer::default();
+    event_buffer.add_event_report(event_report);
+    Ok(event_buffer)
+}
+
+// Make a short summary of the current state of an execution based on an event
+// buffer, and add it to the table.
+fn push_event_buffer_summary(
+    event_buffer: anyhow::Result<EventBuffer<NestedSpec>>,
+    builder: &mut tabled::builder::Builder,
+) {
+    match event_buffer {
+        Ok(buffer) => {
+            event_buffer_summary_impl(buffer, builder);
+        }
+        Err(error) => {
+            builder.push_record([
+                "event report error:".to_string(),
+                error.to_string(),
+            ]);
+            for source in error.chain() {
+                builder.push_record([
+                    "  caused by:".to_string(),
+                    source.to_string(),
+                ]);
+            }
+        }
+    }
+}
+
+fn event_buffer_summary_impl(
+    buffer: EventBuffer<NestedSpec>,
+    builder: &mut tabled::builder::Builder,
+) {
+    let Some(summary) = buffer.root_execution_summary() else {
+        builder.push_record(["status:", "(no information found)"]);
+        return;
+    };
+
+    match summary.execution_status {
+        ExecutionStatus::NotStarted => {
+            builder.push_record(["status:", "not started"]);
+        }
+        ExecutionStatus::Running { step_key, .. } => {
+            let step_data = buffer.get(&step_key).expect("step exists");
+            builder.push_record([
+                "status:".to_string(),
+                format!(
+                    "running: {} (step {})",
+                    step_data.step_info().description,
+                    ProgressRatioDisplay::index_and_total(
+                        step_key.index,
+                        summary.total_steps,
+                    ),
+                ),
+            ]);
+        }
+        ExecutionStatus::Terminal(info) => {
+            push_event_buffer_terminal_info(
+                &info,
+                summary.total_steps,
+                &buffer,
+                builder,
+            );
+        }
+    }
+
+    // Also look for warnings.
+    for (_, step_data) in buffer.iter_steps_recursive() {
+        if let Some(reason) = step_data.step_status().completion_reason() {
+            if let Some(info) = reason.step_completed_info() {
+                if let StepOutcome::Warning { message, .. } = &info.outcome {
+                    builder.push_record([
+                        "warning:".to_string(),
+                        // This can be a nested step, so don't print out the
+                        // index.
+                        format!(
+                            "at: {}: {}",
+                            step_data.step_info().description,
+                            message
+                        ),
+                    ]);
+                }
+            }
+        }
+    }
+}
+
+fn push_event_buffer_terminal_info(
+    info: &ExecutionTerminalInfo,
+    total_steps: usize,
+    buffer: &EventBuffer<NestedSpec>,
+    builder: &mut tabled::builder::Builder,
+) {
+    let step_data = buffer.get(&info.step_key).expect("step exists");
+
+    match info.kind {
+        TerminalKind::Completed => {
+            let v = format!("completed ({} steps)", total_steps);
+            builder.push_record(["status:".to_string(), v]);
+        }
+        TerminalKind::Failed => {
+            let v = format!(
+                "failed at: {} (step {})",
+                step_data.step_info().description,
+                ProgressRatioDisplay::index_and_total(
+                    info.step_key.index,
+                    total_steps,
+                )
+            );
+            builder.push_record(["status:".to_string(), v]);
+
+            // Don't show the error here, because it's duplicated in another
+            // field that's already shown.
+        }
+        TerminalKind::Aborted => {
+            let v = format!(
+                "aborted at: {} (step {})",
+                step_data.step_info().description,
+                ProgressRatioDisplay::index_and_total(
+                    info.step_key.index,
+                    total_steps,
+                )
+            );
+            builder.push_record(["status:".to_string(), v]);
+
+            let Some(reason) = step_data.step_status().abort_reason() else {
+                builder.push_record(["  reason:", "(no reason found)"]);
+                return;
+            };
+
+            builder.push_record([
+                "  reason:".to_string(),
+                reason.message_display(&buffer).to_string(),
+            ]);
+            // TODO: show last progress event
+        }
     }
 }
 
