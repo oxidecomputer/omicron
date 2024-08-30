@@ -125,8 +125,14 @@ impl From<SledAgentInstanceError> for dropshot::HttpError {
                 HttpError::for_internal_error(s)
             }
             // Error responses from sled-agent that indicate the instance is
-            // unhealthy should be mapped to a 500 error.
-            e if e.vmm_gone() => HttpError::for_internal_error(e.to_string()),
+            // unhealthy should be mapped to a 503 error.
+            e if e.vmm_gone() => {
+                let mut error = HttpError::for_unavail(None, e.to_string());
+                error.external_message = "The instance was running but is no \
+                    longer reachable. It is being moved to the Failed state."
+                    .to_string();
+                error
+            }
             // Other client errors can be handled by the normal
             // `external::Error` to `HttpError` conversions.
             SledAgentInstanceError(e) => HttpError::from(Error::from(e)),

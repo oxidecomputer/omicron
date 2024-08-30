@@ -1118,11 +1118,11 @@ async fn test_instance_failed_after_sled_agent_forgets_vmm_can_be_restarted(
     let instance_id = make_forgotten_instance(&cptestctx, instance_name).await;
 
     // Attempting to reboot the forgotten instance will result in a 404
-    // NO_SUCH_INSTANCE from the sled-agent, which Nexus turns into a 500.
+    // NO_SUCH_INSTANCE from the sled-agent, which Nexus turns into a 503.
     expect_instance_reboot_fail(
         client,
         instance_name,
-        http::StatusCode::INTERNAL_SERVER_ERROR,
+        http::StatusCode::SERVICE_UNAVAILABLE,
     )
     .await;
 
@@ -1146,11 +1146,11 @@ async fn test_instance_failed_after_sled_agent_forgets_vmm_can_be_deleted(
     let instance_id = make_forgotten_instance(&cptestctx, instance_name).await;
 
     // Attempting to reboot the forgotten instance will result in a 404
-    // NO_SUCH_INSTANCE from the sled-agent, which Nexus turns into a 500.
+    // NO_SUCH_INSTANCE from the sled-agent, which Nexus turns into a 503.
     expect_instance_reboot_fail(
         client,
         instance_name,
-        http::StatusCode::INTERNAL_SERVER_ERROR,
+        http::StatusCode::SERVICE_UNAVAILABLE,
     )
     .await;
 
