@@ -301,9 +301,9 @@ fn draw_rack_reset_popup(
             // doesn't work yet.
             body.lines.push(Line::from(""));
             body.lines.push(Line::from(vec![
-                Span::styled("WARNING", style::warning()),
+                Span::styled("WARNING: ", style::warning()),
                 Span::styled(
-                    ": This does not work yet and will leave the rack \
+                    "This does not work yet and will leave the rack \
                      in an unknown state (see omicron#3820)",
                     style::plain_text(),
                 ),
