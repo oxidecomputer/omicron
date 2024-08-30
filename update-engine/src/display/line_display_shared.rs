@@ -637,7 +637,8 @@ fn format_progress_counter(counter: &ProgressCounter) -> String {
             format!(
                 "{:>percent_width$.2}% ({} {})",
                 percent,
-                ProgressRatioDisplay::current_and_total(counter.current, total),
+                ProgressRatioDisplay::current_and_total(counter.current, total)
+                    .padded(true),
                 counter.units,
             )
         }

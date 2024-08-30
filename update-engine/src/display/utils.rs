@@ -18,12 +18,17 @@ use std::fmt;
 /// ```
 /// use update_engine::display::ProgressRatioDisplay;
 ///
-/// let display = ProgressRatioDisplay::new(0, 8);
+/// // 0-based index and total.
+/// let display = ProgressRatioDisplay::index_and_total(0 as u64, 8 as u64);
 /// assert_eq!(display.to_string(), "1/8");
-/// let display = ProgressRatioDisplay::new(82, 230);
-/// assert_eq!(display.to_string(), "83/230");
+///
+/// // 1-based current and total.
+/// let display = ProgressRatioDisplay::current_and_total(82 as u64, 230 as u64);
+/// assert_eq!(display.to_string(), "82/230");
+///
+/// // With padding.
 /// let display = display.padded(true);
-/// assert_eq!(display.to_string(), " 83/230");
+/// assert_eq!(display.to_string(), " 82/230");
 /// ```
 #[derive(Debug)]
 pub struct ProgressRatioDisplay {
@@ -46,7 +51,10 @@ impl ProgressRatioDisplay {
     /// out of 8 total steps.
     pub fn index_and_total<T: ToU64>(index: T, total: T) -> Self {
         Self {
-            current: index.to_u64() + 1,
+            current: index
+                .to_u64()
+                .checked_add(1)
+                .expect("index can't be u64::MAX"),
             total: total.to_u64(),
             padded: false,
         }
@@ -63,9 +71,9 @@ impl fmt::Display for ProgressRatioDisplay {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.padded {
             let width = self.total.to_string().len();
-            write!(f, "{:>width$}/{}", self.current + 1, self.total)
+            write!(f, "{:>width$}/{}", self.current, self.total)
         } else {
-            write!(f, "{}/{}", self.current + 1, self.total)
+            write!(f, "{}/{}", self.current, self.total)
         }
     }
 }
