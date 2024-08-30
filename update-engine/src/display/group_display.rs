@@ -12,8 +12,9 @@ use swrite::{swrite, SWrite};
 use unicode_width::UnicodeWidthStr;
 
 use crate::{
-    errors::UnknownReportKey, events::EventReport, EventBuffer,
-    ExecutionStatus, ExecutionTerminalInfo, StepSpec, TerminalKind,
+    display::ProgressRatioDisplay, errors::UnknownReportKey,
+    events::EventReport, EventBuffer, ExecutionStatus, ExecutionTerminalInfo,
+    StepSpec, TerminalKind,
 };
 
 use super::{
@@ -309,11 +310,13 @@ impl GroupDisplayStats {
         };
 
         swrite!(line, "{:>HEADER_WIDTH$} ", header.style(header_style));
-        let terminal_count = self.terminal_count();
         swrite!(
             line,
-            "{terminal_count}/{}: {} running, {} {}",
-            self.total,
+            "{}: {} running, {} {}",
+            ProgressRatioDisplay::current_and_total(
+                self.terminal_count(),
+                self.total
+            ),
             self.running.style(formatter.styles().meta_style),
             self.completed.style(formatter.styles().meta_style),
             "completed".style(formatter.styles().progress_style),

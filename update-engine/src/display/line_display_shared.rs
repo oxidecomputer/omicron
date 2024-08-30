@@ -16,6 +16,7 @@ use owo_colors::OwoColorize;
 use swrite::{swrite, SWrite as _};
 
 use crate::{
+    display::ProgressRatioDisplay,
     events::{
         ProgressCounter, ProgressEvent, ProgressEventKind, StepEvent,
         StepEventKind, StepInfo, StepOutcome,
@@ -633,10 +634,12 @@ fn format_progress_counter(counter: &ProgressCounter) -> String {
             let percent = (counter.current as f64 / total as f64) * 100.0;
             // <12.34> is 5 characters wide.
             let percent_width = 5;
-            let counter_width = total.to_string().len();
             format!(
-                "{:>percent_width$.2}% ({:>counter_width$}/{} {})",
-                percent, counter.current, total, counter.units,
+                "{:>percent_width$.2}% ({} {})",
+                percent,
+                ProgressRatioDisplay::current_and_total(counter.current, total)
+                    .padded(true),
+                counter.units,
             )
         }
         None => format!("{} {}", counter.current, counter.units),
@@ -716,17 +719,16 @@ impl LineDisplayFormatter {
     ) {
         ld_step_info.nest_data.add_prefix(line);
 
-        // Print out "<step index>/<total steps>)". Leave space such that we
-        // print out e.g. "1/8)" and " 3/14)".
-        // Add 1 to the index to make it 1-based.
-        let step_index = ld_step_info.step_info.index + 1;
-        let step_index_width = ld_step_info.total_steps.to_string().len();
+        // Print out "(<current>/<total>)" in a padded way, so that successive
+        // steps are vertically aligned.
         swrite!(
             line,
-            "{:width$}/{:width$}) ",
-            step_index,
-            ld_step_info.total_steps,
-            width = step_index_width
+            "({}) ",
+            ProgressRatioDisplay::index_and_total(
+                ld_step_info.step_info.index,
+                ld_step_info.total_steps
+            )
+            .padded(true),
         );
 
         swrite!(
