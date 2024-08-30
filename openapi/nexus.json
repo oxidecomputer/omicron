@@ -2759,6 +2759,123 @@
             "gateway"
           ]
         }
+      },
+      "post": {
+        "tags": [
+          "vpcs"
+        ],
+        "summary": "Attach ip pool to internet gateway",
+        "operationId": "internet_gateway_ip_address_create",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "gateway",
+            "description": "Name or ID of the internet gateway",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vpc",
+            "description": "Name or ID of the VPC, only required if `gateway` is provided as a `Name`",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InternetGatewayIpAddressCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternetGatewayIpAddress"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/internet-gateway-ip-addrs/{address}": {
+      "delete": {
+        "tags": [
+          "vpcs"
+        ],
+        "summary": "Detach ip pool from internet gateway",
+        "operationId": "internet_gateway_ip_address_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "address",
+            "description": "Name or ID of the IP address",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "gateway",
+            "description": "Name or ID of the internet gateway",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vpc",
+            "description": "Name or ID of the VPC, only required if `gateway` is provided as a `Name`",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/v1/internet-gateway-ip-pools": {
@@ -2843,6 +2960,123 @@
           "required": [
             "gateway"
           ]
+        }
+      },
+      "post": {
+        "tags": [
+          "vpcs"
+        ],
+        "summary": "Attach ip pool to internet gateway",
+        "operationId": "internet_gateway_ip_pool_create",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "gateway",
+            "description": "Name or ID of the internet gateway",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vpc",
+            "description": "Name or ID of the VPC, only required if `gateway` is provided as a `Name`",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InternetGatewayIpPoolCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternetGatewayIpPool"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/internet-gateway-ip-pools/{pool}": {
+      "delete": {
+        "tags": [
+          "vpcs"
+        ],
+        "summary": "Detach ip pool from internet gateway",
+        "operationId": "internet_gateway_ip_pool_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "description": "Name or ID of the IP pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "gateway",
+            "description": "Name or ID of the internet gateway",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vpc",
+            "description": "Name or ID of the VPC, only required if `gateway` is provided as a `Name`",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
         }
       }
     },
@@ -8818,244 +9052,6 @@
                 }
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/v1/vpc-internet-gateway-ip-addrs": {
-      "post": {
-        "tags": [
-          "vpcs"
-        ],
-        "summary": "Attach ip pool to internet gateway",
-        "operationId": "internet_gateway_ip_address_create",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "gateway",
-            "description": "Name or ID of the internet gateway",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "project",
-            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "vpc",
-            "description": "Name or ID of the VPC, only required if `gateway` is provided as a `Name`",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/InternetGatewayIpAddressCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InternetGatewayIpAddress"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/v1/vpc-internet-gateway-ip-addrs/{address}": {
-      "delete": {
-        "tags": [
-          "vpcs"
-        ],
-        "summary": "Detach ip pool from internet gateway",
-        "operationId": "internet_gateway_ip_address_delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "address",
-            "description": "Name or ID of the IP address",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "gateway",
-            "description": "Name or ID of the internet gateway",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "project",
-            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "vpc",
-            "description": "Name or ID of the VPC, only required if `gateway` is provided as a `Name`",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "successful deletion"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/v1/vpc-internet-gateway-ip-pools": {
-      "post": {
-        "tags": [
-          "vpcs"
-        ],
-        "summary": "Attach ip pool to internet gateway",
-        "operationId": "internet_gateway_ip_pool_create",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "gateway",
-            "description": "Name or ID of the internet gateway",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "project",
-            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "vpc",
-            "description": "Name or ID of the VPC, only required if `gateway` is provided as a `Name`",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/InternetGatewayIpPoolCreate"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "successful creation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InternetGatewayIpPool"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/v1/vpc-internet-gateway-ip-pools/{pool}": {
-      "delete": {
-        "tags": [
-          "vpcs"
-        ],
-        "summary": "Detach ip pool from internet gateway",
-        "operationId": "internet_gateway_ip_pool_delete",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "pool",
-            "description": "Name or ID of the IP pool",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "gateway",
-            "description": "Name or ID of the internet gateway",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "project",
-            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
-            "name": "vpc",
-            "description": "Name or ID of the VPC, only required if `gateway` is provided as a `Name`",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "successful deletion"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"

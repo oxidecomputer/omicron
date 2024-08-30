@@ -253,6 +253,83 @@ pub static DEMO_ROUTER_ROUTE_CREATE: Lazy<params::RouterRouteCreate> =
         destination: RouteDestination::Subnet("loopback".parse().unwrap()),
     });
 
+// Internet Gateway used for testing
+pub static DEMO_INTERNET_GATEWAY_NAME: Lazy<Name> =
+    Lazy::new(|| "demo-internet-gateway".parse().unwrap());
+pub static DEMO_INTERNET_GATEWAYS_URL: Lazy<String> = Lazy::new(|| {
+    format!(
+        "/v1/internet-gateways?project={}&vpc={}",
+        *DEMO_PROJECT_NAME, *DEMO_VPC_NAME
+    )
+});
+pub static DEMO_INTERNET_GATEWAY_URL: Lazy<String> = Lazy::new(|| {
+    format!(
+        "/v1/internet-gateways/{}?project={}&vpc={}",
+        *DEMO_INTERNET_GATEWAY_NAME, *DEMO_PROJECT_NAME, *DEMO_VPC_NAME
+    )
+});
+pub static DEMO_INTERNET_GATEWAY_CREATE: Lazy<params::InternetGatewayCreate> =
+    Lazy::new(|| params::InternetGatewayCreate {
+        identity: IdentityMetadataCreateParams {
+            name: DEMO_INTERNET_GATEWAY_NAME.clone(),
+            description: String::from(""),
+        },
+    });
+pub static DEMO_INTERNET_GATEWAY_IP_POOL_CREATE: Lazy<
+    params::InternetGatewayIpPoolCreate,
+> = Lazy::new(|| params::InternetGatewayIpPoolCreate {
+    identity: IdentityMetadataCreateParams {
+        name: DEMO_INTERNET_GATEWAY_NAME.clone(),
+        description: String::from(""),
+    },
+    ip_pool_id: uuid::Uuid::new_v4(),
+    gateway_id: uuid::Uuid::new_v4(),
+});
+pub static DEMO_INTERNET_GATEWAY_IP_ADDRESS_CREATE: Lazy<
+    params::InternetGatewayIpAddressCreate,
+> = Lazy::new(|| params::InternetGatewayIpAddressCreate {
+    identity: IdentityMetadataCreateParams {
+        name: DEMO_INTERNET_GATEWAY_NAME.clone(),
+        description: String::from(""),
+    },
+    gateway_id: uuid::Uuid::new_v4(),
+    address: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+});
+pub static DEMO_INTERNET_GATEWAY_IP_POOLS_URL: Lazy<String> = Lazy::new(|| {
+    format!(
+        "/v1/internet-gateway-ip-pools?project={}&vpc={}&gateway={}",
+        *DEMO_PROJECT_NAME, *DEMO_VPC_NAME, *DEMO_INTERNET_GATEWAY_NAME,
+    )
+});
+pub static DEMO_INTERNET_GATEWAY_IP_ADDRS_URL: Lazy<String> = Lazy::new(|| {
+    format!(
+        "/v1/internet-gateway-ip-addrs?project={}&vpc={}&gateway={}",
+        *DEMO_PROJECT_NAME, *DEMO_VPC_NAME, *DEMO_INTERNET_GATEWAY_NAME,
+    )
+});
+pub static DEMO_INTERNET_GATEWAY_IP_POOL_NAME: Lazy<Name> =
+    Lazy::new(|| "demo-igw-pool".parse().unwrap());
+pub static DEMO_INTERNET_GATEWAY_IP_ADDRESS_NAME: Lazy<Name> =
+    Lazy::new(|| "demo-igw-address".parse().unwrap());
+pub static DEMO_INTERNET_GATEWAY_IP_POOL_URL: Lazy<String> = Lazy::new(|| {
+    format!(
+        "/v1/internet-gateway-ip-pools/{}?project={}&vpc={}&gateway={}",
+        *DEMO_INTERNET_GATEWAY_IP_POOL_NAME,
+        *DEMO_PROJECT_NAME,
+        *DEMO_VPC_NAME,
+        *DEMO_INTERNET_GATEWAY_NAME,
+    )
+});
+pub static DEMO_INTERNET_GATEWAY_IP_ADDR_URL: Lazy<String> = Lazy::new(|| {
+    format!(
+        "/v1/internet-gateway-ip-addrs/{}?project={}&vpc={}&gateway={}",
+        *DEMO_INTERNET_GATEWAY_IP_ADDRESS_NAME,
+        *DEMO_PROJECT_NAME,
+        *DEMO_VPC_NAME,
+        *DEMO_INTERNET_GATEWAY_NAME,
+    )
+});
+
 // Disk used for testing
 pub static DEMO_DISK_NAME: Lazy<Name> =
     Lazy::new(|| "demo-disk".parse().unwrap());
@@ -1605,6 +1682,72 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
                             "loopback".parse().unwrap()),
                     }).unwrap()
                 ),
+                AllowedMethod::Delete,
+            ],
+        },
+
+        /* Internet Gateways */
+
+        VerifyEndpoint {
+            url: &DEMO_INTERNET_GATEWAYS_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::GetNonexistent,
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_INTERNET_GATEWAY_CREATE).unwrap()
+                ),
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_INTERNET_GATEWAY_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::GetNonexistent,
+                AllowedMethod::Delete,
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_INTERNET_GATEWAY_IP_POOLS_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::GetNonexistent,
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_INTERNET_GATEWAY_IP_POOL_CREATE).unwrap()
+                ),
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_INTERNET_GATEWAY_IP_POOL_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Delete,
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_INTERNET_GATEWAY_IP_ADDRS_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::GetNonexistent,
+                AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_INTERNET_GATEWAY_IP_ADDRESS_CREATE).unwrap()
+                ),
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_INTERNET_GATEWAY_IP_ADDR_URL,
+            visibility: Visibility::Protected,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
                 AllowedMethod::Delete,
             ],
         },

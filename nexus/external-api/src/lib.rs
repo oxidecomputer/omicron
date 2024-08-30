@@ -2276,7 +2276,7 @@ pub trait NexusExternalApi {
     /// Attach ip pool to internet gateway
     #[endpoint {
         method = POST,
-        path = "/v1/vpc-internet-gateway-ip-pools",
+        path = "/v1/internet-gateway-ip-pools",
         tags = ["vpcs"],
     }]
     async fn internet_gateway_ip_pool_create(
@@ -2288,7 +2288,7 @@ pub trait NexusExternalApi {
     /// Detach ip pool from internet gateway
     #[endpoint {
         method = DELETE,
-        path = "/v1/vpc-internet-gateway-ip-pools/{pool}",
+        path = "/v1/internet-gateway-ip-pools/{pool}",
         tags = ["vpcs"],
     }]
     async fn internet_gateway_ip_pool_delete(
@@ -2316,7 +2316,7 @@ pub trait NexusExternalApi {
     /// Attach ip pool to internet gateway
     #[endpoint {
         method = POST,
-        path = "/v1/vpc-internet-gateway-ip-addrs",
+        path = "/v1/internet-gateway-ip-addrs",
         tags = ["vpcs"],
     }]
     async fn internet_gateway_ip_address_create(
@@ -2328,7 +2328,7 @@ pub trait NexusExternalApi {
     /// Detach ip pool from internet gateway
     #[endpoint {
         method = DELETE,
-        path = "/v1/vpc-internet-gateway-ip-addrs/{address}",
+        path = "/v1/internet-gateway-ip-addrs/{address}",
         tags = ["vpcs"],
     }]
     async fn internet_gateway_ip_address_delete(
