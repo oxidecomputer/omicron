@@ -184,8 +184,13 @@ impl<K: Eq + Ord, W: std::io::Write, S: StepSpec> GroupDisplay<K, W, S> {
     pub fn write_stats(&mut self, header: &str) -> std::io::Result<()> {
         // Add a blank prefix which is equal to the maximum width of known prefixes.
         let prefix = " ".repeat(self.max_width);
-        let mut line =
-            self.formatter.start_line(&prefix, Some(self.start_sw.elapsed()));
+        let mut line = self.formatter.start_line(
+            &prefix,
+            // TODO: we don't currently support setting a start time for group
+            // displays. We should do that at some point.
+            None,
+            Some(self.start_sw.elapsed()),
+        );
         self.stats.format_line(&mut line, header, &self.formatter);
         writeln!(self.writer, "{line}")
     }
