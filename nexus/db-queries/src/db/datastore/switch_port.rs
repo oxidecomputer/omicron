@@ -39,7 +39,7 @@ use nexus_db_model::{
 use nexus_types::external_api::params;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
-    self, CreateResult, DataPageParams, DeleteResult, Error,
+    self, BgpPeer, CreateResult, DataPageParams, DeleteResult, Error,
     ImportExportPolicy, ListResultVec, LookupResult, NameOrId, ResourceType,
     UpdateResult,
 };
@@ -265,29 +265,29 @@ impl DataStore {
                 async move {
                     do_switch_port_settings_delete(&conn, &selector, err).await
                 }
-        })
-        .await
-        .map_err(|e| {
-            if let Some(err) = err.take() {
-                match err {
-                    SwitchPortSettingsDeleteError::SwitchPortSettingsNotFound => {
-                        Error::invalid_request("port settings not found")
+            })
+            .await
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    match err {
+                        SwitchPortSettingsDeleteError::SwitchPortSettingsNotFound => {
+                            Error::invalid_request("port settings not found")
+                        }
                     }
+                } else {
+                    let name = match &params.configuration {
+                        Some(name_or_id) => name_or_id.to_string(),
+                        None => String::new(),
+                    };
+                    public_error_from_diesel(
+                        e,
+                        ErrorHandler::Conflict(
+                            ResourceType::SwitchPortSettings,
+                            &name,
+                        ),
+                    )
                 }
-            } else {
-                let name = match &params.configuration {
-                    Some(name_or_id) => name_or_id.to_string(),
-                    None => String::new(),
-                };
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::Conflict(
-                        ResourceType::SwitchPortSettings,
-                        &name,
-                    ),
-                )
-            }
-        })
+            })
     }
 
     pub async fn switch_port_settings_update(
@@ -387,39 +387,39 @@ impl DataStore {
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 async move {
-                // get the top level port settings object
-                use db::schema::switch_port_settings::{
-                    self, dsl as port_settings_dsl,
-                };
-                use db::schema::{
-                    switch_port_settings_bgp_peer_config_allow_import::dsl as allow_import_dsl,
-                    switch_port_settings_bgp_peer_config_allow_export::dsl as allow_export_dsl,
-                    switch_port_settings_bgp_peer_config_communities::dsl as bgp_communities_dsl,
-                };
+                    // get the top level port settings object
+                    use db::schema::switch_port_settings::{
+                        self, dsl as port_settings_dsl,
+                    };
+                    use db::schema::{
+                        switch_port_settings_bgp_peer_config_allow_import::dsl as allow_import_dsl,
+                        switch_port_settings_bgp_peer_config_allow_export::dsl as allow_export_dsl,
+                        switch_port_settings_bgp_peer_config_communities::dsl as bgp_communities_dsl,
+                    };
 
-                let id = match name_or_id {
-                    NameOrId::Id(id) => *id,
-                    NameOrId::Name(name) => {
-                        let name_str = name.to_string();
+                    let id = match name_or_id {
+                        NameOrId::Id(id) => *id,
+                        NameOrId::Name(name) => {
+                            let name_str = name.to_string();
+                            port_settings_dsl::switch_port_settings
+                                .filter(switch_port_settings::time_deleted.is_null())
+                                .filter(switch_port_settings::name.eq(name_str))
+                                .select(switch_port_settings::id)
+                                .limit(1)
+                                .first_async::<Uuid>(&conn)
+                                .await
+                                .map_err(|diesel_error| {
+                                    err.bail_retryable_or_else(diesel_error, |_| {
+                                        SwitchPortSettingsGetError::NotFound(
+                                            name.clone(),
+                                        )
+                                    })
+                                })?
+                        }
+                    };
+
+                    let settings: SwitchPortSettings =
                         port_settings_dsl::switch_port_settings
-                            .filter(switch_port_settings::time_deleted.is_null())
-                            .filter(switch_port_settings::name.eq(name_str))
-                            .select(switch_port_settings::id)
-                            .limit(1)
-                            .first_async::<Uuid>(&conn)
-                            .await
-                            .map_err(|diesel_error| {
-                                err.bail_retryable_or_else(diesel_error, |_| {
-                                    SwitchPortSettingsGetError::NotFound(
-                                        name.clone(),
-                                    )
-                                })
-                            })?
-                    }
-                };
-
-                let settings: SwitchPortSettings =
-                    port_settings_dsl::switch_port_settings
                         .filter(switch_port_settings::time_deleted.is_null())
                         .filter(switch_port_settings::id.eq(id))
                         .select(SwitchPortSettings::as_select())
@@ -427,100 +427,100 @@ impl DataStore {
                         .first_async::<SwitchPortSettings>(&conn)
                         .await?;
 
-                // get the port config
-                use db::schema::switch_port_settings_port_config::{
-                    self as port_config, dsl as port_config_dsl,
-                };
-                let port: SwitchPortConfig =
-                    port_config_dsl::switch_port_settings_port_config
+                    // get the port config
+                    use db::schema::switch_port_settings_port_config::{
+                        self as port_config, dsl as port_config_dsl,
+                    };
+                    let port: SwitchPortConfig =
+                        port_config_dsl::switch_port_settings_port_config
                         .filter(port_config::port_settings_id.eq(id))
                         .select(SwitchPortConfig::as_select())
                         .limit(1)
                         .first_async::<SwitchPortConfig>(&conn)
                         .await?;
 
-                // initialize result
-                let mut result =
-                    SwitchPortSettingsCombinedResult::new(settings, port);
+                    // initialize result
+                    let mut result =
+                        SwitchPortSettingsCombinedResult::new(settings, port);
 
-                // get the link configs
-                use db::schema::switch_port_settings_link_config::{
-                    self as link_config, dsl as link_config_dsl,
-                };
+                    // get the link configs
+                    use db::schema::switch_port_settings_link_config::{
+                        self as link_config, dsl as link_config_dsl,
+                    };
 
-                result.links = link_config_dsl::switch_port_settings_link_config
-                    .filter(link_config::port_settings_id.eq(id))
-                    .select(SwitchPortLinkConfig::as_select())
-                    .load_async::<SwitchPortLinkConfig>(&conn)
-                    .await?;
+                    result.links = link_config_dsl::switch_port_settings_link_config
+                        .filter(link_config::port_settings_id.eq(id))
+                        .select(SwitchPortLinkConfig::as_select())
+                        .load_async::<SwitchPortLinkConfig>(&conn)
+                        .await?;
 
-                let lldp_link_ids: Vec<Uuid> = result
-                    .links
-                    .iter()
-                    .map(|link| link.lldp_link_config_id)
-                    .collect();
+                    let lldp_link_ids: Vec<Uuid> = result
+                        .links
+                        .iter()
+                        .map(|link| link.lldp_link_config_id)
+                        .collect();
 
-                use db::schema::lldp_link_config;
-                result.link_lldp = lldp_link_config::dsl::lldp_link_config
-                    .filter(lldp_link_config::id.eq_any(lldp_link_ids))
-                    .select(LldpLinkConfig::as_select())
-                    .limit(1)
-                    .load_async::<LldpLinkConfig>(&conn)
-                    .await?;
+                    use db::schema::lldp_link_config;
+                    result.link_lldp = lldp_link_config::dsl::lldp_link_config
+                        .filter(lldp_link_config::id.eq_any(lldp_link_ids))
+                        .select(LldpLinkConfig::as_select())
+                        .limit(1)
+                        .load_async::<LldpLinkConfig>(&conn)
+                        .await?;
 
-                // get the interface configs
-                use db::schema::switch_port_settings_interface_config::{
-                    self as interface_config, dsl as interface_config_dsl,
-                };
+                    // get the interface configs
+                    use db::schema::switch_port_settings_interface_config::{
+                        self as interface_config, dsl as interface_config_dsl,
+                    };
 
-                result.interfaces =
-                    interface_config_dsl::switch_port_settings_interface_config
+                    result.interfaces =
+                        interface_config_dsl::switch_port_settings_interface_config
                         .filter(interface_config::port_settings_id.eq(id))
                         .select(SwitchInterfaceConfig::as_select())
                         .load_async::<SwitchInterfaceConfig>(&conn)
                         .await?;
 
-                use db::schema::switch_vlan_interface_config as vlan_config;
-                use db::schema::switch_vlan_interface_config::dsl as vlan_dsl;
-                let interface_ids: Vec<Uuid> = result
-                    .interfaces
-                    .iter()
-                    .map(|interface| interface.id)
-                    .collect();
+                    use db::schema::switch_vlan_interface_config as vlan_config;
+                    use db::schema::switch_vlan_interface_config::dsl as vlan_dsl;
+                    let interface_ids: Vec<Uuid> = result
+                        .interfaces
+                        .iter()
+                        .map(|interface| interface.id)
+                        .collect();
 
-                result.vlan_interfaces = vlan_dsl::switch_vlan_interface_config
-                    .filter(vlan_config::interface_config_id.eq_any(interface_ids))
-                    .select(SwitchVlanInterfaceConfig::as_select())
-                    .load_async::<SwitchVlanInterfaceConfig>(&conn)
-                    .await?;
+                    result.vlan_interfaces = vlan_dsl::switch_vlan_interface_config
+                        .filter(vlan_config::interface_config_id.eq_any(interface_ids))
+                        .select(SwitchVlanInterfaceConfig::as_select())
+                        .load_async::<SwitchVlanInterfaceConfig>(&conn)
+                        .await?;
 
-                // get the route configs
-                use db::schema::switch_port_settings_route_config::{
-                    self as route_config, dsl as route_config_dsl,
-                };
+                    // get the route configs
+                    use db::schema::switch_port_settings_route_config::{
+                        self as route_config, dsl as route_config_dsl,
+                    };
 
-                result.routes = route_config_dsl::switch_port_settings_route_config
-                    .filter(route_config::port_settings_id.eq(id))
-                    .select(SwitchPortRouteConfig::as_select())
-                    .load_async::<SwitchPortRouteConfig>(&conn)
-                    .await?;
+                    result.routes = route_config_dsl::switch_port_settings_route_config
+                        .filter(route_config::port_settings_id.eq(id))
+                        .select(SwitchPortRouteConfig::as_select())
+                        .load_async::<SwitchPortRouteConfig>(&conn)
+                        .await?;
 
-                // get the bgp peer configs
-                use db::schema::switch_port_settings_bgp_peer_config::{
-                    self as bgp_peer, dsl as bgp_peer_dsl,
-                };
+                    // get the bgp peer configs
+                    use db::schema::switch_port_settings_bgp_peer_config::{
+                        self as bgp_peer, dsl as bgp_peer_dsl,
+                    };
 
-                let peers: Vec<SwitchPortBgpPeerConfig> =
-                    bgp_peer_dsl::switch_port_settings_bgp_peer_config
+                    let peers: Vec<SwitchPortBgpPeerConfig> =
+                        bgp_peer_dsl::switch_port_settings_bgp_peer_config
                         .filter(bgp_peer::port_settings_id.eq(id))
                         .select(SwitchPortBgpPeerConfig::as_select())
                         .load_async::<SwitchPortBgpPeerConfig>(&conn)
                         .await?;
 
-                for p in peers.iter() {
-                    let allowed_import: ImportExportPolicy = if p.allow_import_list_active {
-                        let db_list: Vec<SwitchPortBgpPeerConfigAllowImport> =
-                            allow_import_dsl::switch_port_settings_bgp_peer_config_allow_import
+                    for p in peers.iter() {
+                        let allowed_import: ImportExportPolicy = if p.allow_import_list_active {
+                            let db_list: Vec<SwitchPortBgpPeerConfigAllowImport> =
+                                allow_import_dsl::switch_port_settings_bgp_peer_config_allow_import
                                 .filter(allow_import_dsl::port_settings_id.eq(id))
                                 .filter(allow_import_dsl::interface_name.eq(p.interface_name.clone()))
                                 .filter(allow_import_dsl::addr.eq(p.addr))
@@ -528,18 +528,18 @@ impl DataStore {
                                 .load_async::<SwitchPortBgpPeerConfigAllowImport>(&conn)
                                 .await?;
 
-                        ImportExportPolicy::Allow(db_list
-                            .into_iter()
-                            .map(|x| x.prefix.into())
-                            .collect()
-                        )
-                    } else {
-                        ImportExportPolicy::NoFiltering
-                    };
+                            ImportExportPolicy::Allow(db_list
+                                                      .into_iter()
+                                                      .map(|x| x.prefix.into())
+                                                      .collect()
+                            )
+                        } else {
+                            ImportExportPolicy::NoFiltering
+                        };
 
-                    let allowed_export: ImportExportPolicy = if p.allow_export_list_active {
-                        let db_list: Vec<SwitchPortBgpPeerConfigAllowExport> =
-                            allow_export_dsl::switch_port_settings_bgp_peer_config_allow_export
+                        let allowed_export: ImportExportPolicy = if p.allow_export_list_active {
+                            let db_list: Vec<SwitchPortBgpPeerConfigAllowExport> =
+                                allow_export_dsl::switch_port_settings_bgp_peer_config_allow_export
                                 .filter(allow_export_dsl::port_settings_id.eq(id))
                                 .filter(allow_export_dsl::interface_name.eq(p.interface_name.clone()))
                                 .filter(allow_export_dsl::addr.eq(p.addr))
@@ -547,17 +547,17 @@ impl DataStore {
                                 .load_async::<SwitchPortBgpPeerConfigAllowExport>(&conn)
                                 .await?;
 
-                        ImportExportPolicy::Allow(db_list
-                            .into_iter()
-                            .map(|x| x.prefix.into())
-                            .collect()
-                        )
-                    } else {
-                        ImportExportPolicy::NoFiltering
-                    };
+                            ImportExportPolicy::Allow(db_list
+                                                      .into_iter()
+                                                      .map(|x| x.prefix.into())
+                                                      .collect()
+                            )
+                        } else {
+                            ImportExportPolicy::NoFiltering
+                        };
 
-                    let communities: Vec<SwitchPortBgpPeerConfigCommunity> =
-                        bgp_communities_dsl::switch_port_settings_bgp_peer_config_communities
+                        let communities: Vec<SwitchPortBgpPeerConfigCommunity> =
+                            bgp_communities_dsl::switch_port_settings_bgp_peer_config_communities
                             .filter(bgp_communities_dsl::port_settings_id.eq(id))
                             .filter(bgp_communities_dsl::interface_name.eq(p.interface_name.clone()))
                             .filter(bgp_communities_dsl::addr.eq(p.addr))
@@ -565,68 +565,68 @@ impl DataStore {
                             .load_async::<SwitchPortBgpPeerConfigCommunity>(&conn)
                             .await?;
 
-                    let view = BgpPeerConfig {
-                        port_settings_id: p.port_settings_id,
-                        bgp_config_id: p.bgp_config_id,
-                        interface_name: p.interface_name.clone(),
-                        addr: p.addr,
-                        hold_time: p.hold_time,
-                        idle_hold_time: p.idle_hold_time,
-                        delay_open: p.delay_open,
-                        connect_retry: p.connect_retry,
-                        keepalive: p.keepalive,
-                        remote_asn: p.remote_asn,
-                        min_ttl: p.min_ttl,
-                        md5_auth_key: p.md5_auth_key.clone(),
-                        multi_exit_discriminator: p.multi_exit_discriminator,
-                        local_pref: p.local_pref,
-                        enforce_first_as: p.enforce_first_as,
-                        vlan_id: p.vlan_id,
-                        communities: communities.into_iter().map(|c| c.community.0).collect(),
-                        allowed_import,
-                        allowed_export,
+                        let view = BgpPeerConfig {
+                            port_settings_id: p.port_settings_id,
+                            bgp_config_id: p.bgp_config_id,
+                            interface_name: p.interface_name.clone(),
+                            addr: p.addr,
+                            hold_time: p.hold_time,
+                            idle_hold_time: p.idle_hold_time,
+                            delay_open: p.delay_open,
+                            connect_retry: p.connect_retry,
+                            keepalive: p.keepalive,
+                            remote_asn: p.remote_asn,
+                            min_ttl: p.min_ttl,
+                            md5_auth_key: p.md5_auth_key.clone(),
+                            multi_exit_discriminator: p.multi_exit_discriminator,
+                            local_pref: p.local_pref,
+                            enforce_first_as: p.enforce_first_as,
+                            vlan_id: p.vlan_id,
+                            communities: communities.into_iter().map(|c| c.community.0).collect(),
+                            allowed_import,
+                            allowed_export,
+                        };
+
+                        result.bgp_peers.push(view);
+                    }
+
+                    // get the address configs
+                    use db::schema::switch_port_settings_address_config::{
+                        self as address_config, dsl as address_config_dsl,
                     };
 
-                    result.bgp_peers.push(view);
-                }
-
-                // get the address configs
-                use db::schema::switch_port_settings_address_config::{
-                    self as address_config, dsl as address_config_dsl,
-                };
-
-                result.addresses =
-                    address_config_dsl::switch_port_settings_address_config
+                    result.addresses =
+                        address_config_dsl::switch_port_settings_address_config
                         .filter(address_config::port_settings_id.eq(id))
                         .select(SwitchPortAddressConfig::as_select())
                         .load_async::<SwitchPortAddressConfig>(&conn)
                         .await?;
 
-                Ok(result)
-            }
-        })
-        .await
-        .map_err(|e| {
-            if let Some(err) = err.take() {
-                match err {
-                    SwitchPortSettingsGetError::NotFound(name) => {
-                        Error::not_found_by_name(
+                    Ok(result)
+                }
+            })
+            .await
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    match err {
+                        SwitchPortSettingsGetError::NotFound(name) => {
+                            Error::not_found_by_name(
+                                ResourceType::SwitchPortSettings,
+                                &name,
+                            )
+                        }
+                    }
+                } else {
+                    let name = name_or_id.to_string();
+                    public_error_from_diesel(
+                        e,
+                        ErrorHandler::Conflict(
                             ResourceType::SwitchPortSettings,
                             &name,
-                        )
-                    }
+                        ),
+                    )
                 }
-            } else {
-                let name = name_or_id.to_string();
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::Conflict(
-                        ResourceType::SwitchPortSettings,
-                        &name,
-                    ),
-                )
-            }
-        })
+            })
     }
 
     pub async fn switch_port_configuration_geometry_get(
@@ -958,8 +958,8 @@ impl DataStore {
         let err = OptionalError::new();
 
         self.transaction_retry_wrapper(
-                "switch_port_configuration_interface_address_add",
-            )
+            "switch_port_configuration_interface_address_add",
+        )
             .transaction(&conn, |conn| {
                 let parent_configuration = configuration.clone();
                 let new_settings = address.clone();
@@ -1074,10 +1074,10 @@ impl DataStore {
                     let address = diesel::insert_into(
                         address_config::table,
                     )
-                    .values(address_config)
-                    .returning(SwitchPortAddressConfig::as_returning())
-                    .get_result_async(&conn)
-                    .await?;
+                        .values(address_config)
+                        .returning(SwitchPortAddressConfig::as_returning())
+                        .get_result_async(&conn)
+                        .await?;
 
                     Ok(address)
                 }
@@ -1110,8 +1110,8 @@ impl DataStore {
         let err = OptionalError::new();
 
         self.transaction_retry_wrapper(
-                "switch_port_configuration_interface_address_remove",
-            )
+            "switch_port_configuration_interface_address_remove",
+        )
             .transaction(&conn, |conn| {
                 let parent_configuration = configuration.clone();
                 let settings_to_remove = address.clone();
@@ -1254,84 +1254,84 @@ impl DataStore {
         self.transaction_retry_wrapper(
             "switch_port_configuration_interface_route_add",
         )
-        .transaction(&conn, |conn| {
-            let parent_configuration = configuration.clone();
-            let new_settings = route.clone();
-            let err = err.clone();
+            .transaction(&conn, |conn| {
+                let parent_configuration = configuration.clone();
+                let new_settings = route.clone();
+                let err = err.clone();
 
-            async move {
-                // resolve id of port_settings record
-                let port_settings_id = switch_port_configuration_id(&conn, parent_configuration.clone())
-                    .await
-                    .map_err(|e: diesel::result::Error| {
-                        match e {
-                            diesel::result::Error::NotFound => {
-                                err.bail(
-                                    Error::non_resourcetype_not_found(
-                                        format!("unable to lookup configuration with identifier {parent_configuration}")
+                async move {
+                    // resolve id of port_settings record
+                    let port_settings_id = switch_port_configuration_id(&conn, parent_configuration.clone())
+                        .await
+                        .map_err(|e: diesel::result::Error| {
+                            match e {
+                                diesel::result::Error::NotFound => {
+                                    err.bail(
+                                        Error::non_resourcetype_not_found(
+                                            format!("unable to lookup configuration with identifier {parent_configuration}")
+                                        )
                                     )
-                                )
-                            },
-                            _ => {
-                                err.bail(Error::internal_error(
-                                    "error while looking up configuration for interface address"
-                                ))
-                            },
-                        }
-                    })?;
+                                },
+                                _ => {
+                                    err.bail(Error::internal_error(
+                                        "error while looking up configuration for interface route"
+                                    ))
+                                },
+                            }
+                        })?;
 
-                let route_config = SwitchPortRouteConfig{
-                    port_settings_id,
-                    interface_name: new_settings.interface.to_string(),
-                    dst: new_settings.dst.into(),
-                    gw: new_settings.gw.into(),
-                    vid: new_settings.vid.map(Into::into),
-                    local_pref: new_settings.local_pref.map(Into::into),
-                };
+                    let route_config = SwitchPortRouteConfig{
+                        port_settings_id,
+                        interface_name: new_settings.interface.to_string(),
+                        dst: new_settings.dst.into(),
+                        gw: new_settings.gw.into(),
+                        vid: new_settings.vid.map(Into::into),
+                        local_pref: new_settings.local_pref.map(Into::into),
+                    };
 
-                let config = diesel::insert_into(route_config::table)
-                    .values(route_config)
-                    .returning(SwitchPortRouteConfig::as_returning())
-                    .get_result_async(&conn)
-                    .await
-                    .map_err(|e: diesel::result::Error| {
-                        let message = "error while adding route to interface";
-                        match e {
-                            diesel::result::Error::DatabaseError(kind, _) => {
-                                match kind {
-                                    diesel::result::DatabaseErrorKind::UniqueViolation => {
-                                        err.bail(Error::conflict("route configuration conflicts with an existing route"))
-                                    },
-                                    diesel::result::DatabaseErrorKind::NotNullViolation => {
-                                        err.bail(Error::invalid_request("a required field is not populated"))
-                                    },
-                                    _ => err.bail(Error::internal_error(message)),
-                                }
-                            },
-                            _ => err.bail(Error::internal_error(message)),
-                        }
-                    })?;
+                    let config = diesel::insert_into(route_config::table)
+                        .values(route_config)
+                        .returning(SwitchPortRouteConfig::as_returning())
+                        .get_result_async(&conn)
+                        .await
+                        .map_err(|e: diesel::result::Error| {
+                            let message = "error while adding route to interface";
+                            match e {
+                                diesel::result::Error::DatabaseError(kind, _) => {
+                                    match kind {
+                                        diesel::result::DatabaseErrorKind::UniqueViolation => {
+                                            err.bail(Error::conflict("route configuration conflicts with an existing route"))
+                                        },
+                                        diesel::result::DatabaseErrorKind::NotNullViolation => {
+                                            err.bail(Error::invalid_request("a required field is not populated"))
+                                        },
+                                        _ => err.bail(Error::internal_error(message)),
+                                    }
+                                },
+                                _ => err.bail(Error::internal_error(message)),
+                            }
+                        })?;
 
-                Ok(config)
-            }
-        })
-        .await
-        .map_err(|e| {
-            let message =
-                "switch_port_configuration_interface_route_add failed";
-            match err.take() {
-                Some(external_error) => {
-                    error!(opctx.log, "{message}"; "error" => ?external_error);
-                    external_error
+                    Ok(config)
                 }
-                None => {
-                    error!(opctx.log, "{message}"; "error" => ?e);
-                    Error::internal_error(
-                        "error while adding route to interface",
-                    )
+            })
+            .await
+            .map_err(|e| {
+                let message =
+                    "switch_port_configuration_interface_route_add failed";
+                match err.take() {
+                    Some(external_error) => {
+                        error!(opctx.log, "{message}"; "error" => ?external_error);
+                        external_error
+                    }
+                    None => {
+                        error!(opctx.log, "{message}"; "error" => ?e);
+                        Error::internal_error(
+                            "error while adding route to interface",
+                        )
+                    }
                 }
-            }
-        })
+            })
     }
 
     pub async fn switch_port_configuration_route_remove(
@@ -1348,12 +1348,12 @@ impl DataStore {
         self.transaction_retry_wrapper(
             "switch_port_configuration_interface_route_remove",
         )
-        .transaction(&conn, |conn| {
-            let parent_configuration = configuration.clone();
-            let settings_to_remove = route.clone();
-            let err = err.clone();
+            .transaction(&conn, |conn| {
+                let parent_configuration = configuration.clone();
+                let settings_to_remove = route.clone();
+                let err = err.clone();
 
-            async move {
+                async move {
                     // resolve id of port_settings record
                     let port_settings_id = switch_port_configuration_id(&conn, parent_configuration.clone())
                         .await
@@ -1368,7 +1368,7 @@ impl DataStore {
                                 },
                                 _ => {
                                     err.bail(Error::internal_error(
-                                        "error while looking up configuration for interface address"
+                                        "error while looking up configuration for interface route"
                                     ))
                                 },
                             }
@@ -1386,25 +1386,610 @@ impl DataStore {
 
                     Ok(())
 
-            }
-        })
-        .await
-        .map_err(|e| {
-            let message =
-                "switch_port_configuration_interface_route_remove failed";
-            match err.take() {
-                Some(external_error) => {
-                    error!(opctx.log, "{message}"; "error" => ?external_error);
-                    external_error
                 }
-                None => {
-                    error!(opctx.log, "{message}"; "error" => ?e);
-                    Error::internal_error(
-                        "error while removing route from interface",
-                    )
+            })
+            .await
+            .map_err(|e| {
+                let message =
+                    "switch_port_configuration_interface_route_remove failed";
+                match err.take() {
+                    Some(external_error) => {
+                        error!(opctx.log, "{message}"; "error" => ?external_error);
+                        external_error
+                    }
+                    None => {
+                        error!(opctx.log, "{message}"; "error" => ?e);
+                        Error::internal_error(
+                            "error while removing route from interface",
+                        )
+                    }
                 }
-            }
-        })
+            })
+    }
+
+    pub async fn switch_port_configuration_bgp_peer_list(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+    ) -> ListResultVec<BgpPeerConfig> {
+        use db::schema::switch_port_settings as port_settings;
+        use db::schema::switch_port_settings_bgp_peer_config as bgp_peer_config;
+        use db::schema::switch_port_settings_bgp_peer_config_allow_export as allow_export;
+        use db::schema::switch_port_settings_bgp_peer_config_allow_import as allow_import;
+        use db::schema::switch_port_settings_bgp_peer_config_communities as communities;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let err = OptionalError::new();
+
+        self.transaction_retry_wrapper(
+            "switch_port_configuration_bgp_peer_list",
+        )
+            .transaction(&conn, |conn| {
+                let parent_configuration = configuration.clone();
+                let err = err.clone();
+
+                async move {
+
+                    let dataset = port_settings::table.inner_join(
+                        bgp_peer_config::table
+                            .on(bgp_peer_config::port_settings_id.eq(port_settings::id)),
+                    );
+
+                    let query = match parent_configuration {
+                        NameOrId::Id(id) => {
+                            // find port config using port settings id
+                            dataset.filter(port_settings::id.eq(id)).into_boxed()
+                        }
+                        NameOrId::Name(name) => {
+                            // find port config using port settings name
+                            dataset
+                                .filter(port_settings::name.eq(name.to_string()))
+                                .into_boxed()
+                        }
+                    };
+
+                    let peers: Vec<SwitchPortBgpPeerConfig> = query
+                        .select(SwitchPortBgpPeerConfig::as_select())
+                        .load_async(&conn)
+                        .await
+                        .map_err(|e: diesel::result::Error| {
+                            let message = "error while looking up interface bgp peer configuration";
+                            error!(opctx.log, "{message}"; "error" => ?e);
+                            match e {
+                                diesel::result::Error::NotFound => {
+                                    err.bail(Error::non_resourcetype_not_found(
+                                        "could not find bgp peer configuration for switch port configuration: {configuration}, interface: {interface}"
+                                    ))},
+                                _ => err.bail(Error::internal_error(message)),
+                            }
+                        })?;
+
+                    let mut configs: Vec<BgpPeerConfig> = vec![];
+
+                    for peer in peers {
+                        // get allowed import
+                        let prefixes_to_import: Vec<IpNetwork> = allow_import::table
+                            .filter(allow_import::addr.eq(peer.addr))
+                            .filter(allow_import::interface_name.eq(peer.interface_name.clone()))
+                            .filter(allow_import::port_settings_id.eq(peer.port_settings_id))
+                            .select(allow_import::prefix)
+                            .load_async(&conn)
+                            .await
+                            .map_err(|e| {
+                                let message = "error while looking up bgp peer import configuration";
+                                error!(opctx.log, "{message}"; "error" => ?e);
+                                err.bail(Error::internal_error(message))
+                            })?;
+
+                        let allowed_import = if prefixes_to_import.is_empty() {
+                            ImportExportPolicy::NoFiltering
+                        } else {
+                            ImportExportPolicy::Allow(prefixes_to_import.into_iter().map(Into::into).collect())
+                        };
+
+                        // get allowed export
+                        let prefixes_to_export: Vec<IpNetwork> = allow_export::table
+                            .filter(allow_export::addr.eq(peer.addr))
+                            .filter(allow_export::interface_name.eq(peer.interface_name.clone()))
+                            .filter(allow_export::port_settings_id.eq(peer.port_settings_id))
+                            .select(allow_export::prefix)
+                            .load_async(&conn)
+                            .await
+                            .map_err(|e| {
+                                let message =
+                                    "error while looking up bgp peer export configuration";
+                                error!(opctx.log, "{message}"; "error" => ?e);
+                                err.bail(Error::internal_error(message))
+                            })?;
+
+                        let allowed_export = if prefixes_to_export.is_empty() {
+                            ImportExportPolicy::NoFiltering
+                        } else {
+                            ImportExportPolicy::Allow(prefixes_to_export.into_iter().map(Into::into).collect())
+                        };
+
+                        // get communities
+                        let communities: Vec<SqlU32> = communities::table
+                            .filter(communities::addr.eq(peer.addr))
+                            .filter(communities::interface_name.eq(peer.interface_name.clone()))
+                            .filter(communities::port_settings_id.eq(peer.port_settings_id))
+                            .select(communities::community)
+                            .load_async(&conn)
+                            .await
+                            .map_err(|e| {
+                                let message =
+                                    "error while looking up bgp peer communities";
+                                error!(opctx.log, "{message}"; "error" => ?e);
+                                err.bail(Error::internal_error(message))
+                            })?;
+
+                        // build config
+                        let config = BgpPeerConfig {
+                            port_settings_id: peer.port_settings_id,
+                            bgp_config_id: peer.bgp_config_id,
+                            interface_name: peer.interface_name,
+                            addr: peer.addr,
+                            hold_time: peer.hold_time,
+                            idle_hold_time: peer.idle_hold_time,
+                            delay_open: peer.delay_open,
+                            connect_retry: peer.connect_retry,
+                            keepalive: peer.keepalive,
+                            remote_asn: peer.remote_asn,
+                            min_ttl: peer.min_ttl,
+                            md5_auth_key: peer.md5_auth_key,
+                            multi_exit_discriminator: peer.multi_exit_discriminator,
+                            local_pref: peer.local_pref,
+                            enforce_first_as: peer.enforce_first_as,
+                            allowed_import,
+                            allowed_export,
+                            communities: communities.into_iter().map(Into::into).collect(),
+                            vlan_id: peer.vlan_id,
+                        };
+                        // push
+                        configs.push(config);
+                    }
+
+                    Ok(configs)
+                }
+            })
+            .await
+            .map_err(|e| {
+                let message =
+                    "switch_port_configuration_bgp_peer_list failed";
+                match err.take() {
+                    Some(external_error) => {
+                        error!(opctx.log, "{message}"; "error" => ?external_error);
+                        external_error
+                    }
+                    None => {
+                        error!(opctx.log, "{message}"; "error" => ?e);
+                        Error::internal_error(
+                            "error while listing peers for interface configuration",
+                        )
+                    }
+                }
+            })
+    }
+
+    pub async fn switch_port_configuration_bgp_peer_add(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+        bgp_peer: BgpPeer,
+    ) -> CreateResult<BgpPeerConfig> {
+        use db::schema::bgp_config;
+        use db::schema::switch_port_settings_bgp_peer_config as bgp_peer_config;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let err = OptionalError::new();
+
+        self.transaction_retry_wrapper(
+            "switch_port_configuration_interface_bgp_peer_add",
+        )
+            .transaction(&conn, |conn| {
+                let parent_configuration = configuration.clone();
+                let new_settings = bgp_peer.clone();
+                let err = err.clone();
+
+                async move {
+                    // resolve id of port_settings record
+                    let port_settings_id = switch_port_configuration_id(&conn, parent_configuration.clone())
+                        .await
+                        .map_err(|e: diesel::result::Error| {
+                            match e {
+                                diesel::result::Error::NotFound => {
+                                    err.bail(
+                                        Error::non_resourcetype_not_found(
+                                            format!("unable to lookup configuration with identifier {parent_configuration}")
+                                        )
+                                    )
+                                },
+                                _ => {
+                                    err.bail(Error::internal_error(
+                                        "error while looking up configuration for interface bgp peer"
+                                    ))
+                                },
+                            }
+                        })?;
+
+                    // resolve id of referenced bgp configuratino
+                    let bgp_config_id = match new_settings.bgp_config {
+
+                        NameOrId::Id(id) => {
+                            // verify id is valid
+                            bgp_config::table
+                                .filter(bgp_config::time_deleted.is_null())
+                                .filter(bgp_config::id.eq(id))
+                                .select(bgp_config::id)
+                                .limit(1)
+                                .first_async::<Uuid>(&conn)
+                                .await
+                                .map_err(|e: diesel::result::Error| {
+                                    match e {
+                                        diesel::result::Error::NotFound => {
+                                            err.bail(Error::not_found_by_id(ResourceType::BgpConfig, &id))
+                                        },
+                                        _ => {
+                                            let message = "error while looking up bgp config for bgp peer";
+                                            error!(opctx.log, "{message}"; "error" => ?e);
+                                            err.bail(Error::internal_error(message))
+                                        },
+                                    }
+                                })
+                        },
+
+                        NameOrId::Name(name) => {
+                            bgp_config::table
+                                .filter(bgp_config::time_deleted.is_null())
+                                .filter(bgp_config::name.eq(name.to_string()))
+                                .select(bgp_config::id)
+                                .limit(1)
+                                .first_async::<Uuid>(&conn)
+                                .await
+                                .map_err(|e: diesel::result::Error| {
+                                    match e {
+                                        diesel::result::Error::NotFound => {
+                                            err.bail(Error::not_found_by_name(ResourceType::BgpConfig, &name))
+                                        },
+                                        _ => {
+                                            let message = "error while looking up bgp config for bgp peer";
+                                            error!(opctx.log, "{message}"; "error" => ?e);
+                                            err.bail(Error::internal_error(message))
+                                        },
+                                    }
+                                })
+                        }
+                    }?;
+
+                    // create import list if enabled
+                    let allow_import_list_active = match new_settings.allowed_import.clone() {
+                        ImportExportPolicy::NoFiltering => false,
+                        ImportExportPolicy::Allow(prefixes) => {
+                            use db::schema::switch_port_settings_bgp_peer_config_allow_import as allow_import;
+                            let to_insert: Vec<SwitchPortBgpPeerConfigAllowImport> = prefixes
+                                .clone()
+                                .into_iter()
+                                .map(|x| SwitchPortBgpPeerConfigAllowImport {
+                                    port_settings_id,
+                                    interface_name: new_settings.interface_name.clone(),
+                                    addr: new_settings.addr.into(),
+                                    prefix: x.into(),
+                                })
+                                .collect();
+
+                            diesel::insert_into(allow_import::table)
+                                .values(to_insert)
+                                .execute_async(&conn)
+                                .await
+                                .map_err(|e: diesel::result::Error| {
+                                    let message = "error while creating bgp allowed import configuration";
+                                    match e {
+                                        diesel::result::Error::DatabaseError(kind, _) => {
+                                            match kind {
+                                                diesel::result::DatabaseErrorKind::UniqueViolation => {
+                                                    err.bail(Error::conflict("allowed import configuration conflicts with an existing configuration"))
+                                                },
+                                                diesel::result::DatabaseErrorKind::NotNullViolation => {
+                                                    err.bail(Error::invalid_request("a required field is not populated"))
+                                                },
+                                                _ => err.bail(Error::internal_error(message)),
+                                            }
+                                        },
+                                        _ => err.bail(Error::internal_error(message)),
+                                    }
+                                })?;
+
+                            true
+                        },
+                    };
+
+                    // create export list if enabled
+                    let allow_export_list_active = match new_settings.allowed_export.clone() {
+                        ImportExportPolicy::NoFiltering => false,
+                        ImportExportPolicy::Allow(prefixes) => {
+                            use db::schema::switch_port_settings_bgp_peer_config_allow_export as allow_export;
+                            let to_insert: Vec<SwitchPortBgpPeerConfigAllowExport> = prefixes
+                                .clone()
+                                .into_iter()
+                                .map(|x| SwitchPortBgpPeerConfigAllowExport {
+                                    port_settings_id,
+                                    interface_name: new_settings.interface_name.clone(),
+                                    addr: new_settings.addr.into(),
+                                    prefix: x.into(),
+                                })
+                                .collect();
+
+                            diesel::insert_into(allow_export::table)
+                                .values(to_insert)
+                                .execute_async(&conn)
+                                .await
+                                .map_err(|e: diesel::result::Error| {
+                                    let message = "error while creating bgp allowed export configuration";
+                                    match e {
+                                        diesel::result::Error::DatabaseError(kind, _) => {
+                                            match kind {
+                                                diesel::result::DatabaseErrorKind::UniqueViolation => {
+                                                    err.bail(Error::conflict("allowed export configuration conflicts with an existing configuration"))
+                                                },
+                                                diesel::result::DatabaseErrorKind::NotNullViolation => {
+                                                    err.bail(Error::invalid_request("a required field is not populated"))
+                                                },
+                                                _ => err.bail(Error::internal_error(message)),
+                                            }
+                                        },
+                                        _ => err.bail(Error::internal_error(message)),
+                                    }
+                                })?;
+
+                            true
+                        },
+                    };
+
+                    // create communities
+                    if !new_settings.communities.is_empty() {
+                        use db::schema::switch_port_settings_bgp_peer_config_communities as peer_communities;
+                        let to_insert: Vec<SwitchPortBgpPeerConfigCommunity> = new_settings
+                            .communities
+                            .clone()
+                            .into_iter()
+                            .map(|x| SwitchPortBgpPeerConfigCommunity {
+                                port_settings_id,
+                                interface_name: new_settings.interface_name.clone(),
+                                addr: new_settings.addr.into(),
+                                community: x.into(),
+                            })
+                            .collect();
+
+                        diesel::insert_into(peer_communities::table)
+                            .values(to_insert)
+                            .execute_async(&conn)
+                            .await
+                            .map_err(|e: diesel::result::Error| {
+                                let message = "error while creating bgp communities for peer";
+                                match e {
+                                    diesel::result::Error::DatabaseError(kind, _) => {
+                                        match kind {
+                                            diesel::result::DatabaseErrorKind::UniqueViolation => {
+                                                err.bail(Error::conflict("peer communities configuration conflicts with an existing configuration"))
+                                            },
+                                            diesel::result::DatabaseErrorKind::NotNullViolation => {
+                                                err.bail(Error::invalid_request("a required field is not populated"))
+                                            },
+                                            _ => err.bail(Error::internal_error(message)),
+                                        }
+                                    },
+                                    _ => err.bail(Error::internal_error(message)),
+                                }
+                            })?;
+
+                    }
+
+                    let bgp_peer_config = SwitchPortBgpPeerConfig {
+                        port_settings_id,
+                        bgp_config_id,
+                        interface_name: new_settings.interface_name,
+                        addr: new_settings.addr.into(),
+                        hold_time: new_settings.hold_time.into(),
+                        idle_hold_time: new_settings.idle_hold_time.into(),
+                        delay_open: new_settings.delay_open.into(),
+                        connect_retry: new_settings.connect_retry.into(),
+                        keepalive: new_settings.keepalive.into(),
+                        remote_asn: new_settings.remote_asn.map(Into::into),
+                        min_ttl: new_settings.min_ttl.map(Into::into),
+                        md5_auth_key: new_settings.md5_auth_key,
+                        multi_exit_discriminator: new_settings.multi_exit_discriminator.map(Into::into),
+                        local_pref: new_settings.local_pref.map(Into::into),
+                        enforce_first_as: new_settings.enforce_first_as,
+                        allow_import_list_active,
+                        allow_export_list_active,
+                        vlan_id: new_settings.vlan_id.map(Into::into),
+                    };
+
+                    let peer = diesel::insert_into(bgp_peer_config::table)
+                        .values(bgp_peer_config)
+                        .returning(SwitchPortBgpPeerConfig::as_returning())
+                        .get_result_async(&conn)
+                        .await
+                        .map_err(|e: diesel::result::Error| {
+                            let message = "error while adding bgp peer to interface";
+                            match e {
+                                diesel::result::Error::DatabaseError(kind, _) => {
+                                    match kind {
+                                        diesel::result::DatabaseErrorKind::UniqueViolation => {
+                                            err.bail(Error::conflict("bgp peer configuration conflicts with an existing configuration"))
+                                        },
+                                        diesel::result::DatabaseErrorKind::NotNullViolation => {
+                                            err.bail(Error::invalid_request("a required field is not populated"))
+                                        },
+                                        _ => err.bail(Error::internal_error(message)),
+                                    }
+                                },
+                                _ => err.bail(Error::internal_error(message)),
+                            }
+                        })?;
+
+                    let config = BgpPeerConfig {
+                        port_settings_id,
+                        bgp_config_id,
+                        interface_name: peer.interface_name,
+                        addr: peer.addr,
+                        hold_time: peer.hold_time,
+                        idle_hold_time: peer.idle_hold_time,
+                        delay_open: peer.delay_open,
+                        connect_retry: peer.connect_retry,
+                        keepalive: peer.keepalive,
+                        remote_asn: peer.remote_asn,
+                        min_ttl: peer.min_ttl,
+                        md5_auth_key: peer.md5_auth_key,
+                        multi_exit_discriminator: peer.multi_exit_discriminator,
+                        local_pref: peer.local_pref,
+                        enforce_first_as: peer.enforce_first_as,
+                        allowed_import: new_settings.allowed_import,
+                        allowed_export: new_settings.allowed_export,
+                        communities: new_settings.communities,
+                        vlan_id: peer.vlan_id,
+                    };
+
+                    Ok(config)
+                }
+            })
+            .await
+            .map_err(|e| {
+                let message =
+                    "switch_port_configuration_interface_bgp_peer_add failed";
+                match err.take() {
+                    Some(external_error) => {
+                        error!(opctx.log, "{message}"; "error" => ?external_error);
+                        external_error
+                    }
+                    None => {
+                        error!(opctx.log, "{message}"; "error" => ?e);
+                        Error::internal_error(
+                            "error while adding bgp peer to interface",
+                        )
+                    }
+                }
+            })
+    }
+
+    pub async fn switch_port_configuration_bgp_peer_remove(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+        bgp_peer: BgpPeer,
+    ) -> DeleteResult {
+        use db::schema::switch_port_settings_bgp_peer_config as bgp_peer_config;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let err = OptionalError::new();
+
+        self.transaction_retry_wrapper(
+            "switch_port_configuration_interface_bgp_peer_remove",
+        )
+            .transaction(&conn, |conn| {
+                let parent_configuration = configuration.clone();
+                let settings_to_remove = bgp_peer.clone();
+                let err = err.clone();
+
+                async move {
+                    // resolve id of port_settings record
+                    let port_settings_id = switch_port_configuration_id(&conn, parent_configuration.clone())
+                        .await
+                        .map_err(|e: diesel::result::Error| {
+                            match e {
+                                diesel::result::Error::NotFound => {
+                                    err.bail(
+                                        Error::non_resourcetype_not_found(
+                                            format!("unable to lookup configuration with identifier {parent_configuration}")
+                                        )
+                                    )
+                                },
+                                _ => {
+                                    err.bail(Error::internal_error(
+                                        "error while looking up configuration for interface bgp peer"
+                                    ))
+                                },
+                            }
+                        })?;
+
+                    // delete allowed import / export
+                    // PRIMARY KEY (port_settings_id, interface_name, addr, prefix)
+                    use db::schema::switch_port_settings_bgp_peer_config_allow_import as allow_import;
+                    diesel::delete(allow_import::table)
+                        .filter(allow_import::port_settings_id.eq(port_settings_id))
+                        .filter(allow_import::interface_name.eq(settings_to_remove.interface_name.clone()))
+                        .filter(allow_import::addr.eq(IpNetwork::from(settings_to_remove.addr)))
+                        .execute_async(&conn)
+                        .await
+                        .map_err(|e| {
+                            let message = "error while deleting import list for bgp peer";
+                            error!(opctx.log, "{message}"; "error" => ?e);
+                            err.bail(Error::internal_error(message))
+                        })?;
+
+                    use db::schema::switch_port_settings_bgp_peer_config_allow_export as allow_export;
+                    diesel::delete(allow_export::table)
+                        .filter(allow_export::port_settings_id.eq(port_settings_id))
+                        .filter(allow_export::interface_name.eq(settings_to_remove.interface_name.clone()))
+                        .filter(allow_export::addr.eq(IpNetwork::from(settings_to_remove.addr)))
+                        .execute_async(&conn)
+                        .await
+                        .map_err(|e| {
+                            let message = "error while deleting export list for bgp peer";
+                            error!(opctx.log, "{message}"; "error" => ?e);
+                            err.bail(Error::internal_error(message))
+                        })?;
+
+                    // delete communities
+                    // PRIMARY KEY (port_settings_id, interface_name, addr, community)
+                    use db::schema::switch_port_settings_bgp_peer_config_communities as peer_communities;
+                    diesel::delete(peer_communities::table)
+                        .filter(peer_communities::port_settings_id.eq(port_settings_id))
+                        .filter(peer_communities::interface_name.eq(settings_to_remove.interface_name.clone()))
+                        .filter(peer_communities::addr.eq(IpNetwork::from(settings_to_remove.addr)))
+                        .execute_async(&conn)
+                        .await
+                        .map_err(|e| {
+                            let message = "error while deleting communities for bgp peer";
+                            error!(opctx.log, "{message}"; "error" => ?e);
+                            err.bail(Error::internal_error(message))
+                        })?;
+
+                    // delete bgp peer config
+                    // PRIMARY KEY (port_settings_id, interface_name, addr)
+                    diesel::delete(bgp_peer_config::table)
+                        .filter(bgp_peer_config::addr.eq(IpNetwork::from(settings_to_remove.addr)))
+                        .filter(bgp_peer_config::port_settings_id.eq(port_settings_id))
+                        .filter(bgp_peer_config::interface_name.eq(settings_to_remove.interface_name))
+                        .execute_async(&conn)
+                        .await
+                        .map_err(|e| {
+                            let message = "error while deleting bgp peer";
+                            error!(opctx.log, "{message}"; "error" => ?e);
+                            err.bail(Error::internal_error(message))
+                        })?;
+
+                    Ok(())
+
+                }
+            })
+            .await
+            .map_err(|e| {
+                let message =
+                    "switch_port_configuration_interface_bgp_peer_remove failed";
+                match err.take() {
+                    Some(external_error) => {
+                        error!(opctx.log, "{message}"; "error" => ?external_error);
+                        external_error
+                    }
+                    None => {
+                        error!(opctx.log, "{message}"; "error" => ?e);
+                        Error::internal_error(
+                            "error while removing bgp peer from interface",
+                        )
+                    }
+                }
+            })
     }
 
     // switch ports

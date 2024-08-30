@@ -7423,7 +7423,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/BgpPeerConfig"
+                  "title": "Array_of_BgpPeer",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BgpPeer"
+                  }
                 }
               }
             }
@@ -7878,7 +7882,7 @@
         "tags": [
           "system/networking"
         ],
-        "summary": "Remove address from an interface configuration",
+        "summary": "Remove route from an interface configuration",
         "operationId": "networking_switch_port_configuration_route_remove",
         "parameters": [
           {

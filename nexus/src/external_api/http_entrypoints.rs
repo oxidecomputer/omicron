@@ -40,10 +40,7 @@ use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup::ImageLookup;
 use nexus_db_queries::db::lookup::ImageParentLookup;
 use nexus_db_queries::db::model::Name;
-use nexus_types::external_api::{
-    params::BgpPeerConfig,
-    shared::{BfdStatus, ProbeInfo},
-};
+use nexus_types::external_api::shared::{BfdStatus, ProbeInfo};
 use omicron_common::api::external::AddressLot;
 use omicron_common::api::external::AddressLotCreateResponse;
 use omicron_common::api::external::AggregateBgpMessageHistory;
@@ -279,51 +276,49 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(networking_switch_port_configuration_delete)?;
 
         // /v1/system/networking/switch-port-configuration/{name_or_id}/geometry
-        // TODO: Levon - test
+        // TODO:  Levon - add tests
         api.register(networking_switch_port_configuration_geometry_view)?;
-        // TODO: Levon - test
+        // TODO:  Levon - add tests
         api.register(networking_switch_port_configuration_geometry_set)?;
 
         // /v1/system/networking/switch-port-configuration/{name_or_id}/link
-        // TODO: Levon - test
+        // TODO:  Levon - add tests
         api.register(networking_switch_port_configuration_link_create)?;
-        // TODO: Levon - test
+        // TODO:  Levon - add tests
         api.register(networking_switch_port_configuration_link_delete)?;
-        // TODO: Levon - test
+        // TODO:  Levon - add tests
         api.register(networking_switch_port_configuration_link_view)?;
-        // TODO: Levon - test
+        // TODO:  Levon - add tests
         api.register(networking_switch_port_configuration_link_list)?;
 
         // /v1/system/networking/switch-port-configuration/{name_or_id}/interface/{interface}/address
-        // TODO: Levon - test
+        // TODO:  Levon - add tests
         api.register(networking_switch_port_configuration_address_add)?;
-        // TODO: Levon - test
+        // TODO:  Levon - add tests
         api.register(networking_switch_port_configuration_address_remove)?;
-        // TODO: Levon - test
+        // TODO:  Levon - add tests
         api.register(networking_switch_port_configuration_address_list)?;
 
         // /v1/system/networking/switch-port-configuration/{name_or_id}/interface/{interface}/route
-        // TODO: Levon - test
+        // TODO:  Levon - add tests
         api.register(networking_switch_port_configuration_route_add)?;
-        // TODO: Levon - test
+        // TODO:  Levon - add tests
         api.register(networking_switch_port_configuration_route_remove)?;
-        // TODO: Levon - test
+        // TODO:  Levon - add tests
         api.register(networking_switch_port_configuration_route_list)?;
 
         // /v1/system/networking/switch-port-configuration/{name_or_id}/interface/{interface}/bgp-peer
-        // TODO: Levon - test
+        // TODO:  Levon - add tests
         api.register(networking_switch_port_configuration_bgp_peer_add)?;
-        // TODO: Levon - test
+        // TODO:  Levon - add tests
         api.register(networking_switch_port_configuration_bgp_peer_remove)?;
-        // TODO: Levon - test
+        // TODO:  Levon - add tests
         api.register(networking_switch_port_configuration_bgp_peer_list)?;
 
         api.register(networking_switch_port_list)?;
         api.register(networking_switch_port_status)?;
         api.register(networking_switch_port_apply_settings)?;
         api.register(networking_switch_port_clear_settings)?;
-        // TODO: Levon - test
-        // api.register(networking_switch_port_view_settings)?;
 
         api.register(networking_bgp_config_create)?;
         api.register(networking_bgp_config_list)?;
@@ -4190,7 +4185,7 @@ async fn networking_switch_port_configuration_route_add(
         .await
 }
 
-/// Remove address from an interface configuration
+/// Remove route from an interface configuration
 #[endpoint {
     method = POST,
     path ="/v1/system/networking/switch-port-configuration/{configuration}/route/remove",
@@ -4233,15 +4228,18 @@ async fn networking_switch_port_configuration_route_remove(
 async fn networking_switch_port_configuration_bgp_peer_list(
     rqctx: RequestContext<ApiContext>,
     path_params: Path<params::SwitchPortSettingsInfoSelector>,
-) -> Result<HttpResponseOk<BgpPeerConfig>, HttpError> {
+) -> Result<HttpResponseOk<Vec<BgpPeer>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.context.nexus;
-        let query = path_params.into_inner().configuration;
+        let configuration = path_params.into_inner().configuration;
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
 
-        let settings = nexus.switch_port_settings_get(&opctx, &query).await?;
-        todo!("list interface routes")
+        let settings = nexus
+            .switch_port_configuration_bgp_peer_list(&opctx, configuration)
+            .await?;
+
+        Ok(HttpResponseOk(settings.into_iter().map(Into::into).collect()))
     };
     apictx
         .context
@@ -4264,11 +4262,18 @@ async fn networking_switch_port_configuration_bgp_peer_add(
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.context.nexus;
-        let query = path_params.into_inner().configuration;
+        let configuration = path_params.into_inner().configuration;
+        let bgp_peer = bgp_peer.into_inner();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
 
-        let settings = nexus.switch_port_settings_get(&opctx, &query).await?;
-        todo!("add interface route")
+        let settings = nexus
+            .switch_port_configuration_bgp_peer_add(
+                &opctx,
+                configuration,
+                bgp_peer,
+            )
+            .await?;
+        Ok(HttpResponseCreated(settings.into()))
     };
     apictx
         .context
@@ -4291,11 +4296,18 @@ async fn networking_switch_port_configuration_bgp_peer_remove(
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.context.nexus;
-        let query = path_params.into_inner().configuration;
+        let configuration = path_params.into_inner().configuration;
+        let bgp_peer = bgp_peer.into_inner();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
 
-        let settings = nexus.switch_port_settings_get(&opctx, &query).await?;
-        todo!("remove interface route")
+        nexus
+            .switch_port_configuration_bgp_peer_remove(
+                &opctx,
+                configuration,
+                bgp_peer,
+            )
+            .await?;
+        Ok(HttpResponseDeleted())
     };
     apictx
         .context

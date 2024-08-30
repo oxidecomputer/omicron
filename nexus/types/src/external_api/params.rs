@@ -1677,6 +1677,13 @@ pub struct OptionalBgpAnnounceSetSelector {
     pub name_or_id: Option<NameOrId>,
 }
 
+/// Optionally select a BGP Peer by a name or id.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct OptionalBgpPeerSelector {
+    /// A name or id to use when filtering or paginating bgp peers
+    pub name_or_id: Option<NameOrId>,
+}
+
 /// Select a BGP announce set by a name or id.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct BgpAnnounceSetSelector {

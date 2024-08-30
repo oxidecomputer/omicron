@@ -120,6 +120,7 @@ pub use region::RegionAllocationParameters;
 pub use silo::Discoverability;
 pub use sled::SledTransition;
 pub use sled::TransitionError;
+pub use switch_port::BgpPeerConfig;
 pub use switch_port::SwitchPortSettingsCombinedResult;
 pub use virtual_provisioning_collection::StorageType;
 pub use vmm::VmmStateUpdateResult;

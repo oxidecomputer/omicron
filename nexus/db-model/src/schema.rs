@@ -1911,4 +1911,8 @@ allow_tables_to_appear_in_same_query!(
     switch_port_settings_link_config,
     switch_port_settings_address_config,
     switch_port_settings_route_config,
+    switch_port_settings_bgp_peer_config,
+    switch_port_settings_bgp_peer_config_allow_export,
+    switch_port_settings_bgp_peer_config_allow_import,
+    switch_port_settings_bgp_peer_config_communities,
 );
