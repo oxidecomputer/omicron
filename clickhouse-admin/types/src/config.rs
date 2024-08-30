@@ -15,7 +15,8 @@ use schemars::{
     JsonSchema,
 };
 use serde::{Deserialize, Serialize};
-use std::{fmt::Display, net::Ipv6Addr};
+use std::fmt::Display;
+use std::net::{Ipv4Addr, Ipv6Addr};
 
 // Used for schemars to be able to be used with camino:
 // See https://github.com/camino-rs/camino/issues/91#issuecomment-2027908513
@@ -256,15 +257,16 @@ impl KeeperConfigsForReplica {
             // Otherwise, when running any query, a "Service not found" error
             // appears.
             // https://github.com/ClickHouse/ClickHouse/blob/a011990fd75628c63c7995c4f15475f1d4125d10/src/Coordination/KeeperStateManager.cpp#L149
-            let parsed_host = match host.parse::<Ipv6Addr>() {
-                Ok(_) => format!("[{host}]"),
-                Err(_) => host.to_string(),
+            let sanitised_host = match host {
+                ClickhouseHost::Ipv6(h) => format!("[{h}]"),
+                ClickhouseHost::Ipv4(h) => h.to_string(),
+                ClickhouseHost::DomainName(h) => h.to_string(),
             };
 
             s.push_str(&format!(
                 "
         <node>
-            <host>{parsed_host}</host>
+            <host>{sanitised_host}</host>
             <port>{port}</port>
         </node>",
             ));
@@ -274,15 +276,23 @@ impl KeeperConfigsForReplica {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ClickhouseHost {
+    Ipv6(Ipv6Addr),
+    Ipv4(Ipv4Addr),
+    DomainName(String),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, JsonSchema, Serialize, Deserialize)]
 pub struct KeeperNodeConfig {
-    pub host: String,
+    pub host: ClickhouseHost,
     pub port: u16,
 }
 
 impl KeeperNodeConfig {
     /// A new ClickHouse keeper node configuration with default port
-    pub fn new(host: String) -> Self {
+    pub fn new(host: ClickhouseHost) -> Self {
         let port = CLICKHOUSE_KEEPER_TCP_PORT;
         Self { host, port }
     }

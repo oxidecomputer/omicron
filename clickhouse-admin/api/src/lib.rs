@@ -2,12 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use clickhouse_admin_types::config::ClickhouseHost;
 use dropshot::{
     HttpError, HttpResponseCreated, HttpResponseOk, RequestContext, TypedBody,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::net::SocketAddrV6;
+use std::net::{Ipv6Addr, SocketAddrV6};
 
 #[dropshot::api_description]
 pub trait ClickhouseAdminApi {
@@ -26,8 +27,7 @@ pub trait ClickhouseAdminApi {
     /// directory.
     #[endpoint {
         method = POST,
-        // TODO: I'm not sure about this endpoint, could be better?
-        path = "/server-node/generate-config",
+        path = "/node/server/generate-config",
     }]
     async fn generate_server_config(
         rqctx: RequestContext<Self::Context>,
@@ -60,4 +60,9 @@ impl ServerConfigGenerateResponse {
 #[serde(rename_all = "snake_case")]
 pub struct ServerSettings {
     pub node_id: u64,
+    pub keepers: Vec<ClickhouseHost>,
+    pub remote_servers: Vec<ClickhouseHost>,
+    pub config_dir: String,
+    pub datastore_path: String,
+    pub listen_addr: Ipv6Addr,
 }

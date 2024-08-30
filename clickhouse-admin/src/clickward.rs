@@ -11,7 +11,7 @@ use clickhouse_admin_types::{ClickhouseServerConfig, ServerId};
 use dropshot::HttpError;
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use std::io;
-use std::net::{Ipv6Addr, SocketAddrV6};
+use std::net::SocketAddrV6;
 use std::str::FromStr;
 
 #[derive(Debug, thiserror::Error, SlogInlineError)]
@@ -62,24 +62,36 @@ impl Clickward {
         settings: ServerSettings,
     ) -> Result<ServerConfigGenerateResponse, ClickwardError> {
         // TODO: This should be part of the request body
-        let keepers = vec![
-            KeeperNodeConfig::new("ff::01".to_string()),
-            KeeperNodeConfig::new("127.0.0.1".to_string()),
-            KeeperNodeConfig::new("we.dont.want.brackets.com".to_string()),
-        ];
+        //   let keepers = vec![
+        //       KeeperNodeConfig::new("ff::01".to_string()),
+        //       KeeperNodeConfig::new("127.0.0.1".to_string()),
+        //       KeeperNodeConfig::new("we.dont.want.brackets.com".to_string()),
+        //   ];
 
-        let servers = vec![
-            ServerNodeConfig::new("ff::08".to_string()),
-            ServerNodeConfig::new("ff::09".to_string()),
-        ];
+        // let servers = vec![
+        //     ServerNodeConfig::new("ff::08".to_string()),
+        //     ServerNodeConfig::new("ff::09".to_string()),
+        // ];
+
+        let keepers = settings
+            .keepers
+            .iter()
+            .map(|host| KeeperNodeConfig::new(host.clone()))
+            .collect();
+
+        let remote_servers = settings
+            .remote_servers
+            .iter()
+            .map(|host| ServerNodeConfig::new(format!("{host:?}")))
+            .collect();
 
         let config = ClickhouseServerConfig::new(
             Utf8PathBuf::from_str("./").unwrap(),
             ServerId(settings.node_id),
             Utf8PathBuf::from_str("./").unwrap(),
-            Ipv6Addr::from_str("ff::08").unwrap(),
+            settings.listen_addr,
             keepers,
-            servers,
+            remote_servers,
         );
 
         config.generate_xml_file().unwrap();

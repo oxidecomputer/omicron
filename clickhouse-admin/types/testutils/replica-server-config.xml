@@ -90,7 +90,7 @@
         
     <zookeeper>
         <node>
-            <host>[ff::01]</host>
+            <host>[ff::1]</host>
             <port>9181</port>
         </node>
         <node>

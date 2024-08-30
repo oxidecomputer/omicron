@@ -153,14 +153,18 @@ impl ClickhouseKeeperConfig {
 
 #[cfg(test)]
 mod tests {
-    use std::{net::Ipv6Addr, str::FromStr};
+    use std::{
+        net::{Ipv4Addr, Ipv6Addr},
+        str::FromStr,
+    };
 
     use camino::Utf8PathBuf;
     use camino_tempfile::Builder;
 
     use crate::{
-        ClickhouseKeeperConfig, ClickhouseServerConfig, KeeperId,
-        KeeperNodeConfig, RaftServerConfig, ServerId, ServerNodeConfig,
+        ClickhouseHost, ClickhouseKeeperConfig, ClickhouseServerConfig,
+        KeeperId, KeeperNodeConfig, RaftServerConfig, ServerId,
+        ServerNodeConfig,
     };
 
     #[test]
@@ -207,9 +211,15 @@ mod tests {
         );
 
         let keepers = vec![
-            KeeperNodeConfig::new("ff::01".to_string()),
-            KeeperNodeConfig::new("127.0.0.1".to_string()),
-            KeeperNodeConfig::new("we.dont.want.brackets.com".to_string()),
+            KeeperNodeConfig::new(ClickhouseHost::Ipv6(
+                Ipv6Addr::from_str("ff::01").unwrap(),
+            )),
+            KeeperNodeConfig::new(ClickhouseHost::Ipv4(
+                Ipv4Addr::from_str("127.0.0.1").unwrap(),
+            )),
+            KeeperNodeConfig::new(ClickhouseHost::DomainName(
+                "we.dont.want.brackets.com".to_string(),
+            )),
         ];
 
         let servers = vec![
