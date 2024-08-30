@@ -711,17 +711,22 @@ impl<'a> BlueprintBuilder<'a> {
         let (mut additions, mut updates, expunges, removals) = {
             let mut datasets_builder = BlueprintSledDatasetsBuilder::new(
                 self.log.clone(),
+                &mut self.rng,
                 sled_id,
                 &self.datasets,
                 resources,
             );
 
             // Ensure each zpool has a "Debug" and "Zone Root" dataset.
-            let bp_zpools = self
+            let mut bp_zpools = self
                 .disks
                 .current_sled_disks(sled_id)
                 .map(|disk_config| disk_config.pool_id)
                 .collect::<Vec<ZpoolUuid>>();
+            // We iterate over the zpools in a deterministic order to ensure
+            // that "new Dataset UUIDs" are distributed in a reliable order.
+            bp_zpools.sort();
+
             for zpool_id in bp_zpools {
                 let zpool = ZpoolName::new_external(zpool_id);
                 let address = None;
@@ -1454,6 +1459,7 @@ struct BlueprintBuilderRng {
     // associated with a specific `TypedUuidKind`.
     blueprint_rng: UuidRng,
     zone_rng: TypedUuidRng<OmicronZoneKind>,
+    dataset_rng: TypedUuidRng<omicron_uuid_kinds::DatasetKind>,
     network_interface_rng: UuidRng,
     external_ip_rng: TypedUuidRng<ExternalIpKind>,
 }
@@ -1466,6 +1472,7 @@ impl BlueprintBuilderRng {
     fn new_from_parent(mut parent: StdRng) -> Self {
         let blueprint_rng = UuidRng::from_parent_rng(&mut parent, "blueprint");
         let zone_rng = TypedUuidRng::from_parent_rng(&mut parent, "zone");
+        let dataset_rng = TypedUuidRng::from_parent_rng(&mut parent, "dataset");
         let network_interface_rng =
             UuidRng::from_parent_rng(&mut parent, "network_interface");
         let external_ip_rng =
@@ -1474,6 +1481,7 @@ impl BlueprintBuilderRng {
         BlueprintBuilderRng {
             blueprint_rng,
             zone_rng,
+            dataset_rng,
             network_interface_rng,
             external_ip_rng,
         }
@@ -1773,6 +1781,7 @@ impl<'a> BlueprintDatasetsBuilder<'a> {
 #[derive(Debug)]
 struct BlueprintSledDatasetsBuilder<'a> {
     log: Logger,
+    rng: &'a mut BlueprintBuilderRng,
     blueprint_datasets:
         BTreeMap<ZpoolUuid, BTreeMap<DatasetKind, &'a BlueprintDatasetConfig>>,
     database_datasets:
@@ -1793,6 +1802,7 @@ struct BlueprintSledDatasetsBuilder<'a> {
 impl<'a> BlueprintSledDatasetsBuilder<'a> {
     pub fn new(
         log: Logger,
+        rng: &'a mut BlueprintBuilderRng,
         sled_id: SledUuid,
         datasets: &'a BlueprintDatasetsBuilder<'_>,
         resources: &'a SledResources,
@@ -1824,6 +1834,7 @@ impl<'a> BlueprintSledDatasetsBuilder<'a> {
 
         Self {
             log,
+            rng,
             blueprint_datasets,
             database_datasets,
             unchanged_datasets: BTreeMap::new(),
@@ -1887,7 +1898,7 @@ impl<'a> BlueprintSledDatasetsBuilder<'a> {
         let id = if let Some(old_config) = self.get_from_db(zpool_id, kind) {
             old_config.id
         } else {
-            DatasetUuid::new_v4()
+            self.rng.dataset_rng.next()
         };
 
         let new_config = make_config(id);
