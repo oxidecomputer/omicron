@@ -17,6 +17,9 @@ use url::Url;
 #[derive(Args)]
 pub struct LsClientsArgs {
     #[arg(long)]
+    package_manifest: Option<Utf8PathBuf>,
+
+    #[arg(long)]
     adoc: bool,
 }
 
@@ -37,6 +40,23 @@ pub fn run_cmd(args: LsClientsArgs) -> Result<()> {
             }
         })
         .collect::<Result<Vec<_>>>()?;
+
+    // Parse the package manifest.
+    let pkg_file = args
+        .package_manifest
+        .as_ref()
+        .map(|c| Ok::<_, anyhow::Error>(c.clone()))
+        .unwrap_or_else(|| {
+            Ok(Utf8PathBuf::from(
+                std::env::var("CARGO_MANIFEST_DIR")
+                    .context("looking up CARGO_MANIFEST_DIR in environment")?,
+            )
+            .join("..")
+            .join("..")
+            .join("package-manifest.toml"))
+        })?;
+    let pkgs = parse_packages(&pkg_file)?;
+    pkgs.dump();
 
     for c in &progenitor_clients {
         print_package(c, &args);
@@ -214,6 +234,151 @@ fn direct_dependents<'a, 'b>(
             }
         })
         .collect()
+}
+
+fn parse_packages(pkg_file: &Utf8Path) -> Result<OmicronPackageConfig> {
+    let contents = std::fs::read_to_string(pkg_file)
+        .with_context(|| format!("read package file {:?}", pkg_file))?;
+    let raw_packages =
+        toml::from_str::<omicron_zone_package::config::Config>(&contents)
+            .with_context(|| format!("parse package file {:?}", pkg_file))?;
+    Ok(OmicronPackageConfig::from(raw_packages))
+}
+
+struct OmicronPackageConfig {
+    deployable_zones: Vec<OmicronPackage>,
+    dont_care: Vec<(OmicronPackage, &'static str)>,
+    dont_know: Vec<OmicronPackage>,
+}
+
+struct OmicronPackage {
+    name: String,
+    package: omicron_zone_package::package::Package,
+}
+
+impl From<(String, omicron_zone_package::package::Package)> for OmicronPackage {
+    fn from(
+        (pkgname, package): (String, omicron_zone_package::package::Package),
+    ) -> Self {
+        OmicronPackage { name: pkgname, package }
+    }
+}
+
+impl From<omicron_zone_package::config::Config> for OmicronPackageConfig {
+    fn from(raw: omicron_zone_package::config::Config) -> Self {
+        let mut deployable_zones = Vec::new();
+        let mut dont_care = Vec::new();
+        let mut dont_know = Vec::new();
+        for (pkgname, package) in raw.packages {
+            let ompkg = OmicronPackage::from((pkgname, package));
+
+            match &ompkg.package.output {
+                omicron_zone_package::package::PackageOutput::Zone {
+                    intermediate_only: true,
+                } => {
+                    dont_care.push((ompkg, "marked intermediate-only"));
+                }
+                omicron_zone_package::package::PackageOutput::Zone {
+                    intermediate_only: false,
+                } => {
+                    deployable_zones.push(ompkg);
+                }
+                omicron_zone_package::package::PackageOutput::Tarball => {
+                    dont_know.push(ompkg);
+                }
+            }
+        }
+
+        OmicronPackageConfig {
+            deployable_zones,
+            dont_care,
+            dont_know,
+        }
+    }
+}
+
+impl OmicronPackageConfig {
+    pub fn dump(&self) {
+        println!("deployable zones");
+        for ompkg in &self.deployable_zones {
+            println!("    {}", ompkg.name);
+        }
+        println!("");
+
+        println!("stuff I think we can ignore");
+        for (ompkg, reason) in &self.dont_care {
+            println!("    {}: {}", ompkg.name, reason);
+        }
+        println!("");
+
+        println!("stuff I'm not sure about yet");
+        for ompkg in &self.dont_know {
+            println!("    {}", ompkg.name);
+        }
+        println!("");
+    }
+    //    pub fn dump(&self) {
+    //        for (pkgname, package) in &self.raw.packages {
+    //            print!("found Omicron package {:?}: ", pkgname);
+    //            match &package.source {
+    //                omicron_zone_package::package::PackageSource::Local {
+    //                    blobs,
+    //                    buildomat_blobs,
+    //                    rust,
+    //                    paths,
+    //                } => {
+    //                    if rust.is_some() {
+    //                        println!("rust package");
+    //                    } else {
+    //                        println!("");
+    //                    }
+    //
+    //                    if let Some(blobs) = blobs {
+    //                        println!("    blobs: ({})", blobs.len());
+    //                        for b in blobs {
+    //                            println!("        {}", b);
+    //                        }
+    //                    }
+    //
+    //                    if let Some(buildomat_blobs) = blobs {
+    //                        println!(
+    //                            "    buildomat blobs: ({})",
+    //                            buildomat_blobs.len()
+    //                        );
+    //                        for b in buildomat_blobs {
+    //                            println!("        {}", b);
+    //                        }
+    //                    }
+    //
+    //                    if !paths.is_empty() {
+    //                        println!("    plus some mapped paths: {}", paths.len());
+    //                    }
+    //                }
+    //                omicron_zone_package::package::PackageSource::Prebuilt {
+    //                    repo,
+    //                    commit,
+    //                    sha256,
+    //                } => {
+    //                    println!("prebuilt from repo: {repo}");
+    //                }
+    //                omicron_zone_package::package::PackageSource::Composite {
+    //                    packages,
+    //                } => {
+    //                    println!(
+    //                        "composite of: {}",
+    //                        packages
+    //                            .iter()
+    //                            .map(|p| format!("{:?}", p))
+    //                            .collect::<Vec<_>>()
+    //                            .join(", ")
+    //                    );
+    //                }
+    //                omicron_zone_package::package::PackageSource::Manual => {
+    //                    println!("ERROR: unsupported manual package");
+    //                }
+    //            }
+    //        }
+    //    }
 }
 
 fn print_package(p: &ClientPackage<'_>, args: &LsClientsArgs) {

@@ -12398,6 +12398,7 @@ dependencies = [
  "clap",
  "fs-err",
  "macaddr",
+ "omicron-zone-package",
  "serde",
  "swrite",
  "tabled",

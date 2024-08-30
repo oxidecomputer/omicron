@@ -30,6 +30,7 @@ cargo_metadata.workspace = true
 clap.workspace = true
 fs-err.workspace = true
 macaddr.workspace = true
+omicron-zone-package.workspace = true
 serde.workspace = true
 swrite.workspace = true
 tabled.workspace = true
