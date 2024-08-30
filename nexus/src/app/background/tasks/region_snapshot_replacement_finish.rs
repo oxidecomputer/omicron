@@ -67,7 +67,7 @@ impl RegionSnapshotReplacementFinishDetector {
 
                 Err(e) => {
                     let s = format!(
-                        "counting non-complete region snapshot replacement \
+                        "counting incomplete region snapshot replacement \
                         steps failed: {e}",
                     );
                     error!(&log, "{s}");
