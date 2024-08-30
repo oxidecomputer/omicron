@@ -41,11 +41,10 @@ use nexus_db_queries::db::lookup::ImageLookup;
 use nexus_db_queries::db::lookup::ImageParentLookup;
 use nexus_db_queries::db::model::Name;
 use nexus_types::external_api::{
-    params::{BgpPeerConfig, RouteConfig},
+    params::BgpPeerConfig,
     shared::{BfdStatus, ProbeInfo},
 };
 use omicron_common::api::external::AddressLot;
-use omicron_common::api::external::AddressLotBlock;
 use omicron_common::api::external::AddressLotCreateResponse;
 use omicron_common::api::external::AggregateBgpMessageHistory;
 use omicron_common::api::external::BgpAnnounceSet;
@@ -83,6 +82,7 @@ use omicron_common::api::external::{
     },
     SwitchPortAddressConfig,
 };
+use omicron_common::api::external::{AddressLotBlock, SwitchPortRouteConfig};
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
 use parse_display::Display;
@@ -4141,12 +4141,11 @@ async fn networking_switch_port_configuration_address_remove(
 async fn networking_switch_port_configuration_route_list(
     rqctx: RequestContext<ApiContext>,
     path_params: Path<params::SwitchPortSettingsInfoSelector>,
-) -> Result<HttpResponseOk<RouteConfig>, HttpError> {
+) -> Result<HttpResponseOk<Vec<SwitchPortRouteConfig>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.context.nexus;
         let configuration = path_params.into_inner().configuration;
-        let address = address.into_inner();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
 
         let settings = nexus
@@ -4170,17 +4169,17 @@ async fn networking_switch_port_configuration_route_list(
 async fn networking_switch_port_configuration_route_add(
     rqctx: RequestContext<ApiContext>,
     path_params: Path<params::SwitchPortSettingsInfoSelector>,
-    route: TypedBody<params::Route>,
-) -> Result<HttpResponseCreated<RouteConfig>, HttpError> {
+    route: TypedBody<params::RouteAddRemove>,
+) -> Result<HttpResponseCreated<SwitchPortRouteConfig>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.context.nexus;
         let configuration = path_params.into_inner().configuration;
-        let address = address.into_inner();
+        let route = route.into_inner();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
 
         let settings = nexus
-            .switch_port_configuration_route_add(&opctx, configuration, address)
+            .switch_port_configuration_route_add(&opctx, configuration, route)
             .await?;
         Ok(HttpResponseCreated(settings.into()))
     };
@@ -4200,20 +4199,20 @@ async fn networking_switch_port_configuration_route_add(
 async fn networking_switch_port_configuration_route_remove(
     rqctx: RequestContext<ApiContext>,
     path_params: Path<params::SwitchPortSettingsInfoSelector>,
-    route: TypedBody<params::Route>,
+    route: TypedBody<params::RouteAddRemove>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.context.nexus;
         let configuration = path_params.into_inner().configuration;
-        let address = address.into_inner();
+        let route = route.into_inner();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
 
         nexus
             .switch_port_configuration_route_remove(
                 &opctx,
                 configuration,
-                address,
+                route,
             )
             .await?;
         Ok(HttpResponseDeleted())

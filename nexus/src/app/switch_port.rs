@@ -12,6 +12,7 @@ use nexus_db_model::SwitchPortAddressConfig;
 use nexus_db_model::SwitchPortConfig;
 use nexus_db_model::SwitchPortGeometry;
 use nexus_db_model::SwitchPortLinkConfig;
+use nexus_db_model::SwitchPortRouteConfig;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
@@ -267,11 +268,11 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         configuration: NameOrId,
-        address: params::RouteAddRemove,
+        route: params::RouteAddRemove,
     ) -> CreateResult<SwitchPortRouteConfig> {
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
         self.db_datastore
-            .switch_port_configuration_route_add(opctx, configuration, address)
+            .switch_port_configuration_route_add(opctx, configuration, route)
             .await
     }
 
@@ -279,15 +280,11 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         configuration: NameOrId,
-        address: params::RouteAddRemove,
+        route: params::RouteAddRemove,
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Delete, &authz::FLEET).await?;
         self.db_datastore
-            .switch_port_configuration_route_remove(
-                opctx,
-                configuration,
-                address,
-            )
+            .switch_port_configuration_route_remove(opctx, configuration, route)
             .await
     }
 

@@ -7807,7 +7807,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RouteConfig"
+                  "title": "Array_of_SwitchPortRouteConfig",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SwitchPortRouteConfig"
+                  }
                 }
               }
             }
@@ -7843,7 +7847,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Route"
+                "$ref": "#/components/schemas/RouteAddRemove"
               }
             }
           },
@@ -7855,7 +7859,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Route"
+                  "$ref": "#/components/schemas/SwitchPortRouteConfig"
                 }
               }
             }
@@ -7891,7 +7895,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Route"
+                "$ref": "#/components/schemas/RouteAddRemove"
               }
             }
           },
@@ -18180,6 +18184,52 @@
         "required": [
           "dst",
           "gw"
+        ]
+      },
+      "RouteAddRemove": {
+        "description": "A route to a destination network through a gateway address to add or remove to an interface.",
+        "type": "object",
+        "properties": {
+          "dst": {
+            "description": "The route destination.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpNet"
+              }
+            ]
+          },
+          "gw": {
+            "description": "The route gateway.",
+            "type": "string",
+            "format": "ip"
+          },
+          "interface": {
+            "description": "The interface to configure the route on",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "local_pref": {
+            "nullable": true,
+            "description": "Local preference for route. Higher preference indictes precedence within and across protocols.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "vid": {
+            "nullable": true,
+            "description": "VLAN id the gateway is reachable over.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "dst",
+          "gw",
+          "interface"
         ]
       },
       "RouteConfig": {
