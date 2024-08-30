@@ -110,9 +110,18 @@ impl From<SledAgentInstanceError> for dropshot::HttpError {
                 // a 4xx error. So, instead, we construct an internal error and
                 // then munge its status code.
                 let mut error = HttpError::for_internal_error(e.to_string());
-                error.status_code = http::StatusCode::BAD_GATEWAY;
+                error.status_code = if e.is_timeout() {
+                    // This isn't actually in the RFD, but I thought it might be
+                    // nice to return 504 Gateway Timeout when the communication
+                    // error is a timeout...
+                    http::StatusCode::GATEWAY_TIMEOUT
+                } else {
+                    http::StatusCode::BAD_GATEWAY
+                };
                 error
             }
+            // Invalid request errors from the sled-agent should return 500
+            // Internal Server Errors.
             progenitor_client::Error::InvalidRequest(s) => {
                 HttpError::for_internal_error(s)
             }
