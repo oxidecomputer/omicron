@@ -94,9 +94,6 @@ impl InstanceWatcher {
             let rsp = client
                 .vmm_get_state(&vmm_id)
                 .await
-                // TODO(eliza): since we now also wrap errors returned by
-                // `vmm_get_state` in this, perhaps it ought not be called
-                // `SledAgentInstancePutError` any longer...
                 .map_err(SledAgentInstanceError);
             let mut check = Check {
                 target,
@@ -160,7 +157,7 @@ impl InstanceWatcher {
                     // unreachable for a while. We may also want to take other
                     // corrective actions or alert an operator in this case.
                     //
-                    // TODO(eliza):  because we have the preported IP address
+                    // TODO(eliza): because we have the preported IP address
                     // of the instance's VMM from our databse query, we could
                     // also ask the VMM directly when the sled-agent is
                     // unreachable. We should start doing that here at some

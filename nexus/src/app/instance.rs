@@ -1269,11 +1269,6 @@ impl super::Nexus {
                 // attempting to transition their instance's state, and then,
                 // upon fetching the instance, transiently see an instance state
                 // suggesting it's "doing fine" until the update saga completes.
-                //
-                // TODO(eliza): to provide more assurance that the update has
-                // run to completion before returning an error, we could retry
-                // here...at least when the update saga fails due to the lock
-                // being held.
                 self.update_instance(&opctx.log, saga, instance_id).await;
             }
             // XXX: It's not clear what to do with this error; should it be
