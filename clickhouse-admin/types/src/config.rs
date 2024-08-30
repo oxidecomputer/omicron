@@ -215,10 +215,16 @@ impl RemoteServers {
 
         for r in replicas {
             let ServerNodeConfig { host, port } = r;
+            let sanitised_host = match host {
+                ClickhouseHost::Ipv6(h) => h.to_string(),
+                ClickhouseHost::Ipv4(h) => h.to_string(),
+                ClickhouseHost::DomainName(h) => h.to_string(),
+            };
+
             s.push_str(&format!(
                 "
                 <replica>
-                    <host>{host}</host>
+                    <host>{sanitised_host}</host>
                     <port>{port}</port>
                 </replica>"
             ));
@@ -300,13 +306,13 @@ impl KeeperNodeConfig {
 
 #[derive(Debug, Clone, PartialEq, Eq, JsonSchema, Serialize, Deserialize)]
 pub struct ServerNodeConfig {
-    pub host: String,
+    pub host: ClickhouseHost,
     pub port: u16,
 }
 
 impl ServerNodeConfig {
     /// A new ClickHouse replica node configuration with default port
-    pub fn new(host: String) -> Self {
+    pub fn new(host: ClickhouseHost) -> Self {
         let port = CLICKHOUSE_TCP_PORT;
         Self { host, port }
     }
@@ -389,11 +395,18 @@ impl RaftServers {
         let mut s = String::new();
         for server in &self.servers {
             let RaftServerConfig { id, hostname, port } = server;
+
+            let sanitised_host = match hostname {
+                ClickhouseHost::Ipv6(h) => h.to_string(),
+                ClickhouseHost::Ipv4(h) => h.to_string(),
+                ClickhouseHost::DomainName(h) => h.to_string(),
+            };
+
             s.push_str(&format!(
                 "
             <server>
                 <id>{id}</id>
-                <hostname>{hostname}</hostname>
+                <hostname>{sanitised_host}</hostname>
                 <port>{port}</port>
             </server>
             "
@@ -407,12 +420,12 @@ impl RaftServers {
 #[derive(Debug, Clone, PartialEq, Eq, JsonSchema, Serialize, Deserialize)]
 pub struct RaftServerConfig {
     pub id: KeeperId,
-    pub hostname: String,
+    pub hostname: ClickhouseHost,
     pub port: u16,
 }
 
 impl RaftServerConfig {
-    pub fn new(id: KeeperId, hostname: String) -> Self {
+    pub fn new(id: KeeperId, hostname: ClickhouseHost) -> Self {
         Self { id, hostname, port: CLICKHOUSE_KEEPER_RAFT_PORT }
     }
 }

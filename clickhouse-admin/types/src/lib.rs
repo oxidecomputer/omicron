@@ -176,9 +176,18 @@ mod tests {
             );
 
         let keepers = vec![
-            RaftServerConfig::new(KeeperId(1), "ff::01".to_string()),
-            RaftServerConfig::new(KeeperId(2), "ff::02".to_string()),
-            RaftServerConfig::new(KeeperId(3), "ff::03".to_string()),
+            RaftServerConfig::new(
+                KeeperId(1),
+                ClickhouseHost::Ipv6(Ipv6Addr::from_str("ff::01").unwrap()),
+            ),
+            RaftServerConfig::new(
+                KeeperId(2),
+                ClickhouseHost::Ipv4(Ipv4Addr::from_str("127.0.0.1").unwrap()),
+            ),
+            RaftServerConfig::new(
+                KeeperId(3),
+                ClickhouseHost::DomainName("ohai.com".to_string()),
+            ),
         ];
 
         let config = ClickhouseKeeperConfig::new(
@@ -223,8 +232,12 @@ mod tests {
         ];
 
         let servers = vec![
-            ServerNodeConfig::new("ff::08".to_string()),
-            ServerNodeConfig::new("ff::09".to_string()),
+            ServerNodeConfig::new(ClickhouseHost::Ipv6(
+                Ipv6Addr::from_str("ff::09").unwrap(),
+            )),
+            ServerNodeConfig::new(ClickhouseHost::DomainName(
+                "ohai.com".to_string(),
+            )),
         ];
 
         let config = ClickhouseServerConfig::new(

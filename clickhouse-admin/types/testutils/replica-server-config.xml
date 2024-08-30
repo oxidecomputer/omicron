@@ -77,11 +77,11 @@
             <shard>
                 <internal_replication>true</internal_replication>
                 <replica>
-                    <host>ff::08</host>
+                    <host>ff::9</host>
                     <port>9000</port>
                 </replica>
                 <replica>
-                    <host>ff::09</host>
+                    <host>ohai.com</host>
                     <port>9000</port>
                 </replica>
             </shard>

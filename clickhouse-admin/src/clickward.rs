@@ -61,18 +61,6 @@ impl Clickward {
         &self,
         settings: ServerSettings,
     ) -> Result<ServerConfigGenerateResponse, ClickwardError> {
-        // TODO: This should be part of the request body
-        //   let keepers = vec![
-        //       KeeperNodeConfig::new("ff::01".to_string()),
-        //       KeeperNodeConfig::new("127.0.0.1".to_string()),
-        //       KeeperNodeConfig::new("we.dont.want.brackets.com".to_string()),
-        //   ];
-
-        // let servers = vec![
-        //     ServerNodeConfig::new("ff::08".to_string()),
-        //     ServerNodeConfig::new("ff::09".to_string()),
-        // ];
-
         let keepers = settings
             .keepers
             .iter()
@@ -82,13 +70,13 @@ impl Clickward {
         let remote_servers = settings
             .remote_servers
             .iter()
-            .map(|host| ServerNodeConfig::new(format!("{host:?}")))
+            .map(|host| ServerNodeConfig::new(host.clone()))
             .collect();
 
         let config = ClickhouseServerConfig::new(
-            Utf8PathBuf::from_str("./").unwrap(),
+            Utf8PathBuf::from_str(&settings.config_dir).unwrap(),
             ServerId(settings.node_id),
-            Utf8PathBuf::from_str("./").unwrap(),
+            Utf8PathBuf::from_str(&settings.datastore_path).unwrap(),
             settings.listen_addr,
             keepers,
             remote_servers,
