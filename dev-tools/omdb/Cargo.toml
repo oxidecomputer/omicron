@@ -54,6 +54,7 @@ tabled.workspace = true
 textwrap.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
 unicode-width.workspace = true
+update-engine.workspace = true
 url.workspace = true
 uuid.workspace = true
 ipnetwork.workspace = true
