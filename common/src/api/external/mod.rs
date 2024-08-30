@@ -2596,6 +2596,32 @@ pub struct BgpPeerRemove {
     pub addr: IpAddr,
 }
 
+/// A BGP allowed prefix entry
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct BgpAllowedPrefix {
+    /// Parent switch port configuration
+    pub port_settings_id: Uuid,
+    /// Interface peer is reachable on
+    pub interface_name: String,
+    /// Peer Address
+    pub addr: oxnet::IpNet,
+    /// Allowed Prefix
+    pub prefix: oxnet::IpNet,
+}
+
+/// A BGP community
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
+pub struct BgpCommunity {
+    /// Parent switch port configuration
+    pub port_settings_id: Uuid,
+    /// Interface peer is reachable on
+    pub interface_name: String,
+    /// Peer Address
+    pub addr: oxnet::IpNet,
+    /// Community
+    pub community: u32,
+}
+
 /// A base BGP configuration.
 #[derive(
     ObjectIdentity, Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq,

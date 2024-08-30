@@ -2107,6 +2107,83 @@ impl DataStore {
             })
     }
 
+    pub async fn switch_port_configuration_bgp_peer_allow_import_remove(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+        bgp_peer: IpAddr,
+        prefix: AllowedPrefixAddRemove,
+    ) -> DeleteResult {
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let err = OptionalError::new();
+
+        self.transaction_retry_wrapper(
+            "switch_port_configuration_bgp_peer_allow_import_remove",
+        )
+            .transaction(&conn, |conn| {
+                let parent_configuration = configuration.clone();
+                let settings_to_remove = prefix.clone();
+                let err = err.clone();
+
+                async move {
+                    // resolve id of port_settings record
+                    let port_settings_id = switch_port_configuration_id(&conn, parent_configuration.clone())
+                        .await
+                        .map_err(|e: diesel::result::Error| {
+                            match e {
+                                diesel::result::Error::NotFound => {
+                                    err.bail(
+                                        Error::non_resourcetype_not_found(
+                                            format!("unable to lookup configuration with identifier {parent_configuration}")
+                                        )
+                                    )
+                                },
+                                _ => {
+                                    err.bail(Error::internal_error(
+                                        "error while looking up configuration for interface bgp peer"
+                                    ))
+                                },
+                            }
+                        })?;
+
+                    // delete allowed import
+                    // PRIMARY KEY (port_settings_id, interface_name, addr, prefix)
+                    use db::schema::switch_port_settings_bgp_peer_config_allow_import as allow_import;
+                    diesel::delete(allow_import::table)
+                        .filter(allow_import::port_settings_id.eq(port_settings_id))
+                        .filter(allow_import::interface_name.eq(settings_to_remove.interface.to_string()))
+                        .filter(allow_import::addr.eq(IpNetwork::from(bgp_peer)))
+                        .filter(allow_import::prefix.eq(IpNetwork::from(settings_to_remove.prefix)))
+                        .execute_async(&conn)
+                        .await
+                        .map_err(|e| {
+                            let message = "error while deleting import list entry for bgp peer";
+                            error!(opctx.log, "{message}"; "error" => ?e);
+                            err.bail(Error::internal_error(message))
+                        })?;
+                    Ok(())
+
+                }
+            })
+            .await
+            .map_err(|e| {
+                let message =
+                    "switch_port_configuration_bgp_peer_allow_import_remove failed";
+                match err.take() {
+                    Some(external_error) => {
+                        error!(opctx.log, "{message}"; "error" => ?external_error);
+                        external_error
+                    }
+                    None => {
+                        error!(opctx.log, "{message}"; "error" => ?e);
+                        Error::internal_error(
+                            "error while removing entry from allow import list",
+                        )
+                    }
+                }
+            })
+    }
+
     pub async fn switch_port_configuration_bgp_peer_allow_export_list(
         &self,
         opctx: &OpContext,
@@ -2220,6 +2297,83 @@ impl DataStore {
             })
     }
 
+    pub async fn switch_port_configuration_bgp_peer_allow_export_remove(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+        bgp_peer: IpAddr,
+        prefix: AllowedPrefixAddRemove,
+    ) -> DeleteResult {
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let err = OptionalError::new();
+
+        self.transaction_retry_wrapper(
+            "switch_port_configuration_bgp_peer_allow_export_remove",
+        )
+            .transaction(&conn, |conn| {
+                let parent_configuration = configuration.clone();
+                let settings_to_remove = prefix.clone();
+                let err = err.clone();
+
+                async move {
+                    // resolve id of port_settings record
+                    let port_settings_id = switch_port_configuration_id(&conn, parent_configuration.clone())
+                        .await
+                        .map_err(|e: diesel::result::Error| {
+                            match e {
+                                diesel::result::Error::NotFound => {
+                                    err.bail(
+                                        Error::non_resourcetype_not_found(
+                                            format!("unable to lookup configuration with identifier {parent_configuration}")
+                                        )
+                                    )
+                                },
+                                _ => {
+                                    err.bail(Error::internal_error(
+                                        "error while looking up configuration for interface bgp peer"
+                                    ))
+                                },
+                            }
+                        })?;
+
+                    // delete allowed export
+                    // PRIMARY KEY (port_settings_id, interface_name, addr, prefix)
+                    use db::schema::switch_port_settings_bgp_peer_config_allow_export as allow_export;
+                    diesel::delete(allow_export::table)
+                        .filter(allow_export::port_settings_id.eq(port_settings_id))
+                        .filter(allow_export::interface_name.eq(settings_to_remove.interface.to_string()))
+                        .filter(allow_export::addr.eq(IpNetwork::from(bgp_peer)))
+                        .filter(allow_export::prefix.eq(IpNetwork::from(settings_to_remove.prefix)))
+                        .execute_async(&conn)
+                        .await
+                        .map_err(|e| {
+                            let message = "error while deleting export list entry for bgp peer";
+                            error!(opctx.log, "{message}"; "error" => ?e);
+                            err.bail(Error::internal_error(message))
+                        })?;
+                    Ok(())
+
+                }
+            })
+            .await
+            .map_err(|e| {
+                let message =
+                    "switch_port_configuration_bgp_peer_allow_export_remove failed";
+                match err.take() {
+                    Some(external_error) => {
+                        error!(opctx.log, "{message}"; "error" => ?external_error);
+                        external_error
+                    }
+                    None => {
+                        error!(opctx.log, "{message}"; "error" => ?e);
+                        Error::internal_error(
+                            "error while removing entry from allow export list",
+                        )
+                    }
+                }
+            })
+    }
+
     pub async fn switch_port_configuration_bgp_peer_community_list(
         &self,
         opctx: &OpContext,
@@ -2264,7 +2418,7 @@ impl DataStore {
         opctx: &OpContext,
         configuration: NameOrId,
         bgp_peer: IpAddr,
-        prefix: BgpCommunityAddRemove,
+        community: BgpCommunityAddRemove,
     ) -> CreateResult<SwitchPortBgpPeerConfigCommunity> {
         use db::schema::switch_port_settings_bgp_peer_config_communities as communities;
 
@@ -2276,7 +2430,7 @@ impl DataStore {
         )
             .transaction(&conn, |conn| {
                 let parent_configuration = configuration.clone();
-                let new_settings = prefix.clone();
+                let new_settings = community.clone();
                 let err = err.clone();
 
                 async move {
@@ -2329,6 +2483,84 @@ impl DataStore {
                         error!(opctx.log, "{message}"; "error" => ?e);
                         Error::internal_error("error while adding community to bgp peer")
                     },
+                }
+            })
+    }
+
+    pub async fn switch_port_configuration_bgp_peer_community_remove(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+        bgp_peer: IpAddr,
+        community: BgpCommunityAddRemove,
+    ) -> DeleteResult {
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let err = OptionalError::new();
+
+        self.transaction_retry_wrapper(
+            "switch_port_configuration_bgp_peer_community_remove",
+        )
+            .transaction(&conn, |conn| {
+                let parent_configuration = configuration.clone();
+                let settings_to_remove = community.clone();
+                let err = err.clone();
+
+                async move {
+                    // resolve id of port_settings record
+                    let port_settings_id = switch_port_configuration_id(&conn, parent_configuration.clone())
+                        .await
+                        .map_err(|e: diesel::result::Error| {
+                            match e {
+                                diesel::result::Error::NotFound => {
+                                    err.bail(
+                                        Error::non_resourcetype_not_found(
+                                            format!("unable to lookup configuration with identifier {parent_configuration}")
+                                        )
+                                    )
+                                },
+                                _ => {
+                                    err.bail(Error::internal_error(
+                                        "error while looking up configuration for interface bgp peer"
+                                    ))
+                                },
+                            }
+                        })?;
+
+                    // delete communities
+                    // PRIMARY KEY (port_settings_id, interface_name, addr, community)
+                    use db::schema::switch_port_settings_bgp_peer_config_communities as peer_communities;
+                    diesel::delete(peer_communities::table)
+                        .filter(peer_communities::port_settings_id.eq(port_settings_id))
+                        .filter(peer_communities::interface_name.eq(settings_to_remove.interface.to_string()))
+                        .filter(peer_communities::addr.eq(IpNetwork::from(bgp_peer)))
+                        .filter(peer_communities::community.eq(SqlU32::from(settings_to_remove.community)))
+                        .execute_async(&conn)
+                        .await
+                        .map_err(|e| {
+                            let message = "error while deleting community entry for bgp peer";
+                            error!(opctx.log, "{message}"; "error" => ?e);
+                            err.bail(Error::internal_error(message))
+                        })?;
+
+                    Ok(())
+
+                }
+            })
+            .await
+            .map_err(|e| {
+                let message =
+                    "switch_port_configuration_bgp_peer_community_remove failed";
+                match err.take() {
+                    Some(external_error) => {
+                        error!(opctx.log, "{message}"; "error" => ?external_error);
+                        external_error
+                    }
+                    None => {
+                        error!(opctx.log, "{message}"; "error" => ?e);
+                        Error::internal_error(
+                            "error while removing entry from community list",
+                        )
+                    }
                 }
             })
     }

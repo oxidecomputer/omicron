@@ -20,7 +20,7 @@ use diesel::AsChangeset;
 use ipnetwork::IpNetwork;
 use nexus_types::external_api::params;
 use nexus_types::identity::Resource;
-use omicron_common::api::external;
+use omicron_common::api::external::{self, BgpAllowedPrefix, BgpCommunity};
 use omicron_common::api::external::{BgpPeer, ImportExportPolicy};
 use omicron_common::api::internal::shared::{PortFec, PortSpeed};
 use serde::{Deserialize, Serialize};
@@ -638,6 +638,17 @@ pub struct SwitchPortBgpPeerConfigCommunity {
     pub community: SqlU32,
 }
 
+impl Into<BgpCommunity> for SwitchPortBgpPeerConfigCommunity {
+    fn into(self) -> BgpCommunity {
+        BgpCommunity {
+            port_settings_id: self.port_settings_id,
+            interface_name: self.interface_name,
+            addr: self.addr.into(),
+            community: self.community.into(),
+        }
+    }
+}
+
 #[derive(
     Queryable,
     Insertable,
@@ -658,6 +669,17 @@ pub struct SwitchPortBgpPeerConfigAllowExport {
     pub addr: IpNetwork,
     /// Allowed Prefix
     pub prefix: IpNetwork,
+}
+
+impl Into<BgpAllowedPrefix> for SwitchPortBgpPeerConfigAllowExport {
+    fn into(self) -> BgpAllowedPrefix {
+        BgpAllowedPrefix {
+            port_settings_id: self.port_settings_id,
+            interface_name: self.interface_name,
+            addr: self.addr.into(),
+            prefix: self.prefix.into(),
+        }
+    }
 }
 
 #[derive(
@@ -717,6 +739,17 @@ impl SwitchPortBgpPeerConfig {
                 _ => true,
             },
             vlan_id: p.vlan_id.map(|x| x.into()),
+        }
+    }
+}
+
+impl Into<BgpAllowedPrefix> for SwitchPortBgpPeerConfigAllowImport {
+    fn into(self) -> BgpAllowedPrefix {
+        BgpAllowedPrefix {
+            port_settings_id: self.port_settings_id,
+            interface_name: self.interface_name,
+            addr: self.addr.into(),
+            prefix: self.prefix.into(),
         }
     }
 }

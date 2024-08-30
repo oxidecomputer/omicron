@@ -41,8 +41,6 @@ use nexus_db_queries::db::lookup::ImageLookup;
 use nexus_db_queries::db::lookup::ImageParentLookup;
 use nexus_db_queries::db::model::Name;
 use nexus_types::external_api::shared::{BfdStatus, ProbeInfo};
-use omicron_common::api::external::AddressLotCreateResponse;
-use omicron_common::api::external::AggregateBgpMessageHistory;
 use omicron_common::api::external::BgpAnnounceSet;
 use omicron_common::api::external::BgpAnnouncement;
 use omicron_common::api::external::BgpConfig;
@@ -80,6 +78,10 @@ use omicron_common::api::external::{
 };
 use omicron_common::api::external::{AddressLot, BgpPeerRemove};
 use omicron_common::api::external::{AddressLotBlock, SwitchPortRouteConfig};
+use omicron_common::api::external::{
+    AddressLotCreateResponse, BgpAllowedPrefix,
+};
+use omicron_common::api::external::{AggregateBgpMessageHistory, BgpCommunity};
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
 use parse_display::Display;
@@ -4357,7 +4359,7 @@ async fn networking_switch_port_configuration_bgp_peer_remove(
 async fn networking_switch_port_configuration_bgp_peer_allow_import_list(
     rqctx: RequestContext<ApiContext>,
     path_params: Path<params::SwitchPortSettingsBgpPeerInfoSelector>,
-) -> Result<HttpResponseOk<Vec<oxnet::IpNet>>, HttpError> {
+) -> Result<HttpResponseOk<Vec<BgpAllowedPrefix>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.context.nexus;
@@ -4374,6 +4376,7 @@ async fn networking_switch_port_configuration_bgp_peer_allow_import_list(
                 bgp_peer,
             )
             .await?;
+
         Ok(HttpResponseOk(settings.into_iter().map(Into::into).collect()))
     };
     apictx
@@ -4393,7 +4396,7 @@ async fn networking_switch_port_configuration_bgp_peer_allow_import_add(
     rqctx: RequestContext<ApiContext>,
     path_params: Path<params::SwitchPortSettingsBgpPeerInfoSelector>,
     prefix: TypedBody<params::AllowedPrefixAddRemove>,
-) -> Result<HttpResponseCreated<SwitchPortAddressConfig>, HttpError> {
+) -> Result<HttpResponseCreated<BgpAllowedPrefix>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.context.nexus;
@@ -4457,7 +4460,7 @@ async fn networking_switch_port_configuration_bgp_peer_allow_import_remove(
         .await
 }
 
-/// List addresses assigned to a provided interface configuration
+/// List prefixes allowed to be exported by a given bgp peer
 #[endpoint {
     method = GET,
     path ="/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/{bgp_peer}/allow-export",
@@ -4466,7 +4469,7 @@ async fn networking_switch_port_configuration_bgp_peer_allow_import_remove(
 async fn networking_switch_port_configuration_bgp_peer_allow_export_list(
     rqctx: RequestContext<ApiContext>,
     path_params: Path<params::SwitchPortSettingsBgpPeerInfoSelector>,
-) -> Result<HttpResponseOk<Vec<SwitchPortAddressConfig>>, HttpError> {
+) -> Result<HttpResponseOk<Vec<BgpAllowedPrefix>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.context.nexus;
@@ -4483,6 +4486,7 @@ async fn networking_switch_port_configuration_bgp_peer_allow_export_list(
                 bgp_peer,
             )
             .await?;
+
         Ok(HttpResponseOk(settings.into_iter().map(Into::into).collect()))
     };
     apictx
@@ -4492,7 +4496,7 @@ async fn networking_switch_port_configuration_bgp_peer_allow_export_list(
         .await
 }
 
-/// Add address to an interface configuration
+/// Add prefix to bgp peer allowed export list
 #[endpoint {
     method = POST,
     path ="/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/{bgp_peer}/allow-export/add",
@@ -4502,7 +4506,7 @@ async fn networking_switch_port_configuration_bgp_peer_allow_export_add(
     rqctx: RequestContext<ApiContext>,
     path_params: Path<params::SwitchPortSettingsBgpPeerInfoSelector>,
     prefix: TypedBody<params::AllowedPrefixAddRemove>,
-) -> Result<HttpResponseCreated<SwitchPortAddressConfig>, HttpError> {
+) -> Result<HttpResponseCreated<BgpAllowedPrefix>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.context.nexus;
@@ -4529,7 +4533,7 @@ async fn networking_switch_port_configuration_bgp_peer_allow_export_add(
         .await
 }
 
-/// Remove address from an interface configuration
+/// Remove prefix from bgp peer allowed export list
 #[endpoint {
     method = POST,
     path ="/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/{bgp_peer}/allow-export/remove",
@@ -4566,7 +4570,7 @@ async fn networking_switch_port_configuration_bgp_peer_allow_export_remove(
         .await
 }
 
-/// List addresses assigned to a provided interface configuration
+/// List communities assigned to a bgp peer
 #[endpoint {
     method = GET,
     path ="/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/{bgp_peer}/community",
@@ -4575,7 +4579,7 @@ async fn networking_switch_port_configuration_bgp_peer_allow_export_remove(
 async fn networking_switch_port_configuration_bgp_peer_community_list(
     rqctx: RequestContext<ApiContext>,
     path_params: Path<params::SwitchPortSettingsBgpPeerInfoSelector>,
-) -> Result<HttpResponseOk<Vec<SwitchPortAddressConfig>>, HttpError> {
+) -> Result<HttpResponseOk<Vec<BgpCommunity>>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.context.nexus;
@@ -4601,7 +4605,7 @@ async fn networking_switch_port_configuration_bgp_peer_community_list(
         .await
 }
 
-/// Add address to an interface configuration
+/// Add community to bgp peer
 #[endpoint {
     method = POST,
     path ="/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/{bgp_peer}/community/add",
@@ -4611,7 +4615,7 @@ async fn networking_switch_port_configuration_bgp_peer_community_add(
     rqctx: RequestContext<ApiContext>,
     path_params: Path<params::SwitchPortSettingsBgpPeerInfoSelector>,
     community: TypedBody<params::BgpCommunityAddRemove>,
-) -> Result<HttpResponseCreated<SwitchPortAddressConfig>, HttpError> {
+) -> Result<HttpResponseCreated<BgpCommunity>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.context.nexus;
@@ -4638,7 +4642,7 @@ async fn networking_switch_port_configuration_bgp_peer_community_add(
         .await
 }
 
-/// Remove address from an interface configuration
+/// Remove community from bgp peer
 #[endpoint {
     method = POST,
     path ="/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/{bgp_peer}/community/remove",
