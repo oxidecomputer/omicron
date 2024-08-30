@@ -20,14 +20,8 @@ use std::net::{SocketAddr, SocketAddrV6};
 enum Args {
     /// Start the ClickHouse admin server
     Run {
-        // TODO: This address is solely for testing now. We should remove it
-        // once we have more endpoints up and running.
-        /// Socket address for a running clickhouse server or keeper instance
-        #[clap(long, short = 'a', action)]
-        clickhouse_address: SocketAddrV6,
-
         /// Address on which this server should run
-        #[clap(long, short = 'H', action)]
+        #[clap(long, short = 'a', action)]
         http_address: SocketAddrV6,
 
         /// Path to the server configuration file
@@ -47,12 +41,12 @@ async fn main_impl() -> Result<(), CmdError> {
     let args = Args::parse();
 
     match args {
-        Args::Run { clickhouse_address, http_address, config } => {
+        Args::Run { http_address, config } => {
             let mut config = Config::from_file(&config)
                 .map_err(|err| CmdError::Failure(anyhow!(err)))?;
             config.dropshot.bind_address = SocketAddr::V6(http_address);
 
-            let clickward = Clickward::new(clickhouse_address);
+            let clickward = Clickward::new();
 
             let server =
                 omicron_clickhouse_admin::start_server(clickward, config)

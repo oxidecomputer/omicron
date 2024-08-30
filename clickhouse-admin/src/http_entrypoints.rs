@@ -6,9 +6,7 @@ use crate::context::ServerContext;
 use clickhouse_admin_api::*;
 use clickhouse_admin_types::config::ReplicaConfig;
 use dropshot::HttpError;
-use dropshot::{
-    HttpResponseCreated, HttpResponseOk, RequestContext, TypedBody,
-};
+use dropshot::{HttpResponseCreated, RequestContext, TypedBody};
 use std::sync::Arc;
 
 type ClickhouseApiDescription = dropshot::ApiDescription<Arc<ServerContext>>;
@@ -22,14 +20,6 @@ enum ClickhouseAdminImpl {}
 
 impl ClickhouseAdminApi for ClickhouseAdminImpl {
     type Context = Arc<ServerContext>;
-
-    async fn clickhouse_address(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<ClickhouseAddress>, HttpError> {
-        let ctx = rqctx.context();
-        let output = ctx.clickward().clickhouse_address()?;
-        Ok(HttpResponseOk(output))
-    }
 
     async fn generate_server_config(
         rqctx: RequestContext<Self::Context>,

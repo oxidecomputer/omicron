@@ -3,14 +3,13 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use camino::Utf8PathBuf;
-use clickhouse_admin_api::{ClickhouseAddress, ServerSettings};
+use clickhouse_admin_api::ServerSettings;
 use clickhouse_admin_types::config::{
     KeeperNodeConfig, ReplicaConfig, ServerNodeConfig,
 };
 use clickhouse_admin_types::{ClickhouseServerConfig, ServerId};
 use dropshot::HttpError;
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
-use std::net::SocketAddrV6;
 use std::str::FromStr;
 
 #[derive(Debug, thiserror::Error, SlogInlineError)]
@@ -39,21 +38,11 @@ impl From<ClickwardError> for HttpError {
 }
 
 #[derive(Debug)]
-pub struct Clickward {
-    // TODO: Remove address?
-    clickhouse_address: SocketAddrV6,
-}
+pub struct Clickward {}
 
 impl Clickward {
-    pub fn new(clickhouse_address: SocketAddrV6) -> Self {
-        Self { clickhouse_address }
-    }
-
-    // TODO: Remove this endpoint?
-    pub fn clickhouse_address(
-        &self,
-    ) -> Result<ClickhouseAddress, ClickwardError> {
-        Ok(ClickhouseAddress { clickhouse_address: self.clickhouse_address })
+    pub fn new() -> Self {
+        Self {}
     }
 
     pub fn generate_server_config(
