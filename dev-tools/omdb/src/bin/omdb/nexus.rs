@@ -55,8 +55,9 @@ use tabled::settings::object::Columns;
 use tabled::settings::Padding;
 use tabled::Tabled;
 use tokio::sync::OnceCell;
-use update_engine::display::StepIndexDisplay;
+use update_engine::display::ProgressRatioDisplay;
 use update_engine::events::EventReport;
+use update_engine::events::StepOutcome;
 use update_engine::EventBuffer;
 use update_engine::ExecutionStatus;
 use update_engine::ExecutionTerminalInfo;
@@ -1681,7 +1682,7 @@ fn reason_str(reason: &ActivationReason) -> &'static str {
 }
 
 fn bgtask_apply_kv_style(table: &mut tabled::Table) {
-    let style = tabled::settings::Style::blank();
+    let style = tabled::settings::Style::empty();
     table.with(style).with(
         tabled::settings::Modify::new(Columns::first())
             // Background task tables are offset by 4 characters.
@@ -1724,38 +1725,7 @@ fn push_event_buffer_summary(
 ) {
     match event_buffer {
         Ok(buffer) => {
-            let Some(summary) = buffer.root_execution_summary() else {
-                builder.push_record(["status:", "(no information found)"]);
-                return;
-            };
-
-            match summary.execution_status {
-                ExecutionStatus::NotStarted => {
-                    builder.push_record(["status:", "not started"]);
-                }
-                ExecutionStatus::Running { step_key, .. } => {
-                    let step_data = buffer.get(&step_key).expect("step exists");
-                    builder.push_record([
-                        "status:".to_string(),
-                        format!(
-                            "running: {} (step {})",
-                            step_data.step_info().description,
-                            StepIndexDisplay::new(
-                                step_key.index + 1,
-                                summary.total_steps
-                            ),
-                        ),
-                    ]);
-                }
-                ExecutionStatus::Terminal(info) => {
-                    push_event_buffer_terminal_info(
-                        &info,
-                        summary.total_steps,
-                        &buffer,
-                        builder,
-                    );
-                }
-            }
+            event_buffer_summary_impl(buffer, builder);
         }
         Err(error) => {
             builder.push_record([
@@ -1767,6 +1737,64 @@ fn push_event_buffer_summary(
                     "  caused by:".to_string(),
                     source.to_string(),
                 ]);
+            }
+        }
+    }
+}
+
+fn event_buffer_summary_impl(
+    buffer: EventBuffer<NestedSpec>,
+    builder: &mut tabled::builder::Builder,
+) {
+    let Some(summary) = buffer.root_execution_summary() else {
+        builder.push_record(["status:", "(no information found)"]);
+        return;
+    };
+
+    match summary.execution_status {
+        ExecutionStatus::NotStarted => {
+            builder.push_record(["status:", "not started"]);
+        }
+        ExecutionStatus::Running { step_key, .. } => {
+            let step_data = buffer.get(&step_key).expect("step exists");
+            builder.push_record([
+                "status:".to_string(),
+                format!(
+                    "running: {} (step {})",
+                    step_data.step_info().description,
+                    ProgressRatioDisplay::index_and_total(
+                        step_key.index,
+                        summary.total_steps,
+                    ),
+                ),
+            ]);
+        }
+        ExecutionStatus::Terminal(info) => {
+            push_event_buffer_terminal_info(
+                &info,
+                summary.total_steps,
+                &buffer,
+                builder,
+            );
+        }
+    }
+
+    // Also look for warnings.
+    for (_, step_data) in buffer.iter_steps_recursive() {
+        if let Some(reason) = step_data.step_status().completion_reason() {
+            if let Some(info) = reason.step_completed_info() {
+                if let StepOutcome::Warning { message, .. } = &info.outcome {
+                    builder.push_record([
+                        "warning:".to_string(),
+                        // This can be a nested step, so don't print out the
+                        // index.
+                        format!(
+                            "at: {}: {}",
+                            step_data.step_info().description,
+                            message
+                        ),
+                    ]);
+                }
             }
         }
     }
@@ -1789,7 +1817,10 @@ fn push_event_buffer_terminal_info(
             let v = format!(
                 "failed at: {} (step {})",
                 step_data.step_info().description,
-                StepIndexDisplay::new(info.step_key.index, total_steps)
+                ProgressRatioDisplay::index_and_total(
+                    info.step_key.index,
+                    total_steps,
+                )
             );
             builder.push_record(["status:".to_string(), v]);
 
@@ -1800,7 +1831,10 @@ fn push_event_buffer_terminal_info(
             let v = format!(
                 "aborted at: {} (step {})",
                 step_data.step_info().description,
-                StepIndexDisplay::new(info.step_key.index, total_steps)
+                ProgressRatioDisplay::index_and_total(
+                    info.step_key.index,
+                    total_steps,
+                )
             );
             builder.push_record(["status:".to_string(), v]);
 

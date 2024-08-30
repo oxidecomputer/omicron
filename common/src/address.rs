@@ -8,7 +8,7 @@
 //! and Nexus, who need to agree upon addressing schemes.
 
 use crate::api::external::{self, Error};
-use crate::policy::{DNS_REDUNDANCY, MAX_DNS_REDUNDANCY};
+use crate::policy::{INTERNAL_DNS_REDUNDANCY, MAX_INTERNAL_DNS_REDUNDANCY};
 use ipnetwork::Ipv6Network;
 use once_cell::sync::Lazy;
 use oxnet::{Ipv4Net, Ipv6Net};
@@ -33,8 +33,11 @@ pub const SLED_AGENT_PORT: u16 = 12345;
 pub const COCKROACH_PORT: u16 = 32221;
 pub const COCKROACH_ADMIN_PORT: u16 = 32222;
 pub const CRUCIBLE_PORT: u16 = 32345;
-pub const CLICKHOUSE_PORT: u16 = 8123;
-pub const CLICKHOUSE_KEEPER_PORT: u16 = 9181;
+pub const CLICKHOUSE_HTTP_PORT: u16 = 8123;
+pub const CLICKHOUSE_INTERSERVER_PORT: u16 = 9009;
+pub const CLICKHOUSE_TCP_PORT: u16 = 9000;
+pub const CLICKHOUSE_KEEPER_TCP_PORT: u16 = 9181;
+pub const CLICKHOUSE_KEEPER_RAFT_PORT: u16 = 9234;
 pub const CLICKHOUSE_ADMIN_PORT: u16 = 8888;
 pub const OXIMETER_PORT: u16 = 12223;
 pub const DENDRITE_PORT: u16 = 12224;
@@ -172,7 +175,18 @@ pub const CP_SERVICES_RESERVED_ADDRESSES: u16 = 0xFFFF;
 pub const SLED_RESERVED_ADDRESSES: u16 = 32;
 
 /// Wraps an [`Ipv6Net`] with a compile-time prefix length.
-#[derive(Debug, Clone, Copy, JsonSchema, Serialize, Hash, PartialEq, Eq)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    JsonSchema,
+    Serialize,
+    Hash,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+)]
 #[schemars(rename = "Ipv6Subnet")]
 pub struct Ipv6Subnet<const N: u8> {
     net: Ipv6Net,
@@ -226,12 +240,33 @@ impl<'de, const N: u8> Deserialize<'de> for Ipv6Subnet<N> {
 }
 
 /// Represents a subnet which may be used for contacting DNS services.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[derive(
+    Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, PartialOrd, Ord,
+)]
 pub struct DnsSubnet {
     subnet: Ipv6Subnet<SLED_PREFIX>,
 }
 
 impl DnsSubnet {
+    pub fn new(subnet: Ipv6Subnet<SLED_PREFIX>) -> Self {
+        Self { subnet }
+    }
+
+    /// Makes a new DNS subnet from the high-order bits of an address.
+    pub fn from_addr(addr: Ipv6Addr) -> Self {
+        Self::new(Ipv6Subnet::new(addr))
+    }
+
+    /// Returns the DNS subnet.
+    pub fn subnet(&self) -> Ipv6Subnet<SLED_PREFIX> {
+        self.subnet
+    }
+
+    /// Returns the reserved rack subnet that contains this DNS subnet.
+    pub fn rack_subnet(&self) -> ReservedRackSubnet {
+        ReservedRackSubnet::from_subnet(self.subnet)
+    }
+
     /// Returns the DNS server address within the subnet.
     ///
     /// This is the first address within the subnet.
@@ -250,7 +285,7 @@ impl DnsSubnet {
 
 /// A wrapper around an IPv6 network, indicating it is a "reserved" rack
 /// subnet which can be used for AZ-wide services.
-#[derive(Debug, Clone)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ReservedRackSubnet(pub Ipv6Subnet<RACK_PREFIX>);
 
 impl ReservedRackSubnet {
@@ -259,17 +294,23 @@ impl ReservedRackSubnet {
         ReservedRackSubnet(Ipv6Subnet::<RACK_PREFIX>::new(subnet.net().addr()))
     }
 
+    /// Infer the reserved rack subnet from a sled/AZ/DNS subnet.
+    pub fn from_subnet<const N: u8>(subnet: Ipv6Subnet<N>) -> Self {
+        Self::new(Ipv6Subnet::<AZ_PREFIX>::new(subnet.net().addr()))
+    }
+
+    /// Returns the `index`th DNS subnet from this reserved rack subnet.
+    pub fn get_dns_subnet(&self, index: u8) -> DnsSubnet {
+        DnsSubnet::new(get_64_subnet(self.0, index))
+    }
+
     /// Returns the DNS addresses from this reserved rack subnet.
     ///
-    /// These addresses will come from the first [`MAX_DNS_REDUNDANCY`] `/64s` of the
-    /// [`RACK_PREFIX`] subnet.
+    /// These addresses will come from the first [`MAX_INTERNAL_DNS_REDUNDANCY`]
+    /// `/64s` of the [`RACK_PREFIX`] subnet.
     pub fn get_dns_subnets(&self) -> Vec<DnsSubnet> {
-        (0..MAX_DNS_REDUNDANCY)
-            .map(|idx| {
-                let subnet =
-                    get_64_subnet(self.0, u8::try_from(idx + 1).unwrap());
-                DnsSubnet { subnet }
-            })
+        (0..MAX_INTERNAL_DNS_REDUNDANCY)
+            .map(|idx| self.get_dns_subnet(u8::try_from(idx + 1).unwrap()))
             .collect()
     }
 }
@@ -280,7 +321,7 @@ pub fn get_internal_dns_server_addresses(addr: Ipv6Addr) -> Vec<IpAddr> {
     let az_subnet = Ipv6Subnet::<AZ_PREFIX>::new(addr);
     let reserved_rack_subnet = ReservedRackSubnet::new(az_subnet);
     let dns_subnets =
-        &reserved_rack_subnet.get_dns_subnets()[0..DNS_REDUNDANCY];
+        &reserved_rack_subnet.get_dns_subnets()[0..INTERNAL_DNS_REDUNDANCY];
     dns_subnets
         .iter()
         .map(|dns_subnet| IpAddr::from(dns_subnet.dns_address()))
@@ -661,7 +702,7 @@ mod test {
 
         // Observe the first DNS subnet within this reserved rack subnet.
         let dns_subnets = rack_subnet.get_dns_subnets();
-        assert_eq!(MAX_DNS_REDUNDANCY, dns_subnets.len());
+        assert_eq!(MAX_INTERNAL_DNS_REDUNDANCY, dns_subnets.len());
 
         // The DNS address and GZ address should be only differing by one.
         assert_eq!(

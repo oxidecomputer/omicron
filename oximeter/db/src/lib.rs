@@ -10,8 +10,6 @@ use crate::query::StringFieldSelector;
 use anyhow::Context as _;
 use chrono::DateTime;
 use chrono::Utc;
-use dropshot::EmptyScanParams;
-use dropshot::PaginationParams;
 pub use oximeter::schema::FieldSchema;
 pub use oximeter::schema::FieldSource;
 use oximeter::schema::TimeseriesKey;
@@ -234,10 +232,6 @@ impl From<FieldSource> for DbFieldSource {
         }
     }
 }
-
-/// Type used to paginate request to list timeseries schema.
-pub type TimeseriesSchemaPaginationParams =
-    PaginationParams<EmptyScanParams, TimeseriesName>;
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct TimeseriesScanParams {

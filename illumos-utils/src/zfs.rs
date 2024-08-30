@@ -6,6 +6,7 @@
 
 use crate::{execute, PFEXEC};
 use camino::{Utf8Path, Utf8PathBuf};
+use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::disk::DiskIdentity;
 use std::fmt;
 
@@ -203,7 +204,8 @@ pub struct EncryptionDetails {
 #[derive(Debug, Default)]
 pub struct SizeDetails {
     pub quota: Option<usize>,
-    pub compression: Option<&'static str>,
+    pub reservation: Option<usize>,
+    pub compression: CompressionAlgorithm,
 }
 
 #[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
@@ -259,9 +261,27 @@ impl Zfs {
         Ok(())
     }
 
-    /// Creates a new ZFS filesystem named `name`, unless one already exists.
+    /// Creates a new ZFS filesystem unless one already exists.
     ///
-    /// Applies an optional quota, provided _in bytes_.
+    /// - `name`: the full path to the zfs dataset
+    /// - `mountpoint`: The expected mountpoint of this filesystem.
+    /// If the filesystem already exists, and is not mounted here, and error is
+    /// returned.
+    /// - `zoned`: identifies whether or not this filesystem should be
+    /// used in a zone. Only used when creating a new filesystem - ignored
+    /// if the filesystem already exists.
+    /// - `do_format`: if "false", prevents a new filesystem from being created,
+    /// and returns an error if it is not found.
+    /// - `encryption_details`: Ensures a filesystem as an encryption root.
+    /// For new filesystems, this supplies the key, and all datasets within this
+    /// root are implicitly encrypted. For existing filesystems, ensures that
+    /// they are mounted (and that keys are loaded), but does not verify the
+    /// input details.
+    /// - `size_details`: If supplied, sets size-related information. These
+    /// values are set on both new filesystem creation as well as when loading
+    /// existing filesystems.
+    /// - `additional_options`: Additional ZFS options, which are only set when
+    /// creating new filesystems.
     #[allow(clippy::too_many_arguments)]
     pub fn ensure_filesystem(
         name: &str,
@@ -274,10 +294,18 @@ impl Zfs {
     ) -> Result<(), EnsureFilesystemError> {
         let (exists, mounted) = Self::dataset_exists(name, &mountpoint)?;
         if exists {
-            if let Some(SizeDetails { quota, compression }) = size_details {
+            if let Some(SizeDetails { quota, reservation, compression }) =
+                size_details
+            {
                 // apply quota and compression mode (in case they've changed across
                 // sled-agent versions since creation)
-                Self::apply_properties(name, &mountpoint, quota, compression)?;
+                Self::apply_properties(
+                    name,
+                    &mountpoint,
+                    quota,
+                    reservation,
+                    compression,
+                )?;
             }
 
             if encryption_details.is_none() {
@@ -351,42 +379,64 @@ impl Zfs {
             })?;
         }
 
-        if let Some(SizeDetails { quota, compression }) = size_details {
+        if let Some(SizeDetails { quota, reservation, compression }) =
+            size_details
+        {
             // Apply any quota and compression mode.
-            Self::apply_properties(name, &mountpoint, quota, compression)?;
+            Self::apply_properties(
+                name,
+                &mountpoint,
+                quota,
+                reservation,
+                compression,
+            )?;
         }
 
         Ok(())
     }
 
+    /// Applies the following properties to the filesystem.
+    ///
+    /// If any of the options are not supplied, a default "none" or "off"
+    /// value is supplied.
     fn apply_properties(
         name: &str,
         mountpoint: &Mountpoint,
         quota: Option<usize>,
-        compression: Option<&'static str>,
+        reservation: Option<usize>,
+        compression: CompressionAlgorithm,
     ) -> Result<(), EnsureFilesystemError> {
-        if let Some(quota) = quota {
-            if let Err(err) =
-                Self::set_value(name, "quota", &format!("{quota}"))
-            {
-                return Err(EnsureFilesystemError {
-                    name: name.to_string(),
-                    mountpoint: mountpoint.clone(),
-                    // Take the execution error from the SetValueError
-                    err: err.err.into(),
-                });
-            }
+        let quota = quota
+            .map(|q| q.to_string())
+            .unwrap_or_else(|| String::from("none"));
+        let reservation = reservation
+            .map(|r| r.to_string())
+            .unwrap_or_else(|| String::from("none"));
+        let compression = compression.to_string();
+
+        if let Err(err) = Self::set_value(name, "quota", &quota) {
+            return Err(EnsureFilesystemError {
+                name: name.to_string(),
+                mountpoint: mountpoint.clone(),
+                // Take the execution error from the SetValueError
+                err: err.err.into(),
+            });
         }
-        if let Some(compression) = compression {
-            if let Err(err) = Self::set_value(name, "compression", compression)
-            {
-                return Err(EnsureFilesystemError {
-                    name: name.to_string(),
-                    mountpoint: mountpoint.clone(),
-                    // Take the execution error from the SetValueError
-                    err: err.err.into(),
-                });
-            }
+        if let Err(err) = Self::set_value(name, "reservation", &reservation) {
+            return Err(EnsureFilesystemError {
+                name: name.to_string(),
+                mountpoint: mountpoint.clone(),
+                // Take the execution error from the SetValueError
+                err: err.err.into(),
+            });
+        }
+        if let Err(err) = Self::set_value(name, "compression", &compression) {
+            return Err(EnsureFilesystemError {
+                name: name.to_string(),
+                mountpoint: mountpoint.clone(),
+                // Take the execution error from the SetValueError
+                err: err.err.into(),
+            });
         }
         Ok(())
     }

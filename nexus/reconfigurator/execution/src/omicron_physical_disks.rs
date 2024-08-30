@@ -135,7 +135,6 @@ mod test {
     use httptest::responders::status_code;
     use httptest::Expectation;
     use nexus_db_model::Dataset;
-    use nexus_db_model::DatasetKind;
     use nexus_db_model::PhysicalDisk;
     use nexus_db_model::PhysicalDiskKind;
     use nexus_db_model::PhysicalDiskPolicy;
@@ -153,6 +152,7 @@ mod test {
     use nexus_types::identity::Asset;
     use omicron_common::api::external::DataPageParams;
     use omicron_common::api::external::Generation;
+    use omicron_common::api::internal::shared::DatasetKind;
     use omicron_common::disk::DiskIdentity;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;

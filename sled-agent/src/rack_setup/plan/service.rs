@@ -32,12 +32,13 @@ use omicron_common::backoff::{
     retry_notify_ext, retry_policy_internal_service_aggressive, BackoffError,
 };
 use omicron_common::disk::{
-    DiskVariant, OmicronPhysicalDiskConfig, OmicronPhysicalDisksConfig,
+    DatasetKind, DatasetName, DiskVariant, OmicronPhysicalDiskConfig,
+    OmicronPhysicalDisksConfig,
 };
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_common::policy::{
-    BOUNDARY_NTP_REDUNDANCY, COCKROACHDB_REDUNDANCY, DNS_REDUNDANCY,
-    MAX_DNS_REDUNDANCY, NEXUS_REDUNDANCY,
+    BOUNDARY_NTP_REDUNDANCY, COCKROACHDB_REDUNDANCY, INTERNAL_DNS_REDUNDANCY,
+    MAX_INTERNAL_DNS_REDUNDANCY, NEXUS_REDUNDANCY,
 };
 use omicron_uuid_kinds::{
     ExternalIpUuid, GenericUuid, OmicronZoneUuid, SledUuid, ZpoolUuid,
@@ -50,7 +51,7 @@ use sled_agent_client::{
 };
 use sled_agent_types::rack_init::RackInitializeRequest as Config;
 use sled_agent_types::sled::StartSledAgentRequest;
-use sled_storage::dataset::{DatasetName, DatasetType, CONFIG_DATASET};
+use sled_storage::dataset::CONFIG_DATASET;
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -469,9 +470,11 @@ impl Plan {
 
         // Provision internal DNS zones, striping across Sleds.
         let reserved_rack_subnet = ReservedRackSubnet::new(config.az_subnet());
-        static_assertions::const_assert!(DNS_REDUNDANCY <= MAX_DNS_REDUNDANCY,);
+        static_assertions::const_assert!(
+            INTERNAL_DNS_REDUNDANCY <= MAX_INTERNAL_DNS_REDUNDANCY
+        );
         let dns_subnets =
-            &reserved_rack_subnet.get_dns_subnets()[0..DNS_REDUNDANCY];
+            &reserved_rack_subnet.get_dns_subnets()[0..INTERNAL_DNS_REDUNDANCY];
         let rack_dns_servers = dns_subnets
             .into_iter()
             .map(|dns_subnet| dns_subnet.dns_address().into())
@@ -497,7 +500,7 @@ impl Plan {
                 )
                 .unwrap();
             let dataset_name =
-                sled.alloc_dataset_from_u2s(DatasetType::InternalDns)?;
+                sled.alloc_dataset_from_u2s(DatasetKind::InternalDns)?;
             let filesystem_pool = Some(dataset_name.pool().clone());
 
             sled.request.zones.push(BlueprintZoneConfig {
@@ -539,7 +542,7 @@ impl Plan {
                 )
                 .unwrap();
             let dataset_name =
-                sled.alloc_dataset_from_u2s(DatasetType::CockroachDb)?;
+                sled.alloc_dataset_from_u2s(DatasetKind::Cockroach)?;
             let filesystem_pool = Some(dataset_name.pool().clone());
             sled.request.zones.push(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
@@ -587,7 +590,7 @@ impl Plan {
             let dns_address = from_sockaddr_to_external_floating_addr(
                 SocketAddr::new(external_ip, dns_port),
             );
-            let dataset_kind = DatasetType::ExternalDns;
+            let dataset_kind = DatasetKind::ExternalDns;
             let dataset_name = sled.alloc_dataset_from_u2s(dataset_kind)?;
             let filesystem_pool = Some(dataset_name.pool().clone());
 
@@ -705,7 +708,7 @@ impl Plan {
             };
             let id = OmicronZoneUuid::new_v4();
             let ip = sled.addr_alloc.next().expect("Not enough addrs");
-            let port = omicron_common::address::CLICKHOUSE_PORT;
+            let port = omicron_common::address::CLICKHOUSE_HTTP_PORT;
             let address = SocketAddrV6::new(ip, port, 0, 0);
             dns_builder
                 .host_zone_with_one_backend(
@@ -716,7 +719,7 @@ impl Plan {
                 )
                 .unwrap();
             let dataset_name =
-                sled.alloc_dataset_from_u2s(DatasetType::Clickhouse)?;
+                sled.alloc_dataset_from_u2s(DatasetKind::Clickhouse)?;
             let filesystem_pool = Some(dataset_name.pool().clone());
             sled.request.zones.push(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
@@ -748,7 +751,7 @@ impl Plan {
             let ip = sled.addr_alloc.next().expect("Not enough addrs");
             // TODO: This may need to be a different port if/when to have single node
             // and replicated running side by side as per stage 1 of RFD 468.
-            let port = omicron_common::address::CLICKHOUSE_PORT;
+            let port = omicron_common::address::CLICKHOUSE_HTTP_PORT;
             let address = SocketAddrV6::new(ip, port, 0, 0);
             dns_builder
                 .host_zone_with_one_backend(
@@ -759,7 +762,7 @@ impl Plan {
                 )
                 .unwrap();
             let dataset_name =
-                sled.alloc_dataset_from_u2s(DatasetType::ClickhouseServer)?;
+                sled.alloc_dataset_from_u2s(DatasetKind::ClickhouseServer)?;
             let filesystem_pool = Some(dataset_name.pool().clone());
             sled.request.zones.push(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
@@ -789,7 +792,7 @@ impl Plan {
             };
             let id = OmicronZoneUuid::new_v4();
             let ip = sled.addr_alloc.next().expect("Not enough addrs");
-            let port = omicron_common::address::CLICKHOUSE_KEEPER_PORT;
+            let port = omicron_common::address::CLICKHOUSE_KEEPER_TCP_PORT;
             let address = SocketAddrV6::new(ip, port, 0, 0);
             dns_builder
                 .host_zone_with_one_backend(
@@ -800,7 +803,7 @@ impl Plan {
                 )
                 .unwrap();
             let dataset_name =
-                sled.alloc_dataset_from_u2s(DatasetType::ClickhouseKeeper)?;
+                sled.alloc_dataset_from_u2s(DatasetKind::ClickhouseKeeper)?;
             let filesystem_pool = Some(dataset_name.pool().clone());
             sled.request.zones.push(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
@@ -1034,7 +1037,7 @@ pub struct SledInfo {
     u2_zpools: Vec<ZpoolName>,
     /// spreads components across a Sled's zpools
     u2_zpool_allocators:
-        HashMap<DatasetType, Box<dyn Iterator<Item = usize> + Send + Sync>>,
+        HashMap<DatasetKind, Box<dyn Iterator<Item = usize> + Send + Sync>>,
     /// whether this Sled is a scrimlet
     is_scrimlet: bool,
     /// allocator for addresses in this Sled's subnet
@@ -1075,7 +1078,7 @@ impl SledInfo {
     /// this Sled
     fn alloc_dataset_from_u2s(
         &mut self,
-        kind: DatasetType,
+        kind: DatasetKind,
     ) -> Result<DatasetName, PlanError> {
         // We have two goals here:
         //

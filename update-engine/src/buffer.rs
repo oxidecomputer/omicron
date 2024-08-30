@@ -123,6 +123,16 @@ impl<S: StepSpec> EventBuffer<S> {
         EventBufferSteps::new(&self.event_store)
     }
 
+    /// Iterates over all known steps in the buffer in a recursive fashion.
+    ///
+    /// The iterator is depth-first and pre-order (i.e. for nested steps, the
+    /// parent step is visited before the child steps).
+    pub fn iter_steps_recursive(
+        &self,
+    ) -> impl Iterator<Item = (StepKey, &EventBufferStepData<S>)> {
+        self.event_store.event_map_value_dfs()
+    }
+
     /// Returns information about the given step, as currently tracked by the
     /// buffer.
     pub fn get(&self, step_key: &StepKey) -> Option<&EventBufferStepData<S>> {
@@ -1270,6 +1280,14 @@ impl<S: StepSpec> StepStatus<S> {
     /// Returns true if this step is currently running.
     pub fn is_running(&self) -> bool {
         matches!(self, Self::Running { .. })
+    }
+
+    /// For completed steps, return the completion reason, otherwise None.
+    pub fn completion_reason(&self) -> Option<&CompletionReason> {
+        match self {
+            Self::Completed { reason, .. } => Some(reason),
+            _ => None,
+        }
     }
 
     /// For failed steps, return the failure reason, otherwise None.

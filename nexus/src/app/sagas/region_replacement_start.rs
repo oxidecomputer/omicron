@@ -747,7 +747,6 @@ pub(crate) mod test {
     };
     use chrono::Utc;
     use nexus_db_model::Dataset;
-    use nexus_db_model::DatasetKind;
     use nexus_db_model::Region;
     use nexus_db_model::RegionReplacement;
     use nexus_db_model::RegionReplacementState;
@@ -758,6 +757,7 @@ pub(crate) mod test {
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::identity::Asset;
+    use omicron_common::api::internal::shared::DatasetKind;
     use sled_agent_client::types::VolumeConstructionRequest;
     use uuid::Uuid;
 

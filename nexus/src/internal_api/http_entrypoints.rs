@@ -52,7 +52,7 @@ use omicron_common::api::internal::nexus::ProducerRegistrationResponse;
 use omicron_common::api::internal::nexus::RepairFinishInfo;
 use omicron_common::api::internal::nexus::RepairProgress;
 use omicron_common::api::internal::nexus::RepairStartInfo;
-use omicron_common::api::internal::nexus::SledInstanceState;
+use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_common::update::ArtifactId;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
@@ -168,8 +168,8 @@ impl NexusInternalApi for NexusInternalApiImpl {
 
     async fn cpapi_instances_put(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<InstancePathParam>,
-        new_runtime_state: TypedBody<SledInstanceState>,
+        path_params: Path<VmmPathParam>,
+        new_runtime_state: TypedBody<SledVmmState>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let apictx = &rqctx.context().context;
         let nexus = &apictx.nexus;
@@ -178,11 +178,7 @@ impl NexusInternalApi for NexusInternalApiImpl {
         let opctx = crate::context::op_context_for_internal_api(&rqctx).await;
         let handler = async {
             nexus
-                .notify_instance_updated(
-                    &opctx,
-                    InstanceUuid::from_untyped_uuid(path.instance_id),
-                    &new_state,
-                )
+                .notify_vmm_updated(&opctx, path.propolis_id, &new_state)
                 .await?;
             Ok(HttpResponseUpdatedNoContent())
         };

@@ -23,10 +23,13 @@ impl_enum_type!(
     ClickhouseServer => b"clickhouse_server"
     ExternalDns => b"external_dns"
     InternalDns => b"internal_dns"
+    ZoneRoot => b"zone_root"
+    Zone => b"zone"
+    Debug => b"debug"
 );
 
-impl From<internal::shared::DatasetKind> for DatasetKind {
-    fn from(k: internal::shared::DatasetKind) -> Self {
+impl From<&internal::shared::DatasetKind> for DatasetKind {
+    fn from(k: &internal::shared::DatasetKind) -> Self {
         match k {
             internal::shared::DatasetKind::Crucible => DatasetKind::Crucible,
             internal::shared::DatasetKind::Cockroach => DatasetKind::Cockroach,
@@ -45,6 +48,13 @@ impl From<internal::shared::DatasetKind> for DatasetKind {
             internal::shared::DatasetKind::InternalDns => {
                 DatasetKind::InternalDns
             }
+            internal::shared::DatasetKind::ZoneRoot => DatasetKind::ZoneRoot,
+            // Enums in the database do not have associated data, so this drops
+            // the "name" of the zone and only considers the type.
+            //
+            // The zone name, if it exists, is stored in a separate column.
+            internal::shared::DatasetKind::Zone { .. } => DatasetKind::Zone,
+            internal::shared::DatasetKind::Debug => DatasetKind::Debug,
         }
     }
 }
