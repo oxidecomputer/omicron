@@ -36,7 +36,9 @@ use nexus_db_model::{
     SwitchPortBgpPeerConfigAllowImport, SwitchPortBgpPeerConfigCommunity,
     SwitchPortGeometry,
 };
-use nexus_types::external_api::params;
+use nexus_types::external_api::params::{
+    self, AllowedPrefixAddRemove, BgpCommunityAddRemove,
+};
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
     self, BgpPeer, BgpPeerRemove, CreateResult, DataPageParams, DeleteResult,
@@ -1988,6 +1990,345 @@ impl DataStore {
                             "error while removing bgp peer from interface",
                         )
                     }
+                }
+            })
+    }
+
+    pub async fn switch_port_configuration_bgp_peer_allow_import_list(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+        bgp_peer: IpAddr,
+    ) -> ListResultVec<SwitchPortBgpPeerConfigAllowImport> {
+        use db::schema::switch_port_settings as port_settings;
+        use db::schema::switch_port_settings_bgp_peer_config_allow_import as allow_import;
+
+        let dataset = port_settings::table.inner_join(
+            allow_import::table
+                .on(allow_import::port_settings_id.eq(port_settings::id)),
+        );
+
+        let query = match configuration {
+            NameOrId::Id(id) => {
+                // find port config using port settings id
+                dataset.filter(port_settings::id.eq(id)).into_boxed()
+            }
+            NameOrId::Name(name) => {
+                // find port config using port settings name
+                dataset
+                    .filter(port_settings::name.eq(name.to_string()))
+                    .into_boxed()
+            }
+        };
+
+        query
+            .filter(allow_import::addr.eq(IpNetwork::from(bgp_peer)))
+            .select(SwitchPortBgpPeerConfigAllowImport::as_select())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e: diesel::result::Error| {
+                let msg = "error while looking up bgp peer allowed import list";
+                error!(opctx.log, "{msg}"; "error" => ?e);
+                Error::internal_error(msg)
+            })
+    }
+
+    pub async fn switch_port_configuration_bgp_peer_allow_import_add(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+        bgp_peer: IpAddr,
+        prefix: AllowedPrefixAddRemove,
+    ) -> CreateResult<SwitchPortBgpPeerConfigAllowImport> {
+        use db::schema::switch_port_settings_bgp_peer_config_allow_import as allow_import;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let err = OptionalError::new();
+
+        self.transaction_retry_wrapper(
+            "switch_port_configuration_bgp_peer_allow_import_add",
+        )
+            .transaction(&conn, |conn| {
+                let parent_configuration = configuration.clone();
+                let new_settings = prefix.clone();
+                let err = err.clone();
+
+                async move {
+
+                    // resolve id of port_settings record
+                    let port_settings_id = switch_port_configuration_id(&conn, parent_configuration.clone())
+                        .await
+                        .map_err(|e: diesel::result::Error| {
+                            match e {
+                                diesel::result::Error::NotFound => {
+                                    err.bail(
+                                        Error::non_resourcetype_not_found(
+                                            format!("unable to lookup configuration with identifier {parent_configuration}")
+                                        )
+                                    )
+                                },
+                                _ => {
+                                    err.bail(Error::internal_error(
+                                        "error while looking up switch port configuration for bgp peer"
+                                    ))
+                                },
+                            }
+                        })?;
+
+                    let allow_import_config = SwitchPortBgpPeerConfigAllowImport {
+                        port_settings_id,
+                        interface_name: new_settings.interface.to_string(),
+                        addr: bgp_peer.into(),
+                        prefix: new_settings.prefix.into(),
+                    };
+
+                    let config = diesel::insert_into(allow_import::table)
+                        .values(allow_import_config)
+                        .returning(SwitchPortBgpPeerConfigAllowImport::as_returning())
+                        .get_result_async(&conn)
+                        .await?;
+
+                    Ok(config)
+                }
+            })
+            .await
+            .map_err(|e| {
+                let message = "switch_port_configuration_bgp_peer_allow_import_add failed";
+                match err.take() {
+                    Some(external_error) => {
+                        error!(opctx.log, "{message}"; "error" => ?external_error);
+                        external_error
+                    },
+                    None => {
+                        error!(opctx.log, "{message}"; "error" => ?e);
+                        Error::internal_error("error while adding prefix to allowed import list")
+                    },
+                }
+            })
+    }
+
+    pub async fn switch_port_configuration_bgp_peer_allow_export_list(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+        bgp_peer: IpAddr,
+    ) -> ListResultVec<SwitchPortBgpPeerConfigAllowExport> {
+        use db::schema::switch_port_settings as port_settings;
+        use db::schema::switch_port_settings_bgp_peer_config_allow_export as allow_export;
+
+        let dataset = port_settings::table.inner_join(
+            allow_export::table
+                .on(allow_export::port_settings_id.eq(port_settings::id)),
+        );
+
+        let query = match configuration {
+            NameOrId::Id(id) => {
+                // find port config using port settings id
+                dataset.filter(port_settings::id.eq(id)).into_boxed()
+            }
+            NameOrId::Name(name) => {
+                // find port config using port settings name
+                dataset
+                    .filter(port_settings::name.eq(name.to_string()))
+                    .into_boxed()
+            }
+        };
+
+        query
+            .filter(allow_export::addr.eq(IpNetwork::from(bgp_peer)))
+            .select(SwitchPortBgpPeerConfigAllowExport::as_select())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e: diesel::result::Error| {
+                let msg = "error while looking up bgp peer allowed export list";
+                error!(opctx.log, "{msg}"; "error" => ?e);
+                Error::internal_error(msg)
+            })
+    }
+
+    pub async fn switch_port_configuration_bgp_peer_allow_export_add(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+        bgp_peer: IpAddr,
+        prefix: AllowedPrefixAddRemove,
+    ) -> CreateResult<SwitchPortBgpPeerConfigAllowExport> {
+        use db::schema::switch_port_settings_bgp_peer_config_allow_export as allow_export;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let err = OptionalError::new();
+
+        self.transaction_retry_wrapper(
+            "switch_port_configuration_bgp_peer_allow_export_add",
+        )
+            .transaction(&conn, |conn| {
+                let parent_configuration = configuration.clone();
+                let new_settings = prefix.clone();
+                let err = err.clone();
+
+                async move {
+
+                    // resolve id of port_settings record
+                    let port_settings_id = switch_port_configuration_id(&conn, parent_configuration.clone())
+                        .await
+                        .map_err(|e: diesel::result::Error| {
+                            match e {
+                                diesel::result::Error::NotFound => {
+                                    err.bail(
+                                        Error::non_resourcetype_not_found(
+                                            format!("unable to lookup configuration with identifier {parent_configuration}")
+                                        )
+                                    )
+                                },
+                                _ => {
+                                    err.bail(Error::internal_error(
+                                        "error while looking up switch port configuration for bgp peer"
+                                    ))
+                                },
+                            }
+                        })?;
+
+                    let allow_export_config = SwitchPortBgpPeerConfigAllowExport {
+                        port_settings_id,
+                        interface_name: new_settings.interface.to_string(),
+                        addr: bgp_peer.into(),
+                        prefix: new_settings.prefix.into(),
+                    };
+
+                    let config = diesel::insert_into(allow_export::table)
+                        .values(allow_export_config)
+                        .returning(SwitchPortBgpPeerConfigAllowExport::as_returning())
+                        .get_result_async(&conn)
+                        .await?;
+
+                    Ok(config)
+                }
+            })
+            .await
+            .map_err(|e| {
+                let message = "switch_port_configuration_bgp_peer_allow_export_add failed";
+                match err.take() {
+                    Some(external_error) => {
+                        error!(opctx.log, "{message}"; "error" => ?external_error);
+                        external_error
+                    },
+                    None => {
+                        error!(opctx.log, "{message}"; "error" => ?e);
+                        Error::internal_error("error while adding prefix to allowed export list")
+                    },
+                }
+            })
+    }
+
+    pub async fn switch_port_configuration_bgp_peer_community_list(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+        bgp_peer: IpAddr,
+    ) -> ListResultVec<SwitchPortBgpPeerConfigCommunity> {
+        use db::schema::switch_port_settings as port_settings;
+        use db::schema::switch_port_settings_bgp_peer_config_communities as communities;
+
+        let dataset = port_settings::table.inner_join(
+            communities::table
+                .on(communities::port_settings_id.eq(port_settings::id)),
+        );
+
+        let query = match configuration {
+            NameOrId::Id(id) => {
+                // find port config using port settings id
+                dataset.filter(port_settings::id.eq(id)).into_boxed()
+            }
+            NameOrId::Name(name) => {
+                // find port config using port settings name
+                dataset
+                    .filter(port_settings::name.eq(name.to_string()))
+                    .into_boxed()
+            }
+        };
+
+        query
+            .filter(communities::addr.eq(IpNetwork::from(bgp_peer)))
+            .select(SwitchPortBgpPeerConfigCommunity::as_select())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e: diesel::result::Error| {
+                let msg = "error while looking up bgp peer allowed export list";
+                error!(opctx.log, "{msg}"; "error" => ?e);
+                Error::internal_error(msg)
+            })
+    }
+
+    pub async fn switch_port_configuration_bgp_peer_community_add(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+        bgp_peer: IpAddr,
+        prefix: BgpCommunityAddRemove,
+    ) -> CreateResult<SwitchPortBgpPeerConfigCommunity> {
+        use db::schema::switch_port_settings_bgp_peer_config_communities as communities;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let err = OptionalError::new();
+
+        self.transaction_retry_wrapper(
+            "switch_port_configuration_bgp_peer_community_add",
+        )
+            .transaction(&conn, |conn| {
+                let parent_configuration = configuration.clone();
+                let new_settings = prefix.clone();
+                let err = err.clone();
+
+                async move {
+
+                    // resolve id of port_settings record
+                    let port_settings_id = switch_port_configuration_id(&conn, parent_configuration.clone())
+                        .await
+                        .map_err(|e: diesel::result::Error| {
+                            match e {
+                                diesel::result::Error::NotFound => {
+                                    err.bail(
+                                        Error::non_resourcetype_not_found(
+                                            format!("unable to lookup configuration with identifier {parent_configuration}")
+                                        )
+                                    )
+                                },
+                                _ => {
+                                    err.bail(Error::internal_error(
+                                        "error while looking up switch port configuration for bgp peer"
+                                    ))
+                                },
+                            }
+                        })?;
+
+                    let community_config = SwitchPortBgpPeerConfigCommunity {
+                        port_settings_id,
+                        interface_name: new_settings.interface.to_string(),
+                        addr: bgp_peer.into(),
+                        community: new_settings.community.into(),
+                    };
+
+                    let config = diesel::insert_into(communities::table)
+                        .values(community_config)
+                        .returning(SwitchPortBgpPeerConfigCommunity::as_returning())
+                        .get_result_async(&conn)
+                        .await?;
+
+                    Ok(config)
+                }
+            })
+            .await
+            .map_err(|e| {
+                let message = "switch_port_configuration_bgp_peer_community_add failed";
+                match err.take() {
+                    Some(external_error) => {
+                        error!(opctx.log, "{message}"; "error" => ?external_error);
+                        external_error
+                    },
+                    None => {
+                        error!(opctx.log, "{message}"; "error" => ?e);
+                        Error::internal_error("error while adding community to bgp peer")
+                    },
                 }
             })
     }

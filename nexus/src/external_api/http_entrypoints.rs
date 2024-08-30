@@ -275,13 +275,11 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(networking_switch_port_configuration_create)?;
         api.register(networking_switch_port_configuration_delete)?;
 
-        // /v1/system/networking/switch-port-configuration/{name_or_id}/geometry
         // TODO:  Levon - add tests
         api.register(networking_switch_port_configuration_geometry_view)?;
         // TODO:  Levon - add tests
         api.register(networking_switch_port_configuration_geometry_set)?;
 
-        // /v1/system/networking/switch-port-configuration/{name_or_id}/link
         // TODO:  Levon - add tests
         api.register(networking_switch_port_configuration_link_create)?;
         // TODO:  Levon - add tests
@@ -291,7 +289,6 @@ pub(crate) fn external_api() -> NexusApiDescription {
         // TODO:  Levon - add tests
         api.register(networking_switch_port_configuration_link_list)?;
 
-        // /v1/system/networking/switch-port-configuration/{name_or_id}/interface/{interface}/address
         // TODO:  Levon - add tests
         api.register(networking_switch_port_configuration_address_add)?;
         // TODO:  Levon - add tests
@@ -299,7 +296,6 @@ pub(crate) fn external_api() -> NexusApiDescription {
         // TODO:  Levon - add tests
         api.register(networking_switch_port_configuration_address_list)?;
 
-        // /v1/system/networking/switch-port-configuration/{name_or_id}/interface/{interface}/route
         // TODO:  Levon - add tests
         api.register(networking_switch_port_configuration_route_add)?;
         // TODO:  Levon - add tests
@@ -307,13 +303,49 @@ pub(crate) fn external_api() -> NexusApiDescription {
         // TODO:  Levon - add tests
         api.register(networking_switch_port_configuration_route_list)?;
 
-        // /v1/system/networking/switch-port-configuration/{name_or_id}/interface/{interface}/bgp-peer
         // TODO:  Levon - add tests
         api.register(networking_switch_port_configuration_bgp_peer_add)?;
         // TODO:  Levon - add tests
         api.register(networking_switch_port_configuration_bgp_peer_remove)?;
         // TODO:  Levon - add tests
         api.register(networking_switch_port_configuration_bgp_peer_list)?;
+
+        // TODO:  Levon - add tests
+        api.register(
+            networking_switch_port_configuration_bgp_peer_allow_import_add,
+        )?;
+        // TODO:  Levon - add tests
+        api.register(
+            networking_switch_port_configuration_bgp_peer_allow_import_remove,
+        )?;
+        // TODO:  Levon - add tests
+        api.register(
+            networking_switch_port_configuration_bgp_peer_allow_import_list,
+        )?;
+
+        api.register(
+            networking_switch_port_configuration_bgp_peer_allow_export_add,
+        )?;
+        // TODO:  Levon - add tests
+        api.register(
+            networking_switch_port_configuration_bgp_peer_allow_export_remove,
+        )?;
+        // TODO:  Levon - add tests
+        api.register(
+            networking_switch_port_configuration_bgp_peer_allow_export_list,
+        )?;
+
+        api.register(
+            networking_switch_port_configuration_bgp_peer_community_add,
+        )?;
+        // TODO:  Levon - add tests
+        api.register(
+            networking_switch_port_configuration_bgp_peer_community_remove,
+        )?;
+        // TODO:  Levon - add tests
+        api.register(
+            networking_switch_port_configuration_bgp_peer_community_list,
+        )?;
 
         api.register(networking_switch_port_list)?;
         api.register(networking_switch_port_status)?;
@@ -4305,6 +4337,333 @@ async fn networking_switch_port_configuration_bgp_peer_remove(
                 &opctx,
                 configuration,
                 bgp_peer,
+            )
+            .await?;
+        Ok(HttpResponseDeleted())
+    };
+    apictx
+        .context
+        .external_latencies
+        .instrument_dropshot_handler(&rqctx, handler)
+        .await
+}
+
+/// List prefixes allowed to be imported by a given bgp peer
+#[endpoint {
+    method = GET,
+    path ="/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/{bgp_peer}/allow-import",
+    tags = ["system/networking"],
+}]
+async fn networking_switch_port_configuration_bgp_peer_allow_import_list(
+    rqctx: RequestContext<ApiContext>,
+    path_params: Path<params::SwitchPortSettingsBgpPeerInfoSelector>,
+) -> Result<HttpResponseOk<Vec<oxnet::IpNet>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.context.nexus;
+        let params::SwitchPortSettingsBgpPeerInfoSelector {
+            configuration,
+            bgp_peer,
+        } = path_params.into_inner();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+
+        let settings = nexus
+            .switch_port_configuration_bgp_peer_allow_import_list(
+                &opctx,
+                configuration,
+                bgp_peer,
+            )
+            .await?;
+        Ok(HttpResponseOk(settings.into_iter().map(Into::into).collect()))
+    };
+    apictx
+        .context
+        .external_latencies
+        .instrument_dropshot_handler(&rqctx, handler)
+        .await
+}
+
+/// Add prefix to bgp peer allowed import list
+#[endpoint {
+    method = POST,
+    path ="/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/{bgp_peer}/allow-import/add",
+    tags = ["system/networking"],
+}]
+async fn networking_switch_port_configuration_bgp_peer_allow_import_add(
+    rqctx: RequestContext<ApiContext>,
+    path_params: Path<params::SwitchPortSettingsBgpPeerInfoSelector>,
+    prefix: TypedBody<params::AllowedPrefixAddRemove>,
+) -> Result<HttpResponseCreated<SwitchPortAddressConfig>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.context.nexus;
+        let params::SwitchPortSettingsBgpPeerInfoSelector {
+            configuration,
+            bgp_peer,
+        } = path_params.into_inner();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+
+        let settings = nexus
+            .switch_port_configuration_bgp_peer_allow_import_add(
+                &opctx,
+                configuration,
+                bgp_peer,
+                prefix.into_inner(),
+            )
+            .await?;
+        Ok(HttpResponseCreated(settings.into()))
+    };
+    apictx
+        .context
+        .external_latencies
+        .instrument_dropshot_handler(&rqctx, handler)
+        .await
+}
+
+/// Remove prefix from bgp peer allowed import list
+#[endpoint {
+    method = POST,
+    path ="/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/{bgp_peer}/allow-import/remove",
+    tags = ["system/networking"],
+}]
+async fn networking_switch_port_configuration_bgp_peer_allow_import_remove(
+    rqctx: RequestContext<ApiContext>,
+    path_params: Path<params::SwitchPortSettingsBgpPeerInfoSelector>,
+    prefix: TypedBody<params::AllowedPrefixAddRemove>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.context.nexus;
+        let params::SwitchPortSettingsBgpPeerInfoSelector {
+            configuration,
+            bgp_peer,
+        } = path_params.into_inner();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+
+        nexus
+            .switch_port_configuration_bgp_peer_allow_import_remove(
+                &opctx,
+                configuration,
+                bgp_peer,
+                prefix.into_inner(),
+            )
+            .await?;
+        Ok(HttpResponseDeleted())
+    };
+    apictx
+        .context
+        .external_latencies
+        .instrument_dropshot_handler(&rqctx, handler)
+        .await
+}
+
+/// List addresses assigned to a provided interface configuration
+#[endpoint {
+    method = GET,
+    path ="/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/{bgp_peer}/allow-export",
+    tags = ["system/networking"],
+}]
+async fn networking_switch_port_configuration_bgp_peer_allow_export_list(
+    rqctx: RequestContext<ApiContext>,
+    path_params: Path<params::SwitchPortSettingsBgpPeerInfoSelector>,
+) -> Result<HttpResponseOk<Vec<SwitchPortAddressConfig>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.context.nexus;
+        let params::SwitchPortSettingsBgpPeerInfoSelector {
+            configuration,
+            bgp_peer,
+        } = path_params.into_inner();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+
+        let settings = nexus
+            .switch_port_configuration_bgp_peer_allow_export_list(
+                &opctx,
+                configuration,
+                bgp_peer,
+            )
+            .await?;
+        Ok(HttpResponseOk(settings.into_iter().map(Into::into).collect()))
+    };
+    apictx
+        .context
+        .external_latencies
+        .instrument_dropshot_handler(&rqctx, handler)
+        .await
+}
+
+/// Add address to an interface configuration
+#[endpoint {
+    method = POST,
+    path ="/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/{bgp_peer}/allow-export/add",
+    tags = ["system/networking"],
+}]
+async fn networking_switch_port_configuration_bgp_peer_allow_export_add(
+    rqctx: RequestContext<ApiContext>,
+    path_params: Path<params::SwitchPortSettingsBgpPeerInfoSelector>,
+    prefix: TypedBody<params::AllowedPrefixAddRemove>,
+) -> Result<HttpResponseCreated<SwitchPortAddressConfig>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.context.nexus;
+        let params::SwitchPortSettingsBgpPeerInfoSelector {
+            configuration,
+            bgp_peer,
+        } = path_params.into_inner();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+
+        let settings = nexus
+            .switch_port_configuration_bgp_peer_allow_export_add(
+                &opctx,
+                configuration,
+                bgp_peer,
+                prefix.into_inner(),
+            )
+            .await?;
+        Ok(HttpResponseCreated(settings.into()))
+    };
+    apictx
+        .context
+        .external_latencies
+        .instrument_dropshot_handler(&rqctx, handler)
+        .await
+}
+
+/// Remove address from an interface configuration
+#[endpoint {
+    method = POST,
+    path ="/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/{bgp_peer}/allow-export/remove",
+    tags = ["system/networking"],
+}]
+async fn networking_switch_port_configuration_bgp_peer_allow_export_remove(
+    rqctx: RequestContext<ApiContext>,
+    path_params: Path<params::SwitchPortSettingsBgpPeerInfoSelector>,
+    prefix: TypedBody<params::AllowedPrefixAddRemove>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.context.nexus;
+        let params::SwitchPortSettingsBgpPeerInfoSelector {
+            configuration,
+            bgp_peer,
+        } = path_params.into_inner();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+
+        nexus
+            .switch_port_configuration_bgp_peer_allow_export_remove(
+                &opctx,
+                configuration,
+                bgp_peer,
+                prefix.into_inner(),
+            )
+            .await?;
+        Ok(HttpResponseDeleted())
+    };
+    apictx
+        .context
+        .external_latencies
+        .instrument_dropshot_handler(&rqctx, handler)
+        .await
+}
+
+/// List addresses assigned to a provided interface configuration
+#[endpoint {
+    method = GET,
+    path ="/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/{bgp_peer}/community",
+    tags = ["system/networking"],
+}]
+async fn networking_switch_port_configuration_bgp_peer_community_list(
+    rqctx: RequestContext<ApiContext>,
+    path_params: Path<params::SwitchPortSettingsBgpPeerInfoSelector>,
+) -> Result<HttpResponseOk<Vec<SwitchPortAddressConfig>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.context.nexus;
+        let params::SwitchPortSettingsBgpPeerInfoSelector {
+            configuration,
+            bgp_peer,
+        } = path_params.into_inner();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+
+        let settings = nexus
+            .switch_port_configuration_bgp_peer_community_list(
+                &opctx,
+                configuration,
+                bgp_peer,
+            )
+            .await?;
+        Ok(HttpResponseOk(settings.into_iter().map(Into::into).collect()))
+    };
+    apictx
+        .context
+        .external_latencies
+        .instrument_dropshot_handler(&rqctx, handler)
+        .await
+}
+
+/// Add address to an interface configuration
+#[endpoint {
+    method = POST,
+    path ="/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/{bgp_peer}/community/add",
+    tags = ["system/networking"],
+}]
+async fn networking_switch_port_configuration_bgp_peer_community_add(
+    rqctx: RequestContext<ApiContext>,
+    path_params: Path<params::SwitchPortSettingsBgpPeerInfoSelector>,
+    community: TypedBody<params::BgpCommunityAddRemove>,
+) -> Result<HttpResponseCreated<SwitchPortAddressConfig>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.context.nexus;
+        let params::SwitchPortSettingsBgpPeerInfoSelector {
+            configuration,
+            bgp_peer,
+        } = path_params.into_inner();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+
+        let settings = nexus
+            .switch_port_configuration_bgp_peer_community_add(
+                &opctx,
+                configuration,
+                bgp_peer,
+                community.into_inner(),
+            )
+            .await?;
+        Ok(HttpResponseCreated(settings.into()))
+    };
+    apictx
+        .context
+        .external_latencies
+        .instrument_dropshot_handler(&rqctx, handler)
+        .await
+}
+
+/// Remove address from an interface configuration
+#[endpoint {
+    method = POST,
+    path ="/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/{bgp_peer}/community/remove",
+    tags = ["system/networking"],
+}]
+async fn networking_switch_port_configuration_bgp_peer_community_remove(
+    rqctx: RequestContext<ApiContext>,
+    path_params: Path<params::SwitchPortSettingsBgpPeerInfoSelector>,
+    community: TypedBody<params::BgpCommunityAddRemove>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.context.nexus;
+        let params::SwitchPortSettingsBgpPeerInfoSelector {
+            configuration,
+            bgp_peer,
+        } = path_params.into_inner();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+
+        nexus
+            .switch_port_configuration_bgp_peer_community_remove(
+                &opctx,
+                configuration,
+                bgp_peer,
+                community.into_inner(),
             )
             .await?;
         Ok(HttpResponseDeleted())

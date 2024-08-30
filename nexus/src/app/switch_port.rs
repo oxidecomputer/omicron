@@ -9,6 +9,9 @@ use dpd_client::types::LinkId;
 use dpd_client::types::PortId;
 use http::StatusCode;
 use nexus_db_model::SwitchPortAddressConfig;
+use nexus_db_model::SwitchPortBgpPeerConfigAllowExport;
+use nexus_db_model::SwitchPortBgpPeerConfigAllowImport;
+use nexus_db_model::SwitchPortBgpPeerConfigCommunity;
 use nexus_db_model::SwitchPortConfig;
 use nexus_db_model::SwitchPortGeometry;
 use nexus_db_model::SwitchPortLinkConfig;
@@ -20,6 +23,8 @@ use nexus_db_queries::db::datastore::BgpPeerConfig;
 use nexus_db_queries::db::datastore::UpdatePrecondition;
 use nexus_db_queries::db::model::{SwitchPort, SwitchPortSettings};
 use nexus_db_queries::db::DataStore;
+use nexus_types::external_api::params::AllowedPrefixAddRemove;
+use nexus_types::external_api::params::BgpCommunityAddRemove;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::BgpPeer;
 use omicron_common::api::external::BgpPeerRemove;
@@ -28,6 +33,7 @@ use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult, Error, ListResultVec,
     LookupResult, Name, NameOrId, UpdateResult,
 };
+use std::net::IpAddr;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -330,6 +336,162 @@ impl super::Nexus {
                 opctx,
                 configuration,
                 bgp_peer,
+            )
+            .await
+    }
+
+    pub(crate) async fn switch_port_configuration_bgp_peer_allow_import_list(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+        bgp_peer: IpAddr,
+    ) -> ListResultVec<SwitchPortBgpPeerConfigAllowImport> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        self.db_datastore
+            .switch_port_configuration_bgp_peer_allow_import_list(
+                opctx,
+                configuration,
+                bgp_peer,
+            )
+            .await
+    }
+
+    pub(crate) async fn switch_port_configuration_bgp_peer_allow_import_add(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+        bgp_peer: IpAddr,
+        prefix: AllowedPrefixAddRemove,
+    ) -> CreateResult<SwitchPortBgpPeerConfigAllowImport> {
+        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
+        self.db_datastore
+            .switch_port_configuration_bgp_peer_allow_import_add(
+                opctx,
+                configuration,
+                bgp_peer,
+                prefix,
+            )
+            .await
+    }
+
+    pub(crate) async fn switch_port_configuration_bgp_peer_allow_import_remove(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+        bgp_peer: IpAddr,
+        prefix: AllowedPrefixAddRemove,
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Delete, &authz::FLEET).await?;
+        self.db_datastore
+            .switch_port_configuration_bgp_peer_allow_import_remove(
+                opctx,
+                configuration,
+                bgp_peer,
+                prefix,
+            )
+            .await
+    }
+
+    pub(crate) async fn switch_port_configuration_bgp_peer_allow_export_list(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+        bgp_peer: IpAddr,
+    ) -> ListResultVec<SwitchPortBgpPeerConfigAllowExport> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        self.db_datastore
+            .switch_port_configuration_bgp_peer_allow_export_list(
+                opctx,
+                configuration,
+                bgp_peer,
+            )
+            .await
+    }
+
+    pub(crate) async fn switch_port_configuration_bgp_peer_allow_export_add(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+        bgp_peer: IpAddr,
+        prefix: AllowedPrefixAddRemove,
+    ) -> CreateResult<SwitchPortBgpPeerConfigAllowExport> {
+        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
+        self.db_datastore
+            .switch_port_configuration_bgp_peer_allow_export_add(
+                opctx,
+                configuration,
+                bgp_peer,
+                prefix,
+            )
+            .await
+    }
+
+    pub(crate) async fn switch_port_configuration_bgp_peer_allow_export_remove(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+        bgp_peer: IpAddr,
+        prefix: AllowedPrefixAddRemove,
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Delete, &authz::FLEET).await?;
+        self.db_datastore
+            .switch_port_configuration_bgp_peer_allow_export_remove(
+                opctx,
+                configuration,
+                bgp_peer,
+                prefix,
+            )
+            .await
+    }
+
+    pub(crate) async fn switch_port_configuration_bgp_peer_community_list(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+        bgp_peer: IpAddr,
+    ) -> ListResultVec<SwitchPortBgpPeerConfigCommunity> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        self.db_datastore
+            .switch_port_configuration_bgp_peer_community_list(
+                opctx,
+                configuration,
+                bgp_peer,
+            )
+            .await
+    }
+
+    pub(crate) async fn switch_port_configuration_bgp_peer_community_add(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+        bgp_peer: IpAddr,
+        community: BgpCommunityAddRemove,
+    ) -> CreateResult<SwitchPortBgpPeerConfigCommunity> {
+        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
+        self.db_datastore
+            .switch_port_configuration_bgp_peer_community_add(
+                opctx,
+                configuration,
+                bgp_peer,
+                community,
+            )
+            .await
+    }
+
+    pub(crate) async fn switch_port_configuration_bgp_peer_community_remove(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+        bgp_peer: IpAddr,
+        community: BgpCommunityAddRemove,
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Delete, &authz::FLEET).await?;
+        self.db_datastore
+            .switch_port_configuration_bgp_peer_community_remove(
+                opctx,
+                configuration,
+                bgp_peer,
+                community,
             )
             .await
     }

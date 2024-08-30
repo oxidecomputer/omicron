@@ -1641,6 +1641,26 @@ pub struct RouteAddRemove {
     pub local_pref: Option<u32>,
 }
 
+/// A prefix allowed to be imported or exported by a bgp peer
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct AllowedPrefixAddRemove {
+    /// The interface the peer is configured on
+    pub interface: Name,
+
+    /// The allowed prefix to add or remove
+    pub prefix: IpNet,
+}
+
+/// A community to be added to or removed from a bgp peer
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct BgpCommunityAddRemove {
+    /// The interface the peer is configured on
+    pub interface: Name,
+
+    /// The community to add or remove
+    pub community: u32,
+}
+
 /// Select a BGP config by a name or id.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct BgpConfigSelector {
@@ -1831,6 +1851,16 @@ pub struct SwitchPortSettingsSelector {
 pub struct SwitchPortSettingsInfoSelector {
     /// A name or id to use when selecting a switch port configuration.
     pub configuration: NameOrId,
+}
+
+/// Select a port settings info object by name or id and peer by address.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct SwitchPortSettingsBgpPeerInfoSelector {
+    /// A name or id to use when selecting a switch port configuration.
+    pub configuration: NameOrId,
+
+    /// An address identifying a configured bgp peer.
+    pub bgp_peer: IpAddr,
 }
 
 /// Select a link settings info object by port settings name and link name.
