@@ -13,6 +13,7 @@ use crate::app::sagas::{
 use nexus_db_queries::db::{identity::Resource, lookup::LookupPath};
 use nexus_db_queries::{authn, authz, db};
 use nexus_types::internal_api::params::InstanceMigrateRequest;
+use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, SledUuid};
 use serde::Deserialize;
 use serde::Serialize;
@@ -426,7 +427,31 @@ async fn sim_ensure_destination_propolis(
             },
         )
         .await
-        .map_err(ActionError::action_failed)
+        .map_err(|err| match err {
+            InstanceStateChangeError::SledAgent(inner) => {
+                info!(
+                    osagactx.log(),
+                    "migration saga: sled agent failed to register instance";
+                    "instance_id" => %db_instance.id(),
+                    "dst_propolis_id" => %dst_propolis_id,
+                    "error" => ?inner,
+                );
+
+                // Don't set the instance to Failed in this case. Instead, allow
+                // the saga to unwind, marking the VMM as SagaUnwound.
+                ActionError::action_failed(Error::from(inner))
+            }
+            InstanceStateChangeError::Other(inner) => {
+                info!(
+                    osagactx.log(),
+                    "migration saga: internal error registering instance";
+                    "instance_id" => %db_instance.id(),
+                    "dst_propolis_id" => %dst_propolis_id,
+                    "error" => ?inner,
+                );
+                ActionError::action_failed(inner)
+            }
+        })
 }
 
 async fn sim_ensure_destination_propolis_undo(

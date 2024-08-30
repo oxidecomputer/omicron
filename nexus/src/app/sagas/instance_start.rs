@@ -533,7 +533,28 @@ async fn sis_ensure_registered(
             InstanceRegisterReason::Start { vmm_id: propolis_id },
         )
         .await
-        .map_err(ActionError::action_failed)
+        .map_err(|err| match err {
+            InstanceStateChangeError::SledAgent(inner) => {
+                info!(osagactx.log(),
+                      "start saga: sled agent failed to register instance";
+                      "instance_id" => %instance_id,
+                      "sled_id" =>  %sled_id,
+                      "error" => ?inner);
+
+                // Don't set the instance to Failed in this case. Instead, allow
+                // the saga to unwind and restore the instance to the Stopped
+                // state (matching what would happen if there were a failure
+                // prior to this point).
+                ActionError::action_failed(Error::from(inner))
+            }
+            InstanceStateChangeError::Other(inner) => {
+                info!(osagactx.log(),
+                      "start saga: internal error registering instance";
+                      "instance_id" => %instance_id,
+                      "error" => ?inner);
+                ActionError::action_failed(inner)
+            }
+        })
 }
 
 async fn sis_ensure_registered_undo(
