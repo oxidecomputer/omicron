@@ -335,6 +335,14 @@ mod tests {
 
     #[test]
     fn test_merge_anyhow_list() {
+        // If the process's environment has `RUST_BACKTRACE=1`, then backtraces
+        // get captured and the output doesn't match. As long as we set
+        // `RUST_BACKTRACE=0` before the first time a backtrace is captured, we
+        // should be fine. Do so at the beginning of this test.
+        unsafe {
+            std::env::set_var("RUST_BACKTRACE", "0");
+        }
+
         // A single error stays as-is.
         let error = anyhow!("base").context("parent").context("root");
 

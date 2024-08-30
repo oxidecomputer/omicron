@@ -34,6 +34,7 @@ use nexus_saga_recovery::LastPass;
 use nexus_types::deployment::Blueprint;
 use nexus_types::internal_api::background::LookupRegionPortStatus;
 use nexus_types::internal_api::background::RegionReplacementDriverStatus;
+use nexus_types::internal_api::background::RegionSnapshotReplacementFinishStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementGarbageCollectStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStartStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStepStatus;
@@ -1661,6 +1662,30 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 println!("{}", table);
             }
         }
+    } else if name == "region_snapshot_replacement_finish" {
+        match serde_json::from_value::<RegionSnapshotReplacementFinishStatus>(
+            details.clone(),
+        ) {
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            ),
+
+            Ok(status) => {
+                println!(
+                    "    total records transitioned to done: {}",
+                    status.records_set_to_done.len(),
+                );
+                for line in &status.records_set_to_done {
+                    println!("    > {line}");
+                }
+
+                println!("    errors: {}", status.errors.len());
+                for line in &status.errors {
+                    println!("    > {line}");
+                }
+            }
+        }
     } else {
         println!(
             "warning: unknown background task: {:?} \
@@ -1690,16 +1715,17 @@ fn bgtask_apply_kv_style(table: &mut tabled::Table) {
     );
 }
 
-// Extract and remove the event report. (If we don't do this, the `Debug`
-// output can be quite large.)
+/// Extract and remove the event report, returning None if it wasn't found and
+/// an error if something else went wrong. (If we don't do this, the `Debug`
+/// output can be quite large.)
 fn extract_event_buffer(
     value: &mut serde_json::Value,
-) -> anyhow::Result<EventBuffer<NestedSpec>> {
+) -> anyhow::Result<Option<EventBuffer<NestedSpec>>> {
     let Some(obj) = value.as_object_mut() else {
         bail!("expected value to be an object")
     };
     let Some(event_report) = obj.remove("event_report") else {
-        bail!("expected 'event_report' field in value")
+        return Ok(None);
     };
 
     // Try deserializing the event report generically. We could deserialize to
@@ -1714,18 +1740,21 @@ fn extract_event_buffer(
 
     let mut event_buffer = EventBuffer::default();
     event_buffer.add_event_report(event_report);
-    Ok(event_buffer)
+    Ok(Some(event_buffer))
 }
 
 // Make a short summary of the current state of an execution based on an event
 // buffer, and add it to the table.
 fn push_event_buffer_summary(
-    event_buffer: anyhow::Result<EventBuffer<NestedSpec>>,
+    event_buffer: anyhow::Result<Option<EventBuffer<NestedSpec>>>,
     builder: &mut tabled::builder::Builder,
 ) {
     match event_buffer {
-        Ok(buffer) => {
+        Ok(Some(buffer)) => {
             event_buffer_summary_impl(buffer, builder);
+        }
+        Ok(None) => {
+            builder.push_record(["status:", "(no event report found)"]);
         }
         Err(error) => {
             builder.push_record([

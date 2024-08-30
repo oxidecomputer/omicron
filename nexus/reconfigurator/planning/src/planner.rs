@@ -1249,6 +1249,99 @@ mod test {
         logctx.cleanup_successful();
     }
 
+    /// Check that the planner will reuse external IPs that were previously
+    /// assigned to expunged zones
+    #[test]
+    fn test_reuse_external_ips_from_expunged_zones() {
+        static TEST_NAME: &str =
+            "planner_reuse_external_ips_from_expunged_zones";
+        let logctx = test_setup_log(TEST_NAME);
+
+        // Use our example system as a starting point.
+        let (collection, input, blueprint1) =
+            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+
+        // Expunge the first sled we see, which will result in a Nexus external
+        // IP no longer being associated with a running zone, and a new Nexus
+        // zone being added to one of the two remaining sleds.
+        let mut builder = input.into_builder();
+        let (sled_id, details) =
+            builder.sleds_mut().iter_mut().next().expect("no sleds");
+        let sled_id = *sled_id;
+        details.policy = SledPolicy::Expunged;
+        let input = builder.build();
+        let blueprint2 = Planner::new_based_on(
+            logctx.log.clone(),
+            &blueprint1,
+            &input,
+            "test_blueprint2",
+            &collection,
+        )
+        .expect("failed to create planner")
+        .with_rng_seed((TEST_NAME, "bp2"))
+        .plan()
+        .expect("failed to plan");
+
+        let diff = blueprint2.diff_since_blueprint(&blueprint1);
+        println!("1 -> 2 (expunged sled):\n{}", diff.display());
+
+        // The expunged sled should have an expunged Nexus zone.
+        let zone = blueprint2.blueprint_zones[&sled_id]
+            .zones
+            .iter()
+            .find(|zone| matches!(zone.zone_type, BlueprintZoneType::Nexus(_)))
+            .expect("no nexus zone found");
+        assert_eq!(zone.disposition, BlueprintZoneDisposition::Expunged);
+
+        // Set the target Nexus zone count to one that will completely exhaust
+        // the service IP pool. This will force reuse of the IP that was
+        // allocated to the expunged Nexus zone.
+        let mut builder = input.into_builder();
+        builder.update_network_resources_from_blueprint(&blueprint2).unwrap();
+        assert_eq!(builder.policy_mut().service_ip_pool_ranges.len(), 1);
+        builder.policy_mut().target_nexus_zone_count =
+            builder.policy_mut().service_ip_pool_ranges[0]
+                .len()
+                .try_into()
+                .unwrap();
+        let input = builder.build();
+        let blueprint3 = Planner::new_based_on(
+            logctx.log.clone(),
+            &blueprint2,
+            &input,
+            "test_blueprint3",
+            &collection,
+        )
+        .expect("failed to create planner")
+        .with_rng_seed((TEST_NAME, "bp3"))
+        .plan()
+        .expect("failed to plan");
+
+        let diff = blueprint3.diff_since_blueprint(&blueprint2);
+        println!("2 -> 3 (maximum Nexus):\n{}", diff.display());
+
+        // Planning succeeded, but let's prove that we reused the IP address!
+        let expunged_ip = zone.zone_type.external_networking().unwrap().0.ip();
+        let new_zone = blueprint3
+            .blueprint_zones
+            .values()
+            .flat_map(|c| &c.zones)
+            .find(|zone| {
+                zone.disposition == BlueprintZoneDisposition::InService
+                    && zone
+                        .zone_type
+                        .external_networking()
+                        .map_or(false, |(ip, _)| expunged_ip == ip.ip())
+            })
+            .expect("couldn't find that the external IP was reused");
+        println!(
+            "zone {} reused external IP {} from expunged zone {}",
+            new_zone.id, expunged_ip, zone.id
+        );
+
+        logctx.cleanup_successful();
+    }
+
     #[test]
     fn test_crucible_allocation_skips_nonprovisionable_disks() {
         static TEST_NAME: &str =
@@ -1604,6 +1697,10 @@ mod test {
         };
         println!("1 -> 2: decommissioned {decommissioned_sled_id}");
 
+        // Because we marked zones as expunged, we need to update the networking
+        // config in the planning input.
+        builder.update_network_resources_from_blueprint(&blueprint1).unwrap();
+
         // Now run the planner with a high number of target Nexus zones. The
         // number (9) is chosen such that:
         //
@@ -1877,6 +1974,7 @@ mod test {
 
         // Remove the now-decommissioned sled from the planning input.
         let mut builder = input.into_builder();
+        builder.update_network_resources_from_blueprint(&blueprint2).unwrap();
         builder.sleds_mut().remove(&expunged_sled_id);
         let input = builder.build();
 
