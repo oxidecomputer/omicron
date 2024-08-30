@@ -1117,16 +1117,14 @@ async fn test_instance_failed_after_sled_agent_forgets_vmm_can_be_restarted(
     let instance_name = "losing-is-fun";
     let instance_id = make_forgotten_instance(&cptestctx, instance_name).await;
 
-    let url = get_instance_url(format!("{instance_name}/reboot").as_str());
-    let err = NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &url)
-            .body(None as Option<&serde_json::Value>),
+    // Attempting to reboot the forgotten instance will result in a 404
+    // NO_SUCH_INSTANCE from the sled-agent, which Nexus turns into a 500.
+    expect_instance_reboot_fail(
+        client,
+        instance_name,
+        http::StatusCode::INTERNAL_SERVER_ERROR,
     )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap();
-    eprintln!("error = {err:#?}");
+    .await;
 
     // Wait for the instance to transition to Failed.
     instance_wait_for_state(client, instance_id, InstanceState::Failed).await;
@@ -1147,22 +1145,20 @@ async fn test_instance_failed_after_sled_agent_forgets_vmm_can_be_deleted(
     let instance_name = "losing-is-fun";
     let instance_id = make_forgotten_instance(&cptestctx, instance_name).await;
 
-    let url = get_instance_url(format!("{instance_name}/reboot").as_str());
-    let err = NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &url)
-            .body(None as Option<&serde_json::Value>),
+    // Attempting to reboot the forgotten instance will result in a 404
+    // NO_SUCH_INSTANCE from the sled-agent, which Nexus turns into a 500.
+    expect_instance_reboot_fail(
+        client,
+        instance_name,
+        http::StatusCode::INTERNAL_SERVER_ERROR,
     )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap();
-    eprintln!("error = {err:#?}");
+    .await;
 
     // Wait for the instance to transition to Failed.
     instance_wait_for_state(client, instance_id, InstanceState::Failed).await;
 
     // Now, the instance should be deleteable.
-    expect_instance_delete_ok(&client, instance_name).await;
+    expect_instance_delete_ok(client, instance_name).await;
 }
 
 // Verifies that the instance-watcher background task transitions an instance
@@ -1213,6 +1209,87 @@ async fn test_instance_failed_by_instance_watcher_can_be_restarted(
     expect_instance_delete_ok(&client, instance_name).await;
 }
 
+#[nexus_test]
+async fn test_instances_are_not_marked_failed_on_other_sled_agent_errors(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+    let instance_name = "my-cool-instance";
+
+    // Create and start the test instance.
+    create_project_and_pool(&client).await;
+    let instance_url = get_instance_url(instance_name);
+    let instance = create_instance(client, PROJECT_NAME, instance_name).await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+    instance_simulate(nexus, &instance_id).await;
+    let instance_next = instance_get(&client, &instance_url).await;
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
+
+    let sled_agent = &cptestctx.sled_agent.sled_agent;
+    sled_agent
+        .set_instance_ensure_state_error(Some(
+            omicron_common::api::external::Error::internal_error(
+                "somebody set up us the bomb",
+            ),
+        ))
+        .await;
+
+    // Attempting to reboot the instance will fail, but it should *not* go to
+    // Failed.
+    expect_instance_reboot_fail(
+        client,
+        instance_name,
+        http::StatusCode::INTERNAL_SERVER_ERROR,
+    )
+    .await;
+
+    let instance_next = instance_get(&client, &instance_url).await;
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
+
+    sled_agent.set_instance_ensure_state_error(None).await;
+
+    expect_instance_reboot_ok(client, instance_name).await;
+}
+
+#[nexus_test]
+async fn test_instances_are_not_marked_failed_on_other_sled_agent_errors_by_instance_watcher(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+    let instance_name = "my-cool-instance";
+
+    // Create and start the test instance.
+    create_project_and_pool(&client).await;
+    let instance_url = get_instance_url(instance_name);
+    let instance = create_instance(client, PROJECT_NAME, instance_name).await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+    instance_simulate(nexus, &instance_id).await;
+    let instance_next = instance_get(&client, &instance_url).await;
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
+
+    let sled_agent = &cptestctx.sled_agent.sled_agent;
+    sled_agent
+        .set_instance_ensure_state_error(Some(
+            omicron_common::api::external::Error::internal_error(
+                "you have no chance to survive, make your time",
+            ),
+        ))
+        .await;
+
+    nexus_test_utils::background::activate_background_task(
+        &cptestctx.internal_client,
+        "instance_watcher",
+    )
+    .await;
+
+    let instance_next = instance_get(&client, &instance_url).await;
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
+}
+
 /// Prepare an instance and sled-agent for one of the "instance fails after
 /// sled-agent forgets VMM" tests.
 async fn make_forgotten_instance(
@@ -1261,11 +1338,36 @@ async fn expect_instance_delete_ok(
         .expect("instance should be deleted");
 }
 
-// TODO(eliza): add tests for failed instances in the following situations:
-// - Sled-agent errors that are not "no such instance" do NOT go to failed on
-//   API calls
-// - Sled-agent errors that are not "no such instance" do NOT go to failed when
-//   observed by the instance-watcher task.
+async fn expect_instance_reboot_fail(
+    client: &ClientTestContext,
+    instance_name: &str,
+    status: http::StatusCode,
+) {
+    let url = get_instance_url(format!("{instance_name}/reboot").as_str());
+    let builder = RequestBuilder::new(client, Method::POST, &url)
+        .body(None as Option<&serde_json::Value>)
+        .expect_status(Some(status));
+    NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("expected instance reboot to fail");
+}
+
+async fn expect_instance_reboot_ok(
+    client: &ClientTestContext,
+    instance_name: &str,
+) {
+    let url = get_instance_url(format!("{instance_name}/reboot").as_str());
+    let builder = RequestBuilder::new(client, Method::POST, &url)
+        .body(None as Option<&serde_json::Value>)
+        .expect_status(Some(http::StatusCode::ACCEPTED));
+    NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("expected instance reboot to succeed");
+}
 
 /// Assert values for fleet, silo, and project using both system and silo
 /// metrics endpoints
