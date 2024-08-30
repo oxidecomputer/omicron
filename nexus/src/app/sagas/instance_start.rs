@@ -620,9 +620,7 @@ async fn sis_ensure_registered_undo(
         // be a bit of a stretch. See the definition of `instance_unhealthy` for
         // more details.
         match e {
-            InstanceStateChangeError::SledAgent(inner)
-                if inner.vmm_gone() =>
-            {
+            InstanceStateChangeError::SledAgent(inner) if inner.vmm_gone() => {
                 error!(osagactx.log(),
                        "start saga: failing instance after unregister failure";
                        "instance_id" => %instance_id,
