@@ -71,9 +71,19 @@ impl ClickhouseServerConfig {
         id: ServerId,
         datastore_path: Utf8PathBuf,
         listen_addr: Ipv6Addr,
-        keepers: Vec<KeeperNodeConfig>,
-        servers: Vec<ServerNodeConfig>,
+        keepers: Vec<ClickhouseHost>,
+        servers: Vec<ClickhouseHost>,
     ) -> Self {
+        let keepers = keepers
+            .iter()
+            .map(|host| KeeperNodeConfig::new(host.clone()))
+            .collect();
+
+        let servers = servers
+            .iter()
+            .map(|host| ServerNodeConfig::new(host.clone()))
+            .collect();
+
         Self { config_dir, id, datastore_path, listen_addr, keepers, servers }
     }
 
@@ -119,13 +129,7 @@ impl ClickhouseKeeperConfig {
         datastore_path: Utf8PathBuf,
         listen_addr: Ipv6Addr,
     ) -> Self {
-        ClickhouseKeeperConfig {
-            config_dir,
-            id,
-            raft_servers,
-            datastore_path,
-            listen_addr,
-        }
+        Self { config_dir, id, raft_servers, datastore_path, listen_addr }
     }
 
     /// Generate a configuration file for a keeper node
@@ -163,8 +167,7 @@ mod tests {
 
     use crate::{
         ClickhouseHost, ClickhouseKeeperConfig, ClickhouseServerConfig,
-        KeeperId, KeeperNodeConfig, RaftServerConfig, ServerId,
-        ServerNodeConfig,
+        KeeperId, RaftServerConfig, ServerId,
     };
 
     #[test]
@@ -220,24 +223,14 @@ mod tests {
         );
 
         let keepers = vec![
-            KeeperNodeConfig::new(ClickhouseHost::Ipv6(
-                Ipv6Addr::from_str("ff::01").unwrap(),
-            )),
-            KeeperNodeConfig::new(ClickhouseHost::Ipv4(
-                Ipv4Addr::from_str("127.0.0.1").unwrap(),
-            )),
-            KeeperNodeConfig::new(ClickhouseHost::DomainName(
-                "we.dont.want.brackets.com".to_string(),
-            )),
+            ClickhouseHost::Ipv6(Ipv6Addr::from_str("ff::01").unwrap()),
+            ClickhouseHost::Ipv4(Ipv4Addr::from_str("127.0.0.1").unwrap()),
+            ClickhouseHost::DomainName("we.dont.want.brackets.com".to_string()),
         ];
 
         let servers = vec![
-            ServerNodeConfig::new(ClickhouseHost::Ipv6(
-                Ipv6Addr::from_str("ff::09").unwrap(),
-            )),
-            ServerNodeConfig::new(ClickhouseHost::DomainName(
-                "ohai.com".to_string(),
-            )),
+            ClickhouseHost::Ipv6(Ipv6Addr::from_str("ff::09").unwrap()),
+            ClickhouseHost::DomainName("ohai.com".to_string()),
         ];
 
         let config = ClickhouseServerConfig::new(

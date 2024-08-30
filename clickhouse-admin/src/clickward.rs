@@ -4,9 +4,7 @@
 
 use camino::Utf8PathBuf;
 use clickhouse_admin_api::ServerSettings;
-use clickhouse_admin_types::config::{
-    KeeperNodeConfig, ReplicaConfig, ServerNodeConfig,
-};
+use clickhouse_admin_types::config::ReplicaConfig;
 use clickhouse_admin_types::{ClickhouseServerConfig, ServerId};
 use dropshot::HttpError;
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
@@ -49,25 +47,14 @@ impl Clickward {
         &self,
         settings: ServerSettings,
     ) -> Result<ReplicaConfig, ClickwardError> {
-        let keepers = settings
-            .keepers
-            .iter()
-            .map(|host| KeeperNodeConfig::new(host.clone()))
-            .collect();
-
-        let remote_servers = settings
-            .remote_servers
-            .iter()
-            .map(|host| ServerNodeConfig::new(host.clone()))
-            .collect();
-
         let config = ClickhouseServerConfig::new(
+            // We can safely call unwrap here as this method is infallible
             Utf8PathBuf::from_str(&settings.config_dir).unwrap(),
             ServerId(settings.node_id),
             Utf8PathBuf::from_str(&settings.datastore_path).unwrap(),
             settings.listen_addr,
-            keepers,
-            remote_servers,
+            settings.keepers,
+            settings.remote_servers,
         );
 
         let replica_config = config

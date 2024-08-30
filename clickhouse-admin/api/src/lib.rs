@@ -2,7 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use clickhouse_admin_types::config::{ClickhouseHost, ReplicaConfig};
+use clickhouse_admin_types::config::{
+    ClickhouseHost, KeeperConfig, ReplicaConfig,
+};
 use dropshot::{HttpError, HttpResponseCreated, RequestContext, TypedBody};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -22,6 +24,17 @@ pub trait ClickhouseAdminApi {
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<ServerSettings>,
     ) -> Result<HttpResponseCreated<ReplicaConfig>, HttpError>;
+
+    //    /// Generate a ClickHouse configuration file for a keeper node on a specified
+    //    /// directory.
+    //    #[endpoint {
+    //        method = POST,
+    //        path = "/node/keeper/generate-config",
+    //    }]
+    //    async fn generate_keeper_config(
+    //        rqctx: RequestContext<Self::Context>,
+    //        body: TypedBody<KeeperSettings>,
+    //    ) -> Result<HttpResponseCreated<KeeperConfigConfig>, HttpError>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
