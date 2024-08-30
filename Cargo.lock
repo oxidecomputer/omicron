@@ -12525,7 +12525,8 @@ dependencies = [
 [[package]]
 name = "zone"
 version = "0.3.0"
-source = "git+https://github.com/oxidecomputer/zone?branch=state-derive-eq-hash#f1920d5636c69ea8179f8ec659702dcdef43268c"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a62a428a79ea2224ce8ab05d6d8a21bdd7b4b68a8dbc1230511677a56e72ef22"
 dependencies = [
  "itertools 0.10.5",
  "thiserror",
@@ -12570,7 +12571,8 @@ dependencies = [
 [[package]]
 name = "zone_cfg_derive"
 version = "0.3.0"
-source = "git+https://github.com/oxidecomputer/zone?branch=state-derive-eq-hash#f1920d5636c69ea8179f8ec659702dcdef43268c"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d5c4f01d3785e222d5aca11c9813e9c46b69abfe258756c99c9b628683626cc8"
 dependencies = [
  "heck 0.4.1",
  "proc-macro-error",
