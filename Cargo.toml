@@ -576,6 +576,7 @@ static_assertions = "1.1.0"
 # SHA).  Cut a new Steno release instead.  See omicron#2117.
 steno = "0.4.1"
 strum = { version = "0.26", features = [ "derive" ] }
+strum_macros = { version = "0.26" }
 subprocess = "0.2.9"
 supports-color = "3.0.0"
 swrite = "0.1.0"

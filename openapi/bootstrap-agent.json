@@ -1070,11 +1070,15 @@
                 "enum": [
                   "initializing"
                 ]
+              },
+              "step": {
+                "$ref": "#/components/schemas/RssStep"
               }
             },
             "required": [
               "id",
-              "status"
+              "status",
+              "step"
             ]
           },
           {
@@ -1278,6 +1282,263 @@
         "required": [
           "destination",
           "nexthop"
+        ]
+      },
+      "RssStep": {
+        "description": "Steps we go through during initial rack setup. Keep this list in order that they happen.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "requested"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "starting"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "check_previous"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "load_existing_plan"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "waiting_for_peers"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "init_trust_quorum"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "network_config_update"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "sled_init"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "ensure_storage"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "configure_d_n_s"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "init_d_n_s"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "init_n_t_p"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "wait_for_time_sync"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "wait_for_database"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "cluster_init"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "zones_init"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "nexus_handoff"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "completed"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          }
         ]
       },
       "SemverVersion": {
