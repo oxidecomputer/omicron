@@ -9,9 +9,11 @@
 use std::{
     collections::HashMap,
     fmt::{self, Write as _},
+    sync::LazyLock,
     time::Duration,
 };
 
+use chrono::{DateTime, Utc};
 use owo_colors::OwoColorize;
 use swrite::{swrite, SWrite as _};
 
@@ -33,6 +35,8 @@ pub(super) const HEADER_WIDTH: usize = 9;
 
 #[derive(Debug, Default)]
 pub(super) struct LineDisplayShared {
+    // The start time, if provided.
+    start_time: Option<DateTime<Utc>>,
     // This is a map from root execution ID to data about it.
     execution_data: HashMap<ExecutionId, ExecutionData>,
 }
@@ -44,6 +48,10 @@ impl LineDisplayShared {
         formatter: &'a LineDisplayFormatter,
     ) -> LineDisplaySharedContext<'a> {
         LineDisplaySharedContext { shared: self, prefix, formatter }
+    }
+
+    pub(super) fn set_start_time(&mut self, start_time: DateTime<Utc>) {
+        self.start_time = Some(start_time);
     }
 }
 
@@ -60,7 +68,11 @@ impl<'a> LineDisplaySharedContext<'a> {
     /// This line does not have a trailing newline; adding one is the caller's
     /// responsibility.
     pub(super) fn format_generic(&self, message: &str) -> String {
-        let mut line = self.formatter.start_line(self.prefix, None);
+        let mut line = self.formatter.start_line(
+            self.prefix,
+            self.shared.start_time,
+            None,
+        );
         line.push_str(message);
         line
     }
@@ -134,9 +146,11 @@ impl<'a> LineDisplaySharedContext<'a> {
     ) {
         match &step_event.kind {
             StepEventKind::NoStepsDefined => {
-                let mut line = self
-                    .formatter
-                    .start_line(self.prefix, Some(step_event.total_elapsed));
+                let mut line = self.formatter.start_line(
+                    self.prefix,
+                    self.shared.start_time,
+                    Some(step_event.total_elapsed),
+                );
                 swrite!(
                     line,
                     "{}",
@@ -152,9 +166,11 @@ impl<'a> LineDisplaySharedContext<'a> {
                     &first_step.info,
                     &nest_data,
                 );
-                let mut line = self
-                    .formatter
-                    .start_line(self.prefix, Some(root_total_elapsed));
+                let mut line = self.formatter.start_line(
+                    self.prefix,
+                    self.shared.start_time,
+                    Some(root_total_elapsed),
+                );
 
                 swrite!(
                     line,
@@ -178,9 +194,11 @@ impl<'a> LineDisplaySharedContext<'a> {
                     &nest_data,
                 );
 
-                let mut line = self
-                    .formatter
-                    .start_line(self.prefix, Some(root_total_elapsed));
+                let mut line = self.formatter.start_line(
+                    self.prefix,
+                    self.shared.start_time,
+                    Some(root_total_elapsed),
+                );
 
                 swrite!(
                     line,
@@ -224,9 +242,11 @@ impl<'a> LineDisplaySharedContext<'a> {
                     &nest_data,
                 );
 
-                let mut line = self
-                    .formatter
-                    .start_line(self.prefix, Some(root_total_elapsed));
+                let mut line = self.formatter.start_line(
+                    self.prefix,
+                    self.shared.start_time,
+                    Some(root_total_elapsed),
+                );
 
                 swrite!(
                     line,
@@ -270,9 +290,11 @@ impl<'a> LineDisplaySharedContext<'a> {
                     &step.info,
                     &nest_data,
                 );
-                let mut line = self
-                    .formatter
-                    .start_line(self.prefix, Some(root_total_elapsed));
+                let mut line = self.formatter.start_line(
+                    self.prefix,
+                    self.shared.start_time,
+                    Some(root_total_elapsed),
+                );
 
                 self.formatter.add_completion_and_step_info(
                     &mut line,
@@ -293,9 +315,11 @@ impl<'a> LineDisplaySharedContext<'a> {
                     &nest_data,
                 );
 
-                let mut line = self
-                    .formatter
-                    .start_line(self.prefix, Some(root_total_elapsed));
+                let mut line = self.formatter.start_line(
+                    self.prefix,
+                    self.shared.start_time,
+                    Some(root_total_elapsed),
+                );
 
                 self.format_step_running(&mut line, ld_step_info);
 
@@ -315,9 +339,11 @@ impl<'a> LineDisplaySharedContext<'a> {
                     &nest_data,
                 );
 
-                let mut line = self
-                    .formatter
-                    .start_line(self.prefix, Some(root_total_elapsed));
+                let mut line = self.formatter.start_line(
+                    self.prefix,
+                    self.shared.start_time,
+                    Some(root_total_elapsed),
+                );
 
                 self.formatter.add_completion_and_step_info(
                     &mut line,
@@ -344,9 +370,11 @@ impl<'a> LineDisplaySharedContext<'a> {
                     &nest_data,
                 );
 
-                let mut line = self
-                    .formatter
-                    .start_line(self.prefix, Some(root_total_elapsed));
+                let mut line = self.formatter.start_line(
+                    self.prefix,
+                    self.shared.start_time,
+                    Some(root_total_elapsed),
+                );
                 // The prefix is used for "Caused by" lines below. Add
                 // the requisite amount of spacing here.
                 let mut caused_by_prefix = line.clone();
@@ -387,9 +415,11 @@ impl<'a> LineDisplaySharedContext<'a> {
                     &nest_data,
                 );
 
-                let mut line = self
-                    .formatter
-                    .start_line(self.prefix, Some(root_total_elapsed));
+                let mut line = self.formatter.start_line(
+                    self.prefix,
+                    self.shared.start_time,
+                    Some(root_total_elapsed),
+                );
 
                 swrite!(
                     line,
@@ -463,8 +493,11 @@ impl<'a> LineDisplaySharedContext<'a> {
         &self,
         info: &ExecutionTerminalInfo,
     ) -> String {
-        let mut line =
-            self.formatter.start_line(self.prefix, info.leaf_total_elapsed);
+        let mut line = self.formatter.start_line(
+            self.prefix,
+            self.shared.start_time,
+            info.leaf_total_elapsed,
+        );
         match info.kind {
             TerminalKind::Completed => {
                 swrite!(
@@ -540,9 +573,11 @@ impl<'a> LineDisplaySharedContext<'a> {
                     nest_data: &nest_data,
                 };
 
-                let mut line = self
-                    .formatter
-                    .start_line(self.prefix, Some(root_total_elapsed));
+                let mut line = self.formatter.start_line(
+                    self.prefix,
+                    self.shared.start_time,
+                    Some(root_total_elapsed),
+                );
 
                 let (before, after) = match progress {
                     Some(counter) => {
@@ -685,6 +720,7 @@ impl LineDisplayFormatter {
     pub(super) fn start_line(
         &self,
         prefix: &str,
+        start_time: Option<DateTime<Utc>>,
         total_elapsed: Option<Duration>,
     ) -> String {
         let mut line = format!("[{}", prefix.style(self.styles.prefix_style));
@@ -694,17 +730,31 @@ impl LineDisplayFormatter {
         }
 
         // Show total elapsed time in an hh:mm:ss format.
-        if let Some(total_elapsed) = total_elapsed {
-            let total_elapsed_secs = total_elapsed.as_secs();
-            let hours = total_elapsed_secs / 3600;
-            let minutes = (total_elapsed_secs % 3600) / 60;
-            let seconds = total_elapsed_secs % 60;
-            swrite!(line, "{:02}:{:02}:{:02}", hours, minutes, seconds);
-            // To show total_elapsed more accurately, use:
-            // swrite!(line, "{:.2?}", total_elapsed);
-        } else {
-            // Add 8 spaces to align with hh:mm:ss.
-            line.push_str("        ");
+        match (start_time, total_elapsed) {
+            (Some(start_time), Some(total_elapsed)) => {
+                // Add the offset from the start time.
+                let current_time = start_time + total_elapsed;
+                swrite!(
+                    line,
+                    "{}",
+                    current_time.format_with_items(DATETIME_FORMAT.iter())
+                );
+            }
+            (None, Some(total_elapsed)) => {
+                let total_elapsed_secs = total_elapsed.as_secs();
+                let hours = total_elapsed_secs / 3600;
+                let minutes = (total_elapsed_secs % 3600) / 60;
+                let seconds = total_elapsed_secs % 60;
+                swrite!(line, "{:02}:{:02}:{:02}", hours, minutes, seconds);
+                // To show total_elapsed more accurately, use:
+                // swrite!(line, "{:.2?}", total_elapsed);
+            }
+            (Some(_), None) => {
+                line.push_str(DATETIME_FORMAT_INDENT);
+            }
+            (None, None) => {
+                line.push_str(ELAPSED_FORMAT_INDENT);
+            }
         }
 
         line.push_str("] ");
@@ -874,6 +924,23 @@ impl LineDisplayFormatter {
     }
 }
 
+static DATETIME_FORMAT: LazyLock<Vec<chrono::format::Item<'static>>> =
+    LazyLock::new(|| {
+        // The format is "Jan 01 00:00:00".
+        //
+        // We can add customization in the future, but we want to restrict
+        // formats to fixed-width so we know how to align them.
+        chrono::format::StrftimeItems::new("%b %d %H:%M:%S")
+            .parse()
+            .expect("datetime format is valid")
+    });
+
+// "Jan 01 00:00:00" is 15 characters wide.
+const DATETIME_FORMAT_INDENT: &str = "               ";
+
+// "00:00:00" is 8 characters wide.
+const ELAPSED_FORMAT_INDENT: &str = "        ";
+
 #[derive(Clone, Debug)]
 pub(super) struct LineDisplayOutput {
     lines: Vec<String>,
@@ -989,6 +1056,8 @@ impl fmt::Display for AsLetters {
 
 #[cfg(test)]
 mod tests {
+    use chrono::TimeZone;
+
     use super::*;
 
     #[test]
@@ -1009,5 +1078,33 @@ mod tests {
                 input
             );
         }
+    }
+
+    #[test]
+    fn test_start_line() {
+        let formatter = LineDisplayFormatter::new();
+        let prefix = "prefix";
+        let start_time = Utc.with_ymd_and_hms(2023, 2, 8, 3, 40, 56).unwrap();
+
+        assert_eq!(
+            formatter.start_line(prefix, None, None),
+            "[prefix         ] ",
+        );
+        assert_eq!(
+            formatter.start_line(prefix, None, Some(Duration::from_secs(5))),
+            "[prefix 00:00:05] ",
+        );
+        assert_eq!(
+            formatter.start_line(prefix, Some(start_time), None),
+            "[prefix                ] ",
+        );
+        assert_eq!(
+            formatter.start_line(
+                prefix,
+                Some(start_time),
+                Some(Duration::from_secs(3600)),
+            ),
+            "[prefix Feb 08 04:40:56] ",
+        );
     }
 }
