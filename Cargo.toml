@@ -838,7 +838,3 @@ path = "workspace-hack"
 [patch."https://github.com/oxidecomputer/omicron"]
 omicron-uuid-kinds = { path = "uuid-kinds" }
 omicron-common = { path = "common" }
-
-[patch.crates-io.zone]
-git = 'https://github.com/oxidecomputer/zone'
-branch = 'state-derive-eq-hash'
