@@ -12399,6 +12399,7 @@ dependencies = [
  "fs-err",
  "macaddr",
  "omicron-zone-package",
+ "petgraph",
  "serde",
  "swrite",
  "tabled",
