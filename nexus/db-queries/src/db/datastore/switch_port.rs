@@ -39,9 +39,9 @@ use nexus_db_model::{
 use nexus_types::external_api::params;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
-    self, BgpPeer, CreateResult, DataPageParams, DeleteResult, Error,
-    ImportExportPolicy, ListResultVec, LookupResult, NameOrId, ResourceType,
-    UpdateResult,
+    self, BgpPeer, BgpPeerRemove, CreateResult, DataPageParams, DeleteResult,
+    Error, ImportExportPolicy, ListResultVec, LookupResult, NameOrId,
+    ResourceType, UpdateResult,
 };
 use ref_cast::RefCast;
 use serde::{Deserialize, Serialize};
@@ -1876,7 +1876,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         configuration: NameOrId,
-        bgp_peer: BgpPeer,
+        bgp_peer: BgpPeerRemove,
     ) -> DeleteResult {
         use db::schema::switch_port_settings_bgp_peer_config as bgp_peer_config;
 

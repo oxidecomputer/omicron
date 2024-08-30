@@ -2579,6 +2579,23 @@ pub struct BgpPeer {
     pub vlan_id: Option<u16>,
 }
 
+/// A BGP peer configuration to remove from an interface
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct BgpPeerRemove {
+    /// The global BGP configuration used for establishing a session with this
+    /// peer.
+    pub bgp_config: NameOrId,
+
+    /// The name of interface to peer on. This is relative to the port
+    /// configuration this BGP peer configuration is a part of. For example this
+    /// value could be phy0 to refer to a primary physical interface. Or it
+    /// could be vlan47 to refer to a VLAN interface.
+    pub interface_name: String,
+
+    /// The address of the host to peer with.
+    pub addr: IpAddr,
+}
+
 /// A base BGP configuration.
 #[derive(
     ObjectIdentity, Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq,

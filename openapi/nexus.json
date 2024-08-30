@@ -7511,7 +7511,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/BgpPeer"
+                "$ref": "#/components/schemas/BgpPeerRemove"
               }
             }
           },
@@ -11423,6 +11423,34 @@
         },
         "required": [
           "peers"
+        ]
+      },
+      "BgpPeerRemove": {
+        "description": "A BGP peer configuration to remove from an interface",
+        "type": "object",
+        "properties": {
+          "addr": {
+            "description": "The address of the host to peer with.",
+            "type": "string",
+            "format": "ip"
+          },
+          "bgp_config": {
+            "description": "The global BGP configuration used for establishing a session with this peer.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NameOrId"
+              }
+            ]
+          },
+          "interface_name": {
+            "description": "The name of interface to peer on. This is relative to the port configuration this BGP peer configuration is a part of. For example this value could be phy0 to refer to a primary physical interface. Or it could be vlan47 to refer to a VLAN interface.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "addr",
+          "bgp_config",
+          "interface_name"
         ]
       },
       "BgpPeerState": {

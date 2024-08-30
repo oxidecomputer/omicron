@@ -22,6 +22,7 @@ use nexus_db_queries::db::model::{SwitchPort, SwitchPortSettings};
 use nexus_db_queries::db::DataStore;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::BgpPeer;
+use omicron_common::api::external::BgpPeerRemove;
 use omicron_common::api::external::SwitchLocation;
 use omicron_common::api::external::{
     self, CreateResult, DataPageParams, DeleteResult, Error, ListResultVec,
@@ -321,7 +322,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         configuration: NameOrId,
-        bgp_peer: BgpPeer,
+        bgp_peer: BgpPeerRemove,
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Delete, &authz::FLEET).await?;
         self.db_datastore

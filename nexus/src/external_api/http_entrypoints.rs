@@ -41,7 +41,6 @@ use nexus_db_queries::db::lookup::ImageLookup;
 use nexus_db_queries::db::lookup::ImageParentLookup;
 use nexus_db_queries::db::model::Name;
 use nexus_types::external_api::shared::{BfdStatus, ProbeInfo};
-use omicron_common::api::external::AddressLot;
 use omicron_common::api::external::AddressLotCreateResponse;
 use omicron_common::api::external::AggregateBgpMessageHistory;
 use omicron_common::api::external::BgpAnnounceSet;
@@ -79,6 +78,7 @@ use omicron_common::api::external::{
     },
     SwitchPortAddressConfig,
 };
+use omicron_common::api::external::{AddressLot, BgpPeerRemove};
 use omicron_common::api::external::{AddressLotBlock, SwitchPortRouteConfig};
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
@@ -4291,7 +4291,7 @@ async fn networking_switch_port_configuration_bgp_peer_add(
 async fn networking_switch_port_configuration_bgp_peer_remove(
     rqctx: RequestContext<ApiContext>,
     path_params: Path<params::SwitchPortSettingsInfoSelector>,
-    bgp_peer: TypedBody<BgpPeer>,
+    bgp_peer: TypedBody<BgpPeerRemove>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
