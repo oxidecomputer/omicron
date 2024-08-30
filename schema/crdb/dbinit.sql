@@ -1020,6 +1020,20 @@ CREATE TYPE IF NOT EXISTS omicron.public.vmm_state AS ENUM (
     'saga_unwound'
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.instance_auto_restart AS ENUM (
+    /*
+     * The instance should not, under any circumstances, be automatically
+     * rebooted by the control plane.
+     */
+    'never',
+    /*
+     * The instance should be automatically restarted any time a fault is
+     * detected
+     */
+    'all_failures',
+);
+
+
 /*
  * TODO consider how we want to manage multiple sagas operating on the same
  * Instance -- e.g., reboot concurrent with destroy or concurrent reboots or the
@@ -1059,7 +1073,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
     ncpus INT NOT NULL,
     memory INT NOT NULL,
     hostname STRING(63) NOT NULL,
-    boot_on_fault BOOL NOT NULL DEFAULT false,
 
     /* ID of the instance update saga that has locked this instance for
      * updating, if one exists. */
@@ -1076,6 +1089,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
      * `separate-instance-and-vmm-states` schema change for details.
      */
     state omicron.public.instance_state_v2 NOT NULL,
+
+    /*
+     * What failures should result in an instance being automatically restarted
+     * by the control plane.
+     */
+    auto_restart_policy omicron.public.instance_auto_restart NOT NULL,
 
     CONSTRAINT vmm_iff_active_propolis CHECK (
         ((state = 'vmm') AND (active_propolis_id IS NOT NULL)) OR
@@ -4233,7 +4252,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '94.0.0', NULL)
+    (TRUE, NOW(), NOW(), '95.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
