@@ -97,12 +97,13 @@ impl From<SledAgentInstanceError> for omicron_common::api::external::Error {
 impl From<SledAgentInstanceError> for dropshot::HttpError {
     fn from(value: SledAgentInstanceError) -> Self {
         use dropshot::HttpError;
+        use progenitor_client::Error as ClientError;
         // See RFD 486 §6.3:
         // https://rfd.shared.oxide.computer/rfd/486#_stopping_or_rebooting_a_running_instance
-        match value.0 {
+        match value {
             // Errors communicating with the sled-agent should return 502 Bad
             // Gateway to the caller.
-            progenitor_client::Error::CommunicationError(e) => {
+            SledAgentInstanceError(ClientError::CommunicationError(e)) => {
                 // N.B.: it sure *seems* like we should be using the
                 // `HttpError::for_status` constructor here, but that
                 // constructor secretly calls the `for_client_error`
@@ -122,10 +123,17 @@ impl From<SledAgentInstanceError> for dropshot::HttpError {
             }
             // Invalid request errors from the sled-agent should return 500
             // Internal Server Errors.
-            progenitor_client::Error::InvalidRequest(s) => {
+            SledAgentInstanceError(ClientError::InvalidRequest(s)) => {
                 HttpError::for_internal_error(s)
             }
-            e => HttpError::for_internal_error(e.to_string()),
+            // Error responses from sled-agent that indicate the instance is
+            // unhealthy should be mapped to a 500 error.
+            e if e.instance_unhealthy() => {
+                HttpError::for_internal_error(e.to_string())
+            }
+            // Other client errors can be handled by the normal
+            // `external::Error` to `HttpError` conversions.
+            SledAgentInstanceError(e) => HttpError::from(Error::from(e)),
         }
     }
 }
