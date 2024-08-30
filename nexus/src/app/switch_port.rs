@@ -252,6 +252,45 @@ impl super::Nexus {
             .await
     }
 
+    pub(crate) async fn switch_port_configuration_route_list(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+    ) -> ListResultVec<SwitchPortRouteConfig> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        self.db_datastore
+            .switch_port_configuration_route_list(opctx, configuration)
+            .await
+    }
+
+    pub(crate) async fn switch_port_configuration_route_add(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+        address: params::RouteAddRemove,
+    ) -> CreateResult<SwitchPortRouteConfig> {
+        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
+        self.db_datastore
+            .switch_port_configuration_route_add(opctx, configuration, address)
+            .await
+    }
+
+    pub(crate) async fn switch_port_configuration_route_remove(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+        address: params::RouteAddRemove,
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Delete, &authz::FLEET).await?;
+        self.db_datastore
+            .switch_port_configuration_route_remove(
+                opctx,
+                configuration,
+                address,
+            )
+            .await
+    }
+
     async fn switch_port_create(
         &self,
         opctx: &OpContext,

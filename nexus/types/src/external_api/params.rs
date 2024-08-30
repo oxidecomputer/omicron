@@ -1620,6 +1620,27 @@ pub struct Route {
     pub local_pref: Option<u32>,
 }
 
+/// A route to a destination network through a gateway address to add or
+/// remove to an interface.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct RouteAddRemove {
+    /// The interface to configure the route on
+    pub interface: Name,
+
+    /// The route destination.
+    pub dst: IpNet,
+
+    /// The route gateway.
+    pub gw: IpAddr,
+
+    /// VLAN id the gateway is reachable over.
+    pub vid: Option<u16>,
+
+    /// Local preference for route. Higher preference indictes precedence
+    /// within and across protocols.
+    pub local_pref: Option<u32>,
+}
+
 /// Select a BGP config by a name or id.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct BgpConfigSelector {

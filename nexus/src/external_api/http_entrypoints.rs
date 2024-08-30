@@ -4145,11 +4145,14 @@ async fn networking_switch_port_configuration_route_list(
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.context.nexus;
-        let query = path_params.into_inner().configuration;
+        let configuration = path_params.into_inner().configuration;
+        let address = address.into_inner();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
 
-        let settings = nexus.switch_port_settings_get(&opctx, &query).await?;
-        todo!("list interface routes")
+        let settings = nexus
+            .switch_port_configuration_route_list(&opctx, configuration)
+            .await?;
+        Ok(HttpResponseOk(settings.into_iter().map(Into::into).collect()))
     };
     apictx
         .context
@@ -4168,15 +4171,18 @@ async fn networking_switch_port_configuration_route_add(
     rqctx: RequestContext<ApiContext>,
     path_params: Path<params::SwitchPortSettingsInfoSelector>,
     route: TypedBody<params::Route>,
-) -> Result<HttpResponseCreated<params::Route>, HttpError> {
+) -> Result<HttpResponseCreated<RouteConfig>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.context.nexus;
-        let query = path_params.into_inner().configuration;
+        let configuration = path_params.into_inner().configuration;
+        let address = address.into_inner();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
 
-        let settings = nexus.switch_port_settings_get(&opctx, &query).await?;
-        todo!("add interface route")
+        let settings = nexus
+            .switch_port_configuration_route_add(&opctx, configuration, address)
+            .await?;
+        Ok(HttpResponseCreated(settings.into()))
     };
     apictx
         .context
@@ -4199,11 +4205,18 @@ async fn networking_switch_port_configuration_route_remove(
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.context.nexus;
-        let query = path_params.into_inner().configuration;
+        let configuration = path_params.into_inner().configuration;
+        let address = address.into_inner();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
 
-        let settings = nexus.switch_port_settings_get(&opctx, &query).await?;
-        todo!("remove interface route")
+        nexus
+            .switch_port_configuration_route_remove(
+                &opctx,
+                configuration,
+                address,
+            )
+            .await?;
+        Ok(HttpResponseDeleted())
     };
     apictx
         .context

@@ -1195,6 +1195,132 @@ impl DataStore {
             })
     }
 
+    pub async fn switch_port_configuration_route_list(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+    ) -> ListResultVec<SwitchPortRouteConfig> {
+        use db::schema::switch_port_settings as port_settings;
+        use db::schema::switch_port_settings_route_config as route_config;
+
+        let dataset = port_settings::table.inner_join(
+            route_config::table
+                .on(route_config::port_settings_id.eq(port_settings::id)),
+        );
+
+        let query = match configuration {
+            NameOrId::Id(id) => {
+                // find port config using port settings id
+                dataset.filter(port_settings::id.eq(id)).into_boxed()
+            }
+            NameOrId::Name(name) => {
+                // find port config using port settings name
+                dataset
+                    .filter(port_settings::name.eq(name.to_string()))
+                    .into_boxed()
+            }
+        };
+
+        let configs: Vec<SwitchPortRouteConfig> = query
+            .select(SwitchPortRouteConfig::as_select())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e: diesel::result::Error| {
+                let msg =
+                    "error while looking up interface route configuration";
+                match e {
+                    diesel::result::Error::NotFound => {
+                        Error::non_resourcetype_not_found(
+                            "could not find route configuration for switch port configuration: {configuration}, interface: {interface}"
+                        )},
+                    _ => Error::internal_error(msg),
+                }
+            })?;
+
+        Ok(configs)
+    }
+
+    pub async fn switch_port_configuration_route_add(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+        route: params::RouteAddRemove,
+    ) -> CreateResult<SwitchPortRouteConfig> {
+        use db::schema::address_lot;
+        use db::schema::switch_port_settings_route_config as route_config;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let err = OptionalError::new();
+
+        self.transaction_retry_wrapper(
+            "switch_port_configuration_interface_route_add",
+        )
+        .transaction(&conn, |conn| {
+            let parent_configuration = configuration.clone();
+            let new_settings = route.clone();
+            let err = err.clone();
+
+            async move { todo!() }
+        })
+        .await
+        .map_err(|e| {
+            let message =
+                "switch_port_configuration_interface_route_add failed";
+            match err.take() {
+                Some(external_error) => {
+                    error!(opctx.log, "{message}"; "error" => ?external_error);
+                    external_error
+                }
+                None => {
+                    error!(opctx.log, "{message}"; "error" => ?e);
+                    Error::internal_error(
+                        "error while adding route to interface",
+                    )
+                }
+            }
+        })
+    }
+
+    pub async fn switch_port_configuration_route_remove(
+        &self,
+        opctx: &OpContext,
+        configuration: NameOrId,
+        route: params::RouteAddRemove,
+    ) -> DeleteResult {
+        use db::schema::switch_port_settings_route_config as route_config;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let err = OptionalError::new();
+
+        self.transaction_retry_wrapper(
+            "switch_port_configuration_interface_route_remove",
+        )
+        .transaction(&conn, |conn| {
+            let parent_configuration = configuration.clone();
+            let settings_to_remove = route.clone();
+            let err = err.clone();
+
+            async move { todo!() }
+        })
+        .await
+        .map_err(|e| {
+            let message =
+                "switch_port_configuration_interface_route_remove failed";
+            match err.take() {
+                Some(external_error) => {
+                    error!(opctx.log, "{message}"; "error" => ?external_error);
+                    external_error
+                }
+                None => {
+                    error!(opctx.log, "{message}"; "error" => ?e);
+                    Error::internal_error(
+                        "error while removing route from interface",
+                    )
+                }
+            }
+        })
+    }
+
     // switch ports
 
     pub async fn switch_port_create(
