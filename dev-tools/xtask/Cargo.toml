@@ -35,4 +35,5 @@ swrite.workspace = true
 tabled.workspace = true
 textwrap.workspace = true
 toml.workspace = true
+url.workspace = true
 usdt.workspace = true

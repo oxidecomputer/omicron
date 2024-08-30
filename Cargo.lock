@@ -12403,6 +12403,7 @@ dependencies = [
  "tabled",
  "textwrap",
  "toml 0.8.19",
+ "url",
  "usdt",
 ]
 
