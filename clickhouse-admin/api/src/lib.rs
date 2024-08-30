@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use clickhouse_admin_types::config::{
-    ClickhouseHost, KeeperConfig, ReplicaConfig,
+    ClickhouseHost, KeeperConfig, RaftServerSettings, ReplicaConfig,
 };
 use dropshot::{HttpError, HttpResponseCreated, RequestContext, TypedBody};
 use schemars::JsonSchema;
@@ -25,16 +25,16 @@ pub trait ClickhouseAdminApi {
         body: TypedBody<ServerSettings>,
     ) -> Result<HttpResponseCreated<ReplicaConfig>, HttpError>;
 
-    //    /// Generate a ClickHouse configuration file for a keeper node on a specified
-    //    /// directory.
-    //    #[endpoint {
-    //        method = POST,
-    //        path = "/node/keeper/generate-config",
-    //    }]
-    //    async fn generate_keeper_config(
-    //        rqctx: RequestContext<Self::Context>,
-    //        body: TypedBody<KeeperSettings>,
-    //    ) -> Result<HttpResponseCreated<KeeperConfigConfig>, HttpError>;
+    /// Generate a ClickHouse configuration file for a keeper node on a specified
+    /// directory.
+    #[endpoint {
+        method = POST,
+        path = "/node/keeper/generate-config",
+    }]
+    async fn generate_keeper_config(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<KeeperSettings>,
+    ) -> Result<HttpResponseCreated<KeeperConfig>, HttpError>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
@@ -43,6 +43,16 @@ pub struct ServerSettings {
     pub node_id: u64,
     pub keepers: Vec<ClickhouseHost>,
     pub remote_servers: Vec<ClickhouseHost>,
+    pub config_dir: String,
+    pub datastore_path: String,
+    pub listen_addr: Ipv6Addr,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct KeeperSettings {
+    pub node_id: u64,
+    pub keepers: Vec<RaftServerSettings>,
     pub config_dir: String,
     pub datastore_path: String,
     pub listen_addr: Ipv6Addr,

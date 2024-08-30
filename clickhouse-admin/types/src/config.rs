@@ -418,6 +418,13 @@ impl RaftServers {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, JsonSchema, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct RaftServerSettings {
+    pub id: KeeperId,
+    pub host: ClickhouseHost,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, JsonSchema, Serialize, Deserialize)]
 pub struct RaftServerConfig {
     pub id: KeeperId,
     pub hostname: ClickhouseHost,
@@ -425,8 +432,12 @@ pub struct RaftServerConfig {
 }
 
 impl RaftServerConfig {
-    pub fn new(id: KeeperId, hostname: ClickhouseHost) -> Self {
-        Self { id, hostname, port: CLICKHOUSE_KEEPER_RAFT_PORT }
+    pub fn new(settings: RaftServerSettings) -> Self {
+        Self {
+            id: settings.id,
+            hostname: settings.host,
+            port: CLICKHOUSE_KEEPER_RAFT_PORT,
+        }
     }
 }
 
@@ -516,6 +527,7 @@ impl KeeperConfig {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, JsonSchema, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum LogLevel {
     Trace,
     Debug,

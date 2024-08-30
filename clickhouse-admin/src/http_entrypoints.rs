@@ -4,7 +4,7 @@
 
 use crate::context::ServerContext;
 use clickhouse_admin_api::*;
-use clickhouse_admin_types::config::ReplicaConfig;
+use clickhouse_admin_types::config::{KeeperConfig, ReplicaConfig};
 use dropshot::HttpError;
 use dropshot::{HttpResponseCreated, RequestContext, TypedBody};
 use std::sync::Arc;
@@ -28,6 +28,16 @@ impl ClickhouseAdminApi for ClickhouseAdminImpl {
         let ctx = rqctx.context();
         let server_settings = body.into_inner();
         let output = ctx.clickward().generate_server_config(server_settings)?;
+        Ok(HttpResponseCreated(output))
+    }
+
+    async fn generate_keeper_config(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<KeeperSettings>,
+    ) -> Result<HttpResponseCreated<KeeperConfig>, HttpError> {
+        let ctx = rqctx.context();
+        let keeper_settings = body.into_inner();
+        let output = ctx.clickward().generate_keeper_config(keeper_settings)?;
         Ok(HttpResponseCreated(output))
     }
 }

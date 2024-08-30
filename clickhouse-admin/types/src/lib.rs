@@ -125,15 +125,20 @@ impl ClickhouseKeeperConfig {
     pub fn new(
         config_dir: Utf8PathBuf,
         id: KeeperId,
-        raft_servers: Vec<RaftServerConfig>,
+        raft_servers: Vec<RaftServerSettings>,
         datastore_path: Utf8PathBuf,
         listen_addr: Ipv6Addr,
     ) -> Self {
+        let raft_servers = raft_servers
+            .iter()
+            .map(|settings| RaftServerConfig::new(settings.clone()))
+            .collect();
+
         Self { config_dir, id, raft_servers, datastore_path, listen_addr }
     }
 
     /// Generate a configuration file for a keeper node
-    pub fn generate_xml_file(&self) -> Result<()> {
+    pub fn generate_xml_file(&self) -> Result<KeeperConfig> {
         let logger =
             LogConfig::new(self.datastore_path.clone(), NodeType::Keeper);
         let raft_config = RaftServers::new(self.raft_servers.clone());
@@ -151,7 +156,7 @@ impl ClickhouseKeeperConfig {
         f.write_all(config.to_xml().as_bytes())?;
         f.flush()?;
         rename(f.path(), self.config_dir.join("keeper-config.xml"))?;
-        Ok(())
+        Ok(config)
     }
 }
 
@@ -167,7 +172,7 @@ mod tests {
 
     use crate::{
         ClickhouseHost, ClickhouseKeeperConfig, ClickhouseServerConfig,
-        KeeperId, RaftServerConfig, ServerId,
+        KeeperId, RaftServerSettings, ServerId,
     };
 
     #[test]
@@ -179,18 +184,22 @@ mod tests {
             );
 
         let keepers = vec![
-            RaftServerConfig::new(
-                KeeperId(1),
-                ClickhouseHost::Ipv6(Ipv6Addr::from_str("ff::01").unwrap()),
-            ),
-            RaftServerConfig::new(
-                KeeperId(2),
-                ClickhouseHost::Ipv4(Ipv4Addr::from_str("127.0.0.1").unwrap()),
-            ),
-            RaftServerConfig::new(
-                KeeperId(3),
-                ClickhouseHost::DomainName("ohai.com".to_string()),
-            ),
+            RaftServerSettings {
+                id: KeeperId(1),
+                host: ClickhouseHost::Ipv6(
+                    Ipv6Addr::from_str("ff::01").unwrap(),
+                ),
+            },
+            RaftServerSettings {
+                id: KeeperId(2),
+                host: ClickhouseHost::Ipv4(
+                    Ipv4Addr::from_str("127.0.0.1").unwrap(),
+                ),
+            },
+            RaftServerSettings {
+                id: KeeperId(3),
+                host: ClickhouseHost::DomainName("ohai.com".to_string()),
+            },
         ];
 
         let config = ClickhouseKeeperConfig::new(

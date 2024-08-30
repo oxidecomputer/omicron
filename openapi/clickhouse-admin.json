@@ -10,17 +10,28 @@
     "version": "0.0.1"
   },
   "paths": {
-    "/node/address": {
-      "get": {
-        "summary": "Retrieve the address the ClickHouse server or keeper node is listening on.",
-        "operationId": "clickhouse_address",
+    "/node/keeper/generate-config": {
+      "post": {
+        "summary": "Generate a ClickHouse configuration file for a keeper node on a specified",
+        "description": "directory.",
+        "operationId": "generate_keeper_config",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KeeperSettings"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
-          "200": {
-            "description": "successful operation",
+          "201": {
+            "description": "successful creation",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ClickhouseAddress"
+                  "$ref": "#/components/schemas/KeeperConfig"
                 }
               }
             }
@@ -55,7 +66,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ServerConfigGenerateResponse"
+                  "$ref": "#/components/schemas/ReplicaConfig"
                 }
               }
             }
@@ -72,17 +83,6 @@
   },
   "components": {
     "schemas": {
-      "ClickhouseAddress": {
-        "type": "object",
-        "properties": {
-          "clickhouse_address": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "clickhouse_address"
-        ]
-      },
       "ClickhouseHost": {
         "oneOf": [
           {
@@ -144,16 +144,350 @@
           "request_id"
         ]
       },
-      "ServerConfigGenerateResponse": {
-        "description": "Success response for server node configuration file generation",
+      "KeeperConfig": {
+        "description": "Configuration for a ClickHouse keeper",
         "type": "object",
         "properties": {
-          "success": {
-            "type": "boolean"
+          "coordination_settings": {
+            "$ref": "#/components/schemas/KeeperCoordinationSettings"
+          },
+          "listen_host": {
+            "type": "string",
+            "format": "ipv6"
+          },
+          "log_storage_path": {
+            "type": "string",
+            "format": "Utf8PathBuf"
+          },
+          "logger": {
+            "$ref": "#/components/schemas/LogConfig"
+          },
+          "raft_config": {
+            "$ref": "#/components/schemas/RaftServers"
+          },
+          "server_id": {
+            "$ref": "#/components/schemas/KeeperId"
+          },
+          "snapshot_storage_path": {
+            "type": "string",
+            "format": "Utf8PathBuf"
+          },
+          "tcp_port": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
           }
         },
         "required": [
-          "success"
+          "coordination_settings",
+          "listen_host",
+          "log_storage_path",
+          "logger",
+          "raft_config",
+          "server_id",
+          "snapshot_storage_path",
+          "tcp_port"
+        ]
+      },
+      "KeeperConfigsForReplica": {
+        "type": "object",
+        "properties": {
+          "nodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KeeperNodeConfig"
+            }
+          }
+        },
+        "required": [
+          "nodes"
+        ]
+      },
+      "KeeperCoordinationSettings": {
+        "type": "object",
+        "properties": {
+          "operation_timeout_ms": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "raft_logs_level": {
+            "$ref": "#/components/schemas/LogLevel"
+          },
+          "session_timeout_ms": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "operation_timeout_ms",
+          "raft_logs_level",
+          "session_timeout_ms"
+        ]
+      },
+      "KeeperId": {
+        "description": "A unique ID for a ClickHouse Keeper",
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
+      },
+      "KeeperNodeConfig": {
+        "type": "object",
+        "properties": {
+          "host": {
+            "$ref": "#/components/schemas/ClickhouseHost"
+          },
+          "port": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "host",
+          "port"
+        ]
+      },
+      "KeeperSettings": {
+        "type": "object",
+        "properties": {
+          "config_dir": {
+            "type": "string"
+          },
+          "datastore_path": {
+            "type": "string"
+          },
+          "keepers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RaftServerSettings"
+            }
+          },
+          "listen_addr": {
+            "type": "string",
+            "format": "ipv6"
+          },
+          "node_id": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "config_dir",
+          "datastore_path",
+          "keepers",
+          "listen_addr",
+          "node_id"
+        ]
+      },
+      "LogConfig": {
+        "type": "object",
+        "properties": {
+          "count": {
+            "type": "integer",
+            "format": "uint",
+            "minimum": 0
+          },
+          "errorlog": {
+            "type": "string",
+            "format": "Utf8PathBuf"
+          },
+          "level": {
+            "$ref": "#/components/schemas/LogLevel"
+          },
+          "log": {
+            "type": "string",
+            "format": "Utf8PathBuf"
+          },
+          "size": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "count",
+          "errorlog",
+          "level",
+          "log",
+          "size"
+        ]
+      },
+      "LogLevel": {
+        "type": "string",
+        "enum": [
+          "trace",
+          "debug"
+        ]
+      },
+      "Macros": {
+        "type": "object",
+        "properties": {
+          "cluster": {
+            "type": "string"
+          },
+          "replica": {
+            "$ref": "#/components/schemas/ServerId"
+          },
+          "shard": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "cluster",
+          "replica",
+          "shard"
+        ]
+      },
+      "RaftServerConfig": {
+        "type": "object",
+        "properties": {
+          "hostname": {
+            "$ref": "#/components/schemas/ClickhouseHost"
+          },
+          "id": {
+            "$ref": "#/components/schemas/KeeperId"
+          },
+          "port": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "hostname",
+          "id",
+          "port"
+        ]
+      },
+      "RaftServerSettings": {
+        "type": "object",
+        "properties": {
+          "host": {
+            "$ref": "#/components/schemas/ClickhouseHost"
+          },
+          "id": {
+            "$ref": "#/components/schemas/KeeperId"
+          }
+        },
+        "required": [
+          "host",
+          "id"
+        ]
+      },
+      "RaftServers": {
+        "type": "object",
+        "properties": {
+          "servers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RaftServerConfig"
+            }
+          }
+        },
+        "required": [
+          "servers"
+        ]
+      },
+      "RemoteServers": {
+        "type": "object",
+        "properties": {
+          "cluster": {
+            "type": "string"
+          },
+          "replicas": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServerNodeConfig"
+            }
+          },
+          "secret": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "cluster",
+          "replicas",
+          "secret"
+        ]
+      },
+      "ReplicaConfig": {
+        "description": "Configuration for a ClickHouse replica server",
+        "type": "object",
+        "properties": {
+          "data_path": {
+            "type": "string",
+            "format": "Utf8PathBuf"
+          },
+          "http_port": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "interserver_http_port": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "keepers": {
+            "$ref": "#/components/schemas/KeeperConfigsForReplica"
+          },
+          "listen_host": {
+            "type": "string",
+            "format": "ipv6"
+          },
+          "logger": {
+            "$ref": "#/components/schemas/LogConfig"
+          },
+          "macros": {
+            "$ref": "#/components/schemas/Macros"
+          },
+          "remote_servers": {
+            "$ref": "#/components/schemas/RemoteServers"
+          },
+          "tcp_port": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "data_path",
+          "http_port",
+          "interserver_http_port",
+          "keepers",
+          "listen_host",
+          "logger",
+          "macros",
+          "remote_servers",
+          "tcp_port"
+        ]
+      },
+      "ServerId": {
+        "description": "A unique ID for a Clickhouse Server",
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
+      },
+      "ServerNodeConfig": {
+        "type": "object",
+        "properties": {
+          "host": {
+            "$ref": "#/components/schemas/ClickhouseHost"
+          },
+          "port": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "host",
+          "port"
         ]
       },
       "ServerSettings": {

@@ -3,9 +3,11 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use camino::Utf8PathBuf;
-use clickhouse_admin_api::ServerSettings;
-use clickhouse_admin_types::config::ReplicaConfig;
-use clickhouse_admin_types::{ClickhouseServerConfig, ServerId};
+use clickhouse_admin_api::{KeeperSettings, ServerSettings};
+use clickhouse_admin_types::config::{KeeperConfig, ReplicaConfig};
+use clickhouse_admin_types::{
+    ClickhouseKeeperConfig, ClickhouseServerConfig, KeeperId, ServerId,
+};
 use dropshot::HttpError;
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use std::str::FromStr;
@@ -62,5 +64,24 @@ impl Clickward {
             .map_err(|e| ClickwardError::Failure { err: e })?;
 
         Ok(replica_config)
+    }
+
+    pub fn generate_keeper_config(
+        &self,
+        settings: KeeperSettings,
+    ) -> Result<KeeperConfig, ClickwardError> {
+        let config = ClickhouseKeeperConfig::new(
+            Utf8PathBuf::from_str(&settings.config_dir).unwrap(),
+            KeeperId(settings.node_id),
+            settings.keepers,
+            Utf8PathBuf::from_str(&settings.datastore_path).unwrap(),
+            settings.listen_addr,
+        );
+
+        let keeper_config = config
+            .generate_xml_file()
+            .map_err(|e| ClickwardError::Failure { err: e })?;
+
+        Ok(keeper_config)
     }
 }
