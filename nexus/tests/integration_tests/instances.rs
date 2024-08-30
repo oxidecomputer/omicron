@@ -1109,39 +1109,15 @@ async fn test_instance_migrate_v2p_and_routes(
 // 404 error from sled agent, then the instance moves to the Failed state, and
 // can be restarted once it has transitioned to that state..
 #[nexus_test]
-async fn test_instance_fails_after_sled_agent_forgets_vmm_and_can_be_restarted(
+async fn test_instance_failed_after_sled_agent_forgets_vmm_can_be_restarted(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.server_context();
-    let nexus = &apictx.nexus;
+
     let instance_name = "losing-is-fun";
+    let instance_id = make_forgotten_instance(&cptestctx, instance_name).await;
 
-    // Create and start the test instance.
-    create_project_and_pool(&client).await;
-    let instance_url = get_instance_url(instance_name);
-    let instance = create_instance(client, PROJECT_NAME, instance_name).await;
-    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
-    instance_simulate(nexus, &instance_id).await;
-    let instance_next = instance_get(&client, &instance_url).await;
-    assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
-
-    // Forcibly unregister the instance from the sled-agent without tellingthe
-    // Nexus. It will now behave as though it has forgotten the instance and
-    // return a 404 error with the "NO_SUCH_INSTANCE" error code
-    let vmm_id = nexus
-        .active_instance_info(&instance_id, None)
-        .await
-        .unwrap()
-        .expect("running instance must be on a sled")
-        .propolis_id;
-    let sled_agent = &cptestctx.sled_agent.sled_agent;
-    sled_agent
-        .instance_unregister(vmm_id)
-        .await
-        .expect("instance_unregister must succeed");
-
-    let url = get_instance_url(format!("{}/reboot", instance_name).as_str());
+    let url = get_instance_url(format!("{instance_name}/reboot").as_str());
     let err = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url)
             .body(None as Option<&serde_json::Value>),
@@ -1163,39 +1139,15 @@ async fn test_instance_fails_after_sled_agent_forgets_vmm_and_can_be_restarted(
 // 404 error from sled agent, then the instance moves to the Failed state, and
 // can be deleted once it has transitioned to that state..
 #[nexus_test]
-async fn test_instance_fails_after_sled_agent_forgets_vmm_and_can_be_deleted(
+async fn test_instance_failed_after_sled_agent_forgets_vmm_can_be_deleted(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.server_context();
-    let nexus = &apictx.nexus;
+
     let instance_name = "losing-is-fun";
+    let instance_id = make_forgotten_instance(&cptestctx, instance_name).await;
 
-    // Create and start the test instance.
-    create_project_and_pool(&client).await;
-    let instance_url = get_instance_url(instance_name);
-    let instance = create_instance(client, PROJECT_NAME, instance_name).await;
-    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
-    instance_simulate(nexus, &instance_id).await;
-    let instance_next = instance_get(&client, &instance_url).await;
-    assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
-
-    // Forcibly unregister the instance from the sled-agent without tellingthe
-    // Nexus. It will now behave as though it has forgotten the instance and
-    // return a 404 error with the "NO_SUCH_INSTANCE" error code
-    let vmm_id = nexus
-        .active_instance_info(&instance_id, None)
-        .await
-        .unwrap()
-        .expect("running instance must be on a sled")
-        .propolis_id;
-    let sled_agent = &cptestctx.sled_agent.sled_agent;
-    sled_agent
-        .instance_unregister(vmm_id)
-        .await
-        .expect("instance_unregister must succeed");
-
-    let url = get_instance_url(format!("{}/reboot", instance_name).as_str());
+    let url = get_instance_url(format!("{instance_name}/reboot").as_str());
     let err = NexusRequest::new(
         RequestBuilder::new(client, Method::POST, &url)
             .body(None as Option<&serde_json::Value>),
@@ -1210,16 +1162,106 @@ async fn test_instance_fails_after_sled_agent_forgets_vmm_and_can_be_deleted(
     instance_wait_for_state(client, instance_id, InstanceState::Failed).await;
 
     // Now, the instance should be deleteable.
-    NexusRequest::object_delete(&client, &instance_url)
+    expect_instance_delete_ok(&client, instance_name).await;
+}
+
+// Verifies that the instance-watcher background task transitions an instance
+// to Failed when the sled-agent returns a 404, and that the instance can be
+// deleted after it transitions to Failed.
+#[nexus_test]
+async fn test_instance_failed_by_instance_watcher_can_be_deleted(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let instance_name = "losing-is-fun";
+    let instance_id = make_forgotten_instance(&cptestctx, instance_name).await;
+
+    nexus_test_utils::background::activate_background_task(
+        &cptestctx.internal_client,
+        "instance_watcher",
+    )
+    .await;
+
+    // Wait for the instance to transition to Failed.
+    instance_wait_for_state(client, instance_id, InstanceState::Failed).await;
+
+    // Now, the instance should be deleteable.
+    expect_instance_delete_ok(&client, instance_name).await;
+}
+
+// Verifies that the instance-watcher background task transitions an instance
+// to Failed when the sled-agent returns a 404, and that the instance can be
+// deleted after it transitions to Failed.
+#[nexus_test]
+async fn test_instance_failed_by_instance_watcher_can_be_restarted(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let instance_name = "losing-is-fun";
+    let instance_id = make_forgotten_instance(&cptestctx, instance_name).await;
+
+    nexus_test_utils::background::activate_background_task(
+        &cptestctx.internal_client,
+        "instance_watcher",
+    )
+    .await;
+
+    // Wait for the instance to transition to Failed.
+    instance_wait_for_state(client, instance_id, InstanceState::Failed).await;
+
+    // Now, the instance should be deleteable.
+    expect_instance_delete_ok(&client, instance_name).await;
+}
+
+/// Prepare an instance and sled-agent for one of the "instance fails after
+/// sled-agent forgets VMM" tests.
+async fn make_forgotten_instance(
+    cptestctx: &ControlPlaneTestContext,
+    instance_name: &str,
+) -> InstanceUuid {
+    let client = &cptestctx.external_client;
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+
+    // Create and start the test instance.
+    create_project_and_pool(&client).await;
+    let instance_url = get_instance_url(instance_name);
+    let instance = create_instance(client, PROJECT_NAME, instance_name).await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+    instance_simulate(nexus, &instance_id).await;
+    let instance_next = instance_get(&client, &instance_url).await;
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
+
+    // Forcibly unregister the instance from the sled-agent without telling
+    // Nexus. It will now behave as though it has forgotten the instance and
+    // return a 404 error with the "NO_SUCH_INSTANCE" error code
+    let vmm_id = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("running instance must be on a sled")
+        .propolis_id;
+    let sled_agent = &cptestctx.sled_agent.sled_agent;
+    sled_agent
+        .instance_unregister(vmm_id)
+        .await
+        .expect("instance_unregister must succeed");
+
+    instance_id
+}
+
+async fn expect_instance_delete_ok(
+    client: &ClientTestContext,
+    instance_name: &str,
+) {
+    NexusRequest::object_delete(&client, &get_instance_url(instance_name))
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
-        .unwrap();
+        .expect("instance should be deleted");
 }
 
 // TODO(eliza): add tests for failed instances in the following situations:
-// - Failed instance detected by instance-watcher task, can be restarted
-// - Failed instance detected by instance-watcher task, can be deleted
 // - Sled-agent errors that are not "no such instance" do NOT go to failed on
 //   API calls
 // - Sled-agent errors that are not "no such instance" do NOT go to failed when
