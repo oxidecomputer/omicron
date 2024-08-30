@@ -40,7 +40,7 @@ pub struct ProgressRatioDisplay {
 impl ProgressRatioDisplay {
     /// Create a new `ProgressRatioDisplay` with current and total values.
     ///
-    /// `current` is considered to be 1-based. For example, "1 job done of 8".
+    /// `current` is considered to be 1-based. For example, "20/80 jobs done".
     pub fn current_and_total<T: ToU64>(current: T, total: T) -> Self {
         Self { current: current.to_u64(), total: total.to_u64(), padded: false }
     }
@@ -48,7 +48,7 @@ impl ProgressRatioDisplay {
     /// Create a new `ProgressRatioDisplay` with index and total values.
     ///
     /// The index is 0-based (i.e. 1 is added to it). For example, step index 0
-    /// out of 8 total steps.
+    /// out of 8 total steps is shown as "1/8".
     pub fn index_and_total<T: ToU64>(index: T, total: T) -> Self {
         Self {
             current: index
