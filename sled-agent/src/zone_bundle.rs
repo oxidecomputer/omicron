@@ -1679,8 +1679,8 @@ mod tests {
             }
         }
 
+        const DU: &str = "du";
         async fn dir_size_du(path: &Utf8PathBuf) -> Result<u64, BundleError> {
-            const DU: &str = "du";
             let args = &[DU_ARG, "-s", path.as_str()];
             let output =
                 Command::new(DU).args(args).output().await.map_err(|err| {
@@ -1712,6 +1712,13 @@ mod tests {
                 .map(|x: u64| x.saturating_mul(BLOCK_SIZE))
                 .map_err(|_| err("failed to parse du output"))
         }
+
+        let du_output =
+            Command::new(DU).arg("--version").output().await.unwrap();
+        eprintln!(
+            "du --version:\n{}\n",
+            String::from_utf8_lossy(&du_output.stdout)
+        );
 
         let path =
             Utf8PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/src"));
