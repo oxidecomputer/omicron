@@ -129,19 +129,19 @@ use std::collections::{btree_map, BTreeMap, BTreeSet};
 use std::collections::{HashMap, HashSet};
 use std::iter;
 use std::net::{Ipv6Addr, SocketAddrV6};
-use std::sync::mpsc;
 use std::time::Duration;
 use thiserror::Error;
+use tokio::sync::watch;
 use uuid::Uuid;
 
 /// For tracking the current RSS step and sending notifications about it.
 pub struct RssProgress {
     step: RssStep,
-    step_tx: mpsc::Sender<RssStep>,
+    step_tx: watch::Sender<RssStep>,
 }
 
 impl RssProgress {
-    pub fn new(step_tx: mpsc::Sender<RssStep>) -> Self {
+    pub fn new(step_tx: watch::Sender<RssStep>) -> Self {
         let _ = step_tx.send(RssStep::Starting);
         RssProgress { step: RssStep::Starting, step_tx }
     }
@@ -244,7 +244,7 @@ impl RackSetupService {
         storage_manager: StorageHandle,
         local_bootstrap_agent: BootstrapAgentHandle,
         bootstore: bootstore::NodeHandle,
-        step_tx: mpsc::Sender<RssStep>,
+        step_tx: watch::Sender<RssStep>,
     ) -> Self {
         let handle = tokio::task::spawn(async move {
             let svc = ServiceInner::new(log.clone());
@@ -1071,7 +1071,7 @@ impl ServiceInner {
         storage_manager: &StorageHandle,
         local_bootstrap_agent: BootstrapAgentHandle,
         bootstore: bootstore::NodeHandle,
-        step_tx: mpsc::Sender<RssStep>,
+        step_tx: watch::Sender<RssStep>,
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Injecting RSS configuration: {:#?}", config);
         let mut rss_step = RssProgress::new(step_tx);
@@ -1093,7 +1093,6 @@ impl ServiceInner {
             Ledger::<RssCompleteMarker>::new(&self.log, marker_paths.clone())
                 .await;
 
-        rss_step.update(RssStep::CheckPrevious);
         // Check if a previous RSS plan has completed successfully.
         //
         // If it has, the system should be up-and-running.
@@ -1135,13 +1134,12 @@ impl ServiceInner {
                 nexus_address,
             )
             .await?;
-            rss_step.update(RssStep::Completed);
             return Ok(());
         } else {
             info!(self.log, "RSS configuration has not been fully applied yet");
         }
 
-        rss_step.update(RssStep::WaitingForPeers);
+        rss_step.update(RssStep::CreateSledPlan);
         // Wait for either:
         // - All the peers to re-load an old plan (if one exists)
         // - Enough peers to create a new plan (if one does not exist)
@@ -1272,9 +1270,9 @@ impl ServiceInner {
                 matches!(zone_type, OmicronZoneType::InternalDns { .. })
             },
         );
-        rss_step.update(RssStep::ConfigureDNS);
+        rss_step.update(RssStep::InitDns);
         self.ensure_zone_config_at_least(v2generator.sled_configs()).await?;
-        rss_step.update(RssStep::InitDNS);
+        rss_step.update(RssStep::ConfigureDns);
         self.initialize_internal_dns_records(&service_plan).await?;
 
         // Ask MGS in each switch zone which switch it is.
@@ -1282,7 +1280,7 @@ impl ServiceInner {
             .lookup_switch_zone_underlay_addrs(&resolver)
             .await;
 
-        rss_step.update(RssStep::InitNTP);
+        rss_step.update(RssStep::InitNtp);
         // Next start up the NTP services.
         let v3generator = v2generator.new_version_with(
             DeployStepVersion::V3_DNS_AND_NTP,
@@ -1348,7 +1346,6 @@ impl ServiceInner {
         )
         .await?;
 
-        rss_step.update(RssStep::Completed);
         Ok(())
     }
 }

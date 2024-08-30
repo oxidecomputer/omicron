@@ -23,6 +23,7 @@ use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
+use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
 pub(super) struct RssHandle {
@@ -49,7 +50,7 @@ impl RssHandle {
         our_bootstrap_address: Ipv6Addr,
         storage_manager: StorageHandle,
         bootstore: bootstore::NodeHandle,
-        step_tx: std::sync::mpsc::Sender<RssStep>,
+        step_tx: watch::Sender<RssStep>,
     ) -> Result<(), SetupServiceError> {
         let (tx, rx) = rss_channel(our_bootstrap_address);
 

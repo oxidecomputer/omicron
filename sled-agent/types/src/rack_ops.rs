@@ -66,22 +66,20 @@ pub enum RackOperationStatus {
 pub enum RssStep {
     Requested,
     Starting,
-    CheckPrevious,
     LoadExistingPlan,
-    WaitingForPeers,
+    CreateSledPlan,
     InitTrustQuorum,
     NetworkConfigUpdate,
     SledInit,
     EnsureStorage,
-    ConfigureDNS,
-    InitDNS,
-    InitNTP,
+    InitDns,
+    ConfigureDns,
+    InitNtp,
     WaitForTimeSync,
     WaitForDatabase,
     ClusterInit,
     ZonesInit,
     NexusHandoff,
-    Completed,
 }
 
 impl RssStep {

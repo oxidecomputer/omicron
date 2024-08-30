@@ -1321,20 +1321,6 @@
               "status": {
                 "type": "string",
                 "enum": [
-                  "check_previous"
-                ]
-              }
-            },
-            "required": [
-              "status"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
                   "load_existing_plan"
                 ]
               }
@@ -1349,7 +1335,7 @@
               "status": {
                 "type": "string",
                 "enum": [
-                  "waiting_for_peers"
+                  "create_sled_plan"
                 ]
               }
             },
@@ -1419,7 +1405,7 @@
               "status": {
                 "type": "string",
                 "enum": [
-                  "configure_d_n_s"
+                  "init_dns"
                 ]
               }
             },
@@ -1433,7 +1419,7 @@
               "status": {
                 "type": "string",
                 "enum": [
-                  "init_d_n_s"
+                  "configure_dns"
                 ]
               }
             },
@@ -1447,7 +1433,7 @@
               "status": {
                 "type": "string",
                 "enum": [
-                  "init_n_t_p"
+                  "init_ntp"
                 ]
               }
             },
@@ -1518,20 +1504,6 @@
                 "type": "string",
                 "enum": [
                   "nexus_handoff"
-                ]
-              }
-            },
-            "required": [
-              "status"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "status": {
-                "type": "string",
-                "enum": [
-                  "completed"
                 ]
               }
             },

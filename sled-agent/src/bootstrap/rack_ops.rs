@@ -15,11 +15,11 @@ use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::mem;
 use std::net::Ipv6Addr;
-use std::sync::mpsc;
 use std::sync::Arc;
 use std::sync::Mutex;
 use tokio::sync::oneshot;
 use tokio::sync::oneshot::error::TryRecvError;
+use tokio::sync::watch;
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum RssAccessError {
@@ -79,10 +79,9 @@ impl RssAccess {
                         // Check the step channel, and if it is different
                         // than what we have, update what we have.
                         // Ignore errors
-                        if let Ok(cur_step) = step_rx.try_recv() {
-                            if *step != cur_step {
-                                *step = cur_step
-                            }
+                        let cur_step = step_rx.borrow();
+                        if *step != *cur_step {
+                            *step = *cur_step;
                         }
                         RackOperationStatus::Initializing { id, step: *step }
                     }
@@ -180,7 +179,7 @@ impl RssAccess {
             RssStatus::Uninitialized { .. } => {
                 let (completion_tx, completion) = oneshot::channel();
                 let id = RackInitUuid::new_v4();
-                let (step_tx, step_rx) = mpsc::channel();
+                let (step_tx, step_rx) = watch::channel(RssStep::Requested);
                 *status = RssStatus::Initializing {
                     id,
                     completion,
@@ -300,7 +299,7 @@ enum RssStatus {
         id: RackInitUuid,
         completion: oneshot::Receiver<()>,
         // Used by the RSS task to update us with what step it is on.
-        step_rx: mpsc::Receiver<RssStep>,
+        step_rx: watch::Receiver<RssStep>,
         // The most recent RSS step we received from the RSS task.
         step: RssStep,
     },
@@ -332,7 +331,7 @@ async fn rack_initialize(
     storage_manager: StorageHandle,
     bootstore_node_handle: bootstore::NodeHandle,
     request: RackInitializeRequest,
-    step_tx: mpsc::Sender<RssStep>,
+    step_tx: watch::Sender<RssStep>,
 ) -> Result<(), SetupServiceError> {
     RssHandle::run_rss(
         parent_log,
