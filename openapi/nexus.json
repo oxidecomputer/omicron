@@ -2676,7 +2676,7 @@
         }
       }
     },
-    "/v1/internet-gateway-ip-addrs": {
+    "/v1/internet-gateway-ip-addresses": {
       "get": {
         "tags": [
           "vpcs"
@@ -2823,7 +2823,7 @@
         }
       }
     },
-    "/v1/internet-gateway-ip-addrs/{address}": {
+    "/v1/internet-gateway-ip-addresses/{address}": {
       "delete": {
         "tags": [
           "vpcs"
@@ -16595,9 +16595,8 @@
           "description": {
             "type": "string"
           },
-          "gateway_id": {
-            "type": "string",
-            "format": "uuid"
+          "gateway": {
+            "$ref": "#/components/schemas/NameOrId"
           },
           "name": {
             "$ref": "#/components/schemas/Name"
@@ -16606,7 +16605,7 @@
         "required": [
           "address",
           "description",
-          "gateway_id",
+          "gateway",
           "name"
         ]
       },
@@ -16690,13 +16689,11 @@
           "description": {
             "type": "string"
           },
-          "gateway_id": {
-            "type": "string",
-            "format": "uuid"
+          "gateway": {
+            "$ref": "#/components/schemas/NameOrId"
           },
-          "ip_pool_id": {
-            "type": "string",
-            "format": "uuid"
+          "ip_pool": {
+            "$ref": "#/components/schemas/NameOrId"
           },
           "name": {
             "$ref": "#/components/schemas/Name"
@@ -16704,8 +16701,8 @@
         },
         "required": [
           "description",
-          "gateway_id",
-          "ip_pool_id",
+          "gateway",
+          "ip_pool",
           "name"
         ]
       },

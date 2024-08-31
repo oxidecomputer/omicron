@@ -1363,15 +1363,15 @@ pub struct InternetGatewayCreate {
 pub struct InternetGatewayIpPoolCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
-    pub gateway_id: Uuid,
-    pub ip_pool_id: Uuid,
+    pub gateway: NameOrId,
+    pub ip_pool: NameOrId,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InternetGatewayIpAddressCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
-    pub gateway_id: Uuid,
+    pub gateway: NameOrId,
     pub address: IpAddr,
 }
 

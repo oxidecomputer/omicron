@@ -1823,6 +1823,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.internet_gateway_ip_pool (
     ip_pool_id UUID
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_internet_gateway_ip_pool_by_igw_id ON omicron.public.internet_gateway_ip_pool (
+    internet_gateway_id
+) WHERE
+    time_deleted IS NULL;
+
 CREATE TABLE IF NOT EXISTS omicron.public.internet_gateway_ip_address (
     id UUID PRIMARY KEY,
     name STRING(63) NOT NULL,
@@ -1833,6 +1838,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.internet_gateway_ip_address (
     internet_gateway_id UUID,
     address INET
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_internet_gateway_ip_address_by_igw_id ON omicron.public.internet_gateway_ip_address (
+    internet_gateway_id
+) WHERE
+    time_deleted IS NULL;
 
 
 /*

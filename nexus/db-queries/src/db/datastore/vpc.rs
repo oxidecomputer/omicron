@@ -1114,6 +1114,50 @@ impl DataStore {
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
+    pub async fn internet_gateway_has_ip_pools(
+        &self,
+        opctx: &OpContext,
+        authz_igw: &authz::InternetGateway,
+    ) -> LookupResult<bool> {
+        opctx.authorize(authz::Action::ListChildren, authz_igw).await?;
+
+        use db::schema::internet_gateway_ip_pool::dsl;
+        let result = dsl::internet_gateway_ip_pool
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::internet_gateway_id.eq(authz_igw.id()))
+            .select(InternetGatewayIpPool::as_select())
+            .limit(1)
+            .load_async::<db::model::InternetGatewayIpPool>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(!result.is_empty())
+    }
+
+    pub async fn internet_gateway_has_ip_addresses(
+        &self,
+        opctx: &OpContext,
+        authz_igw: &authz::InternetGateway,
+    ) -> LookupResult<bool> {
+        opctx.authorize(authz::Action::ListChildren, authz_igw).await?;
+
+        use db::schema::internet_gateway_ip_address::dsl;
+        let result = dsl::internet_gateway_ip_address
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::internet_gateway_id.eq(authz_igw.id()))
+            .select(InternetGatewayIpAddress::as_select())
+            .limit(1)
+            .load_async::<db::model::InternetGatewayIpAddress>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(!result.is_empty())
+    }
+
     pub async fn internet_gateway_list_ip_pools(
         &self,
         opctx: &OpContext,
@@ -1301,44 +1345,45 @@ impl DataStore {
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Delete, authz_igw).await?;
 
-        use db::schema::internet_gateway::dsl;
-        let now = Utc::now();
-        diesel::update(dsl::internet_gateway)
-            .filter(dsl::time_deleted.is_null())
-            .filter(dsl::id.eq(authz_igw.id()))
-            .set(dsl::time_deleted.eq(now))
-            .execute_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::NotFoundByResource(authz_igw),
-                )
-            })?;
+        let conn = self.pool_connection_authorized(opctx).await?;
 
-        // Delete ip pool associations
-        use db::schema::internet_gateway_ip_pool::dsl as pool;
-        let now = Utc::now();
-        diesel::update(pool::internet_gateway_ip_pool)
-            .filter(pool::time_deleted.is_null())
-            .filter(pool::internet_gateway_id.eq(authz_igw.id()))
-            .set(pool::time_deleted.eq(now))
-            .execute_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        self.transaction_retry_wrapper("vpc_delete_internet_gateway")
+            .transaction(&conn, |conn| {
+                async move {
+                    use db::schema::internet_gateway::dsl;
+                    let now = Utc::now();
+                    diesel::update(dsl::internet_gateway)
+                        .filter(dsl::time_deleted.is_null())
+                        .filter(dsl::id.eq(authz_igw.id()))
+                        .set(dsl::time_deleted.eq(now))
+                        .execute_async(&conn)
+                        .await?;
 
-        // Delete ip address associations
-        use db::schema::internet_gateway_ip_address::dsl as addr;
-        let now = Utc::now();
-        diesel::update(addr::internet_gateway_ip_address)
-            .filter(addr::time_deleted.is_null())
-            .filter(addr::internet_gateway_id.eq(authz_igw.id()))
-            .set(addr::time_deleted.eq(now))
-            .execute_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+                    // Delete ip pool associations
+                    use db::schema::internet_gateway_ip_pool::dsl as pool;
+                    let now = Utc::now();
+                    diesel::update(pool::internet_gateway_ip_pool)
+                        .filter(pool::time_deleted.is_null())
+                        .filter(pool::internet_gateway_id.eq(authz_igw.id()))
+                        .set(pool::time_deleted.eq(now))
+                        .execute_async(&conn)
+                        .await?;
 
-        Ok(())
+                    // Delete ip address associations
+                    use db::schema::internet_gateway_ip_address::dsl as addr;
+                    let now = Utc::now();
+                    diesel::update(addr::internet_gateway_ip_address)
+                        .filter(addr::time_deleted.is_null())
+                        .filter(addr::internet_gateway_id.eq(authz_igw.id()))
+                        .set(addr::time_deleted.eq(now))
+                        .execute_async(&conn)
+                        .await?;
+
+                    Ok(())
+                }
+            })
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     pub async fn vpc_update_router(

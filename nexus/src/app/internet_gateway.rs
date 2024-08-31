@@ -97,11 +97,12 @@ impl super::Nexus {
         opctx: &OpContext,
         lookup: &lookup::InternetGateway<'_>,
     ) -> DeleteResult {
-        let (.., authz_router, _db_igw) =
+        let (.., authz_igw, _db_igw) =
             lookup.fetch_for(authz::Action::Delete).await?;
+
         let out = self
             .db_datastore
-            .vpc_delete_internet_gateway(opctx, &authz_router)
+            .vpc_delete_internet_gateway(opctx, &authz_igw)
             .await?;
 
         self.vpc_needed_notify_sleds();
@@ -172,14 +173,28 @@ impl super::Nexus {
         lookup: &lookup::InternetGateway<'_>,
         params: &params::InternetGatewayIpPoolCreate,
     ) -> CreateResult<db::model::InternetGatewayIpPool> {
-        let (.., authz_igw, _db_pool) =
+        let (.., authz_igw, _) =
             lookup.fetch_for(authz::Action::CreateChild).await?;
+
+        let ip_pool_id = match params.ip_pool {
+            NameOrId::Id(id) => id,
+            NameOrId::Name(ref name) => {
+                let name = name.clone().into();
+                LookupPath::new(opctx, &self.db_datastore)
+                    .ip_pool_name(&name)
+                    .fetch()
+                    .await?
+                    .0
+                    .id()
+            }
+        };
 
         let id = Uuid::new_v4();
         let route = db::model::InternetGatewayIpPool::new(
             id,
+            ip_pool_id,
             authz_igw.id(),
-            params.clone(),
+            params.identity.clone(),
         );
         let route = self
             .db_datastore
@@ -274,7 +289,7 @@ impl super::Nexus {
         lookup: &lookup::InternetGateway<'_>,
         params: &params::InternetGatewayIpAddressCreate,
     ) -> CreateResult<db::model::InternetGatewayIpAddress> {
-        let (.., authz_igw, _db_addr) =
+        let (.., authz_igw, _) =
             lookup.fetch_for(authz::Action::CreateChild).await?;
 
         let id = Uuid::new_v4();

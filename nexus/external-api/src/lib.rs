@@ -2300,7 +2300,7 @@ pub trait NexusExternalApi {
     /// List addresses attached to an internet gateway.
     #[endpoint {
         method = GET,
-        path = "/v1/internet-gateway-ip-addrs",
+        path = "/v1/internet-gateway-ip-addresses",
         tags = ["vpcs"],
     }]
     async fn internet_gateway_ip_address_list(
@@ -2316,7 +2316,7 @@ pub trait NexusExternalApi {
     /// Attach ip pool to internet gateway
     #[endpoint {
         method = POST,
-        path = "/v1/internet-gateway-ip-addrs",
+        path = "/v1/internet-gateway-ip-addresses",
         tags = ["vpcs"],
     }]
     async fn internet_gateway_ip_address_create(
@@ -2328,7 +2328,7 @@ pub trait NexusExternalApi {
     /// Detach ip pool from internet gateway
     #[endpoint {
         method = DELETE,
-        path = "/v1/internet-gateway-ip-addrs/{address}",
+        path = "/v1/internet-gateway-ip-addresses/{address}",
         tags = ["vpcs"],
     }]
     async fn internet_gateway_ip_address_delete(

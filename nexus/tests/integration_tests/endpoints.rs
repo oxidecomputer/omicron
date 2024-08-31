@@ -282,8 +282,8 @@ pub static DEMO_INTERNET_GATEWAY_IP_POOL_CREATE: Lazy<
         name: DEMO_INTERNET_GATEWAY_NAME.clone(),
         description: String::from(""),
     },
-    ip_pool_id: uuid::Uuid::new_v4(),
-    gateway_id: uuid::Uuid::new_v4(),
+    ip_pool: NameOrId::Id(uuid::Uuid::new_v4()),
+    gateway: NameOrId::Id(uuid::Uuid::new_v4()),
 });
 pub static DEMO_INTERNET_GATEWAY_IP_ADDRESS_CREATE: Lazy<
     params::InternetGatewayIpAddressCreate,
@@ -292,7 +292,7 @@ pub static DEMO_INTERNET_GATEWAY_IP_ADDRESS_CREATE: Lazy<
         name: DEMO_INTERNET_GATEWAY_NAME.clone(),
         description: String::from(""),
     },
-    gateway_id: uuid::Uuid::new_v4(),
+    gateway: NameOrId::Id(uuid::Uuid::new_v4()),
     address: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
 });
 pub static DEMO_INTERNET_GATEWAY_IP_POOLS_URL: Lazy<String> = Lazy::new(|| {
@@ -303,7 +303,7 @@ pub static DEMO_INTERNET_GATEWAY_IP_POOLS_URL: Lazy<String> = Lazy::new(|| {
 });
 pub static DEMO_INTERNET_GATEWAY_IP_ADDRS_URL: Lazy<String> = Lazy::new(|| {
     format!(
-        "/v1/internet-gateway-ip-addrs?project={}&vpc={}&gateway={}",
+        "/v1/internet-gateway-ip-addresses?project={}&vpc={}&gateway={}",
         *DEMO_PROJECT_NAME, *DEMO_VPC_NAME, *DEMO_INTERNET_GATEWAY_NAME,
     )
 });
@@ -322,7 +322,7 @@ pub static DEMO_INTERNET_GATEWAY_IP_POOL_URL: Lazy<String> = Lazy::new(|| {
 });
 pub static DEMO_INTERNET_GATEWAY_IP_ADDR_URL: Lazy<String> = Lazy::new(|| {
     format!(
-        "/v1/internet-gateway-ip-addrs/{}?project={}&vpc={}&gateway={}",
+        "/v1/internet-gateway-ip-addresses/{}?project={}&vpc={}&gateway={}",
         *DEMO_INTERNET_GATEWAY_IP_ADDRESS_NAME,
         *DEMO_PROJECT_NAME,
         *DEMO_VPC_NAME,

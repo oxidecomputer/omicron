@@ -7,6 +7,7 @@ use db_macros::Resource;
 use ipnetwork::IpNetwork;
 use nexus_types::external_api::{params, views};
 use nexus_types::identity::Resource;
+use omicron_common::api::external::IdentityMetadataCreateParams;
 use uuid::Uuid;
 
 #[derive(Queryable, Insertable, Clone, Debug, Selectable, Resource)]
@@ -50,13 +51,14 @@ pub struct InternetGatewayIpPool {
 
 impl InternetGatewayIpPool {
     pub fn new(
-        pool_id: Uuid,
+        id: Uuid,
+        ip_pool_id: Uuid,
         internet_gateway_id: Uuid,
-        params: params::InternetGatewayIpPoolCreate,
+        identity: IdentityMetadataCreateParams,
     ) -> Self {
-        let identity =
-            InternetGatewayIpPoolIdentity::new(pool_id, params.identity);
-        Self { identity, internet_gateway_id, ip_pool_id: params.ip_pool_id }
+        let identity = InternetGatewayIpPoolIdentity::new(id, identity);
+        //InternetGatewayIpPoolIdentity::new(pool_id, params.identity);
+        Self { identity, internet_gateway_id, ip_pool_id }
     }
 }
 
