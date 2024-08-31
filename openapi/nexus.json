@@ -6556,14 +6556,6 @@
           },
           {
             "in": "query",
-            "name": "name_or_id",
-            "description": "A name or id to use when s electing BGP port settings",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
             "name": "page_token",
             "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {

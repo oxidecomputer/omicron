@@ -1565,9 +1565,7 @@ pub trait NexusExternalApi {
     }]
     async fn networking_bgp_announce_set_list(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<
-            PaginatedByNameOrId<params::OptionalBgpAnnounceSetSelector>,
-        >,
+        query_params: Query<PaginatedByNameOrId>,
     ) -> Result<HttpResponseOk<Vec<BgpAnnounceSet>>, HttpError>;
 
     /// Delete BGP announce set

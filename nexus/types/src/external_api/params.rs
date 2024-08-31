@@ -1675,13 +1675,6 @@ pub struct BgpAnnounceSetCreate {
     pub announcement: Vec<BgpAnnouncementCreate>,
 }
 
-/// Optionally select a BGP announce set by a name or id.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-pub struct OptionalBgpAnnounceSetSelector {
-    /// A name or id to use when s electing BGP port settings
-    pub name_or_id: Option<NameOrId>,
-}
-
 /// Select a BGP announce set by a name or id.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct BgpAnnounceSetSelector {
