@@ -337,7 +337,8 @@ dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
 dpd-client = { path = "clients/dpd-client" }
-dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
+# dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
+dropshot = { git = "https://github.com/seanmonstar/dropshot", branch = "hyper-v1-2.4-own-body", features = ["usdt-probes"] }
 dyn-clone = "1.0.17"
 either = "1.13.0"
 expectorate = "1.1.0"
@@ -366,7 +367,7 @@ gateway-types = { path = "gateway-types" }
 gethostname = "0.5.0"
 glob = "0.3.1"
 guppy = "0.17.7"
-headers = "0.3.9"
+headers = "0.4.0"
 heck = "0.5"
 hex = "0.4.3"
 hex-literal = "0.4.1"
@@ -376,13 +377,13 @@ hickory-resolver = "0.24.1"
 hickory-server = "0.24.1"
 highway = "1.2.0"
 hkdf = "0.12.4"
-http = "0.2.12"
+http = "1.1.0"
 httptest = "0.15.5"
 hubtools = { git = "https://github.com/oxidecomputer/hubtools.git", branch = "main" }
 humantime = "2.1.0"
-hyper = "0.14"
+hyper = "1.0"
 hyper-rustls = "0.26.0"
-hyper-staticfile = "0.9.5"
+hyper-staticfile = "0.10.0"
 illumos-utils = { path = "illumos-utils" }
 indent_write = "2.2.0"
 indexmap = "2.4.0"
@@ -408,8 +409,10 @@ macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
 mockall = "0.13"
 newtype_derive = "0.1.6"
-mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "9e0fe45ca3862176dc31ad8cc83f605f8a7e1a42" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "9e0fe45ca3862176dc31ad8cc83f605f8a7e1a42" }
+# mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "9e0fe45ca3862176dc31ad8cc83f605f8a7e1a42" }
+# ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "9e0fe45ca3862176dc31ad8cc83f605f8a7e1a42" }
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", branch = "hyper-v1" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", branch = "hyper-v1" }
 multimap = "0.10.0"
 nexus-auth = { path = "nexus/auth" }
 nexus-client = { path = "clients/nexus-client" }
@@ -491,11 +494,15 @@ pretty_assertions = "1.4.0"
 pretty-hex = "0.4.1"
 prettyplease = { version = "0.2.20", features = ["verbatim"] }
 proc-macro2 = "1.0"
-progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
-progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
+# progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
+# progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
+progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "dependabot/cargo/reqwest-0.12.4" }
+progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "dependabot/cargo/reqwest-0.12.4" }
 bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "24a74d0c76b6a63961ecef76acb1516b6e66c5c9" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "24a74d0c76b6a63961ecef76acb1516b6e66c5c9" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "24a74d0c76b6a63961ecef76acb1516b6e66c5c9" }
+# propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "24a74d0c76b6a63961ecef76acb1516b6e66c5c9" }
+# propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "24a74d0c76b6a63961ecef76acb1516b6e66c5c9" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", branch = "hyper-v1" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", branch = "hyper-v1" }
 proptest = "1.5.0"
 quote = "1.0"
 rand = "0.8.5"
@@ -509,7 +516,7 @@ reedline = "0.33.0"
 ref-cast = "1.0"
 regex = "1.10.6"
 regress = "0.9.1"
-reqwest = { version = "0.11", default-features = false }
+reqwest = { version = "0.12", default-features = false }
 ring = "0.17.8"
 rpassword = "7.3.1"
 rstest = "0.22.0"
@@ -583,7 +590,7 @@ tofino = { git = "https://github.com/oxidecomputer/tofino", branch = "main" }
 tokio = "1.38.1"
 tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1" ] }
 tokio-stream = "0.1.15"
-tokio-tungstenite = "0.20"
+tokio-tungstenite = "0.23.1"
 tokio-util = { version = "0.7.11", features = ["io", "io-util"] }
 toml = "0.8.19"
 toml_edit = "0.22.20"
