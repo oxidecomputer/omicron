@@ -14,20 +14,17 @@
 use anyhow::{anyhow, ensure, Context, Result};
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
-use cargo_metadata::DependencyKind;
-use cargo_metadata::Metadata;
 use cargo_metadata::Package;
 use clap::{Args, Parser, Subcommand};
+use omicron_ls_apis::AllApiMetadata;
+use omicron_ls_apis::ClientPackageName;
+use omicron_ls_apis::DeploymentUnit;
+use omicron_ls_apis::ServerComponent;
+use omicron_ls_apis::Workspace;
 use petgraph::dot::Dot;
 use serde::de::DeserializeOwned;
-use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use std::fmt::Display;
-use url::Url;
-
-#[macro_use]
-extern crate newtype_derive;
 
 #[derive(Parser)]
 #[command(
@@ -89,7 +86,6 @@ impl TryFrom<&LsApis> for LoadArgs {
 
         let api_manifest_path =
             args.api_manifest.clone().unwrap_or_else(|| {
-                // XXX TODO-cleanup can these be done in one join call?
                 self_manifest_dir
                     .join("..")
                     .join("..")
@@ -107,42 +103,6 @@ impl TryFrom<&LsApis> for LoadArgs {
         Ok(LoadArgs { api_manifest_path, extra_repos_path })
     }
 }
-
-#[derive(Clone, Deserialize, Ord, PartialOrd, Eq, PartialEq)]
-#[serde(transparent)]
-pub struct ClientPackageName(String);
-NewtypeDebug! { () pub struct ClientPackageName(String); }
-NewtypeDeref! { () pub struct ClientPackageName(String); }
-NewtypeDerefMut! { () pub struct ClientPackageName(String); }
-NewtypeDisplay! { () pub struct ClientPackageName(String); }
-NewtypeFrom! { () pub struct ClientPackageName(String); }
-
-#[derive(Clone, Deserialize, Ord, PartialOrd, Eq, PartialEq)]
-#[serde(transparent)]
-pub struct DeploymentUnit(String);
-NewtypeDebug! { () pub struct DeploymentUnit(String); }
-NewtypeDeref! { () pub struct DeploymentUnit(String); }
-NewtypeDerefMut! { () pub struct DeploymentUnit(String); }
-NewtypeDisplay! { () pub struct DeploymentUnit(String); }
-NewtypeFrom! { () pub struct DeploymentUnit(String); }
-
-#[derive(Clone, Deserialize, Ord, PartialOrd, Eq, PartialEq)]
-#[serde(transparent)]
-pub struct ServerPackageName(String);
-NewtypeDebug! { () pub struct ServerPackageName(String); }
-NewtypeDeref! { () pub struct ServerPackageName(String); }
-NewtypeDerefMut! { () pub struct ServerPackageName(String); }
-NewtypeDisplay! { () pub struct ServerPackageName(String); }
-NewtypeFrom! { () pub struct ServerPackageName(String); }
-
-#[derive(Clone, Deserialize, Ord, PartialOrd, Eq, PartialEq)]
-#[serde(transparent)]
-pub struct ServerComponent(String);
-NewtypeDebug! { () pub struct ServerComponent(String); }
-NewtypeDeref! { () pub struct ServerComponent(String); }
-NewtypeDerefMut! { () pub struct ServerComponent(String); }
-NewtypeDisplay! { () pub struct ServerComponent(String); }
-NewtypeFrom! { () pub struct ServerComponent(String); }
 
 struct Apis {
     server_component_units: BTreeMap<ServerComponent, DeploymentUnit>,
@@ -369,7 +329,7 @@ impl ApisHelper {
             api_metadata.client_pkgnames().collect();
         let mut errors = Vec::new();
         for (_, workspace) in &workspaces {
-            for client_pkgname in &workspace.progenitor_clients {
+            for client_pkgname in workspace.client_packages() {
                 if api_metadata.client_pkgname_lookup(client_pkgname).is_some()
                 {
                     // It's possible that we will find multiple references
@@ -420,309 +380,6 @@ impl ApisHelper {
                 .join(", ")
         );
         Ok(found_in_workspaces[0])
-    }
-}
-
-struct MyPackage {
-    name: String,
-    location: MyPackageLocation,
-}
-
-impl MyPackage {
-    fn new(workspace: &Metadata, pkg: &Package) -> Result<MyPackage> {
-        // Figure out where this thing is.  It's generally one of two places:
-        // (1) In a remote repository.  In that case, it will have a "source"
-        //     property that's the URL to a package.
-        // (2) Inside this workspace.  In that case, it will have no "source",
-        //     but it will have a manifest_path that's inside this workspace.
-        let location = if let Some(source) = &pkg.source {
-            let source_repo_str = &source.repr;
-            let repo_name =
-                source_repo_name(source_repo_str).with_context(|| {
-                    format!("parsing source {:?}", source_repo_str)
-                })?;
-
-            // Figuring out where in that repo the package lives is trickier.
-            // Here we encode some knowledge of where Cargo would have checked
-            // out the repo.
-            let cargo_home = std::env::var("CARGO_HOME")
-                .context("looking up CARGO_HOME in environment")?;
-            let cargo_path =
-                Utf8PathBuf::from(cargo_home).join("git").join("checkouts");
-            let path =
-                pkg.manifest_path.strip_prefix(&cargo_path).map_err(|_| {
-                    anyhow!(
-                    "expected non-local package manifest path ({:?}) to be \
-                     under {:?}",
-                    pkg.manifest_path,
-                    cargo_path,
-                )
-                })?;
-
-            // There should be two extra leading directory components here.
-            // Remove them.  We've gone too far if the file name isn't right
-            // after that.
-            let tail: Utf8PathBuf = path.components().skip(2).collect();
-            ensure!(
-                tail.file_name() == Some("Cargo.toml"),
-                "unexpected non-local package manifest path: {:?}",
-                pkg.manifest_path
-            );
-
-            let path = tail
-                .parent()
-                .ok_or_else(|| {
-                    anyhow!(
-                        "unexpected non-local package manifest path: {:?}",
-                        pkg.manifest_path
-                    )
-                })?
-                .to_owned();
-            MyPackageLocation::RemoteRepo { oxide_github_repo: repo_name, path }
-        } else {
-            let manifest_path = &pkg.manifest_path;
-            let relative_path = manifest_path
-                .strip_prefix(&workspace.workspace_root)
-                .map_err(|_| {
-                    anyhow!(
-                    "no \"source\", so assuming this package is inside this \
-                     repo, but its manifest path ({:?}) is not under the \
-                     workspace root ({:?})",
-                    manifest_path,
-                    &workspace.workspace_root
-                )
-                })?;
-            // XXX-dap commonize with above
-            ensure!(
-                relative_path.file_name() == Some("Cargo.toml"),
-                "unexpected manifest path for local package: {:?}",
-                manifest_path
-            );
-            let path = relative_path
-                .parent()
-                .ok_or_else(|| {
-                    anyhow!(
-                        "unexpected manifest path for local package: {:?}",
-                        manifest_path
-                    )
-                })?
-                .to_owned();
-
-            MyPackageLocation::Omicron { path }
-        };
-
-        Ok(MyPackage { name: pkg.name.clone(), location })
-    }
-}
-
-enum MyPackageLocation {
-    Omicron { path: Utf8PathBuf },
-    RemoteRepo { oxide_github_repo: String, path: Utf8PathBuf },
-}
-
-impl Display for MyPackageLocation {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            MyPackageLocation::Omicron { path } => {
-                write!(f, "omicron:{}", path)
-            }
-            MyPackageLocation::RemoteRepo { oxide_github_repo, path } => {
-                write!(f, "{}:{}", oxide_github_repo, path)
-            }
-        }
-    }
-}
-
-fn source_repo_name(raw: &str) -> Result<String> {
-    let repo_url =
-        Url::parse(raw).with_context(|| format!("parsing {:?}", raw))?;
-    ensure!(repo_url.scheme() == "git+https", "unsupported URL scheme",);
-    ensure!(
-        matches!(repo_url.host_str(), Some(h) if h == "github.com"),
-        "unexpected URL host (expected \"github.com\")",
-    );
-    let path_segments: Vec<_> = repo_url
-        .path_segments()
-        .ok_or_else(|| anyhow!("expected URL to contain path segments"))?
-        .collect();
-    ensure!(
-        path_segments.len() == 2,
-        "expected exactly two path segments in URL",
-    );
-    ensure!(
-        path_segments[0] == "oxidecomputer",
-        "expected repo under Oxide's GitHub organization",
-    );
-
-    Ok(path_segments[1].to_string())
-}
-
-fn direct_dependents(
-    workspace: &Metadata,
-    pkg_name: &str,
-) -> Result<Vec<MyPackage>> {
-    workspace
-        .packages
-        .iter()
-        .filter_map(|pkg| {
-            if pkg.dependencies.iter().any(|dep| {
-                matches!(
-                    dep.kind,
-                    DependencyKind::Normal | DependencyKind::Build
-                ) && dep.name == pkg_name
-            }) {
-                Some(
-                    MyPackage::new(workspace, pkg)
-                        .with_context(|| format!("package {:?}", pkg.name)),
-                )
-            } else {
-                None
-            }
-        })
-        .collect()
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct AllApiMetadata {
-    apis: Vec<ApiMetadata>,
-}
-
-impl AllApiMetadata {
-    fn apis(&self) -> impl Iterator<Item = &ApiMetadata> {
-        self.apis.iter()
-    }
-
-    fn client_pkgnames(&self) -> impl Iterator<Item = &ClientPackageName> {
-        self.apis().map(|api| &api.client_package_name)
-    }
-
-    fn server_components(&self) -> impl Iterator<Item = &ServerComponent> {
-        self.apis().map(|api| &api.server_component)
-    }
-
-    fn client_pkgname_lookup(&self, pkgname: &str) -> Option<&ApiMetadata> {
-        // XXX-dap this is worth optimizing but it would require a separate type
-        // -- this one would be the "raw" type.
-        self.apis.iter().find(|api| *api.client_package_name == pkgname)
-    }
-}
-
-#[derive(Deserialize)]
-struct ApiMetadata {
-    /// primary key for APIs is the client package name
-    client_package_name: ClientPackageName,
-    /// human-readable label for the API
-    label: String,
-    /// package name that the corresponding API lives in
-    // XXX-dap unused right now
-    server_package_name: ServerPackageName,
-    /// package name that the corresponding server lives in
-    server_component: ServerComponent,
-    /// name of the unit of deployment
-    group: Option<DeploymentUnit>,
-}
-
-impl ApiMetadata {
-    fn group(&self) -> DeploymentUnit {
-        self.group
-            .clone()
-            .unwrap_or_else(|| (*self.server_component).clone().into())
-    }
-}
-
-struct Workspace {
-    name: String,
-    all_packages: BTreeMap<String, Package>, // XXX-dap memory usage
-    progenitor_clients: BTreeSet<ClientPackageName>,
-}
-
-impl Workspace {
-    pub fn load(name: &str, extra_repos: Option<&Utf8Path>) -> Result<Self> {
-        eprintln!("loading metadata for workspace {name}");
-
-        let mut cmd = cargo_metadata::MetadataCommand::new();
-        if let Some(extra_repos) = extra_repos {
-            cmd.manifest_path(extra_repos.join(name).join("Cargo.toml"));
-        }
-        let metadata = cmd.exec().context("loading metadata")?;
-
-        // Find all packages with a direct non-dev, non-build dependency on
-        // "progenitor".  These generally ought to be suffixed with "-client".
-        let progenitor_clients = direct_dependents(&metadata, "progenitor")?
-            .into_iter()
-            .filter_map(|mypkg| {
-                if mypkg.name.ends_with("-client") {
-                    Some(ClientPackageName::from(mypkg.name))
-                } else {
-                    eprintln!("ignoring apparent non-client: {}", mypkg.name);
-                    None
-                }
-            })
-            .collect();
-
-        let all_packages = metadata
-            .packages
-            .iter()
-            .map(|p| (p.name.clone(), p.clone()))
-            .collect();
-
-        Ok(Workspace {
-            name: name.to_owned(),
-            all_packages,
-            progenitor_clients,
-        })
-    }
-
-    pub fn find_package(&self, pkgname: &str) -> Option<&Package> {
-        self.all_packages.get(pkgname)
-    }
-
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
-    fn walk_required_deps_recursively(
-        &self,
-        root: &Package,
-        func: &mut dyn FnMut(&Package, &Package),
-    ) -> Result<()> {
-        let mut remaining = vec![root];
-        let mut seen: BTreeSet<String> = BTreeSet::new();
-
-        while let Some(next) = remaining.pop() {
-            for d in &next.dependencies {
-                if seen.contains(&d.name) {
-                    continue;
-                }
-
-                seen.insert(d.name.clone());
-
-                if d.optional {
-                    continue;
-                }
-
-                if !matches!(
-                    d.kind,
-                    DependencyKind::Normal | DependencyKind::Build
-                ) {
-                    continue;
-                }
-
-                let pkg = self.find_package(&d.name).ok_or_else(|| {
-                    anyhow!(
-                        "package {:?} has dependency {:?} not in workspace \
-                     metadata",
-                        next.name,
-                        d.name
-                    )
-                })?;
-                func(next, pkg);
-                remaining.push(pkg);
-            }
-        }
-
-        Ok(())
     }
 }
 
