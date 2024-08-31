@@ -8,10 +8,11 @@ use serde::Deserialize;
 
 mod api_metadata;
 mod cargo;
+mod helpers;
 
-pub use api_metadata::AllApiMetadata;
-pub use api_metadata::ApiMetadata;
-pub use cargo::Workspace;
+pub use helpers::Apis;
+pub use helpers::ApisHelper;
+pub use helpers::LoadArgs;
 
 #[macro_use]
 extern crate newtype_derive;
