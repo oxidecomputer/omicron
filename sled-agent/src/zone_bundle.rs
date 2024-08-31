@@ -1637,8 +1637,6 @@ mod tests {
         let path =
             Utf8PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/src"));
         let usage = dir_size(&path).await.unwrap();
-        // Run `du -As /path/to/omicron/sled-agent/src`, which currently shows this
-        // directory is ~450 KiB.
         assert!(
             usage >= 1024 * 400,
             "sled-agent manifest directory disk usage not correct?"
@@ -1648,38 +1646,15 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg(any(
-        target_os = "illumos",
-        target_os = "linux",
-        target_os = "macos"
-    ))]
+    // Different operating systems ship slightly different versions of `du(1)`,
+    // with differing behaviors. We really only care that the `dir_size`
+    // function behaves the same as the illumos `du(1)`, so skip this test on
+    // other systems.
+    #[cfg_attr(not(target_os = "illumos"), ignore)]
     async fn test_dir_size_matches_du() {
-        // Each OS implements slightly different `du` options.
-        //
-        // Linux and illumos support the "apparent" size in bytes, though using
-        // different options. macOS doesn't support bytes at all, and has a minimum
-        // block size of 512.
-        //
-        // We'll suffer the lower resolution on macOS, and get higher resolution on
-        // the others.
-        cfg_if::cfg_if! {
-            if #[cfg(target_os = "illumos")] {
-                const BLOCK_SIZE: u64 = 1;
-                const DU_ARG: &str = "-A";
-            } else if #[cfg(target_os = "linux")] {
-                const BLOCK_SIZE: u64 = 1;
-                const DU_ARG: &str = "-b";
-            } else if #[cfg(target_os = "macos")] {
-                const BLOCK_SIZE: u64 = 512;
-                const DU_ARG: &str = "-k";
-            } else {
-                compile_error!("unsupported target OS");
-            }
-        }
-
         const DU: &str = "du";
         async fn dir_size_du(path: &Utf8PathBuf) -> Result<u64, BundleError> {
-            let args = &[DU_ARG, "-s", path.as_str()];
+            let args = &["-A", "-s", path.as_str()];
             let output =
                 Command::new(DU).args(args).output().await.map_err(|err| {
                     BundleError::Command {
@@ -1706,9 +1681,7 @@ mod tests {
             let Some(part) = line.trim().split_ascii_whitespace().next() else {
                 return Err(err("no disk usage size computed in output"));
             };
-            part.parse()
-                .map(|x: u64| x.saturating_mul(BLOCK_SIZE))
-                .map_err(|_| err("failed to parse du output"))
+            part.parse().map_err(|_| err("failed to parse du output"))
         }
 
         let du_output =
@@ -1726,18 +1699,11 @@ mod tests {
         eprintln!("dir_size({path}) took {:?}", t0.elapsed());
 
         let t0 = std::time::Instant::now();
+        // Run `du -As /path/to/omicron/sled-agent/src`, which currently shows this
+        // directory is ~450 KiB.
         let du_usage =
             dbg!(dir_size_du(&path).await).expect("running du failed!");
         eprintln!("du -s {path} took {:?}", t0.elapsed());
-
-        // Round up the Rust disk usage result to `du`'s block size on this
-        // system.
-        let usage = if BLOCK_SIZE > 1 {
-            eprintln!("rounding up to `du(1)`'s block size of {BLOCK_SIZE}B");
-            dbg!(usage.div_ceil(BLOCK_SIZE) * BLOCK_SIZE)
-        } else {
-            usage
-        };
 
         assert_eq!(
             usage, du_usage,
