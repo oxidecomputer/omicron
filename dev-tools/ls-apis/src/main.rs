@@ -4,6 +4,13 @@
 
 //! Show information about Progenitor-based APIs
 
+// XXX-dap some ideas:
+// - another cleanup pass
+//   - move stuff into separate files
+//   - see XXX-dap
+// - summarize metadata (e.g., write a table of APIs)
+// - asciidoc output
+
 use anyhow::{anyhow, ensure, Context, Result};
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
@@ -12,11 +19,15 @@ use cargo_metadata::Metadata;
 use cargo_metadata::Package;
 use clap::{Args, Parser, Subcommand};
 use petgraph::dot::Dot;
+use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt::Display;
 use url::Url;
+
+#[macro_use]
+extern crate newtype_derive;
 
 #[derive(Parser)]
 #[command(
@@ -25,6 +36,18 @@ use url::Url;
     about = "Show information about Progenitor-based APIs"
 )]
 struct LsApis {
+    /// path to metadata about APIs
+    #[arg(long)]
+    api_manifest: Option<Utf8PathBuf>,
+
+    /// path to metadata about Omicron packages
+    #[arg(long)]
+    package_manifest: Option<Utf8PathBuf>,
+
+    /// path to directory with clones of dependent repositories
+    #[arg(long)]
+    extra_repos: Option<Utf8PathBuf>,
+
     #[command(subcommand)]
     cmd: Cmds,
 }
@@ -37,130 +60,383 @@ enum Cmds {
 #[derive(Args)]
 pub struct ShowArgs {
     #[arg(long)]
-    api_manifest: Option<Utf8PathBuf>,
-
-    #[arg(long)]
-    package_manifest: Option<Utf8PathBuf>,
-
-    #[arg(long)]
-    extra_repos: Option<Utf8PathBuf>,
-
-    #[arg(long)]
     adoc: bool,
 }
 
 fn main() -> Result<()> {
-    let args = LsApis::parse();
-    match args.cmd {
-        Cmds::Show(args) => run_show(args),
+    let cli_args = LsApis::parse();
+    let load_args = LoadArgs::try_from(&cli_args)?;
+    let apis = Apis::load(load_args)?;
+
+    match cli_args.cmd {
+        Cmds::Show(args) => run_show(&apis, args),
     }
 }
 
-pub fn run_show(args: ShowArgs) -> Result<()> {
-    let manifest_dir = Utf8PathBuf::from(
-        std::env::var("CARGO_MANIFEST_DIR")
-            .context("looking up CARGO_MANIFEST_DIR in environment")?,
-    );
+fn run_show(apis: &Apis, args: ShowArgs) -> Result<()> {
+    println!("{}", apis.dot_by_unit());
+    Ok(())
+}
 
-    // First, read the metadata we have about APIs.
-    let api_manifest_path = args.api_manifest.clone().unwrap_or_else(|| {
-        manifest_dir.join("..").join("..").join("api-manifest.toml")
-    });
-    let api_manifest: AllApiMetadata = toml::from_str(
-        &std::fs::read_to_string(&api_manifest_path).with_context(|| {
-            format!("read API manifest {:?}", &api_manifest_path)
-        })?,
-    )
-    .with_context(|| format!("parse API manifest {:?}", &api_manifest_path))?;
+struct LoadArgs {
+    api_manifest_path: Utf8PathBuf,
+    package_manifest_path: Utf8PathBuf,
+    extra_repos_path: Utf8PathBuf,
+}
 
-    let apis_by_client_package: BTreeMap<_, _> = api_manifest
-        .apis
-        .into_iter()
-        .map(|api| (api.client_package_name.clone(), api))
-        .collect();
+impl TryFrom<&LsApis> for LoadArgs {
+    type Error = anyhow::Error;
 
-    // Now, for each repo, load its metadata.  Omicron is a little special since
-    // we're already in that repo.
-    let mut metadata_by_repo = BTreeMap::new();
-    metadata_by_repo.insert(
-        String::from("omicron"),
-        Workspace::load("omicron", None)
-            .context("loading Omicron repo metadata")?,
-    );
-    let extra_repos = args.extra_repos.clone().unwrap_or_else(|| {
-        manifest_dir.join("..").join("..").join("extra_repos")
-    });
-    for repo in &api_manifest.extra_repos {
-        metadata_by_repo.insert(
-            repo.clone(),
-            Workspace::load(repo, Some(&extra_repos))
-                .with_context(|| format!("load metadata for repo {}", repo))?,
-        );
+    fn try_from(args: &LsApis) -> Result<Self> {
+        let self_manifest_dir_str = std::env::var("CARGO_MANIFEST_DIR")
+            .context("expected CARGO_MANIFEST_DIR in environment")?;
+        let self_manifest_dir = Utf8PathBuf::from(self_manifest_dir_str);
+
+        let api_manifest_path =
+            args.api_manifest.clone().unwrap_or_else(|| {
+                // XXX TODO-cleanup can these be done in one join call?
+                self_manifest_dir
+                    .join("..")
+                    .join("..")
+                    .join("api-manifest.toml")
+            });
+        let package_manifest_path =
+            args.package_manifest.clone().unwrap_or_else(|| {
+                self_manifest_dir
+                    .join("..")
+                    .join("..")
+                    .join("package-manifest.toml")
+            });
+        let extra_repos_path = args.extra_repos.clone().unwrap_or_else(|| {
+            self_manifest_dir
+                .join("..")
+                .join("..")
+                .join("out")
+                .join("ls-apis")
+                .join("checkout")
+        });
+
+        Ok(LoadArgs {
+            api_manifest_path,
+            package_manifest_path,
+            extra_repos_path,
+        })
     }
+}
 
-    let mut metadata_used = BTreeSet::new();
-    for (_, workspace) in &metadata_by_repo {
-        println!("WORKSPACE: {}", workspace.name);
-        for (_, c) in &workspace.progenitor_clients {
-            let metadata = apis_by_client_package.get(&c.me.name);
-            if metadata.is_none() {
-                eprintln!(
-                    "missing metadata for client package: {:#}",
-                    c.me.name
-                );
+#[derive(Clone, Deserialize, Ord, PartialOrd, Eq, PartialEq)]
+#[serde(transparent)]
+pub struct ClientPackageName(String);
+NewtypeDebug! { () pub struct ClientPackageName(String); }
+NewtypeDeref! { () pub struct ClientPackageName(String); }
+NewtypeDerefMut! { () pub struct ClientPackageName(String); }
+NewtypeDisplay! { () pub struct ClientPackageName(String); }
+NewtypeFrom! { () pub struct ClientPackageName(String); }
+
+#[derive(Clone, Deserialize, Ord, PartialOrd, Eq, PartialEq)]
+#[serde(transparent)]
+pub struct DeploymentUnit(String);
+NewtypeDebug! { () pub struct DeploymentUnit(String); }
+NewtypeDeref! { () pub struct DeploymentUnit(String); }
+NewtypeDerefMut! { () pub struct DeploymentUnit(String); }
+NewtypeDisplay! { () pub struct DeploymentUnit(String); }
+NewtypeFrom! { () pub struct DeploymentUnit(String); }
+
+#[derive(Clone, Deserialize, Ord, PartialOrd, Eq, PartialEq)]
+#[serde(transparent)]
+pub struct ServerPackageName(String);
+NewtypeDebug! { () pub struct ServerPackageName(String); }
+NewtypeDeref! { () pub struct ServerPackageName(String); }
+NewtypeDerefMut! { () pub struct ServerPackageName(String); }
+NewtypeDisplay! { () pub struct ServerPackageName(String); }
+NewtypeFrom! { () pub struct ServerPackageName(String); }
+
+#[derive(Clone, Deserialize, Ord, PartialOrd, Eq, PartialEq)]
+#[serde(transparent)]
+pub struct ServerComponent(String);
+NewtypeDebug! { () pub struct ServerComponent(String); }
+NewtypeDeref! { () pub struct ServerComponent(String); }
+NewtypeDerefMut! { () pub struct ServerComponent(String); }
+NewtypeDisplay! { () pub struct ServerComponent(String); }
+NewtypeFrom! { () pub struct ServerComponent(String); }
+
+struct Apis {
+    server_component_units: BTreeMap<ServerComponent, DeploymentUnit>,
+    unit_server_components: BTreeMap<DeploymentUnit, Vec<ServerComponent>>,
+    deployment_units: BTreeSet<DeploymentUnit>,
+    apis_consumed: BTreeMap<ServerComponent, BTreeSet<ClientPackageName>>,
+    api_metadata: AllApiMetadata,
+}
+
+impl Apis {
+    pub fn load(args: LoadArgs) -> Result<Apis> {
+        let helper = ApisHelper::load(args)?;
+        if !helper.warnings.is_empty() {
+            for e in &helper.warnings {
+                eprintln!("warning: {:#}", e);
             }
-
-            metadata_used.insert(c.me.name.clone());
-            print_package(c, &args);
         }
 
-        println!("");
+        // Collect the distinct set of deployment units for all the APIs.
+        let deployment_units: BTreeSet<_> =
+            helper.api_metadata.apis().map(|a| a.group().clone()).collect();
+
+        // Create a mapping from server package to its deployment unit.
+        let server_component_units: BTreeMap<_, _> = helper
+            .api_metadata
+            .apis()
+            .map(|a| (a.server_component.clone(), a.group().clone()))
+            .collect();
+
+        // Compute a reverse mapping from deployment unit to the server
+        // packages deployed inside it.
+        let mut unit2components = BTreeMap::new();
+        for (server_component, deployment_unit) in &server_component_units {
+            let list = unit2components
+                .entry(deployment_unit.clone())
+                .or_insert_with(Vec::new);
+            list.push(server_component.clone());
+        }
+
+        // For each server component, determine which client APIs it depends on
+        // by walking its dependencies.
+        // XXX-dap figure out how to abstract this
+        let mut apis_consumed = BTreeMap::new();
+        for server_pkgname in helper.api_metadata.server_components() {
+            let (workspace, pkg) =
+                helper.find_package_workspace(server_pkgname)?;
+            let mut clients_used = BTreeSet::new();
+            workspace
+                .walk_required_deps_recursively(
+                    pkg,
+                    &mut |parent: &Package, p: &Package| {
+                        // TODO
+                        // omicron_common depends on mg-admin-client solely to
+                        // impl some `From` conversions.  That makes it look
+                        // like just about everything depends on
+                        // mg-admin-client, which isn't true.  We should
+                        // consider reversing this, since most clients put those
+                        // conversions into the client rather than
+                        // omicron_common.  But for now, let's just ignore this
+                        // particular dependency.
+                        if p.name == "mg-admin-client"
+                            && parent.name == "omicron-common"
+                        {
+                            return;
+                        }
+
+                        // TODO internal-dns depends on dns-service-client to use
+                        // its types.  They're only used when *configuring* DNS,
+                        // which is only done in a couple of components.  But
+                        // many components use internal-dns to *read* DNS.  So
+                        // like above, this makes it look like everything uses
+                        // the DNS server API, but that's not true.  We should
+                        // consider splitting this crate in two.  But for now,
+                        // just ignore the specific dependency from internal-dns
+                        // to dns-service-client.  If a consumer actually calls
+                        // the DNS server, it will have a separate dependency.
+                        if p.name == "dns-service-client"
+                            && (parent.name == "internal-dns")
+                        {
+                            return;
+                        }
+
+                        // TODO nexus-types depends on dns-service-client and
+                        // gateway-client for defining some types, but again,
+                        // this doesn't mean that somebody using nexus-types is
+                        // actually calling out to these services.  If they
+                        // were, they'd need to have some other dependency on
+                        // them.
+                        if parent.name == "nexus-types"
+                            && (p.name == "dns-service-client"
+                                || p.name == "gateway-client")
+                        {
+                            return;
+                        }
+
+                        // TODO
+                        // This one's debatable.  Everything with an Oximeter
+                        // producer talks to Nexus.  But let's ignore those for
+                        // now.  Maybe we could improve this by creating a
+                        // separate API inside Nexus for this?
+                        if parent.name == "oximeter-producer"
+                            && p.name == "nexus-client"
+                        {
+                            eprintln!(
+                                "warning: ignoring legit dependency from \
+                         oximeter-producer -> nexus_client"
+                            );
+                            return;
+                        }
+
+                        if helper
+                            .api_metadata
+                            .client_pkgname_lookup(&p.name)
+                            .is_some()
+                        {
+                            clients_used.insert(p.name.clone().into());
+                        }
+                    },
+                )
+                .with_context(|| {
+                    format!(
+                        "iterating dependencies of workspace {:?} package {:?}",
+                        workspace.name(),
+                        server_pkgname
+                    )
+                })?;
+
+            apis_consumed.insert(server_pkgname.clone(), clients_used);
+        }
+
+        Ok(Apis {
+            server_component_units,
+            deployment_units,
+            unit_server_components: unit2components,
+            apis_consumed,
+            api_metadata: helper.api_metadata,
+        })
     }
 
-    let clients_in_metadata =
-        apis_by_client_package.keys().cloned().collect::<BTreeSet<_>>();
-    let metadata_extra =
-        clients_in_metadata.difference(&metadata_used).collect::<Vec<_>>();
-    for extra in metadata_extra {
-        eprintln!("unused metadata: {}", extra);
+    fn all_deployment_unit_components(
+        &self,
+    ) -> impl Iterator<Item = (&DeploymentUnit, &Vec<ServerComponent>)> {
+        self.unit_server_components.iter()
     }
 
-    // Parse the package manifest.
-    //    let pkg_file = args
-    //        .package_manifest
-    //        .as_ref()
-    //        .map(|c| Ok::<_, anyhow::Error>(c.clone()))
-    //        .unwrap_or_else(|| {
-    //            Ok(Utf8PathBuf::from(
-    //                std::env::var("CARGO_MANIFEST_DIR")
-    //                    .context("looking up CARGO_MANIFEST_DIR in environment")?,
-    //            )
-    //            .join("..")
-    //            .join("..")
-    //            .join("package-manifest.toml"))
-    //        })?;
-    //    let pkgs = parse_packages(&pkg_file)?;
-    //    pkgs.dump();
+    fn component_apis_consumed(
+        &self,
+        server_component: &ServerComponent,
+    ) -> Box<dyn Iterator<Item = &ClientPackageName> + '_> {
+        match self.apis_consumed.get(server_component) {
+            Some(l) => Box::new(l.iter()),
+            None => Box::new(std::iter::empty()),
+        }
+    }
 
-    // for c in &progenitor_clients {
-    //     let metadata = apis_by_client_package.remove(c.me.name);
-    //     if metadata.is_none() {
-    //         eprintln!("missing metadata for client package: {:#}", c.me.name);
-    //     }
-    //     // print_package(c, &args);
-    // }
+    pub fn dot_by_unit(&self) -> String {
+        let mut graph = petgraph::graph::Graph::new();
+        let nodes: BTreeMap<_, _> = self
+            .deployment_units
+            .iter()
+            .map(|name| (name, graph.add_node(name)))
+            .collect();
 
-    // for (client_package, _) in apis_by_client_package {
-    //     eprintln!("metadata matches no known package: {}", client_package);
-    // }
+        // Now walk through the deployment units, walk through each one's server
+        // packages, walk through each one of the clients used by those, and
+        // create a corresponding edge.
+        for (deployment_unit, server_components) in
+            self.all_deployment_unit_components()
+        {
+            let my_node = nodes.get(deployment_unit).unwrap();
+            for server_pkg in server_components {
+                for client_pkg in self.component_apis_consumed(server_pkg) {
+                    let api = self
+                        .api_metadata
+                        .client_pkgname_lookup(client_pkg)
+                        .unwrap();
+                    let other_component = &api.server_component;
+                    let other_unit = self
+                        .server_component_units
+                        .get(other_component)
+                        .unwrap();
+                    let other_node = nodes.get(other_unit).unwrap();
+                    graph.add_edge(*my_node, *other_node, client_pkg.clone());
+                }
+            }
+        }
 
-    let graph = make_graph(
-        &apis_by_client_package,
-        metadata_by_repo.values().collect(),
-    )?;
-    println!("{}", graph);
+        Dot::new(&graph).to_string()
+    }
+}
 
-    Ok(())
+struct ApisHelper {
+    api_metadata: AllApiMetadata,
+    workspaces: BTreeMap<String, Workspace>,
+    warnings: Vec<anyhow::Error>,
+}
+
+impl ApisHelper {
+    pub fn load(args: LoadArgs) -> Result<ApisHelper> {
+        // Load the API manifest.
+        let api_metadata: AllApiMetadata =
+            parse_toml_file(&args.api_manifest_path)?;
+
+        // Load information about each of the workspaces.
+        let mut workspaces = BTreeMap::new();
+        workspaces.insert(
+            String::from("omicron"),
+            Workspace::load("omicron", None)
+                .context("loading Omicron workspace metadata")?,
+        );
+
+        for repo in ["crucible", "maghemite", "propolis", "dendrite"] {
+            workspaces.insert(
+                String::from(repo),
+                Workspace::load(repo, Some(&args.extra_repos_path))
+                    .with_context(|| {
+                        format!("load metadata for workspace {:?}", repo)
+                    })?,
+            );
+        }
+
+        // Validate the metadata against what we found in the workspaces.
+        let mut client_pkgnames_unused: BTreeSet<_> =
+            api_metadata.client_pkgnames().collect();
+        let mut errors = Vec::new();
+        for (_, workspace) in &workspaces {
+            for (client_pkgname, _) in &workspace.progenitor_clients {
+                if api_metadata.client_pkgname_lookup(client_pkgname).is_some()
+                {
+                    // It's possible that we will find multiple references
+                    // to the same client package name.  That's okay.
+                    client_pkgnames_unused.remove(client_pkgname);
+                } else {
+                    errors.push(anyhow!(
+                        "found client package missing from API manifest: {}",
+                        client_pkgname
+                    ));
+                }
+            }
+        }
+
+        for c in client_pkgnames_unused {
+            errors.push(anyhow!(
+                "API manifest refers to unknown client package: {}",
+                c
+            ));
+        }
+
+        Ok(ApisHelper { api_metadata, workspaces, warnings: errors })
+    }
+
+    pub fn find_package_workspace(
+        &self,
+        server_pkgname: &str,
+    ) -> Result<(&Workspace, &Package)> {
+        // Figure out which workspace has this package.
+        let found_in_workspaces: Vec<_> = self
+            .workspaces
+            .values()
+            .filter_map(|w| w.find_package(&server_pkgname).map(|p| (w, p)))
+            .collect();
+        ensure!(
+            !found_in_workspaces.is_empty(),
+            "server package {:?} was not found in any workspace",
+            server_pkgname
+        );
+        ensure!(
+            found_in_workspaces.len() == 1,
+            "server package {:?} was found in more than one workspace: {}",
+            server_pkgname,
+            found_in_workspaces
+                .into_iter()
+                .map(|(w, _)| w.name())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        Ok(found_in_workspaces[0])
+    }
 }
 
 struct ClientPackage {
@@ -334,201 +610,59 @@ fn direct_dependents(
         .collect()
 }
 
-// fn parse_packages(pkg_file: &Utf8Path) -> Result<OmicronPackageConfig> {
-//     let contents = std::fs::read_to_string(pkg_file)
-//         .with_context(|| format!("read package file {:?}", pkg_file))?;
-//     let raw_packages =
-//         toml::from_str::<omicron_zone_package::config::Config>(&contents)
-//             .with_context(|| format!("parse package file {:?}", pkg_file))?;
-//     Ok(OmicronPackageConfig::from(raw_packages))
-// }
-//
-// struct OmicronPackageConfig {
-//     deployable_zones: Vec<OmicronPackage>,
-//     dont_care: Vec<(OmicronPackage, &'static str)>,
-//     dont_know: Vec<OmicronPackage>,
-// }
-//
-// struct OmicronPackage {
-//     name: String,
-//     package: omicron_zone_package::package::Package,
-// }
-//
-// impl From<(String, omicron_zone_package::package::Package)> for OmicronPackage {
-//     fn from(
-//         (pkgname, package): (String, omicron_zone_package::package::Package),
-//     ) -> Self {
-//         OmicronPackage { name: pkgname, package }
-//     }
-// }
-//
-// impl From<omicron_zone_package::config::Config> for OmicronPackageConfig {
-//     fn from(raw: omicron_zone_package::config::Config) -> Self {
-//         let mut deployable_zones = Vec::new();
-//         let mut dont_care = Vec::new();
-//         let mut dont_know = Vec::new();
-//         for (pkgname, package) in raw.packages {
-//             let ompkg = OmicronPackage::from((pkgname, package));
-//
-//             match &ompkg.package.output {
-//                 omicron_zone_package::package::PackageOutput::Zone {
-//                     intermediate_only: true,
-//                 } => {
-//                     dont_care.push((ompkg, "marked intermediate-only"));
-//                 }
-//                 omicron_zone_package::package::PackageOutput::Zone {
-//                     intermediate_only: false,
-//                 } => {
-//                     deployable_zones.push(ompkg);
-//                 }
-//                 omicron_zone_package::package::PackageOutput::Tarball => {
-//                     dont_know.push(ompkg);
-//                 }
-//             }
-//         }
-//
-//         OmicronPackageConfig { deployable_zones, dont_care, dont_know }
-//     }
-// }
-//
-// impl OmicronPackageConfig {
-//     pub fn dump(&self) {
-//         println!("deployable zones");
-//         for ompkg in &self.deployable_zones {
-//             println!("    {}", ompkg.name);
-//         }
-//         println!("");
-//
-//         println!("stuff I think we can ignore");
-//         for (ompkg, reason) in &self.dont_care {
-//             println!("    {}: {}", ompkg.name, reason);
-//         }
-//         println!("");
-//
-//         println!("stuff I'm not sure about yet");
-//         for ompkg in &self.dont_know {
-//             println!("    {}", ompkg.name);
-//         }
-//         println!("");
-//     }
-//     //    pub fn dump(&self) {
-//     //        for (pkgname, package) in &self.raw.packages {
-//     //            print!("found Omicron package {:?}: ", pkgname);
-//     //            match &package.source {
-//     //                omicron_zone_package::package::PackageSource::Local {
-//     //                    blobs,
-//     //                    buildomat_blobs,
-//     //                    rust,
-//     //                    paths,
-//     //                } => {
-//     //                    if rust.is_some() {
-//     //                        println!("rust package");
-//     //                    } else {
-//     //                        println!("");
-//     //                    }
-//     //
-//     //                    if let Some(blobs) = blobs {
-//     //                        println!("    blobs: ({})", blobs.len());
-//     //                        for b in blobs {
-//     //                            println!("        {}", b);
-//     //                        }
-//     //                    }
-//     //
-//     //                    if let Some(buildomat_blobs) = blobs {
-//     //                        println!(
-//     //                            "    buildomat blobs: ({})",
-//     //                            buildomat_blobs.len()
-//     //                        );
-//     //                        for b in buildomat_blobs {
-//     //                            println!("        {}", b);
-//     //                        }
-//     //                    }
-//     //
-//     //                    if !paths.is_empty() {
-//     //                        println!("    plus some mapped paths: {}", paths.len());
-//     //                    }
-//     //                }
-//     //                omicron_zone_package::package::PackageSource::Prebuilt {
-//     //                    repo,
-//     //                    commit,
-//     //                    sha256,
-//     //                } => {
-//     //                    println!("prebuilt from repo: {repo}");
-//     //                }
-//     //                omicron_zone_package::package::PackageSource::Composite {
-//     //                    packages,
-//     //                } => {
-//     //                    println!(
-//     //                        "composite of: {}",
-//     //                        packages
-//     //                            .iter()
-//     //                            .map(|p| format!("{:?}", p))
-//     //                            .collect::<Vec<_>>()
-//     //                            .join(", ")
-//     //                    );
-//     //                }
-//     //                omicron_zone_package::package::PackageSource::Manual => {
-//     //                    println!("ERROR: unsupported manual package");
-//     //                }
-//     //            }
-//     //        }
-//     //    }
-// }
-//
-fn print_package(p: &ClientPackage, args: &ShowArgs) {
-    if !args.adoc {
-        println!("  package: {} from {}", p.me.name, p.me.location);
-        for d in &p.rdeps {
-            println!("    consumer: {} from {}", d.name, d.location);
-        }
-    } else {
-        println!("|?");
-        println!("|?");
-        println!("|{}", p.me.location);
-        print!(
-            "|{}",
-            p.rdeps
-                .iter()
-                .map(|d| d.location.to_string())
-                .collect::<Vec<_>>()
-                .join(",\n ")
-        );
-        println!("\n");
-    }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AllApiMetadata {
+    apis: Vec<ApiMetadata>,
 }
 
-#[derive(Deserialize)]
-struct AllApiMetadata {
-    extra_repos: Vec<String>,
-    apis: Vec<ApiMetadata>,
+impl AllApiMetadata {
+    fn apis(&self) -> impl Iterator<Item = &ApiMetadata> {
+        self.apis.iter()
+    }
+
+    fn client_pkgnames(&self) -> impl Iterator<Item = &ClientPackageName> {
+        self.apis().map(|api| &api.client_package_name)
+    }
+
+    fn server_components(&self) -> impl Iterator<Item = &ServerComponent> {
+        self.apis().map(|api| &api.server_component)
+    }
+
+    fn client_pkgname_lookup(&self, pkgname: &str) -> Option<&ApiMetadata> {
+        // XXX-dap this is worth optimizing but it would require a separate type
+        // -- this one would be the "raw" type.
+        self.apis.iter().find(|api| *api.client_package_name == pkgname)
+    }
 }
 
 #[derive(Deserialize)]
 struct ApiMetadata {
     /// primary key for APIs is the client package name
-    client_package_name: String,
+    client_package_name: ClientPackageName,
     /// human-readable label for the API
     label: String,
     /// package name that the corresponding API lives in
     // XXX-dap unused right now
-    server_package_name: String,
+    server_package_name: ServerPackageName,
     /// package name that the corresponding server lives in
-    server_component: String,
+    server_component: ServerComponent,
     /// name of the unit of deployment
-    group: Option<String>,
+    group: Option<DeploymentUnit>,
 }
 
 impl ApiMetadata {
-    fn group(&self) -> &str {
-        self.group.as_ref().unwrap_or_else(|| &self.server_component)
+    fn group(&self) -> DeploymentUnit {
+        self.group
+            .clone()
+            .unwrap_or_else(|| (*self.server_component).clone().into())
     }
 }
 
 struct Workspace {
     name: String,
-    metadata: cargo_metadata::Metadata,
     all_packages: BTreeMap<String, Package>, // XXX-dap memory usage
-    progenitor_clients: BTreeMap<String, ClientPackage>,
+    progenitor_clients: BTreeMap<ClientPackageName, ClientPackage>,
 }
 
 impl Workspace {
@@ -555,7 +689,7 @@ impl Workspace {
             })
             .collect::<Result<Vec<_>>>()?
             .into_iter()
-            .map(|cpkg| (cpkg.me.name.to_owned(), cpkg))
+            .map(|cpkg| (cpkg.me.name.clone().into(), cpkg))
             .collect();
 
         let all_packages = metadata
@@ -566,7 +700,6 @@ impl Workspace {
 
         Ok(Workspace {
             name: name.to_owned(),
-            metadata,
             all_packages,
             progenitor_clients,
         })
@@ -579,233 +712,53 @@ impl Workspace {
     pub fn name(&self) -> &str {
         &self.name
     }
-}
 
-// XXX-dap Okay, so now I have all the information I think I could want in
-// memory.  Which is: I have the metadata, plus the set of all packages
-// referenced in all relevant workspaces.  Now what do I do with it?
-//
-// In the end, my goal is to:
-//
-// - map "server" packages to top-level deployable components
-//   I can do this manually or I can presumably do it with the package manifest.
-// - make a DAG
-//   - nodes: deployable components (could start with server packages)
-//   - edges: component depends on a client of another API
-//
-// To do this, I need to do ONE of the following:
-//
-// - for each server package, walk its dependencies recursively and note each of
-//   known client packages that it uses
-// - for each client package, walk its reverse dependencies recursively and note
-//   each of the known server packages
-//
-// but this is tricky because:
-//
-// - client packages could have reverse dependencies in any repo, and I will
-//   likely find a lot of dups
-// - server packages have dependencies in other repos, too
-//   - If we start from the server, the entire chain should be represented in
-//     the server's workspace's metadata
-//   - by contrast, if we start from the client, it may have reverse-deps in
-//     other workspaces and we have to try all of them
-fn make_graph(
-    apis_by_client_package: &BTreeMap<String, ApiMetadata>,
-    workspaces: Vec<&Workspace>,
-) -> Result<String> {
-    let mut graph = petgraph::graph::Graph::new();
+    fn walk_required_deps_recursively(
+        &self,
+        root: &Package,
+        func: &mut dyn FnMut(&Package, &Package),
+    ) -> Result<()> {
+        let mut remaining = vec![root];
+        let mut seen: BTreeSet<String> = BTreeSet::new();
 
-    // Some server components have more than one API in them.  Deduplicate the
-    // server component names.  We'll iterate these to compute relationships.
-    let server_component_groups: BTreeMap<_, _> = apis_by_client_package
-        .values()
-        .map(|api| (&api.server_component, api.group()))
-        .collect();
-
-    // Identify the distinct units of deployment.  Create a graph node for each
-    // one.
-    let deployment_unit_names: BTreeSet<_> =
-        apis_by_client_package.values().map(|api| api.group()).collect();
-    let nodes: BTreeMap<_, _> = deployment_unit_names
-        .into_iter()
-        .map(|name| (name, graph.add_node(name)))
-        .collect();
-
-    for (server_pkgname, group) in &server_component_groups {
-        // Figure out which workspace has this package.
-        // XXX-dap make some data structures maybe?
-        let found_in_workspaces: Vec<_> = workspaces
-            .iter()
-            .filter_map(|w| w.find_package(&server_pkgname).map(|p| (w, p)))
-            .collect();
-        if found_in_workspaces.is_empty() {
-            eprintln!(
-                "error: server package {:?} was not found in any workspace",
-                server_pkgname
-            );
-            // XXX-dap exit non-zero
-            continue;
-        }
-
-        if found_in_workspaces.len() > 1 {
-            eprintln!(
-                "error: server package {:?} was found in more than one \
-                 workspace: {}",
-                server_pkgname,
-                found_in_workspaces
-                    .into_iter()
-                    .map(|(w, _)| w.name())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            );
-            // XXX-dap exit non-zero
-            continue;
-        }
-
-        let (found_workspace, found_server_package) = found_in_workspaces[0];
-        eprintln!(
-            "server package {} found in repo {}",
-            server_pkgname,
-            found_workspace.name(),
-        );
-
-        // Walk the server package's dependencies recursively, keeping track of
-        // known clients used.
-        let mut clients_used = BTreeSet::new();
-        walk_required_deps_recursively(
-            &found_workspace,
-            &found_server_package,
-            &mut |parent: &Package, p: &Package| {
-                // TODO
-                // omicron_common depends on mg-admin-client solely to impl
-                // some `From` conversions.  That makes it look like just about
-                // everything depends on mg-admin-client, which isn't true.  We
-                // should consider reversing this, since most clients put those
-                // conversions into the client rather than omicron_common.  But
-                // for now, let's just ignore this particular dependency.
-                if p.name == "mg-admin-client"
-                    && parent.name == "omicron-common"
-                {
-                    return;
+        while let Some(next) = remaining.pop() {
+            for d in &next.dependencies {
+                if seen.contains(&d.name) {
+                    continue;
                 }
 
-                // TODO internal-dns depends on dns-service-client to use its
-                // types.  They're only used when *configuring* DNS, which is
-                // only done in a couple of components.  But many components use
-                // internal-dns to *read* DNS.  So like above, this makes it
-                // look like everything uses the DNS server API, but that's not
-                // true.  We should consider splitting this crate in two.  But
-                // for now, just ignore the specific dependency from
-                // internal-dns to dns-service-client.  If a consumer actually
-                // calls the DNS server, it will have a separate dependency.
-                if p.name == "dns-service-client"
-                    && (parent.name == "internal-dns")
-                {
-                    return;
+                seen.insert(d.name.clone());
+
+                if d.optional {
+                    continue;
                 }
 
-                // TODO nexus-types depends on dns-service-client and
-                // gateway-client for defining some types, but again, this
-                // doesn't mean that somebody using nexus-types is actually
-                // calling out to these services.  If they were, they'd need to
-                // have some other dependency on them.
-                if parent.name == "nexus-types"
-                    && (p.name == "dns-service-client"
-                        || p.name == "gateway-client")
-                {
-                    return;
+                if !matches!(
+                    d.kind,
+                    DependencyKind::Normal | DependencyKind::Build
+                ) {
+                    continue;
                 }
 
-                // TODO
-                // This one's debatable.  Everything with an Oximeter producer
-                // talks to Nexus.  But let's ignore those for now.
-                // Maybe we could improve this by creating a separate API inside
-                // Nexus for this?
-                if parent.name == "oximeter-producer"
-                    && p.name == "nexus-client"
-                {
-                    eprintln!(
-                        "warning: ignoring legit dependency from \
-                         oximeter-producer -> nexus_client"
-                    );
-                    return;
-                }
-
-                if apis_by_client_package.contains_key(&p.name) {
-                    clients_used.insert(p.name.clone());
-                }
-            },
-        )
-        .with_context(|| {
-            format!(
-                "iterating dependencies of workspace {:?} package {:?}",
-                found_workspace.name(),
-                server_pkgname
-            )
-        })?;
-
-        // unwrap(): we created a node for every group above.
-        let my_node = nodes.get(group).unwrap();
-
-        println!("server package {}:", server_pkgname);
-        for c in &clients_used {
-            println!("    uses client {}", c);
-
-            // unwrap(): The values in "clients_used" were populated above after
-            // checking whether they were in `apis_by_client_package` already.
-            let other_api = apis_by_client_package.get(c).unwrap();
-            // unwrap(): We created nodes for all of the groups up front.
-            let other_node = nodes.get(other_api.group()).unwrap();
-
-            graph.add_edge(
-                *my_node,
-                *other_node,
-                &other_api.client_package_name,
-            );
-        }
-        println!("");
-    }
-
-    Ok(Dot::new(&graph).to_string())
-}
-
-fn walk_required_deps_recursively(
-    workspace: &Workspace,
-    root: &Package,
-    func: &mut dyn FnMut(&Package, &Package),
-) -> Result<()> {
-    let mut remaining = vec![root];
-    let mut seen: BTreeSet<String> = BTreeSet::new();
-
-    while let Some(next) = remaining.pop() {
-        for d in &next.dependencies {
-            if seen.contains(&d.name) {
-                continue;
-            }
-
-            seen.insert(d.name.clone());
-
-            if d.optional {
-                continue;
-            }
-
-            if !matches!(d.kind, DependencyKind::Normal | DependencyKind::Build)
-            {
-                continue;
-            }
-
-            let pkg = workspace.find_package(&d.name).ok_or_else(|| {
-                anyhow!(
-                    "package {:?} has dependency {:?} not in workspace \
+                let pkg = self.find_package(&d.name).ok_or_else(|| {
+                    anyhow!(
+                        "package {:?} has dependency {:?} not in workspace \
                      metadata",
-                    next.name,
-                    d.name
-                )
-            })?;
-            func(next, pkg);
-            remaining.push(pkg);
+                        next.name,
+                        d.name
+                    )
+                })?;
+                func(next, pkg);
+                remaining.push(pkg);
+            }
         }
-    }
 
-    Ok(())
+        Ok(())
+    }
+}
+
+fn parse_toml_file<T: DeserializeOwned>(path: &Utf8Path) -> Result<T> {
+    let s = std::fs::read_to_string(path)
+        .with_context(|| format!("read {:?}", path))?;
+    toml::from_str(&s).with_context(|| format!("parse {:?}", path))
 }

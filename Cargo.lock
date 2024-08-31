@@ -6159,7 +6159,7 @@ dependencies = [
  "camino",
  "cargo_metadata",
  "clap",
- "omicron-zone-package",
+ "newtype_derive",
  "petgraph",
  "serde",
  "toml 0.8.19",

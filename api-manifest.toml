@@ -2,8 +2,6 @@
 # XXX-dap there's similar metadata in the openapi manager
 # XXX-dap can server_component, group be determined from package metadata?
 
-extra_repos = [ "crucible", "maghemite", "propolis", "dendrite" ]
-
 [[apis]]
 client_package_name = "bootstrap-agent-client"
 label = "Bootstrap Agent"
