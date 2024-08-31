@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Subcommand: cargo xtask ls-clients
+//! Show information about Progenitor-based APIs
 
 use anyhow::{anyhow, ensure, Context, Result};
 use camino::Utf8Path;
@@ -10,7 +10,7 @@ use camino::Utf8PathBuf;
 use cargo_metadata::DependencyKind;
 use cargo_metadata::Metadata;
 use cargo_metadata::Package;
-use clap::Args;
+use clap::{Args, Parser, Subcommand};
 use petgraph::dot::Dot;
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -18,8 +18,24 @@ use std::collections::BTreeSet;
 use std::fmt::Display;
 use url::Url;
 
+#[derive(Parser)]
+#[command(
+    name = "ls-apis",
+    bin_name = "ls-apis",
+    about = "Show information about Progenitor-based APIs"
+)]
+struct LsApis {
+    #[command(subcommand)]
+    cmd: Cmds,
+}
+
+#[derive(Subcommand)]
+enum Cmds {
+    Show(ShowArgs),
+}
+
 #[derive(Args)]
-pub struct LsClientsArgs {
+pub struct ShowArgs {
     #[arg(long)]
     api_manifest: Option<Utf8PathBuf>,
 
@@ -33,7 +49,14 @@ pub struct LsClientsArgs {
     adoc: bool,
 }
 
-pub fn run_cmd(args: LsClientsArgs) -> Result<()> {
+fn main() -> Result<()> {
+    let args = LsApis::parse();
+    match args.cmd {
+        Cmds::Show(args) => run_show(args),
+    }
+}
+
+pub fn run_show(args: ShowArgs) -> Result<()> {
     let manifest_dir = Utf8PathBuf::from(
         std::env::var("CARGO_MANIFEST_DIR")
             .context("looking up CARGO_MANIFEST_DIR in environment")?,
@@ -452,7 +475,7 @@ fn direct_dependents(
 //     //    }
 // }
 //
-fn print_package(p: &ClientPackage, args: &LsClientsArgs) {
+fn print_package(p: &ClientPackage, args: &ShowArgs) {
     if !args.adoc {
         println!("  package: {} from {}", p.me.name, p.me.location);
         for d in &p.rdeps {

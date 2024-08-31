@@ -6152,6 +6152,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "omicron-ls-apis"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "camino",
+ "cargo_metadata",
+ "clap",
+ "omicron-zone-package",
+ "petgraph",
+ "serde",
+ "toml 0.8.19",
+ "url",
+]
+
+[[package]]
 name = "omicron-nexus"
 version = "0.1.0"
 dependencies = [

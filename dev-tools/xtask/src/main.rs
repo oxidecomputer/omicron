@@ -20,7 +20,6 @@ mod common;
 #[cfg_attr(not(target_os = "illumos"), allow(dead_code))]
 mod external;
 mod live_tests;
-mod ls_clients;
 mod usdt;
 
 #[cfg(target_os = "illumos")]
@@ -52,8 +51,8 @@ enum Cmds {
     /// Utilities for working with CockroachDB databases.
     DbDev(external::External),
 
-    /// List Progenitor-based clients (heuristically)
-    LsClients(ls_clients::LsClientsArgs),
+    /// Show information about Progenitor-based APIs
+    LsApis(external::External),
 
     /// Check that all features are flagged correctly
     CheckFeatures(check_features::Args),
@@ -137,7 +136,7 @@ fn main() -> Result<()> {
             }
         }
         Cmds::LiveTests(args) => live_tests::run_cmd(args),
-        Cmds::LsClients(args) => ls_clients::run_cmd(args),
+        Cmds::LsApis(external) => external.exec_bin("ls-apis"),
         Cmds::MgsDev(external) => external.exec_bin("mgs-dev"),
         Cmds::OmicronDev(external) => external.exec_bin("omicron-dev"),
         Cmds::Openapi(external) => external.exec_bin("openapi-manager"),
