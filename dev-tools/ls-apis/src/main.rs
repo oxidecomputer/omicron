@@ -40,10 +40,6 @@ struct LsApis {
     #[arg(long)]
     api_manifest: Option<Utf8PathBuf>,
 
-    /// path to metadata about Omicron packages
-    #[arg(long)]
-    package_manifest: Option<Utf8PathBuf>,
-
     /// path to directory with clones of dependent repositories
     #[arg(long)]
     extra_repos: Option<Utf8PathBuf>,
@@ -80,7 +76,6 @@ fn run_show(apis: &Apis, args: ShowArgs) -> Result<()> {
 
 struct LoadArgs {
     api_manifest_path: Utf8PathBuf,
-    package_manifest_path: Utf8PathBuf,
     extra_repos_path: Utf8PathBuf,
 }
 
@@ -100,13 +95,6 @@ impl TryFrom<&LsApis> for LoadArgs {
                     .join("..")
                     .join("api-manifest.toml")
             });
-        let package_manifest_path =
-            args.package_manifest.clone().unwrap_or_else(|| {
-                self_manifest_dir
-                    .join("..")
-                    .join("..")
-                    .join("package-manifest.toml")
-            });
         let extra_repos_path = args.extra_repos.clone().unwrap_or_else(|| {
             self_manifest_dir
                 .join("..")
@@ -116,11 +104,7 @@ impl TryFrom<&LsApis> for LoadArgs {
                 .join("checkout")
         });
 
-        Ok(LoadArgs {
-            api_manifest_path,
-            package_manifest_path,
-            extra_repos_path,
-        })
+        Ok(LoadArgs { api_manifest_path, extra_repos_path })
     }
 }
 
@@ -385,7 +369,7 @@ impl ApisHelper {
             api_metadata.client_pkgnames().collect();
         let mut errors = Vec::new();
         for (_, workspace) in &workspaces {
-            for (client_pkgname, _) in &workspace.progenitor_clients {
+            for client_pkgname in &workspace.progenitor_clients {
                 if api_metadata.client_pkgname_lookup(client_pkgname).is_some()
                 {
                     // It's possible that we will find multiple references
@@ -436,18 +420,6 @@ impl ApisHelper {
                 .join(", ")
         );
         Ok(found_in_workspaces[0])
-    }
-}
-
-struct ClientPackage {
-    me: MyPackage,
-    rdeps: Vec<MyPackage>,
-}
-
-impl ClientPackage {
-    fn new(workspace: &Metadata, me: MyPackage) -> Result<ClientPackage> {
-        let rdeps = direct_dependents(workspace, &me.name)?;
-        Ok(ClientPackage { me, rdeps })
     }
 }
 
@@ -662,7 +634,7 @@ impl ApiMetadata {
 struct Workspace {
     name: String,
     all_packages: BTreeMap<String, Package>, // XXX-dap memory usage
-    progenitor_clients: BTreeMap<ClientPackageName, ClientPackage>,
+    progenitor_clients: BTreeSet<ClientPackageName>,
 }
 
 impl Workspace {
@@ -681,15 +653,12 @@ impl Workspace {
             .into_iter()
             .filter_map(|mypkg| {
                 if mypkg.name.ends_with("-client") {
-                    Some(ClientPackage::new(&metadata, mypkg))
+                    Some(ClientPackageName::from(mypkg.name))
                 } else {
                     eprintln!("ignoring apparent non-client: {}", mypkg.name);
                     None
                 }
             })
-            .collect::<Result<Vec<_>>>()?
-            .into_iter()
-            .map(|cpkg| (cpkg.me.name.clone().into(), cpkg))
             .collect();
 
         let all_packages = metadata
