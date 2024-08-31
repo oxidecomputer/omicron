@@ -72,9 +72,9 @@ pub struct BgpPeerConfig {
     pub vlan_id: Option<SqlU16>,
 }
 
-impl Into<external::BgpPeer> for BgpPeerConfig {
-    fn into(self) -> external::BgpPeer {
-        external::BgpPeer {
+impl Into<external::BgpPeerCombined> for BgpPeerConfig {
+    fn into(self) -> external::BgpPeerCombined {
+        external::BgpPeerCombined {
             bgp_config: self.bgp_config_id.into(),
             interface_name: self.interface_name.clone(),
             addr: self.addr.ip(),
@@ -1413,12 +1413,9 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         configuration: NameOrId,
-    ) -> ListResultVec<BgpPeerConfig> {
+    ) -> ListResultVec<SwitchPortBgpPeerConfig> {
         use db::schema::switch_port_settings as port_settings;
         use db::schema::switch_port_settings_bgp_peer_config as bgp_peer_config;
-        use db::schema::switch_port_settings_bgp_peer_config_allow_export as allow_export;
-        use db::schema::switch_port_settings_bgp_peer_config_allow_import as allow_import;
-        use db::schema::switch_port_settings_bgp_peer_config_communities as communities;
 
         let conn = self.pool_connection_authorized(opctx).await?;
         let err = OptionalError::new();
@@ -1466,92 +1463,8 @@ impl DataStore {
                             }
                         })?;
 
-                    let mut configs: Vec<BgpPeerConfig> = vec![];
 
-                    for peer in peers {
-                        // get allowed import
-                        let prefixes_to_import: Vec<IpNetwork> = allow_import::table
-                            .filter(allow_import::addr.eq(peer.addr))
-                            .filter(allow_import::interface_name.eq(peer.interface_name.clone()))
-                            .filter(allow_import::port_settings_id.eq(peer.port_settings_id))
-                            .select(allow_import::prefix)
-                            .load_async(&conn)
-                            .await
-                            .map_err(|e| {
-                                let message = "error while looking up bgp peer import configuration";
-                                error!(opctx.log, "{message}"; "error" => ?e);
-                                err.bail(Error::internal_error(message))
-                            })?;
-
-                        let allowed_import = if prefixes_to_import.is_empty() {
-                            ImportExportPolicy::NoFiltering
-                        } else {
-                            ImportExportPolicy::Allow(prefixes_to_import.into_iter().map(Into::into).collect())
-                        };
-
-                        // get allowed export
-                        let prefixes_to_export: Vec<IpNetwork> = allow_export::table
-                            .filter(allow_export::addr.eq(peer.addr))
-                            .filter(allow_export::interface_name.eq(peer.interface_name.clone()))
-                            .filter(allow_export::port_settings_id.eq(peer.port_settings_id))
-                            .select(allow_export::prefix)
-                            .load_async(&conn)
-                            .await
-                            .map_err(|e| {
-                                let message =
-                                    "error while looking up bgp peer export configuration";
-                                error!(opctx.log, "{message}"; "error" => ?e);
-                                err.bail(Error::internal_error(message))
-                            })?;
-
-                        let allowed_export = if prefixes_to_export.is_empty() {
-                            ImportExportPolicy::NoFiltering
-                        } else {
-                            ImportExportPolicy::Allow(prefixes_to_export.into_iter().map(Into::into).collect())
-                        };
-
-                        // get communities
-                        let communities: Vec<SqlU32> = communities::table
-                            .filter(communities::addr.eq(peer.addr))
-                            .filter(communities::interface_name.eq(peer.interface_name.clone()))
-                            .filter(communities::port_settings_id.eq(peer.port_settings_id))
-                            .select(communities::community)
-                            .load_async(&conn)
-                            .await
-                            .map_err(|e| {
-                                let message =
-                                    "error while looking up bgp peer communities";
-                                error!(opctx.log, "{message}"; "error" => ?e);
-                                err.bail(Error::internal_error(message))
-                            })?;
-
-                        // build config
-                        let config = BgpPeerConfig {
-                            port_settings_id: peer.port_settings_id,
-                            bgp_config_id: peer.bgp_config_id,
-                            interface_name: peer.interface_name,
-                            addr: peer.addr,
-                            hold_time: peer.hold_time,
-                            idle_hold_time: peer.idle_hold_time,
-                            delay_open: peer.delay_open,
-                            connect_retry: peer.connect_retry,
-                            keepalive: peer.keepalive,
-                            remote_asn: peer.remote_asn,
-                            min_ttl: peer.min_ttl,
-                            md5_auth_key: peer.md5_auth_key,
-                            multi_exit_discriminator: peer.multi_exit_discriminator,
-                            local_pref: peer.local_pref,
-                            enforce_first_as: peer.enforce_first_as,
-                            allowed_import,
-                            allowed_export,
-                            communities: communities.into_iter().map(Into::into).collect(),
-                            vlan_id: peer.vlan_id,
-                        };
-                        // push
-                        configs.push(config);
-                    }
-
-                    Ok(configs)
+                    Ok(peers)
                 }
             })
             .await
@@ -1578,7 +1491,7 @@ impl DataStore {
         opctx: &OpContext,
         configuration: NameOrId,
         bgp_peer: BgpPeer,
-    ) -> CreateResult<BgpPeerConfig> {
+    ) -> CreateResult<SwitchPortBgpPeerConfig> {
         use db::schema::bgp_config;
         use db::schema::switch_port_settings_bgp_peer_config as bgp_peer_config;
 
@@ -1663,129 +1576,6 @@ impl DataStore {
                         }
                     }?;
 
-                    // create import list if enabled
-                    let allow_import_list_active = match new_settings.allowed_import.clone() {
-                        ImportExportPolicy::NoFiltering => false,
-                        ImportExportPolicy::Allow(prefixes) => {
-                            use db::schema::switch_port_settings_bgp_peer_config_allow_import as allow_import;
-                            let to_insert: Vec<SwitchPortBgpPeerConfigAllowImport> = prefixes
-                                .clone()
-                                .into_iter()
-                                .map(|x| SwitchPortBgpPeerConfigAllowImport {
-                                    port_settings_id,
-                                    interface_name: new_settings.interface_name.clone(),
-                                    addr: new_settings.addr.into(),
-                                    prefix: x.into(),
-                                })
-                                .collect();
-
-                            diesel::insert_into(allow_import::table)
-                                .values(to_insert)
-                                .execute_async(&conn)
-                                .await
-                                .map_err(|e: diesel::result::Error| {
-                                    let message = "error while creating bgp allowed import configuration";
-                                    match e {
-                                        diesel::result::Error::DatabaseError(kind, _) => {
-                                            match kind {
-                                                diesel::result::DatabaseErrorKind::UniqueViolation => {
-                                                    err.bail(Error::conflict("allowed import configuration conflicts with an existing configuration"))
-                                                },
-                                                diesel::result::DatabaseErrorKind::NotNullViolation => {
-                                                    err.bail(Error::invalid_request("a required field is not populated"))
-                                                },
-                                                _ => err.bail(Error::internal_error(message)),
-                                            }
-                                        },
-                                        _ => err.bail(Error::internal_error(message)),
-                                    }
-                                })?;
-
-                            true
-                        },
-                    };
-
-                    // create export list if enabled
-                    let allow_export_list_active = match new_settings.allowed_export.clone() {
-                        ImportExportPolicy::NoFiltering => false,
-                        ImportExportPolicy::Allow(prefixes) => {
-                            use db::schema::switch_port_settings_bgp_peer_config_allow_export as allow_export;
-                            let to_insert: Vec<SwitchPortBgpPeerConfigAllowExport> = prefixes
-                                .clone()
-                                .into_iter()
-                                .map(|x| SwitchPortBgpPeerConfigAllowExport {
-                                    port_settings_id,
-                                    interface_name: new_settings.interface_name.clone(),
-                                    addr: new_settings.addr.into(),
-                                    prefix: x.into(),
-                                })
-                                .collect();
-
-                            diesel::insert_into(allow_export::table)
-                                .values(to_insert)
-                                .execute_async(&conn)
-                                .await
-                                .map_err(|e: diesel::result::Error| {
-                                    let message = "error while creating bgp allowed export configuration";
-                                    match e {
-                                        diesel::result::Error::DatabaseError(kind, _) => {
-                                            match kind {
-                                                diesel::result::DatabaseErrorKind::UniqueViolation => {
-                                                    err.bail(Error::conflict("allowed export configuration conflicts with an existing configuration"))
-                                                },
-                                                diesel::result::DatabaseErrorKind::NotNullViolation => {
-                                                    err.bail(Error::invalid_request("a required field is not populated"))
-                                                },
-                                                _ => err.bail(Error::internal_error(message)),
-                                            }
-                                        },
-                                        _ => err.bail(Error::internal_error(message)),
-                                    }
-                                })?;
-
-                            true
-                        },
-                    };
-
-                    // create communities
-                    if !new_settings.communities.is_empty() {
-                        use db::schema::switch_port_settings_bgp_peer_config_communities as peer_communities;
-                        let to_insert: Vec<SwitchPortBgpPeerConfigCommunity> = new_settings
-                            .communities
-                            .clone()
-                            .into_iter()
-                            .map(|x| SwitchPortBgpPeerConfigCommunity {
-                                port_settings_id,
-                                interface_name: new_settings.interface_name.clone(),
-                                addr: new_settings.addr.into(),
-                                community: x.into(),
-                            })
-                            .collect();
-
-                        diesel::insert_into(peer_communities::table)
-                            .values(to_insert)
-                            .execute_async(&conn)
-                            .await
-                            .map_err(|e: diesel::result::Error| {
-                                let message = "error while creating bgp communities for peer";
-                                match e {
-                                    diesel::result::Error::DatabaseError(kind, _) => {
-                                        match kind {
-                                            diesel::result::DatabaseErrorKind::UniqueViolation => {
-                                                err.bail(Error::conflict("peer communities configuration conflicts with an existing configuration"))
-                                            },
-                                            diesel::result::DatabaseErrorKind::NotNullViolation => {
-                                                err.bail(Error::invalid_request("a required field is not populated"))
-                                            },
-                                            _ => err.bail(Error::internal_error(message)),
-                                        }
-                                    },
-                                    _ => err.bail(Error::internal_error(message)),
-                                }
-                            })?;
-
-                    }
-
                     let bgp_peer_config = SwitchPortBgpPeerConfig {
                         port_settings_id,
                         bgp_config_id,
@@ -1802,8 +1592,8 @@ impl DataStore {
                         multi_exit_discriminator: new_settings.multi_exit_discriminator.map(Into::into),
                         local_pref: new_settings.local_pref.map(Into::into),
                         enforce_first_as: new_settings.enforce_first_as,
-                        allow_import_list_active,
-                        allow_export_list_active,
+                        allow_import_list_active: new_settings.allow_import_list_active,
+                        allow_export_list_active: new_settings.allow_import_list_active,
                         vlan_id: new_settings.vlan_id.map(Into::into),
                     };
 
@@ -1830,29 +1620,7 @@ impl DataStore {
                             }
                         })?;
 
-                    let config = BgpPeerConfig {
-                        port_settings_id,
-                        bgp_config_id,
-                        interface_name: peer.interface_name,
-                        addr: peer.addr,
-                        hold_time: peer.hold_time,
-                        idle_hold_time: peer.idle_hold_time,
-                        delay_open: peer.delay_open,
-                        connect_retry: peer.connect_retry,
-                        keepalive: peer.keepalive,
-                        remote_asn: peer.remote_asn,
-                        min_ttl: peer.min_ttl,
-                        md5_auth_key: peer.md5_auth_key,
-                        multi_exit_discriminator: peer.multi_exit_discriminator,
-                        local_pref: peer.local_pref,
-                        enforce_first_as: peer.enforce_first_as,
-                        allowed_import: new_settings.allowed_import,
-                        allowed_export: new_settings.allowed_export,
-                        communities: new_settings.communities,
-                        vlan_id: peer.vlan_id,
-                    };
-
-                    Ok(config)
+                    Ok(peer)
                 }
             })
             .await
@@ -3187,7 +2955,7 @@ async fn do_switch_port_settings_create(
     .get_results_async(conn)
     .await?;
 
-    let mut peer_by_addr: BTreeMap<IpAddr, &external::BgpPeer> =
+    let mut peer_by_addr: BTreeMap<IpAddr, &external::BgpPeerCombined> =
         BTreeMap::new();
 
     let mut bgp_peer_config = Vec::new();
@@ -3618,8 +3386,8 @@ mod test {
         SwitchPortConfigCreate, SwitchPortGeometry, SwitchPortSettingsCreate,
     };
     use omicron_common::api::external::{
-        BgpPeer, IdentityMetadataCreateParams, ImportExportPolicy, Name,
-        NameOrId,
+        BgpPeerCombined, IdentityMetadataCreateParams, ImportExportPolicy,
+        Name, NameOrId,
     };
     use omicron_test_utils::dev;
     use std::collections::HashMap;
@@ -3682,7 +3450,7 @@ mod test {
             bgp_peers: HashMap::from([(
                 "phy0".into(),
                 BgpPeerConfig {
-                    peers: vec![BgpPeer {
+                    peers: vec![BgpPeerCombined {
                         bgp_config: NameOrId::Name(
                             "test-bgp-config".parse().unwrap(),
                         ),

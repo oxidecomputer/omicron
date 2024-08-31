@@ -2238,7 +2238,7 @@ pub struct SwitchPortSettingsView {
     pub routes: Vec<SwitchPortRouteConfig>,
 
     /// BGP peer settings.
-    pub bgp_peers: Vec<BgpPeer>,
+    pub bgp_peers: Vec<BgpPeerCombined>,
 
     /// Layer 3 IP address settings.
     pub addresses: Vec<SwitchPortAddressConfig>,
@@ -2517,7 +2517,7 @@ pub struct SwitchPortBgpPeerConfig {
 /// parameter is a reference to global BGP parameters. The `interface_name`
 /// indicates what interface the peer should be contacted on.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-pub struct BgpPeer {
+pub struct BgpPeerCombined {
     /// The global BGP configuration used for establishing a session with this
     /// peer.
     pub bgp_config: NameOrId,
@@ -2574,6 +2574,67 @@ pub struct BgpPeer {
 
     /// Define export policy for a peer.
     pub allowed_export: ImportExportPolicy,
+
+    /// Associate a VLAN ID with a peer.
+    pub vlan_id: Option<u16>,
+}
+
+/// The information required to configure a BGP peer.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct BgpPeer {
+    /// The global BGP configuration used for establishing a session with this
+    /// peer.
+    pub bgp_config: NameOrId,
+
+    /// The name of interface to peer on. This is relative to the port
+    /// configuration this BGP peer configuration is a part of. For example this
+    /// value could be phy0 to refer to a primary physical interface. Or it
+    /// could be vlan47 to refer to a VLAN interface.
+    pub interface_name: String,
+
+    /// The address of th e host to peer with.
+    pub addr: oxnet::IpNet,
+
+    /// How long to hold peer connections between keepalives (seconds).
+    pub hold_time: u32,
+
+    /// How long to hold a peer in idle before attempting a new session
+    /// (seconds).
+    pub idle_hold_time: u32,
+
+    /// How long to delay sending an open request after establishing a TCP
+    /// session (seconds).
+    pub delay_open: u32,
+
+    /// How long to to wait between TCP connection retries (seconds).
+    pub connect_retry: u32,
+
+    /// How often to send keepalive requests (seconds).
+    pub keepalive: u32,
+
+    /// Require that a peer has a specified ASN.
+    pub remote_asn: Option<u32>,
+
+    /// Require messages from a peer have a minimum IP time to live field.
+    pub min_ttl: Option<u8>,
+
+    /// Use the given key for TCP-MD5 authentication with the peer.
+    pub md5_auth_key: Option<String>,
+
+    /// Apply the provided multi-exit discriminator (MED) updates sent to the peer.
+    pub multi_exit_discriminator: Option<u32>,
+
+    /// Apply a local preference to routes received from this peer.
+    pub local_pref: Option<u32>,
+
+    /// Enforce that the first AS in paths received from this peer is the peer's AS.
+    pub enforce_first_as: bool,
+
+    /// Enable import policies
+    pub allow_import_list_active: bool,
+
+    /// Enable export policies
+    pub allow_export_list_active: bool,
 
     /// Associate a VLAN ID with a peer.
     pub vlan_id: Option<u16>,

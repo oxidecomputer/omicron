@@ -7489,6 +7489,429 @@
         }
       }
     },
+    "/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/allow-export": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "List prefixes allowed to be exported by a given bgp peer",
+        "operationId": "networking_switch_port_configuration_bgp_peer_allow_export_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "configuration",
+            "description": "A name or id to use when selecting a switch port configuration.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "peer_address",
+            "description": "An address identifying a configured bgp peer.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "ip"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_BgpAllowedPrefix",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BgpAllowedPrefix"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/allow-export/add": {
+      "post": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Add prefix to bgp peer allowed export list",
+        "operationId": "networking_switch_port_configuration_bgp_peer_allow_export_add",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "configuration",
+            "description": "A name or id to use when selecting a switch port configuration.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AllowedPrefixAddRemove"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BgpAllowedPrefix"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/allow-export/remove": {
+      "post": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Remove prefix from bgp peer allowed export list",
+        "operationId": "networking_switch_port_configuration_bgp_peer_allow_export_remove",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "configuration",
+            "description": "A name or id to use when selecting a switch port configuration.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AllowedPrefixAddRemove"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/allow-import": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "List prefixes allowed to be imported by a given bgp peer",
+        "operationId": "networking_switch_port_configuration_bgp_peer_allow_import_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "configuration",
+            "description": "A name or id to use when selecting a switch port configuration.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "peer_address",
+            "description": "An address identifying a configured bgp peer.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "ip"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_BgpAllowedPrefix",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BgpAllowedPrefix"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/allow-import/add": {
+      "post": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Add prefix to bgp peer allowed import list",
+        "operationId": "networking_switch_port_configuration_bgp_peer_allow_import_add",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "configuration",
+            "description": "A name or id to use when selecting a switch port configuration.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AllowedPrefixAddRemove"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BgpAllowedPrefix"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/allow-import/remove": {
+      "post": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Remove prefix from bgp peer allowed import list",
+        "operationId": "networking_switch_port_configuration_bgp_peer_allow_import_remove",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "configuration",
+            "description": "A name or id to use when selecting a switch port configuration.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AllowedPrefixAddRemove"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/community": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "List communities assigned to a bgp peer",
+        "operationId": "networking_switch_port_configuration_bgp_peer_community_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "configuration",
+            "description": "A name or id to use when selecting a switch port configuration.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "peer_address",
+            "description": "An address identifying a configured bgp peer.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "ip"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_BgpCommunity",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BgpCommunity"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/community/add": {
+      "post": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Add community to bgp peer",
+        "operationId": "networking_switch_port_configuration_bgp_peer_community_add",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "configuration",
+            "description": "A name or id to use when selecting a switch port configuration.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BgpCommunityAddRemove"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BgpCommunity"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/community/remove": {
+      "post": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Remove community from bgp peer",
+        "operationId": "networking_switch_port_configuration_bgp_peer_community_remove",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "configuration",
+            "description": "A name or id to use when selecting a switch port configuration.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BgpCommunityAddRemove"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/remove": {
       "post": {
         "tags": [
@@ -10735,6 +11158,38 @@
           "allowed_ips"
         ]
       },
+      "AllowedPrefixAddRemove": {
+        "description": "A prefix allowed to be imported or exported by a bgp peer",
+        "type": "object",
+        "properties": {
+          "interface": {
+            "description": "The interface the peer is configured on",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "peer_address": {
+            "description": "An address identifying the target bgp peer",
+            "type": "string",
+            "format": "ip"
+          },
+          "prefix": {
+            "description": "The allowed prefix to add or remove",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpNet"
+              }
+            ]
+          }
+        },
+        "required": [
+          "interface",
+          "peer_address",
+          "prefix"
+        ]
+      },
       "AllowedSourceIps": {
         "description": "Description of source IPs allowed to reach rack services.",
         "oneOf": [
@@ -10988,6 +11443,43 @@
           "switch"
         ]
       },
+      "BgpAllowedPrefix": {
+        "description": "A BGP allowed prefix entry",
+        "type": "object",
+        "properties": {
+          "addr": {
+            "description": "Peer Address",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpNet"
+              }
+            ]
+          },
+          "interface_name": {
+            "description": "Interface peer is reachable on",
+            "type": "string"
+          },
+          "port_settings_id": {
+            "description": "Parent switch port configuration",
+            "type": "string",
+            "format": "uuid"
+          },
+          "prefix": {
+            "description": "Allowed Prefix",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpNet"
+              }
+            ]
+          }
+        },
+        "required": [
+          "addr",
+          "interface_name",
+          "port_settings_id",
+          "prefix"
+        ]
+      },
       "BgpAnnounceSet": {
         "description": "Represents a BGP announce set by id. The id can be used with other API calls to view and manage the announce set.",
         "type": "object",
@@ -11105,6 +11597,71 @@
         "required": [
           "address_lot_block",
           "network"
+        ]
+      },
+      "BgpCommunity": {
+        "description": "A BGP community",
+        "type": "object",
+        "properties": {
+          "addr": {
+            "description": "Peer Address",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpNet"
+              }
+            ]
+          },
+          "community": {
+            "description": "Community",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "interface_name": {
+            "description": "Interface peer is reachable on",
+            "type": "string"
+          },
+          "port_settings_id": {
+            "description": "Parent switch port configuration",
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "addr",
+          "community",
+          "interface_name",
+          "port_settings_id"
+        ]
+      },
+      "BgpCommunityAddRemove": {
+        "description": "A community to be added to or removed from a bgp peer",
+        "type": "object",
+        "properties": {
+          "community": {
+            "description": "The community to add or remove",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "interface": {
+            "description": "The interface the peer is configured on",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "peer_address": {
+            "description": "An address identifying the target bgp peer",
+            "type": "string",
+            "format": "ip"
+          }
+        },
+        "required": [
+          "community",
+          "interface",
+          "peer_address"
         ]
       },
       "BgpConfig": {
@@ -11276,6 +11833,127 @@
       },
       "BgpMessageHistory": {},
       "BgpPeer": {
+        "description": "The information required to configure a BGP peer.",
+        "type": "object",
+        "properties": {
+          "addr": {
+            "description": "The address of th e host to peer with.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpNet"
+              }
+            ]
+          },
+          "allow_export_list_active": {
+            "description": "Enable export policies",
+            "type": "boolean"
+          },
+          "allow_import_list_active": {
+            "description": "Enable import policies",
+            "type": "boolean"
+          },
+          "bgp_config": {
+            "description": "The global BGP configuration used for establishing a session with this peer.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NameOrId"
+              }
+            ]
+          },
+          "connect_retry": {
+            "description": "How long to to wait between TCP connection retries (seconds).",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "delay_open": {
+            "description": "How long to delay sending an open request after establishing a TCP session (seconds).",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "enforce_first_as": {
+            "description": "Enforce that the first AS in paths received from this peer is the peer's AS.",
+            "type": "boolean"
+          },
+          "hold_time": {
+            "description": "How long to hold peer connections between keepalives (seconds).",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "idle_hold_time": {
+            "description": "How long to hold a peer in idle before attempting a new session (seconds).",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "interface_name": {
+            "description": "The name of interface to peer on. This is relative to the port configuration this BGP peer configuration is a part of. For example this value could be phy0 to refer to a primary physical interface. Or it could be vlan47 to refer to a VLAN interface.",
+            "type": "string"
+          },
+          "keepalive": {
+            "description": "How often to send keepalive requests (seconds).",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "local_pref": {
+            "nullable": true,
+            "description": "Apply a local preference to routes received from this peer.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "md5_auth_key": {
+            "nullable": true,
+            "description": "Use the given key for TCP-MD5 authentication with the peer.",
+            "type": "string"
+          },
+          "min_ttl": {
+            "nullable": true,
+            "description": "Require messages from a peer have a minimum IP time to live field.",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "multi_exit_discriminator": {
+            "nullable": true,
+            "description": "Apply the provided multi-exit discriminator (MED) updates sent to the peer.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "remote_asn": {
+            "nullable": true,
+            "description": "Require that a peer has a specified ASN.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "Associate a VLAN ID with a peer.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "addr",
+          "allow_export_list_active",
+          "allow_import_list_active",
+          "bgp_config",
+          "connect_retry",
+          "delay_open",
+          "enforce_first_as",
+          "hold_time",
+          "idle_hold_time",
+          "interface_name",
+          "keepalive"
+        ]
+      },
+      "BgpPeerCombined": {
         "description": "A BGP peer configuration for an interface. Includes the set of announcements that will be advertised to the peer identified by `addr`. The `bgp_config` parameter is a reference to global BGP parameters. The `interface_name` indicates what interface the peer should be contacted on.",
         "type": "object",
         "properties": {
@@ -11417,7 +12095,7 @@
           "peers": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/BgpPeer"
+              "$ref": "#/components/schemas/BgpPeerCombined"
             }
           }
         },
@@ -20499,7 +21177,7 @@
             "description": "BGP peer settings.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/BgpPeer"
+              "$ref": "#/components/schemas/BgpPeerCombined"
             }
           },
           "groups": {

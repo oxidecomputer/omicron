@@ -51,7 +51,7 @@ use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::DnsRecord;
 use omicron_common::address::{get_64_subnet, Ipv6Subnet, RACK_PREFIX};
 use omicron_common::api::external::AddressLotKind;
-use omicron_common::api::external::BgpPeer;
+use omicron_common::api::external::BgpPeerCombined;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -649,10 +649,10 @@ impl super::Nexus {
                 .routes
                 .insert("phy0".to_string(), RouteConfig { routes });
 
-            let peers: Vec<BgpPeer> = uplink_config
+            let peers: Vec<BgpPeerCombined> = uplink_config
                 .bgp_peers
                 .iter()
-                .map(|r| BgpPeer {
+                .map(|r| BgpPeerCombined {
                     bgp_config: NameOrId::Name(
                         format!("as{}", r.asn).parse().unwrap(),
                     ),

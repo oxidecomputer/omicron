@@ -9,6 +9,7 @@ use dpd_client::types::LinkId;
 use dpd_client::types::PortId;
 use http::StatusCode;
 use nexus_db_model::SwitchPortAddressConfig;
+use nexus_db_model::SwitchPortBgpPeerConfig;
 use nexus_db_model::SwitchPortBgpPeerConfigAllowExport;
 use nexus_db_model::SwitchPortBgpPeerConfigAllowImport;
 use nexus_db_model::SwitchPortBgpPeerConfigCommunity;
@@ -19,7 +20,6 @@ use nexus_db_model::SwitchPortRouteConfig;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
-use nexus_db_queries::db::datastore::BgpPeerConfig;
 use nexus_db_queries::db::datastore::UpdatePrecondition;
 use nexus_db_queries::db::model::{SwitchPort, SwitchPortSettings};
 use nexus_db_queries::db::DataStore;
@@ -301,7 +301,7 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         configuration: NameOrId,
-    ) -> ListResultVec<BgpPeerConfig> {
+    ) -> ListResultVec<SwitchPortBgpPeerConfig> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         self.db_datastore
             .switch_port_configuration_bgp_peer_list(opctx, configuration)
@@ -313,7 +313,7 @@ impl super::Nexus {
         opctx: &OpContext,
         configuration: NameOrId,
         bgp_peer: BgpPeer,
-    ) -> CreateResult<BgpPeerConfig> {
+    ) -> CreateResult<SwitchPortBgpPeerConfig> {
         opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
         self.db_datastore
             .switch_port_configuration_bgp_peer_add(

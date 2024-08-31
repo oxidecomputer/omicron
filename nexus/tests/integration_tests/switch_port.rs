@@ -18,8 +18,8 @@ use nexus_types::external_api::params::{
 use nexus_types::external_api::views::Rack;
 use omicron_common::api::external::ImportExportPolicy;
 use omicron_common::api::external::{
-    self, AddressLotKind, BgpPeer, IdentityMetadataCreateParams, LinkFec,
-    LinkSpeed, NameOrId, SwitchPort, SwitchPortSettingsView,
+    self, AddressLotKind, BgpPeerCombined, IdentityMetadataCreateParams,
+    LinkFec, LinkSpeed, NameOrId, SwitchPort, SwitchPortSettingsView,
 };
 
 type ControlPlaneTestContext =
@@ -298,7 +298,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     settings.bgp_peers.insert(
         "phy0".into(),
         BgpPeerConfig {
-            peers: vec![BgpPeer {
+            peers: vec![BgpPeerCombined {
                 bgp_config: NameOrId::Name("as47".parse().unwrap()),
                 interface_name: "phy0".to_string(),
                 addr: "1.2.3.4".parse().unwrap(),

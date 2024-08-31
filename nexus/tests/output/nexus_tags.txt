@@ -198,6 +198,15 @@ networking_switch_port_configuration_address_add POST     /v1/system/networking/
 networking_switch_port_configuration_address_list GET      /v1/system/networking/switch-port-configuration/{configuration}/address
 networking_switch_port_configuration_address_remove POST     /v1/system/networking/switch-port-configuration/{configuration}/address/remove
 networking_switch_port_configuration_bgp_peer_add POST     /v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/add
+networking_switch_port_configuration_bgp_peer_allow_export_add POST     /v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/allow-export/add
+networking_switch_port_configuration_bgp_peer_allow_export_list GET      /v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/allow-export
+networking_switch_port_configuration_bgp_peer_allow_export_remove POST     /v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/allow-export/remove
+networking_switch_port_configuration_bgp_peer_allow_import_add POST     /v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/allow-import/add
+networking_switch_port_configuration_bgp_peer_allow_import_list GET      /v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/allow-import
+networking_switch_port_configuration_bgp_peer_allow_import_remove POST     /v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/allow-import/remove
+networking_switch_port_configuration_bgp_peer_community_add POST     /v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/community/add
+networking_switch_port_configuration_bgp_peer_community_list GET      /v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/community
+networking_switch_port_configuration_bgp_peer_community_remove POST     /v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/community/remove
 networking_switch_port_configuration_bgp_peer_list GET      /v1/system/networking/switch-port-configuration/{configuration}/bgp-peer
 networking_switch_port_configuration_bgp_peer_remove POST     /v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/remove
 networking_switch_port_configuration_create POST     /v1/system/networking/switch-port-configuration

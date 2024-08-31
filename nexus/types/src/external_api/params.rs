@@ -9,8 +9,8 @@ use crate::external_api::shared;
 use base64::Engine;
 use chrono::{DateTime, Utc};
 use omicron_common::api::external::{
-    AddressLotKind, AllowedSourceIps, BfdMode, BgpPeer, ByteCount, Hostname,
-    IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
+    AddressLotKind, AllowedSourceIps, BfdMode, BgpPeerCombined, ByteCount,
+    Hostname, IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
     InstanceCpuCount, LinkFec, LinkSpeed, Name, NameOrId, PaginationOrder,
     RouteDestination, RouteTarget, SemverVersion, UserId,
 };
@@ -1644,6 +1644,9 @@ pub struct RouteAddRemove {
 /// A prefix allowed to be imported or exported by a bgp peer
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct AllowedPrefixAddRemove {
+    /// An address identifying the target bgp peer
+    pub peer_address: IpAddr,
+
     /// The interface the peer is configured on
     pub interface: Name,
 
@@ -1654,6 +1657,9 @@ pub struct AllowedPrefixAddRemove {
 /// A community to be added to or removed from a bgp peer
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct BgpCommunityAddRemove {
+    /// An address identifying the target bgp peer
+    pub peer_address: IpAddr,
+
     /// The interface the peer is configured on
     pub interface: Name,
 
@@ -1677,7 +1683,7 @@ pub struct BgpConfigListSelector {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct BgpPeerConfig {
-    pub peers: Vec<BgpPeer>,
+    pub peers: Vec<BgpPeerCombined>,
 }
 
 /// Parameters for creating a named set of BGP announcements.
@@ -1860,7 +1866,14 @@ pub struct SwitchPortSettingsBgpPeerInfoSelector {
     pub configuration: NameOrId,
 
     /// An address identifying a configured bgp peer.
-    pub bgp_peer: IpAddr,
+    pub peer_address: IpAddr,
+}
+
+/// Select a Bgp Peer by address.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct BgpPeerQuerySelector {
+    /// An address identifying a configured bgp peer.
+    pub peer_address: IpAddr,
 }
 
 /// Select a link settings info object by port settings name and link name.
