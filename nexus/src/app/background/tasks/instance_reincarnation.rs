@@ -8,13 +8,13 @@ use crate::app::background::BackgroundTask;
 use crate::app::saga::StartSaga;
 use crate::app::sagas::instance_start;
 use crate::app::sagas::NexusSaga;
-use anyhow::Context;
 use futures::future::BoxFuture;
 use nexus_db_queries::authn;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
 use nexus_types::identity::Resource;
+use nexus_types::internal_api::background::InstanceReincarnationStatus;
 use omicron_common::api::external::Error;
 use std::num::NonZeroU32;
 use std::sync::Arc;
@@ -23,16 +23,6 @@ use tokio::task::JoinSet;
 pub struct InstanceReincarnation {
     datastore: Arc<DataStore>,
     sagas: Arc<dyn StartSaga>,
-}
-
-#[derive(Default)]
-struct ActivationStats {
-    instances_found: usize,
-    instances_reincarnated: usize,
-    already_reincarnated: usize,
-    sagas_started: usize,
-    saga_start_errors: usize,
-    saga_errors: usize,
 }
 
 const BATCH_SIZE: NonZeroU32 = unsafe {
@@ -46,60 +36,44 @@ impl BackgroundTask for InstanceReincarnation {
         opctx: &'a OpContext,
     ) -> BoxFuture<'a, serde_json::Value> {
         Box::pin(async move {
-            let mut stats = ActivationStats::default();
-            let error = match self.actually_activate(opctx, &mut stats).await {
-                Ok(_) => {
-                    if stats.instances_reincarnated > 0 {
-                        info!(
-                            &opctx.log,
-                            "instance reincarnation completed";
-                            "instances_found" => stats.instances_found,
-                            "instances_reincarnated" => stats.instances_reincarnated,
-                            "already_reincarnated" => stats.already_reincarnated,
-                            "sagas_started" => stats.sagas_started,
-                        );
-                    } else {
-                        debug!(
-                            &opctx.log,
-                            "instance reincarnation completed; no instances \
-                             in need of reincarnation";
-                            "instances_found" => stats.instances_found,
-                            "already_reincarnated" => stats.already_reincarnated,
-                        );
-                    }
-                    None
-                }
-                Err(error) => {
-                    error!(
-                        &opctx.log,
-                        "instance reincarnation failed!";
-                        "last_error" => %error,
-                        "instances_found" => stats.instances_found,
-                        "instances_reincarnated" => stats.instances_reincarnated,
-                        "already_reincarnated" => stats.already_reincarnated,
-                        "sagas_started" => stats.sagas_started,
-                        "saga_start_errors" => stats.saga_start_errors,
-                        "saga_errors" => stats.saga_errors,
-                    );
-                    Some(error.to_string())
-                }
+            let mut status = InstanceReincarnationStatus::default();
+            self.actually_activate(opctx, &mut status).await;
+            if !status.restart_errors.is_empty() || status.query_error.is_some()
+            {
+                error!(
+                    &opctx.log,
+                    "instance reincarnation completed with errors!";
+                    "instances_found" => status.instances_found,
+                    "instances_reincarnated" => status.instances_reincarnated.len(),
+                    "already_reincarnated" => status.already_reincarnated.len(),
+                    "query_error" => ?status.query_error,
+                    "restart_errors" => status.restart_errors.len(),
+                );
+            } else if !status.instances_reincarnated.is_empty() {
+                info!(
+                    &opctx.log,
+                    "instance reincarnation completed";
+                    "instances_found" => status.instances_found,
+                    "instances_reincarnated" => status.instances_reincarnated.len(),
+                    "already_reincarnated" => status.already_reincarnated.len(),
+                );
+            } else {
+                debug!(
+                    &opctx.log,
+                    "instance reincarnation completed; no instances \
+                     in need of reincarnation";
+                    "instances_found" => status.instances_found,
+                    "already_reincarnated" => status.already_reincarnated.len(),
+                );
             };
-            serde_json::json!({
-                "instances_found": stats.instances_found,
-                "instances_reincarnated": stats.instances_reincarnated,
-                "already_reincarnated": stats.already_reincarnated,
-                "sagas_started": stats.sagas_started,
-                "saga_start_errors": stats.saga_start_errors,
-                "saga_errors": stats.saga_errors,
-                "last_error": error,
-            })
+            serde_json::json!(status)
         })
     }
 }
 
 impl InstanceReincarnation {
     pub(crate) fn new(
-        datastore: Arc<Datastore>,
+        datastore: Arc<DataStore>,
         sagas: Arc<dyn StartSaga>,
     ) -> Self {
         Self { datastore, sagas }
@@ -108,11 +82,9 @@ impl InstanceReincarnation {
     async fn actually_activate(
         &mut self,
         opctx: &OpContext,
-        stats: &mut ActivationStats,
-    ) -> anyhow::Result<()> {
+        status: &mut InstanceReincarnationStatus,
+    ) {
         let mut tasks = JoinSet::new();
-
-        let mut last_err = Ok(());
         let mut paginator = Paginator::new(BATCH_SIZE);
 
         while let Some(p) = paginator.next() {
@@ -123,14 +95,12 @@ impl InstanceReincarnation {
             let batch = match maybe_batch {
                 Ok(batch) => batch,
                 Err(error) => {
-                    const ERR_STR: &'static str =
-                        "failed to list instances in need of reincarnation";
                     error!(
                         opctx.log,
                         "failed to list instances in need of reincarnation";
                         "error" => &error,
                     );
-                    last_err = Err(error).context(ERR_STR);
+                    status.query_error = Some(error.to_string());
                     break;
                 }
             };
@@ -142,13 +112,13 @@ impl InstanceReincarnation {
                 debug!(
                     opctx.log,
                     "no more instances in need of reincarnation";
-                    "total_found" => stats.instances_found,
+                    "total_found" => status.instances_found,
                 );
                 break;
             }
 
-            let prev_sagas_started = stats.sagas_started;
-            stats.instances_found += found;
+            let prev_sagas_started = tasks.len();
+            status.instances_found += found;
 
             let serialized_authn = authn::saga::Serialized::for_opctx(opctx);
             for db_instance in batch {
@@ -169,31 +139,31 @@ impl InstanceReincarnation {
                                 .map_err(|e| (instance_id, e))?;
                             Ok(instance_id)
                         });
-                        stats.sagas_started += 1;
                     }
                     Err(error) => {
-                        const ERR_STR: &'static str =
-                            "failed to prepare instance-start saga for ";
+                        const ERR_MSG: &'static str =
+                            "failed to prepare instance-start saga";
                         error!(
                             opctx.log,
-                            "{ERR_STR}{instance_id}";
+                            "{ERR_MSG} for {instance_id}";
                             "instance_id" => %instance_id,
                             "error" => %error,
                         );
-                        last_err = Err(error)
-                            .with_context(|| format!("{ERR_STR}{instance_id}"));
-                        stats.saga_start_errors += 1;
+                        status
+                            .restart_errors
+                            .push((instance_id, format!("{ERR_MSG}: {error}")))
                     }
                 };
             }
 
+            let total_sagas_started = tasks.len();
             debug!(
                 opctx.log,
                 "found instance in need of reincarnation";
                 "instances_found" => found,
-                "total_found" => stats.instances_found,
-                "sagas_started" => stats.sagas_started - prev_sagas_started,
-                "total_sagas_started" => stats.sagas_started,
+                "total_found" => status.instances_found,
+                "sagas_started" => total_sagas_started - prev_sagas_started,
+                "total_sagas_started" => total_sagas_started,
             );
         }
 
@@ -207,7 +177,7 @@ impl InstanceReincarnation {
                         "welcome back to the realm of the living, {instance_id}!";
                         "instance_id" => %instance_id,
                     );
-                    stats.instances_reincarnated += 1;
+                    status.instances_reincarnated.push(instance_id);
                 }
                 // The instance was restarted by another saga, that's fine...
                 Ok(Err((instance_id, Error::Conflict { message })))
@@ -219,19 +189,19 @@ impl InstanceReincarnation {
                         "instance {instance_id} was already reincarnated";
                         "instance_id" => %instance_id,
                     );
-                    stats.already_reincarnated += 1;
+                    status.already_reincarnated.push(instance_id);
                 }
                 // Start saga failed
                 Ok(Err((instance_id, error))) => {
-                    const ERR_MSG: &'static str = "failed to restart instance";
+                    const ERR_MSG: &'static str = "instance-start saga failed";
                     warn!(opctx.log,
-                        "{ERR_MSG} {instance_id}";
+                        "{ERR_MSG}";
                         "instance_id" => %instance_id,
                         "error" => %error,
                     );
-                    stats.saga_errors += 1;
-                    last_err = Err(error)
-                        .with_context(|| format!("{ERR_MSG} {instance_id}"));
+                    status
+                        .restart_errors
+                        .push((instance_id, format!("{ERR_MSG}: {error}")));
                 }
                 Err(e) => {
                     const JOIN_ERR_MSG: &'static str =
@@ -245,7 +215,5 @@ impl InstanceReincarnation {
                 }
             }
         }
-
-        last_err
     }
 }

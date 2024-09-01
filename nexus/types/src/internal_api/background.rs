@@ -114,3 +114,19 @@ impl InstanceUpdaterStatus {
             + self.terminated_active_migrations
     }
 }
+
+/// The status of an `instance_reincarnation` background task activation.
+#[derive(Default, Serialize, Deserialize)]
+pub struct InstanceReincarnationStatus {
+    /// Total number of instances in need of reincarnation on this activation.
+    pub instances_found: usize,
+    /// UUIDs of instances reincarnated successfully by this activation.
+    pub instances_reincarnated: Vec<Uuid>,
+    /// UUIDs of instances which were reincarnated by a different Nexus'
+    /// instance-reincarnation task, or by a user-triggered restart saga.
+    pub already_reincarnated: Vec<Uuid>,
+    /// Any error that occured while finding instances in need of reincarnation.
+    pub query_error: Option<String>,
+    /// Errors that occurred while restarting individual instances.
+    pub restart_errors: Vec<(Uuid, String)>,
+}

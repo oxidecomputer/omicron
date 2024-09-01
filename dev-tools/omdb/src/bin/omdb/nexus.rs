@@ -35,6 +35,7 @@ use nexus_db_queries::db::lookup::LookupPath;
 use nexus_saga_recovery::LastPass;
 use nexus_types::deployment::Blueprint;
 use nexus_types::internal_api::background::AbandonedVmmReaperStatus;
+use nexus_types::internal_api::background::InstanceReincarnationStatus;
 use nexus_types::internal_api::background::InstanceUpdaterStatus;
 use nexus_types::internal_api::background::LookupRegionPortStatus;
 use nexus_types::internal_api::background::RegionReplacementDriverStatus;
@@ -1780,6 +1781,80 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 }
             }
         }
+    } else if name == "instance_reincarnation" {
+        match serde_json::from_value::<InstanceReincarnationStatus>(
+            details.clone(),
+        ) {
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            ),
+            Ok(InstanceReincarnationStatus {
+                instances_found,
+                instances_reincarnated,
+                already_reincarnated,
+                query_error,
+                restart_errors,
+            }) => {
+                const FOUND: &'static str =
+                    "instances eligible for reincarnation:";
+                const REINCARNATED: &'static str = "  instances reincarnated:";
+                const ALREADY_REINCARNATED: &'static str =
+                    "  instances already reincarnated:";
+                const ERRORS: &'static str =
+                    "  instances which failed to be reincarnated:";
+                const WIDTH: usize = const_max_len(&[
+                    FOUND,
+                    REINCARNATED,
+                    ALREADY_REINCARNATED,
+                    ERRORS,
+                ]);
+                let n_restart_errors = restart_errors.len();
+                let n_restarted = instances_reincarnated.len();
+                let n_already_restarted = already_reincarnated.len();
+                println!("    {FOUND:<WIDTH$} {instances_found:>3}");
+                println!("    {REINCARNATED:<WIDTH$} {n_restarted:>3}");
+                println!(
+                    "    {ALREADY_REINCARNATED:<WIDTH$} {:>3}",
+                    n_already_restarted
+                );
+                println!("    {ERRORS:<WIDTH$} {n_restart_errors:>3}");
+
+                if let Some(e) = query_error {
+                    println!(
+                        "    an error occurred while searching for instances \
+                         to reincarnate:\n      {e}",
+                    );
+                }
+
+                if n_restart_errors > 0 {
+                    println!(
+                        "    errors occurred while restarting the following \
+                         instances:"
+                    );
+                    for (id, error) in restart_errors {
+                        println!("    > {id}: {error}");
+                    }
+                }
+
+                if n_restarted > 0 {
+                    println!("    the following instances have reincarnated:");
+                    for id in instances_reincarnated {
+                        println!("    > {id}")
+                    }
+                }
+
+                if n_already_restarted > 0 {
+                    println!(
+                        "    the following instances were reincarnated by another \
+                         Nexus\n    or a user-triggered start saga:"
+                    );
+                    for id in already_reincarnated {
+                        println!("    > {id}")
+                    }
+                }
+            }
+        };
     } else {
         println!(
             "warning: unknown background task: {:?} \
