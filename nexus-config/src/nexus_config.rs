@@ -381,6 +381,8 @@ pub struct BackgroundTaskConfig {
     pub instance_watcher: InstanceWatcherConfig,
     /// configuration for instance updater task
     pub instance_updater: InstanceUpdaterConfig,
+    /// configuration for instance reincarnation task
+    pub instance_reincarnation: InstancereincarnationConfig,
     /// configuration for service VPC firewall propagation task
     pub service_firewall_propagation: ServiceFirewallPropagationConfig,
     /// configuration for v2p mapping propagation task
@@ -587,6 +589,14 @@ pub struct InstanceUpdaterConfig {
     /// Default: Off
     #[serde(default)]
     pub disable: bool,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct InstancereincarnationConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
 }
 
 #[serde_as]
@@ -911,6 +921,7 @@ mod test {
             instance_watcher.period_secs = 30
             instance_updater.period_secs = 30
             instance_updater.disable = false
+            instance_reincarnation.period_secs = 60
             service_firewall_propagation.period_secs = 300
             v2p_mapping_propagation.period_secs = 30
             abandoned_vmm_reaper.period_secs = 60
@@ -1066,6 +1077,9 @@ mod test {
                             period_secs: Duration::from_secs(30),
                             disable: false,
                         },
+                        instance_reincarnation: InstancereincarnationConfig {
+                            period_secs: Duration::from_secs(60),
+                        },
                         service_firewall_propagation:
                             ServiceFirewallPropagationConfig {
                                 period_secs: Duration::from_secs(300),
@@ -1169,6 +1183,7 @@ mod test {
             region_replacement_driver.period_secs = 30
             instance_watcher.period_secs = 30
             instance_updater.period_secs = 30
+            instance_reincarnation.period_secs = 60
             service_firewall_propagation.period_secs = 300
             v2p_mapping_propagation.period_secs = 30
             abandoned_vmm_reaper.period_secs = 60

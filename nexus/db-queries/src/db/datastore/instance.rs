@@ -20,7 +20,9 @@ use crate::db::identity::Resource;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Generation;
 use crate::db::model::Instance;
+use crate::db::model::InstanceAutoRestart;
 use crate::db::model::InstanceRuntimeState;
+use crate::db::model::InstanceState;
 use crate::db::model::Migration;
 use crate::db::model::MigrationState;
 use crate::db::model::Name;
@@ -426,6 +428,53 @@ impl DataStore {
                                 .eq_any(MigrationState::TERMINAL_STATES)),
                     )),
             )
+            .select(Instance::as_select())
+            .load_async::<Instance>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// List all instances in the [`Failed`](InstanceState::Failed) with an
+    /// auto-restart policy that permits them to be automatically restarted by
+    /// the control plane.
+    ///
+    /// This is used by the `instance_reincarnation` RPW to ensure that that any
+    /// such instances are restarted.
+    ///
+    /// This query is paginated by the instance's UUID, using the provided
+    /// [`DataPageParams`].
+    pub async fn find_reincarnatable_instances(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<Instance> {
+        use db::schema::instance::dsl;
+
+        paginated(dsl::instance, dsl::id, pagparams)
+            // Only attempt to reincarnate Failed instances.
+            .filter(dsl::state.eq(InstanceState::Failed))
+            // The instance's auto-restart policy must allow the control plane
+            // to restart it automatically.
+            //
+            // N.B. that this may become more complex in the future if we grow
+            // additional auto-restart policies that require additional logic
+            // (such as restart limits...)
+            .filter(
+                dsl::auto_restart_policy.eq(InstanceAutoRestart::AllFailures),
+            )
+            // Deleted instances may not be reincarnated.
+            .filter(dsl::time_deleted.is_null())
+            // If the instance is currently in the process of being updated,
+            // let's not mess with it for now and try to restart it on another
+            // pass.
+            .filter(dsl::updater_id.is_null())
+            // TODO(eliza): perhaps we ought to check for the presence of an
+            // active VMM here? If there is one, that would indicate that the
+            // instance hasn't been moved to `Failed` correctly. But, we would
+            // also need to handle the case where the active VMM is
+            // SagaUnwound...
             .select(Instance::as_select())
             .load_async::<Instance>(
                 &*self.pool_connection_authorized(opctx).await?,
@@ -889,12 +938,11 @@ impl DataStore {
         // instance must be "stopped" or "failed" in order to delete it.  The
         // delete operation sets "time_deleted" (just like with other objects)
         // and also sets the state to "destroyed".
-        use db::model::InstanceState as DbInstanceState;
         use db::schema::{disk, instance};
 
-        let stopped = DbInstanceState::NoVmm;
-        let failed = DbInstanceState::Failed;
-        let destroyed = DbInstanceState::Destroyed;
+        let stopped = InstanceState::NoVmm;
+        let failed = InstanceState::Failed;
+        let destroyed = InstanceState::Destroyed;
         let ok_to_delete_instance_states = vec![stopped, failed];
 
         let detached_label = api::external::DiskState::Detached.label();
