@@ -31,7 +31,7 @@ impl ClickhouseAdminApi for ClickhouseAdminImpl {
         let ctx = rqctx.context();
         let server_settings = body.into_inner();
         let output = ctx.clickward().generate_server_config(server_settings)?;
-        // TODO: Do something with the generation number
+        // TODO(https://github.com/oxidecomputer/omicron/issues/5999): Do something with the generation number
         println!("{path:?}");
         Ok(HttpResponseCreated(output))
     }
@@ -44,7 +44,7 @@ impl ClickhouseAdminApi for ClickhouseAdminImpl {
         let ctx = rqctx.context();
         let keeper_settings = body.into_inner();
         let output = ctx.clickward().generate_keeper_config(keeper_settings)?;
-        // TODO: Do something with the generation number
+        // TODO(https://github.com/oxidecomputer/omicron/issues/5999): Do something with the generation number
         println!("{path:?}");
         Ok(HttpResponseCreated(output))
     }
