@@ -112,11 +112,14 @@ impl ClickhouseServerConfig {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
 pub struct ClickhouseKeeperConfig {
+    #[schemars(schema_with = "path_schema")]
     pub config_dir: Utf8PathBuf,
     pub id: KeeperId,
     pub raft_servers: Vec<RaftServerConfig>,
+    #[schemars(schema_with = "path_schema")]
     pub datastore_path: Utf8PathBuf,
     pub listen_addr: Ipv6Addr,
 }

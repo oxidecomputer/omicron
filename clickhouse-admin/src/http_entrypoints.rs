@@ -5,8 +5,7 @@
 use crate::context::ServerContext;
 use clickhouse_admin_api::*;
 use clickhouse_admin_types::config::{KeeperConfig, ReplicaConfig};
-use dropshot::HttpError;
-use dropshot::{HttpResponseCreated, RequestContext, TypedBody};
+use dropshot::{HttpError, HttpResponseCreated, Path, RequestContext, TypedBody};
 use std::sync::Arc;
 
 type ClickhouseApiDescription = dropshot::ApiDescription<Arc<ServerContext>>;
@@ -23,21 +22,27 @@ impl ClickhouseAdminApi for ClickhouseAdminImpl {
 
     async fn generate_server_config(
         rqctx: RequestContext<Self::Context>,
+        path: Path<GenerationNum>,
         body: TypedBody<ServerSettings>,
     ) -> Result<HttpResponseCreated<ReplicaConfig>, HttpError> {
         let ctx = rqctx.context();
         let server_settings = body.into_inner();
         let output = ctx.clickward().generate_server_config(server_settings)?;
+        // TODO: Do something with the generation number
+        println!("{path:?}");
         Ok(HttpResponseCreated(output))
     }
 
     async fn generate_keeper_config(
         rqctx: RequestContext<Self::Context>,
+        path: Path<GenerationNum>,
         body: TypedBody<KeeperSettings>,
     ) -> Result<HttpResponseCreated<KeeperConfig>, HttpError> {
         let ctx = rqctx.context();
         let keeper_settings = body.into_inner();
         let output = ctx.clickward().generate_keeper_config(keeper_settings)?;
+        // TODO: Do something with the generation number
+        println!("{path:?}");
         Ok(HttpResponseCreated(output))
     }
 }

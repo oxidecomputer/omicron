@@ -5,9 +5,7 @@
 use camino::Utf8PathBuf;
 use clickhouse_admin_api::{KeeperSettings, ServerSettings};
 use clickhouse_admin_types::config::{KeeperConfig, ReplicaConfig};
-use clickhouse_admin_types::{
-    ClickhouseKeeperConfig, ClickhouseServerConfig, KeeperId, ServerId,
-};
+use clickhouse_admin_types::{ClickhouseKeeperConfig, ClickhouseServerConfig};
 use dropshot::HttpError;
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use std::str::FromStr;
@@ -52,7 +50,7 @@ impl Clickward {
         let config = ClickhouseServerConfig::new(
             // We can safely call unwrap here as this method is infallible
             Utf8PathBuf::from_str(&settings.config_dir).unwrap(),
-            ServerId(settings.node_id),
+            settings.node_id,
             Utf8PathBuf::from_str(&settings.datastore_path).unwrap(),
             settings.listen_addr,
             settings.keepers,
@@ -72,7 +70,7 @@ impl Clickward {
     ) -> Result<KeeperConfig, ClickwardError> {
         let config = ClickhouseKeeperConfig::new(
             Utf8PathBuf::from_str(&settings.config_dir).unwrap(),
-            KeeperId(settings.node_id),
+            settings.node_id,
             settings.keepers,
             Utf8PathBuf::from_str(&settings.datastore_path).unwrap(),
             settings.listen_addr,

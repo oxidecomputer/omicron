@@ -5,10 +5,18 @@
 use clickhouse_admin_types::config::{
     ClickhouseHost, KeeperConfig, RaftServerSettings, ReplicaConfig,
 };
-use dropshot::{HttpError, HttpResponseCreated, RequestContext, TypedBody};
+use clickhouse_admin_types::{KeeperId, ServerId};
+use dropshot::{HttpError, HttpResponseCreated, Path, RequestContext, TypedBody};
+use omicron_common::api::external::Generation;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::net::Ipv6Addr;
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct GenerationNum {
+    /// A unique identifier for the configuration generation.
+    pub generation: Generation,
+}
 
 #[dropshot::api_description]
 pub trait ClickhouseAdminApi {
@@ -18,10 +26,11 @@ pub trait ClickhouseAdminApi {
     /// directory.
     #[endpoint {
         method = POST,
-        path = "/node/server/generate-config",
+        path = "/node/server/generate-config/{generation}",
     }]
     async fn generate_server_config(
         rqctx: RequestContext<Self::Context>,
+        path: Path<GenerationNum>,
         body: TypedBody<ServerSettings>,
     ) -> Result<HttpResponseCreated<ReplicaConfig>, HttpError>;
 
@@ -29,10 +38,11 @@ pub trait ClickhouseAdminApi {
     /// directory.
     #[endpoint {
         method = POST,
-        path = "/node/keeper/generate-config",
+        path = "/node/keeper/generate-config/{generation}",
     }]
     async fn generate_keeper_config(
         rqctx: RequestContext<Self::Context>,
+        path: Path<GenerationNum>,
         body: TypedBody<KeeperSettings>,
     ) -> Result<HttpResponseCreated<KeeperConfig>, HttpError>;
 }
@@ -40,20 +50,20 @@ pub trait ClickhouseAdminApi {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct ServerSettings {
-    pub node_id: u64,
-    pub keepers: Vec<ClickhouseHost>,
-    pub remote_servers: Vec<ClickhouseHost>,
     pub config_dir: String,
     pub datastore_path: String,
     pub listen_addr: Ipv6Addr,
+    pub node_id: ServerId,
+    pub keepers: Vec<ClickhouseHost>,
+    pub remote_servers: Vec<ClickhouseHost>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct KeeperSettings {
-    pub node_id: u64,
-    pub keepers: Vec<RaftServerSettings>,
     pub config_dir: String,
     pub datastore_path: String,
     pub listen_addr: Ipv6Addr,
+    pub node_id: KeeperId,
+    pub keepers: Vec<RaftServerSettings>,
 }

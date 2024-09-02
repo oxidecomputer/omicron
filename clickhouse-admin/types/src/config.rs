@@ -20,7 +20,7 @@ use std::net::{Ipv4Addr, Ipv6Addr};
 
 // Used for schemars to be able to be used with camino:
 // See https://github.com/camino-rs/camino/issues/91#issuecomment-2027908513
-fn path_schema(gen: &mut SchemaGenerator) -> Schema {
+pub fn path_schema(gen: &mut SchemaGenerator) -> Schema {
     let mut schema: SchemaObject = <String>::json_schema(gen).into();
     schema.format = Some("Utf8PathBuf".to_owned());
     schema.into()
