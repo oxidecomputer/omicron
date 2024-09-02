@@ -2,18 +2,14 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use camino::Utf8PathBuf;
-use clickhouse_admin_types::config::{
-    path_schema, KeeperConfig, RaftServerSettings, ReplicaConfig,
-};
-use clickhouse_admin_types::{ServerSettings, KeeperId};
+use clickhouse_admin_types::config::{KeeperConfig, ReplicaConfig};
+use clickhouse_admin_types::{KeeperSettings, ServerSettings};
 use dropshot::{
     HttpError, HttpResponseCreated, Path, RequestContext, TypedBody,
 };
 use omicron_common::api::external::Generation;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use std::net::Ipv6Addr;
+use serde::Deserialize;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct GenerationNum {
@@ -48,16 +44,4 @@ pub trait ClickhouseAdminApi {
         path: Path<GenerationNum>,
         body: TypedBody<KeeperSettings>,
     ) -> Result<HttpResponseCreated<KeeperConfig>, HttpError>;
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub struct KeeperSettings {
-    #[schemars(schema_with = "path_schema")]
-    pub config_dir: Utf8PathBuf,
-    #[schemars(schema_with = "path_schema")]
-    pub datastore_path: Utf8PathBuf,
-    pub listen_addr: Ipv6Addr,
-    pub node_id: KeeperId,
-    pub keepers: Vec<RaftServerSettings>,
 }

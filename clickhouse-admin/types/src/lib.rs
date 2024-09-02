@@ -126,41 +126,43 @@ impl ServerSettings {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub struct ClickhouseKeeperConfig {
+pub struct KeeperSettings {
     #[schemars(schema_with = "path_schema")]
     pub config_dir: Utf8PathBuf,
-    pub id: KeeperId,
-    pub raft_servers: Vec<RaftServerConfig>,
+    pub node_id: KeeperId,
+    pub raft_servers: Vec<RaftServerSettings>,
     #[schemars(schema_with = "path_schema")]
     pub datastore_path: Utf8PathBuf,
     pub listen_addr: Ipv6Addr,
 }
 
-impl ClickhouseKeeperConfig {
+impl KeeperSettings {
     pub fn new(
         config_dir: Utf8PathBuf,
-        id: KeeperId,
+        node_id: KeeperId,
         raft_servers: Vec<RaftServerSettings>,
         datastore_path: Utf8PathBuf,
         listen_addr: Ipv6Addr,
     ) -> Self {
-        let raft_servers = raft_servers
-            .iter()
-            .map(|settings| RaftServerConfig::new(settings.clone()))
-            .collect();
-
-        Self { config_dir, id, raft_servers, datastore_path, listen_addr }
+        Self { config_dir, node_id, raft_servers, datastore_path, listen_addr }
     }
 
     /// Generate a configuration file for a keeper node
     pub fn generate_xml_file(&self) -> Result<KeeperConfig> {
         let logger =
             LogConfig::new(self.datastore_path.clone(), NodeType::Keeper);
-        let raft_config = RaftServers::new(self.raft_servers.clone());
+
+        let raft_servers = self
+            .raft_servers
+            .iter()
+            .map(|settings| RaftServerConfig::new(settings.clone()))
+            .collect();
+        let raft_config = RaftServers::new(raft_servers);
+
         let config = KeeperConfig::new(
             logger,
             self.listen_addr,
-            self.id,
+            self.node_id,
             self.datastore_path.clone(),
             raft_config,
         );
@@ -186,8 +188,8 @@ mod tests {
     use camino_tempfile::Builder;
 
     use crate::{
-        ClickhouseHost, ClickhouseKeeperConfig, ServerSettings,
-        KeeperId, RaftServerSettings, ServerId,
+        ClickhouseHost, KeeperId, KeeperSettings, RaftServerSettings, ServerId,
+        ServerSettings,
     };
 
     #[test]
@@ -217,7 +219,7 @@ mod tests {
             },
         ];
 
-        let config = ClickhouseKeeperConfig::new(
+        let config = KeeperSettings::new(
             Utf8PathBuf::from(config_dir.path()),
             KeeperId(1),
             keepers,

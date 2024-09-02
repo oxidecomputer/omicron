@@ -282,26 +282,26 @@
             "type": "string",
             "format": "Utf8PathBuf"
           },
-          "keepers": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/RaftServerSettings"
-            }
+          "id": {
+            "$ref": "#/components/schemas/KeeperId"
           },
           "listen_addr": {
             "type": "string",
             "format": "ipv6"
           },
-          "node_id": {
-            "$ref": "#/components/schemas/KeeperId"
+          "raft_servers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RaftServerSettings"
+            }
           }
         },
         "required": [
           "config_dir",
           "datastore_path",
-          "keepers",
+          "id",
           "listen_addr",
-          "node_id"
+          "raft_servers"
         ]
       },
       "LogConfig": {

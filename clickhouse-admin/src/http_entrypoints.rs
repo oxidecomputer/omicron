@@ -5,7 +5,7 @@
 use crate::context::ServerContext;
 use clickhouse_admin_api::*;
 use clickhouse_admin_types::config::{KeeperConfig, ReplicaConfig};
-use clickhouse_admin_types::ServerSettings;
+use clickhouse_admin_types::{KeeperSettings, ServerSettings};
 use dropshot::{
     HttpError, HttpResponseCreated, Path, RequestContext, TypedBody,
 };

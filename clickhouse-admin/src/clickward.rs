@@ -2,9 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use clickhouse_admin_api::KeeperSettings;
 use clickhouse_admin_types::config::{KeeperConfig, ReplicaConfig};
-use clickhouse_admin_types::{ClickhouseKeeperConfig, ServerSettings};
+use clickhouse_admin_types::{KeeperSettings, ServerSettings};
 use dropshot::HttpError;
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
 
@@ -44,7 +43,7 @@ impl Clickward {
     pub fn generate_server_config(
         &self,
         settings: ServerSettings,
-     ) -> Result<ReplicaConfig, ClickwardError> {
+    ) -> Result<ReplicaConfig, ClickwardError> {
         let replica_config = settings
             .generate_xml_file()
             .map_err(|e| ClickwardError::Failure { err: e })?;
@@ -56,15 +55,7 @@ impl Clickward {
         &self,
         settings: KeeperSettings,
     ) -> Result<KeeperConfig, ClickwardError> {
-        let config = ClickhouseKeeperConfig::new(
-            settings.config_dir,
-            settings.node_id,
-            settings.keepers,
-            settings.datastore_path,
-            settings.listen_addr,
-        );
-
-        let keeper_config = config
+        let keeper_config = settings
             .generate_xml_file()
             .map_err(|e| ClickwardError::Failure { err: e })?;
 

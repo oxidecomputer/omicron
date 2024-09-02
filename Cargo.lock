@@ -1119,7 +1119,6 @@ checksum = "98cc8fbded0c607b7ba9dd60cd98df59af97e84d24e49c8557331cfc26d301ce"
 name = "clickhouse-admin-api"
 version = "0.1.0"
 dependencies = [
- "camino",
  "clickhouse-admin-types",
  "dropshot 0.10.2-dev",
  "omicron-common",
