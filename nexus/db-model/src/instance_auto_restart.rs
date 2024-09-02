@@ -18,15 +18,23 @@ impl_enum_type!(
 
     // Enum values
     Never => b"never"
+    SledFailuresOnly => b"sled_failures_only"
     AllFailures => b"all_failures"
 );
 
 impl InstanceAutoRestart {
     pub fn label(&self) -> &'static str {
         match self {
-            InstanceAutoRestart::Never => "never",
-            InstanceAutoRestart::AllFailures => "all_failures",
+            Self::Never => "never",
+            Self::SledFailuresOnly => "sled_failures_only",
+            Self::AllFailures => "all_failures",
         }
+    }
+}
+
+impl Default for InstanceAutoRestart {
+    fn default() -> Self {
+        Self::SledFailuresOnly
     }
 }
 

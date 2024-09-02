@@ -109,7 +109,7 @@ impl Instance {
             ncpus: params.ncpus.into(),
             memory: params.memory.into(),
             hostname: params.hostname.to_string(),
-            auto_restart_policy: InstanceAutoRestart::Never,
+            auto_restart_policy: InstanceAutoRestart::default(),
             runtime_state,
 
             updater_gen: Generation::new(),
