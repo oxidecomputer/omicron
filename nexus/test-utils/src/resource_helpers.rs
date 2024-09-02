@@ -779,12 +779,13 @@ pub async fn delete_internet_gateway(
     project_name: &str,
     vpc_name: &str,
     internet_gateway_name: &str,
+    cascade: bool,
 ) {
     NexusRequest::object_delete(
         &client,
         format!(
-            "/v1/internet-gateways/{}?project={}&vpc={}",
-            &internet_gateway_name, &project_name, &vpc_name
+            "/v1/internet-gateways/{}?project={}&vpc={}&cascade={}",
+            &internet_gateway_name, &project_name, &vpc_name, cascade
         )
         .as_str(),
     )
@@ -889,10 +890,11 @@ pub async fn detach_ip_address_from_igw(
     vpc_name: &str,
     igw_name: &str,
     attachment_name: &str,
+    cascade: bool,
 ) {
     let url = format!(
-        "/v1/internet-gateway-ip-addresses/{}?project={}&vpc={}&gateway={}",
-        attachment_name, project_name, vpc_name, igw_name,
+        "/v1/internet-gateway-ip-addresses/{}?project={}&vpc={}&gateway={}&cascade={}",
+        attachment_name, project_name, vpc_name, igw_name, cascade
     );
 
     NexusRequest::object_delete(&client, url.as_str())
