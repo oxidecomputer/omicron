@@ -123,6 +123,11 @@ impl Instance {
     pub fn runtime(&self) -> &InstanceRuntimeState {
         &self.runtime_state
     }
+
+    /// Returns `true` if this instance can be automatically restarted.
+    pub fn can_reincarnate(&self) -> bool {
+        self.runtime_state.can_reincarnate(self.auto_restart_policy)
+    }
 }
 
 impl DatastoreAttachTargetConfig<Disk> for Instance {
@@ -220,6 +225,26 @@ impl InstanceRuntimeState {
             dst_propolis_id: None,
             migration_id: None,
             gen: Generation::new(),
+        }
+    }
+
+    /// Returns `true` if this instance can be automatically restarted by the
+    /// provided [`InstanceAutoRestart`] policy.
+    pub fn can_reincarnate(&self, policy: InstanceAutoRestart) -> bool {
+        // Instances only need to be automatically restarted if they are in the
+        // `Failed` state.
+        if self.nexus_state != InstanceState::Failed {
+            return false;
+        }
+
+        // Check if the instance's configured auto-restart policy permits the
+        // control plane to automatically restart it.
+        match policy {
+            InstanceAutoRestart::Never => false,
+            InstanceAutoRestart::AllFailures => true,
+            // TODO(eliza): future auto-restart policies may
+            // require additional checks here, such as a limited restart
+            // budget...
         }
     }
 }
