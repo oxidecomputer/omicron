@@ -408,12 +408,14 @@ mod test {
         let mut will_not_reincarnate = std::collections::BTreeSet::new();
         // Some instances which are `Failed`` but don't have policies permitting
         // them to be reincarnated.
-        for _ in 0..3 {
+        for policy in
+            [InstanceAutoRestart::Never, InstanceAutoRestart::SledFailuresOnly]
+        {
             let id = create_instance(
                 &cptestctx,
                 &opctx,
                 &authz_project,
-                InstanceAutoRestart::Never,
+                policy,
                 InstanceState::Failed,
             )
             .await;
@@ -422,12 +424,12 @@ mod test {
 
         // Some instances with policies permitting them to be reincarnated, but
         // which are not `Failed`.
-        for _ in 0..3 {
+        for _ in 0..2 {
             let id = create_instance(
                 &cptestctx,
                 &opctx,
                 &authz_project,
-                InstanceAutoRestart::Never,
+                InstanceAutoRestart::AllFailures,
                 InstanceState::NoVmm,
             )
             .await;

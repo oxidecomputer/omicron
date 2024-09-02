@@ -242,9 +242,14 @@ impl InstanceRuntimeState {
         match policy {
             InstanceAutoRestart::Never => false,
             InstanceAutoRestart::AllFailures => true,
-            // TODO(eliza): future auto-restart policies may
-            // require additional checks here, such as a limited restart
-            // budget...
+            // TODO(eliza): currently, we don't have the ability to determine
+            // whether an instance is failed because the sled it was on has
+            // rebooted, or because the individual Propolis VMM crashed. For
+            // now, we assume all failures are VMM failures rather than sled
+            // failures. In the future, we will need to determine if a failure
+            // was a sled-level or VMM-level failure, and use that here to
+            // determine whether or not the instance is restartable.
+            InstanceAutoRestart::SledFailuresOnly => false,
         }
     }
 }
