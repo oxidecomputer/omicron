@@ -10,6 +10,7 @@ use nexus_auth::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::LookupPath;
+use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
@@ -21,6 +22,8 @@ use uuid::Uuid;
 
 impl super::Nexus {
     //Internet gateways
+
+    /// Lookup an internet gateway.
     pub fn internet_gateway_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
@@ -58,6 +61,7 @@ impl super::Nexus {
         }
     }
 
+    /// Create an internet gateway.
     pub(crate) async fn internet_gateway_create(
         &self,
         opctx: &OpContext,
@@ -77,6 +81,7 @@ impl super::Nexus {
         Ok(router)
     }
 
+    /// List internet gateways within a VPC.
     pub(crate) async fn internet_gateway_list(
         &self,
         opctx: &OpContext,
@@ -92,17 +97,23 @@ impl super::Nexus {
         Ok(igws)
     }
 
+    /// Delete an internet gateway.
+    ///
+    /// If there are routes that reference the gateway being deleted and
+    /// `cascade` is true all referencing routes are deleted, otherwise an
+    /// error is returned.
     pub(crate) async fn internet_gateway_delete(
         &self,
         opctx: &OpContext,
         lookup: &lookup::InternetGateway<'_>,
+        cascade: bool,
     ) -> DeleteResult {
         let (.., authz_igw, _db_igw) =
             lookup.fetch_for(authz::Action::Delete).await?;
 
         let out = self
             .db_datastore
-            .vpc_delete_internet_gateway(opctx, &authz_igw)
+            .vpc_delete_internet_gateway(opctx, &authz_igw, cascade)
             .await?;
 
         self.vpc_needed_notify_sleds();
@@ -110,6 +121,7 @@ impl super::Nexus {
         Ok(out)
     }
 
+    /// List IP pools associated with an internet gateway.
     pub(crate) async fn internet_gateway_ip_pool_list(
         &self,
         opctx: &OpContext,
@@ -125,6 +137,7 @@ impl super::Nexus {
         Ok(pools)
     }
 
+    /// Lookup an IP pool associated with an internet gateway.
     pub fn internet_gateway_ip_pool_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
@@ -167,6 +180,7 @@ impl super::Nexus {
         }
     }
 
+    /// Attach an IP pool to an internet gateway.
     pub(crate) async fn internet_gateway_ip_pool_attach(
         &self,
         opctx: &OpContext,
@@ -201,46 +215,66 @@ impl super::Nexus {
             .internet_gateway_attach_ip_pool(&opctx, &authz_igw, route)
             .await?;
 
-        //TODO trigger igw rpw
-        //self.vpc_igw_increment_rpw_version(opctx, &authz_igw).await?;
+        self.vpc_needed_notify_sleds();
 
         Ok(route)
     }
 
+    /// Detach an IP pool from an internet gateway.
+    ///
+    /// If there are routes that depend on the IP pool being detached and
+    /// `cascade` is true then those routes are deleted, otherwise an
+    /// error is returned.
     pub(crate) async fn internet_gateway_ip_pool_detach(
         &self,
         opctx: &OpContext,
         lookup: &lookup::InternetGatewayIpPool<'_>,
+        cascade: bool,
     ) -> DeleteResult {
-        let (.., _authz_igw, authz_pool, _db_pool) =
+        let (.., authz_vpc, _authz_igw, authz_pool, db_pool) =
             lookup.fetch_for(authz::Action::Delete).await?;
+
+        let (.., igw) = LookupPath::new(opctx, &self.db_datastore)
+            .internet_gateway_id(db_pool.internet_gateway_id)
+            .fetch()
+            .await?;
 
         let out = self
             .db_datastore
-            .internet_gateway_detach_ip_pool(opctx, &authz_pool)
+            .internet_gateway_detach_ip_pool(
+                opctx,
+                igw.name().to_string(),
+                &authz_pool,
+                db_pool.ip_pool_id,
+                authz_vpc.id(),
+                cascade,
+            )
             .await?;
 
         //TODO trigger igw rpw
-        //self.vpc_igw_increment_rpw_version(opctx, &authz_igw).await?;
+        //self.vpc_router_increment_rpw_version(opctx, &authz_router).await?;
+        self.vpc_needed_notify_sleds();
 
         Ok(out)
     }
 
+    /// List IP addresses attached to an internet gateway.
     pub(crate) async fn internet_gateway_ip_address_list(
         &self,
         opctx: &OpContext,
         gateway_lookup: &lookup::InternetGateway<'_>,
         pagparams: &PaginatedBy<'_>,
     ) -> ListResultVec<db::model::InternetGatewayIpAddress> {
-        let (.., authz_vpc) =
+        let (.., authz_igw) =
             gateway_lookup.lookup_for(authz::Action::ListChildren).await?;
         let pools = self
             .db_datastore
-            .internet_gateway_list_ip_addresses(opctx, &authz_vpc, pagparams)
+            .internet_gateway_list_ip_addresses(opctx, &authz_igw, pagparams)
             .await?;
         Ok(pools)
     }
 
+    /// Lookup an IP address attached to an internet gateway.
     pub fn internet_gateway_ip_address_lookup<'a>(
         &'a self,
         opctx: &'a OpContext,
@@ -283,6 +317,7 @@ impl super::Nexus {
         }
     }
 
+    /// Attach an IP address to an internet gateway.
     pub(crate) async fn internet_gateway_ip_address_attach(
         &self,
         opctx: &OpContext,
@@ -304,26 +339,46 @@ impl super::Nexus {
             .await?;
 
         //TODO trigger igw rpw
-        //self.vpc_igw_increment_rpw_version(opctx, &authz_igw).await?;
+        //self.vpc_router_increment_rpw_version(opctx, &authz_router).await?;
+        self.vpc_needed_notify_sleds();
 
         Ok(route)
     }
 
+    /// Detach an IP pool from an internet gateway.
+    ///
+    /// If there are routes that depend on the IP address being detached and
+    /// `cascade` is true then those routes are deleted, otherwise an
+    /// error is returned.
     pub(crate) async fn internet_gateway_ip_address_detach(
         &self,
         opctx: &OpContext,
         lookup: &lookup::InternetGatewayIpAddress<'_>,
+        cascade: bool,
     ) -> DeleteResult {
-        let (.., _authz_igw, authz_addr, _db_addr) =
+        let (.., authz_vpc, _authz_igw, authz_addr, db_addr) =
             lookup.fetch_for(authz::Action::Delete).await?;
+
+        let (.., igw) = LookupPath::new(opctx, &self.db_datastore)
+            .internet_gateway_id(db_addr.internet_gateway_id)
+            .fetch()
+            .await?;
 
         let out = self
             .db_datastore
-            .internet_gateway_detach_ip_address(opctx, &authz_addr)
+            .internet_gateway_detach_ip_address(
+                opctx,
+                igw.name().to_string(),
+                &authz_addr,
+                db_addr.address.ip(),
+                authz_vpc.id(),
+                cascade,
+            )
             .await?;
 
         //TODO trigger igw rpw
-        //self.vpc_igw_increment_rpw_version(opctx, &authz_igw).await?;
+        //self.vpc_router_increment_rpw_version(opctx, &authz_router).await?;
+        self.vpc_needed_notify_sleds();
 
         Ok(out)
     }

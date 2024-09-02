@@ -51,9 +51,11 @@ use diesel::result::Error as DieselError;
 use futures::stream::{self, StreamExt};
 use ipnetwork::IpNetwork;
 use nexus_db_fixed_data::vpc::SERVICES_VPC_ID;
+use nexus_db_model::ExternalIp;
 use nexus_db_model::InternetGateway;
 use nexus_db_model::InternetGatewayIpAddress;
 use nexus_db_model::InternetGatewayIpPool;
+use nexus_db_model::IpPoolRange;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::SledFilter;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -1342,12 +1344,92 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_igw: &authz::InternetGateway,
+        cascade: bool,
+    ) -> DeleteResult {
+        if cascade {
+            self.vpc_delete_internet_gateway_cascade(opctx, authz_igw).await
+        } else {
+            self.vpc_delete_internet_gateway_no_cascade(opctx, authz_igw).await
+        }
+    }
+
+    pub async fn vpc_delete_internet_gateway_no_cascade(
+        &self,
+        opctx: &OpContext,
+        authz_igw: &authz::InternetGateway,
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Delete, authz_igw).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let err = OptionalError::new();
 
+        #[derive(Debug)]
+        enum DeleteError {
+            IpPoolsExist,
+            IpAddressesExist,
+        }
+
+        self.transaction_retry_wrapper("vpc_delete_internet_gateway_no_cascade")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                async move {
+                    // Delete ip pool associations
+                    use db::schema::internet_gateway_ip_pool::dsl as pool;
+                    let count = pool::internet_gateway_ip_pool
+                        .filter(pool::time_deleted.is_null())
+                        .filter(pool::internet_gateway_id.eq(authz_igw.id()))
+                        .count()
+                        .first_async::<i64>(&conn)
+                        .await?;
+                    if count > 0 {
+                        return Err(err.bail(DeleteError::IpPoolsExist));
+                    }
+
+                    // Delete ip address associations
+                    use db::schema::internet_gateway_ip_address::dsl as addr;
+                    let count = addr::internet_gateway_ip_address
+                        .filter(addr::time_deleted.is_null())
+                        .filter(addr::internet_gateway_id.eq(authz_igw.id()))
+                        .count()
+                        .first_async::<i64>(&conn)
+                        .await?;
+                    if count > 0 {
+                        return Err(err.bail(DeleteError::IpAddressesExist));
+                    }
+
+                    use db::schema::internet_gateway::dsl;
+                    let now = Utc::now();
+                    diesel::update(dsl::internet_gateway)
+                        .filter(dsl::time_deleted.is_null())
+                        .filter(dsl::id.eq(authz_igw.id()))
+                        .set(dsl::time_deleted.eq(now))
+                        .execute_async(&conn)
+                        .await?;
+
+                    Ok(())
+                }
+            })
+            .await
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    match err {
+                        DeleteError::IpPoolsExist => Error::invalid_request("Ip pools referencing this gateway exist. To perform a cascading delete set the cascade option"),
+                        DeleteError::IpAddressesExist => Error::invalid_request("Ip addresses referencing this gateway exist. To perform a cascading delete set the cascade option"),
+                    }
+                } else {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
+            })
+    }
+
+    pub async fn vpc_delete_internet_gateway_cascade(
+        &self,
+        opctx: &OpContext,
+        authz_igw: &authz::InternetGateway,
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Delete, authz_igw).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        self.transaction_retry_wrapper("vpc_delete_internet_gateway")
+        self.transaction_retry_wrapper("vpc_delete_internet_gateway_cascade")
             .transaction(&conn, |conn| {
                 async move {
                     use db::schema::internet_gateway::dsl;
@@ -1581,10 +1663,136 @@ impl DataStore {
     pub async fn internet_gateway_detach_ip_pool(
         &self,
         opctx: &OpContext,
+        igw_name: String,
+        authz_igw_pool: &authz::InternetGatewayIpPool,
+        ip_pool_id: Uuid,
+        vpc_id: Uuid,
+        cascade: bool,
+    ) -> DeleteResult {
+        if cascade {
+            self.internet_gateway_detach_ip_pool_cascade(opctx, authz_igw_pool)
+                .await
+        } else {
+            self.internet_gateway_detach_ip_pool_no_cascade(
+                opctx,
+                igw_name,
+                authz_igw_pool,
+                ip_pool_id,
+                vpc_id,
+            )
+            .await
+        }
+    }
+
+    pub async fn internet_gateway_detach_ip_pool_no_cascade(
+        &self,
+        opctx: &OpContext,
+        igw_name: String,
+        authz_igw_pool: &authz::InternetGatewayIpPool,
+        ip_pool_id: Uuid,
+        vpc_id: Uuid,
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Delete, authz_igw_pool).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let err = OptionalError::new();
+        #[derive(Debug)]
+        enum DeleteError {
+            DependentInstances,
+        }
+
+        self.transaction_retry_wrapper("internet_gateway_detach_ip_pool_no_cascade")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                let igw_name = igw_name.clone();
+                async move {
+
+                    // determine if there are routes that target this igw
+                    let this_target = format!("inetgw:{}", igw_name);
+                    use  db::schema::router_route::dsl as rr;
+                    let count = rr::router_route
+                        .filter(rr::time_deleted.is_null())
+                        .filter(rr::target.eq(this_target))
+                        .count()
+                        .first_async::<i64>(&conn)
+                        .await?;
+
+                    info!(self.log, "detach ip pool: applies to {} routes", count);
+
+                    if count > 0 {
+                        // determine if there are instances that have IP
+                        // addresses in the IP pool being removed.
+
+                        use db::schema::ip_pool_range::dsl as ipr;
+                        let pr = ipr::ip_pool_range
+                            .filter(ipr::time_deleted.is_null())
+                            .filter(ipr::ip_pool_id.eq(ip_pool_id))
+                            .select(IpPoolRange::as_select())
+                            .first_async::<IpPoolRange>(&conn)
+                            .await?;
+                        info!(self.log, "POOL {pr:#?}");
+
+                        use db::schema::instance_network_interface::dsl as ini;
+                        let vpc_interfaces = ini::instance_network_interface
+                            .filter(ini::time_deleted.is_null())
+                            .filter(ini::vpc_id.eq(vpc_id))
+                            .select(InstanceNetworkInterface::as_select())
+                            .load_async::<InstanceNetworkInterface>(&conn)
+                            .await?;
+
+                        info!(self.log, "detach ip pool: applies to {} interfaces", vpc_interfaces.len());
+
+                        for ifx in &vpc_interfaces {
+                            info!(self.log, "IFX {ifx:#?}");
+
+                            use db::schema::external_ip::dsl as xip;
+                            let ext_ips = xip::external_ip
+                                .filter(xip::time_deleted.is_null())
+                                .filter(xip::parent_id.eq(ifx.instance_id))
+                                .select(ExternalIp::as_select())
+                                .load_async::<ExternalIp>(&conn)
+                                .await?;
+
+                            info!(self.log, "EXT IP {ext_ips:#?}");
+
+                            for ext_ip in &ext_ips {
+                                if ext_ip.ip.ip() >= pr.first_address.ip() &&
+                                    ext_ip.ip.ip() <= pr.last_address.ip() {
+                                    return Err(err.bail(DeleteError::DependentInstances));
+                                }
+                            }
+                        }
+                    }
+
+                    use db::schema::internet_gateway_ip_pool::dsl;
+                    let now = Utc::now();
+                    diesel::update(dsl::internet_gateway_ip_pool)
+                        .filter(dsl::time_deleted.is_null())
+                        .filter(dsl::id.eq(authz_igw_pool.id()))
+                        .set(dsl::time_deleted.eq(now))
+                        .execute_async(&conn)
+                        .await?;
+
+                    Ok(())
+                }
+            })
+            .await
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    match err {
+                        DeleteError::DependentInstances => Error::invalid_request("VPC routes dependent on this IP pool. To perform a cascading delete set the cascade option"),
+                    }
+                } else {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
+            })
+    }
+
+    pub async fn internet_gateway_detach_ip_pool_cascade(
+        &self,
+        opctx: &OpContext,
         authz_pool: &authz::InternetGatewayIpPool,
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Delete, authz_pool).await?;
-
         use db::schema::internet_gateway_ip_pool::dsl;
         let now = Utc::now();
         diesel::update(dsl::internet_gateway_ip_pool)
@@ -1593,16 +1801,32 @@ impl DataStore {
             .set(dsl::time_deleted.eq(now))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::NotFoundByResource(authz_pool),
-                )
-            })?;
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
         Ok(())
     }
 
     pub async fn internet_gateway_detach_ip_address(
+        &self,
+        opctx: &OpContext,
+        igw_name: String,
+        authz_addr: &authz::InternetGatewayIpAddress,
+        addr: IpAddr,
+        vpc_id: Uuid,
+        cascade: bool,
+    ) -> DeleteResult {
+        if cascade {
+            self.internet_gateway_detach_ip_address_cascade(opctx, authz_addr)
+                .await
+        } else {
+            self.internet_gateway_detach_ip_address_no_cascade(
+                opctx, igw_name, authz_addr, addr, vpc_id,
+            )
+            .await
+        }
+    }
+
+    pub async fn internet_gateway_detach_ip_address_cascade(
         &self,
         opctx: &OpContext,
         authz_addr: &authz::InternetGatewayIpAddress,
@@ -1624,6 +1848,87 @@ impl DataStore {
                 )
             })?;
         Ok(())
+    }
+
+    pub async fn internet_gateway_detach_ip_address_no_cascade(
+        &self,
+        opctx: &OpContext,
+        igw_name: String,
+        authz_addr: &authz::InternetGatewayIpAddress,
+        addr: IpAddr,
+        vpc_id: Uuid,
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Delete, authz_addr).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let err = OptionalError::new();
+        #[derive(Debug)]
+        enum DeleteError {
+            DependentInstances,
+        }
+        self.transaction_retry_wrapper("internet_gateway_detach_ip_address_no_cascade")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                let igw_name = igw_name.clone();
+                async move {
+                    // determine if there are routes that target this igw
+                    let this_target = format!("inetgw:{}", igw_name);
+                    use  db::schema::router_route::dsl as rr;
+                    let count = rr::router_route
+                        .filter(rr::time_deleted.is_null())
+                        .filter(rr::target.eq(this_target))
+                        .count()
+                        .first_async::<i64>(&conn)
+                        .await?;
+
+                    if count > 0 {
+                        use db::schema::instance_network_interface::dsl as ini;
+                        let vpc_interfaces = ini::instance_network_interface
+                            .filter(ini::time_deleted.is_null())
+                            .filter(ini::vpc_id.eq(vpc_id))
+                            .select(InstanceNetworkInterface::as_select())
+                            .load_async::<InstanceNetworkInterface>(&conn)
+                            .await?;
+
+                        for ifx in &vpc_interfaces {
+
+                            use db::schema::external_ip::dsl as xip;
+                            let ext_ips = xip::external_ip
+                                .filter(xip::time_deleted.is_null())
+                                .filter(xip::parent_id.eq(ifx.instance_id))
+                                .select(ExternalIp::as_select())
+                                .load_async::<ExternalIp>(&conn)
+                                .await?;
+
+                            for ext_ip in &ext_ips {
+                                if ext_ip.ip.ip() == addr {
+                                    return Err(err.bail(DeleteError::DependentInstances));
+                                }
+                            }
+                        }
+                    }
+
+                    use db::schema::internet_gateway_ip_address::dsl;
+                    let now = Utc::now();
+                    diesel::update(dsl::internet_gateway_ip_address)
+                        .filter(dsl::time_deleted.is_null())
+                        .filter(dsl::id.eq(authz_addr.id()))
+                        .set(dsl::time_deleted.eq(now))
+                        .execute_async(&conn)
+                        .await?;
+
+                    Ok(())
+                }
+            })
+            .await
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    match err {
+                        DeleteError::DependentInstances => Error::invalid_request("VPC routes dependent on this IP pool. To perform a cascading delete set the cascade option"),
+                    }
+                } else {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
+            })
     }
 
     pub async fn router_update_route(

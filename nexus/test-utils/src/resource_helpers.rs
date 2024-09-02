@@ -835,10 +835,11 @@ pub async fn detach_ip_pool_from_igw(
     vpc_name: &str,
     igw_name: &str,
     ip_pool_name: &str,
+    cascade: bool,
 ) {
     let url = format!(
-        "/v1/internet-gateway-ip-pools/{}?project={}&vpc={}&gateway={}",
-        ip_pool_name, project_name, vpc_name, igw_name,
+        "/v1/internet-gateway-ip-pools/{}?project={}&vpc={}&gateway={}&cascade={}",
+        ip_pool_name, project_name, vpc_name, igw_name, cascade,
     );
 
     NexusRequest::object_delete(&client, url.as_str())

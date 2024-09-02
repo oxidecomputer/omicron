@@ -4788,7 +4788,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn internet_gateway_delete(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::InternetGatewayPath>,
-        query_params: Query<params::OptionalVpcSelector>,
+        query_params: Query<params::InternetGatewayDeleteSelector>,
     ) -> Result<HttpResponseDeleted, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
@@ -4803,7 +4803,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 gateway: path.gateway,
             };
             let lookup = nexus.internet_gateway_lookup(&opctx, selector)?;
-            nexus.internet_gateway_delete(&opctx, &lookup).await?;
+            nexus
+                .internet_gateway_delete(&opctx, &lookup, query.cascade)
+                .await?;
             Ok(HttpResponseDeleted())
         };
         apictx
@@ -4886,7 +4888,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn internet_gateway_ip_pool_delete(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::IpPoolPath>,
-        query_params: Query<params::OptionalInternetGatewaySelector>,
+        query_params: Query<params::DeleteInternetGatewayElementSelector>,
     ) -> Result<HttpResponseDeleted, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
@@ -4903,7 +4905,9 @@ impl NexusExternalApi for NexusExternalApiImpl {
             };
             let lookup =
                 nexus.internet_gateway_ip_pool_lookup(&opctx, selector)?;
-            nexus.internet_gateway_ip_pool_detach(&opctx, &lookup).await?;
+            nexus
+                .internet_gateway_ip_pool_detach(&opctx, &lookup, query.cascade)
+                .await?;
             Ok(HttpResponseDeleted())
         };
         apictx
@@ -4990,7 +4994,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
     async fn internet_gateway_ip_address_delete(
         rqctx: RequestContext<ApiContext>,
         path_params: Path<params::IpAddressPath>,
-        query_params: Query<params::OptionalInternetGatewaySelector>,
+        query_params: Query<params::DeleteInternetGatewayElementSelector>,
     ) -> Result<HttpResponseDeleted, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
@@ -5007,7 +5011,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
             };
             let lookup =
                 nexus.internet_gateway_ip_address_lookup(&opctx, selector)?;
-            nexus.internet_gateway_ip_address_detach(&opctx, &lookup).await?;
+            nexus
+                .internet_gateway_ip_address_detach(
+                    &opctx,
+                    &lookup,
+                    query.cascade,
+                )
+                .await?;
             Ok(HttpResponseDeleted())
         };
         apictx

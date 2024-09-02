@@ -4,18 +4,31 @@
 
 use dropshot::test_util::ClientTestContext;
 use http::{Method, StatusCode};
+use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_test_utils::{
     http_testing::{AuthnMode, NexusRequest},
     resource_helpers::{
-        attach_ip_address_to_igw, attach_ip_pool_to_igw,
-        create_internet_gateway, create_ip_pool, create_project, create_vpc,
+        attach_ip_address_to_igw, attach_ip_pool_to_igw, create_floating_ip,
+        create_instance_with, create_internet_gateway, create_ip_pool,
+        create_project, create_route, create_router, create_vpc,
         delete_internet_gateway, detach_ip_address_from_igw,
-        detach_ip_pool_from_igw, objects_list_page_authz,
+        detach_ip_pool_from_igw, link_ip_pool, objects_list_page_authz,
     },
 };
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::views::{
-    InternetGateway, InternetGatewayIpAddress, InternetGatewayIpPool,
+use nexus_types::external_api::{
+    params::{
+        ExternalIpCreate, InstanceNetworkInterfaceAttachment,
+        InstanceNetworkInterfaceCreate,
+    },
+    views::{InternetGateway, InternetGatewayIpAddress, InternetGatewayIpPool},
+};
+use nexus_types::identity::Resource;
+use omicron_common::{
+    address::{IpRange, Ipv4Range},
+    api::external::{
+        IdentityMetadataCreateParams, NameOrId, RouteDestination, RouteTarget,
+    },
 };
 
 type ControlPlaneTestContext =
@@ -30,13 +43,70 @@ async fn test_internet_gateway_basic_crud(ctx: &ControlPlaneTestContext) {
     const IP_POOL_ATTACHMENT_NAME: &str = "runabout";
     const IP_ADDRESS_ATTACHMENT_NAME: &str = "defiant";
     const IP_ADDRESS_ATTACHMENT: &str = "198.51.100.47";
+    const INSTANCE_NAME: &str = "odo";
+    const FLOATING_IP_NAME: &str = "floater";
+    const ROUTER_NAME: &str = "deepspace";
+    const ROUTE_NAME: &str = "subspace";
 
     let c = &ctx.external_client;
 
     // create a project and vpc to test with
     let _proj = create_project(&c, PROJECT_NAME).await;
     let _vpc = create_vpc(&c, PROJECT_NAME, VPC_NAME).await;
-    let _pool = create_ip_pool(c, IP_POOL_NAME, None).await;
+    let _pool = create_ip_pool(
+        c,
+        IP_POOL_NAME,
+        Some(IpRange::V4(Ipv4Range {
+            first: "203.0.113.1".parse().unwrap(),
+            last: "203.0.113.254".parse().unwrap(),
+        })),
+    )
+    .await;
+    link_ip_pool(&c, IP_POOL_NAME, &DEFAULT_SILO.id(), true).await;
+    let _floater = create_floating_ip(
+        c,
+        FLOATING_IP_NAME,
+        PROJECT_NAME,
+        None,
+        Some(IP_POOL_NAME),
+    )
+    .await;
+    let nic_attach = InstanceNetworkInterfaceAttachment::Create(vec![
+        InstanceNetworkInterfaceCreate {
+            identity: IdentityMetadataCreateParams {
+                description: String::from("description"),
+                name: "noname".parse().unwrap(),
+            },
+            ip: None,
+            subnet_name: "default".parse().unwrap(),
+            vpc_name: VPC_NAME.parse().unwrap(),
+        },
+    ]);
+    let _inst = create_instance_with(
+        c,
+        PROJECT_NAME,
+        INSTANCE_NAME,
+        &nic_attach,
+        Vec::new(),
+        vec![ExternalIpCreate::Floating {
+            floating_ip: NameOrId::Name(FLOATING_IP_NAME.parse().unwrap()),
+        }],
+        true,
+    )
+    .await;
+
+    let _router = create_router(c, PROJECT_NAME, VPC_NAME, ROUTER_NAME).await;
+    let route = create_route(
+        c,
+        PROJECT_NAME,
+        VPC_NAME,
+        ROUTER_NAME,
+        ROUTE_NAME,
+        RouteDestination::IpNet("0.0.0.0/0".parse().unwrap()),
+        RouteTarget::InternetGateway(IGW_NAME.parse().unwrap()),
+    )
+    .await;
+    println!("{}", route.target);
 
     // should start with zero gateways
     let igws = list_internet_gateways(c, PROJECT_NAME, VPC_NAME).await;
@@ -106,6 +176,42 @@ async fn test_internet_gateway_basic_crud(ctx: &ControlPlaneTestContext) {
             .await;
     assert_eq!(igw_pools.len(), 1, "should now have one attached ip pool");
 
+    // ensure we cannot delete the IP gateway without cascading
+    let url = format!(
+        "/v1/internet-gateways/{}?project={}&vpc={}",
+        IGW_NAME, PROJECT_NAME, VPC_NAME
+    );
+    let _error: dropshot::HttpErrorResponseBody = NexusRequest::expect_failure(
+        c,
+        StatusCode::BAD_REQUEST,
+        Method::DELETE,
+        &url,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+
+    // ensure we cannot delete the IP gateway pool without cascading
+    let url = format!(
+        "/v1/internet-gateway-ip-pools/{}?project={}&vpc={}&gateway={}",
+        IP_POOL_ATTACHMENT_NAME, PROJECT_NAME, VPC_NAME, IGW_NAME
+    );
+    let _error: dropshot::HttpErrorResponseBody = NexusRequest::expect_failure(
+        c,
+        StatusCode::BAD_REQUEST,
+        Method::DELETE,
+        &url,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+
     // attach an ip address
     attach_ip_address_to_igw(
         c,
@@ -121,13 +227,15 @@ async fn test_internet_gateway_basic_crud(ctx: &ControlPlaneTestContext) {
             .await;
     assert_eq!(igw_pools.len(), 1, "should now have one attached address");
 
-    // detach an ip pool
+    // detach an ip pool, note we need to cascade here since a running instance
+    // has a route that uses the ip pool association
     detach_ip_pool_from_igw(
         c,
         PROJECT_NAME,
         VPC_NAME,
         IGW_NAME,
         IP_POOL_ATTACHMENT_NAME,
+        true,
     )
     .await;
     let igw_addrs =
@@ -158,6 +266,14 @@ async fn test_internet_gateway_basic_crud(ctx: &ControlPlaneTestContext) {
     let igws = list_internet_gateways(c, PROJECT_NAME, VPC_NAME).await;
     assert_eq!(igws.len(), 0, "should now have zero internet gateways");
 }
+
+/*
+#[nexus_test]
+async fn test_internet_gateway_pool_delete_cascade(
+    ctx: &ControlPlaneTestContext,
+) {
+}
+*/
 
 async fn list_internet_gateways(
     client: &ClientTestContext,

@@ -260,6 +260,17 @@ pub struct OptionalVpcSelector {
     pub vpc: Option<NameOrId>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct InternetGatewayDeleteSelector {
+    /// Name or ID of the project, only required if `vpc` is provided as a `Name`
+    pub project: Option<NameOrId>,
+    /// Name or ID of the VPC
+    pub vpc: Option<NameOrId>,
+    /// Also delete routes targeting this gateway.
+    #[serde(default)]
+    pub cascade: bool,
+}
+
 #[derive(Deserialize, JsonSchema)]
 pub struct SubnetSelector {
     /// Name or ID of the project, only required if `vpc` is provided as a `Name`
@@ -322,6 +333,19 @@ pub struct OptionalInternetGatewaySelector {
     pub vpc: Option<NameOrId>,
     /// Name or ID of the internet gateway
     pub gateway: Option<NameOrId>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct DeleteInternetGatewayElementSelector {
+    /// Name or ID of the project, only required if `vpc` is provided as a `Name`
+    pub project: Option<NameOrId>,
+    /// Name or ID of the VPC, only required if `gateway` is provided as a `Name`
+    pub vpc: Option<NameOrId>,
+    /// Name or ID of the internet gateway
+    pub gateway: Option<NameOrId>,
+    /// Also delete routes targeting this gateway element.
+    #[serde(default)]
+    pub cascade: bool,
 }
 
 #[derive(Deserialize, JsonSchema)]
