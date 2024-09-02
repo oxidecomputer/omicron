@@ -217,3 +217,155 @@ impl InstanceReincarnation {
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::app::background::init::test::NoopStartSaga;
+    use crate::external_api::params;
+    use chrono::Utc;
+    use nexus_db_model::Instance;
+    use nexus_db_model::InstanceAutoRestart;
+    use nexus_db_model::InstanceRuntimeState;
+    use nexus_db_model::InstanceState;
+    use nexus_db_queries::authz;
+    use nexus_db_queries::db::lookup::LookupPath;
+    use nexus_test_utils::resource_helpers::{
+        create_default_ip_pool, create_project,
+    };
+    use nexus_test_utils_macros::nexus_test;
+    use omicron_common::api::external::ByteCount;
+    use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_uuid_kinds::GenericUuid;
+    use omicron_uuid_kinds::InstanceUuid;
+    use uuid::Uuid;
+
+    type ControlPlaneTestContext =
+        nexus_test_utils::ControlPlaneTestContext<crate::Server>;
+
+    const PROJECT_NAME: &str = "reincarnation-station";
+
+    async fn setup_test_project(
+        cptestctx: &ControlPlaneTestContext,
+        opctx: &OpContext,
+    ) -> authz::Project {
+        create_default_ip_pool(&cptestctx.external_client).await;
+        let project =
+            create_project(&cptestctx.external_client, PROJECT_NAME).await;
+
+        let datastore = cptestctx.server.server_context().nexus.datastore();
+        let (_, authz_project) = LookupPath::new(opctx, datastore)
+            .project_id(project.identity.id)
+            .lookup_for(authz::Action::CreateChild)
+            .await
+            .expect("project must exist");
+        authz_project
+    }
+
+    async fn create_instance(
+        cptestctx: &ControlPlaneTestContext,
+        opctx: &OpContext,
+        authz_project: &authz::Project,
+        restart_policy: InstanceAutoRestart,
+        state: InstanceState,
+    ) -> InstanceUuid {
+        let id = InstanceUuid::from_untyped_uuid(Uuid::new_v4());
+        // Use the first chunk of the UUID as the name, to avoid conflicts.
+        // Start with a lower ascii character to satisfy the name constraints.
+        let name = format!("instance-{id}").parse().unwrap();
+        let mut instance = Instance::new(
+            id,
+            authz_project.id(),
+            &params::InstanceCreate {
+                identity: IdentityMetadataCreateParams {
+                    name,
+                    description: "It's an instance".into(),
+                },
+                ncpus: 2i64.try_into().unwrap(),
+                memory: ByteCount::from_gibibytes_u32(16),
+                hostname: "myhostname".try_into().unwrap(),
+                user_data: Vec::new(),
+                network_interfaces:
+                    params::InstanceNetworkInterfaceAttachment::None,
+                external_ips: Vec::new(),
+                disks: Vec::new(),
+                ssh_public_keys: None,
+                start: false,
+            },
+        );
+        instance.auto_restart_policy = restart_policy;
+        let datastore = cptestctx.server.server_context().nexus.datastore();
+
+        let instance = datastore
+            .project_create_instance(opctx, authz_project, instance)
+            .await
+            .expect("test instance should be created successfully");
+        let prev_state = instance.runtime_state;
+        datastore
+            .instance_update_runtime(
+                &id,
+                &InstanceRuntimeState {
+                    time_updated: Utc::now(),
+                    nexus_state: state,
+                    r#gen: nexus_db_model::Generation(prev_state.r#gen.next()),
+                    ..prev_state
+                },
+            )
+            .await
+            .expect("instance runtime state should update");
+        id
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_reincarnates_failed_instances(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+
+        let authz_project = setup_test_project(&cptestctx, &opctx).await;
+
+        let starter = Arc::new(NoopStartSaga::new());
+        let mut task =
+            InstanceReincarnation::new(datastore.clone(), starter.clone());
+
+        // Noop test
+        let result = task.activate(&opctx).await;
+        assert_eq!(
+            result,
+            serde_json::json!(InstanceReincarnationStatus::default())
+        );
+        assert_eq!(starter.count_reset(), 0);
+
+        // Create an instance in the `Failed` state that's eligible to be
+        // restarted.
+        let instance_id = create_instance(
+            &cptestctx,
+            &opctx,
+            &authz_project,
+            InstanceAutoRestart::AllFailures,
+            InstanceState::Failed,
+        )
+        .await;
+
+        // Activate the task again, and check that our instance had an
+        // instance-start saga  started.
+        let result = task.activate(&opctx).await;
+        assert_eq!(starter.count_reset(), 1);
+        let status =
+            serde_json::from_value::<InstanceReincarnationStatus>(result)
+                .expect("JSON must be correctly shaped");
+        assert_eq!(status.instances_found, 1);
+        assert_eq!(
+            status.instances_reincarnated,
+            vec![instance_id.into_untyped_uuid()]
+        );
+        assert_eq!(status.already_reincarnated, Vec::new());
+        assert_eq!(status.query_error, None);
+        assert_eq!(status.restart_errors, Vec::new());
+    }
+}
