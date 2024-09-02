@@ -313,6 +313,7 @@ mod test {
             )
             .await
             .expect("instance runtime state should update");
+        eprintln!("instance {id}: policy={restart_policy:?}; state={state:?}");
         id
     }
 
@@ -367,5 +368,96 @@ mod test {
         assert_eq!(status.already_reincarnated, Vec::new());
         assert_eq!(status.query_error, None);
         assert_eq!(status.restart_errors, Vec::new());
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_only_reincarnates_eligible_instances(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+
+        let authz_project = setup_test_project(&cptestctx, &opctx).await;
+
+        let starter = Arc::new(NoopStartSaga::new());
+        let mut task =
+            InstanceReincarnation::new(datastore.clone(), starter.clone());
+
+        // Create instances in the `Failed` state that are eligible to be
+        // restarted.
+        let mut will_reincarnate = std::collections::BTreeSet::new();
+        for _ in 0..3 {
+            let id = create_instance(
+                &cptestctx,
+                &opctx,
+                &authz_project,
+                InstanceAutoRestart::AllFailures,
+                InstanceState::Failed,
+            )
+            .await;
+            will_reincarnate.insert(id.into_untyped_uuid());
+        }
+
+        // Create some instances that will not reicnarnate.
+        let mut will_not_reincarnate = std::collections::BTreeSet::new();
+        // Some instances which are `Failed`` but don't have policies permitting
+        // them to be reincarnated.
+        for _ in 0..3 {
+            let id = create_instance(
+                &cptestctx,
+                &opctx,
+                &authz_project,
+                InstanceAutoRestart::Never,
+                InstanceState::Failed,
+            )
+            .await;
+            will_not_reincarnate.insert(id.into_untyped_uuid());
+        }
+
+        // Some instances with policies permitting them to be reincarnated, but
+        // which are not `Failed`.
+        for _ in 0..3 {
+            let id = create_instance(
+                &cptestctx,
+                &opctx,
+                &authz_project,
+                InstanceAutoRestart::Never,
+                InstanceState::NoVmm,
+            )
+            .await;
+            will_not_reincarnate.insert(id.into_untyped_uuid());
+        }
+
+        // Activate the task again, and check that our instance had an
+        // instance-start saga  started.
+        let result = task.activate(&opctx).await;
+        assert_eq!(starter.count_reset(), will_reincarnate.len() as u64);
+        let status =
+            serde_json::from_value::<InstanceReincarnationStatus>(result)
+                .expect("JSON must be correctly shaped");
+        assert_eq!(status.instances_found, will_reincarnate.len());
+        assert_eq!(status.already_reincarnated, Vec::new());
+        assert_eq!(status.query_error, None);
+        assert_eq!(status.restart_errors, Vec::new());
+
+        for id in &status.instances_reincarnated {
+            assert!(
+                will_reincarnate.contains(id),
+                "expected {id} to be reincarnated, but found {:?}",
+                status.instances_reincarnated
+            );
+        }
+
+        for id in will_not_reincarnate {
+            assert!(
+                !status.instances_reincarnated.iter().any(|&i| i == id),
+                "expected {id} to not reincarnate, but found {:?}",
+                status.instances_reincarnated
+            );
+        }
     }
 }
