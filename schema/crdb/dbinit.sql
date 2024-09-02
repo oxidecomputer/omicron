@@ -1001,6 +1001,14 @@ CREATE TYPE IF NOT EXISTS omicron.public.instance_state_v2 AS ENUM (
 );
 
 CREATE TYPE IF NOT EXISTS omicron.public.vmm_state AS ENUM (
+    /*
+     * The VMM is known to Nexus, but may not yet exist on a sled.
+     *
+     * VMM records are always inserted into the database in this state, and
+     * then transition to 'starting' or 'migrating' once a sled-agent reports
+     * that the VMM has been registered.
+     */
+    'creating',
     'starting',
     'running',
     'stopping',
@@ -4225,7 +4233,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '93.0.0', NULL)
+    (TRUE, NOW(), NOW(), '94.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

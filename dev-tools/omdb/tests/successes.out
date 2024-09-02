@@ -524,7 +524,8 @@ task: "instance_updater"
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total instances in need of updates: 0
-      instances with destroyed active VMMs: 0
+      instances with Destroyed active VMMs: 0
+      instances with Failed active VMMs: 0
       instances with terminated active migrations: 0
     update sagas started: 0
     update sagas completed successfully: 0
@@ -950,7 +951,8 @@ task: "instance_updater"
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total instances in need of updates: 0
-      instances with destroyed active VMMs: 0
+      instances with Destroyed active VMMs: 0
+      instances with Failed active VMMs: 0
       instances with terminated active migrations: 0
     update sagas started: 0
     update sagas completed successfully: 0
