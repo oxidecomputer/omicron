@@ -356,10 +356,12 @@ mod test {
         // Activate the task again, and check that our instance had an
         // instance-start saga  started.
         let result = task.activate(&opctx).await;
-        assert_eq!(starter.count_reset(), 1);
         let status =
             serde_json::from_value::<InstanceReincarnationStatus>(result)
                 .expect("JSON must be correctly shaped");
+        eprintln!("activation: {status:#?}");
+
+        assert_eq!(starter.count_reset(), 1);
         assert_eq!(status.instances_found, 1);
         assert_eq!(
             status.instances_reincarnated,
@@ -433,31 +435,34 @@ mod test {
         }
 
         // Activate the task again, and check that our instance had an
-        // instance-start saga  started.
+        // instance-start saga started.
         let result = task.activate(&opctx).await;
-        assert_eq!(starter.count_reset(), will_reincarnate.len() as u64);
         let status =
             serde_json::from_value::<InstanceReincarnationStatus>(result)
                 .expect("JSON must be correctly shaped");
+        eprintln!("activation: {status:#?}");
+
+        assert_eq!(starter.count_reset(), will_reincarnate.len() as u64);
         assert_eq!(status.instances_found, will_reincarnate.len());
         assert_eq!(status.already_reincarnated, Vec::new());
         assert_eq!(status.query_error, None);
         assert_eq!(status.restart_errors, Vec::new());
 
         for id in &status.instances_reincarnated {
+            eprintln!("instance {id} reincarnated");
             assert!(
-                will_reincarnate.contains(id),
-                "expected {id} to be reincarnated, but found {:?}",
+                !will_not_reincarnate.contains(id),
+                "expected {id} not to reincarnate! reincarnated: {:?}",
                 status.instances_reincarnated
             );
         }
 
-        for id in will_not_reincarnate {
+        for id in will_reincarnate {
             assert!(
-                !status.instances_reincarnated.iter().any(|&i| i == id),
-                "expected {id} to not reincarnate, but found {:?}",
+                status.instances_reincarnated.contains(&id),
+                "expected {id} to have reincarnated! reincarnated: {:?}",
                 status.instances_reincarnated
-            );
+            )
         }
     }
 }

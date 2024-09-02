@@ -116,7 +116,7 @@ impl InstanceUpdaterStatus {
 }
 
 /// The status of an `instance_reincarnation` background task activation.
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Default, Serialize, Deserialize, Debug)]
 pub struct InstanceReincarnationStatus {
     /// Total number of instances in need of reincarnation on this activation.
     pub instances_found: usize,
