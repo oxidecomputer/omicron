@@ -52,15 +52,15 @@ async fn test_internet_gateway_basic_crud(ctx: &ControlPlaneTestContext) {
     let c = &ctx.external_client;
     test_setup(c).await;
 
-    // should start with zero gateways
+    // should start with just default gateway
     let igws = list_internet_gateways(c, PROJECT_NAME, VPC_NAME).await;
-    assert_eq!(igws.len(), 0, "should start with zero internet gateways");
+    assert_eq!(igws.len(), 1, "should start with zero internet gateways");
     expect_igw_not_found(c, PROJECT_NAME, VPC_NAME, IGW_NAME).await;
 
     // create an internet gateway
     let gw = create_internet_gateway(c, PROJECT_NAME, VPC_NAME, IGW_NAME).await;
     let igws = list_internet_gateways(c, PROJECT_NAME, VPC_NAME).await;
-    assert_eq!(igws.len(), 1, "should now have one internet gateway");
+    assert_eq!(igws.len(), 2, "should now have two internet gateways");
 
     // should be able to get the gateway just created
     let same_igw = get_igw(c, PROJECT_NAME, VPC_NAME, IGW_NAME).await;
@@ -136,7 +136,7 @@ async fn test_internet_gateway_basic_crud(ctx: &ControlPlaneTestContext) {
     let igw_addrs =
         list_internet_gateway_ip_pools(c, PROJECT_NAME, VPC_NAME, IGW_NAME)
             .await;
-    assert_eq!(igw_addrs.len(), 0, "should now have zero attached ip pool");
+    assert_eq!(igw_addrs.len(), 0, "should now have zero attached ip pools");
 
     // detach an ip address
     detach_ip_address_from_igw(
@@ -160,7 +160,7 @@ async fn test_internet_gateway_basic_crud(ctx: &ControlPlaneTestContext) {
     // delete internet gateay
     delete_internet_gateway(c, PROJECT_NAME, VPC_NAME, IGW_NAME, false).await;
     let igws = list_internet_gateways(c, PROJECT_NAME, VPC_NAME).await;
-    assert_eq!(igws.len(), 0, "should now have zero internet gateways");
+    assert_eq!(igws.len(), 1, "should now just have default gateway");
 
     // looking for gateway should return 404
     expect_igw_not_found(c, PROJECT_NAME, VPC_NAME, IGW_NAME).await;
