@@ -55,50 +55,62 @@ pub struct KeeperId(pub u64);
 )]
 pub struct ServerId(pub u64);
 
-#[derive(Debug, Clone)]
-pub struct ClickhouseServerConfig {
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct ServerSettings {
+    #[schemars(schema_with = "path_schema")]
     pub config_dir: Utf8PathBuf,
-    pub id: ServerId,
+    pub node_id: ServerId,
+    #[schemars(schema_with = "path_schema")]
     pub datastore_path: Utf8PathBuf,
     pub listen_addr: Ipv6Addr,
-    pub keepers: Vec<KeeperNodeConfig>,
-    pub servers: Vec<ServerNodeConfig>,
+    pub keepers: Vec<ClickhouseHost>,
+    pub remote_servers: Vec<ClickhouseHost>,
 }
 
-impl ClickhouseServerConfig {
+impl ServerSettings {
     pub fn new(
         config_dir: Utf8PathBuf,
-        id: ServerId,
+        node_id: ServerId,
         datastore_path: Utf8PathBuf,
         listen_addr: Ipv6Addr,
         keepers: Vec<ClickhouseHost>,
-        servers: Vec<ClickhouseHost>,
+        remote_servers: Vec<ClickhouseHost>,
     ) -> Self {
-        let keepers = keepers
-            .iter()
-            .map(|host| KeeperNodeConfig::new(host.clone()))
-            .collect();
-
-        let servers = servers
-            .iter()
-            .map(|host| ServerNodeConfig::new(host.clone()))
-            .collect();
-
-        Self { config_dir, id, datastore_path, listen_addr, keepers, servers }
+        Self {
+            config_dir,
+            node_id,
+            datastore_path,
+            listen_addr,
+            keepers,
+            remote_servers,
+        }
     }
 
     /// Generate a configuration file for a replica server node
     pub fn generate_xml_file(&self) -> Result<ReplicaConfig> {
         let logger =
             LogConfig::new(self.datastore_path.clone(), NodeType::Server);
-        let macros = Macros::new(self.id);
+        let macros = Macros::new(self.node_id);
+
+        let keepers: Vec<KeeperNodeConfig> = self
+            .keepers
+            .iter()
+            .map(|host| KeeperNodeConfig::new(host.clone()))
+            .collect();
+
+        let servers: Vec<ServerNodeConfig> = self
+            .remote_servers
+            .iter()
+            .map(|host| ServerNodeConfig::new(host.clone()))
+            .collect();
 
         let config = ReplicaConfig::new(
             logger,
             macros,
             self.listen_addr,
-            self.servers.clone(),
-            self.keepers.clone(),
+            servers.clone(),
+            keepers.clone(),
             self.datastore_path.clone(),
         );
 
@@ -174,7 +186,7 @@ mod tests {
     use camino_tempfile::Builder;
 
     use crate::{
-        ClickhouseHost, ClickhouseKeeperConfig, ClickhouseServerConfig,
+        ClickhouseHost, ClickhouseKeeperConfig, ServerSettings,
         KeeperId, RaftServerSettings, ServerId,
     };
 
@@ -245,7 +257,7 @@ mod tests {
             ClickhouseHost::DomainName("ohai.com".to_string()),
         ];
 
-        let config = ClickhouseServerConfig::new(
+        let config = ServerSettings::new(
             Utf8PathBuf::from(config_dir.path()),
             ServerId(1),
             Utf8PathBuf::from_str("./").unwrap(),

@@ -2,13 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use camino::Utf8PathBuf;
-use clickhouse_admin_api::{KeeperSettings, ServerSettings};
+use clickhouse_admin_api::KeeperSettings;
 use clickhouse_admin_types::config::{KeeperConfig, ReplicaConfig};
-use clickhouse_admin_types::{ClickhouseKeeperConfig, ClickhouseServerConfig};
+use clickhouse_admin_types::{ClickhouseKeeperConfig, ServerSettings};
 use dropshot::HttpError;
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
-use std::str::FromStr;
 
 #[derive(Debug, thiserror::Error, SlogInlineError)]
 pub enum ClickwardError {
@@ -46,18 +44,8 @@ impl Clickward {
     pub fn generate_server_config(
         &self,
         settings: ServerSettings,
-    ) -> Result<ReplicaConfig, ClickwardError> {
-        let config = ClickhouseServerConfig::new(
-            // We can safely call unwrap here as this method is infallible
-            Utf8PathBuf::from_str(&settings.config_dir).unwrap(),
-            settings.node_id,
-            Utf8PathBuf::from_str(&settings.datastore_path).unwrap(),
-            settings.listen_addr,
-            settings.keepers,
-            settings.remote_servers,
-        );
-
-        let replica_config = config
+     ) -> Result<ReplicaConfig, ClickwardError> {
+        let replica_config = settings
             .generate_xml_file()
             .map_err(|e| ClickwardError::Failure { err: e })?;
 
@@ -69,10 +57,10 @@ impl Clickward {
         settings: KeeperSettings,
     ) -> Result<KeeperConfig, ClickwardError> {
         let config = ClickhouseKeeperConfig::new(
-            Utf8PathBuf::from_str(&settings.config_dir).unwrap(),
+            settings.config_dir,
             settings.node_id,
             settings.keepers,
-            Utf8PathBuf::from_str(&settings.datastore_path).unwrap(),
+            settings.datastore_path,
             settings.listen_addr,
         );
 

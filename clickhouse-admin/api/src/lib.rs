@@ -2,11 +2,14 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use camino::Utf8PathBuf;
 use clickhouse_admin_types::config::{
-    ClickhouseHost, KeeperConfig, RaftServerSettings, ReplicaConfig,
+    path_schema, KeeperConfig, RaftServerSettings, ReplicaConfig,
 };
-use clickhouse_admin_types::{KeeperId, ServerId};
-use dropshot::{HttpError, HttpResponseCreated, Path, RequestContext, TypedBody};
+use clickhouse_admin_types::{ServerSettings, KeeperId};
+use dropshot::{
+    HttpError, HttpResponseCreated, Path, RequestContext, TypedBody,
+};
 use omicron_common::api::external::Generation;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -49,20 +52,11 @@ pub trait ClickhouseAdminApi {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub struct ServerSettings {
-    pub config_dir: String,
-    pub datastore_path: String,
-    pub listen_addr: Ipv6Addr,
-    pub node_id: ServerId,
-    pub keepers: Vec<ClickhouseHost>,
-    pub remote_servers: Vec<ClickhouseHost>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
 pub struct KeeperSettings {
-    pub config_dir: String,
-    pub datastore_path: String,
+    #[schemars(schema_with = "path_schema")]
+    pub config_dir: Utf8PathBuf,
+    #[schemars(schema_with = "path_schema")]
+    pub datastore_path: Utf8PathBuf,
     pub listen_addr: Ipv6Addr,
     pub node_id: KeeperId,
     pub keepers: Vec<RaftServerSettings>,

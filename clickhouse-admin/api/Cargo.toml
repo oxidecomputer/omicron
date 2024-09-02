@@ -8,6 +8,7 @@ license = "MPL-2.0"
 workspace = true
 
 [dependencies]
+camino.workspace = true
 clickhouse-admin-types.workspace = true
 dropshot.workspace = true
 omicron-common.workspace = true

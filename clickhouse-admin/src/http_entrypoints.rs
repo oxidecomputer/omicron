@@ -5,7 +5,10 @@
 use crate::context::ServerContext;
 use clickhouse_admin_api::*;
 use clickhouse_admin_types::config::{KeeperConfig, ReplicaConfig};
-use dropshot::{HttpError, HttpResponseCreated, Path, RequestContext, TypedBody};
+use clickhouse_admin_types::ServerSettings;
+use dropshot::{
+    HttpError, HttpResponseCreated, Path, RequestContext, TypedBody,
+};
 use std::sync::Arc;
 
 type ClickhouseApiDescription = dropshot::ApiDescription<Arc<ServerContext>>;

@@ -275,10 +275,12 @@
         "type": "object",
         "properties": {
           "config_dir": {
-            "type": "string"
+            "type": "string",
+            "format": "Utf8PathBuf"
           },
           "datastore_path": {
-            "type": "string"
+            "type": "string",
+            "format": "Utf8PathBuf"
           },
           "keepers": {
             "type": "array",
@@ -514,10 +516,12 @@
         "type": "object",
         "properties": {
           "config_dir": {
-            "type": "string"
+            "type": "string",
+            "format": "Utf8PathBuf"
           },
           "datastore_path": {
-            "type": "string"
+            "type": "string",
+            "format": "Utf8PathBuf"
           },
           "keepers": {
             "type": "array",
