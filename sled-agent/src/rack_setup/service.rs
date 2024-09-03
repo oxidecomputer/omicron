@@ -136,19 +136,17 @@ use uuid::Uuid;
 
 /// For tracking the current RSS step and sending notifications about it.
 pub struct RssProgress {
-    step: RssStep,
     step_tx: watch::Sender<RssStep>,
 }
 
 impl RssProgress {
     pub fn new(step_tx: watch::Sender<RssStep>) -> Self {
-        let _ = step_tx.send(RssStep::Starting);
-        RssProgress { step: RssStep::Starting, step_tx }
+        step_tx.send_replace(RssStep::Starting);
+        RssProgress { step_tx }
     }
 
     pub fn update(&mut self, new_step: RssStep) {
-        self.step = new_step;
-        let _ = self.step_tx.send(new_step);
+        self.step_tx.send_replace(new_step);
     }
 }
 

@@ -63,7 +63,7 @@ impl RssAccess {
         let mut status = self.status.lock().unwrap();
 
         match &mut *status {
-            RssStatus::Initializing { id, completion, step_rx, step } => {
+            RssStatus::Initializing { id, completion, step_rx } => {
                 let id = *id;
                 // This is our only chance to notice the initialization task has
                 // panicked: if it dropped the sending half of `completion`
@@ -76,14 +76,11 @@ impl RssAccess {
                     }
                     Err(TryRecvError::Empty) => {
                         // Initialization task is still running
-                        // Check the step channel, and if it is different
-                        // than what we have, update what we have.
-                        // Ignore errors
-                        let cur_step = step_rx.borrow();
-                        if *step != *cur_step {
-                            *step = *cur_step;
+                        // Update the step we are on.
+                        RackOperationStatus::Initializing {
+                            id,
+                            step: *step_rx.borrow(),
                         }
-                        RackOperationStatus::Initializing { id, step: *step }
                     }
                     Err(TryRecvError::Closed) => {
                         // Initialization task has panicked!
@@ -180,12 +177,7 @@ impl RssAccess {
                 let (completion_tx, completion) = oneshot::channel();
                 let id = RackInitUuid::new_v4();
                 let (step_tx, step_rx) = watch::channel(RssStep::Requested);
-                *status = RssStatus::Initializing {
-                    id,
-                    completion,
-                    step_rx,
-                    step: RssStep::Requested,
-                };
+                *status = RssStatus::Initializing { id, completion, step_rx };
                 mem::drop(status);
                 let parent_log = parent_log.clone();
                 let storage_manager = storage_manager.clone();
@@ -299,9 +291,8 @@ enum RssStatus {
         id: RackInitUuid,
         completion: oneshot::Receiver<()>,
         // Used by the RSS task to update us with what step it is on.
+        // This holds the current RSS step.
         step_rx: watch::Receiver<RssStep>,
-        // The most recent RSS step we received from the RSS task.
-        step: RssStep,
     },
     Resetting {
         id: RackResetUuid,
