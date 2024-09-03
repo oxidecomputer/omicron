@@ -6555,6 +6555,7 @@ dependencies = [
  "atomicwrites",
  "camino",
  "camino-tempfile",
+ "chrono",
  "dropshot 0.10.2-dev",
  "expectorate",
  "filetime",
