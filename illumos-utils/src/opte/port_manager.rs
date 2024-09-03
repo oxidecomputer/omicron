@@ -46,6 +46,7 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::net::IpAddr;
+use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
@@ -249,7 +250,7 @@ impl PortManager {
         };
 
         let vpc_cfg = VpcCfg {
-            ip_cfg,
+            ip_cfg: ip_cfg.clone(),
             guest_mac: MacAddr::from(nic.mac.into_array()),
             gateway_mac: MacAddr::from(gateway.mac.into_array()),
             vni,
@@ -329,6 +330,19 @@ impl PortManager {
         // create a record to show that we're interested in receiving
         // those routes.
         let mut routes = self.inner.routes.lock().unwrap();
+        let system_routes = match &ip_cfg {
+            IpCfg::Ipv4(cfg) => {
+                system_routes_v4(cfg, is_service, &mut routes, &port)
+            }
+            IpCfg::Ipv6(cfg) => {
+                system_routes_v6(cfg, is_service, &mut routes, &port)
+            }
+            IpCfg::DualStack { ipv4, ipv6 } => {
+                system_routes_v4(ipv4, is_service, &mut routes, &port);
+                system_routes_v6(ipv6, is_service, &mut routes, &port)
+            }
+        };
+        /*
         let system_routes =
             routes.entry(port.system_router_key()).or_insert_with(|| {
                 let mut routes = HashSet::new();
@@ -349,6 +363,7 @@ impl PortManager {
 
                 RouteSet { version: None, routes, active_ports: 0 }
             });
+        */
         system_routes.active_ports += 1;
         // Clone is needed to get borrowck on our side, sadly.
         let system_routes = system_routes.clone();
@@ -938,4 +953,88 @@ impl Drop for PortTicket {
         // can't do anything with it anyway.
         let _ = self.release_inner();
     }
+}
+
+fn system_routes_v4<'a>(
+    cfg: &Ipv4Cfg,
+    is_service: bool,
+    routes: &'a mut HashMap<RouterId, RouteSet>,
+    port: &Port,
+) -> &'a mut RouteSet {
+    routes.entry(port.system_router_key()).or_insert_with(|| {
+        let mut routes = HashSet::new();
+        if let Some(ref snat) = cfg.external_ips.snat {
+            if is_service {
+                routes.insert(ResolvedVpcRoute {
+                    dest: "0.0.0.0/0".parse().unwrap(),
+                    target: ApiRouterTarget::InternetGateway(IpAddr::V4(
+                        Ipv4Addr::from(snat.external_ip),
+                    )),
+                });
+            }
+        }
+        if let Some(ref ephemeral) = cfg.external_ips.ephemeral_ip {
+            if is_service {
+                routes.insert(ResolvedVpcRoute {
+                    dest: "0.0.0.0/0".parse().unwrap(),
+                    target: ApiRouterTarget::InternetGateway(IpAddr::V4(
+                        Ipv4Addr::from(*ephemeral),
+                    )),
+                });
+            }
+        }
+        if is_service {
+            for fip in &cfg.external_ips.floating_ips {
+                routes.insert(ResolvedVpcRoute {
+                    dest: "0.0.0.0/0".parse().unwrap(),
+                    target: ApiRouterTarget::InternetGateway(IpAddr::V4(
+                        Ipv4Addr::from(*fip),
+                    )),
+                });
+            }
+        }
+        RouteSet { version: None, routes, active_ports: 0 }
+    })
+}
+
+fn system_routes_v6<'a>(
+    cfg: &Ipv6Cfg,
+    is_service: bool,
+    routes: &'a mut HashMap<RouterId, RouteSet>,
+    port: &Port,
+) -> &'a mut RouteSet {
+    routes.entry(port.system_router_key()).or_insert_with(|| {
+        let mut routes = HashSet::new();
+        if let Some(ref snat) = cfg.external_ips.snat {
+            if is_service {
+                routes.insert(ResolvedVpcRoute {
+                    dest: "0.0.0.0/0".parse().unwrap(),
+                    target: ApiRouterTarget::InternetGateway(IpAddr::V6(
+                        Ipv6Addr::from(snat.external_ip),
+                    )),
+                });
+            }
+        }
+        if let Some(ref ephemeral) = cfg.external_ips.ephemeral_ip {
+            if is_service {
+                routes.insert(ResolvedVpcRoute {
+                    dest: "0.0.0.0/0".parse().unwrap(),
+                    target: ApiRouterTarget::InternetGateway(IpAddr::V6(
+                        Ipv6Addr::from(*ephemeral),
+                    )),
+                });
+            }
+        }
+        if is_service {
+            for fip in &cfg.external_ips.floating_ips {
+                routes.insert(ResolvedVpcRoute {
+                    dest: "0.0.0.0/0".parse().unwrap(),
+                    target: ApiRouterTarget::InternetGateway(IpAddr::V6(
+                        Ipv6Addr::from(*fip),
+                    )),
+                });
+            }
+        }
+        RouteSet { version: None, routes, active_ports: 0 }
+    })
 }

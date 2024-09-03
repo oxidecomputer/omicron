@@ -4779,10 +4779,15 @@
                 "enum": [
                   "internet_gateway"
                 ]
+              },
+              "value": {
+                "type": "string",
+                "format": "ip"
               }
             },
             "required": [
-              "type"
+              "type",
+              "value"
             ]
           },
           {

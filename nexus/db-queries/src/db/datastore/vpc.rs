@@ -2413,12 +2413,12 @@ impl DataStore {
                 RouteDestination::Vpc(_) => (None, None),
             };
 
-            let (v4_target, v6_target) = match rule.target.0 {
+            let (v4_target, v6_target) = match &rule.target.0 {
                 RouteTarget::Ip(ip @ IpAddr::V4(_)) => {
-                    (Some(RouterTarget::Ip(ip)), None)
+                    (Some(RouterTarget::Ip(*ip)), None)
                 }
                 RouteTarget::Ip(ip @ IpAddr::V6(_)) => {
-                    (None, Some(RouterTarget::Ip(ip)))
+                    (None, Some(RouterTarget::Ip(*ip)))
                 }
                 RouteTarget::Subnet(n) => subnets
                     .get(&n)
@@ -2449,15 +2449,9 @@ impl DataStore {
                     (Some(RouterTarget::Drop), Some(RouterTarget::Drop))
                 }
 
-                // TODO: Internet Gateways.
-                //       The semantic here is 'name match => allow',
-                //       as the other aspect they will control is SNAT
-                //       IP allocation. Today, presence of this rule
-                //       allows upstream regardless of name.
-                RouteTarget::InternetGateway(_n) => (
-                    Some(RouterTarget::InternetGateway),
-                    Some(RouterTarget::InternetGateway),
-                ),
+                // There can be multiple targets per internet gateway, so these
+                // are handled below.
+                RouteTarget::InternetGateway(_) => (None, None),
 
                 // TODO: VPC Peering.
                 RouteTarget::Vpc(_) => (None, None),
@@ -2475,6 +2469,126 @@ impl DataStore {
 
             if let (Some(dest), Some(target)) = (v6_dest, v6_target) {
                 out.insert(dest, target);
+            }
+
+            // The OPTE model for internet gateway routes is that a VPC
+            // route points at an internet gateway object. That internet
+            // gateway object contains the source address that is to be
+            // used for the route.
+            //
+            // Therefore, here what we are doing is ...
+            // 1. Look up the intergnet gateway (igw).
+            // 2. Fetch the IP pools associated with the igw.
+            // 3. Look up the external IPs in the vpc.
+            // 4. For each external IP, see if it belongs to an IP pool
+            //    associated with an internet gateway (yeah, this is
+            //    quadratic, but the number of ip pool associations is
+            //    unlikely to be more than a couple?)
+            // 5. If the external IP does belong to an IP pool that is
+            //    associated with the gateway target, install the
+            //    destination -> target rule where the target is the
+            //    internet gateway parameterized by the external ip.
+            if let RouteTarget::InternetGateway(name) = &rule.target.0 {
+                let conn = self.pool_connection_authorized(opctx).await?;
+                let igw = db::lookup::LookupPath::new(opctx, self)
+                    .vpc_id(authz_vpc.id())
+                    .internet_gateway_name(&(name.clone().into()))
+                    .fetch()
+                    .await
+                    .ok();
+
+                let (.., authz_igw, _db_igw) = match igw {
+                    Some(value) => value,
+                    None => return Ok(out),
+                };
+
+                use db::schema::internet_gateway_ip_pool::dsl as igwp;
+                let igw_pools = igwp::internet_gateway_ip_pool
+                    .filter(igwp::time_deleted.is_null())
+                    .filter(igwp::internet_gateway_id.eq(authz_igw.id()))
+                    .select(InternetGatewayIpPool::as_select())
+                    .load_async::<InternetGatewayIpPool>(&*conn)
+                    .await
+                    .ok();
+
+                let igw_pools = match igw_pools {
+                    Some(value) => value,
+                    None => return Ok(out),
+                };
+
+                for igw_pool in &igw_pools {
+                    use db::schema::ip_pool_range::dsl as ipr;
+                    let prs = match ipr::ip_pool_range
+                        .filter(ipr::time_deleted.is_null())
+                        .filter(ipr::ip_pool_id.eq(igw_pool.ip_pool_id))
+                        .select(IpPoolRange::as_select())
+                        .load_async::<IpPoolRange>(&*conn)
+                        .await
+                    {
+                        Ok(value) => value,
+                        Err(_) => continue,
+                    };
+
+                    for x in instances.values() {
+                        let ifx = &x.1;
+                        use db::schema::external_ip::dsl as xip;
+                        let ext_ips = xip::external_ip
+                            .filter(xip::time_deleted.is_null())
+                            .filter(xip::parent_id.eq(ifx.instance_id))
+                            .select(ExternalIp::as_select())
+                            .load_async::<ExternalIp>(&*conn)
+                            .await
+                            .ok();
+
+                        let ext_ips = match ext_ips {
+                            Some(value) => value,
+                            None => continue,
+                        };
+
+                        for ext_ip in &ext_ips {
+                            match ext_ip.ip.ip() {
+                                IpAddr::V4(v4) => {
+                                    if let Some(dest) = v4_dest {
+                                        for pr in &prs {
+                                            if ext_ip.ip.ip()
+                                                >= pr.first_address.ip()
+                                                && ext_ip.ip.ip()
+                                                    <= pr.last_address.ip()
+                                            {
+                                                out.insert(
+                                                        dest,
+                                                        RouterTarget::InternetGateway(
+                                                            v4.into(),
+                                                        ),
+                                                    );
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                                IpAddr::V6(v6) => {
+                                    if let Some(dest) = v6_dest {
+                                        for pr in &prs {
+                                            if ext_ip.ip.ip()
+                                                >= pr.first_address.ip()
+                                                && ext_ip.ip.ip()
+                                                    <= pr.last_address.ip()
+                                            {
+                                                out.insert(
+                                                        dest,
+                                                        RouterTarget::InternetGateway(
+                                                            v6.into(),
+                                                        ),
+                                                    );
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            };
+                        }
+                    }
+                }
             }
         }
 

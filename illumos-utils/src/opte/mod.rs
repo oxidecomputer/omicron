@@ -90,7 +90,7 @@ fn router_target_opte(target: &shared::RouterTarget) -> RouterTarget {
     use shared::RouterTarget::*;
     match target {
         Drop => RouterTarget::Drop,
-        InternetGateway => RouterTarget::InternetGateway,
+        InternetGateway(ip) => RouterTarget::InternetGateway((*ip).into()),
         Ip(ip) => RouterTarget::Ip((*ip).into()),
         VpcSubnet(net) => RouterTarget::VpcSubnet(net_to_cidr(*net)),
     }

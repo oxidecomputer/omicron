@@ -777,7 +777,7 @@ pub struct DhcpConfig {
 #[serde(tag = "type", rename_all = "snake_case", content = "value")]
 pub enum RouterTarget {
     Drop,
-    InternetGateway,
+    InternetGateway(IpAddr),
     Ip(IpAddr),
     VpcSubnet(IpNet),
 }
