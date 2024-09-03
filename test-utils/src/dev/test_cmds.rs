@@ -157,19 +157,14 @@ pub fn redact_variable(input: &str) -> String {
     // Replace timestamps.
     //
     // Format: RFC 3339 (ISO 8601)
-    // Example: 1970-01-01T00:00:00Z
-    let s = regex::Regex::new(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
-        .unwrap()
-        .replace_all(&s, "<REDACTED_TIMESTAMP>")
-        .to_string();
-
-    // Replace timestamps that have a sub-second portion.
-    // Example: 1970-01-01T00:00:00.000001Z
+    // Examples:
+    //  1970-01-01T00:00:00Z
+    //  1970-01-01T00:00:00.00001Z
     //
     // Note that depending on the amount of trailing zeros,
     // this value can have different widths. However, "<REDACTED_TIMESTAMP>"
     // has a deterministic width, so that's used instead.
-    let s = regex::Regex::new(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z")
+    let s = regex::Regex::new(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z")
         .unwrap()
         .replace_all(&s, "<REDACTED_TIMESTAMP>")
         .to_string();
