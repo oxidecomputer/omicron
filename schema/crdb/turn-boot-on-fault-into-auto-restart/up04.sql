@@ -1,1 +1,1 @@
-ALTER TABLE omicron.public.instance ALTER COLUMN auto_restart_policy SET NOT NULL;
+ALTER TABLE omicron.public.instance DROP COLUMN IF EXISTS boot_on_fault;

@@ -58,9 +58,10 @@ pub struct Instance {
     /// The auto-restart policy for this instance.
     ///
     /// This indicates whether the instance should be automatically restarted by
-    /// the control plane on failure.
+    /// the control plane on failure. If this is `NULL`, no auto-restart policy
+    /// has been configured for this instance by the user.
     #[diesel(column_name = auto_restart_policy)]
-    pub auto_restart_policy: InstanceAutoRestart,
+    pub auto_restart_policy: Option<InstanceAutoRestart>,
 
     #[diesel(embed)]
     pub runtime_state: InstanceRuntimeState,
@@ -109,7 +110,9 @@ impl Instance {
             ncpus: params.ncpus.into(),
             memory: params.memory.into(),
             hostname: params.hostname.to_string(),
-            auto_restart_policy: InstanceAutoRestart::default(),
+            // TODO(eliza): allow this to be configured via the instance-create
+            // params...
+            auto_restart_policy: None,
             runtime_state,
 
             updater_gen: Generation::new(),

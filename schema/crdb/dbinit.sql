@@ -1101,7 +1101,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
      * What failures should result in an instance being automatically restarted
      * by the control plane.
      */
-    auto_restart_policy omicron.public.instance_auto_restart NOT NULL,
+    auto_restart_policy omicron.public.instance_auto_restart,
 
     CONSTRAINT vmm_iff_active_propolis CHECK (
         ((state = 'vmm') AND (active_propolis_id IS NOT NULL)) OR

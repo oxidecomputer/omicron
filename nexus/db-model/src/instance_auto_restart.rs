@@ -32,12 +32,6 @@ impl InstanceAutoRestart {
     }
 }
 
-impl Default for InstanceAutoRestart {
-    fn default() -> Self {
-        Self::Never
-    }
-}
-
 impl fmt::Display for InstanceAutoRestart {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.label())
