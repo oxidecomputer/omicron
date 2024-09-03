@@ -355,6 +355,7 @@ mod test {
             value,
             json!({
                 "target_id": blueprint_id,
+                "execution_error": null,
                 "enabled": true,
                 "needs_saga_recovery": false,
             })
@@ -454,6 +455,7 @@ mod test {
             value,
             json!({
                 "target_id": blueprint.1.id.to_string(),
+                "execution_error": null,
                 "enabled": true,
                 "needs_saga_recovery": false,
             })
@@ -502,7 +504,7 @@ mod test {
 
         #[derive(Deserialize)]
         struct ErrorResult {
-            error: NestedError,
+            execution_error: NestedError,
         }
 
         let mut value = task.activate(&opctx).await;
@@ -510,7 +512,10 @@ mod test {
 
         println!("after failure: {:?}", value);
         let result: ErrorResult = serde_json::from_value(value).unwrap();
-        assert_eq!(result.error.message(), "step failed: Deploy Omicron zones");
+        assert_eq!(
+            result.execution_error.message(),
+            "step failed: Deploy Omicron zones"
+        );
 
         assert_event_buffer_failed_at(
             &event_buffer,

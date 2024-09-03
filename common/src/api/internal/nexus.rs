@@ -102,6 +102,17 @@ pub enum VmmState {
     Destroyed,
 }
 
+impl VmmState {
+    /// States in which the VMM no longer exists and must be cleaned up.
+    pub const TERMINAL_STATES: &'static [Self] =
+        &[Self::Failed, Self::Destroyed];
+
+    /// Returns `true` if this VMM is in a terminal state.
+    pub fn is_terminal(&self) -> bool {
+        Self::TERMINAL_STATES.contains(self)
+    }
+}
+
 /// The dynamic runtime properties of an individual VMM process.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VmmRuntimeState {

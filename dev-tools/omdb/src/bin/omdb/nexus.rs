@@ -1405,6 +1405,9 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
             /// number of instances found with destroyed active VMMs
             destroyed_active_vmms: usize,
 
+            /// number of instances found with failed active VMMs
+            failed_active_vmms: usize,
+
             /// number of instances found with terminated active migrations
             terminated_active_migrations: usize,
 
@@ -1430,6 +1433,7 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
             ),
             Ok(UpdaterStatus {
                 destroyed_active_vmms,
+                failed_active_vmms,
                 terminated_active_migrations,
                 sagas_started,
                 sagas_completed,
@@ -1447,8 +1451,12 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                     destroyed_active_vmms + terminated_active_migrations
                 );
                 println!(
-                    "      instances with destroyed active VMMs: {}",
+                    "      instances with Destroyed active VMMs: {}",
                     destroyed_active_vmms,
+                );
+                println!(
+                    "      instances with Failed active VMMs: {}",
+                    failed_active_vmms,
                 );
                 println!(
                     "      instances with terminated active migrations: {}",

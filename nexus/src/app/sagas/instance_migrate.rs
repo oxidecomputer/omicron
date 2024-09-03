@@ -13,6 +13,7 @@ use crate::app::sagas::{
 use nexus_db_queries::db::{identity::Resource, lookup::LookupPath};
 use nexus_db_queries::{authn, authz, db};
 use nexus_types::internal_api::params::InstanceMigrateRequest;
+use omicron_common::api::external::Error;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, SledUuid};
 use serde::Deserialize;
 use serde::Serialize;
@@ -319,7 +320,6 @@ async fn sim_create_vmm_record(
         propolis_id,
         sled_id,
         propolis_ip,
-        nexus_db_model::VmmInitialState::Migrating,
     )
     .await
 }
@@ -334,16 +334,15 @@ async fn sim_destroy_vmm_record(
         &params.serialized_authn,
     );
 
-    let vmm = sagactx.lookup::<db::model::Vmm>("dst_vmm_record")?;
-    info!(osagactx.log(), "destroying vmm record for migration unwind";
-          "propolis_id" => %vmm.id);
+    let propolis_id = sagactx.lookup::<PropolisUuid>("dst_propolis_id")?;
+    info!(
+        osagactx.log(),
+        "destroying vmm record for migration unwind";
+        "propolis_id" => %propolis_id,
+    );
 
-    super::instance_common::unwind_vmm_record(
-        osagactx.datastore(),
-        &opctx,
-        &vmm,
-    )
-    .await
+    osagactx.datastore().vmm_mark_saga_unwound(&opctx, &propolis_id).await?;
+    Ok(())
 }
 
 async fn sim_set_migration_ids(
@@ -384,7 +383,7 @@ async fn sim_set_migration_ids(
 
 async fn sim_ensure_destination_propolis(
     sagactx: NexusActionContext,
-) -> Result<(), ActionError> {
+) -> Result<db::model::Vmm, ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
     let opctx = crate::context::op_context_for_saga_action(
@@ -428,9 +427,31 @@ async fn sim_ensure_destination_propolis(
             },
         )
         .await
-        .map_err(ActionError::action_failed)?;
+        .map_err(|err| match err {
+            InstanceStateChangeError::SledAgent(inner) => {
+                info!(
+                    osagactx.log(),
+                    "migration saga: sled agent failed to register instance";
+                    "instance_id" => %db_instance.id(),
+                    "dst_propolis_id" => %dst_propolis_id,
+                    "error" => ?inner,
+                );
 
-    Ok(())
+                // Don't set the instance to Failed in this case. Instead, allow
+                // the saga to unwind, marking the VMM as SagaUnwound.
+                ActionError::action_failed(Error::from(inner))
+            }
+            InstanceStateChangeError::Other(inner) => {
+                info!(
+                    osagactx.log(),
+                    "migration saga: internal error registering instance";
+                    "instance_id" => %db_instance.id(),
+                    "dst_propolis_id" => %dst_propolis_id,
+                    "error" => ?inner,
+                );
+                ActionError::action_failed(inner)
+            }
+        })
 }
 
 async fn sim_ensure_destination_propolis_undo(
@@ -460,7 +481,7 @@ async fn sim_ensure_destination_propolis_undo(
     {
         Ok(_) => Ok(()),
         Err(InstanceStateChangeError::SledAgent(inner)) => {
-            if !inner.instance_unhealthy() {
+            if !inner.vmm_gone() {
                 Ok(())
             } else {
                 Err(inner.0.into())
@@ -489,7 +510,7 @@ async fn sim_instance_migrate(
     );
 
     let src_propolis_id = db_instance.runtime().propolis_id.unwrap();
-    let dst_vmm = sagactx.lookup::<db::model::Vmm>("dst_vmm_record")?;
+    let dst_vmm = sagactx.lookup::<db::model::Vmm>("ensure_destination")?;
     info!(osagactx.log(), "initiating migration from destination sled";
           "instance_id" => %db_instance.id(),
           "dst_vmm_record" => ?dst_vmm,
