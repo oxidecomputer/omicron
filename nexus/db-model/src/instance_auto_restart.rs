@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::impl_enum_type;
+use nexus_types::external_api::params;
 use serde::Deserialize;
 use serde::Serialize;
 use std::fmt;
@@ -34,7 +35,29 @@ impl InstanceAutoRestart {
 
 impl fmt::Display for InstanceAutoRestart {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.label())
+        self.label().fmt(f)
+    }
+}
+
+impl From<InstanceAutoRestart> for params::InstanceAutoRestart {
+    fn from(value: InstanceAutoRestart) -> Self {
+        match value {
+            InstanceAutoRestart::Never => Self::Never,
+            InstanceAutoRestart::SledFailuresOnly => Self::SledFailuresOnly,
+            InstanceAutoRestart::AllFailures => Self::AllFailures,
+        }
+    }
+}
+
+impl From<params::InstanceAutoRestart> for InstanceAutoRestart {
+    fn from(value: params::InstanceAutoRestart) -> Self {
+        match value {
+            params::InstanceAutoRestart::Never => Self::Never,
+            params::InstanceAutoRestart::SledFailuresOnly => {
+                Self::SledFailuresOnly
+            }
+            params::InstanceAutoRestart::AllFailures => Self::AllFailures,
+        }
     }
 }
 

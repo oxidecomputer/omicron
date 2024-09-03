@@ -982,6 +982,32 @@ pub enum ExternalIpDetach {
     Floating { floating_ip: NameOrId },
 }
 
+/// A policy determining when an instance should be automatically restarted by
+/// the control plane.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum InstanceAutoRestart {
+    /// The instance should not be automatically restarted by the control plane
+    /// if it failures.
+    Never,
+    /// The instance should be automatically restarted by the control plane if
+    /// the sled that it's running on reboots or fails, but it should not be
+    /// restarted automatically if the individual instance fails. This policy
+    /// will only automatically restart an instance if the control plane is able
+    /// to definitively determine that the instance failed due to a sled reboot
+    /// or fault.
+    ///
+    /// This is the default policy for instances that don't specify an
+    /// auto-restart policy.
+    #[default]
+    SledFailuresOnly,
+    /// The instance should be automatically restarted by the control plane in
+    /// the event of any failure. If the instance crashes, or if the sled it's
+    /// running on reboots, the control plane will always attempt to
+    /// automatically restart this instance.
+    AllFailures,
+}
+
 /// Create-time parameters for an `Instance`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceCreate {
@@ -1032,6 +1058,14 @@ pub struct InstanceCreate {
     /// Should this instance be started upon creation; true by default.
     #[serde(default = "bool_true")]
     pub start: bool,
+
+    /// A policy that indicates whether the control plane should automatically
+    /// restart this instance if it fails.
+    ///
+    /// If this is not provided, it defaults to the "sled_failures_only"
+    /// auto-restart policy.
+    #[serde(default)]
+    pub auto_restart_policy: InstanceAutoRestart,
 }
 
 #[inline]

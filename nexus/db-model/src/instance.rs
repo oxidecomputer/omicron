@@ -110,9 +110,7 @@ impl Instance {
             ncpus: params.ncpus.into(),
             memory: params.memory.into(),
             hostname: params.hostname.to_string(),
-            // TODO(eliza): allow this to be configured via the instance-create
-            // params...
-            auto_restart_policy: None,
+            auto_restart_policy: params.auto_restart_policy.clone().into(),
             runtime_state,
 
             updater_gen: Generation::new(),
