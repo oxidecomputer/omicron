@@ -325,10 +325,26 @@ mod tests {
 
     #[test]
     fn test_redact_timestamps() {
-        let times = [DateTime::<Utc>::from_timestamp_nanos(0), Utc::now()];
+        let times = [
+            DateTime::<Utc>::from_timestamp_nanos(0),
+            DateTime::<Utc>::from_timestamp_nanos(1),
+            DateTime::<Utc>::from_timestamp_nanos(10),
+            DateTime::<Utc>::from_timestamp_nanos(100000),
+            DateTime::<Utc>::from_timestamp_nanos(123456789),
+            // This doesn't impact the test at all, but as a fun fact, this
+            // happened on March 18th, 2005.
+            DateTime::<Utc>::from_timestamp_nanos(1111111111100000000),
+            DateTime::<Utc>::from_timestamp_nanos(1111111111111100000),
+            DateTime::<Utc>::from_timestamp_nanos(1111111111111111110),
+            DateTime::<Utc>::from_timestamp_nanos(1111111111111111111),
+            // ... and this one happens on June 6th, 2040.
+            DateTime::<Utc>::from_timestamp_nanos(2222222222000000000),
+            DateTime::<Utc>::from_timestamp_nanos(2222222222222200000),
+            DateTime::<Utc>::from_timestamp_nanos(2222222222222222220),
+            DateTime::<Utc>::from_timestamp_nanos(2222222222222222222),
+        ];
         for time in times {
             let input = format!("{:?}", time);
-
             assert_eq!(
                 redact_variable(&input),
                 "<REDACTED_TIMESTAMP>",
