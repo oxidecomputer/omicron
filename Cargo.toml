@@ -323,10 +323,10 @@ cookie = "0.18"
 criterion = { version = "0.5.1", features = [ "async_tokio" ] }
 crossbeam = "0.8"
 crossterm = { version = "0.28.1", features = ["event-stream"] }
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "e58ca3693cb9ce0438947beba10e97ee38a0966b" }
-crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "e58ca3693cb9ce0438947beba10e97ee38a0966b" }
-crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "e58ca3693cb9ce0438947beba10e97ee38a0966b" }
-crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "e58ca3693cb9ce0438947beba10e97ee38a0966b" }
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "eab46702b6a43ff558672462dea3eb5ff7b8a0e6"}
+crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "eab46702b6a43ff558672462dea3eb5ff7b8a0e6"}
+crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "eab46702b6a43ff558672462dea3eb5ff7b8a0e6"}
+crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "eab46702b6a43ff558672462dea3eb5ff7b8a0e6"}
 csv = "1.3.0"
 curve25519-dalek = "4"
 datatest-stable = "0.2.9"
@@ -503,8 +503,8 @@ proc-macro2 = "1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "24a74d0c76b6a63961ecef76acb1516b6e66c5c9" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "24a74d0c76b6a63961ecef76acb1516b6e66c5c9" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "24a74d0c76b6a63961ecef76acb1516b6e66c5c9" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "d45b4898137762074b7f7435b64fd2ccf41f4138" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "d45b4898137762074b7f7435b64fd2ccf41f4138" }
 proptest = "1.5.0"
 qorb = { git = "https://github.com/oxidecomputer/qorb", branch = "master" }
 quote = "1.0"
@@ -788,17 +788,19 @@ opt-level = 3
 #dropshot = { path = "../dropshot/dropshot" }
 #[patch.crates-io]
 #steno = { path = "../steno" }
-#[patch."https://github.com/oxidecomputer/propolis"]
-#propolis-client = { path = "../propolis/lib/propolis-client" }
-#propolis-mock-server = { path = "../propolis/bin/mock-server" }
-#[patch."https://github.com/oxidecomputer/crucible"]
-#crucible-agent-client = { path = "../crucible/agent-client" }
-#crucible-pantry-client = { path = "../crucible/pantry-client" }
-#crucible-smf = { path = "../crucible/smf" }
+# [patch."https://github.com/oxidecomputer/propolis"]
+# propolis-client = { path = "../propolis/lib/propolis-client" }
+# propolis-mock-server = { path = "../propolis/bin/mock-server" }
+# [patch."https://github.com/oxidecomputer/crucible"]
+# crucible-agent-client = { path = "../crucible/agent-client" }
+# crucible-pantry-client = { path = "../crucible/pantry-client" }
+# crucible-smf = { path = "../crucible/smf" }
 #[patch.crates-io]
 #diesel = { path = "../../diesel/diesel" }
 #[patch."https://github.com/oxidecomputer/diesel-dtrace"]
 #diesel-dtrace = { path = "../diesel-dtrace" }
+# [patch."https://github.com/oxidecomputer/falcon"]
+# libfalcon = { path = "../falcon/lib" }
 
 #
 # Local client generation during development.
