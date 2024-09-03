@@ -34,7 +34,7 @@ impl InstanceAutoRestart {
 
 impl Default for InstanceAutoRestart {
     fn default() -> Self {
-        Self::SledFailuresOnly
+        Self::Never
     }
 }
 
