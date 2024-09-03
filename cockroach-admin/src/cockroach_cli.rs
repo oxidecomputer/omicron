@@ -147,9 +147,7 @@ mod tests {
     //
     // This is to help debug test flakes like
     // https://github.com/oxidecomputer/omicron/issues/6506.
-    async fn exec_command_logging_output(
-        command: &mut Command,
-    ) -> String {
+    async fn exec_command_logging_output(command: &mut Command) -> String {
         let command_str = command
             .as_std()
             .get_args()
