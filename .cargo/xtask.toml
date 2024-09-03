@@ -39,3 +39,7 @@ binary_allow_list = [
   "sled-agent",
   "sled-agent-sim",
 ]
+
+# libfalcon uses the xz2 crate to decompress test images.
+[libraries."liblzma.so.5"]
+binary_allow_list = ["falcon_runner", "falcon_runner_cli"]
