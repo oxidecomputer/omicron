@@ -431,11 +431,21 @@ fn draw_rack_status_details_popup(
                 style::plain_text(),
             )]));
         }
-        Ok(RackOperationStatus::Initializing { id }) => {
+        Ok(RackOperationStatus::Initializing { id, step }) => {
             body.lines.push(Line::from(vec![
                 status,
                 Span::styled("Initializing", style::plain_text()),
             ]));
+            let max = step.max_step();
+            let index = step.index();
+            body.lines.push(Line::from(vec![Span::styled(
+                format!("Current step: {}/{}", index, max),
+                style::plain_text(),
+            )]));
+            body.lines.push(Line::from(vec![Span::styled(
+                format!("Current operation: {:?}", step),
+                style::plain_text(),
+            )]));
             body.lines.push(Line::from(vec![Span::styled(
                 format!("Current operation ID: {}", id),
                 style::plain_text(),
@@ -632,8 +642,11 @@ fn rss_config_text<'a>(
         Ok(RackOperationStatus::Initialized { .. }) => {
             Span::styled("Initialized", ok_style)
         }
-        Ok(RackOperationStatus::Initializing { .. }) => {
-            Span::styled("Initializing", warn_style)
+        Ok(RackOperationStatus::Initializing { step, .. }) => {
+            let max = step.max_step();
+            let index = step.index();
+            let msg = format!("Initializing: Step {}/{}", index, max);
+            Span::styled(msg, warn_style)
         }
         Ok(RackOperationStatus::Resetting { .. }) => {
             Span::styled("Resetting", warn_style)
