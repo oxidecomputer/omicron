@@ -1507,6 +1507,7 @@ mod test {
                 external_ips: vec![],
                 disks: vec![],
                 start: true,
+                auto_restart_policy: None,
             },
         )
         .await
