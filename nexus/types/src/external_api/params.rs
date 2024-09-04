@@ -1061,11 +1061,8 @@ pub struct InstanceCreate {
 
     /// A policy that indicates whether the control plane should automatically
     /// restart this instance if it fails.
-    ///
-    /// If this is not provided, it defaults to the "sled_failures_only"
-    /// auto-restart policy.
     #[serde(default)]
-    pub auto_restart_policy: InstanceAutoRestart,
+    pub auto_restart_policy: Option<InstanceAutoRestart>,
 }
 
 #[inline]

@@ -15227,10 +15227,9 @@
         "type": "object",
         "properties": {
           "auto_restart_policy": {
-            "description": "A policy that indicates whether the control plane should automatically restart this instance if it fails.\n\nIf this is not provided, it defaults to the \"sled_failures_only\" auto-restart policy.",
-            "default": {
-              "type": "sled_failures_only"
-            },
+            "nullable": true,
+            "description": "A policy that indicates whether the control plane should automatically restart this instance if it fails.",
+            "default": null,
             "allOf": [
               {
                 "$ref": "#/components/schemas/InstanceAutoRestart"

@@ -110,7 +110,10 @@ impl Instance {
             ncpus: params.ncpus.into(),
             memory: params.memory.into(),
             hostname: params.hostname.to_string(),
-            auto_restart_policy: params.auto_restart_policy.clone().into(),
+            auto_restart_policy: params
+                .auto_restart_policy
+                .clone()
+                .map(Into::into),
             runtime_state,
 
             updater_gen: Generation::new(),
@@ -124,7 +127,11 @@ impl Instance {
 
     /// Returns `true` if this instance can be automatically restarted.
     pub fn can_reincarnate(&self) -> bool {
-        self.runtime_state.can_reincarnate(self.auto_restart_policy)
+        self.auto_restart_policy
+            .map(|policy| self.runtime_state.can_reincarnate(policy))
+            // If the instance does not have a specified auto-restart policy,
+            // assume it cannot be restarted.
+            .unwrap_or(false)
     }
 }
 
