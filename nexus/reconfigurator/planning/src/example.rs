@@ -9,13 +9,10 @@ use crate::system::SledBuilder;
 use crate::system::SystemDescription;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintZoneFilter;
-use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::inventory::Collection;
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledKind;
-use omicron_uuid_kinds::VnicUuid;
 use typed_rng::TypedUuidRng;
 
 pub struct ExampleSystem {
@@ -79,6 +76,9 @@ impl ExampleSystem {
                     vec![],
                 )
                 .unwrap();
+            let _ = builder
+                .sled_ensure_zone_multiple_internal_dns(sled_id, 1)
+                .unwrap();
             let _ = builder.sled_ensure_disks(sled_id, sled_resources).unwrap();
             for pool_name in sled_resources.zpools.keys() {
                 let _ = builder
@@ -92,37 +92,15 @@ impl ExampleSystem {
             system.to_collection_builder().expect("failed to build collection");
         builder.set_rng_seed((test_name, "ExampleSystem collection"));
 
-        for sled_id in blueprint.sleds() {
-            let Some(zones) = blueprint.blueprint_zones.get(&sled_id) else {
-                continue;
-            };
-            for zone in zones.zones.iter() {
-                let service_id = zone.id;
-                if let Some((external_ip, nic)) =
-                    zone.zone_type.external_networking()
-                {
-                    input_builder
-                        .add_omicron_zone_external_ip(service_id, external_ip)
-                        .expect("failed to add Omicron zone external IP");
-                    input_builder
-                        .add_omicron_zone_nic(
-                            service_id,
-                            OmicronZoneNic {
-                                // TODO-cleanup use `TypedUuid` everywhere
-                                id: VnicUuid::from_untyped_uuid(nic.id),
-                                mac: nic.mac,
-                                ip: nic.ip,
-                                slot: nic.slot,
-                                primary: nic.primary,
-                            },
-                        )
-                        .expect("failed to add Omicron zone NIC");
-                }
-            }
+        input_builder
+            .update_network_resources_from_blueprint(&blueprint)
+            .expect("failed to add network resources from blueprint");
+
+        for (sled_id, zones) in &blueprint.blueprint_zones {
             builder
                 .found_sled_omicron_zones(
                     "fake sled agent",
-                    sled_id,
+                    *sled_id,
                     zones.to_omicron_zones_config(
                         BlueprintZoneFilter::ShouldBeRunning,
                     ),

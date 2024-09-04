@@ -9,7 +9,7 @@ use oxide_client::{
         UsernamePasswordCredentials,
     },
     ClientHiddenExt, ClientLoginExt, ClientProjectsExt,
-    ClientSystemHardwareExt, ClientSystemNetworkingExt, ClientSystemStatusExt,
+    ClientSystemHardwareExt, ClientSystemIpPoolsExt, ClientSystemStatusExt,
     ClientVpcsExt,
 };
 use std::{

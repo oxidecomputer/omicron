@@ -146,11 +146,7 @@ sled_view                                GET      /v1/system/hardware/sleds/{sle
 switch_list                              GET      /v1/system/hardware/switches
 switch_view                              GET      /v1/system/hardware/switches/{switch_id}
 
-API operations found with tag "system/metrics"
-OPERATION ID                             METHOD   URL PATH
-system_metric                            GET      /v1/system/metrics/{metric_name}
-
-API operations found with tag "system/networking"
+API operations found with tag "system/ip-pools"
 OPERATION ID                             METHOD   URL PATH
 ip_pool_create                           POST     /v1/system/ip-pools
 ip_pool_delete                           DELETE   /v1/system/ip-pools/{pool}
@@ -169,6 +165,13 @@ ip_pool_silo_update                      PUT      /v1/system/ip-pools/{pool}/sil
 ip_pool_update                           PUT      /v1/system/ip-pools/{pool}
 ip_pool_utilization_view                 GET      /v1/system/ip-pools/{pool}/utilization
 ip_pool_view                             GET      /v1/system/ip-pools/{pool}
+
+API operations found with tag "system/metrics"
+OPERATION ID                             METHOD   URL PATH
+system_metric                            GET      /v1/system/metrics/{metric_name}
+
+API operations found with tag "system/networking"
+OPERATION ID                             METHOD   URL PATH
 networking_address_lot_block_list        GET      /v1/system/networking/address-lot/{address_lot}/blocks
 networking_address_lot_create            POST     /v1/system/networking/address-lot
 networking_address_lot_delete            DELETE   /v1/system/networking/address-lot/{address_lot}

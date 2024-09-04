@@ -175,6 +175,12 @@ pub const API_VERSION: &str = "20240821.0";
                     url = "http://docs.oxide.computer/api/system-metrics"
                 }
             },
+            "system/ip-pools" = {
+                description = "IP pools are collections of external IPs that can be assigned to silos. When a pool is linked to a silo, users in that silo can allocate IPs from the pool for their instances.",
+                external_docs = {
+                    url = "http://docs.oxide.computer/api/system-ip-pools"
+                }
+            },
             "system/networking" = {
                 description = "This provides rack-level network configuration.",
                 external_docs = {
@@ -630,7 +636,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = GET,
         path = "/v1/system/ip-pools",
-        tags = ["system/networking"],
+        tags = ["system/ip-pools"],
     }]
     async fn ip_pool_list(
         rqctx: RequestContext<Self::Context>,
@@ -641,7 +647,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = POST,
         path = "/v1/system/ip-pools",
-        tags = ["system/networking"],
+        tags = ["system/ip-pools"],
     }]
     async fn ip_pool_create(
         rqctx: RequestContext<Self::Context>,
@@ -652,7 +658,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = GET,
         path = "/v1/system/ip-pools/{pool}",
-        tags = ["system/networking"],
+        tags = ["system/ip-pools"],
     }]
     async fn ip_pool_view(
         rqctx: RequestContext<Self::Context>,
@@ -663,7 +669,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = DELETE,
         path = "/v1/system/ip-pools/{pool}",
-        tags = ["system/networking"],
+        tags = ["system/ip-pools"],
     }]
     async fn ip_pool_delete(
         rqctx: RequestContext<Self::Context>,
@@ -674,7 +680,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = PUT,
         path = "/v1/system/ip-pools/{pool}",
-        tags = ["system/networking"],
+        tags = ["system/ip-pools"],
     }]
     async fn ip_pool_update(
         rqctx: RequestContext<Self::Context>,
@@ -686,7 +692,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = GET,
         path = "/v1/system/ip-pools/{pool}/utilization",
-        tags = ["system/networking"],
+        tags = ["system/ip-pools"],
     }]
     async fn ip_pool_utilization_view(
         rqctx: RequestContext<Self::Context>,
@@ -697,7 +703,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = GET,
         path = "/v1/system/ip-pools/{pool}/silos",
-        tags = ["system/networking"],
+        tags = ["system/ip-pools"],
     }]
     async fn ip_pool_silo_list(
         rqctx: RequestContext<Self::Context>,
@@ -723,7 +729,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = POST,
         path = "/v1/system/ip-pools/{pool}/silos",
-        tags = ["system/networking"],
+        tags = ["system/ip-pools"],
     }]
     async fn ip_pool_silo_link(
         rqctx: RequestContext<Self::Context>,
@@ -737,7 +743,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = DELETE,
         path = "/v1/system/ip-pools/{pool}/silos/{silo}",
-        tags = ["system/networking"],
+        tags = ["system/ip-pools"],
     }]
     async fn ip_pool_silo_unlink(
         rqctx: RequestContext<Self::Context>,
@@ -754,7 +760,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = PUT,
         path = "/v1/system/ip-pools/{pool}/silos/{silo}",
-        tags = ["system/networking"],
+        tags = ["system/ip-pools"],
     }]
     async fn ip_pool_silo_update(
         rqctx: RequestContext<Self::Context>,
@@ -766,7 +772,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = GET,
         path = "/v1/system/ip-pools-service",
-        tags = ["system/networking"],
+        tags = ["system/ip-pools"],
     }]
     async fn ip_pool_service_view(
         rqctx: RequestContext<Self::Context>,
@@ -778,7 +784,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = GET,
         path = "/v1/system/ip-pools/{pool}/ranges",
-        tags = ["system/networking"],
+        tags = ["system/ip-pools"],
     }]
     async fn ip_pool_range_list(
         rqctx: RequestContext<Self::Context>,
@@ -792,7 +798,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = POST,
         path = "/v1/system/ip-pools/{pool}/ranges/add",
-        tags = ["system/networking"],
+        tags = ["system/ip-pools"],
     }]
     async fn ip_pool_range_add(
         rqctx: RequestContext<Self::Context>,
@@ -804,7 +810,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = POST,
         path = "/v1/system/ip-pools/{pool}/ranges/remove",
-        tags = ["system/networking"],
+        tags = ["system/ip-pools"],
     }]
     async fn ip_pool_range_remove(
         rqctx: RequestContext<Self::Context>,
@@ -818,7 +824,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = GET,
         path = "/v1/system/ip-pools-service/ranges",
-        tags = ["system/networking"],
+        tags = ["system/ip-pools"],
     }]
     async fn ip_pool_service_range_list(
         rqctx: RequestContext<Self::Context>,
@@ -831,7 +837,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = POST,
         path = "/v1/system/ip-pools-service/ranges/add",
-        tags = ["system/networking"],
+        tags = ["system/ip-pools"],
     }]
     async fn ip_pool_service_range_add(
         rqctx: RequestContext<Self::Context>,
@@ -842,7 +848,7 @@ pub trait NexusExternalApi {
     #[endpoint {
         method = POST,
         path = "/v1/system/ip-pools-service/ranges/remove",
-        tags = ["system/networking"],
+        tags = ["system/ip-pools"],
     }]
     async fn ip_pool_service_range_remove(
         rqctx: RequestContext<Self::Context>,

@@ -10,7 +10,7 @@ use bootstore::schemes::v0 as bootstore;
 use omicron_uuid_kinds::RackInitUuid;
 use omicron_uuid_kinds::RackResetUuid;
 use sled_agent_types::rack_init::RackInitializeRequest;
-use sled_agent_types::rack_ops::RackOperationStatus;
+use sled_agent_types::rack_ops::{RackOperationStatus, RssStep};
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::mem;
@@ -19,6 +19,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use tokio::sync::oneshot;
 use tokio::sync::oneshot::error::TryRecvError;
+use tokio::sync::watch;
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum RssAccessError {
@@ -62,7 +63,7 @@ impl RssAccess {
         let mut status = self.status.lock().unwrap();
 
         match &mut *status {
-            RssStatus::Initializing { id, completion } => {
+            RssStatus::Initializing { id, completion, step_rx } => {
                 let id = *id;
                 // This is our only chance to notice the initialization task has
                 // panicked: if it dropped the sending half of `completion`
@@ -75,7 +76,11 @@ impl RssAccess {
                     }
                     Err(TryRecvError::Empty) => {
                         // Initialization task is still running
-                        RackOperationStatus::Initializing { id }
+                        // Update the step we are on.
+                        RackOperationStatus::Initializing {
+                            id,
+                            step: *step_rx.borrow(),
+                        }
                     }
                     Err(TryRecvError::Closed) => {
                         // Initialization task has panicked!
@@ -171,9 +176,9 @@ impl RssAccess {
             RssStatus::Uninitialized { .. } => {
                 let (completion_tx, completion) = oneshot::channel();
                 let id = RackInitUuid::new_v4();
-                *status = RssStatus::Initializing { id, completion };
+                let (step_tx, step_rx) = watch::channel(RssStep::Requested);
+                *status = RssStatus::Initializing { id, completion, step_rx };
                 mem::drop(status);
-
                 let parent_log = parent_log.clone();
                 let storage_manager = storage_manager.clone();
                 let bootstore_node_handle = bootstore_node_handle.clone();
@@ -185,6 +190,7 @@ impl RssAccess {
                         storage_manager,
                         bootstore_node_handle,
                         request,
+                        step_tx,
                     )
                     .await;
                     let new_status = match result {
@@ -284,6 +290,9 @@ enum RssStatus {
     Initializing {
         id: RackInitUuid,
         completion: oneshot::Receiver<()>,
+        // Used by the RSS task to update us with what step it is on.
+        // This holds the current RSS step.
+        step_rx: watch::Receiver<RssStep>,
     },
     Resetting {
         id: RackResetUuid,
@@ -313,6 +322,7 @@ async fn rack_initialize(
     storage_manager: StorageHandle,
     bootstore_node_handle: bootstore::NodeHandle,
     request: RackInitializeRequest,
+    step_tx: watch::Sender<RssStep>,
 ) -> Result<(), SetupServiceError> {
     RssHandle::run_rss(
         parent_log,
@@ -320,6 +330,7 @@ async fn rack_initialize(
         global_zone_bootstrap_ip,
         storage_manager,
         bootstore_node_handle,
+        step_tx,
     )
     .await
 }

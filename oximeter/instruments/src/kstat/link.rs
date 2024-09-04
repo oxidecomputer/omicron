@@ -19,7 +19,7 @@ use oximeter::Sample;
 
 oximeter::use_timeseries!("sled-data-link.toml");
 
-// Helper function to extract the same kstat metrics from all link targets.
+/// Helper function to extract the same kstat metrics from all link targets.
 fn extract_link_kstats<T>(
     target: &T,
     named_data: &Named,

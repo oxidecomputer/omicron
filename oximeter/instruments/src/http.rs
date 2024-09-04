@@ -24,11 +24,11 @@ pub use http_service::RequestLatencyHistogram;
 impl RequestLatencyHistogram {
     /// Build a new `RequestLatencyHistogram` with a specified histogram.
     ///
-    /// Latencies are expressed in seconds.
+    /// Latencies are expressed in nanoseconds.
     pub fn new(
         operation_id: &str,
         status_code: StatusCode,
-        histogram: Histogram<f64>,
+        histogram: Histogram<u64>,
     ) -> Self {
         Self {
             operation_id: operation_id.to_string().into(),
@@ -37,24 +37,26 @@ impl RequestLatencyHistogram {
         }
     }
 
-    /// Build a `RequestLatencyHistogram` with a histogram whose bins span the given decades.
+    /// Build a histogram whose bins span the given powers of ten.
     ///
-    /// `start_decade` and `end_decade` specify the lower and upper limits of the histogram's
-    /// range, as a power of 10. For example, passing `-3` and `2` results in a histogram with bins
-    /// spanning `[10 ** -3, 10 ** 2)`. There are 10 bins in each decade. See the
-    /// [`Histogram::span_decades`] method for more details.
+    /// `start_power` and `end_power` specify the lower and upper limits of
+    /// the histogram's range, as powers of 10. For example, passing 2 and 4
+    /// results in a histogram with bins from `[10 ** 2, 10 ** 4)`. There are 10
+    /// bins in each power of 10.
     ///
-    /// Latencies are expressed as seconds.
-    pub fn with_latency_decades(
+    /// See the [`Histogram::span_decades`] method for more details.
+    ///
+    /// Latencies are expressed in nanoseconds.
+    pub fn with_log_linear_bins(
         operation_id: &str,
         status_code: StatusCode,
-        start_decade: i16,
-        end_decade: i16,
+        start_power: u16,
+        end_power: u16,
     ) -> Result<Self, MetricsError> {
         Ok(Self::new(
             operation_id,
             status_code,
-            Histogram::span_decades(start_decade, end_decade)?,
+            Histogram::span_decades(start_power, end_power)?,
         ))
     }
 
@@ -71,7 +73,7 @@ impl RequestLatencyHistogram {
 }
 
 /// The `LatencyTracker` is an [`oximeter::Producer`] that tracks the latencies of requests for an
-/// HTTP service, in seconds.
+/// HTTP service, in nanoseconds.
 ///
 /// Consumers should construct one `LatencyTracker` for each HTTP service they wish to instrument.
 /// As requests are received, the [`LatencyTracker::update`] method can be called with the
@@ -94,14 +96,14 @@ pub struct LatencyTracker {
     /// The histogram used to track each request.
     ///
     /// We store it here to clone as we see new requests.
-    histogram: Histogram<f64>,
+    histogram: Histogram<u64>,
 }
 
 impl LatencyTracker {
     /// Build a new tracker for the given `service`, using `histogram` to track latencies.
     ///
     /// Note that the same histogram is used for each tracked timeseries.
-    pub fn new(service: HttpService, histogram: Histogram<f64>) -> Self {
+    pub fn new(service: HttpService, histogram: Histogram<u64>) -> Self {
         Self {
             service,
             latencies: Arc::new(Mutex::new(HashMap::new())),
@@ -109,18 +111,19 @@ impl LatencyTracker {
         }
     }
 
-    /// Build a new tracker for the given `service`, with a histogram that spans the given decades
-    /// (powers of 10). See [`RequestLatencyHistogram::with_latency_decades`] for details on the
+    /// Build a new tracker with log-linear bins.
+    ///
+    /// This creates a tracker for the `service`, using 10 bins per power of 10,
+    /// from `[10 ** start_power, 10 ** end_power)`.
+    ///
+    /// [`RequestLatencyHistogram::with_log_linear_bins`] for details on the
     /// arguments.
-    pub fn with_latency_decades(
+    pub fn with_log_linear_bins(
         service: HttpService,
-        start_decade: i16,
-        end_decade: i16,
+        start_power: u16,
+        end_power: u16,
     ) -> Result<Self, MetricsError> {
-        Ok(Self::new(
-            service,
-            Histogram::span_decades(start_decade, end_decade)?,
-        ))
+        Ok(Self::new(service, Histogram::span_decades(start_power, end_power)?))
     }
 
     /// Update (or create) a timeseries in response to a new request.
@@ -142,7 +145,7 @@ impl LatencyTracker {
                 self.histogram.clone(),
             )
         });
-        entry.datum.sample(latency.as_secs_f64()).map_err(MetricsError::from)
+        entry.datum.sample(latency.as_nanos() as _).map_err(MetricsError::from)
     }
 
     /// Instrument the given Dropshot endpoint handler function.
@@ -218,16 +221,16 @@ mod tests {
     fn test_latency_tracker() {
         let service =
             HttpService { name: "my-service".into(), id: ID.parse().unwrap() };
-        let hist = Histogram::new(&[0.0, 1.0]).unwrap();
+        let hist = Histogram::new(&[100, 1000]).unwrap();
         let tracker = LatencyTracker::new(service, hist);
         let status_code0 = StatusCode::OK;
         let status_code1 = StatusCode::NOT_FOUND;
         let operation_id = "some_operation_id";
         tracker
-            .update(operation_id, status_code0, Duration::from_secs_f64(0.5))
+            .update(operation_id, status_code0, Duration::from_nanos(200))
             .unwrap();
         tracker
-            .update(operation_id, status_code1, Duration::from_secs_f64(0.5))
+            .update(operation_id, status_code1, Duration::from_nanos(200))
             .unwrap();
         let key0 = RequestLatencyHistogram::key_for(operation_id, status_code0);
         let key1 = RequestLatencyHistogram::key_for(operation_id, status_code1);
