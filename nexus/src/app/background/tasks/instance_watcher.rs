@@ -205,8 +205,8 @@ impl InstanceWatcher {
                         // unreachable for a while. We may also want to take other
                         // corrective actions or alert an operator in this case.
                         //
-                        // TODO(eliza): because we have the preported IP address
-                        // of the instance's VMM from our databse query, we could
+                        // TODO(eliza): because we have the purported IP address
+                        // of the instance's VMM from our database query, we could
                         // also ask the VMM directly when the sled-agent is
                         // unreachable. We should start doing that here at some
                         // point.
