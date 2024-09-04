@@ -515,6 +515,7 @@ pub async fn create_instance_with(
             external_ips,
             disks,
             start,
+            ..Default::default()
         },
     )
     .await
