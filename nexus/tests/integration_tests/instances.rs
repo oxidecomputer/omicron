@@ -1209,6 +1209,92 @@ async fn test_instance_failed_by_instance_watcher_can_be_restarted(
     expect_instance_delete_ok(&client, instance_name).await;
 }
 
+// Verified that instances currently on Expunged sleds are marked as failed.
+#[nexus_test]
+async fn test_instance_failed_when_on_expunged_sled(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+    let instance1_name = "romeo";
+    let instance2_name = "juliet";
+
+    create_project_and_pool(&client).await;
+
+    // Create and start the test instances.
+    let mk_instance = |name: &'static str| async move {
+        let instance_url = get_instance_url(name);
+        let instance = create_instance(client, PROJECT_NAME, name).await;
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+        instance_simulate(nexus, &instance_id).await;
+        let instance_next = instance_get(&client, &instance_url).await;
+        assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
+
+        slog::info!(
+            &cptestctx.logctx.log,
+            "test instance is running";
+            "instance_name" => %name,
+            "instance_id" => %instance_id,
+        );
+
+        instance_id
+    };
+    let instance1_id = mk_instance(instance1_name).await;
+    let instance2_id = mk_instance(instance2_name).await;
+
+    // Create a second sled for instances on the Expunged sled to be assigned
+    // to.
+    let default_sled_id: SledUuid =
+        nexus_test_utils::SLED_AGENT_UUID.parse().unwrap();
+    let update_dir = Utf8Path::new("/should/be/unused");
+    let other_sled_id = SledUuid::new_v4();
+    let _other_sa = nexus_test_utils::start_sled_agent(
+        cptestctx.logctx.log.new(o!("sled_id" => other_sled_id.to_string())),
+        cptestctx.server.get_http_server_internal_address().await,
+        other_sled_id,
+        &update_dir,
+        sim::SimMode::Explicit,
+    )
+    .await
+    .unwrap();
+
+    // Expunge the sled
+    slog::info!(
+        &cptestctx.logctx.log,
+        "expunging sled";
+        "sled_id" => %default_sled_id,
+    );
+    let int_client = &cptestctx.internal_client;
+    int_client
+        .make_request(
+            Method::POST,
+            "/sleds/expunge",
+            Some(params::SledSelector {
+                sled: default_sled_id.into_untyped_uuid(),
+            }),
+            StatusCode::OK,
+        )
+        .await
+        .unwrap();
+
+    // Activate the instance-watcher task.
+    nexus_test_utils::background::activate_background_task(
+        &cptestctx.internal_client,
+        "instance_watcher",
+    )
+    .await;
+
+    // Wait for both instances to transition to Failed.
+    instance_wait_for_state(client, instance1_id, InstanceState::Failed).await;
+    instance_wait_for_state(client, instance2_id, InstanceState::Failed).await;
+
+    // Now, the instances should be deleteable...
+    expect_instance_delete_ok(&client, instance1_name).await;
+    // ...or restartable.
+    expect_instance_start_ok(client, instance2_name).await;
+}
+
 #[nexus_test]
 async fn test_instances_are_not_marked_failed_on_other_sled_agent_errors(
     cptestctx: &ControlPlaneTestContext,
