@@ -490,7 +490,7 @@ struct UpdatesRequired {
     /// The instance's auto-restart policy. This indicates whether the
     /// `instance-reincarnation` background task should be activated if the
     /// instance has transitioned to [`InstanceState::Failed`].
-    auto_restart_policy: InstanceAutoRestart,
+    auto_restart_policy: Option<InstanceAutoRestart>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -1218,15 +1218,17 @@ async fn siu_commit_instance_updates(
     // update saga is required, and the instance's auto-restart policy allows it
     // to be automatically restarted, activate the instance-reincarnation
     // background task to automatically restart it.
-    if update.new_runtime.can_reincarnate(update.auto_restart_policy) {
-        info!(
-            log,
-            "instance update: instance transitioned to Failed, but can \
-             be automatically restarted; activating reincarnation.";
-            "instance_id" => %instance_id,
-            "auto_restart_policy" => ?update.auto_restart_policy,
-        );
-        nexus.background_tasks.task_instance_reincarnation.activate();
+    if let Some(auto_restart_policy) = update.auto_restart_policy {
+        if update.new_runtime.can_reincarnate(auto_restart_policy) {
+            info!(
+                log,
+                "instance update: instance transitioned to Failed, but can \
+                 be automatically restarted; activating reincarnation.";
+                "instance_id" => %instance_id,
+                "auto_restart_policy" => ?update.auto_restart_policy,
+            );
+            nexus.background_tasks.task_instance_reincarnation.activate();
+        }
     }
 
     Ok(())
