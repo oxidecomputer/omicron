@@ -5,16 +5,26 @@
 use clickhouse_admin_types::config::{KeeperConfig, ReplicaConfig};
 use clickhouse_admin_types::{KeeperSettings, ServerSettings};
 use dropshot::{
-    HttpError, HttpResponseCreated, Path, RequestContext, TypedBody,
+    HttpError, HttpResponseCreated, RequestContext, TypedBody,
 };
 use omicron_common::api::external::Generation;
 use schemars::JsonSchema;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize, JsonSchema)]
-pub struct GenerationNum {
+pub struct ServerConfigurableSettings {
     /// A unique identifier for the configuration generation.
     pub generation: Generation,
+    /// Configurable settings for a ClickHouse replica server node.
+    pub settings: ServerSettings,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct KeeperConfigurableSettings {
+    /// A unique identifier for the configuration generation.
+    pub generation: Generation,
+    /// Configurable settings for a ClickHouse keeper node.
+    pub settings: KeeperSettings,
 }
 
 #[dropshot::api_description]
@@ -24,24 +34,22 @@ pub trait ClickhouseAdminApi {
     /// Generate a ClickHouse configuration file for a server node on a specified
     /// directory.
     #[endpoint {
-        method = POST,
-        path = "/node/server/generate-config/{generation}",
+        method = PUT,
+        path = "/server/config",
     }]
     async fn generate_server_config(
         rqctx: RequestContext<Self::Context>,
-        path: Path<GenerationNum>,
-        body: TypedBody<ServerSettings>,
+        body: TypedBody<ServerConfigurableSettings>,
     ) -> Result<HttpResponseCreated<ReplicaConfig>, HttpError>;
 
     /// Generate a ClickHouse configuration file for a keeper node on a specified
     /// directory.
     #[endpoint {
-        method = POST,
-        path = "/node/keeper/generate-config/{generation}",
+        method = PUT,
+        path = "/keeper/config",
     }]
     async fn generate_keeper_config(
         rqctx: RequestContext<Self::Context>,
-        path: Path<GenerationNum>,
-        body: TypedBody<KeeperSettings>,
+        body: TypedBody<KeeperConfigurableSettings>,
     ) -> Result<HttpResponseCreated<KeeperConfig>, HttpError>;
 }

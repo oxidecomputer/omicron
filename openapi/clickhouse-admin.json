@@ -10,27 +10,16 @@
     "version": "0.0.1"
   },
   "paths": {
-    "/node/keeper/generate-config/{generation}": {
-      "post": {
+    "/keeper/config": {
+      "put": {
         "summary": "Generate a ClickHouse configuration file for a keeper node on a specified",
         "description": "directory.",
         "operationId": "generate_keeper_config",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "generation",
-            "description": "A unique identifier for the configuration generation.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Generation"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/KeeperSettings"
+                "$ref": "#/components/schemas/KeeperConfigurableSettings"
               }
             }
           },
@@ -56,27 +45,16 @@
         }
       }
     },
-    "/node/server/generate-config/{generation}": {
-      "post": {
+    "/server/config": {
+      "put": {
         "summary": "Generate a ClickHouse configuration file for a server node on a specified",
         "description": "directory.",
         "operationId": "generate_server_config",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "generation",
-            "description": "A unique identifier for the configuration generation.",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/Generation"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ServerSettings"
+                "$ref": "#/components/schemas/ServerConfigurableSettings"
               }
             }
           },
@@ -166,6 +144,12 @@
           "request_id"
         ]
       },
+      "Generation": {
+        "description": "Generation numbers stored in the database, used for optimistic concurrency control",
+        "type": "integer",
+        "format": "uint64",
+        "minimum": 0
+      },
       "KeeperConfig": {
         "description": "Configuration for a ClickHouse keeper",
         "type": "object",
@@ -249,6 +233,31 @@
           "nodes"
         ]
       },
+      "KeeperConfigurableSettings": {
+        "type": "object",
+        "properties": {
+          "generation": {
+            "description": "A unique identifier for the configuration generation.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          },
+          "settings": {
+            "description": "Configurable settings for a ClickHouse keeper node.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/KeeperSettings"
+              }
+            ]
+          }
+        },
+        "required": [
+          "generation",
+          "settings"
+        ]
+      },
       "KeeperCoordinationSettings": {
         "type": "object",
         "properties": {
@@ -296,6 +305,7 @@
         ]
       },
       "KeeperSettings": {
+        "description": "Configurable settings for a ClickHouse keeper node.",
         "type": "object",
         "properties": {
           "config_dir": {
@@ -547,6 +557,31 @@
           "tcp_port"
         ]
       },
+      "ServerConfigurableSettings": {
+        "type": "object",
+        "properties": {
+          "generation": {
+            "description": "A unique identifier for the configuration generation.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          },
+          "settings": {
+            "description": "Configurable settings for a ClickHouse replica server node.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ServerSettings"
+              }
+            ]
+          }
+        },
+        "required": [
+          "generation",
+          "settings"
+        ]
+      },
       "ServerId": {
         "description": "A unique ID for a Clickhouse Server",
         "type": "integer",
@@ -571,6 +606,7 @@
         ]
       },
       "ServerSettings": {
+        "description": "Configurable settings for a ClickHouse replica server node.",
         "type": "object",
         "properties": {
           "config_dir": {
@@ -619,12 +655,6 @@
           "node_id",
           "remote_servers"
         ]
-      },
-      "Generation": {
-        "description": "Generation numbers stored in the database, used for optimistic concurrency control",
-        "type": "integer",
-        "format": "uint64",
-        "minimum": 0
       }
     },
     "responses": {

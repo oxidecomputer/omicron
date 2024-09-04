@@ -55,6 +55,7 @@ pub struct KeeperId(pub u64);
 )]
 pub struct ServerId(pub u64);
 
+/// Configurable settings for a ClickHouse replica server node.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct ServerSettings {
@@ -130,6 +131,7 @@ impl ServerSettings {
     }
 }
 
+ /// Configurable settings for a ClickHouse keeper node.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct KeeperSettings {

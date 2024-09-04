@@ -5,9 +5,8 @@
 use crate::context::ServerContext;
 use clickhouse_admin_api::*;
 use clickhouse_admin_types::config::{KeeperConfig, ReplicaConfig};
-use clickhouse_admin_types::{KeeperSettings, ServerSettings};
 use dropshot::{
-    HttpError, HttpResponseCreated, Path, RequestContext, TypedBody,
+    HttpError, HttpResponseCreated, RequestContext, TypedBody,
 };
 use std::sync::Arc;
 
@@ -25,27 +24,25 @@ impl ClickhouseAdminApi for ClickhouseAdminImpl {
 
     async fn generate_server_config(
         rqctx: RequestContext<Self::Context>,
-        path: Path<GenerationNum>,
-        body: TypedBody<ServerSettings>,
+        body: TypedBody<ServerConfigurableSettings>,
     ) -> Result<HttpResponseCreated<ReplicaConfig>, HttpError> {
         let ctx = rqctx.context();
-        let server_settings = body.into_inner();
-        let output = ctx.clickward().generate_server_config(server_settings)?;
-        // TODO(https://github.com/oxidecomputer/omicron/issues/5999): Do something with the generation number
-        println!("{path:?}");
+        let replica_server = body.into_inner();
+        // TODO(https://github.com/oxidecomputer/omicron/issues/5999): Do something
+        // with the generation number `replica_server.generation`
+        let output = ctx.clickward().generate_server_config(replica_server.settings)?;
         Ok(HttpResponseCreated(output))
     }
 
     async fn generate_keeper_config(
         rqctx: RequestContext<Self::Context>,
-        path: Path<GenerationNum>,
-        body: TypedBody<KeeperSettings>,
+        body: TypedBody<KeeperConfigurableSettings>,
     ) -> Result<HttpResponseCreated<KeeperConfig>, HttpError> {
         let ctx = rqctx.context();
-        let keeper_settings = body.into_inner();
-        let output = ctx.clickward().generate_keeper_config(keeper_settings)?;
-        // TODO(https://github.com/oxidecomputer/omicron/issues/5999): Do something with the generation number
-        println!("{path:?}");
+        let keeper = body.into_inner();
+        // TODO(https://github.com/oxidecomputer/omicron/issues/5999): Do something
+        // with the generation number `keeper.generation`
+        let output = ctx.clickward().generate_keeper_config(keeper.settings)?;
         Ok(HttpResponseCreated(output))
     }
 }
