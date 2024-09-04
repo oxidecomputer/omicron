@@ -22,6 +22,8 @@ use chrono::Utc;
 use diesel::prelude::*;
 use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
+use diesel::sql_types;
+use nexus_db_model::ProducerKindEnum;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
@@ -63,10 +65,18 @@ impl DataStore {
     ) -> Result<(), Error> {
         use db::schema::oximeter::dsl;
 
-        // If we get a conflict on the Oximeter ID, this means that collector instance was
-        // previously registered, and it's re-registering due to something like a service restart.
-        // In this case, we update the time modified and the service address, rather than
-        // propagating a constraint violation to the caller.
+        // If we get a conflict on the Oximeter ID, this means that collector
+        // instance was previously registered, and it's re-registering due to
+        // something like a service restart. In this case, we update the time
+        // modified and the service address, rather than propagating a
+        // constraint violation to the caller.
+        //
+        // TODO(john) - Should we ignore time_deleted or explicitly set it to
+        // NULL? We _shouldn't_ be called by an Oximeter that's been deleted,
+        // and if we are that indicates a bug somewhere else in the system
+        // (probably in reconfigurator or its related tasks). For now, we refuse
+        // to resurrect a deleted Oximeter: if we're called with a deleted
+        // instance, we'll leave it deleted.
         diesel::insert_into(dsl::oximeter)
             .values(*info)
             .on_conflict(dsl::id)
@@ -160,11 +170,47 @@ impl DataStore {
         opctx: &OpContext,
         producer: &ProducerEndpoint,
     ) -> Result<(), Error> {
+        // Our caller has already chosen an Oximeter instance for this producer,
+        // but we don't want to allow it to use a nonexistent or deleted
+        // Oximeter. This query turns into a `SELECT all_the_fields_of_producer
+        // WHERE producer.oximeter_id is legal` in a diesel-compatible way. I'm
+        // not aware of a helper method to generate "all the fields of
+        // `producer`", so instead we have a big tuple of its fields that must
+        // stay in sync with the `table!` definition and field ordering for the
+        // `metric_producer` table. The compiler will catch any mistakes
+        // _except_ incorrect orderings where the types still line up (e.g.,
+        // swapping two Uuid columns), which is not ideal but is hopefully good
+        // enough.
+        let producer_subquery = {
+            use db::schema::oximeter::dsl;
+
+            dsl::oximeter
+                .select((
+                    producer.id().into_sql::<sql_types::Uuid>(),
+                    producer
+                        .time_created()
+                        .into_sql::<sql_types::Timestamptz>(),
+                    producer
+                        .time_modified()
+                        .into_sql::<sql_types::Timestamptz>(),
+                    producer.kind.into_sql::<ProducerKindEnum>(),
+                    producer.ip.into_sql::<sql_types::Inet>(),
+                    producer.port.into_sql::<sql_types::Int4>(),
+                    producer.interval.into_sql::<sql_types::Float8>(),
+                    producer.oximeter_id.into_sql::<sql_types::Uuid>(),
+                ))
+                .filter(
+                    dsl::id
+                        .eq(producer.oximeter_id)
+                        .and(dsl::time_deleted.is_null()),
+                )
+        };
+
         use db::schema::metric_producer::dsl;
 
         // TODO: see https://github.com/oxidecomputer/omicron/issues/323
-        diesel::insert_into(dsl::metric_producer)
-            .values(producer.clone())
+        let n = diesel::insert_into(dsl::metric_producer)
+            .values(producer_subquery)
             .on_conflict(dsl::id)
             .do_update()
             .set((
@@ -185,7 +231,22 @@ impl DataStore {
                     ),
                 )
             })?;
-        Ok(())
+
+        // We expect `n` to basically always be 1 (1 row was inserted or
+        // updated). It can be 0 if `producer.oximeter_id` doesn't exist or has
+        // been deleted. It can never be 2 or greater because
+        // `producer_subquery` filters on finding an exact row for its Oximeter
+        // instance's ID.
+        match n {
+            0 => Err(Error::not_found_by_id(
+                ResourceType::Oximeter,
+                &producer.oximeter_id,
+            )),
+            1 => Ok(()),
+            _ => Err(Error::internal_error(&format!(
+                "multiple rows inserted ({n}) in `producer_endpoint_create`"
+            ))),
+        }
     }
 
     /// Delete a record for a producer endpoint, by its ID.
@@ -290,6 +351,7 @@ mod tests {
     use db::datastore::pub_test_utils::datastore_test;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::internal_api::params;
+    use omicron_common::api::external::LookupType;
     use omicron_common::api::internal::nexus;
     use omicron_test_utils::dev;
     use std::time::Duration;
@@ -436,6 +498,106 @@ mod tests {
         let deleted1b = find_oximeter_ignoring_deleted(collector_ids[1]).await;
         assert_eq!(deleted0a, deleted0b);
         assert_eq!(deleted1a, deleted1b);
+
+        // Cleanup
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_producer_endpoint_create_rejects_deleted_oximeters() {
+        // Setup
+        let logctx = dev::test_setup_log(
+            "test_producer_endpoint_create_rejects_deleted_oximeters",
+        );
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) =
+            datastore_test(&logctx, &db, Uuid::new_v4()).await;
+
+        // Insert a few Oximeter collectors.
+        let collector_ids = (0..4).map(|_| Uuid::new_v4()).collect::<Vec<_>>();
+        for &collector_id in &collector_ids {
+            let info = OximeterInfo::new(&params::OximeterInfo {
+                collector_id,
+                address: "[::1]:0".parse().unwrap(), // unused
+            });
+            datastore
+                .oximeter_create(&opctx, &info)
+                .await
+                .expect("inserted collector");
+        }
+
+        // We can insert metric producers for each collector.
+        for &collector_id in &collector_ids {
+            let producer = ProducerEndpoint::new(
+                &nexus::ProducerEndpoint {
+                    id: Uuid::new_v4(),
+                    kind: nexus::ProducerKind::Service,
+                    address: "[::1]:0".parse().unwrap(), // unused
+                    interval: Duration::from_secs(0),    // unused
+                },
+                collector_id,
+            );
+            datastore
+                .producer_endpoint_create(&opctx, &producer)
+                .await
+                .expect("created producer");
+        }
+
+        // Delete the first collector.
+        datastore
+            .oximeter_delete(&opctx, collector_ids[0])
+            .await
+            .expect("deleted collector");
+
+        // Attempting to insert a producer assigned to the first collector
+        // should fail, now that it's deleted.
+        let err = {
+            let producer = ProducerEndpoint::new(
+                &nexus::ProducerEndpoint {
+                    id: Uuid::new_v4(),
+                    kind: nexus::ProducerKind::Service,
+                    address: "[::1]:0".parse().unwrap(), // unused
+                    interval: Duration::from_secs(0),    // unused
+                },
+                collector_ids[0],
+            );
+            datastore
+                .producer_endpoint_create(&opctx, &producer)
+                .await
+                .expect_err("producer creation fails")
+        };
+        assert_eq!(
+            err,
+            Error::ObjectNotFound {
+                type_name: ResourceType::Oximeter,
+                lookup_type: LookupType::ById(collector_ids[0])
+            }
+        );
+
+        // We can still insert metric producers for the other collectors...
+        for &collector_id in &collector_ids[1..] {
+            let mut producer = ProducerEndpoint::new(
+                &nexus::ProducerEndpoint {
+                    id: Uuid::new_v4(),
+                    kind: nexus::ProducerKind::Service,
+                    address: "[::1]:0".parse().unwrap(), // unused
+                    interval: Duration::from_secs(0),    // unused
+                },
+                collector_id,
+            );
+            datastore
+                .producer_endpoint_create(&opctx, &producer)
+                .await
+                .expect("created producer");
+
+            // ... and we can update them.
+            producer.port = 100.into();
+            datastore
+                .producer_endpoint_create(&opctx, &producer)
+                .await
+                .expect("created producer");
+        }
 
         // Cleanup
         db.cleanup().await.unwrap();
