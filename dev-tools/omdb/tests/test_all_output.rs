@@ -505,8 +505,12 @@ async fn do_run_extra<F>(
                     // Set RUST_BACKTRACE explicitly for consistency between CI
                     // and developers' local runs.  We set it to 1 so that in
                     // the event of a panic, particularly in CI, we have more
-                    // information about what went wrong.
+                    // information about what went wrong.  But we set
+                    // RUST_LIB_BACKTRACE=1 so that we don't get a dump to
+                    // stderr for all the Errors that get created and handled
+                    // gracefully.
                     .env("RUST_BACKTRACE", "1")
+                    .env("RUST_LIB_BACKTRACE", "0")
                     .args(&owned_args),
             );
             run_command(exec)
