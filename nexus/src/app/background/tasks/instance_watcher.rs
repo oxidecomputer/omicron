@@ -152,18 +152,15 @@ impl InstanceWatcher {
                 ))) => {
                     let status = rsp.status();
                     if status.is_client_error() {
-                        slog::warn!(opctx.log, "check failed due to client error";
+                        slog::warn!(opctx.log, "check incomplete due to client error";
                             "status" => ?status, "error" => ?rsp.into_inner());
-                        check.result =
-                            Err(Incomplete::ClientHttpError(status.as_u16()));
                     } else {
-                        slog::info!(opctx.log, "check failed due to server error";
+                        slog::info!(opctx.log, "check incomplete due to server error";
                         "status" => ?status, "error" => ?rsp.into_inner());
                     }
 
-                    check.outcome = CheckOutcome::Failure(
-                        Failure::SledAgentResponse(status.as_u16()),
-                    );
+                    check.result =
+                        Err(Incomplete::SledAgentHttpError(status.as_u16()));
                     return check;
                 }
                 Err(SledAgentInstanceError(
@@ -180,8 +177,7 @@ impl InstanceWatcher {
                     // unreachable. We should start doing that here at some
                     // point.
                     slog::info!(opctx.log, "sled agent is unreachable"; "error" => ?e);
-                    check.outcome =
-                        CheckOutcome::Failure(Failure::SledAgentUnreachable);
+                    check.result = Err(Incomplete::SledAgentUnreachable);
                     return check;
                 }
                 Err(SledAgentInstanceError(e)) => {
@@ -328,14 +324,6 @@ impl Check {
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize,
 )]
 enum Failure {
-    /// The sled-agent for the sled on which the instance is running was
-    /// unreachable.
-    ///
-    /// This may indicate a network partition between us and that sled, that
-    /// the sled-agent process has crashed, or that the sled is down.
-    SledAgentUnreachable,
-    /// The sled-agent responded with an unexpected HTTP error.
-    SledAgentResponse(u16),
     /// The sled-agent indicated that it doesn't know about an instance ID that
     /// we believe it *should* know about. This probably means the sled-agent,
     /// and potentially the whole sled, has been restarted.
@@ -345,8 +333,6 @@ enum Failure {
 impl Failure {
     fn as_str(&self) -> Cow<'static, str> {
         match self {
-            Self::SledAgentUnreachable => "unreachable".into(),
-            Self::SledAgentResponse(status) => status.to_string().into(),
             Self::NoSuchInstance => "no_such_instance".into(),
         }
     }
@@ -356,11 +342,16 @@ impl Failure {
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize,
 )]
 enum Incomplete {
-    /// The sled-agent responded with an HTTP client error, indicating that our
-    /// request as somehow malformed.
-    ClientHttpError(u16),
     /// Something else went wrong while making an HTTP request.
     ClientError,
+    /// The sled-agent for the sled on which the instance is running was
+    /// unreachable.
+    ///
+    /// This may indicate a network partition between us and that sled, that
+    /// the sled-agent process has crashed, or that the sled is down.
+    SledAgentUnreachable,
+    /// The sled-agent responded with an unexpected HTTP error.
+    SledAgentHttpError(u16),
     /// We attempted to update the instance state in the database, but no
     /// instance with that UUID existed.
     ///
@@ -377,8 +368,9 @@ enum Incomplete {
 impl Incomplete {
     fn as_str(&self) -> Cow<'static, str> {
         match self {
-            Self::ClientHttpError(status) => status.to_string().into(),
             Self::ClientError => "client_error".into(),
+            Self::SledAgentHttpError(status) => status.to_string().into(),
+            Self::SledAgentUnreachable => "unreachable".into(),
             Self::InstanceNotFound => "instance_not_found".into(),
             Self::UpdateFailed => "update_failed".into(),
         }
