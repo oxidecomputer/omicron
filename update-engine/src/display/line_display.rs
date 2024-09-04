@@ -4,6 +4,7 @@
 
 // Copyright 2023 Oxide Computer Company
 
+use chrono::{DateTime, Utc};
 use debug_ignore::DebugIgnore;
 use derive_where::derive_where;
 use owo_colors::Style;
@@ -48,6 +49,16 @@ impl<W: std::io::Write> LineDisplay<W> {
     #[inline]
     pub fn set_styles(&mut self, styles: LineDisplayStyles) {
         self.formatter.set_styles(styles);
+    }
+
+    /// Sets the start time for all future lines.
+    ///
+    /// If the start time is set, then the progress display will be relative to
+    /// that time. Otherwise, only the offset from the start of the job will be
+    /// displayed.
+    #[inline]
+    pub fn set_start_time(&mut self, start_time: DateTime<Utc>) {
+        self.shared.set_start_time(start_time);
     }
 
     /// Sets the amount of time before the next progress event is shown.

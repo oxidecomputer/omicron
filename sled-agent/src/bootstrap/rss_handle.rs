@@ -15,6 +15,7 @@ use omicron_common::backoff::retry_notify;
 use omicron_common::backoff::retry_policy_local;
 use omicron_common::backoff::BackoffError;
 use sled_agent_types::rack_init::RackInitializeRequest;
+use sled_agent_types::rack_ops::RssStep;
 use sled_agent_types::sled::StartSledAgentRequest;
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
@@ -22,6 +23,7 @@ use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
+use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
 pub(super) struct RssHandle {
@@ -48,6 +50,7 @@ impl RssHandle {
         our_bootstrap_address: Ipv6Addr,
         storage_manager: StorageHandle,
         bootstore: bootstore::NodeHandle,
+        step_tx: watch::Sender<RssStep>,
     ) -> Result<(), SetupServiceError> {
         let (tx, rx) = rss_channel(our_bootstrap_address);
 
@@ -57,6 +60,7 @@ impl RssHandle {
             storage_manager,
             tx,
             bootstore,
+            step_tx,
         );
         let log = log.new(o!("component" => "BootstrapAgentRssHandler"));
         rx.await_local_rss_request(&log).await;

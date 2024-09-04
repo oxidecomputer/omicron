@@ -156,6 +156,13 @@ impl InstanceAndActiveVmm {
             (InstanceState::Vmm, Some(VmmState::SagaUnwound)) => {
                 external::InstanceState::Stopped
             }
+            // - An instance with a "failed" VMM should *not* be counted as
+            //   failed until the VMM is unlinked, because a start saga must be
+            //   able to run "failed" instance. Until then, it will continue to
+            //   appear "stopping".
+            (InstanceState::Vmm, Some(VmmState::Failed)) => {
+                external::InstanceState::Stopping
+            }
             // - An instance with no VMM is always "stopped" (as long as it's
             //   not "starting" etc.)
             (InstanceState::NoVmm, _vmm_state) => {
@@ -360,21 +367,21 @@ impl DataStore {
         .collect())
     }
 
-    /// List all instances with active VMMs in the `Destroyed` state that don't
-    /// have currently-running instance-updater sagas.
+    /// List all instances with active VMMs in the provided [`VmmState`] which
+    /// don't have currently-running instance-updater sagas.
     ///
     /// This is used by the `instance_updater` background task to ensure that
     /// update sagas are scheduled for these instances.
-    pub async fn find_instances_with_destroyed_active_vmms(
+    pub async fn find_instances_by_active_vmm_state(
         &self,
         opctx: &OpContext,
+        vmm_state: VmmState,
     ) -> ListResultVec<Instance> {
-        use db::model::VmmState;
         use db::schema::instance::dsl;
         use db::schema::vmm::dsl as vmm_dsl;
 
         vmm_dsl::vmm
-            .filter(vmm_dsl::state.eq(VmmState::Destroyed))
+            .filter(vmm_dsl::state.eq(vmm_state))
             // If the VMM record has already been deleted, we don't need to do
             // anything about it --- someone already has.
             .filter(vmm_dsl::time_deleted.is_null())
@@ -734,7 +741,7 @@ impl DataStore {
                     format!(
                         "cannot set migration ID {migration_id} for instance \
                          {instance_id} (perhaps another migration ID is \
-                         already present): {error:#}"
+                         already present): {error:#?}"
                     ),
                 ),
             })
@@ -818,7 +825,15 @@ impl DataStore {
                 vmm_dsl::vmm
                     .on(vmm_dsl::sled_id
                         .eq(sled_dsl::id)
-                        .and(vmm_dsl::time_deleted.is_null()))
+                        .and(vmm_dsl::time_deleted.is_null())
+                        // Ignore instances which are in states that are not
+                        // known to exist on a sled. Since this query drives
+                        // instance-watcher health checking, it is not necessary
+                        // to perform health checks for VMMs that don't actually
+                        // exist in real life.
+                        .and(
+                            vmm_dsl::state.ne_all(VmmState::NONEXISTENT_STATES),
+                        ))
                     .inner_join(
                         instance_dsl::instance
                             .on(instance_dsl::id

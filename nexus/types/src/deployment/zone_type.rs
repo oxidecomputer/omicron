@@ -73,56 +73,26 @@ impl BlueprintZoneType {
 
     /// Identifies whether this is an NTP zone (any flavor)
     pub fn is_ntp(&self) -> bool {
-        match self {
+        matches!(
+            self,
             BlueprintZoneType::InternalNtp(_)
-            | BlueprintZoneType::BoundaryNtp(_) => true,
-            BlueprintZoneType::Nexus(_)
-            | BlueprintZoneType::ExternalDns(_)
-            | BlueprintZoneType::Clickhouse(_)
-            | BlueprintZoneType::ClickhouseKeeper(_)
-            | BlueprintZoneType::ClickhouseServer(_)
-            | BlueprintZoneType::CockroachDb(_)
-            | BlueprintZoneType::Crucible(_)
-            | BlueprintZoneType::CruciblePantry(_)
-            | BlueprintZoneType::InternalDns(_)
-            | BlueprintZoneType::Oximeter(_) => false,
-        }
+                | BlueprintZoneType::BoundaryNtp(_)
+        )
     }
 
     /// Identifies whether this is a Nexus zone
     pub fn is_nexus(&self) -> bool {
-        match self {
-            BlueprintZoneType::Nexus(_) => true,
-            BlueprintZoneType::BoundaryNtp(_)
-            | BlueprintZoneType::ExternalDns(_)
-            | BlueprintZoneType::Clickhouse(_)
-            | BlueprintZoneType::ClickhouseKeeper(_)
-            | BlueprintZoneType::ClickhouseServer(_)
-            | BlueprintZoneType::CockroachDb(_)
-            | BlueprintZoneType::Crucible(_)
-            | BlueprintZoneType::CruciblePantry(_)
-            | BlueprintZoneType::InternalDns(_)
-            | BlueprintZoneType::InternalNtp(_)
-            | BlueprintZoneType::Oximeter(_) => false,
-        }
+        matches!(self, BlueprintZoneType::Nexus(_))
+    }
+
+    /// Identifies whether this is an internal DNS zone
+    pub fn is_internal_dns(&self) -> bool {
+        matches!(self, BlueprintZoneType::InternalDns(_))
     }
 
     /// Identifies whether this a Crucible (not Crucible pantry) zone
     pub fn is_crucible(&self) -> bool {
-        match self {
-            BlueprintZoneType::Crucible(_) => true,
-            BlueprintZoneType::BoundaryNtp(_)
-            | BlueprintZoneType::Clickhouse(_)
-            | BlueprintZoneType::ClickhouseKeeper(_)
-            | BlueprintZoneType::ClickhouseServer(_)
-            | BlueprintZoneType::CockroachDb(_)
-            | BlueprintZoneType::CruciblePantry(_)
-            | BlueprintZoneType::ExternalDns(_)
-            | BlueprintZoneType::InternalDns(_)
-            | BlueprintZoneType::InternalNtp(_)
-            | BlueprintZoneType::Nexus(_)
-            | BlueprintZoneType::Oximeter(_) => false,
-        }
+        matches!(self, BlueprintZoneType::Crucible(_))
     }
 
     /// Returns the durable dataset associated with this zone, if any exists.

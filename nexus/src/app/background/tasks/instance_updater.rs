@@ -12,6 +12,7 @@ use anyhow::Context;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use nexus_db_model::Instance;
+use nexus_db_model::VmmState;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::DataStore;
@@ -84,7 +85,8 @@ impl InstanceUpdater {
             "destroyed active VMMs",
             &opctx.log,
             &mut last_err,
-            self.datastore.find_instances_with_destroyed_active_vmms(opctx),
+            self.datastore
+                .find_instances_by_active_vmm_state(opctx, VmmState::Destroyed),
         )
         .await;
         stats.destroyed_active_vmms = destroyed_active_vmms.len();
@@ -94,6 +96,24 @@ impl InstanceUpdater {
             &mut last_err,
             &mut sagas,
             destroyed_active_vmms,
+        )
+        .await;
+
+        let failed_active_vmms = find_instances(
+            "failed active VMMs",
+            &opctx.log,
+            &mut last_err,
+            self.datastore
+                .find_instances_by_active_vmm_state(opctx, VmmState::Failed),
+        )
+        .await;
+        stats.failed_active_vmms = failed_active_vmms.len();
+        self.start_sagas(
+            &opctx,
+            stats,
+            &mut last_err,
+            &mut sagas,
+            failed_active_vmms,
         )
         .await;
 
@@ -196,6 +216,7 @@ impl InstanceUpdater {
 #[derive(Default)]
 struct ActivationStats {
     destroyed_active_vmms: usize,
+    failed_active_vmms: usize,
     terminated_active_migrations: usize,
     sagas_started: usize,
     sagas_completed: usize,
@@ -221,6 +242,7 @@ impl BackgroundTask for InstanceUpdater {
                             &opctx.log,
                             "instance updater activation completed";
                             "destroyed_active_vmms" => stats.destroyed_active_vmms,
+                            "failed_active_vmms" => stats.failed_active_vmms,
                             "terminated_active_migrations" => stats.terminated_active_migrations,
                             "update_sagas_started" => stats.sagas_started,
                             "update_sagas_completed" => stats.sagas_completed,
@@ -245,6 +267,7 @@ impl BackgroundTask for InstanceUpdater {
                             "instance updater activation failed!";
                             "error" => %error,
                             "destroyed_active_vmms" => stats.destroyed_active_vmms,
+                            "failed_active_vmms" => stats.failed_active_vmms,
                             "terminated_active_migrations" => stats.terminated_active_migrations,
                             "update_sagas_started" => stats.sagas_started,
                             "update_sagas_completed" => stats.sagas_completed,
@@ -257,6 +280,7 @@ impl BackgroundTask for InstanceUpdater {
             };
             json!({
                 "destroyed_active_vmms": stats.destroyed_active_vmms,
+                "failed_active_vmms": stats.failed_active_vmms,
                 "terminated_active_migrations": stats.terminated_active_migrations,
                 "sagas_started": stats.sagas_started,
                 "sagas_completed": stats.sagas_completed,

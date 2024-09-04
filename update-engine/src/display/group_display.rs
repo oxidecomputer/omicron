@@ -12,8 +12,9 @@ use swrite::{swrite, SWrite};
 use unicode_width::UnicodeWidthStr;
 
 use crate::{
-    errors::UnknownReportKey, events::EventReport, EventBuffer,
-    ExecutionStatus, ExecutionTerminalInfo, StepSpec, TerminalKind,
+    display::ProgressRatioDisplay, errors::UnknownReportKey,
+    events::EventReport, EventBuffer, ExecutionStatus, ExecutionTerminalInfo,
+    StepSpec, TerminalKind,
 };
 
 use super::{
@@ -183,8 +184,13 @@ impl<K: Eq + Ord, W: std::io::Write, S: StepSpec> GroupDisplay<K, W, S> {
     pub fn write_stats(&mut self, header: &str) -> std::io::Result<()> {
         // Add a blank prefix which is equal to the maximum width of known prefixes.
         let prefix = " ".repeat(self.max_width);
-        let mut line =
-            self.formatter.start_line(&prefix, Some(self.start_sw.elapsed()));
+        let mut line = self.formatter.start_line(
+            &prefix,
+            // TODO: we don't currently support setting a start time for group
+            // displays. We should do that at some point.
+            None,
+            Some(self.start_sw.elapsed()),
+        );
         self.stats.format_line(&mut line, header, &self.formatter);
         writeln!(self.writer, "{line}")
     }
@@ -309,11 +315,13 @@ impl GroupDisplayStats {
         };
 
         swrite!(line, "{:>HEADER_WIDTH$} ", header.style(header_style));
-        let terminal_count = self.terminal_count();
         swrite!(
             line,
-            "{terminal_count}/{}: {} running, {} {}",
-            self.total,
+            "{}: {} running, {} {}",
+            ProgressRatioDisplay::current_and_total(
+                self.terminal_count(),
+                self.total
+            ),
             self.running.style(formatter.styles().meta_style),
             self.completed.style(formatter.styles().meta_style),
             "completed".style(formatter.styles().progress_style),
