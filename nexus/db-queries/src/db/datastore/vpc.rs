@@ -2275,6 +2275,73 @@ impl DataStore {
             })
     }
 
+    async fn external_ip_home_info(
+        &self,
+        opctx: &OpContext,
+        conn: &async_bb8_diesel::Connection<crate::db::DbConnection>,
+    ) -> Result<ExternalIpHome, Error> {
+        use db::schema::external_ip as eip;
+        use db::schema::external_ip::dsl as eip_dsl;
+        use db::schema::inv_omicron_zone as ioz;
+        use db::schema::inv_omicron_zone::dsl as ioz_dsl;
+        use db::schema::vmm;
+        use db::schema::vmm::dsl as vmm_dsl;
+
+        let instance_info: Vec<(IpNetwork, Uuid)> = eip_dsl::external_ip
+            .inner_join(
+                vmm::table.on(vmm::instance_id.nullable().eq(eip::parent_id)),
+            )
+            .filter(eip::time_deleted.is_null())
+            .filter(vmm::time_deleted.is_null())
+            .select((eip_dsl::ip, vmm_dsl::sled_id))
+            .load_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        let service_info: Vec<(IpNetwork, Uuid)> = eip_dsl::external_ip
+            .inner_join(
+                ioz::table.on(ioz::primary_service_ip
+                    .eq(eip::ip)
+                    .or(ioz::second_service_ip.nullable().eq(Some(eip::ip)))
+                    .or(ioz::snat_ip.nullable().eq(Some(eip::ip)))),
+            )
+            .filter(eip::time_deleted.is_null())
+            .select((eip_dsl::ip, ioz::sled_id))
+            .load_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        /* XXX attempt to get aroud error with ^, but second query has same
+               error
+
+        let service_info1: Vec<(IpNetwork, Uuid)> = eip_dsl::external_ip
+            .inner_join(ioz::table.on(ioz::primary_service_ip.eq(eip::ip)))
+            .filter(eip::time_deleted.is_null())
+            .select((eip_dsl::ip, ioz::sled_id))
+            .load_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        let service_info2: Vec<(IpNetwork, Uuid)> = eip_dsl::external_ip
+            .inner_join(ioz::table.on(ioz::second_service_ip.eq(Some(eip::ip))))
+            .filter(eip::time_deleted.is_null())
+            .select((eip_dsl::ip, ioz::sled_id))
+            .load_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        let service_info3: Vec<(IpNetwork, Uuid)> = eip_dsl::external_ip
+            .inner_join(ioz::table.on(ioz::snat_ip.eq(Some(eip::ip))))
+            .filter(eip::time_deleted.is_null())
+            .select((eip_dsl::ip, ioz::sled_id))
+            .load_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        */
+
+        todo!();
+    }
+
     /// Resolve all targets in a router into concrete details.
     pub async fn vpc_resolve_router_rules(
         &self,
@@ -3763,4 +3830,10 @@ mod tests {
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
+}
+
+struct ExternalIpHome {
+    ip: IpAddr,
+    parent: Uuid,
+    sled: Uuid,
 }
