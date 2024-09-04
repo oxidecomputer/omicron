@@ -14,6 +14,10 @@ client_package_name = "cockroach-admin-client"
 label = "CockroachDB Cluster Admin"
 server_package_name = "cockroach-admin-api"
 server_component = "omicron-cockroach-admin"
+notes = """
+This is the server running inside CockroachDB zones that performs \
+configuration and monitoring that requires the `cockroach` CLI.
+"""
 
 [[apis]]
 client_package_name = "crucible-agent-client"
@@ -34,6 +38,16 @@ server_package_name = "ddmd"
 server_component = "ddmd"
 # XXX-dap confirm
 group = "Host OS"
+notes = """
+The `ddmd` server runs in each sled GZ and each switch zone. These daemons \
+provide an interface for advertising network prefixes, and observing what \
+prefixes have been received from other DDM daemons in the rack. Sled agent \
+uses this interface to announce bootstrap and underlay network prefixes, as \
+well as learn about routes to other sleds and services in the rack. This \
+interface is required in early-networking before a rack is fully up with Nexus \
+running. Nexus does not consume this interface today, but will for \
+observability APIs in the future.
+"""
 
 [[apis]]
 client_package_name = "dns-service-client"
@@ -48,6 +62,15 @@ server_package_name = "dpd"
 server_component = "dpd"
 # XXX-dap confirm
 group = "Host OS"
+notes = """
+Dendrite's data plane daemon (`dpd`) is the interface to configure and manage \
+the rack switches. It's consumed by sled-agent to get the rack off the \
+ground. The dpd API is also used by nexus as operators make changes to the \
+rack external network configuration, these changes are synchronized by nexus \
+to `dpd`. The `dpd` API is a auto-generated from it's OpenAPI specification \
+and exists as a client library within omicron. This is because the Dendrite \
+repo is not currently open source.
+"""
 
 [[apis]]
 client_package_name = "gateway-client"
@@ -56,6 +79,7 @@ server_package_name = "gateway-api"
 server_component = "omicron-gateway"
 # XXX-dap confirm
 group = "Host OS"
+notes = "Wicketd is deployed in a unit with MGS so we can ignore that one."
 
 [[apis]]
 client_package_name = "installinator-client"
@@ -72,6 +96,13 @@ server_package_name = "mgd"
 server_component = "mgd"
 # XXX-dap confirm
 group = "Host OS"
+notes = """
+The `mgd` daemon runs in each switch zone. This daemon is responsible for all \
+external route management for a switch. It provides interfaces for static \
+route management, BGP configuration and BFD configuration. This interface is \
+consumed by both nexus and sled agent, since we need external connectivity to \
+bring the rack up.
+"""
 
 [[apis]]
 client_package_name = "nexus-client"
@@ -84,12 +115,20 @@ client_package_name = "oxide-client"
 label = "External API"
 server_package_name = "nexus-external-api"
 server_component = "omicron-nexus"
+notes = "Special case, since we don't fully control all clients"
 
 [[apis]]
 client_package_name = "oximeter-client"
 label = "Oximeter"
 server_package_name = "oximeter-api"
 server_component = "oximeter-collector"
+notes = """
+Shared types for this interface are in `omicron-common`. The producer makes \
+requests to Nexus, and receives them from `oximeter-collector`. \
+`oximeter-collector` makes requests to Nexus and the producer, and receives \
+them from Nexus (for periodic renewals). Nexus receives requests from both, \
+and makes the periodic renewal requests to `oximeter-collector`.
+"""
 
 [[apis]]
 client_package_name = "propolis-client"
@@ -98,6 +137,9 @@ server_package_name = "propolis-server"
 server_component = "propolis-server"
 # XXX-dap confirm
 group = "Host OS"
+notes = """
+Sled Agent is deployed in a unit with Propolis so we can ignore that one.
+"""
 
 [[apis]]
 client_package_name = "sled-agent-client"
@@ -114,3 +156,6 @@ server_package_name = "wicketd-api"
 server_component = "wicketd"
 # XXX-dap confirm
 group = "Host OS"
+notes = """
+wicketd-client is only used by wicket, which is deployed in a unit with wicketd.
+"""

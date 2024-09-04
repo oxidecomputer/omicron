@@ -28,7 +28,8 @@ pub struct Apis {
     unit_server_components: BTreeMap<DeploymentUnit, Vec<ServerComponent>>,
     deployment_units: BTreeSet<DeploymentUnit>,
     apis_consumed: BTreeMap<ServerComponent, BTreeSet<ClientPackageName>>,
-    api_metadata: AllApiMetadata,
+    api_consumers: BTreeMap<ClientPackageName, BTreeSet<ServerComponent>>,
+    helper: ApisHelper,
 }
 
 impl Apis {
@@ -65,10 +66,11 @@ impl Apis {
         // by walking its dependencies.
         // XXX-dap figure out how to abstract this
         let mut apis_consumed = BTreeMap::new();
+        let mut api_consumers = BTreeMap::new();
         for server_pkgname in helper.api_metadata.server_components() {
             let (workspace, pkg) =
                 helper.find_package_workspace(server_pkgname)?;
-            let mut clients_used = BTreeSet::new();
+            let mut clients_used: BTreeSet<ClientPackageName> = BTreeSet::new();
             workspace
                 .walk_required_deps_recursively(
                     pkg,
@@ -149,6 +151,12 @@ impl Apis {
                     )
                 })?;
 
+            for c in &clients_used {
+                api_consumers
+                    .entry(c.clone())
+                    .or_insert_with(BTreeSet::new)
+                    .insert(server_pkgname.clone());
+            }
             apis_consumed.insert(server_pkgname.clone(), clients_used);
         }
 
@@ -157,7 +165,8 @@ impl Apis {
             deployment_units,
             unit_server_components: unit2components,
             apis_consumed,
-            api_metadata: helper.api_metadata,
+            api_consumers,
+            helper,
         })
     }
 
@@ -165,6 +174,10 @@ impl Apis {
         &self,
     ) -> impl Iterator<Item = (&DeploymentUnit, &Vec<ServerComponent>)> {
         self.unit_server_components.iter()
+    }
+
+    pub fn api_metadata(&self) -> &AllApiMetadata {
+        &self.helper.api_metadata
     }
 
     fn component_apis_consumed(
@@ -175,6 +188,21 @@ impl Apis {
             Some(l) => Box::new(l.iter()),
             None => Box::new(std::iter::empty()),
         }
+    }
+
+    pub fn api_consumers(
+        &self,
+        client: &ClientPackageName,
+    ) -> Box<dyn Iterator<Item = &ServerComponent> + '_> {
+        match self.api_consumers.get(client) {
+            Some(l) => Box::new(l.iter()),
+            None => Box::new(std::iter::empty()),
+        }
+    }
+
+    pub fn adoc_label(&self, pkgname: &str) -> Result<String> {
+        let (workspace, _) = self.helper.find_package_workspace(pkgname)?;
+        Ok(format!("{}:{}", workspace.name(), pkgname))
     }
 
     pub fn dot_by_unit(&self) -> String {
@@ -195,7 +223,7 @@ impl Apis {
             for server_pkg in server_components {
                 for client_pkg in self.component_apis_consumed(server_pkg) {
                     let api = self
-                        .api_metadata
+                        .api_metadata()
                         .client_pkgname_lookup(client_pkg)
                         .unwrap();
                     let other_component = &api.server_component;
@@ -273,6 +301,8 @@ impl ApisHelper {
         Ok(ApisHelper { api_metadata, workspaces, warnings: errors })
     }
 
+    // XXX-dap document that this really only works for packages that appear in
+    // only one workspace
     pub fn find_package_workspace(
         &self,
         server_pkgname: &str,
@@ -281,8 +311,21 @@ impl ApisHelper {
         let found_in_workspaces: Vec<_> = self
             .workspaces
             .values()
-            .filter_map(|w| w.find_package(&server_pkgname).map(|p| (w, p)))
+            .filter_map(|w| {
+                w.find_workspace_package(&server_pkgname).map(|p| (w, p))
+            })
             .collect();
+        // XXX-dap there are actually two separate packages called "dpd-client".
+        // One is in the Omicron workspace.  The other is in the Dendrite
+        // workspace.  I don't know how we know which one gets used!
+        if server_pkgname == "dpd-client" && found_in_workspaces.len() == 2 {
+            if found_in_workspaces[0].0.name() == "omicron" {
+                return Ok(found_in_workspaces[0]);
+            }
+            if found_in_workspaces[1].0.name() == "omicron" {
+                return Ok(found_in_workspaces[1]);
+            }
+        }
         ensure!(
             !found_in_workspaces.is_empty(),
             "server package {:?} was not found in any workspace",

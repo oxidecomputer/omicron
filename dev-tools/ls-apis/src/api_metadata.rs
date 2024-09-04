@@ -49,6 +49,8 @@ pub struct ApiMetadata {
     pub server_component: ServerComponent,
     /// name of the unit of deployment
     group: Option<DeploymentUnit>,
+    /// human-readable notes about this API
+    pub notes: Option<String>,
 }
 
 impl ApiMetadata {

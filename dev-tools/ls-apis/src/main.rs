@@ -36,11 +36,14 @@ struct LsApis {
 
 #[derive(Subcommand)]
 enum Cmds {
+    /// print out an Asciidoc table summarizing the APIs
+    Adoc,
     Show(ShowArgs),
 }
 
 #[derive(Args)]
 pub struct ShowArgs {
+    // XXX-dap
     #[arg(long)]
     adoc: bool,
 }
@@ -51,8 +54,40 @@ fn main() -> Result<()> {
     let apis = Apis::load(load_args)?;
 
     match cli_args.cmd {
+        Cmds::Adoc => run_adoc(&apis),
         Cmds::Show(args) => run_show(&apis, args),
     }
+}
+
+fn run_adoc(apis: &Apis) -> Result<()> {
+    println!(r#"[cols="1h,2,2,2a,2", options="header"]"#);
+    println!("|===");
+    println!("|API");
+    println!("|Server location (`repo:path`)");
+    println!("|Client packages (`repo:path`)");
+    // XXX-dap does this approach ignore consumers that are not themselves
+    // exporters of APIs?
+    println!("|Consumers (`repo:path`; excluding omdb and tests)");
+    println!("|Notes");
+    println!("");
+
+    let metadata = apis.api_metadata();
+    for api in metadata.apis() {
+        println!("|{}", api.label);
+        // XXX-dap want these to include repo name
+        println!("|{}", apis.adoc_label(&api.server_component)?);
+        println!("|{}", apis.adoc_label(&api.client_package_name)?);
+        println!("a|");
+
+        for c in apis.api_consumers(&api.client_package_name) {
+            println!(" * {}", apis.adoc_label(c)?);
+        }
+
+        println!("|{}", api.notes.as_deref().unwrap_or(""));
+        println!("");
+    }
+
+    Ok(())
 }
 
 fn run_show(apis: &Apis, args: ShowArgs) -> Result<()> {

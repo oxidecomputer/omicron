@@ -19,6 +19,7 @@ use url::Url;
 pub struct Workspace {
     name: String,
     all_packages: BTreeMap<String, Package>, // XXX-dap memory usage
+    workspace_packages: BTreeMap<String, Package>, // XXX-dap memory usage
     progenitor_clients: BTreeSet<ClientPackageName>,
 }
 
@@ -46,15 +47,29 @@ impl Workspace {
             })
             .collect();
 
+        // XXX-dap do we want workspace packages or all packages?
         let all_packages = metadata
             .packages
             .iter()
             .map(|p| (p.name.clone(), p.clone()))
             .collect();
 
+        let workspace_packages = metadata
+            .packages
+            .iter()
+            .filter_map(|p| {
+                if p.source.is_none() {
+                    Some((p.name.clone(), p.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
         Ok(Workspace {
             name: name.to_owned(),
             all_packages,
+            workspace_packages,
             progenitor_clients,
         })
     }
@@ -65,6 +80,10 @@ impl Workspace {
 
     pub fn find_package(&self, pkgname: &str) -> Option<&Package> {
         self.all_packages.get(pkgname)
+    }
+
+    pub fn find_workspace_package(&self, pkgname: &str) -> Option<&Package> {
+        self.workspace_packages.get(pkgname)
     }
 
     pub fn name(&self) -> &str {
@@ -98,6 +117,8 @@ impl Workspace {
                     continue;
                 }
 
+                // XXX-dap this is getting an arbitrary package with this name,
+                // not necessarily the one depended-on here.
                 let pkg = self.find_package(&d.name).ok_or_else(|| {
                     anyhow!(
                         "package {:?} has dependency {:?} not in workspace \
