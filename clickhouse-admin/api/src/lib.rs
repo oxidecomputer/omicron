@@ -4,9 +4,7 @@
 
 use clickhouse_admin_types::config::{KeeperConfig, ReplicaConfig};
 use clickhouse_admin_types::{KeeperSettings, ServerSettings};
-use dropshot::{
-    HttpError, HttpResponseCreated, RequestContext, TypedBody,
-};
+use dropshot::{HttpError, HttpResponseCreated, RequestContext, TypedBody};
 use omicron_common::api::external::Generation;
 use schemars::JsonSchema;
 use serde::Deserialize;

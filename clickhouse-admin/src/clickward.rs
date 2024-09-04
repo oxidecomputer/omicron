@@ -9,7 +9,7 @@ use slog_error_chain::{InlineErrorChain, SlogInlineError};
 
 #[derive(Debug, thiserror::Error, SlogInlineError)]
 pub enum ClickwardError {
-    #[error("clickward failure")]
+    #[error("clickward XML generation failure")]
     Failure {
         #[source]
         err: anyhow::Error,

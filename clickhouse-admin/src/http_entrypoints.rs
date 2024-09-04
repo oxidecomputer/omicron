@@ -5,9 +5,7 @@
 use crate::context::ServerContext;
 use clickhouse_admin_api::*;
 use clickhouse_admin_types::config::{KeeperConfig, ReplicaConfig};
-use dropshot::{
-    HttpError, HttpResponseCreated, RequestContext, TypedBody,
-};
+use dropshot::{HttpError, HttpResponseCreated, RequestContext, TypedBody};
 use std::sync::Arc;
 
 type ClickhouseApiDescription = dropshot::ApiDescription<Arc<ServerContext>>;
@@ -30,7 +28,8 @@ impl ClickhouseAdminApi for ClickhouseAdminImpl {
         let replica_server = body.into_inner();
         // TODO(https://github.com/oxidecomputer/omicron/issues/5999): Do something
         // with the generation number `replica_server.generation`
-        let output = ctx.clickward().generate_server_config(replica_server.settings)?;
+        let output =
+            ctx.clickward().generate_server_config(replica_server.settings)?;
         Ok(HttpResponseCreated(output))
     }
 

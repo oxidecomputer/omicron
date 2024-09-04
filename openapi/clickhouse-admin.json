@@ -318,18 +318,18 @@
             "type": "string",
             "format": "Utf8PathBuf"
           },
-          "listen_addr": {
-            "description": "Address the keeper is listening on",
-            "type": "string",
-            "format": "ipv6"
-          },
-          "node_id": {
-            "description": "Unique ID of the keeper",
+          "id": {
+            "description": "Unique ID of the keeper node",
             "allOf": [
               {
                 "$ref": "#/components/schemas/KeeperId"
               }
             ]
+          },
+          "listen_addr": {
+            "description": "Address the keeper is listening on",
+            "type": "string",
+            "format": "ipv6"
           },
           "raft_servers": {
             "description": "ID and host of each server in the keeper cluster",
@@ -342,8 +342,8 @@
         "required": [
           "config_dir",
           "datastore_path",
+          "id",
           "listen_addr",
-          "node_id",
           "raft_servers"
         ]
       },
@@ -619,6 +619,14 @@
             "type": "string",
             "format": "Utf8PathBuf"
           },
+          "id": {
+            "description": "Unique ID of the server node",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ServerId"
+              }
+            ]
+          },
           "keepers": {
             "description": "Addresses for each of the individual nodes in the Keeper cluster",
             "type": "array",
@@ -631,14 +639,6 @@
             "type": "string",
             "format": "ipv6"
           },
-          "node_id": {
-            "description": "Unique ID of the server",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/ServerId"
-              }
-            ]
-          },
           "remote_servers": {
             "description": "Addresses for each of the individual replica servers",
             "type": "array",
@@ -650,9 +650,9 @@
         "required": [
           "config_dir",
           "datastore_path",
+          "id",
           "keepers",
           "listen_addr",
-          "node_id",
           "remote_servers"
         ]
       }
