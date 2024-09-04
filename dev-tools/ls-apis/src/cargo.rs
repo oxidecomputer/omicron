@@ -155,21 +155,7 @@ impl MyPackage {
             // Remove them.  We've gone too far if the file name isn't right
             // after that.
             let tail: Utf8PathBuf = path.components().skip(2).collect();
-            ensure!(
-                tail.file_name() == Some("Cargo.toml"),
-                "unexpected non-local package manifest path: {:?}",
-                pkg.manifest_path
-            );
-
-            let path = tail
-                .parent()
-                .ok_or_else(|| {
-                    anyhow!(
-                        "unexpected non-local package manifest path: {:?}",
-                        pkg.manifest_path
-                    )
-                })?
-                .to_owned();
+            let path = cargo_toml_parent(&tail, &pkg.manifest_path)?;
             MyPackageLocation::RemoteRepo { oxide_github_repo: repo_name, path }
         } else {
             let manifest_path = &pkg.manifest_path;
@@ -184,27 +170,29 @@ impl MyPackage {
                     &workspace.workspace_root
                 )
                 })?;
-            // XXX-dap commonize with above
-            ensure!(
-                relative_path.file_name() == Some("Cargo.toml"),
-                "unexpected manifest path for local package: {:?}",
-                manifest_path
-            );
-            let path = relative_path
-                .parent()
-                .ok_or_else(|| {
-                    anyhow!(
-                        "unexpected manifest path for local package: {:?}",
-                        manifest_path
-                    )
-                })?
-                .to_owned();
+            let path = cargo_toml_parent(&relative_path, &manifest_path)?;
 
             MyPackageLocation::Omicron { path }
         };
 
         Ok(MyPackage { name: pkg.name.clone(), location })
     }
+}
+
+fn cargo_toml_parent(
+    path: &Utf8Path,
+    label_path: &Utf8Path,
+) -> Result<Utf8PathBuf> {
+    ensure!(
+        path.file_name() == Some("Cargo.toml"),
+        "unexpected manifest path: {:?}",
+        label_path
+    );
+    let path = path
+        .parent()
+        .ok_or_else(|| anyhow!("unexpected manifest path: {:?}", label_path))?
+        .to_owned();
+    Ok(path)
 }
 
 pub enum MyPackageLocation {
