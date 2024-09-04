@@ -50,6 +50,7 @@ use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
 use futures::stream::{self, StreamExt};
 use ipnetwork::IpNetwork;
+use nexus_db_fixed_data::vpc::SERVICES_INTERNET_GATEWAY_ID;
 use nexus_db_fixed_data::vpc::SERVICES_VPC_ID;
 use nexus_db_model::ExternalIp;
 use nexus_db_model::InternetGateway;
@@ -90,8 +91,6 @@ impl DataStore {
     ) -> Result<(), Error> {
         use nexus_db_fixed_data::project::SERVICES_PROJECT_ID;
         use nexus_db_fixed_data::vpc::SERVICES_VPC;
-        use nexus_db_fixed_data::vpc::SERVICES_VPC_DEFAULT_V4_ROUTE_ID;
-        use nexus_db_fixed_data::vpc::SERVICES_VPC_DEFAULT_V6_ROUTE_ID;
 
         opctx.authorize(authz::Action::Modify, &authz::DATABASE).await?;
 
@@ -126,6 +125,25 @@ impl DataStore {
             Err(e) => Err(e),
         }?;
 
+        let igw = db::model::InternetGateway::new(
+            *SERVICES_INTERNET_GATEWAY_ID,
+            authz_vpc.id(),
+            nexus_types::external_api::params::InternetGatewayCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "default".parse().unwrap(),
+                    description: String::from("Default VPC gateway"),
+                },
+            },
+        );
+
+        match self.vpc_create_internet_gateway(&opctx, &authz_vpc, igw).await {
+            Ok(_) => Ok(()),
+            Err(e) => match e {
+                Error::ObjectAlreadyExists { .. } => Ok(()),
+                _ => Err(e),
+            },
+        }?;
+
         // Also add the system router and internet gateway route
 
         let system_router = db::lookup::LookupPath::new(opctx, self)
@@ -152,38 +170,40 @@ impl DataStore {
                 .map(|(authz_router, _)| authz_router)?
         };
 
-        // Unwrap safety: these are known valid CIDR blocks.
-        let default_ips = [
-            (
-                "default-v4",
-                "0.0.0.0/0".parse().unwrap(),
-                *SERVICES_VPC_DEFAULT_V4_ROUTE_ID,
-            ),
-            (
-                "default-v6",
-                "::/0".parse().unwrap(),
-                *SERVICES_VPC_DEFAULT_V6_ROUTE_ID,
-            ),
-        ];
-
-        for (name, default, uuid) in default_ips {
-            let route = RouterRoute::new(
-                uuid,
-                SERVICES_VPC.system_router_id,
-                ExternalRouteKind::Default,
-                nexus_types::external_api::params::RouterRouteCreate {
-                    identity: IdentityMetadataCreateParams {
-                        name: name.parse().unwrap(),
-                        description:
-                            "Default internet gateway route for Oxide Services"
-                                .to_string(),
-                    },
-                    target: RouteTarget::InternetGateway(
-                        "outbound".parse().unwrap(),
-                    ),
-                    destination: RouteDestination::IpNet(default),
+        let default_v4 = RouterRoute::new(
+            Uuid::new_v4(),
+            SERVICES_VPC.system_router_id,
+            ExternalRouteKind::Default,
+            nexus_types::external_api::params::RouterRouteCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "default-v4".parse().unwrap(),
+                    description: String::from("Default IPv4 route"),
                 },
-            );
+                target: RouteTarget::InternetGateway(
+                    "default".parse().unwrap(),
+                ),
+                destination: RouteDestination::IpNet(
+                    "0.0.0.0/0".parse().unwrap(),
+                ),
+            },
+        );
+        let default_v6 = RouterRoute::new(
+            Uuid::new_v4(),
+            SERVICES_VPC.system_router_id,
+            ExternalRouteKind::Default,
+            nexus_types::external_api::params::RouterRouteCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "default-v6".parse().unwrap(),
+                    description: String::from("Default IPv6 route"),
+                },
+                target: RouteTarget::InternetGateway(
+                    "default".parse().unwrap(),
+                ),
+                destination: RouteDestination::IpNet("::/0".parse().unwrap()),
+            },
+        );
+
+        for route in [default_v4, default_v6] {
             self.router_create_route(opctx, &authz_router, route)
                 .await
                 .map(|_| ())
@@ -1266,8 +1286,6 @@ impl DataStore {
         let name = igw.name().clone();
         let igw = diesel::insert_into(dsl::internet_gateway)
             .values(igw)
-            .on_conflict(dsl::id)
-            .do_nothing()
             .returning(InternetGateway::as_returning())
             .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -2378,8 +2396,6 @@ impl DataStore {
             .collect::<HashMap<_, _>>()
             .await;
 
-        // TODO: validate names of Internet Gateways.
-
         // See the discussion in `resolve_firewall_rules_for_sled_agent` on
         // how we should resolve name misses in route resolution.
         // This method adopts the same strategy: a lookup failure corresponds
@@ -2489,17 +2505,24 @@ impl DataStore {
             //    destination -> target rule where the target is the
             //    internet gateway parameterized by the external ip.
             if let RouteTarget::InternetGateway(name) = &rule.target.0 {
+                info!(opctx.log, "Internet gateway '{name}' resolving targets");
                 let conn = self.pool_connection_authorized(opctx).await?;
                 let igw = db::lookup::LookupPath::new(opctx, self)
                     .vpc_id(authz_vpc.id())
                     .internet_gateway_name(&(name.clone().into()))
                     .fetch()
-                    .await
-                    .ok();
+                    .await;
 
                 let (.., authz_igw, _db_igw) = match igw {
-                    Some(value) => value,
-                    None => return Ok(out),
+                    Ok(value) => value,
+                    Err(e) => {
+                        warn!(
+                            opctx.log,
+                            "Internet gateway '{name}' lookup failed \
+                            when resolving vpc router rules: {e}",
+                        );
+                        continue;
+                    }
                 };
 
                 use db::schema::internet_gateway_ip_pool::dsl as igwp;
@@ -2508,13 +2531,38 @@ impl DataStore {
                     .filter(igwp::internet_gateway_id.eq(authz_igw.id()))
                     .select(InternetGatewayIpPool::as_select())
                     .load_async::<InternetGatewayIpPool>(&*conn)
-                    .await
-                    .ok();
+                    .await;
 
                 let igw_pools = match igw_pools {
-                    Some(value) => value,
-                    None => return Ok(out),
+                    Ok(value) => value,
+                    Err(e) => {
+                        warn!(
+                            opctx.log,
+                            "Internet gateway '{name}' pool lookup failed \
+                            when resolving vpc router rules: {e}"
+                        );
+                        continue;
+                    }
                 };
+                info!(
+                    opctx.log,
+                    "Internet gateway '{name}' found {} pools",
+                    igw_pools.len()
+                );
+
+                let mut parents: Vec<Uuid> = self
+                    .service_network_interfaces_all_list_batched(opctx)
+                    .await?
+                    .iter()
+                    .map(|x| x.service_id)
+                    .collect();
+                parents.extend(instances.values().map(|x| x.1.instance_id));
+
+                info!(
+                    opctx.log,
+                    "Internet gateway '{name}' found {} parents",
+                    parents.len()
+                );
 
                 for igw_pool in &igw_pools {
                     use db::schema::ip_pool_range::dsl as ipr;
@@ -2526,29 +2574,56 @@ impl DataStore {
                         .await
                     {
                         Ok(value) => value,
-                        Err(_) => continue,
+                        Err(e) => {
+                            warn!(
+                                opctx.log,
+                                "Internet gateway '{name}' pool range lookup failed \
+                                for pool id {} when resolving vpc router rules: {e}",
+                                igw_pool.ip_pool_id,
+                            );
+                            continue;
+                        }
                     };
 
-                    for x in instances.values() {
-                        let ifx = &x.1;
+                    for parent_id in &parents {
                         use db::schema::external_ip::dsl as xip;
                         let ext_ips = xip::external_ip
                             .filter(xip::time_deleted.is_null())
-                            .filter(xip::parent_id.eq(ifx.instance_id))
+                            .filter(xip::parent_id.eq(*parent_id))
                             .select(ExternalIp::as_select())
                             .load_async::<ExternalIp>(&*conn)
-                            .await
-                            .ok();
+                            .await;
 
                         let ext_ips = match ext_ips {
-                            Some(value) => value,
-                            None => continue,
+                            Ok(value) => value,
+                            Err(e) => {
+                                warn!(
+                                    opctx.log,
+                                    "Internet gateway '{name}' external ip look \
+                                    up failed when resolving vpc router rules: {e}",
+                                );
+                                continue;
+                            }
                         };
 
+                        info!(
+                            opctx.log,
+                            "Internet gateway '{name}' found {} external_ips",
+                            ext_ips.len()
+                        );
+
                         for ext_ip in &ext_ips {
+                            info!(
+                                opctx.log,
+                                "Internet gateway '{name}' \
+                                v4_dest: {v4_dest:?}, v6_dest: {v6_dest:?}, ext_ip: {}",
+                                ext_ip.ip.ip(),
+                            );
+
                             match ext_ip.ip.ip() {
                                 IpAddr::V4(v4) => {
                                     if let Some(dest) = v4_dest {
+                                        let mut found = false;
                                         for pr in &prs {
                                             if ext_ip.ip.ip()
                                                 >= pr.first_address.ip()
@@ -2561,13 +2636,28 @@ impl DataStore {
                                                             v4.into(),
                                                         ),
                                                     );
+                                                info!(
+                                                    opctx.log,
+                                                    "Internet gateway '{name}' adding route \
+                                                    {dest} -> {v4}"
+                                                );
+                                                found = true;
                                                 break;
                                             }
+                                        }
+                                        if !found {
+                                            warn!(
+                                                opctx.log,
+                                                "Internet gateway '{name}' no suitable \
+                                                ipv4 range found for {} in pool {}",
+                                                ext_ip.ip.ip(), igw_pool.ip_pool_id,
+                                            );
                                         }
                                     }
                                 }
                                 IpAddr::V6(v6) => {
                                     if let Some(dest) = v6_dest {
+                                        let mut found = false;
                                         for pr in &prs {
                                             if ext_ip.ip.ip()
                                                 >= pr.first_address.ip()
@@ -2580,8 +2670,22 @@ impl DataStore {
                                                             v6.into(),
                                                         ),
                                                     );
+                                                info!(
+                                                    opctx.log,
+                                                    "Internet gateway '{name}' adding route \
+                                                    {dest} -> {v6}"
+                                                );
+                                                found = true;
                                                 break;
                                             }
+                                        }
+                                        if !found {
+                                            warn!(
+                                                opctx.log,
+                                                "Internet gateway '{name}' no suitable \
+                                                ipv6 range found for {} in pool {}",
+                                                ext_ip.ip.ip(), igw_pool.ip_pool_id,
+                                            );
                                         }
                                     }
                                 }

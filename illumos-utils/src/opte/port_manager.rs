@@ -458,9 +458,11 @@ impl PortManager {
     ) -> Result<(), Error> {
         let mut routes = self.inner.routes.lock().unwrap();
         let mut deltas = HashMap::new();
+        slog::info!(self.inner.log, "new routes: {new_routes:#?}");
         for new in new_routes {
             // Disregard any route information for a subnet we don't have.
             let Some(old) = routes.get(&new.id) else {
+                slog::warn!(self.inner.log, "ignoring route {new:#?}");
                 continue;
             };
 
