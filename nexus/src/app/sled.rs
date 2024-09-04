@@ -102,7 +102,19 @@ impl super::Nexus {
         let sled_lookup = self.sled_lookup(opctx, &sled_id)?;
         let (authz_sled,) =
             sled_lookup.lookup_for(authz::Action::Modify).await?;
-        self.db_datastore.sled_set_policy_to_expunged(opctx, &authz_sled).await
+        let prev_policy = self
+            .db_datastore
+            .sled_set_policy_to_expunged(opctx, &authz_sled)
+            .await?;
+
+        // The instance-watcher background task is responsible for marking any
+        // VMMs running on `Expunged` sleds as `Failed`, so that their instances
+        // can transition to `Failed` and be deleted or restarted. Let's go
+        // ahead and activate it now so that those instances don't need to wait
+        // for the next periodic activation before they can be cleaned up.
+        self.background_tasks.task_instance_watcher.activate();
+
+        Ok(prev_policy)
     }
 
     pub(crate) async fn sled_request_firewall_rules(
