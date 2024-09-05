@@ -17,7 +17,7 @@
 //! state files that get generated as RSS executes:
 //!
 //! - /pool/int/UUID/config/rss-sled-plan.json (Sled Plan)
-//! - /pool/int/UUID/config/rss-service-plan-v3.json (Service Plan)
+//! - /pool/int/UUID/config/rss-service-plan-v5.json (Service Plan)
 //! - /pool/int/UUID/config/rss-plan-completed.marker (Plan Execution Complete)
 //!
 //! These phases are described below.  As each phase completes, a corresponding

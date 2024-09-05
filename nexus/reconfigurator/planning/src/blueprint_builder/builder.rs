@@ -933,7 +933,12 @@ impl<'a> BlueprintBuilder<'a> {
             )?;
         }
 
-        Ok(EnsureMultiple::Changed { added: to_add, removed: 0, expunged: 0, updated: 0 })
+        Ok(EnsureMultiple::Changed {
+            added: to_add,
+            removed: 0,
+            expunged: 0,
+            updated: 0,
+        })
     }
 
     pub fn sled_ensure_zone_ntp(

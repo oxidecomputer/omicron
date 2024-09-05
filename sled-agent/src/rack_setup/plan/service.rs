@@ -124,6 +124,12 @@ pub enum PlanError {
 
     #[error("Found only v2 service plan")]
     FoundV2,
+
+    #[error("Found only v3 service plan")]
+    FoundV3,
+
+    #[error("Found only v4 service plan")]
+    FoundV4,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
@@ -153,7 +159,8 @@ impl Ledgerable for Plan {
 const RSS_SERVICE_PLAN_V1_FILENAME: &str = "rss-service-plan.json";
 const RSS_SERVICE_PLAN_V2_FILENAME: &str = "rss-service-plan-v2.json";
 const RSS_SERVICE_PLAN_V3_FILENAME: &str = "rss-service-plan-v3.json";
-const RSS_SERVICE_PLAN_FILENAME: &str = "rss-service-plan-v4.json";
+const RSS_SERVICE_PLAN_V4_FILENAME: &str = "rss-service-plan-v4.json";
+const RSS_SERVICE_PLAN_FILENAME: &str = "rss-service-plan-v5.json";
 
 pub fn from_sockaddr_to_external_floating_addr(
     addr: SocketAddr,
@@ -265,7 +272,15 @@ impl Plan {
                 err,
             }
         })? {
-            Err(PlanError::FoundV2)
+            Err(PlanError::FoundV3)
+        } else if Self::has_v4(storage_manager).await.map_err(|err| {
+            // Same as the comment above, but for version 4.
+            PlanError::Io {
+                message: String::from("looking for v4 RSS plan"),
+                err,
+            }
+        })? {
+            Err(PlanError::FoundV4)
         } else {
             Ok(None)
         }
@@ -318,6 +333,25 @@ impl Plan {
             .all_m2_mountpoints(CONFIG_DATASET)
             .into_iter()
             .map(|p| p.join(RSS_SERVICE_PLAN_V3_FILENAME));
+
+        for p in paths {
+            if p.try_exists()? {
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
+    }
+
+    async fn has_v4(
+        storage_manager: &StorageHandle,
+    ) -> Result<bool, std::io::Error> {
+        let paths = storage_manager
+            .get_latest_disks()
+            .await
+            .all_m2_mountpoints(CONFIG_DATASET)
+            .into_iter()
+            .map(|p| p.join(RSS_SERVICE_PLAN_V4_FILENAME));
 
         for p in paths {
             if p.try_exists()? {
@@ -1499,10 +1533,10 @@ mod tests {
     }
 
     #[test]
-    fn test_rss_service_plan_v4_schema() {
+    fn test_rss_service_plan_v5_schema() {
         let schema = schemars::schema_for!(Plan);
         expectorate::assert_contents(
-            "../schema/rss-service-plan-v4.json",
+            "../schema/rss-service-plan-v5.json",
             &serde_json::to_string_pretty(&schema).unwrap(),
         );
     }

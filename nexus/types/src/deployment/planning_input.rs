@@ -517,11 +517,11 @@ impl SledResources {
     pub fn all_datasets(
         &self,
         filter: ZpoolFilter,
-    ) -> impl Iterator<Item = (&ZpoolUuid, &Vec<DatasetConfig>)> + '_ {
+    ) -> impl Iterator<Item = (&ZpoolUuid, &[DatasetConfig])> + '_ {
         self.zpools.iter().filter_map(move |(zpool, (disk, datasets))| {
             filter
                 .matches_policy_and_state(disk.policy, disk.state)
-                .then_some((zpool, datasets))
+                .then_some((zpool, datasets.as_slice()))
         })
     }
 }
