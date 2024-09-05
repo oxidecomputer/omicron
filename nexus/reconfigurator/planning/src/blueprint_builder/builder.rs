@@ -1387,8 +1387,11 @@ impl<'a> BlueprintZonesBuilder<'a> {
     /// Returns a mutable reference to a sled's Omicron zones *because* we're
     /// going to change them.
     ///
-    /// This method should generally only be called if the caller is going to
-    /// change the zones, but is safe to call otherwise.
+    /// This updates internal data structures, and it is recommended that it be
+    /// called only when the caller actually wishes to make changes to zones.
+    /// But making no changes after calling this does not result in a changed
+    /// blueprint. (In particular, the generation number is only updated if
+    /// the state of any zones was updated.)
     pub fn change_sled_zones(
         &mut self,
         sled_id: SledUuid,
@@ -1495,9 +1498,11 @@ impl<'a> BlueprintDisksBuilder<'a> {
     }
 
     /// Returns a mutable reference to a sled's Omicron disks *because* we're
-    /// going to change them.  It's essential that the caller _does_ change them
-    /// because we will have bumped the generation number and we don't want to
-    /// do that if no changes are being made.
+    /// going to change them.
+    ///
+    /// Unlike [`BlueprintZonesBuilder::change_sled_zones`], it is essential
+    /// that the caller _does_ change them, because constructing this bumps the
+    /// generation number unconditionally.
     pub fn change_sled_disks(
         &mut self,
         sled_id: SledUuid,

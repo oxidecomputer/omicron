@@ -61,13 +61,24 @@ impl BuilderZonesConfig {
         &mut self,
         zone: BlueprintZoneConfig,
     ) -> Result<(), BuilderZonesConfigError> {
-        if self.zones.iter().any(|z| z.id() == zone.id) {
+        if let Some(existing) = self.zones.iter().find(|z| z.id() == zone.id) {
             // We shouldn't be trying to add zones that already exist (or were
             // even noted to be removed) -- something went wrong in the planner
             // logic.
-            return Err(BuilderZonesConfigError::AddExistingZone {
-                zone_id: zone.id,
-            });
+            match existing {
+                BuilderZoneEntry::Present(_) => {
+                    return Err(BuilderZonesConfigError::AddExistingZone {
+                        zone_id: zone.id,
+                    })
+                }
+                BuilderZoneEntry::Removed(_) => {
+                    // We do not permit re-adding zones that have been removed.
+                    // Once a zone is gone, it's gone.
+                    return Err(BuilderZonesConfigError::AddRemovedZone {
+                        zone_id: zone.id,
+                    });
+                }
+            }
         };
 
         self.zones.push(BuilderZoneEntry::Present(BuilderZoneConfig {
@@ -271,9 +282,24 @@ fn check_removability(
     }
 }
 
+/// A zone entry in [`BuilderZonesConfig`].
 #[derive(Debug)]
 enum BuilderZoneEntry {
+    /// The zone is present in the blueprint.
     Present(BuilderZoneConfig),
+
+    /// The zone has been removed from the blueprint.
+    ///
+    /// Why store a `Removed` entry instead of removing the zone from the list?
+    ///
+    /// * We can present slightly better error messages and catch a few more
+    ///   bad states (e.g. remove -> add).
+    /// * It's just more convenient this way: since we return `&mut` entries,
+    ///   removing elements form the list is a bit awkward.
+    ///
+    /// But note that _externally_ we pretend that the zone is actually gone.
+    /// External methods don't return `BuilderZoneEntry` -- only
+    /// `BuilderZoneConfig` for zones that are present.
     Removed(OmicronZoneUuid),
 }
 
@@ -327,6 +353,9 @@ pub(super) enum BuilderZoneState {
 pub(super) enum BuilderZonesConfigError {
     #[error("attempted to add zone that already exists: {zone_id}")]
     AddExistingZone { zone_id: OmicronZoneUuid },
+
+    #[error("attempted to add zone that has already been removed: {zone_id}")]
+    AddRemovedZone { zone_id: OmicronZoneUuid },
 
     #[error(
         "while attempting to {op} zones, not all zones provided\
@@ -642,6 +671,35 @@ mod tests {
             BuilderZonesConfigError::ExpungeModifiedZone {
                 zone_id: new_zone_id,
                 state: BuilderZoneState::Added
+            }
+        );
+
+        // Removing a zone should fail if it doesn't exist.
+        let error = builder
+            .zones
+            .change_sled_zones(existing_sled_id)
+            .remove_zone_entry(non_existent_zone_id)
+            .expect_err("removing non-existent zone");
+        assert_eq!(
+            error,
+            BuilderZonesConfigError::OperateOnUnmatchedZones {
+                op: BuilderZoneOperation::Remove,
+                unmatched: UnmatchedZones::one_non_existent(
+                    non_existent_zone_id
+                ),
+            }
+        );
+        // Removing a zone should fail if it's not in an expunged state.
+        let error = builder
+            .zones
+            .change_sled_zones(existing_sled_id)
+            .remove_zone_entry(new_zone_id)
+            .expect_err("removing non-expunged zone");
+        assert_eq!(
+            error,
+            BuilderZonesConfigError::RemoveNonExpungedZone {
+                zone_id: new_zone_id,
+                disposition: BlueprintZoneDisposition::InService
             }
         );
 
