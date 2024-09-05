@@ -800,18 +800,16 @@ pub struct BlueprintDatasetsConfig {
     pub datasets: BTreeMap<DatasetUuid, BlueprintDatasetConfig>,
 }
 
-impl TryFrom<BlueprintDatasetsConfig> for DatasetsConfig {
-    type Error = anyhow::Error;
-
-    fn try_from(config: BlueprintDatasetsConfig) -> Result<Self, Self::Error> {
-        Ok(Self {
+impl From<BlueprintDatasetsConfig> for DatasetsConfig {
+    fn from(config: BlueprintDatasetsConfig) -> Self {
+        Self {
             generation: config.generation,
             datasets: config
                 .datasets
                 .into_iter()
-                .map(|(id, d)| Ok((id, d.try_into()?)))
-                .collect::<Result<_, anyhow::Error>>()?,
-        })
+                .map(|(id, d)| (id, d.into()))
+                .collect(),
+        }
     }
 }
 

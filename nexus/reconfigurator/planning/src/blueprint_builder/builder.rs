@@ -2001,18 +2001,13 @@ impl<'a> BlueprintSledDatasetsBuilder<'a> {
                     return false;
                 };
 
-                for (_, dataset_config) in datasets {
-                    if dataset_config.id == dataset_id {
-                        return true;
-                    }
-                }
-                return false;
+                datasets.values().any(|config| config.id == dataset_id)
             };
 
         let mut expunges = BTreeSet::new();
 
         for (zpool_id, datasets) in &self.blueprint_datasets {
-            for (_dataset_kind, dataset_config) in datasets {
+            for dataset_config in datasets.values() {
                 match dataset_config.disposition {
                     // Already expunged; ignore
                     BlueprintDatasetDisposition::Expunged => continue,
@@ -2058,12 +2053,7 @@ impl<'a> BlueprintSledDatasetsBuilder<'a> {
                     return false;
                 };
 
-                for (_, dataset_config) in datasets {
-                    if dataset_config.id == dataset_id {
-                        return true;
-                    }
-                }
-                return false;
+                datasets.values().any(|config| config.id == dataset_id)
             };
 
         let mut removals = BTreeSet::new();
@@ -2226,12 +2216,6 @@ pub mod test {
         for (sled_id, zone_config) in
             blueprint.all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
         {
-            match blueprint.sled_state.get(&sled_id) {
-                // Decommissioned sleds don't keep dataset state around
-                None | Some(SledState::Decommissioned) => continue,
-                Some(SledState::Active) => (),
-            }
-
             let datasets = datasets_for_sled(&blueprint, sled_id);
 
             let zpool = zone_config.filesystem_pool.as_ref().unwrap();
@@ -2716,7 +2700,7 @@ pub mod test {
             .collect::<Vec<_>>();
         // We saw two datasets being expunged earlier when we called
         // `sled_ensure_datasets` -- validate that this is true when inspecting
-        // the bluepirnt too.
+        // the blueprint too.
         assert_eq!(expunged_datasets.len(), 2);
 
         // Remove these two datasets from the input.

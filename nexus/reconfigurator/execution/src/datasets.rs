@@ -56,11 +56,7 @@ pub(crate) async fn deploy_datasets(
                 &log,
             );
 
-            let config: DatasetsConfig = match config.clone().try_into() {
-                Ok(config) => config,
-                Err(err) => return Some(err)
-            };
-
+            let config: DatasetsConfig = config.clone().into();
             let result =
                 client.datasets_put(&config).await.with_context(
                     || format!("Failed to put {config:#?} to sled {sled_id}"),
@@ -266,20 +262,17 @@ mod tests {
         blueprint
             .all_omicron_zones(BlueprintZoneFilter::All)
             .filter_map(|(_, zone)| {
-                if let Some(dataset) = zone.zone_type.durable_dataset() {
-                    Some(BlueprintDatasetConfig {
-                        disposition: BlueprintDatasetDisposition::InService,
-                        id: DatasetUuid::new_v4(),
-                        pool: dataset.dataset.pool_name.clone(),
-                        kind: dataset.kind,
-                        address: Some(dataset.address),
-                        quota: None,
-                        reservation: None,
-                        compression: CompressionAlgorithm::Off,
-                    })
-                } else {
-                    None
-                }
+                let dataset = zone.zone_type.durable_dataset()?;
+                Some(BlueprintDatasetConfig {
+                    disposition: BlueprintDatasetDisposition::InService,
+                    id: DatasetUuid::new_v4(),
+                    pool: dataset.dataset.pool_name.clone(),
+                    kind: dataset.kind,
+                    address: Some(dataset.address),
+                    quota: None,
+                    reservation: None,
+                    compression: CompressionAlgorithm::Off,
+                })
             })
             .collect::<Vec<_>>()
     }
@@ -467,7 +460,6 @@ mod tests {
         first_dataset.quota = Some(ByteCount::from_kibibytes_u32(1));
         first_dataset.reservation = Some(ByteCount::from_kibibytes_u32(2));
         first_dataset.compression = CompressionAlgorithm::Lz4;
-        let _ = first_dataset;
 
         // Update the datastore
         let EnsureDatasetsResult { inserted, updated, removed } =
@@ -490,9 +482,9 @@ mod tests {
             .expect("Couldn't find dataset we tried to update?");
         let observed_dataset: DatasetConfig =
             observed_dataset.try_into().unwrap();
-        assert_eq!(observed_dataset.quota, first_dataset.quota,);
-        assert_eq!(observed_dataset.reservation, first_dataset.reservation,);
-        assert_eq!(observed_dataset.compression, first_dataset.compression,);
+        assert_eq!(observed_dataset.quota, first_dataset.quota);
+        assert_eq!(observed_dataset.reservation, first_dataset.reservation);
+        assert_eq!(observed_dataset.compression, first_dataset.compression);
     }
 
     #[nexus_test]
@@ -552,7 +544,6 @@ mod tests {
         );
         crucible_dataset.disposition = BlueprintDatasetDisposition::Expunged;
         let crucible_dataset_id = crucible_dataset.id;
-        let _ = crucible_dataset;
 
         let non_crucible_dataset = all_datasets
             .iter_mut()
@@ -565,7 +556,6 @@ mod tests {
         non_crucible_dataset.disposition =
             BlueprintDatasetDisposition::Expunged;
         let non_crucible_dataset_id = non_crucible_dataset.id;
-        let _ = non_crucible_dataset;
 
         // Observe that we only remove one dataset.
         //
@@ -646,7 +636,7 @@ mod tests {
         // a dataset, we'll just remove it from the "blueprint".
         //
         // This situation mimics a scenario where we are an "old Nexus,
-        // executing and old blueprint" - more datasets might be created
+        // executing an old blueprint" - more datasets might be created
         // concurrently with our execution, and we should leave them alone.
         assert_eq!(dataset_id, all_datasets.pop().unwrap().id);
 
