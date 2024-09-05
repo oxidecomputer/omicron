@@ -31,7 +31,6 @@ use std::future::Future;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::sync::Mutex;
-use tokio::sync::Semaphore;
 use uuid::Uuid;
 
 oximeter::use_timeseries!("vm-health-check.toml");
@@ -43,18 +42,13 @@ pub(crate) struct InstanceWatcher {
     sagas: Arc<dyn StartSaga>,
     metrics: Arc<Mutex<metrics::Metrics>>,
     id: WatcherIdentity,
-    /// Semaphore used to limit the number of concurrently in flight requests to
-    /// sled-agents.
-    check_concurrency_limit: Arc<Semaphore>,
 }
 
-const MAX_SLED_AGENTS: NonZeroU32 = unsafe {
-    // Safety: last time I checked, 100 was greater than zero.
-    NonZeroU32::new_unchecked(100)
-};
-
 // Chosen arbitrarily. Perhaps this should be configurable in the config file?
-const MAX_CONCURRENT_CHECKS: usize = 16;
+const MAX_CONCURRENT_CHECKS: NonZeroU32 = unsafe {
+    // Safety: last time I checked, 16 was greater than zero.
+    NonZeroU32::new_unchecked(16)
+};
 
 impl InstanceWatcher {
     pub(crate) fn new(
@@ -67,27 +61,18 @@ impl InstanceWatcher {
         producer_registry
             .register_producer(metrics::Producer(metrics.clone()))
             .unwrap();
-        Self {
-            datastore,
-            sagas,
-            metrics,
-            id,
-            check_concurrency_limit: Arc::new(Semaphore::new(
-                MAX_CONCURRENT_CHECKS,
-            )),
-        }
+        Self { datastore, sagas, metrics, id }
     }
 
     fn check_instance(
         &self,
         opctx: &OpContext,
-        client: &SledAgentClient,
+        client: SledAgentClient,
         target: VirtualMachine,
         vmm: Vmm,
     ) -> impl Future<Output = Check> + Send + 'static {
         let datastore = self.datastore.clone();
         let sagas = self.sagas.clone();
-        let concurrency_limit = self.check_concurrency_limit.clone();
 
         let vmm_id = PropolisUuid::from_untyped_uuid(target.vmm_id);
         let opctx = {
@@ -99,22 +84,8 @@ impl InstanceWatcher {
             meta.insert("vmm_id".to_string(), vmm_id.to_string());
             opctx.child(meta)
         };
-        let client = client.clone();
 
         async move {
-            // First, acquire a permit from the semaphore before continuing to
-            // perform the health check, to limit the number of concurrently
-            // in-flight checks.
-            //
-            // Dropping this will release the permit back to the semaphore,
-            // allowing he next check task to proceed.
-            let _permit = match concurrency_limit.acquire().await {
-                Ok(permit) => Some(permit),
-                Err(_) if cfg!(debug_assertions) => unreachable!(
-                    "the semaphore is never closed, so this should never fail"
-                ),
-                Err(_) => None,
-            };
             slog::trace!(
                 opctx.log, "checking on VMM"; "propolis_id" => %vmm_id
             );
@@ -406,15 +377,17 @@ impl BackgroundTask for InstanceWatcher {
     ) -> BoxFuture<'a, serde_json::Value> {
         async {
             let mut tasks = tokio::task::JoinSet::new();
-            let mut paginator = Paginator::new(MAX_SLED_AGENTS);
-            let mk_client = |sled: &Sled| {
-                nexus_networking::sled_client_from_address(
-                    sled.id(),
-                    sled.address(),
-                    &opctx.log,
-                )
-            };
+            let mut paginator = Paginator::new(MAX_CONCURRENT_CHECKS);
 
+            let mut total: usize = 0;
+            let mut update_sagas_queued: usize = 0;
+            let mut instance_states: BTreeMap<String, usize> =
+                BTreeMap::new();
+            let mut check_failures: BTreeMap<String, usize> =
+                BTreeMap::new();
+            let mut check_errors: BTreeMap<String, usize> = BTreeMap::new();
+
+            let mut curr_sled: Option<(Uuid, SledAgentClient)> = None;
             while let Some(p) = paginator.next() {
                 let maybe_batch = self
                     .datastore
@@ -435,69 +408,60 @@ impl BackgroundTask for InstanceWatcher {
                 };
                 paginator = p.found_batch(&batch, &|(sled, _, _, _)| sled.id());
 
-                // When we iterate over the batch of sled instances, we pop the
-                // first sled from the batch before looping over the rest, to
-                // insure that the initial sled-agent client is created first,
-                // as we need the address of the first sled to construct it.
-                // We could, alternatively, make the sled-agent client an
-                // `Option`, but then every subsequent iteration would have to
-                // handle the case where it's `None`, and I thought this was a
-                // bit neater...
-                let mut batch = batch.into_iter();
-                if let Some((mut curr_sled, instance, vmm, project)) = batch.next() {
-                    let mut client = mk_client(&curr_sled);
-                    let target = VirtualMachine::new(self.id, &curr_sled, &instance, &vmm, &project);
-                    tasks.spawn(self.check_instance(opctx, &client, target, vmm));
+                // Spawn a task to check on each sled in the batch.
+                for (sled, instance, vmm, project) in batch {
+                    let client = match curr_sled {
+                        // If we are still talking to the same sled, reuse the
+                        // existing client and its connection pool.
+                        Some((sled_id, ref client)) if sled_id == sled.id() => client.clone(),
+                        // Otherwise, if we've moved on to a new sled, refresh
+                        // the client.
+                        ref mut curr => {
+                            let client = nexus_networking::sled_client_from_address(
+                                sled.id(),
+                                sled.address(),
+                                &opctx.log,
+                            );
+                            *curr = Some((sled.id(), client.clone()));
+                            client
+                        },
+                    };
 
-                    for (sled, instance, vmm, project) in batch {
-                        // We're now talking to a new sled agent; update the client.
-                        if sled.id() != curr_sled.id() {
-                            client = mk_client(&sled);
-                            curr_sled = sled;
+
+                    let target = VirtualMachine::new(self.id, &sled, &instance, &vmm, &project);
+                    tasks.spawn(self.check_instance(opctx, client, target, vmm));
+                }
+
+                // Now, wait for the check results to come back.
+                while let Some(result) = tasks.join_next().await {
+                    total += 1;
+                    let check = result.expect(
+                        "a `JoinError` is returned if a spawned task \
+                        panics, or if the task is aborted. we never abort \
+                        tasks on this `JoinSet`, and nexus is compiled with \
+                        `panic=\"abort\"`, so neither of these cases should \
+                        ever occur",
+                    );
+                    match check.outcome {
+                        CheckOutcome::Success(state) => {
+                            *instance_states
+                                .entry(state.to_string())
+                                .or_default() += 1;
                         }
-
-                        let target = VirtualMachine::new(self.id, &curr_sled, &instance, &vmm, &project);
-                        tasks.spawn(self.check_instance(opctx, &client, target, vmm));
+                        CheckOutcome::Failure(reason) => {
+                            *check_failures.entry(reason.as_str().into_owned()).or_default() += 1;
+                        }
+                        CheckOutcome::Unknown => {}
                     }
-                }
-            }
-
-            // Now, wait for the check results to come back.
-            let mut total: usize = 0;
-            let mut update_sagas_queued: usize = 0;
-            let mut instance_states: BTreeMap<String, usize> =
-                BTreeMap::new();
-            let mut check_failures: BTreeMap<String, usize> =
-                BTreeMap::new();
-            let mut check_errors: BTreeMap<String, usize> = BTreeMap::new();
-            while let Some(result) = tasks.join_next().await {
-                total += 1;
-                let check = result.expect(
-                    "a `JoinError` is returned if a spawned task \
-                    panics, or if the task is aborted. we never abort \
-                    tasks on this `JoinSet`, and nexus is compiled with \
-                    `panic=\"abort\"`, so neither of these cases should \
-                    ever occur",
-                );
-                match check.outcome {
-                    CheckOutcome::Success(state) => {
-                        *instance_states
-                            .entry(state.to_string())
-                            .or_default() += 1;
+                    if let Err(ref reason) = check.result {
+                        *check_errors.entry(reason.as_str().into_owned()).or_default() += 1;
                     }
-                    CheckOutcome::Failure(reason) => {
-                        *check_failures.entry(reason.as_str().into_owned()).or_default() += 1;
+                    if check.update_saga_queued {
+                        update_sagas_queued += 1;
                     }
-                    CheckOutcome::Unknown => {}
-                }
-                if let Err(ref reason) = check.result {
-                    *check_errors.entry(reason.as_str().into_owned()).or_default() += 1;
-                }
-                if check.update_saga_queued {
-                    update_sagas_queued += 1;
-                }
-                self.metrics.lock().unwrap().record_check(check);
+                    self.metrics.lock().unwrap().record_check(check);
 
+                }
             }
 
             // All requests completed! Prune any old instance metrics for
