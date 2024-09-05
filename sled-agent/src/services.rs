@@ -1573,12 +1573,6 @@ impl ServiceManager {
                             .add_property_group(config),
                     );
 
-                let ch_address = SocketAddr::new(
-                    IpAddr::V6(listen_addr),
-                    CLICKHOUSE_HTTP_PORT,
-                )
-                .to_string();
-
                 let admin_address = SocketAddr::new(
                     IpAddr::V6(listen_addr),
                     CLICKHOUSE_ADMIN_PORT,
@@ -1586,13 +1580,11 @@ impl ServiceManager {
                 .to_string();
 
                 let clickhouse_admin_config =
-                    PropertyGroupBuilder::new("config")
-                        .add_property(
-                            "clickhouse_address",
-                            "astring",
-                            ch_address,
-                        )
-                        .add_property("http_address", "astring", admin_address);
+                    PropertyGroupBuilder::new("config").add_property(
+                        "http_address",
+                        "astring",
+                        admin_address,
+                    );
                 let clickhouse_admin_service =
                     ServiceBuilder::new("oxide/clickhouse-admin").add_instance(
                         ServiceInstanceBuilder::new("default")
@@ -1654,12 +1646,6 @@ impl ServiceManager {
                                 .add_property_group(config),
                         );
 
-                let ch_address = SocketAddr::new(
-                    IpAddr::V6(listen_addr),
-                    CLICKHOUSE_HTTP_PORT,
-                )
-                .to_string();
-
                 let admin_address = SocketAddr::new(
                     IpAddr::V6(listen_addr),
                     CLICKHOUSE_ADMIN_PORT,
@@ -1667,13 +1653,11 @@ impl ServiceManager {
                 .to_string();
 
                 let clickhouse_admin_config =
-                    PropertyGroupBuilder::new("config")
-                        .add_property(
-                            "clickhouse_address",
-                            "astring",
-                            ch_address,
-                        )
-                        .add_property("http_address", "astring", admin_address);
+                    PropertyGroupBuilder::new("config").add_property(
+                        "http_address",
+                        "astring",
+                        admin_address,
+                    );
                 let clickhouse_admin_service =
                     ServiceBuilder::new("oxide/clickhouse-admin").add_instance(
                         ServiceInstanceBuilder::new("default")
@@ -1738,12 +1722,6 @@ impl ServiceManager {
                                 .add_property_group(config),
                         );
 
-                let ch_address = SocketAddr::new(
-                    IpAddr::V6(listen_addr),
-                    CLICKHOUSE_HTTP_PORT,
-                )
-                .to_string();
-
                 let admin_address = SocketAddr::new(
                     IpAddr::V6(listen_addr),
                     CLICKHOUSE_ADMIN_PORT,
@@ -1751,13 +1729,11 @@ impl ServiceManager {
                 .to_string();
 
                 let clickhouse_admin_config =
-                    PropertyGroupBuilder::new("config")
-                        .add_property(
-                            "clickhouse_address",
-                            "astring",
-                            ch_address,
-                        )
-                        .add_property("http_address", "astring", admin_address);
+                    PropertyGroupBuilder::new("config").add_property(
+                        "http_address",
+                        "astring",
+                        admin_address,
+                    );
                 let clickhouse_admin_service =
                     ServiceBuilder::new("oxide/clickhouse-admin").add_instance(
                         ServiceInstanceBuilder::new("default")

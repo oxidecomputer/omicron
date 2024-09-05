@@ -4,9 +4,8 @@
 
 use crate::context::ServerContext;
 use clickhouse_admin_api::*;
-use dropshot::HttpError;
-use dropshot::HttpResponseOk;
-use dropshot::RequestContext;
+use clickhouse_admin_types::config::{KeeperConfig, ReplicaConfig};
+use dropshot::{HttpError, HttpResponseCreated, RequestContext, TypedBody};
 use std::sync::Arc;
 
 type ClickhouseApiDescription = dropshot::ApiDescription<Arc<ServerContext>>;
@@ -21,11 +20,28 @@ enum ClickhouseAdminImpl {}
 impl ClickhouseAdminApi for ClickhouseAdminImpl {
     type Context = Arc<ServerContext>;
 
-    async fn clickhouse_address(
+    async fn generate_server_config(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<ClickhouseAddress>, HttpError> {
+        body: TypedBody<ServerConfigurableSettings>,
+    ) -> Result<HttpResponseCreated<ReplicaConfig>, HttpError> {
         let ctx = rqctx.context();
-        let output = ctx.clickward().clickhouse_address()?;
-        Ok(HttpResponseOk(output))
+        let replica_server = body.into_inner();
+        // TODO(https://github.com/oxidecomputer/omicron/issues/5999): Do something
+        // with the generation number `replica_server.generation`
+        let output =
+            ctx.clickward().generate_server_config(replica_server.settings)?;
+        Ok(HttpResponseCreated(output))
+    }
+
+    async fn generate_keeper_config(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<KeeperConfigurableSettings>,
+    ) -> Result<HttpResponseCreated<KeeperConfig>, HttpError> {
+        let ctx = rqctx.context();
+        let keeper = body.into_inner();
+        // TODO(https://github.com/oxidecomputer/omicron/issues/5999): Do something
+        // with the generation number `keeper.generation`
+        let output = ctx.clickward().generate_keeper_config(keeper.settings)?;
+        Ok(HttpResponseCreated(output))
     }
 }
