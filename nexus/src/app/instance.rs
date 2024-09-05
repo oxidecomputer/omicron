@@ -463,7 +463,13 @@ impl super::Nexus {
             let lookup = LookupPath::new(opctx, &self.db_datastore)
                 .instance_id(instance_id);
 
-            let start_result = self.instance_start(opctx, &lookup).await;
+            let start_result = self
+                .instance_start(
+                    opctx,
+                    &lookup,
+                    sagas::instance_start::Reason::AutoStart,
+                )
+                .await;
             if let Err(e) = start_result {
                 info!(self.log, "failed to start newly-created instance";
                       "instance_id" => %instance_id,
@@ -638,6 +644,7 @@ impl super::Nexus {
         self: &Arc<Self>,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
+        reason: sagas::instance_start::Reason,
     ) -> Result<InstanceAndActiveVmm, InstanceStateChangeError> {
         let (.., authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
@@ -653,6 +660,7 @@ impl super::Nexus {
                 let saga_params = sagas::instance_start::Params {
                     serialized_authn: authn::saga::Serialized::for_opctx(opctx),
                     db_instance: state.instance().clone(),
+                    reason,
                 };
 
                 self.sagas

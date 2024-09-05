@@ -32,6 +32,25 @@ pub(crate) struct Params {
     /// Authentication context to use to fetch the instance's current state from
     /// the database.
     pub serialized_authn: authn::saga::Serialized,
+
+    /// Why is this instance being started?
+    pub reason: Reason,
+}
+
+/// Reasons an instance may be started.
+///
+/// Currently, this is primarily used to determine whether the instance's
+/// auto-restart timestamp must be updated. It's also included in log messages
+/// in the start saga.
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub(crate) enum Reason {
+    /// The instance was automatically started upon being created.
+    AutoStart,
+    /// The instance was started by a user action.
+    User,
+    /// The instance has failed and is being automatically restarted by the
+    /// control plane.
+    AutoRestart,
 }
 
 declare_saga_actions! {
@@ -298,12 +317,24 @@ async fn sis_move_to_starting(
         None => {}
     }
 
-    let new_runtime = db::model::InstanceRuntimeState {
-        nexus_state: db::model::InstanceState::Vmm,
-        propolis_id: Some(propolis_id.into_untyped_uuid()),
-        time_updated: Utc::now(),
-        gen: db_instance.runtime().gen.next().into(),
-        ..db_instance.runtime_state
+    let new_runtime = {
+        let now = Utc::now();
+
+        // If this instance is being automatically restarted, update the last
+        // auto-restart timestamp.
+        let time_last_auto_restarted = if params.reason == Reason::AutoRestart {
+            Some(now)
+        } else {
+            db_instance.runtime_state.time_last_auto_restarted
+        };
+        db::model::InstanceRuntimeState {
+            nexus_state: db::model::InstanceState::Vmm,
+            propolis_id: Some(propolis_id.into_untyped_uuid()),
+            time_updated: now,
+            gen: db_instance.runtime().gen.next().into(),
+            time_last_auto_restarted,
+            ..db_instance.runtime_state
+        }
     };
 
     // Bail if another actor managed to update the instance's state in
@@ -794,6 +825,7 @@ mod test {
         let params = Params {
             serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
             db_instance,
+            reason: Reason::User,
         };
 
         nexus
@@ -844,7 +876,8 @@ mod test {
                         Params {
                             serialized_authn:
                                 authn::saga::Serialized::for_opctx(&opctx),
-                                db_instance,
+                            db_instance,
+                            reason: Reason::User,
                         }
                     }
                 })
@@ -891,6 +924,7 @@ mod test {
         let params = Params {
             serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
             db_instance,
+            reason: Reason::User,
         };
 
         let dag = create_saga_dag::<SagaInstanceStart>(params).unwrap();
@@ -931,6 +965,7 @@ mod test {
         let params = Params {
             serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
             db_instance,
+            reason: Reason::User,
         };
 
         let dag = create_saga_dag::<SagaInstanceStart>(params).unwrap();

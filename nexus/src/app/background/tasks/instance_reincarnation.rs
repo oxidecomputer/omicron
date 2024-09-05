@@ -127,6 +127,7 @@ impl InstanceReincarnation {
                     &instance_start::Params {
                         db_instance,
                         serialized_authn: serialized_authn.clone(),
+                        reason: instance_start::Reason::AutoRestart,
                     },
                 );
                 match prepared_saga {
