@@ -2216,6 +2216,15 @@ pub mod test {
         for (sled_id, zone_config) in
             blueprint.all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
         {
+            match blueprint.sled_state.get(&sled_id) {
+                // Decommissioned sleds don't keep dataset state around.
+                //
+                // Normally we wouldn't observe zones from decommissioned sleds
+                // anyway, but that's the responsibility of the Planner, not the
+                // BlueprintBuilder.
+                None | Some(SledState::Decommissioned) => continue,
+                Some(SledState::Active) => (),
+            }
             let datasets = datasets_for_sled(&blueprint, sled_id);
 
             let zpool = zone_config.filesystem_pool.as_ref().unwrap();
