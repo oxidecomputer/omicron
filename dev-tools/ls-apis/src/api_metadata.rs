@@ -8,35 +8,62 @@ use crate::ClientPackageName;
 use crate::DeploymentUnit;
 use crate::ServerComponent;
 use crate::ServerPackageName;
+use anyhow::bail;
 use serde::Deserialize;
+use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+#[serde(try_from = "RawApiMetadata")]
 pub struct AllApiMetadata {
-    apis: Vec<ApiMetadata>,
+    apis: BTreeMap<ClientPackageName, ApiMetadata>,
+}
+
+impl TryFrom<RawApiMetadata> for AllApiMetadata {
+    type Error = anyhow::Error;
+
+    fn try_from(raw: RawApiMetadata) -> anyhow::Result<AllApiMetadata> {
+        let mut apis = BTreeMap::new();
+
+        for api in raw.apis {
+            if let Some(previous) =
+                apis.insert(api.client_package_name.clone(), api)
+            {
+                bail!(
+                    "duplicate client package name in API metadata: {}",
+                    &previous.client_package_name,
+                );
+            }
+        }
+
+        Ok(AllApiMetadata { apis })
+    }
 }
 
 impl AllApiMetadata {
     pub fn apis(&self) -> impl Iterator<Item = &ApiMetadata> {
-        self.apis.iter()
+        self.apis.values()
     }
 
     pub fn client_pkgnames(&self) -> impl Iterator<Item = &ClientPackageName> {
-        self.apis().map(|api| &api.client_package_name)
+        self.apis.keys()
     }
 
     pub fn server_components(&self) -> impl Iterator<Item = &ServerComponent> {
+        // There may be duplicates here.  That's not a mistake.  But we don't
+        // want to report duplicates here.
         self.apis()
             .map(|api| &api.server_component)
             .collect::<BTreeSet<_>>()
             .into_iter()
     }
 
-    pub fn client_pkgname_lookup(&self, pkgname: &str) -> Option<&ApiMetadata> {
-        // XXX-dap this is worth optimizing but it would require a separate type
-        // -- this one would be the "raw" type.
-        self.apis.iter().find(|api| *api.client_package_name == pkgname)
+    pub fn client_pkgname_lookup(
+        &self,
+        pkgname: &ClientPackageName,
+    ) -> Option<&ApiMetadata> {
+        self.apis.get(pkgname)
     }
 }
 
@@ -63,4 +90,10 @@ impl ApiMetadata {
             .clone()
             .unwrap_or_else(|| (*self.server_component).clone().into())
     }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawApiMetadata {
+    apis: Vec<ApiMetadata>,
 }

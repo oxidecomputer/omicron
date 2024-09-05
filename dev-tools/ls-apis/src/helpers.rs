@@ -149,7 +149,9 @@ impl Apis {
 
                         if helper
                             .api_metadata
-                            .client_pkgname_lookup(&p.name)
+                            .client_pkgname_lookup(&ClientPackageName::from(
+                                p.name.to_owned(),
+                            ))
                             .is_some()
                         {
                             clients_used.insert(
