@@ -1,13 +1,14 @@
 # Describes all the Dropshot/OpenAPI/Progenitor APIs in the system
 # XXX-dap there's similar metadata in the openapi manager
-# XXX-dap can server_component, group be determined from package metadata?
+# XXX-dap can server_component, deployment_unit be determined from package
+# metadata?
 
 [[apis]]
 client_package_name = "bootstrap-agent-client"
 label = "Bootstrap Agent"
 server_package_name = "bootstrap-agent-api"
 server_component = "omicron-sled-agent"
-group = "Host OS"
+deployment_unit = "Host OS"
 
 [[apis]]
 client_package_name = "cockroach-admin-client"
@@ -37,7 +38,7 @@ label = "Maghemite DDM Admin"
 server_package_name = "ddmd"
 server_component = "ddmd"
 # XXX-dap confirm
-group = "Host OS"
+deployment_unit = "Host OS"
 notes = """
 The `ddmd` server runs in each sled GZ and each switch zone. These daemons \
 provide an interface for advertising network prefixes, and observing what \
@@ -61,7 +62,7 @@ label = "Dendrite DPD"
 server_package_name = "dpd"
 server_component = "dpd"
 # XXX-dap confirm
-group = "Host OS"
+deployment_unit = "Host OS"
 notes = """
 Dendrite's data plane daemon (`dpd`) is the interface to configure and manage \
 the rack switches. It's consumed by sled-agent to get the rack off the \
@@ -78,7 +79,7 @@ label = "Management Gateway Service"
 server_package_name = "gateway-api"
 server_component = "omicron-gateway"
 # XXX-dap confirm
-group = "Host OS"
+deployment_unit = "Host OS"
 notes = "Wicketd is deployed in a unit with MGS so we can ignore that one."
 
 [[apis]]
@@ -87,7 +88,7 @@ label = "Wicketd Installinator"
 server_package_name = "installinator-api"
 server_component = "wicketd"
 # XXX-dap confirm
-group = "Host OS"
+deployment_unit = "Host OS"
 
 [[apis]]
 client_package_name = "mg-admin-client"
@@ -95,7 +96,7 @@ label = "Maghemite MG Admin"
 server_package_name = "mgd"
 server_component = "mgd"
 # XXX-dap confirm
-group = "Host OS"
+deployment_unit = "Host OS"
 notes = """
 The `mgd` daemon runs in each switch zone. This daemon is responsible for all \
 external route management for a switch. It provides interfaces for static \
@@ -136,7 +137,7 @@ label = "Propolis"
 server_package_name = "propolis-server"
 server_component = "propolis-server"
 # XXX-dap confirm
-group = "Host OS"
+deployment_unit = "Host OS"
 notes = """
 Sled Agent is deployed in a unit with Propolis so we can ignore that one.
 """
@@ -147,7 +148,7 @@ label = "Sled Agent"
 server_package_name = "sled-agent-api"
 server_component = "omicron-sled-agent"
 # XXX-dap confirm
-group = "Host OS"
+deployment_unit = "Host OS"
 
 [[apis]]
 client_package_name = "wicketd-client"
@@ -155,7 +156,7 @@ label = "Wicketd"
 server_package_name = "wicketd-api"
 server_component = "wicketd"
 # XXX-dap confirm
-group = "Host OS"
+deployment_unit = "Host OS"
 notes = """
 wicketd-client is only used by wicket, which is deployed in a unit with wicketd.
 """

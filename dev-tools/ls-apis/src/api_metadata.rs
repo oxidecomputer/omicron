@@ -52,14 +52,14 @@ pub struct ApiMetadata {
     /// package name that the corresponding server lives in
     pub server_component: ServerComponent,
     /// name of the unit of deployment
-    group: Option<DeploymentUnit>,
+    deployment_unit: Option<DeploymentUnit>,
     /// human-readable notes about this API
     pub notes: Option<String>,
 }
 
 impl ApiMetadata {
-    pub fn group(&self) -> DeploymentUnit {
-        self.group
+    pub fn deployment_unit(&self) -> DeploymentUnit {
+        self.deployment_unit
             .clone()
             .unwrap_or_else(|| (*self.server_component).clone().into())
     }

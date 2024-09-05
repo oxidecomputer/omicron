@@ -42,14 +42,17 @@ impl Apis {
         }
 
         // Collect the distinct set of deployment units for all the APIs.
-        let deployment_units: BTreeSet<_> =
-            helper.api_metadata.apis().map(|a| a.group().clone()).collect();
+        let deployment_units: BTreeSet<_> = helper
+            .api_metadata
+            .apis()
+            .map(|a| a.deployment_unit().clone())
+            .collect();
 
         // Create a mapping from server package to its deployment unit.
         let server_component_units: BTreeMap<_, _> = helper
             .api_metadata
             .apis()
-            .map(|a| (a.server_component.clone(), a.group().clone()))
+            .map(|a| (a.server_component.clone(), a.deployment_unit().clone()))
             .collect();
 
         // Compute a reverse mapping from deployment unit to the server
