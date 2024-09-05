@@ -183,7 +183,7 @@ impl PlanningInputFromDb<'_> {
                     )
                 })
                 .collect();
-            datasets.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+            datasets.sort_by(|(a, _), (b, _)| a.cmp(&b));
             let mut datasets_by_zpool: BTreeMap<_, Vec<_>> = BTreeMap::new();
             for (zpool_id, dataset) in datasets {
                 datasets_by_zpool
