@@ -10,6 +10,7 @@ mod api_metadata;
 mod cargo;
 mod helpers;
 
+pub use api_metadata::AllApiMetadata;
 pub use helpers::Apis;
 pub use helpers::ApisHelper;
 pub use helpers::LoadArgs;

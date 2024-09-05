@@ -170,7 +170,7 @@ impl Apis {
         })
     }
 
-    fn all_deployment_unit_components(
+    pub fn all_deployment_unit_components(
         &self,
     ) -> impl Iterator<Item = (&DeploymentUnit, &Vec<ServerComponent>)> {
         self.unit_server_components.iter()
@@ -180,7 +180,7 @@ impl Apis {
         &self.helper.api_metadata
     }
 
-    fn component_apis_consumed(
+    pub fn component_apis_consumed(
         &self,
         server_component: &ServerComponent,
     ) -> Box<dyn Iterator<Item = &ClientPackageName> + '_> {
@@ -198,6 +198,12 @@ impl Apis {
             Some(l) => Box::new(l.iter()),
             None => Box::new(std::iter::empty()),
         }
+    }
+
+    pub fn package_label(&self, pkgname: &str) -> Result<(&str, Utf8PathBuf)> {
+        let (workspace, _) = self.helper.find_package_workspace(pkgname)?;
+        let pkgpath = workspace.find_workspace_package_path(pkgname)?;
+        Ok((workspace.name(), pkgpath))
     }
 
     pub fn adoc_label(&self, pkgname: &str) -> Result<String> {

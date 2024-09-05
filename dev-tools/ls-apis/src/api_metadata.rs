@@ -9,6 +9,7 @@ use crate::DeploymentUnit;
 use crate::ServerComponent;
 use crate::ServerPackageName;
 use serde::Deserialize;
+use std::collections::BTreeSet;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -26,7 +27,10 @@ impl AllApiMetadata {
     }
 
     pub fn server_components(&self) -> impl Iterator<Item = &ServerComponent> {
-        self.apis().map(|api| &api.server_component)
+        self.apis()
+            .map(|api| &api.server_component)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
     }
 
     pub fn client_pkgname_lookup(&self, pkgname: &str) -> Option<&ApiMetadata> {

@@ -13,7 +13,7 @@
 use anyhow::{Context, Result};
 use camino::Utf8PathBuf;
 use clap::{Args, Parser, Subcommand};
-use omicron_ls_apis::{Apis, LoadArgs};
+use omicron_ls_apis::{AllApiMetadata, Apis, LoadArgs, ServerComponent};
 
 #[derive(Parser)]
 #[command(
@@ -38,6 +38,12 @@ struct LsApis {
 enum Cmds {
     /// print out an Asciidoc table summarizing the APIs
     Adoc,
+    /// print out each API, what exports it, and what consumes it
+    Apis,
+    /// print out APIs exported and consumed by each deployment unit
+    DeploymentUnits,
+    /// print out APIs exported and consumed, by server component
+    Servers,
     Show(ShowArgs),
 }
 
@@ -55,6 +61,9 @@ fn main() -> Result<()> {
 
     match cli_args.cmd {
         Cmds::Adoc => run_adoc(&apis),
+        Cmds::Apis => run_apis(&apis),
+        Cmds::DeploymentUnits => run_deployment_units(&apis),
+        Cmds::Servers => run_servers(&apis),
         Cmds::Show(args) => run_show(&apis, args),
     }
 }
@@ -93,6 +102,59 @@ fn run_adoc(apis: &Apis) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn run_apis(apis: &Apis) -> Result<()> {
+    let metadata = apis.api_metadata();
+    for api in metadata.apis() {
+        println!("{} (client: {})", api.label, api.client_package_name);
+        for s in apis.api_consumers(&api.client_package_name) {
+            let (repo_name, package_path) = apis.package_label(s)?;
+            println!("    consumed by: {} ({}/{})", s, repo_name, package_path);
+        }
+        println!("");
+    }
+    Ok(())
+}
+
+fn run_deployment_units(apis: &Apis) -> Result<()> {
+    let metadata = apis.api_metadata();
+    for (unit, server_components) in apis.all_deployment_unit_components() {
+        println!("{}", unit);
+        print_server_components(apis, metadata, server_components, "    ")?;
+        println!("");
+    }
+    Ok(())
+}
+
+fn print_server_components<'a>(
+    apis: &Apis,
+    metadata: &AllApiMetadata,
+    server_components: impl IntoIterator<Item = &'a ServerComponent>,
+    prefix: &str,
+) -> Result<()> {
+    for s in server_components.into_iter() {
+        let (repo_name, pkg_path) = apis.package_label(s)?;
+        println!("{}{} ({}/{})", prefix, s, repo_name, pkg_path);
+        for api in metadata.apis().filter(|a| a.server_component == *s) {
+            println!(
+                "{}    exposes: {} (client = {})",
+                prefix, api.label, api.client_package_name
+            );
+        }
+        // XXX-dap add mode to print paths
+        for c in apis.component_apis_consumed(s) {
+            println!("{}    consumes: {}", prefix, c);
+        }
+
+        println!("");
+    }
+    Ok(())
+}
+
+fn run_servers(apis: &Apis) -> Result<()> {
+    let metadata = apis.api_metadata();
+    print_server_components(apis, metadata, metadata.server_components(), "")
 }
 
 fn run_show(apis: &Apis, args: ShowArgs) -> Result<()> {
