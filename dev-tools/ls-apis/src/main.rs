@@ -5,10 +5,24 @@
 //! Show information about Progenitor-based APIs
 
 // XXX-dap some ideas:
-// - another cleanup pass
-//   - see XXX-dap
-// - summarize metadata (e.g., write a table of APIs)
-// - asciidoc output
+// - The current approach only finds consumers that are themselves exporters of
+//   APIs.  We want to find other consumers, too.  This is a little tricky
+//   because we don't have a way of getting from a package to the list of
+//   packages that depend on it.  But perhaps we could create this reverse-index
+//   inside the Workspace.  We really only need it for the progenitor clients'
+//   reverse dependencies, but we don't know which ones those are until we've
+//   computed this for everybody.
+//
+//   It's also worth noting that we care about this cross-repo: a progenitor
+//   client might be in repo X but we want this information for its dependents
+//   in repo Y.  So we can't do this entirely at the Workspace level.  All the
+//   Workspace can give us is an efficient way to walk reverse dependencies.
+// - Add options to the various list commands to print full dependency paths, too
+//   - Modify walk_required_deps_recursively() to provide the full path from the
+//     root to the package, not just the parent and package found.
+//   - Modify the data structures in `Apis` to keep track of not just the
+//     dependencies but the path to them
+//   - Update the commands to use these
 
 use anyhow::{Context, Result};
 use camino::Utf8PathBuf;
