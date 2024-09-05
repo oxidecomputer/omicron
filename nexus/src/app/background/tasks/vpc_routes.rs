@@ -16,6 +16,7 @@ use nexus_types::{
 };
 use omicron_common::api::internal::shared::{
     ResolvedVpcRoute, ResolvedVpcRouteSet, RouterId, RouterKind, RouterVersion,
+    SledTarget,
 };
 use serde_json::json;
 use std::collections::hash_map::Entry;
@@ -242,15 +243,8 @@ impl BackgroundTask for VpcRouteManager {
                         .await
                     {
                         Ok(rules) => {
-                            let collapsed: HashSet<_> = rules
-                                .into_iter()
-                                .map(|(dest, target)| ResolvedVpcRoute {
-                                    dest,
-                                    target,
-                                })
-                                .collect();
-                            set_rules(set.id, Some(version), collapsed.clone());
-                            known_rules.insert(router_id, collapsed);
+                            set_rules(set.id, Some(version), rules.clone());
+                            known_rules.insert(router_id, rules);
                         }
                         Err(e) => {
                             error!(
@@ -264,6 +258,13 @@ impl BackgroundTask for VpcRouteManager {
                 }
 
                 if !to_push.is_empty() {
+                    for set in &mut to_push {
+                        set.routes.retain(|x| match x.sled {
+                            SledTarget::Any => true,
+                            SledTarget::Only(id) if id == sled.id() => true,
+                            _ => false,
+                        });
+                    }
                     if let Err(e) = client.set_vpc_routes(&to_push).await {
                         error!(
                             log,

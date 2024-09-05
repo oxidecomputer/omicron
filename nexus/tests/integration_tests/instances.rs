@@ -6313,7 +6313,6 @@ pub async fn assert_sled_vpc_routes(
                 .await
                 .unwrap()
                 .into_iter()
-                .map(|(dest, target)| ResolvedVpcRoute { dest, target })
                 .collect()
         } else {
             Default::default()
@@ -6330,7 +6329,6 @@ pub async fn assert_sled_vpc_routes(
         .await
         .unwrap()
         .into_iter()
-        .map(|(dest, target)| ResolvedVpcRoute { dest, target })
         .collect();
 
     assert!(!system_routes.is_empty());

@@ -22,6 +22,7 @@ use omicron_common::api::internal::shared::ResolvedVpcRouteState;
 use omicron_common::api::internal::shared::RouterId;
 use omicron_common::api::internal::shared::RouterTarget as ApiRouterTarget;
 use omicron_common::api::internal::shared::RouterVersion;
+use omicron_common::api::internal::shared::SledTarget;
 use omicron_common::api::internal::shared::SourceNatConfig;
 use omicron_common::api::internal::shared::VirtualNetworkInterfaceHost;
 use oxide_vpc::api::AddRouterEntryReq;
@@ -972,6 +973,7 @@ fn system_routes_v4<'a>(
                     target: ApiRouterTarget::InternetGateway(IpAddr::V4(
                         Ipv4Addr::from(snat.external_ip),
                     )),
+                    sled: SledTarget::Any,
                 });
             }
         }
@@ -982,6 +984,7 @@ fn system_routes_v4<'a>(
                     target: ApiRouterTarget::InternetGateway(IpAddr::V4(
                         Ipv4Addr::from(*ephemeral),
                     )),
+                    sled: SledTarget::Any,
                 });
             }
         }
@@ -992,6 +995,7 @@ fn system_routes_v4<'a>(
                     target: ApiRouterTarget::InternetGateway(IpAddr::V4(
                         Ipv4Addr::from(*fip),
                     )),
+                    sled: SledTarget::Any,
                 });
             }
         }
@@ -1014,6 +1018,7 @@ fn system_routes_v6<'a>(
                     target: ApiRouterTarget::InternetGateway(IpAddr::V6(
                         Ipv6Addr::from(snat.external_ip),
                     )),
+                    sled: SledTarget::Any,
                 });
             }
         }
@@ -1024,6 +1029,7 @@ fn system_routes_v6<'a>(
                     target: ApiRouterTarget::InternetGateway(IpAddr::V6(
                         Ipv6Addr::from(*ephemeral),
                     )),
+                    sled: SledTarget::Any,
                 });
             }
         }
@@ -1034,6 +1040,7 @@ fn system_routes_v6<'a>(
                     target: ApiRouterTarget::InternetGateway(IpAddr::V6(
                         Ipv6Addr::from(*fip),
                     )),
+                    sled: SledTarget::Any,
                 });
             }
         }

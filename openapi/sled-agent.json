@@ -4606,12 +4606,16 @@
           "dest": {
             "$ref": "#/components/schemas/IpNet"
           },
+          "sled": {
+            "$ref": "#/components/schemas/SledTarget"
+          },
           "target": {
             "$ref": "#/components/schemas/RouterTarget"
           }
         },
         "required": [
           "dest",
+          "sled",
           "target"
         ]
       },
@@ -4904,6 +4908,44 @@
             "type": "string",
             "enum": [
               "scrimlet"
+            ]
+          }
+        ]
+      },
+      "SledTarget": {
+        "description": "A VPC route resolved into a concrete target.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "any"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "only"
+                ]
+              },
+              "value": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "type",
+              "value"
             ]
           }
         ]

@@ -68,13 +68,16 @@ use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
+use omicron_common::api::external::MessagePair;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::RouteDestination;
 use omicron_common::api::external::RouteTarget;
 use omicron_common::api::external::RouterRouteKind as ExternalRouteKind;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vni as ExternalVni;
+use omicron_common::api::internal::shared::ResolvedVpcRoute;
 use omicron_common::api::internal::shared::RouterTarget;
+use omicron_common::api::internal::shared::SledTarget;
 use oxnet::IpNet;
 use ref_cast::RefCast;
 use std::collections::BTreeMap;
@@ -2275,11 +2278,11 @@ impl DataStore {
             })
     }
 
-    async fn external_ip_home_info(
+    pub async fn sled_id_for_external_ip(
         &self,
-        opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<crate::db::DbConnection>,
-    ) -> Result<ExternalIpHome, Error> {
+        ip: IpAddr,
+    ) -> Result<Uuid, Error> {
         use db::schema::external_ip as eip;
         use db::schema::external_ip::dsl as eip_dsl;
         use db::schema::inv_omicron_zone as ioz;
@@ -2287,59 +2290,73 @@ impl DataStore {
         use db::schema::vmm;
         use db::schema::vmm::dsl as vmm_dsl;
 
-        let instance_info: Vec<(IpNetwork, Uuid)> = eip_dsl::external_ip
+        let ip = IpNetwork::from(ip);
+
+        // look for a vmm association
+        match eip_dsl::external_ip
             .inner_join(
                 vmm::table.on(vmm::instance_id.nullable().eq(eip::parent_id)),
             )
             .filter(eip::time_deleted.is_null())
+            .filter(eip::ip.eq(ip))
             .filter(vmm::time_deleted.is_null())
-            .select((eip_dsl::ip, vmm_dsl::sled_id))
-            .load_async(&*conn)
+            .select(vmm_dsl::sled_id)
+            .get_result_async(conn)
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        {
+            Ok(result) => return Ok(result),
+            Err(_) => {}
+        };
 
-        let service_info: Vec<(IpNetwork, Uuid)> = eip_dsl::external_ip
+        match eip_dsl::external_ip
             .inner_join(
                 ioz::table.on(ioz::primary_service_ip
                     .eq(eip::ip)
-                    .or(ioz::second_service_ip.nullable().eq(Some(eip::ip)))
-                    .or(ioz::snat_ip.nullable().eq(Some(eip::ip)))),
+                    .or(ioz::second_service_ip.eq(eip::ip.nullable()))
+                    .or(ioz::snat_ip.eq(eip::ip.nullable()))),
             )
             .filter(eip::time_deleted.is_null())
-            .select((eip_dsl::ip, ioz::sled_id))
-            .load_async(&*conn)
+            .select(ioz_dsl::sled_id)
+            .get_result_async(conn)
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        {
+            Ok(result) => Ok(result),
+            Err(_) => Err(Error::NotFound {
+                message: MessagePair::new(format!(
+                    "sled not found for ip {ip}"
+                )),
+            }),
+        }
 
-        /* XXX attempt to get aroud error with ^, but second query has same
-               error
+        /*
+        let service_info: Vec<(IpNetwork, Option<Uuid>, Uuid)> =
+            eip_dsl::external_ip
+                .inner_join(
+                    ioz::table.on(ioz::primary_service_ip
+                        .eq(eip::ip)
+                        .or(ioz::second_service_ip.eq(eip::ip.nullable()))
+                        .or(ioz::snat_ip.eq(eip::ip.nullable()))),
+                )
+                .filter(eip::time_deleted.is_null())
+                .select((eip_dsl::ip, eip_dsl::parent_id, ioz_dsl::sled_id))
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
 
-        let service_info1: Vec<(IpNetwork, Uuid)> = eip_dsl::external_ip
-            .inner_join(ioz::table.on(ioz::primary_service_ip.eq(eip::ip)))
-            .filter(eip::time_deleted.is_null())
-            .select((eip_dsl::ip, ioz::sled_id))
-            .load_async(&*conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        info.extend(service_info);
 
-        let service_info2: Vec<(IpNetwork, Uuid)> = eip_dsl::external_ip
-            .inner_join(ioz::table.on(ioz::second_service_ip.eq(Some(eip::ip))))
-            .filter(eip::time_deleted.is_null())
-            .select((eip_dsl::ip, ioz::sled_id))
-            .load_async(&*conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-
-        let service_info3: Vec<(IpNetwork, Uuid)> = eip_dsl::external_ip
-            .inner_join(ioz::table.on(ioz::snat_ip.eq(Some(eip::ip))))
-            .filter(eip::time_deleted.is_null())
-            .select((eip_dsl::ip, ioz::sled_id))
-            .load_async(&*conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-        */
-
-        todo!();
+        Ok(info
+            .into_iter()
+            .flat_map(|x| match x {
+                (ip, Some(parent), sled) => {
+                    Some(ExternalIpHome { ip: ip.ip(), parent, sled })
+                }
+                _ => None,
+            })
+            .collect())
+            */
     }
 
     /// Resolve all targets in a router into concrete details.
@@ -2347,7 +2364,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         vpc_router_id: Uuid,
-    ) -> Result<HashMap<IpNet, RouterTarget>, Error> {
+    ) -> Result<HashSet<ResolvedVpcRoute>, Error> {
         // Get all rules in target router.
         opctx.check_complex_operations_allowed()?;
 
@@ -2467,7 +2484,7 @@ impl DataStore {
         // how we should resolve name misses in route resolution.
         // This method adopts the same strategy: a lookup failure corresponds
         // to a NO-OP rule.
-        let mut out = HashMap::new();
+        let mut out = HashSet::new();
         for rule in all_rules {
             // Some dests/targets (e.g., subnet) resolve to *several* specifiers
             // to handle both v4 and v6. The user-facing API will prevent severe
@@ -2547,11 +2564,19 @@ impl DataStore {
             //      It would be really useful to raise collisions and
             //      misses to users, somehow.
             if let (Some(dest), Some(target)) = (v4_dest, v4_target) {
-                out.insert(dest, target);
+                out.insert(ResolvedVpcRoute {
+                    dest,
+                    target,
+                    sled: SledTarget::Any,
+                });
             }
 
             if let (Some(dest), Some(target)) = (v6_dest, v6_target) {
-                out.insert(dest, target);
+                out.insert(ResolvedVpcRoute {
+                    dest,
+                    target,
+                    sled: SledTarget::Any,
+                });
             }
 
             // The OPTE model for internet gateway routes is that a VPC
@@ -2617,12 +2642,17 @@ impl DataStore {
                     igw_pools.len()
                 );
 
-                let mut parents: Vec<Uuid> = self
-                    .service_network_interfaces_all_list_batched(opctx)
-                    .await?
-                    .iter()
-                    .map(|x| x.service_id)
-                    .collect();
+                let mut parents: Vec<Uuid> =
+                    match opctx.authn.silo_or_builtin()? {
+                        None => self
+                            .service_network_interfaces_all_list_batched(opctx)
+                            .await?
+                            .iter()
+                            .map(|x| x.service_id)
+                            .collect(),
+                        Some(_) => Vec::new(),
+                    };
+
                 parents.extend(instances.values().map(|x| x.1.instance_id));
 
                 info!(
@@ -2697,12 +2727,19 @@ impl DataStore {
                                                 && ext_ip.ip.ip()
                                                     <= pr.last_address.ip()
                                             {
-                                                out.insert(
+                                                let sled_id = self
+                                                    .sled_id_for_external_ip(
+                                                        &conn,
+                                                        ext_ip.ip.ip(),
+                                                    )
+                                                    .await?;
+                                                out.insert(ResolvedVpcRoute{
                                                         dest,
-                                                        RouterTarget::InternetGateway(
+                                                        target: RouterTarget::InternetGateway(
                                                             v4.into(),
                                                         ),
-                                                    );
+                                                        sled: SledTarget::Only(sled_id),
+                                                    });
                                                 info!(
                                                     opctx.log,
                                                     "Internet gateway '{name}' adding route \
@@ -2731,12 +2768,19 @@ impl DataStore {
                                                 && ext_ip.ip.ip()
                                                     <= pr.last_address.ip()
                                             {
-                                                out.insert(
+                                                let sled_id = self
+                                                    .sled_id_for_external_ip(
+                                                        &conn,
+                                                        ext_ip.ip.ip(),
+                                                    )
+                                                    .await?;
+                                                out.insert(ResolvedVpcRoute{
                                                         dest,
-                                                        RouterTarget::InternetGateway(
+                                                        target: RouterTarget::InternetGateway(
                                                             v6.into(),
                                                         ),
-                                                    );
+                                                        sled: SledTarget::Only(sled_id),
+                                                    });
                                                 info!(
                                                     opctx.log,
                                                     "Internet gateway '{name}' adding route \
@@ -3659,7 +3703,9 @@ mod tests {
 
         // And each subnet generates a v4->v4 and v6->v6.
         for subnet in subnets {
-            assert!(resolved.iter().any(|(k, v)| {
+            assert!(resolved.iter().any(|x| {
+                let k = &x.dest;
+                let v = &x.target;
                 *k == subnet.ipv4_block.0.into()
                     && match v {
                         RouterTarget::VpcSubnet(ip) => {
@@ -3668,7 +3714,9 @@ mod tests {
                         _ => false,
                     }
             }));
-            assert!(resolved.iter().any(|(k, v)| {
+            assert!(resolved.iter().any(|x| {
+                let k = &x.dest;
+                let v = &x.target;
                 *k == subnet.ipv6_block.0.into()
                     && match v {
                         RouterTarget::VpcSubnet(ip) => {
@@ -3820,20 +3868,14 @@ mod tests {
 
         // Verify we now have a route pointing at this instance.
         assert_eq!(routes.len(), 3);
-        assert!(routes.iter().any(|(k, v)| (*k
+        assert!(routes.iter().any(|x| (x.dest
             == "192.168.0.0/16".parse::<IpNet>().unwrap())
-            && match v {
-                RouterTarget::Ip(ip) => *ip == nic.ip.ip(),
+            && match x.target {
+                RouterTarget::Ip(ip) => ip == nic.ip.ip(),
                 _ => false,
             }));
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
-}
-
-struct ExternalIpHome {
-    ip: IpAddr,
-    parent: Uuid,
-    sled: Uuid,
 }
