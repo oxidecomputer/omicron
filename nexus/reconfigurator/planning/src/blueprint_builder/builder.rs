@@ -231,7 +231,7 @@ impl fmt::Display for Operation {
 }
 
 fn zone_name(zone: &BlueprintZoneConfig) -> String {
-    format!("oxz_{}_{}", zone.zone_type.kind().zone_prefix(), zone.id,)
+    format!("oxz_{}_{}", zone.zone_type.kind().zone_prefix(), zone.id)
 }
 
 /// Helper for assembling a blueprint
