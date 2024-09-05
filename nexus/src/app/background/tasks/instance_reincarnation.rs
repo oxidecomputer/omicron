@@ -291,9 +291,9 @@ mod test {
                 disks: Vec::new(),
                 ssh_public_keys: None,
                 start: false,
+                auto_restart_policy: Some(restart_policy),
             },
         );
-        instance.auto_restart_policy = restart_policy;
         let datastore = cptestctx.server.server_context().nexus.datastore();
 
         let instance = datastore
