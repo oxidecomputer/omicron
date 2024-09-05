@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, fmt};
 
 use nexus_types::deployment::{
     BlueprintZoneConfig, BlueprintZoneDisposition, BlueprintZoneFilter,
@@ -20,7 +20,7 @@ pub(super) struct BuilderZonesConfig {
     generation: Generation,
 
     // The list of zones, along with their state.
-    zones: Vec<BuilderZoneConfig>,
+    zones: Vec<BuilderZoneEntry>,
 }
 
 impl BuilderZonesConfig {
@@ -47,9 +47,11 @@ impl BuilderZonesConfig {
             zones: parent
                 .zones
                 .iter()
-                .map(|zone| BuilderZoneConfig {
-                    zone: zone.clone(),
-                    state: BuilderZoneState::Unchanged,
+                .map(|zone| {
+                    BuilderZoneEntry::Present(BuilderZoneConfig {
+                        zone: zone.clone(),
+                        state: BuilderZoneState::Unchanged,
+                    })
                 })
                 .collect(),
         }
@@ -59,16 +61,30 @@ impl BuilderZonesConfig {
         &mut self,
         zone: BlueprintZoneConfig,
     ) -> Result<(), BuilderZonesConfigError> {
-        if self.zones.iter().any(|z| z.zone.id == zone.id) {
-            // We shouldn't be trying to add zones that already exist --
-            // something went wrong in the planner logic.
-            return Err(BuilderZonesConfigError::AddExistingZone {
-                zone_id: zone.id,
-            });
+        if let Some(existing) = self.zones.iter().find(|z| z.id() == zone.id) {
+            // We shouldn't be trying to add zones that already exist (or were
+            // even noted to be removed) -- something went wrong in the planner
+            // logic.
+            match existing {
+                BuilderZoneEntry::Present(_) => {
+                    return Err(BuilderZonesConfigError::AddExistingZone {
+                        zone_id: zone.id,
+                    })
+                }
+                BuilderZoneEntry::Removed(_) => {
+                    // We do not permit re-adding zones that have been removed.
+                    // Once a zone is gone, it's gone.
+                    return Err(BuilderZonesConfigError::AddRemovedZone {
+                        zone_id: zone.id,
+                    });
+                }
+            }
         };
 
-        self.zones
-            .push(BuilderZoneConfig { zone, state: BuilderZoneState::Added });
+        self.zones.push(BuilderZoneEntry::Present(BuilderZoneConfig {
+            zone,
+            state: BuilderZoneState::Added,
+        }));
         Ok(())
     }
 
@@ -76,20 +92,13 @@ impl BuilderZonesConfig {
         &mut self,
         zone_id: OmicronZoneUuid,
     ) -> Result<(), BuilderZonesConfigError> {
-        let zone = self
-            .zones
-            .iter_mut()
-            .find(|zone| zone.zone.id == zone_id)
-            .ok_or_else(|| {
-            let mut unmatched = BTreeSet::new();
-            unmatched.insert(zone_id);
-            BuilderZonesConfigError::ExpungeUnmatchedZones { unmatched }
-        })?;
+        let zone =
+            self.find_zone_config_mut(zone_id, BuilderZoneOperation::Expunge)?;
 
-        // Check that the zone is expungeable. Typically, zones passed
-        // in here should have had this check done to them already, but
-        // in case they're not, or in case something else about those
-        // zones changed in between, check again.
+        // Check that the zone is expungeable. Typically, zones passed in here
+        // should have had this check done to them already, but in case they're
+        // not, or in case something else about those zones changed in between,
+        // check again.
         is_already_expunged(&zone.zone, zone.state)?;
         zone.zone.disposition = BlueprintZoneDisposition::Expunged;
         zone.state = BuilderZoneState::Modified;
@@ -99,27 +108,58 @@ impl BuilderZonesConfig {
 
     pub(super) fn expunge_zones(
         &mut self,
-        mut zones: BTreeSet<OmicronZoneUuid>,
+        zones: BTreeSet<OmicronZoneUuid>,
     ) -> Result<(), BuilderZonesConfigError> {
-        for zone in &mut self.zones {
-            if zones.remove(&zone.zone.id) {
-                // Check that the zone is expungeable. Typically, zones passed
-                // in here should have had this check done to them already, but
-                // in case they're not, or in case something else about those
-                // zones changed in between, check again.
-                is_already_expunged(&zone.zone, zone.state)?;
-                zone.zone.disposition = BlueprintZoneDisposition::Expunged;
-                zone.state = BuilderZoneState::Modified;
+        let mut unmatched = UnmatchedZones::default();
+        // We'll remove zones from this set as we find them.
+        unmatched.non_existent = zones;
+
+        for entry in &mut self.zones {
+            match entry {
+                BuilderZoneEntry::Present(zone) => {
+                    if unmatched.non_existent.remove(&zone.zone.id) {
+                        // Check that the zone is expungeable. Typically, zones passed
+                        // in here should have had this check done to them already, but
+                        // in case they're not, or in case something else about those
+                        // zones changed in between, check again.
+                        is_already_expunged(&zone.zone, zone.state)?;
+                        zone.zone.disposition =
+                            BlueprintZoneDisposition::Expunged;
+                        zone.state = BuilderZoneState::Modified;
+                    }
+                }
+                BuilderZoneEntry::Removed(zone_id) => {
+                    if unmatched.non_existent.remove(&zone_id) {
+                        // Once a zone is removed, no more changes can be made to it.
+                        unmatched.already_removed.insert(*zone_id);
+                    }
+                }
             }
         }
 
         // All zones passed in should have been found -- are there any left
         // over?
-        if !zones.is_empty() {
-            return Err(BuilderZonesConfigError::ExpungeUnmatchedZones {
-                unmatched: zones,
+        if !unmatched.is_empty() {
+            return Err(BuilderZonesConfigError::OperateOnUnmatchedZones {
+                op: BuilderZoneOperation::Expunge,
+                unmatched,
             });
         }
+
+        Ok(())
+    }
+
+    pub(super) fn remove_zone_entry(
+        &mut self,
+        zone_id: OmicronZoneUuid,
+    ) -> Result<(), BuilderZonesConfigError> {
+        // We should only be removing zones that are already expunged. (This
+        // should have been checked already, but check again just in case.)
+        let entry =
+            self.find_zone_entry_mut(zone_id, BuilderZoneOperation::Remove)?;
+        check_removability(entry)?;
+
+        *entry = BuilderZoneEntry::Removed(zone_id);
 
         Ok(())
     }
@@ -128,16 +168,54 @@ impl BuilderZonesConfig {
         &self,
         filter: BlueprintZoneFilter,
     ) -> impl Iterator<Item = &BuilderZoneConfig> {
-        self.zones.iter().filter(move |z| z.zone().disposition.matches(filter))
+        self.zones.iter().filter_map(move |z| {
+            let z = z.as_present()?;
+            z.zone.disposition.matches(filter).then_some(z)
+        })
+    }
+
+    fn find_zone_entry_mut(
+        &mut self,
+        zone_id: OmicronZoneUuid,
+        op: BuilderZoneOperation,
+    ) -> Result<&mut BuilderZoneEntry, BuilderZonesConfigError> {
+        self.zones.iter_mut().find(|z| z.id() == zone_id).ok_or_else(|| {
+            BuilderZonesConfigError::OperateOnUnmatchedZones {
+                op,
+                unmatched: UnmatchedZones::one_non_existent(zone_id),
+            }
+        })
+    }
+
+    fn find_zone_config_mut(
+        &mut self,
+        zone_id: OmicronZoneUuid,
+        op: BuilderZoneOperation,
+    ) -> Result<&mut BuilderZoneConfig, BuilderZonesConfigError> {
+        let entry = self.find_zone_entry_mut(zone_id, op)?;
+
+        match entry {
+            BuilderZoneEntry::Present(zone) => Ok(zone),
+            BuilderZoneEntry::Removed(_) => {
+                Err(BuilderZonesConfigError::OperateOnUnmatchedZones {
+                    op,
+                    unmatched: UnmatchedZones::one_already_removed(zone_id),
+                })
+            }
+        }
     }
 
     pub(super) fn build(self) -> BlueprintZonesConfig {
         // Only bump the generation if any zones have been changed.
-        let generation = if self
-            .zones
-            .iter()
-            .any(|z| z.state != BuilderZoneState::Unchanged)
-        {
+        let generation = if self.zones.iter().any(|z| {
+            if let BuilderZoneEntry::Present(z) = z {
+                z.state != BuilderZoneState::Unchanged
+            } else {
+                // Removed zones don't count as changes because they're purely
+                // for internal accounting.
+                false
+            }
+        }) {
             self.generation.next()
         } else {
             self.generation
@@ -145,7 +223,11 @@ impl BuilderZonesConfig {
 
         let mut ret = BlueprintZonesConfig {
             generation,
-            zones: self.zones.into_iter().map(|z| z.zone).collect(),
+            zones: self
+                .zones
+                .into_iter()
+                .filter_map(|z| Some(z.into_present()?.zone))
+                .collect(),
         };
         ret.sort();
         ret
@@ -177,6 +259,73 @@ pub(super) fn is_already_expunged(
     }
 }
 
+fn check_removability(
+    entry: &BuilderZoneEntry,
+) -> Result<(), BuilderZonesConfigError> {
+    match entry {
+        BuilderZoneEntry::Present(zone) => match zone.zone.disposition {
+            BlueprintZoneDisposition::InService
+            | BlueprintZoneDisposition::Quiesced => {
+                return Err(BuilderZonesConfigError::RemoveNonExpungedZone {
+                    zone_id: zone.zone.id,
+                    disposition: zone.zone.disposition,
+                });
+            }
+            BlueprintZoneDisposition::Expunged => Ok(()),
+        },
+        BuilderZoneEntry::Removed(zone_id) => {
+            Err(BuilderZonesConfigError::OperateOnUnmatchedZones {
+                op: BuilderZoneOperation::Remove,
+                unmatched: UnmatchedZones::one_already_removed(*zone_id),
+            })
+        }
+    }
+}
+
+/// A zone entry in [`BuilderZonesConfig`].
+#[derive(Debug)]
+enum BuilderZoneEntry {
+    /// The zone is present in the blueprint.
+    Present(BuilderZoneConfig),
+
+    /// The zone has been removed from the blueprint.
+    ///
+    /// Why store a `Removed` entry instead of removing the zone from the list?
+    ///
+    /// * We can present slightly better error messages and catch a few more
+    ///   bad states (e.g. remove -> add).
+    /// * It's just more convenient this way: since we return `&mut` entries,
+    ///   removing elements form the list is a bit awkward.
+    ///
+    /// But note that _externally_ we pretend that the zone is actually gone.
+    /// External methods don't return `BuilderZoneEntry` -- only
+    /// `BuilderZoneConfig` for zones that are present.
+    Removed(OmicronZoneUuid),
+}
+
+impl BuilderZoneEntry {
+    fn id(&self) -> OmicronZoneUuid {
+        match self {
+            Self::Present(z) => z.zone.id,
+            Self::Removed(id) => *id,
+        }
+    }
+
+    fn as_present(&self) -> Option<&BuilderZoneConfig> {
+        match self {
+            Self::Present(z) => Some(z),
+            Self::Removed(_) => None,
+        }
+    }
+
+    fn into_present(self) -> Option<BuilderZoneConfig> {
+        match self {
+            Self::Present(z) => Some(z),
+            Self::Removed(_) => None,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub(super) struct BuilderZoneConfig {
     zone: BlueprintZoneConfig,
@@ -204,15 +353,111 @@ pub(super) enum BuilderZoneState {
 pub(super) enum BuilderZonesConfigError {
     #[error("attempted to add zone that already exists: {zone_id}")]
     AddExistingZone { zone_id: OmicronZoneUuid },
+
+    #[error("attempted to add zone that has already been removed: {zone_id}")]
+    AddRemovedZone { zone_id: OmicronZoneUuid },
+
+    #[error(
+        "while attempting to {op} zones, not all zones provided\
+         were found: {unmatched:?}"
+    )]
+    OperateOnUnmatchedZones {
+        op: BuilderZoneOperation,
+        unmatched: UnmatchedZones,
+    },
+
     #[error(
         "attempted to expunge zone {zone_id} that was in state {state:?} \
          (can only expunge unchanged zones)"
     )]
     ExpungeModifiedZone { zone_id: OmicronZoneUuid, state: BuilderZoneState },
+
     #[error(
-        "while expunging zones, not all zones provided were found: {unmatched:?}"
+        "attempted to remove a non-expunged zone: {zone_id} \
+         (disposition: {disposition:?})"
     )]
-    ExpungeUnmatchedZones { unmatched: BTreeSet<OmicronZoneUuid> },
+    RemoveNonExpungedZone {
+        zone_id: OmicronZoneUuid,
+        disposition: BlueprintZoneDisposition,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum BuilderZoneOperation {
+    Expunge,
+    Remove,
+}
+
+impl fmt::Display for BuilderZoneOperation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Expunge => write!(f, "expunge"),
+            Self::Remove => write!(f, "remove"),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(super) struct UnmatchedZones {
+    non_existent: BTreeSet<OmicronZoneUuid>,
+    already_removed: BTreeSet<OmicronZoneUuid>,
+}
+
+impl UnmatchedZones {
+    fn one_non_existent(zone_id: OmicronZoneUuid) -> Self {
+        Self {
+            non_existent: {
+                let mut set = BTreeSet::new();
+                set.insert(zone_id);
+                set
+            },
+            already_removed: BTreeSet::new(),
+        }
+    }
+
+    fn one_already_removed(zone_id: OmicronZoneUuid) -> Self {
+        Self {
+            non_existent: BTreeSet::new(),
+            already_removed: {
+                let mut set = BTreeSet::new();
+                set.insert(zone_id);
+                set
+            },
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.non_existent.is_empty() && self.already_removed.is_empty()
+    }
+}
+
+impl fmt::Display for UnmatchedZones {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if !self.non_existent.is_empty() {
+            write!(f, "non-existent: ")?;
+            for (ix, zone_id) in self.non_existent.iter().enumerate() {
+                write!(f, "{zone_id}")?;
+                if ix < self.non_existent.len() - 1 {
+                    write!(f, ", ")?;
+                }
+            }
+        }
+
+        if !self.already_removed.is_empty() {
+            if !self.non_existent.is_empty() {
+                write!(f, "; ")?;
+            }
+            write!(f, "already removed: ")?;
+            for (ix, zone_id) in self.already_removed.iter().enumerate() {
+                write!(f, "{zone_id}")?;
+                if ix < self.already_removed.len() - 1 {
+                    write!(f, ", ")?;
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -381,8 +626,12 @@ mod tests {
             .expect_err("expunging non-existent zone");
         assert_eq!(
             error,
-            BuilderZonesConfigError::ExpungeUnmatchedZones {
-                unmatched: non_existent_set
+            BuilderZonesConfigError::OperateOnUnmatchedZones {
+                op: BuilderZoneOperation::Expunge,
+                unmatched: UnmatchedZones {
+                    non_existent: non_existent_set,
+                    already_removed: BTreeSet::new(),
+                }
             }
         );
 
@@ -422,6 +671,35 @@ mod tests {
             BuilderZonesConfigError::ExpungeModifiedZone {
                 zone_id: new_zone_id,
                 state: BuilderZoneState::Added
+            }
+        );
+
+        // Removing a zone should fail if it doesn't exist.
+        let error = builder
+            .zones
+            .change_sled_zones(existing_sled_id)
+            .remove_zone_entry(non_existent_zone_id)
+            .expect_err("removing non-existent zone");
+        assert_eq!(
+            error,
+            BuilderZonesConfigError::OperateOnUnmatchedZones {
+                op: BuilderZoneOperation::Remove,
+                unmatched: UnmatchedZones::one_non_existent(
+                    non_existent_zone_id
+                ),
+            }
+        );
+        // Removing a zone should fail if it's not in an expunged state.
+        let error = builder
+            .zones
+            .change_sled_zones(existing_sled_id)
+            .remove_zone_entry(new_zone_id)
+            .expect_err("removing non-expunged zone");
+        assert_eq!(
+            error,
+            BuilderZonesConfigError::RemoveNonExpungedZone {
+                zone_id: new_zone_id,
+                disposition: BlueprintZoneDisposition::InService
             }
         );
 

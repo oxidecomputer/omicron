@@ -5409,6 +5409,7 @@ dependencies = [
  "sled-agent-client",
  "slog",
  "static_assertions",
+ "steno",
  "strum",
  "test-strategy",
  "thiserror",
@@ -5430,6 +5431,7 @@ dependencies = [
  "omicron-workspace-hack",
  "slog",
  "slog-error-chain",
+ "steno",
 ]
 
 [[package]]

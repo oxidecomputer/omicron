@@ -14,6 +14,7 @@ nexus-db-queries.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
+steno.workspace = true
 slog.workspace = true
 slog-error-chain.workspace = true
 

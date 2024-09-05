@@ -27,7 +27,9 @@ use nexus_types::deployment::ZpoolFilter;
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::Collection;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
+use slog::debug;
 use slog::error;
 use slog::{info, warn, Logger};
 use std::collections::BTreeMap;
@@ -93,15 +95,119 @@ impl<'a> Planner<'a> {
     }
 
     fn do_plan(&mut self) -> Result<(), Error> {
-        // We perform planning in two loops: the first one turns expunged sleds
-        // into expunged zones, and the second one adds services.
+        // Perform planning for sleds in 4 main steps:
 
+        // 1. Clean up entries that no longer have any resources left. This is
+        //    done first because it is an error to clean up any services after
+        //    operating on them. (Cleanup is for entries that *don't* have any
+        //    resources left.)
+        self.do_plan_cleanup()?;
+
+        // 2. Turn expunged sleds into expunged zones.
         self.do_plan_expunge()?;
+
+        // 3. Add services to sleds that need them.
         self.do_plan_add()?;
+
+        // 4. Decommission sleds that are no longer in use.
         self.do_plan_decommission()?;
+
+        // Other steps that aren't related to sleds.
         self.do_plan_cockroachdb_settings();
 
         Ok(())
+    }
+
+    fn do_plan_cleanup(&mut self) -> Result<(), Error> {
+        for sled_id in self.blueprint.sled_ids_with_zones() {
+            let mut zones_to_remove = BTreeSet::new();
+
+            for zone in self
+                .blueprint
+                .current_sled_zones(sled_id, BlueprintZoneFilter::Expunged)
+            {
+                if self.any_network_resources_assigned(zone.id) {
+                    continue;
+                }
+
+                match zone.zone_type.kind() {
+                    ZoneKind::Nexus => {
+                        // Currently, we clean up expunged Nexus zones that don't have any
+                        // external IPs or sagas assigned to them.
+                        let zone_id = zone.id;
+
+                        if let Some(sec_resources) =
+                            self.input.sec_resources(&zone_id)
+                        {
+                            if !sec_resources.unfinished_sagas.is_empty() {
+                                debug!(
+                                    self.log,
+                                    "skipping cleanup of expunged Nexus zone \
+                                     because it has unfinished sagas";
+                                    "zone_id" => %zone_id,
+                                    "unfinished_sagas" => ?sec_resources.unfinished_sagas,
+                                );
+                                continue;
+                            }
+                        }
+
+                        info!(
+                            self.log,
+                            "cleaning up expunged Nexus zone which has no resources assigned";
+                            "sled_id" => %sled_id,
+                            "zone_id" => %zone_id,
+                        );
+
+                        zones_to_remove.insert(zone_id);
+                    }
+                    _ => {
+                        // We don't know how to clean up other zones yet.
+                    }
+                }
+            }
+
+            if zones_to_remove.is_empty() {
+                continue;
+            }
+
+            for zone in zones_to_remove {
+                self.blueprint.remove_zone_entry(sled_id, zone)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    // Does a zone have any networking resources assigned to it?
+    fn any_network_resources_assigned(&self, zone_id: OmicronZoneUuid) -> bool {
+        let network_resources = self.input.network_resources();
+
+        if let Some(external_ip) =
+            network_resources.get_external_ip_by_zone_id(zone_id)
+        {
+            debug!(
+                self.log,
+                "skipping cleanup of expunged Nexus zone \
+                 because it has an external IP assigned";
+                "zone_id" => %zone_id,
+                "external_ip_id" => ?external_ip.ip,
+            );
+            return true;
+        }
+
+        if let Some(nic) = network_resources.get_nic_by_zone_id(zone_id) {
+            debug!(
+                self.log,
+                "skipping cleanup of expunged Nexus zone \
+                 because it has a NIC assigned";
+                "zone_id" => %zone_id,
+                "nic_id" => %nic.nic.id,
+            );
+
+            return true;
+        }
+
+        false
     }
 
     fn do_plan_decommission(&mut self) -> Result<(), Error> {
@@ -732,6 +838,7 @@ mod test {
     use chrono::TimeZone;
     use chrono::Utc;
     use expectorate::assert_contents;
+    use maplit::btreeset;
     use nexus_inventory::now_db_precision;
     use nexus_sled_agent_shared::inventory::ZoneKind;
     use nexus_types::deployment::blueprint_zone_type;
@@ -743,6 +850,7 @@ mod test {
     use nexus_types::deployment::CockroachDbPreserveDowngrade;
     use nexus_types::deployment::CockroachDbSettings;
     use nexus_types::deployment::OmicronZoneNetworkResources;
+    use nexus_types::deployment::SecResources;
     use nexus_types::deployment::SledDisk;
     use nexus_types::external_api::views::PhysicalDiskPolicy;
     use nexus_types::external_api::views::PhysicalDiskState;
@@ -760,7 +868,9 @@ mod test {
     use omicron_uuid_kinds::ZpoolUuid;
     use std::collections::HashMap;
     use std::mem;
+    use steno::SagaId;
     use typed_rng::TypedUuidRng;
+    use uuid::Uuid;
 
     /// Runs through a basic sequence of blueprints for adding a sled
     #[test]
@@ -1693,6 +1803,8 @@ mod test {
                 zone.disposition = BlueprintZoneDisposition::Expunged;
             }
 
+            // Note that some of the decommissioned sled's zones are going to
+            // be cleaned up. That's to be expected.
             *sled_id
         };
         println!("1 -> 2: decommissioned {decommissioned_sled_id}");
@@ -1928,12 +2040,29 @@ mod test {
 
         // Expunge one of the sleds.
         let mut builder = input.into_builder();
+
         let expunged_sled_id = {
             let mut iter = builder.sleds_mut().iter_mut();
             let (sled_id, details) = iter.next().expect("at least one sled");
             details.policy = SledPolicy::Expunged;
             *sled_id
         };
+
+        // The sled should have a Nexus on it -- add an unfinished saga to the
+        // input to ensure that the Nexus isn't cleaned up until the saga is.
+        let saga_id = SagaId(Uuid::new_v4());
+        let nexus_id = blueprint1.blueprint_zones[&expunged_sled_id]
+            .zones
+            .iter()
+            .find(|zone| zone.zone_type.is_nexus())
+            .expect("no Nexus zone found")
+            .id;
+        builder
+            .add_sec_resources(
+                nexus_id,
+                SecResources { unfinished_sagas: btreeset! { saga_id } },
+            )
+            .expect("adding SEC resources");
 
         let input = builder.build();
         let mut blueprint2 = Planner::new_based_on(
@@ -1990,10 +2119,9 @@ mod test {
         .plan()
         .expect("failed to plan");
 
-        // There should be no changes to the blueprint; we don't yet garbage
-        // collect zones, so we should still have the sled's expunged zones
-        // (even though the sled itself is no longer present in the list of
-        // commissioned sleds).
+        // There should be no changes to the blueprint; the only garbage
+        // collection we do is for Nexus, to which is still assigned the
+        // unfinished saga.
         let diff = blueprint3.diff_since_blueprint(&blueprint2);
         println!(
             "2 -> 3 (decommissioned {expunged_sled_id}):\n{}",
@@ -2003,6 +2131,46 @@ mod test {
         assert_eq!(diff.sleds_removed.len(), 0);
         assert_eq!(diff.sleds_modified.len(), 0);
         assert_eq!(diff.sleds_unchanged.len(), DEFAULT_N_SLEDS);
+
+        // Now remove the saga from the SEC resources and plan again.
+        let mut builder = input.into_builder();
+        builder
+            .remove_sec_resources(&nexus_id)
+            .expect("nexus ID should have had SEC resources");
+        let input = builder.build();
+
+        let blueprint4 = Planner::new_based_on(
+            logctx.log.clone(),
+            &blueprint3,
+            &input,
+            "test_blueprint4",
+            &collection,
+        )
+        .expect("created planner")
+        .with_rng_seed((TEST_NAME, "bp4"))
+        .plan()
+        .expect("failed to plan");
+
+        // There should be one removed zone: the Nexus zone.
+        let diff = blueprint4.diff_since_blueprint(&blueprint3);
+        println!("3 -> 4 (removed saga from Nexus):\n{}", diff.display());
+
+        assert_eq!(diff.sleds_added.len(), 0);
+        assert_eq!(diff.sleds_removed.len(), 0);
+        assert_eq!(diff.sleds_modified.len(), 1);
+        assert_eq!(diff.sleds_unchanged.len(), DEFAULT_N_SLEDS - 1);
+
+        assert_eq!(diff.zones.added.len(), 0);
+        assert_eq!(diff.zones.modified.len(), 0);
+        assert_eq!(diff.zones.removed.len(), 1);
+
+        let removed_zones = diff.zones.removed.get(&expunged_sled_id).expect(
+            "expected to find removed zones for the decommissioned sled",
+        );
+        assert_eq!(removed_zones.zones.len(), 1);
+        let removed_zone = removed_zones.zones.first().unwrap();
+        assert_eq!(removed_zone.id(), nexus_id);
+        assert_eq!(removed_zone.kind(), ZoneKind::Nexus);
 
         logctx.cleanup_successful();
     }

@@ -65,6 +65,7 @@ pub use planning_input::PlanningInput;
 pub use planning_input::PlanningInputBuildError;
 pub use planning_input::PlanningInputBuilder;
 pub use planning_input::Policy;
+pub use planning_input::SecResources;
 pub use planning_input::SledDetails;
 pub use planning_input::SledDisk;
 pub use planning_input::SledFilter;

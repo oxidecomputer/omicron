@@ -18,9 +18,12 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use nexus_auth::authz;
 use nexus_auth::context::OpContext;
+use nexus_db_model::SagaId;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::ops::Add;
 
 impl DataStore {
@@ -127,6 +130,47 @@ impl DataStore {
                 )))
             }
         }
+    }
+
+    /// Returns a list of SEC IDs that have unfinished sagas assigned to them.
+    pub async fn saga_list_secs_with_unfinished_sagas(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<BTreeMap<db::saga_types::SecId, BTreeSet<steno::SagaId>>, Error>
+    {
+        let mut secs = BTreeMap::new();
+        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        while let Some(p) = paginator.next() {
+            use db::schema::saga::dsl;
+
+            let batch = paginated(dsl::saga, dsl::id, &p.current_pagparams())
+                .filter(dsl::saga_state.ne(db::saga_types::SagaCachedState(
+                    steno::SagaCachedState::Done,
+                )))
+                .select((dsl::id, dsl::current_sec))
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+            paginator =
+                p.found_batch(&batch, &|(saga_id, _): &(SagaId, _)| *saga_id);
+
+            for (saga_id, sec_id) in batch {
+                // Sagas may not have any SEC assigned to them, in which case
+                // we skip them.
+                if let Some(sec_id) = sec_id {
+                    secs.entry(sec_id)
+                        .or_insert_with(BTreeSet::new)
+                        .insert(saga_id.into());
+                }
+            }
+        }
+
+        Ok(secs)
     }
 
     /// Returns a list of unfinished sagas assigned to SEC `sec_id`, making as

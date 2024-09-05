@@ -1531,6 +1531,7 @@ mod test {
                 target_cockroachdb_zone_count: COCKROACHDB_REDUNDANCY,
                 target_cockroachdb_cluster_version:
                     CockroachDbClusterVersion::POLICY,
+                unfinished_sagas: &BTreeMap::new(),
                 log,
             }
             .build()

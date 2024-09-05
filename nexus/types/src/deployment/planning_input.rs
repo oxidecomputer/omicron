@@ -35,7 +35,9 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::fmt;
+use steno::SagaId;
 use strum::IntoEnumIterator;
 
 /// Policy and database inputs to the Reconfigurator planner
@@ -54,6 +56,9 @@ use strum::IntoEnumIterator;
 /// - Each Omicron zone has at most one external IP and at most one vNIC.
 /// - A given external IP or vNIC is only associated with a single Omicron
 ///   zone.
+///
+/// Note: the `Serialize` and `Deserialize` impls are meant for debugging, and
+/// are not stable.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlanningInput {
     /// fleet-wide policy
@@ -73,6 +78,13 @@ pub struct PlanningInput {
 
     /// per-zone network resources
     network_resources: OmicronZoneNetworkResources,
+
+    // Note that Nexus uses an `SecId` newtype, but that is defined in
+    // `nexus-db-model`. `nexus-types` doesn't depend on `nexus-db-model` so we
+    // use the closest analog, `OmicronZoneUuid`, here.
+    //
+    /// per-SEC resources
+    sec_resources: BTreeMap<OmicronZoneUuid, SecResources>,
 }
 
 impl PlanningInput {
@@ -151,6 +163,13 @@ impl PlanningInput {
         self.sleds.get(sled_id).map(|details| &details.resources)
     }
 
+    pub fn sec_resources(
+        &self,
+        sec_id: &OmicronZoneUuid,
+    ) -> Option<&SecResources> {
+        self.sec_resources.get(sec_id)
+    }
+
     pub fn network_resources(&self) -> &OmicronZoneNetworkResources {
         &self.network_resources
     }
@@ -167,6 +186,7 @@ impl PlanningInput {
             cockroachdb_settings: self.cockroachdb_settings,
             sleds: self.sleds,
             network_resources: self.network_resources,
+            sec_resources: self.sec_resources,
         }
     }
 }
@@ -341,6 +361,13 @@ impl From<CockroachDbClusterVersion> for CockroachDbPreserveDowngrade {
     fn from(value: CockroachDbClusterVersion) -> Self {
         CockroachDbPreserveDowngrade::Set(value)
     }
+}
+
+/// Saga-related planning input.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecResources {
+    /// The set of currently-running or unwinding saga IDs for this SEC.
+    pub unfinished_sagas: BTreeSet<SagaId>,
 }
 
 /// Describes a single disk already managed by the sled.
@@ -762,6 +789,8 @@ pub struct SledDetails {
 pub enum PlanningInputBuildError {
     #[error("duplicate sled ID: {0}")]
     DuplicateSledId(SledUuid),
+    #[error("duplicate SEC ID: {0}")]
+    DuplicateSecId(OmicronZoneUuid),
     #[error("Omicron zone {zone_id} has a range of IPs ({ip:?}), only a single IP is supported")]
     NotSingleIp { zone_id: OmicronZoneUuid, ip: IpNetwork },
     #[error(transparent)]
@@ -785,6 +814,7 @@ pub struct PlanningInputBuilder {
     cockroachdb_settings: CockroachDbSettings,
     sleds: BTreeMap<SledUuid, SledDetails>,
     network_resources: OmicronZoneNetworkResources,
+    sec_resources: BTreeMap<OmicronZoneUuid, SecResources>,
 }
 
 impl PlanningInputBuilder {
@@ -806,6 +836,7 @@ impl PlanningInputBuilder {
             cockroachdb_settings: CockroachDbSettings::empty(),
             sleds: BTreeMap::new(),
             network_resources: OmicronZoneNetworkResources::new(),
+            sec_resources: BTreeMap::new(),
         }
     }
 
@@ -822,6 +853,7 @@ impl PlanningInputBuilder {
             cockroachdb_settings,
             sleds: BTreeMap::new(),
             network_resources: OmicronZoneNetworkResources::new(),
+            sec_resources: BTreeMap::new(),
         }
     }
 
@@ -855,6 +887,29 @@ impl PlanningInputBuilder {
         nic: OmicronZoneNic,
     ) -> Result<(), PlanningInputBuildError> {
         Ok(self.network_resources.add_nic(zone_id, nic)?)
+    }
+
+    pub fn add_sec_resources(
+        &mut self,
+        sec_id: OmicronZoneUuid,
+        resources: SecResources,
+    ) -> Result<(), PlanningInputBuildError> {
+        match self.sec_resources.entry(sec_id) {
+            Entry::Vacant(slot) => {
+                slot.insert(resources);
+                Ok(())
+            }
+            Entry::Occupied(_) => {
+                Err(PlanningInputBuildError::DuplicateSecId(sec_id))
+            }
+        }
+    }
+
+    pub fn remove_sec_resources(
+        &mut self,
+        sec_id: &OmicronZoneUuid,
+    ) -> Option<SecResources> {
+        self.sec_resources.remove(sec_id)
     }
 
     pub fn network_resources_mut(
@@ -927,6 +982,7 @@ impl PlanningInputBuilder {
             cockroachdb_settings: self.cockroachdb_settings,
             sleds: self.sleds,
             network_resources: self.network_resources,
+            sec_resources: self.sec_resources,
         }
     }
 }

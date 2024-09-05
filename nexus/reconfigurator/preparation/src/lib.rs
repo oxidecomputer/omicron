@@ -7,6 +7,7 @@
 use anyhow::Context;
 use futures::StreamExt;
 use nexus_db_model::DnsGroup;
+use nexus_db_model::SecId;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::DataStoreDnsTest;
 use nexus_db_queries::db::datastore::DataStoreInventoryTest;
@@ -23,6 +24,7 @@ use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::PlanningInputBuilder;
 use nexus_types::deployment::Policy;
+use nexus_types::deployment::SecResources;
 use nexus_types::deployment::SledDetails;
 use nexus_types::deployment::SledDisk;
 use nexus_types::deployment::SledFilter;
@@ -52,6 +54,7 @@ use slog::Logger;
 use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use steno::SagaId;
 
 /// Given various pieces of database state that go into the blueprint planning
 /// process, produce a `PlanningInput` object encapsulating what the planner
@@ -71,6 +74,7 @@ pub struct PlanningInputFromDb<'a> {
     pub internal_dns_version: nexus_db_model::Generation,
     pub external_dns_version: nexus_db_model::Generation,
     pub cockroachdb_settings: &'a CockroachDbSettings,
+    pub unfinished_sagas: &'a BTreeMap<SecId, BTreeSet<SagaId>>,
     pub log: &'a Logger,
 }
 
@@ -120,6 +124,10 @@ impl PlanningInputFromDb<'_> {
             .cockroachdb_settings(opctx)
             .await
             .internal_context("fetching cockroachdb settings")?;
+        let unfinished_sagas = datastore
+            .saga_list_secs_with_unfinished_sagas(opctx)
+            .await
+            .internal_context("fetching running sagas")?;
 
         let planning_input = PlanningInputFromDb {
             sled_rows: &sled_rows,
@@ -137,6 +145,7 @@ impl PlanningInputFromDb<'_> {
             internal_dns_version,
             external_dns_version,
             cockroachdb_settings: &cockroachdb_settings,
+            unfinished_sagas: &unfinished_sagas,
         }
         .build()
         .internal_context("assembling planning_input")?;
@@ -252,6 +261,16 @@ impl PlanningInputFromDb<'_> {
                 Error::internal_error(&format!(
                     "unexpectedly failed to add Omicron zone NIC \
                      to planning input: {e}"
+                ))
+            })?;
+        }
+
+        for (sec_id, sagas) in self.unfinished_sagas {
+            let resources = SecResources { unfinished_sagas: sagas.clone() };
+            let sec_id = OmicronZoneUuid::from_untyped_uuid(sec_id.0);
+            builder.add_sec_resources(sec_id, resources).map_err(|e| {
+                Error::internal_error(&format!(
+                    "unexpectedly failed to add SEC resources to planning input: {e}"
                 ))
             })?;
         }
