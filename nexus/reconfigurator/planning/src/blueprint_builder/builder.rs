@@ -1337,9 +1337,10 @@ impl<'a> BlueprintZonesBuilder<'a> {
     }
 
     /// Returns a mutable reference to a sled's Omicron zones *because* we're
-    /// going to change them.  It's essential that the caller _does_ change them
-    /// because we will have bumped the generation number and we don't want to
-    /// do that if no changes are being made.
+    /// going to change them.
+    ///
+    /// This method should generally only be called if the caller is going to
+    /// change the zones, but is safe to call otherwise.
     pub fn change_sled_zones(
         &mut self,
         sled_id: SledUuid,
