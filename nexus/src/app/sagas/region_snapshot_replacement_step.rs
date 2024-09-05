@@ -462,7 +462,8 @@ async fn rsrss_notify_upstairs(
         | VmmState::Migrating
         | VmmState::Failed
         | VmmState::Destroyed
-        | VmmState::SagaUnwound => {
+        | VmmState::SagaUnwound
+        | VmmState::Creating => {
             // Propolis server is not ok to receive volume replacement requests
             // - unwind so that this saga can run again.
             return Err(ActionError::action_failed(format!(

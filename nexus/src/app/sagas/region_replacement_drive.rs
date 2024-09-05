@@ -577,26 +577,17 @@ async fn check_from_previous_propolis_step(
                 Ok(DriveCheck::LastStepStillRunning)
             }
 
-            VmmState::Starting => {
-                // This state is unexpected, considering Nexus previously sent a
-                // target replacement request to this propolis!
+            // These states are unexpected, considering Nexus previously sent a
+            // target replacement request to this propolis!
+            VmmState::Starting | VmmState::Creating
+            // This state is unexpected because we should have already
+            // returned `DriveCheck::Wait` above.
+            | VmmState::Migrating => {
 
                 return Err(ActionError::action_failed(format!(
-                    "vmm {} propolis is Starting",
-                    step_vmm_id,
+                    "vmm {step_vmm_id} propolis is {state}",
                 )));
             }
-
-            VmmState::Migrating => {
-                // This state is unexpected because we should have already
-                // returned `DriveCheck::Wait` above.
-
-                return Err(ActionError::action_failed(format!(
-                    "vmm {} propolis is Migrating!",
-                    step_vmm_id,
-                )));
-            }
-
             VmmState::Stopping
             | VmmState::Stopped
             | VmmState::Failed
@@ -923,7 +914,8 @@ async fn srrd_drive_region_replacement_prepare(
                             | VmmState::Migrating
                             | VmmState::Failed
                             | VmmState::Destroyed
-                            | VmmState::SagaUnwound => {
+                            | VmmState::SagaUnwound
+                            | VmmState::Creating => {
                                 // Propolis server is not ok to receive volume
                                 // replacement requests, bail out
                                 return Err(ActionError::action_failed(format!(

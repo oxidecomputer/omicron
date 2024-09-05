@@ -135,13 +135,43 @@ impl CockroachCli {
 
 #[cfg(test)]
 mod tests {
-    use std::net::SocketAddr;
-
     use super::*;
     use cockroach_admin_types::NodeMembership;
     use nexus_test_utils::db::test_setup_database;
     use omicron_test_utils::dev;
+    use std::net::SocketAddr;
     use url::Url;
+
+    // Helper function to execute `command`, log its stdout/stderr/status, and
+    // return its stdout.
+    //
+    // This is to help debug test flakes like
+    // https://github.com/oxidecomputer/omicron/issues/6506.
+    async fn exec_command_logging_output(command: &mut Command) -> String {
+        let command_str = command
+            .as_std()
+            .get_args()
+            .map(|s| s.to_string_lossy())
+            .collect::<Vec<_>>()
+            .join(" ");
+        let output = match command.output().await {
+            Ok(output) => output,
+            Err(err) => panic!("failed executing [{command_str}]: {err}"),
+        };
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        eprintln!("Executed [{command_str}]");
+        eprintln!("  Status: {}", output.status);
+        eprintln!("  Stdout:");
+        eprintln!("----------------");
+        eprintln!("{stdout}");
+        eprintln!("----------------");
+        eprintln!("  Stderr:");
+        eprintln!("----------------");
+        eprintln!("{stderr}");
+        eprintln!("----------------");
+        stdout.to_string()
+    }
 
     // Ensure that if `cockroach node status` changes in a future CRDB version
     // bump, we have a test that will fail to force us to check whether our
@@ -165,10 +195,8 @@ mod tests {
             .arg(&db_url)
             .arg("--format")
             .arg("csv");
-        let output =
-            command.output().await.expect("ran `cockroach node status`");
+        let stdout = exec_command_logging_output(&mut command).await;
 
-        let stdout = String::from_utf8_lossy(&output.stdout);
         let mut lines = stdout.lines();
         let headers = lines.next().expect("header line");
         assert_eq!(
@@ -228,10 +256,8 @@ mod tests {
             .arg(&db_url)
             .arg("--format")
             .arg("csv");
-        let output =
-            command.output().await.expect("ran `cockroach node decommission`");
+        let stdout = exec_command_logging_output(&mut command).await;
 
-        let stdout = String::from_utf8_lossy(&output.stdout);
         let mut lines = stdout.lines();
         let headers = lines.next().expect("header line");
         assert_eq!(

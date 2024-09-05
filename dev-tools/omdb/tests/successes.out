@@ -397,14 +397,14 @@ task: "dns_config_internal"
   configured period: every 1m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last generation found: 1
 
 task: "dns_servers_internal"
   configured period: every 1m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     servers found: 1
 
       DNS_SERVER_ADDR 
@@ -414,7 +414,7 @@ task: "dns_propagation_internal"
   configured period: every 1m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     attempt to propagate generation: 1
 
       DNS_SERVER_ADDR LAST_RESULT 
@@ -425,14 +425,14 @@ task: "dns_config_external"
   configured period: every 1m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last generation found: 2
 
 task: "dns_servers_external"
   configured period: every 1m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     servers found: 1
 
       DNS_SERVER_ADDR 
@@ -442,7 +442,7 @@ task: "dns_propagation_external"
   configured period: every 1m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     attempt to propagate generation: 2
 
       DNS_SERVER_ADDR LAST_RESULT 
@@ -453,28 +453,28 @@ task: "nat_v4_garbage_collector"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: failed to resolve addresses for Dendrite services: no record found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
 
 task: "blueprint_loader"
   configured period: every 1m <REDACTED_DURATION>s
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: failed to read target blueprint: Internal Error: no target blueprint set
 
 task: "blueprint_executor"
   configured period: every 10m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: no blueprint
 
 task: "abandoned_vmm_reaper"
   configured period: every 1m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total abandoned VMMs found: 0
       VMM records deleted: 0
       VMM records already deleted by another Nexus: 0
@@ -484,28 +484,28 @@ task: "bfd_manager"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: failed to resolve addresses for Dendrite services: no record found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
 
 task: "crdb_node_id_collector"
   configured period: every 10m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: no blueprint
 
 task: "decommissioned_disk_cleaner"
   configured period: every 1m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "decommissioned_disk_cleaner" (don't know how to interpret details: Object {"deleted": Number(0), "error": Null, "error_count": Number(0), "found": Number(0), "not_ready_to_be_deleted": Number(0)})
 
 task: "external_endpoints"
   configured period: every 1m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     external API endpoints: 2 ('*' below marks default)
 
           SILO_ID                              DNS_NAME                           
@@ -522,9 +522,10 @@ task: "instance_updater"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total instances in need of updates: 0
-      instances with destroyed active VMMs: 0
+      instances with Destroyed active VMMs: 0
+      instances with Failed active VMMs: 0
       instances with terminated active migrations: 0
     update sagas started: 0
     update sagas completed successfully: 0
@@ -533,7 +534,7 @@ task: "instance_watcher"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total instances checked: 0
     checks completed: 0
        successful checks: 0
@@ -546,7 +547,7 @@ task: "inventory_collection"
   configured period: every 10m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last collection id:      ..........<REDACTED_UUID>...........
     last collection started: <REDACTED_TIMESTAMP>
     last collection done:    <REDACTED_TIMESTAMP>
@@ -555,7 +556,7 @@ task: "lookup_region_port"
   configured period: every 1m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total filled in ports: 0
     errors: 0
 
@@ -563,14 +564,14 @@ task: "metrics_producer_gc"
   configured period: every 1m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "metrics_producer_gc" (don't know how to interpret details: Object {"expiration": String("<REDACTED           TIMESTAMP>"), "pruned": Array []})
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "metrics_producer_gc" (don't know how to interpret details: Object {"expiration": String("<REDACTED_TIMESTAMP>"), "pruned": Array []})
 
 task: "phantom_disks"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     number of phantom disks deleted: 0
     number of phantom disk delete errors: 0
 
@@ -578,14 +579,14 @@ task: "physical_disk_adoption"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: task disabled
 
 task: "region_replacement"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     number of region replacements started ok: 0
     number of region replacement start errors: 0
 
@@ -593,7 +594,7 @@ task: "region_replacement_driver"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     number of region replacement drive sagas started ok: 0
     number of region replacement finish sagas started ok: 0
     number of errors: 0
@@ -602,7 +603,7 @@ task: "region_snapshot_replacement_finish"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total records transitioned to done: 0
     errors: 0
 
@@ -610,7 +611,7 @@ task: "region_snapshot_replacement_garbage_collection"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total garbage collections requested: 0
     errors: 0
 
@@ -618,7 +619,7 @@ task: "region_snapshot_replacement_start"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total requests created ok: 0
     total start saga invoked ok: 0
     errors: 0
@@ -627,7 +628,7 @@ task: "region_snapshot_replacement_step"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total step records created ok: 0
     total step garbage collect saga invoked ok: 0
     total step saga invoked ok: 0
@@ -637,7 +638,7 @@ task: "saga_recovery"
   configured period: every 10m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     since Nexus started:
         sagas recovered:           0
         sagas recovery errors:     0
@@ -658,34 +659,34 @@ task: "service_firewall_rule_propagation"
   configured period: every 5m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 
 task: "service_zone_nat_tracker"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: inventory collection is None
 
 task: "switch_port_config_manager"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "switch_port_config_manager" (don't know how to interpret details: Object {})
 
 task: "v2p_manager"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "v2p_manager" (don't know how to interpret details: Object {})
 
 task: "vpc_route_manager"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "vpc_route_manager" (don't know how to interpret details: Object {})
 
 ---------------------------------------------
@@ -700,7 +701,7 @@ task: "saga_recovery"
   configured period: every 10m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     since Nexus started:
         sagas recovered:           0
         sagas recovery errors:     0
@@ -729,14 +730,14 @@ task: "blueprint_loader"
   configured period: every 1m <REDACTED_DURATION>s
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: failed to read target blueprint: Internal Error: no target blueprint set
 
 task: "blueprint_executor"
   configured period: every 10m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: no blueprint
 
 ---------------------------------------------
@@ -751,14 +752,14 @@ task: "dns_config_internal"
   configured period: every 1m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last generation found: 1
 
 task: "dns_servers_internal"
   configured period: every 1m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     servers found: 1
 
       DNS_SERVER_ADDR 
@@ -768,7 +769,7 @@ task: "dns_propagation_internal"
   configured period: every 1m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     attempt to propagate generation: 1
 
       DNS_SERVER_ADDR LAST_RESULT 
@@ -787,14 +788,14 @@ task: "dns_config_external"
   configured period: every 1m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last generation found: 2
 
 task: "dns_servers_external"
   configured period: every 1m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     servers found: 1
 
       DNS_SERVER_ADDR 
@@ -804,7 +805,7 @@ task: "dns_propagation_external"
   configured period: every 1m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     attempt to propagate generation: 2
 
       DNS_SERVER_ADDR LAST_RESULT 
@@ -823,14 +824,14 @@ task: "dns_config_internal"
   configured period: every 1m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last generation found: 1
 
 task: "dns_servers_internal"
   configured period: every 1m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     servers found: 1
 
       DNS_SERVER_ADDR 
@@ -840,7 +841,7 @@ task: "dns_propagation_internal"
   configured period: every 1m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     attempt to propagate generation: 1
 
       DNS_SERVER_ADDR LAST_RESULT 
@@ -851,14 +852,14 @@ task: "dns_config_external"
   configured period: every 1m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last generation found: 2
 
 task: "dns_servers_external"
   configured period: every 1m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     servers found: 1
 
       DNS_SERVER_ADDR 
@@ -868,7 +869,7 @@ task: "dns_propagation_external"
   configured period: every 1m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     attempt to propagate generation: 2
 
       DNS_SERVER_ADDR LAST_RESULT 
@@ -879,28 +880,28 @@ task: "nat_v4_garbage_collector"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: failed to resolve addresses for Dendrite services: no record found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
 
 task: "blueprint_loader"
   configured period: every 1m <REDACTED_DURATION>s
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: failed to read target blueprint: Internal Error: no target blueprint set
 
 task: "blueprint_executor"
   configured period: every 10m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: no blueprint
 
 task: "abandoned_vmm_reaper"
   configured period: every 1m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total abandoned VMMs found: 0
       VMM records deleted: 0
       VMM records already deleted by another Nexus: 0
@@ -910,28 +911,28 @@ task: "bfd_manager"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: failed to resolve addresses for Dendrite services: no record found for Query { name: Name("_dendrite._tcp.control-plane.oxide.internal."), query_type: SRV, query_class: IN }
 
 task: "crdb_node_id_collector"
   configured period: every 10m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: no blueprint
 
 task: "decommissioned_disk_cleaner"
   configured period: every 1m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "decommissioned_disk_cleaner" (don't know how to interpret details: Object {"deleted": Number(0), "error": Null, "error_count": Number(0), "found": Number(0), "not_ready_to_be_deleted": Number(0)})
 
 task: "external_endpoints"
   configured period: every 1m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     external API endpoints: 2 ('*' below marks default)
 
           SILO_ID                              DNS_NAME                           
@@ -948,9 +949,10 @@ task: "instance_updater"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total instances in need of updates: 0
-      instances with destroyed active VMMs: 0
+      instances with Destroyed active VMMs: 0
+      instances with Failed active VMMs: 0
       instances with terminated active migrations: 0
     update sagas started: 0
     update sagas completed successfully: 0
@@ -959,7 +961,7 @@ task: "instance_watcher"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total instances checked: 0
     checks completed: 0
        successful checks: 0
@@ -972,7 +974,7 @@ task: "inventory_collection"
   configured period: every 10m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by an explicit signal
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last collection id:      ..........<REDACTED_UUID>...........
     last collection started: <REDACTED_TIMESTAMP>
     last collection done:    <REDACTED_TIMESTAMP>
@@ -981,7 +983,7 @@ task: "lookup_region_port"
   configured period: every 1m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total filled in ports: 0
     errors: 0
 
@@ -989,14 +991,14 @@ task: "metrics_producer_gc"
   configured period: every 1m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-warning: unknown background task: "metrics_producer_gc" (don't know how to interpret details: Object {"expiration": String("<REDACTED           TIMESTAMP>"), "pruned": Array []})
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+warning: unknown background task: "metrics_producer_gc" (don't know how to interpret details: Object {"expiration": String("<REDACTED_TIMESTAMP>"), "pruned": Array []})
 
 task: "phantom_disks"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     number of phantom disks deleted: 0
     number of phantom disk delete errors: 0
 
@@ -1004,14 +1006,14 @@ task: "physical_disk_adoption"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a dependent task completing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: task disabled
 
 task: "region_replacement"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     number of region replacements started ok: 0
     number of region replacement start errors: 0
 
@@ -1019,7 +1021,7 @@ task: "region_replacement_driver"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     number of region replacement drive sagas started ok: 0
     number of region replacement finish sagas started ok: 0
     number of errors: 0
@@ -1028,7 +1030,7 @@ task: "region_snapshot_replacement_finish"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total records transitioned to done: 0
     errors: 0
 
@@ -1036,7 +1038,7 @@ task: "region_snapshot_replacement_garbage_collection"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total garbage collections requested: 0
     errors: 0
 
@@ -1044,7 +1046,7 @@ task: "region_snapshot_replacement_start"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total requests created ok: 0
     total start saga invoked ok: 0
     errors: 0
@@ -1053,7 +1055,7 @@ task: "region_snapshot_replacement_step"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total step records created ok: 0
     total step garbage collect saga invoked ok: 0
     total step saga invoked ok: 0
@@ -1063,7 +1065,7 @@ task: "saga_recovery"
   configured period: every 10m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     since Nexus started:
         sagas recovered:           0
         sagas recovery errors:     0
@@ -1084,34 +1086,34 @@ task: "service_firewall_rule_propagation"
   configured period: every 5m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 
 task: "service_zone_nat_tracker"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     last completion reported error: inventory collection is None
 
 task: "switch_port_config_manager"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "switch_port_config_manager" (don't know how to interpret details: Object {})
 
 task: "v2p_manager"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "v2p_manager" (don't know how to interpret details: Object {})
 
 task: "vpc_route_manager"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
 warning: unknown background task: "vpc_route_manager" (don't know how to interpret details: Object {})
 
 ---------------------------------------------
@@ -1167,7 +1169,7 @@ termination: Exited(0)
 ---------------------------------------------
 stdout:
 T ENA ID                                   PARENT TIME_CREATED             
-* no  ......<REDACTED_BLUEPRINT_ID>....... <none> <REDACTED     TIMESTAMP> 
+* no  ......<REDACTED_BLUEPRINT_ID>....... <none> <REDACTED_TIMESTAMP> 
 ---------------------------------------------
 stderr:
 note: using Nexus URL http://127.0.0.1:REDACTED_PORT/
@@ -1200,7 +1202,7 @@ WARNING: Zones exist without physical disks!
 
  METADATA:
     created by:::::::::::   nexus-test-utils
-    created at:::::::::::   <REDACTED     TIMESTAMP>
+    created at:::::::::::   <REDACTED_TIMESTAMP>
     comment::::::::::::::   initial test blueprint
     internal DNS version:   1
     external DNS version:   2
@@ -1238,7 +1240,7 @@ WARNING: Zones exist without physical disks!
 
  METADATA:
     created by:::::::::::   nexus-test-utils
-    created at:::::::::::   <REDACTED     TIMESTAMP>
+    created at:::::::::::   <REDACTED_TIMESTAMP>
     comment::::::::::::::   initial test blueprint
     internal DNS version:   1
     external DNS version:   2

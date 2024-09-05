@@ -439,30 +439,14 @@ impl SledAgent {
         self: &Arc<Self>,
         propolis_id: PropolisUuid,
         state: VmmStateRequested,
-    ) -> Result<VmmPutStateResponse, Error> {
+    ) -> Result<VmmPutStateResponse, HttpError> {
         if let Some(e) = self.instance_ensure_state_error.lock().await.as_ref()
         {
-            return Err(e.clone());
+            return Err(e.clone().into());
         }
 
-        let current = match self
-            .vmms
-            .sim_get_cloned_object(&propolis_id.into_untyped_uuid())
-            .await
-        {
-            Ok(i) => i.current().clone(),
-            Err(_) => match state {
-                VmmStateRequested::Stopped => {
-                    return Ok(VmmPutStateResponse { updated_runtime: None });
-                }
-                _ => {
-                    return Err(Error::invalid_request(&format!(
-                        "Propolis {} not registered on sled",
-                        propolis_id,
-                    )));
-                }
-            },
-        };
+        let current =
+            self.get_sim_instance(propolis_id).await?.current().clone();
 
         let mock_lock = self.mock_propolis.lock().await;
         if let Some((_srv, client)) = mock_lock.as_ref() {
@@ -470,7 +454,8 @@ impl SledAgent {
                 VmmStateRequested::MigrationTarget(_) => {
                     return Err(Error::internal_error(
                         "migration not implemented for mock Propolis",
-                    ));
+                    )
+                    .into());
                 }
                 VmmStateRequested::Running => {
                     let vmms = self.vmms.clone();
@@ -506,7 +491,13 @@ impl SledAgent {
                 }
             };
             client.instance_state_put().body(body).send().await.map_err(
-                |e| Error::internal_error(&format!("propolis-client: {}", e)),
+                |e| {
+                    crate::sled_agent::Error::Instance(
+                        crate::instance_manager::Error::Instance(
+                            crate::instance::Error::Propolis(e), // whew!
+                        ),
+                    )
+                },
             )?;
         }
 
@@ -518,20 +509,27 @@ impl SledAgent {
         Ok(VmmPutStateResponse { updated_runtime: Some(new_state) })
     }
 
-    pub async fn instance_get_state(
+    /// Wrapper around `sim_get_cloned_object` that returns the same error as
+    /// the real sled-agent on an unknown VMM.
+    async fn get_sim_instance(
         &self,
         propolis_id: PropolisUuid,
-    ) -> Result<SledVmmState, HttpError> {
-        let instance = self
-            .vmms
+    ) -> Result<SimInstance, crate::sled_agent::Error> {
+        self.vmms
             .sim_get_cloned_object(&propolis_id.into_untyped_uuid())
             .await
             .map_err(|_| {
                 crate::sled_agent::Error::Instance(
                     crate::instance_manager::Error::NoSuchVmm(propolis_id),
                 )
-            })?;
-        Ok(instance.current())
+            })
+    }
+
+    pub async fn instance_get_state(
+        &self,
+        propolis_id: PropolisUuid,
+    ) -> Result<SledVmmState, HttpError> {
+        Ok(self.get_sim_instance(propolis_id).await?.current())
     }
 
     pub async fn instance_simulate_migration_source(
@@ -539,15 +537,7 @@ impl SledAgent {
         propolis_id: PropolisUuid,
         migration: instance::SimulateMigrationSource,
     ) -> Result<(), HttpError> {
-        let instance = self
-            .vmms
-            .sim_get_cloned_object(&propolis_id.into_untyped_uuid())
-            .await
-            .map_err(|_| {
-                crate::sled_agent::Error::Instance(
-                    crate::instance_manager::Error::NoSuchVmm(propolis_id),
-                )
-            })?;
+        let instance = self.get_sim_instance(propolis_id).await?;
         instance.set_simulated_migration_source(migration);
         Ok(())
     }
