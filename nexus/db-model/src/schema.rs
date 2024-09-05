@@ -1517,18 +1517,6 @@ table! {
 }
 
 table! {
-    bp_clickhouse_cluster_config (blueprint_id) {
-        blueprint_id -> Uuid,
-
-        generation-> Int8,
-        max_used_server_id -> Int8,
-        max_used_keeper_id -> Int8,
-        cluster_name -> Text,
-        cluster_secret -> Text,
-    }
-}
-
-table! {
     bp_target (version) {
         version -> Int8,
 
@@ -1626,6 +1614,18 @@ table! {
         vni -> Int8,
         is_primary -> Bool,
         slot -> Int2,
+    }
+}
+
+table! {
+    bp_clickhouse_cluster_config (blueprint_id) {
+        blueprint_id -> Uuid,
+
+        generation-> Int8,
+        max_used_server_id -> Int8,
+        max_used_keeper_id -> Int8,
+        cluster_name -> Text,
+        cluster_secret -> Text,
     }
 }
 

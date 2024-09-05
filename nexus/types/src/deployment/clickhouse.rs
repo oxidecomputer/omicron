@@ -89,7 +89,7 @@ pub struct ClickhouseClusterConfig {
     pub cluster_name: String,
     /// An arbitrary string shared by all nodes used at runtime to determine whether
     /// nodes are part of the same cluster.
-    pub secret: String,
+    pub cluster_secret: String,
 }
 
 impl ClickhouseClusterConfig {
@@ -99,7 +99,7 @@ impl ClickhouseClusterConfig {
             max_used_server_id: 0.into(),
             max_used_keeper_id: 0.into(),
             cluster_name,
-            secret: Uuid::new_v4().to_string(),
+            cluster_secret: Uuid::new_v4().to_string(),
         }
     }
 

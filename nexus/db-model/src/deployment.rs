@@ -8,9 +8,9 @@
 use crate::inventory::ZoneType;
 use crate::omicron_zone_config::{self, OmicronZoneNic};
 use crate::schema::{
-    blueprint, bp_omicron_physical_disk, bp_omicron_zone, bp_omicron_zone_nic,
-    bp_sled_omicron_physical_disks, bp_sled_omicron_zones, bp_sled_state,
-    bp_target,
+    blueprint, bp_clickhouse_cluster_config, bp_omicron_physical_disk,
+    bp_omicron_zone, bp_omicron_zone_nic, bp_sled_omicron_physical_disks,
+    bp_sled_omicron_zones, bp_sled_state, bp_target,
 };
 use crate::typed_uuid::DbTypedUuid;
 use crate::{
@@ -21,7 +21,6 @@ use anyhow::{anyhow, bail, Context, Result};
 use chrono::{DateTime, Utc};
 use ipnetwork::IpNetwork;
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
-use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZonesConfig;
@@ -30,6 +29,7 @@ use nexus_types::deployment::{
     blueprint_zone_type, BlueprintPhysicalDisksConfig,
 };
 use nexus_types::deployment::{BlueprintPhysicalDiskConfig, BlueprintZoneType};
+use nexus_types::deployment::{BlueprintTarget, ClickhouseClusterConfig};
 use nexus_types::deployment::{
     OmicronZoneExternalFloatingAddr, OmicronZoneExternalFloatingIp,
     OmicronZoneExternalSnatIp,
@@ -54,9 +54,6 @@ pub struct Blueprint {
     pub external_dns_version: Generation,
     pub cockroachdb_fingerprint: String,
     pub cockroachdb_setting_preserve_downgrade: Option<String>,
-    pub clickhouse_max_used_server_id: i64,
-    pub clickhouse_max_used_keeper_id: i64,
-    pub clickhouse_cluster_secret: String,
     pub time_created: DateTime<Utc>,
     pub creator: String,
     pub comment: String,
@@ -73,22 +70,6 @@ impl From<&'_ nexus_types::deployment::Blueprint> for Blueprint {
             cockroachdb_setting_preserve_downgrade: bp
                 .cockroachdb_setting_preserve_downgrade
                 .to_optional_string(),
-            clickhouse_max_used_server_id: bp
-                .clickhouse_cluster_config
-                .max_used_server_id
-                .0
-                .try_into()
-                .expect("clickhouse IDs must fit in an i64"),
-            clickhouse_max_used_keeper_id: bp
-                .clickhouse_cluster_config
-                .max_used_keeper_id
-                .0
-                .try_into()
-                .expect("clickhouse IDs must fit in an i64"),
-            clickhouse_cluster_secret: bp
-                .clickhouse_cluster_config
-                .secret
-                .clone(),
             time_created: bp.time_created,
             creator: bp.creator.clone(),
             comment: bp.comment.clone(),
@@ -96,7 +77,6 @@ impl From<&'_ nexus_types::deployment::Blueprint> for Blueprint {
     }
 }
 
-// TODO: Fill in clickhouse details?
 impl From<Blueprint> for nexus_types::deployment::BlueprintMetadata {
     fn from(value: Blueprint) -> Self {
         Self {
@@ -856,6 +836,57 @@ impl From<BpOmicronZoneNic> for OmicronZoneNic {
             vni: value.vni,
             is_primary: value.is_primary,
             slot: value.slot,
+        }
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = bp_clickhouse_cluster_config)]
+pub struct BpClickhouseClusterConfig {
+    blueprint_id: Uuid,
+    generation: Generation,
+    max_used_server_id: i64,
+    max_used_keeper_id: i64,
+    cluster_name: String,
+    cluster_secret: String,
+}
+
+impl BpClickhouseClusterConfig {
+    pub fn new(
+        blueprint_id: Uuid,
+        config: &ClickhouseClusterConfig,
+    ) -> anyhow::Result<BpClickhouseClusterConfig> {
+        Ok(BpClickhouseClusterConfig {
+            blueprint_id,
+            generation: Generation(config.generation),
+            max_used_server_id: config
+                .max_used_server_id
+                .0
+                .try_into()
+                .context("more than 2^63 IDs in use")?,
+            max_used_keeper_id: config
+                .max_used_keeper_id
+                .0
+                .try_into()
+                .context("more than 2^63 IDs in use")?,
+            cluster_name: config.cluster_name.clone(),
+            cluster_secret: config.cluster_secret.clone(),
+        })
+    }
+}
+
+impl From<BpClickhouseClusterConfig> for ClickhouseClusterConfig {
+    fn from(value: BpClickhouseClusterConfig) -> Self {
+        ClickhouseClusterConfig {
+            generation: value.generation.0,
+            max_used_server_id: clickhouse_admin_types::ServerId(
+                value.max_used_server_id.into(),
+            ),
+            max_used_keeper_id: clickhouse_admin_types::KeeperId(
+                value.max_used_keeper_id.into(),
+            ),
+            cluster_name: value.cluster_name.clone(),
+            cluster_secret: value.cluster_secret.clone(),
         }
     }
 }

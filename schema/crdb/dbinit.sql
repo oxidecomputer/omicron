@@ -3549,6 +3549,11 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone (
     -- Eventually, that nullability should be removed.
     filesystem_pool UUID,
 
+    -- Clickhouse related node identifiers for a clickhouse cluster deployment
+    -- These only apply to `ClickhouseKeeper` or `ClickhouseServer` zones.
+    clickhouse_keeper_id INT8,
+    clickhouse_server_id INT8
+
     PRIMARY KEY (blueprint_id, id)
 );
 
@@ -3565,6 +3570,26 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone_nic (
 
     PRIMARY KEY (blueprint_id, id)
 );
+
+--- Blueprint information related to clickhouse cluster management 
+CREATE TABLE IF NOT EXISTS omicron.public.bp_clickhouse_cluster_config (
+    -- Foreign key into the `blueprint` table
+    blueprint_id UUID NOT NULL,
+    -- Generation number to track changes to the cluster state.
+    -- Used as optimizitic concurrency control.
+    generation INT8 NOT NULL,
+
+    -- Clickhouse server and keeper ids can never be reused. We hand them out
+    -- monotonically and keep track of the last one used here.
+    max_used_server_id INT8 NOT NULL,
+    max_used_keeper_id INT8 NOT NULL
+
+    -- Each clickhouse cluster has a unique name and secret value. These are set
+    -- once and shared among all nodes for the lifetime of the fleet.
+    cluster_name TEXT NOT NULL
+    cluster_secret TEXT NOT NULL
+)
+
 
 -- Mapping of Omicron zone ID to CockroachDB node ID. This isn't directly used
 -- by the blueprint tables above, but is used by the more general Reconfigurator
