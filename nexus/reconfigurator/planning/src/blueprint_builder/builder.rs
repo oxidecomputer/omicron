@@ -147,9 +147,25 @@ pub enum EnsureMultiple {
 /// "comment", identifying which operations have occurred on the blueprint.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub(crate) enum Operation {
-    AddZone { sled_id: SledUuid, kind: ZoneKind },
-    UpdateDisks { sled_id: SledUuid, added: usize, removed: usize },
-    ZoneExpunged { sled_id: SledUuid, reason: ZoneExpungeReason, count: usize },
+    AddZone {
+        sled_id: SledUuid,
+        kind: ZoneKind,
+    },
+    UpdateDisks {
+        sled_id: SledUuid,
+        added: usize,
+        removed: usize,
+    },
+    ZoneExpunged {
+        sled_id: SledUuid,
+        reason: ZoneExpungeReason,
+        count: usize,
+    },
+    ZoneEntryRemoved {
+        sled_id: SledUuid,
+        zone_id: OmicronZoneUuid,
+        kind: ZoneKind,
+    },
 }
 
 impl fmt::Display for Operation {
@@ -176,6 +192,13 @@ impl fmt::Display for Operation {
                 write!(
                     f,
                     "sled {sled_id}: expunged {count} zones because: {reason}"
+                )
+            }
+            Self::ZoneEntryRemoved { sled_id, zone_id, kind } => {
+                write!(
+                    f,
+                    "sled {sled_id}: garbage collected zone entry (kind {}) {zone_id}",
+                    kind.report_str(),
                 )
             }
         }
@@ -555,6 +578,31 @@ impl<'a> BlueprintBuilder<'a> {
         }
 
         Ok(zones_to_expunge)
+    }
+
+    /// Actually remove a zone entry from the blueprint.
+    ///
+    /// This should only be called for zones that are expunged, and no longer
+    /// have any resources assigned to them, as noted by the planning input.
+    pub(crate) fn remove_zone_entry(
+        &mut self,
+        sled_id: SledUuid,
+        zone_id: OmicronZoneUuid,
+    ) -> Result<(), Error> {
+        let change = self.zones.change_sled_zones(sled_id);
+        change.remove_zone_entry(zone_id).map_err(|error| {
+            Error::Planner(anyhow!(error).context(format!(
+                "for sled {sled_id}, error removing zone entry {zone_id}"
+            )))
+        })?;
+
+        self.record_operation(Operation::ZoneEntryRemoved {
+            sled_id,
+            zone_id,
+            kind: ZoneKind::Nexus,
+        });
+
+        Ok(())
     }
 
     /// Ensures that the blueprint contains disks for a sled which already
@@ -1337,9 +1385,10 @@ impl<'a> BlueprintZonesBuilder<'a> {
     }
 
     /// Returns a mutable reference to a sled's Omicron zones *because* we're
-    /// going to change them.  It's essential that the caller _does_ change them
-    /// because we will have bumped the generation number and we don't want to
-    /// do that if no changes are being made.
+    /// going to change them.
+    ///
+    /// This method should generally only be called if the caller is going to
+    /// change the zones, but is safe to call otherwise.
     pub fn change_sled_zones(
         &mut self,
         sled_id: SledUuid,
