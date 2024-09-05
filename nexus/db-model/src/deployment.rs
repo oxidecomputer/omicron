@@ -875,19 +875,26 @@ impl BpClickhouseClusterConfig {
     }
 }
 
-impl From<BpClickhouseClusterConfig> for ClickhouseClusterConfig {
-    fn from(value: BpClickhouseClusterConfig) -> Self {
-        ClickhouseClusterConfig {
+impl TryFrom<BpClickhouseClusterConfig> for ClickhouseClusterConfig {
+    type Error = anyhow::Error;
+    fn try_from(value: BpClickhouseClusterConfig) -> Result<Self, Self::Error> {
+        Ok(ClickhouseClusterConfig {
             generation: value.generation.0,
             max_used_server_id: clickhouse_admin_types::ServerId(
-                value.max_used_server_id.into(),
+                value
+                    .max_used_server_id
+                    .try_into()
+                    .context("negative ID in database?")?,
             ),
             max_used_keeper_id: clickhouse_admin_types::KeeperId(
-                value.max_used_keeper_id.into(),
+                value
+                    .max_used_keeper_id
+                    .try_into()
+                    .context("negative ID in database?")?,
             ),
             cluster_name: value.cluster_name.clone(),
             cluster_secret: value.cluster_secret.clone(),
-        }
+        })
     }
 }
 

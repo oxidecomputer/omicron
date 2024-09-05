@@ -373,6 +373,13 @@ impl<'a> BlueprintBuilder<'a> {
             .disks
             .into_disks_map(self.input.all_sled_ids(SledFilter::InService));
 
+        // Copy the `ClickhouseClusterConfig` from the parent blueprint
+        // and update it if any allocations or expungements have occurred.
+        let mut clickhouse_cluster_config =
+            self.parent_blueprint.clickhouse_cluster_config.clone();
+        clickhouse_cluster_config
+            .update_configuration(&self.clickhouse_id_allocator);
+
         Blueprint {
             id: self.rng.blueprint_rng.next(),
             blueprint_zones,
@@ -388,11 +395,7 @@ impl<'a> BlueprintBuilder<'a> {
                 .clone(),
             cockroachdb_setting_preserve_downgrade: self
                 .cockroachdb_setting_preserve_downgrade,
-            // TODO: This will change when generations and IDs get bumped
-            clickhouse_cluster_config: self
-                .parent_blueprint
-                .clickhouse_cluster_config
-                .clone(),
+            clickhouse_cluster_config,
             time_created: now_db_precision(),
             creator: self.creator,
             comment: self
@@ -1377,10 +1380,10 @@ impl<'a> BlueprintBuilder<'a> {
             // We are still attempting to add this node
             //
             // TODO: We need a way to detect if the attempted addition actually
-            // failed here This will involve querying the keeper cluster via
-            // inventory in case the configuration doesn't chnage for a while.
+            // failed here. This will involve querying the keeper cluster via
+            // inventory in case the configuration doesn't change for a while.
             // I don't know how to get that information out of the keeper yet,
-            // except for by reading the log files.
+            // except by reading the log files.
             return true;
         }
 
@@ -1401,7 +1404,8 @@ impl<'a> BlueprintBuilder<'a> {
                 }
             })
         {
-            // We are still attempting to remove keepers for expunged zones from the configuration
+            // We are still attempting to remove keepers for expunged zones from
+            // the configuration.
             return true;
         }
 
