@@ -723,7 +723,9 @@ impl<'a> BlueprintBuilder<'a> {
         sled_id: SledUuid,
         resources: &SledResources,
     ) -> Result<EnsureMultiple, Error> {
-        let (mut additions, mut updates, expunges, removals) = {
+        const DEBUG_QUOTA_SIZE_GB: u32 = 100;
+
+        let (mut additions, mut updates, mut expunges, removals) = {
             let mut datasets_builder = BlueprintSledDatasetsBuilder::new(
                 self.log.clone(),
                 sled_id,
@@ -743,7 +745,7 @@ impl<'a> BlueprintBuilder<'a> {
                 datasets_builder.ensure(
                     DatasetName::new(zpool.clone(), DatasetKind::Debug),
                     address,
-                    Some(ByteCount::from_gibibytes_u32(100)),
+                    Some(ByteCount::from_gibibytes_u32(DEBUG_QUOTA_SIZE_GB)),
                     None,
                     CompressionAlgorithm::Off,
                 );
@@ -849,8 +851,14 @@ impl<'a> BlueprintBuilder<'a> {
             // Mark unused datasets as expunged.
             //
             // This indicates that the dataset should be removed from the database.
-            if expunges.contains(&config.id) {
+            if expunges.remove(&config.id) {
                 config.disposition = BlueprintDatasetDisposition::Expunged;
+            }
+
+            // Small optimization -- if no expungement nor updates are left,
+            // bail.
+            if expunges.is_empty() && updates.is_empty() {
+                break;
             }
         }
 
@@ -1885,16 +1893,15 @@ impl<'a> BlueprintSledDatasetsBuilder<'a> {
         resources: &'a SledResources,
     ) -> Self {
         // Gather all datasets known to the blueprint
-        let mut blueprint_datasets = BTreeMap::new();
+        let mut blueprint_datasets: BTreeMap<
+            ZpoolUuid,
+            BTreeMap<DatasetKind, &BlueprintDatasetConfig>,
+        > = BTreeMap::new();
         for dataset in datasets.current_sled_datasets(sled_id) {
             blueprint_datasets
                 .entry(dataset.pool.id())
-                .and_modify(|values: &mut BTreeMap<_, _>| {
-                    values.insert(dataset.kind.clone(), dataset);
-                })
-                .or_insert_with(|| {
-                    BTreeMap::from([(dataset.kind.clone(), dataset)])
-                });
+                .or_default()
+                .insert(dataset.kind.clone(), dataset);
         }
 
         // Gather all datasets known to the database
@@ -1921,11 +1928,11 @@ impl<'a> BlueprintSledDatasetsBuilder<'a> {
 
     /// Attempts to add a dataset to the builder.
     ///
-    /// - If the dataset exists in the blueprint already, use it
-    /// - Otherwise, if the dataset exists in the database, re-use
-    /// the UUID, but add it to the blueprint
-    /// - Otherwse, create a new dataset in both the database
-    /// and the blueprint
+    /// - If the dataset exists in the blueprint already, use it.
+    /// - Otherwise, if the dataset exists in the database, re-use the UUID, but
+    /// add it to the blueprint.
+    /// - Otherwse, create a new dataset in the blueprint, which will propagate
+    /// to the database during execution.
     pub fn ensure(
         &mut self,
         dataset: DatasetName,
@@ -1961,12 +1968,8 @@ impl<'a> BlueprintSledDatasetsBuilder<'a> {
             };
             target
                 .entry(zpool_id)
-                .and_modify(|values: &mut BTreeMap<_, _>| {
-                    values.insert(new_config.kind.clone(), new_config.clone());
-                })
-                .or_insert_with(|| {
-                    BTreeMap::from([(new_config.kind.clone(), new_config)])
-                });
+                .or_default()
+                .insert(new_config.kind.clone(), new_config);
             return;
         }
 
@@ -1980,12 +1983,8 @@ impl<'a> BlueprintSledDatasetsBuilder<'a> {
         let new_config = make_config(id);
         self.new_datasets
             .entry(zpool_id)
-            .and_modify(|values: &mut BTreeMap<_, _>| {
-                values.insert(new_config.kind.clone(), new_config.clone());
-            })
-            .or_insert_with(|| {
-                BTreeMap::from([(new_config.kind.clone(), new_config)])
-            });
+            .or_default()
+            .insert(new_config.kind.clone(), new_config);
     }
 
     /// Returns all datasets in the old blueprint that are not planned to be
