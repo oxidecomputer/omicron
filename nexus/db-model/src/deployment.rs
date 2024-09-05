@@ -322,7 +322,7 @@ impl BpOmicronDataset {
             port: dataset_config.address.map(|addr| addr.port().into()),
             quota: dataset_config.quota.map(|q| q.into()),
             reservation: dataset_config.reservation.map(|r| r.into()),
-            compression: dataset_config.compression.clone(),
+            compression: dataset_config.compression.to_string(),
         }
     }
 }
@@ -354,7 +354,7 @@ impl TryFrom<BpOmicronDataset> for BlueprintDatasetConfig {
             address,
             quota: dataset.quota.map(|b| b.into()),
             reservation: dataset.reservation.map(|b| b.into()),
-            compression: dataset.compression,
+            compression: dataset.compression.parse()?,
         })
     }
 }

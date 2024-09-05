@@ -251,6 +251,7 @@ mod tests {
     use nexus_types::deployment::BlueprintZoneFilter;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::internal::shared::DatasetKind;
+    use omicron_common::disk::CompressionAlgorithm;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::ZpoolUuid;
@@ -274,7 +275,7 @@ mod tests {
                         address: Some(dataset.address),
                         quota: None,
                         reservation: None,
-                        compression: String::new(),
+                        compression: CompressionAlgorithm::Off,
                     })
                 } else {
                     None
@@ -389,7 +390,7 @@ mod tests {
                 address: None,
                 quota: None,
                 reservation: None,
-                compression: String::new(),
+                compression: CompressionAlgorithm::Off,
             },
             BlueprintDatasetConfig {
                 disposition: BlueprintDatasetDisposition::InService,
@@ -399,7 +400,7 @@ mod tests {
                 address: None,
                 quota: None,
                 reservation: None,
-                compression: String::new(),
+                compression: CompressionAlgorithm::Off,
             },
         ];
 
@@ -461,11 +462,11 @@ mod tests {
         let first_dataset = &mut all_datasets[0];
         assert_eq!(first_dataset.quota, None);
         assert_eq!(first_dataset.reservation, None);
-        assert_eq!(first_dataset.compression, "");
+        assert_eq!(first_dataset.compression, CompressionAlgorithm::Off);
 
         first_dataset.quota = Some(ByteCount::from_kibibytes_u32(1));
         first_dataset.reservation = Some(ByteCount::from_kibibytes_u32(2));
-        first_dataset.compression = String::from("lz4");
+        first_dataset.compression = CompressionAlgorithm::Lz4;
         let _ = first_dataset;
 
         // Update the datastore
@@ -491,10 +492,7 @@ mod tests {
             observed_dataset.try_into().unwrap();
         assert_eq!(observed_dataset.quota, first_dataset.quota,);
         assert_eq!(observed_dataset.reservation, first_dataset.reservation,);
-        assert_eq!(
-            observed_dataset.compression.to_string(),
-            first_dataset.compression,
-        );
+        assert_eq!(observed_dataset.compression, first_dataset.compression,);
     }
 
     #[nexus_test]
@@ -531,7 +529,7 @@ mod tests {
             address: None,
             quota: None,
             reservation: None,
-            compression: String::new(),
+            compression: CompressionAlgorithm::Off,
         });
         let EnsureDatasetsResult { inserted, updated, removed } =
             ensure_dataset_records_exist(opctx, datastore, all_datasets.iter())
@@ -633,7 +631,7 @@ mod tests {
             address: None,
             quota: None,
             reservation: None,
-            compression: String::new(),
+            compression: CompressionAlgorithm::Off,
         });
 
         let EnsureDatasetsResult { inserted, updated, removed } =

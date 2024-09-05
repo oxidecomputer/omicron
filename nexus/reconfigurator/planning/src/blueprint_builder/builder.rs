@@ -1946,7 +1946,7 @@ impl<'a> BlueprintSledDatasetsBuilder<'a> {
             address,
             quota,
             reservation,
-            compression: compression.to_string(),
+            compression,
         };
 
         // This dataset already exists in the blueprint

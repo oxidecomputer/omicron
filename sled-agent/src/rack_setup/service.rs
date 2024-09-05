@@ -1475,7 +1475,7 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
                     pool: d.name.pool().clone(),
                     kind: d.name.dataset().clone(),
                     address,
-                    compression: d.compression.to_string(),
+                    compression: d.compression,
                     quota: d.quota,
                     reservation: d.reservation,
                 },

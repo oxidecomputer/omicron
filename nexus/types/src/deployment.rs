@@ -26,6 +26,7 @@ use nexus_sled_agent_shared::inventory::ZoneKind;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::DatasetKind;
+use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetName;
 use omicron_common::disk::DatasetsConfig;
@@ -868,20 +869,18 @@ pub struct BlueprintDatasetConfig {
     pub address: Option<SocketAddrV6>,
     pub quota: Option<ByteCount>,
     pub reservation: Option<ByteCount>,
-    pub compression: String,
+    pub compression: CompressionAlgorithm,
 }
 
-impl TryFrom<BlueprintDatasetConfig> for DatasetConfig {
-    type Error = anyhow::Error;
-
-    fn try_from(config: BlueprintDatasetConfig) -> Result<Self, Self::Error> {
-        Ok(Self {
+impl From<BlueprintDatasetConfig> for DatasetConfig {
+    fn from(config: BlueprintDatasetConfig) -> Self {
+        Self {
             id: config.id,
             name: DatasetName::new(config.pool, config.kind),
             quota: config.quota,
             reservation: config.reservation,
-            compression: config.compression.parse()?,
-        })
+            compression: config.compression,
+        }
     }
 }
 

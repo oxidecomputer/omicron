@@ -114,11 +114,7 @@ impl From<BlueprintDatasetConfig> for Dataset {
             zone_name,
             quota: bp.quota.map(ByteCount::from),
             reservation: bp.reservation.map(ByteCount::from),
-            compression: if bp.compression.is_empty() {
-                None
-            } else {
-                Some(bp.compression)
-            },
+            compression: Some(bp.compression.to_string()),
         }
     }
 }
