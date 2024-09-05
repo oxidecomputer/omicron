@@ -9,8 +9,9 @@ use diesel::expression::{AsExpression, Expression};
 use diesel::expression_methods::BoolExpressionMethods;
 use diesel::helper_types::*;
 use diesel::pg::Pg;
-use diesel::query_builder::AsQuery;
+use diesel::query_builder::{self, AsQuery};
 use diesel::query_dsl::methods as query_methods;
+use diesel::query_source::QuerySource;
 use diesel::sql_types::{Bool, SqlType};
 use diesel::AppearsOnTable;
 use diesel::Column;
@@ -29,6 +30,8 @@ type BoxedDslOutput<T> = diesel::internal::table_macro::BoxedSelectStatement<
     diesel::internal::table_macro::FromClause<T>,
     Pg,
 >;
+type SelectStatement<T> =
+    query_builder::SelectStatement<query_builder::FromClause<T>>;
 
 /// Uses `pagparams` to list a subset of rows in `table`, ordered by `column`.
 pub fn paginated<T, C, M>(
@@ -82,37 +85,69 @@ pub fn paginated_multicolumn<T, C1, C2, M1, M2>(
     table: T,
     (c1, c2): (C1, C2),
     pagparams: &DataPageParams<'_, (M1, M2)>,
-) -> BoxedQuery<T>
+) -> <SelectStatement<T> as query_methods::BoxedDsl<'static, Pg>>::Output
 where
-    // T is a table which can create a BoxedQuery.
-    T: diesel::Table,
-    T: query_methods::BoxedDsl<
-        'static,
-        Pg,
-        Output = diesel::internal::table_macro::BoxedSelectStatement<
-            'static,
-            TableSqlType<T>,
-            diesel::internal::table_macro::FromClause<T>,
-            Pg,
-        >,
-    >,
+    // T is a table^H^H^H^H^Hquery source which can create a BoxedQuery.
+    T: QuerySource,
+    T: AsQuery<Query = SelectStatement<T>>,
+    <T as QuerySource>::DefaultSelection:
+        Expression<SqlType = <T as AsQuery>::SqlType>,
+    SelectStatement<T>: query_methods::BoxedDsl<'static, Pg>,
+    // Required for...everything.
+    <SelectStatement<T> as query_methods::BoxedDsl<'static, Pg>>::Output:
+        QueryDsl,
     // C1 & C2 are columns which appear in T.
-    C1: 'static + Column + Copy + ExpressionMethods + AppearsOnTable<T>,
-    C2: 'static + Column + Copy + ExpressionMethods + AppearsOnTable<T>,
+    C1: 'static + Column + Copy + ExpressionMethods,
+    C2: 'static + Column + Copy + ExpressionMethods,
     // Required to compare the columns with the marker types.
     C1::SqlType: SqlType,
     C2::SqlType: SqlType,
     M1: Clone + AsExpression<C1::SqlType>,
     M2: Clone + AsExpression<C2::SqlType>,
+    // Necessary for `query.limit(...)`
+    <SelectStatement<T> as query_methods::BoxedDsl<'static, Pg>>::Output:
+        query_methods::LimitDsl<
+            Output = <SelectStatement<T> as query_methods::BoxedDsl<
+                'static,
+                Pg,
+            >>::Output,
+        >,
     // Necessary for "query.order(c1.desc())"
-    BoxedQuery<T>: query_methods::OrderDsl<Desc<C1>, Output = BoxedQuery<T>>,
+    <SelectStatement<T> as query_methods::BoxedDsl<'static, Pg>>::Output:
+        query_methods::OrderDsl<
+            Desc<C1>,
+            Output = <SelectStatement<T> as query_methods::BoxedDsl<
+                'static,
+                Pg,
+            >>::Output,
+        >,
     // Necessary for "query.order(...).then_order_by(c2.desc())"
-    BoxedQuery<T>:
-        query_methods::ThenOrderDsl<Desc<C2>, Output = BoxedQuery<T>>,
+    <SelectStatement<T> as query_methods::BoxedDsl<'static, Pg>>::Output:
+        query_methods::ThenOrderDsl<
+            Desc<C2>,
+            Output = <SelectStatement<T> as query_methods::BoxedDsl<
+                'static,
+                Pg,
+            >>::Output,
+        >,
     // Necessary for "query.order(c1.asc())"
-    BoxedQuery<T>: query_methods::OrderDsl<Asc<C1>, Output = BoxedQuery<T>>,
+    <SelectStatement<T> as query_methods::BoxedDsl<'static, Pg>>::Output:
+        query_methods::OrderDsl<
+            Asc<C1>,
+            Output = <SelectStatement<T> as query_methods::BoxedDsl<
+                'static,
+                Pg,
+            >>::Output,
+        >,
     // Necessary for "query.order(...).then_order_by(c2.asc())"
-    BoxedQuery<T>: query_methods::ThenOrderDsl<Asc<C2>, Output = BoxedQuery<T>>,
+    <SelectStatement<T> as query_methods::BoxedDsl<'static, Pg>>::Output:
+        query_methods::ThenOrderDsl<
+            Asc<C2>,
+            Output = <SelectStatement<T> as query_methods::BoxedDsl<
+                'static,
+                Pg,
+            >>::Output,
+        >,
 
     // We'd like to be able to call:
     //
@@ -126,10 +161,14 @@ where
     // The RHS (c2.gt(v2)) must be a boolean expression:
     Gt<C2, M2>: Expression<SqlType = Bool>,
     // Putting it together, we should be able to filter by LHS.and(RHS):
-    BoxedQuery<T>: query_methods::FilterDsl<
-        And<Eq<C1, M1>, Gt<C2, M2>>,
-        Output = BoxedQuery<T>,
-    >,
+    <SelectStatement<T> as query_methods::BoxedDsl<'static, Pg>>::Output:
+        query_methods::FilterDsl<
+            And<Eq<C1, M1>, Gt<C2, M2>>,
+            Output = <SelectStatement<T> as query_methods::BoxedDsl<
+                'static,
+                Pg,
+            >>::Output,
+        >,
 
     // We'd also like to be able to call:
     //
@@ -138,19 +177,39 @@ where
     // We've already defined the bound on the LHS, so we add the equivalent
     // bounds on the RHS for the "Less than" variant.
     Lt<C2, M2>: Expression<SqlType = Bool>,
-    BoxedQuery<T>: query_methods::FilterDsl<
-        And<Eq<C1, M1>, Lt<C2, M2>>,
-        Output = BoxedQuery<T>,
-    >,
+    <SelectStatement<T> as query_methods::BoxedDsl<'static, Pg>>::Output:
+        query_methods::FilterDsl<
+            And<Eq<C1, M1>, Lt<C2, M2>>,
+            Output = <SelectStatement<T> as query_methods::BoxedDsl<
+                'static,
+                Pg,
+            >>::Output,
+        >,
 
     // Necessary for "query.or_filter(c1.gt(v1))"
-    BoxedQuery<T>:
-        query_methods::OrFilterDsl<Gt<C1, M1>, Output = BoxedQuery<T>>,
+    <SelectStatement<T> as query_methods::BoxedDsl<'static, Pg>>::Output:
+        query_methods::OrFilterDsl<
+            Gt<C1, M1>,
+            Output = <SelectStatement<T> as query_methods::BoxedDsl<
+                'static,
+                Pg,
+            >>::Output,
+        >,
     // Necessary for "query.or_filter(c1.lt(v1))"
-    BoxedQuery<T>:
-        query_methods::OrFilterDsl<Lt<C1, M1>, Output = BoxedQuery<T>>,
+    <SelectStatement<T> as query_methods::BoxedDsl<'static, Pg>>::Output:
+        query_methods::OrFilterDsl<
+            Lt<C1, M1>,
+            Output = <SelectStatement<T> as query_methods::BoxedDsl<
+                'static,
+                Pg,
+            >>::Output,
+        >,
 {
-    let mut query = table.into_boxed().limit(pagparams.limit.get().into());
+    use query_methods::BoxedDsl;
+    let mut query = table
+        .as_query()
+        .internal_into_boxed()
+        .limit(pagparams.limit.get().into());
     let marker = pagparams.marker.map(|m| m.clone());
     match pagparams.direction {
         dropshot::PaginationOrder::Ascending => {
