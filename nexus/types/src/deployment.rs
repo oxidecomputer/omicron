@@ -217,10 +217,12 @@ impl Blueprint {
     /// Iterate over the [`BlueprintDatasetsConfig`] instances in the blueprint.
     pub fn all_omicron_datasets(
         &self,
+        filter: BlueprintDatasetFilter,
     ) -> impl Iterator<Item = &BlueprintDatasetConfig> {
         self.blueprint_datasets
             .iter()
             .flat_map(move |(_, datasets)| datasets.datasets.values())
+            .filter(move |d| d.disposition.matches(filter))
     }
 
     /// Iterate over the [`BlueprintZoneConfig`] instances in the blueprint
@@ -765,6 +767,22 @@ pub enum BlueprintZoneFilter {
     ShouldDeployVpcFirewallRules,
 }
 
+/// Filters that apply to blueprint datasets.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum BlueprintDatasetFilter {
+    // ---
+    // Prefer to keep this list in alphabetical order.
+    // ---
+    /// All datasets
+    All,
+
+    /// Datasets that have been expunged.
+    Expunged,
+
+    /// Datasets that are in-service.
+    InService,
+}
+
 /// Information about an Omicron physical disk as recorded in a blueprint.
 ///
 /// Part of [`Blueprint`].
@@ -820,6 +838,23 @@ pub enum BlueprintDatasetDisposition {
 
     /// The dataset is permanently gone.
     Expunged,
+}
+
+impl BlueprintDatasetDisposition {
+    pub fn matches(self, filter: BlueprintDatasetFilter) -> bool {
+        match self {
+            Self::InService => match filter {
+                BlueprintDatasetFilter::All => true,
+                BlueprintDatasetFilter::Expunged => false,
+                BlueprintDatasetFilter::InService => true,
+            },
+            Self::Expunged => match filter {
+                BlueprintDatasetFilter::All => true,
+                BlueprintDatasetFilter::Expunged => true,
+                BlueprintDatasetFilter::InService => false,
+            },
+        }
+    }
 }
 
 /// Information about a dataset as recorded in a blueprint

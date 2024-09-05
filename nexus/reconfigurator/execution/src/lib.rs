@@ -11,6 +11,7 @@ use internal_dns::resolver::Resolver;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintDatasetFilter;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::SledFilter;
 use nexus_types::external_api::views::SledState;
@@ -186,7 +187,7 @@ pub async fn realize_blueprint_with_overrides(
     datasets::ensure_dataset_records_exist(
         &opctx,
         datastore,
-        blueprint.all_omicron_datasets(),
+        blueprint.all_omicron_datasets(BlueprintDatasetFilter::All),
     )
     .await
     .map_err(|err| vec![err])?;
