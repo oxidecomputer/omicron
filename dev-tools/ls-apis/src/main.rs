@@ -41,17 +41,16 @@ enum Cmds {
     /// print out each API, what exports it, and what consumes it
     Apis,
     /// print out APIs exported and consumed by each deployment unit
-    DeploymentUnits,
+    DeploymentUnits(DotArgs),
     /// print out APIs exported and consumed, by server component
     Servers,
-    Show(ShowArgs),
 }
 
 #[derive(Args)]
-pub struct ShowArgs {
-    // XXX-dap
+pub struct DotArgs {
+    /// Show output that can be fed to graphviz (dot)
     #[arg(long)]
-    adoc: bool,
+    dot: bool,
 }
 
 fn main() -> Result<()> {
@@ -62,9 +61,8 @@ fn main() -> Result<()> {
     match cli_args.cmd {
         Cmds::Adoc => run_adoc(&apis),
         Cmds::Apis => run_apis(&apis),
-        Cmds::DeploymentUnits => run_deployment_units(&apis),
+        Cmds::DeploymentUnits(args) => run_deployment_units(&apis, args),
         Cmds::Servers => run_servers(&apis),
-        Cmds::Show(args) => run_show(&apis, args),
     }
 }
 
@@ -117,13 +115,18 @@ fn run_apis(apis: &Apis) -> Result<()> {
     Ok(())
 }
 
-fn run_deployment_units(apis: &Apis) -> Result<()> {
-    let metadata = apis.api_metadata();
-    for (unit, server_components) in apis.all_deployment_unit_components() {
-        println!("{}", unit);
-        print_server_components(apis, metadata, server_components, "    ")?;
-        println!("");
+fn run_deployment_units(apis: &Apis, args: DotArgs) -> Result<()> {
+    if args.dot {
+        println!("{}", apis.dot_by_unit());
+    } else {
+        let metadata = apis.api_metadata();
+        for (unit, server_components) in apis.all_deployment_unit_components() {
+            println!("{}", unit);
+            print_server_components(apis, metadata, server_components, "    ")?;
+            println!("");
+        }
     }
+
     Ok(())
 }
 
@@ -155,11 +158,6 @@ fn print_server_components<'a>(
 fn run_servers(apis: &Apis) -> Result<()> {
     let metadata = apis.api_metadata();
     print_server_components(apis, metadata, metadata.server_components(), "")
-}
-
-fn run_show(apis: &Apis, args: ShowArgs) -> Result<()> {
-    println!("{}", apis.dot_by_unit());
-    Ok(())
 }
 
 impl TryFrom<&LsApis> for LoadArgs {
