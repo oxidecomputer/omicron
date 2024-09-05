@@ -29,6 +29,7 @@ use ratatui::widgets::{
 use ratatui::Frame;
 use slog::{info, o, Logger};
 use tui_tree_widget::{Tree, TreeItem, TreeState};
+use update_engine::display::ProgressRatioDisplay;
 use update_engine::{
     AbortReason, CompletionReason, ExecutionStatus, FailureReason, StepKey,
     TerminalKind, WillNotBeRunReason,
@@ -1984,9 +1985,11 @@ impl ComponentUpdateListState {
                     ));
                     status_text.push(Span::styled(
                         format!(
-                            " (step {}/{})",
-                            step_key.index + 1,
-                            summary.total_steps,
+                            " (step {})",
+                            ProgressRatioDisplay::index_and_total(
+                                step_key.index,
+                                summary.total_steps,
+                            )
                         ),
                         style::plain_text(),
                     ));
@@ -2015,9 +2018,11 @@ impl ComponentUpdateListState {
                             ));
                             status_text.push(Span::styled(
                                 format!(
-                                    " at step {}/{}",
-                                    info.step_key.index + 1,
-                                    summary.total_steps,
+                                    " at step {}",
+                                    ProgressRatioDisplay::index_and_total(
+                                        info.step_key.index,
+                                        summary.total_steps,
+                                    )
                                 ),
                                 style::plain_text(),
                             ));
@@ -2033,9 +2038,11 @@ impl ComponentUpdateListState {
                             ));
                             status_text.push(Span::styled(
                                 format!(
-                                    " at step {}/{}",
-                                    info.step_key.index + 1,
-                                    summary.total_steps,
+                                    " at step {}",
+                                    ProgressRatioDisplay::index_and_total(
+                                        info.step_key.index,
+                                        summary.total_steps,
+                                    )
                                 ),
                                 style::plain_text(),
                             ));

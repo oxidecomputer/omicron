@@ -212,10 +212,7 @@ impl<'a> Planner<'a> {
     fn do_plan_add(&mut self) -> Result<(), Error> {
         // Internal DNS is a prerequisite for bringing up all other zones.  At
         // this point, we assume that internal DNS (as a service) is already
-        // functioning.  At some point, this function will have to grow the
-        // ability to determine whether more internal DNS zones need to be
-        // added and where they should go.  And the blueprint builder will need
-        // to grow the ability to provision one.
+        // functioning.
 
         // After we make our initial pass through the sleds below to check for
         // zones every sled should have (NTP, Crucible), we'll start making
@@ -400,6 +397,7 @@ impl<'a> Planner<'a> {
         for zone_kind in [
             DiscretionaryOmicronZone::BoundaryNtp,
             DiscretionaryOmicronZone::CockroachDb,
+            DiscretionaryOmicronZone::InternalDns,
             DiscretionaryOmicronZone::Nexus,
         ] {
             let num_zones_to_add = self.num_additional_zones_needed(zone_kind);
@@ -477,6 +475,9 @@ impl<'a> Planner<'a> {
             }
             DiscretionaryOmicronZone::CockroachDb => {
                 self.input.target_cockroachdb_zone_count()
+            }
+            DiscretionaryOmicronZone::InternalDns => {
+                self.input.target_internal_dns_zone_count()
             }
             DiscretionaryOmicronZone::Nexus => {
                 self.input.target_nexus_zone_count()
@@ -556,6 +557,12 @@ impl<'a> Planner<'a> {
                     .sled_promote_internal_ntp_to_boundary_ntp(sled_id)?,
                 DiscretionaryOmicronZone::CockroachDb => {
                     self.blueprint.sled_ensure_zone_multiple_cockroachdb(
+                        sled_id,
+                        new_total_zone_count,
+                    )?
+                }
+                DiscretionaryOmicronZone::InternalDns => {
+                    self.blueprint.sled_ensure_zone_multiple_internal_dns(
                         sled_id,
                         new_total_zone_count,
                     )?
@@ -796,6 +803,7 @@ mod test {
     use nexus_types::inventory::OmicronZonesFound;
     use omicron_common::api::external::Generation;
     use omicron_common::disk::DiskIdentity;
+    use omicron_common::policy::MAX_INTERNAL_DNS_REDUNDANCY;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -1080,6 +1088,11 @@ mod test {
         // one sled we have.
         let mut builder = input.into_builder();
         builder.policy_mut().target_nexus_zone_count = 5;
+
+        // But we don't want it to add any more internal DNS zones,
+        // which it would by default (because we have only one sled).
+        builder.policy_mut().target_internal_dns_zone_count = 1;
+
         let input = builder.build();
         let blueprint2 = Planner::new_based_on(
             logctx.log.clone(),
@@ -1192,6 +1205,194 @@ mod test {
         logctx.cleanup_successful();
     }
 
+    /// Check that the planner will spread additional internal DNS zones out across
+    /// sleds as it adds them
+    #[test]
+    fn test_spread_internal_dns_zones_across_sleds() {
+        static TEST_NAME: &str =
+            "planner_spread_internal_dns_zones_across_sleds";
+        let logctx = test_setup_log(TEST_NAME);
+
+        // Use our example system as a starting point.
+        let (collection, input, blueprint1) =
+            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+
+        // This blueprint should have exactly 3 internal DNS zones: one on each sled.
+        assert_eq!(blueprint1.blueprint_zones.len(), 3);
+        for sled_config in blueprint1.blueprint_zones.values() {
+            assert_eq!(
+                sled_config
+                    .zones
+                    .iter()
+                    .filter(|z| z.zone_type.is_internal_dns())
+                    .count(),
+                1
+            );
+        }
+
+        // Try to run the planner with a high number of internal DNS zones;
+        // it will fail because the target is > MAX_DNS_REDUNDANCY.
+        let mut builder = input.clone().into_builder();
+        builder.policy_mut().target_internal_dns_zone_count = 14;
+        assert!(
+            Planner::new_based_on(
+                logctx.log.clone(),
+                &blueprint1,
+                &builder.build(),
+                "test_blueprint2",
+                &collection,
+            )
+            .is_err(),
+            "too many DNS zones"
+        );
+
+        // Try again with a reasonable number.
+        let mut builder = input.into_builder();
+        builder.policy_mut().target_internal_dns_zone_count =
+            MAX_INTERNAL_DNS_REDUNDANCY;
+        let blueprint2 = Planner::new_based_on(
+            logctx.log.clone(),
+            &blueprint1,
+            &builder.build(),
+            "test_blueprint2",
+            &collection,
+        )
+        .expect("failed to create planner")
+        .with_rng_seed((TEST_NAME, "bp2"))
+        .plan()
+        .expect("failed to plan");
+
+        let diff = blueprint2.diff_since_blueprint(&blueprint1);
+        println!(
+            "1 -> 2 (added additional internal DNS zones):\n{}",
+            diff.display()
+        );
+        assert_eq!(diff.sleds_added.len(), 0);
+        assert_eq!(diff.sleds_removed.len(), 0);
+        assert_eq!(diff.sleds_modified.len(), 2);
+
+        // 2 sleds should each get 1 additional internal DNS zone.
+        let mut total_new_zones = 0;
+        for sled_id in diff.sleds_modified {
+            assert!(!diff.zones.removed.contains_key(&sled_id));
+            assert!(!diff.zones.modified.contains_key(&sled_id));
+            if let Some(zones_added) = &diff.zones.added.get(&sled_id) {
+                let zones = &zones_added.zones;
+                match zones.len() {
+                    n @ 1 => {
+                        total_new_zones += n;
+                    }
+                    n => {
+                        panic!("unexpected number of zones added to {sled_id}: {n}")
+                    }
+                }
+                for zone in zones {
+                    assert_eq!(
+                        zone.kind(),
+                        ZoneKind::InternalDns,
+                        "unexpectedly added a non-internal-DNS zone: {zone:?}"
+                    );
+                }
+            }
+        }
+        assert_eq!(total_new_zones, 2);
+
+        logctx.cleanup_successful();
+    }
+
+    /// Check that the planner will reuse external IPs that were previously
+    /// assigned to expunged zones
+    #[test]
+    fn test_reuse_external_ips_from_expunged_zones() {
+        static TEST_NAME: &str =
+            "planner_reuse_external_ips_from_expunged_zones";
+        let logctx = test_setup_log(TEST_NAME);
+
+        // Use our example system as a starting point.
+        let (collection, input, blueprint1) =
+            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+
+        // Expunge the first sled we see, which will result in a Nexus external
+        // IP no longer being associated with a running zone, and a new Nexus
+        // zone being added to one of the two remaining sleds.
+        let mut builder = input.into_builder();
+        let (sled_id, details) =
+            builder.sleds_mut().iter_mut().next().expect("no sleds");
+        let sled_id = *sled_id;
+        details.policy = SledPolicy::Expunged;
+        let input = builder.build();
+        let blueprint2 = Planner::new_based_on(
+            logctx.log.clone(),
+            &blueprint1,
+            &input,
+            "test_blueprint2",
+            &collection,
+        )
+        .expect("failed to create planner")
+        .with_rng_seed((TEST_NAME, "bp2"))
+        .plan()
+        .expect("failed to plan");
+
+        let diff = blueprint2.diff_since_blueprint(&blueprint1);
+        println!("1 -> 2 (expunged sled):\n{}", diff.display());
+
+        // The expunged sled should have an expunged Nexus zone.
+        let zone = blueprint2.blueprint_zones[&sled_id]
+            .zones
+            .iter()
+            .find(|zone| matches!(zone.zone_type, BlueprintZoneType::Nexus(_)))
+            .expect("no nexus zone found");
+        assert_eq!(zone.disposition, BlueprintZoneDisposition::Expunged);
+
+        // Set the target Nexus zone count to one that will completely exhaust
+        // the service IP pool. This will force reuse of the IP that was
+        // allocated to the expunged Nexus zone.
+        let mut builder = input.into_builder();
+        builder.update_network_resources_from_blueprint(&blueprint2).unwrap();
+        assert_eq!(builder.policy_mut().service_ip_pool_ranges.len(), 1);
+        builder.policy_mut().target_nexus_zone_count =
+            builder.policy_mut().service_ip_pool_ranges[0]
+                .len()
+                .try_into()
+                .unwrap();
+        let input = builder.build();
+        let blueprint3 = Planner::new_based_on(
+            logctx.log.clone(),
+            &blueprint2,
+            &input,
+            "test_blueprint3",
+            &collection,
+        )
+        .expect("failed to create planner")
+        .with_rng_seed((TEST_NAME, "bp3"))
+        .plan()
+        .expect("failed to plan");
+
+        let diff = blueprint3.diff_since_blueprint(&blueprint2);
+        println!("2 -> 3 (maximum Nexus):\n{}", diff.display());
+
+        // Planning succeeded, but let's prove that we reused the IP address!
+        let expunged_ip = zone.zone_type.external_networking().unwrap().0.ip();
+        let new_zone = blueprint3
+            .blueprint_zones
+            .values()
+            .flat_map(|c| &c.zones)
+            .find(|zone| {
+                zone.disposition == BlueprintZoneDisposition::InService
+                    && zone
+                        .zone_type
+                        .external_networking()
+                        .map_or(false, |(ip, _)| expunged_ip == ip.ip())
+            })
+            .expect("couldn't find that the external IP was reused");
+        println!(
+            "zone {} reused external IP {} from expunged zone {}",
+            new_zone.id, expunged_ip, zone.id
+        );
+
+        logctx.cleanup_successful();
+    }
+
     #[test]
     fn test_crucible_allocation_skips_nonprovisionable_disks() {
         static TEST_NAME: &str =
@@ -1204,9 +1405,10 @@ mod test {
 
         let mut builder = input.into_builder();
 
-        // Avoid churning on the quantity of Nexus zones - we're okay staying at
-        // one.
+        // Avoid churning on the quantity of Nexus and internal DNS zones -
+        // we're okay staying at one each.
         builder.policy_mut().target_nexus_zone_count = 1;
+        builder.policy_mut().target_internal_dns_zone_count = 1;
 
         // Make generated disk ids deterministic
         let mut disk_rng =
@@ -1287,9 +1489,10 @@ mod test {
 
         let mut builder = input.into_builder();
 
-        // Aside: Avoid churning on the quantity of Nexus zones - we're okay
-        // staying at one.
+        // Avoid churning on the quantity of Nexus and internal DNS zones -
+        // we're okay staying at one each.
         builder.policy_mut().target_nexus_zone_count = 1;
+        builder.policy_mut().target_internal_dns_zone_count = 1;
 
         // The example system should be assigning crucible zones to each
         // in-service disk. When we expunge one of these disks, the planner
@@ -1544,6 +1747,10 @@ mod test {
             *sled_id
         };
         println!("1 -> 2: decommissioned {decommissioned_sled_id}");
+
+        // Because we marked zones as expunged, we need to update the networking
+        // config in the planning input.
+        builder.update_network_resources_from_blueprint(&blueprint1).unwrap();
 
         // Now run the planner with a high number of target Nexus zones. The
         // number (9) is chosen such that:
@@ -1818,6 +2025,7 @@ mod test {
 
         // Remove the now-decommissioned sled from the planning input.
         let mut builder = input.into_builder();
+        builder.update_network_resources_from_blueprint(&blueprint2).unwrap();
         builder.sleds_mut().remove(&expunged_sled_id);
         let input = builder.build();
 

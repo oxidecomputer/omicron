@@ -40,6 +40,7 @@ use omicron_common::api::external::Generation;
 use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::DiskVariant;
+use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_common::policy::NEXUS_REDUNDANCY;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -82,6 +83,7 @@ pub struct SystemDescription {
     available_scrimlet_slots: BTreeSet<u16>,
     target_boundary_ntp_zone_count: usize,
     target_nexus_zone_count: usize,
+    target_internal_dns_zone_count: usize,
     target_cockroachdb_zone_count: usize,
     target_cockroachdb_cluster_version: CockroachDbClusterVersion,
     service_ip_pool_ranges: Vec<IpRange>,
@@ -131,6 +133,7 @@ impl SystemDescription {
 
         // Policy defaults
         let target_nexus_zone_count = NEXUS_REDUNDANCY;
+        let target_internal_dns_zone_count = INTERNAL_DNS_REDUNDANCY;
 
         // TODO-cleanup These are wrong, but we don't currently set up any
         // boundary NTP or CRDB nodes in our fake system, so this prevents
@@ -157,6 +160,7 @@ impl SystemDescription {
             available_scrimlet_slots,
             target_boundary_ntp_zone_count,
             target_nexus_zone_count,
+            target_internal_dns_zone_count,
             target_cockroachdb_zone_count,
             target_cockroachdb_cluster_version,
             service_ip_pool_ranges,
@@ -326,6 +330,7 @@ impl SystemDescription {
             service_ip_pool_ranges: self.service_ip_pool_ranges.clone(),
             target_boundary_ntp_zone_count: self.target_boundary_ntp_zone_count,
             target_nexus_zone_count: self.target_nexus_zone_count,
+            target_internal_dns_zone_count: self.target_internal_dns_zone_count,
             target_cockroachdb_zone_count: self.target_cockroachdb_zone_count,
             target_cockroachdb_cluster_version: self
                 .target_cockroachdb_cluster_version,

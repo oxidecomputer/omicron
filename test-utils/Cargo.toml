@@ -39,6 +39,7 @@ omicron-workspace-hack.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+chrono.workspace = true
 expectorate.workspace = true
 gethostname.workspace = true
 

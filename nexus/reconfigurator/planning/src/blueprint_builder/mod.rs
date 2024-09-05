@@ -6,6 +6,7 @@
 
 mod builder;
 mod external_networking;
+mod internal_dns;
 mod zones;
 
 pub use builder::*;

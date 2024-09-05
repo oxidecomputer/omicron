@@ -41,6 +41,7 @@ use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::policy::BOUNDARY_NTP_REDUNDANCY;
 use omicron_common::policy::COCKROACHDB_REDUNDANCY;
+use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_common::policy::NEXUS_REDUNDANCY;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -66,6 +67,7 @@ pub struct PlanningInputFromDb<'a> {
     pub service_nic_rows: &'a [nexus_db_model::ServiceNetworkInterface],
     pub target_boundary_ntp_zone_count: usize,
     pub target_nexus_zone_count: usize,
+    pub target_internal_dns_zone_count: usize,
     pub target_cockroachdb_zone_count: usize,
     pub target_cockroachdb_cluster_version: CockroachDbClusterVersion,
     pub internal_dns_version: nexus_db_model::Generation,
@@ -132,6 +134,7 @@ impl PlanningInputFromDb<'_> {
             ip_pool_range_rows: &ip_pool_range_rows,
             target_boundary_ntp_zone_count: BOUNDARY_NTP_REDUNDANCY,
             target_nexus_zone_count: NEXUS_REDUNDANCY,
+            target_internal_dns_zone_count: INTERNAL_DNS_REDUNDANCY,
             target_cockroachdb_zone_count: COCKROACHDB_REDUNDANCY,
             target_cockroachdb_cluster_version:
                 CockroachDbClusterVersion::POLICY,
@@ -155,6 +158,7 @@ impl PlanningInputFromDb<'_> {
             service_ip_pool_ranges,
             target_boundary_ntp_zone_count: self.target_boundary_ntp_zone_count,
             target_nexus_zone_count: self.target_nexus_zone_count,
+            target_internal_dns_zone_count: self.target_internal_dns_zone_count,
             target_cockroachdb_zone_count: self.target_cockroachdb_zone_count,
             target_cockroachdb_cluster_version: self
                 .target_cockroachdb_cluster_version,

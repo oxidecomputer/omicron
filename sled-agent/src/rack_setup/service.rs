@@ -119,6 +119,7 @@ use sled_agent_types::early_networking::{
 use sled_agent_types::rack_init::{
     BootstrapAddressDiscovery, RackInitializeRequest as Config,
 };
+use sled_agent_types::rack_ops::RssStep;
 use sled_agent_types::sled::StartSledAgentRequest;
 use sled_agent_types::time_sync::TimeSync;
 use sled_hardware_types::underlay::BootstrapInterface;
@@ -131,7 +132,24 @@ use std::iter;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use std::time::Duration;
 use thiserror::Error;
+use tokio::sync::watch;
 use uuid::Uuid;
+
+/// For tracking the current RSS step and sending notifications about it.
+pub struct RssProgress {
+    step_tx: watch::Sender<RssStep>,
+}
+
+impl RssProgress {
+    pub fn new(step_tx: watch::Sender<RssStep>) -> Self {
+        step_tx.send_replace(RssStep::Starting);
+        RssProgress { step_tx }
+    }
+
+    pub fn update(&mut self, new_step: RssStep) {
+        self.step_tx.send_replace(new_step);
+    }
+}
 
 /// Describes errors which may occur while operating the setup service.
 #[derive(Error, Debug)]
@@ -225,6 +243,7 @@ impl RackSetupService {
         storage_manager: StorageHandle,
         local_bootstrap_agent: BootstrapAgentHandle,
         bootstore: bootstore::NodeHandle,
+        step_tx: watch::Sender<RssStep>,
     ) -> Self {
         let handle = tokio::task::spawn(async move {
             let svc = ServiceInner::new(log.clone());
@@ -234,6 +253,7 @@ impl RackSetupService {
                     &storage_manager,
                     local_bootstrap_agent,
                     bootstore,
+                    step_tx,
                 )
                 .await
             {
@@ -1050,8 +1070,10 @@ impl ServiceInner {
         storage_manager: &StorageHandle,
         local_bootstrap_agent: BootstrapAgentHandle,
         bootstore: bootstore::NodeHandle,
+        step_tx: watch::Sender<RssStep>,
     ) -> Result<(), SetupServiceError> {
         info!(self.log, "Injecting RSS configuration: {:#?}", config);
+        let mut rss_step = RssProgress::new(step_tx);
 
         let resolver = DnsResolver::new_from_subnet(
             self.log.new(o!("component" => "DnsResolver")),
@@ -1082,6 +1104,7 @@ impl ServiceInner {
                 "RSS configuration looks like it has already been applied",
             );
 
+            rss_step.update(RssStep::LoadExistingPlan);
             let sled_plan = SledPlan::load(&self.log, storage_manager)
                 .await?
                 .expect("Sled plan should exist if completed marker exists");
@@ -1101,6 +1124,7 @@ impl ServiceInner {
             let nexus_address =
                 resolver.lookup_socket_v6(ServiceName::Nexus).await?;
 
+            rss_step.update(RssStep::NexusHandoff);
             self.handoff_to_nexus(
                 &config,
                 &sled_plan,
@@ -1114,6 +1138,7 @@ impl ServiceInner {
             info!(self.log, "RSS configuration has not been fully applied yet");
         }
 
+        rss_step.update(RssStep::CreateSledPlan);
         // Wait for either:
         // - All the peers to re-load an old plan (if one exists)
         // - Enough peers to create a new plan (if one does not exist)
@@ -1164,6 +1189,7 @@ impl ServiceInner {
         };
         let config = &plan.config;
 
+        rss_step.update(RssStep::InitTrustQuorum);
         // Initialize the trust quorum if there are peers configured.
         if let Some(peers) = &config.trust_quorum_peers {
             let initial_membership: BTreeSet<_> =
@@ -1186,8 +1212,10 @@ impl ServiceInner {
             },
         };
         info!(self.log, "Writing Rack Network Configuration to bootstore");
+        rss_step.update(RssStep::NetworkConfigUpdate);
         bootstore.update_network_config(early_network_config.into()).await?;
 
+        rss_step.update(RssStep::SledInit);
         // Forward the sled initialization requests to our sled-agent.
         local_bootstrap_agent
             .initialize_sleds(
@@ -1224,6 +1252,7 @@ impl ServiceInner {
             .await?
         };
 
+        rss_step.update(RssStep::EnsureStorage);
         // Before we can ask for any services, we need to ensure that storage is
         // operational.
         self.ensure_storage_config_at_least(&service_plan).await?;
@@ -1240,7 +1269,9 @@ impl ServiceInner {
                 matches!(zone_type, OmicronZoneType::InternalDns { .. })
             },
         );
+        rss_step.update(RssStep::InitDns);
         self.ensure_zone_config_at_least(v2generator.sled_configs()).await?;
+        rss_step.update(RssStep::ConfigureDns);
         self.initialize_internal_dns_records(&service_plan).await?;
 
         // Ask MGS in each switch zone which switch it is.
@@ -1248,6 +1279,7 @@ impl ServiceInner {
             .lookup_switch_zone_underlay_addrs(&resolver)
             .await;
 
+        rss_step.update(RssStep::InitNtp);
         // Next start up the NTP services.
         let v3generator = v2generator.new_version_with(
             DeployStepVersion::V3_DNS_AND_NTP,
@@ -1261,11 +1293,13 @@ impl ServiceInner {
         );
         self.ensure_zone_config_at_least(v3generator.sled_configs()).await?;
 
+        rss_step.update(RssStep::WaitForTimeSync);
         // Wait until time is synchronized on all sleds before proceeding.
         self.wait_for_timesync(&sled_addresses).await?;
 
         info!(self.log, "Finished setting up Internal DNS and NTP");
 
+        rss_step.update(RssStep::WaitForDatabase);
         // Wait until Cockroach has been initialized before running Nexus.
         let v4generator = v3generator.new_version_with(
             DeployStepVersion::V4_COCKROACHDB,
@@ -1277,9 +1311,11 @@ impl ServiceInner {
 
         // Now that datasets and zones have started for CockroachDB,
         // perform one-time initialization of the cluster.
+        rss_step.update(RssStep::ClusterInit);
         self.initialize_cockroach(&service_plan).await?;
 
         // Issue the rest of the zone initialization requests.
+        rss_step.update(RssStep::ZonesInit);
         let v5generator = v4generator
             .new_version_with(DeployStepVersion::V5_EVERYTHING, &|_| true);
         self.ensure_zone_config_at_least(v5generator.sled_configs()).await?;
@@ -1297,6 +1333,7 @@ impl ServiceInner {
         let nexus_address =
             resolver.lookup_socket_v6(ServiceName::Nexus).await?;
 
+        rss_step.update(RssStep::NexusHandoff);
         // At this point, even if we reboot, we must not try to manage sleds,
         // services, or DNS records.
         self.handoff_to_nexus(

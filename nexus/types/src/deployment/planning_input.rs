@@ -6,6 +6,8 @@
 //! blueprints.
 
 use super::AddNetworkResourceError;
+use super::Blueprint;
+use super::BlueprintZoneFilter;
 use super::OmicronZoneExternalIp;
 use super::OmicronZoneNetworkResources;
 use super::OmicronZoneNic;
@@ -16,6 +18,7 @@ use crate::external_api::views::SledProvisionPolicy;
 use crate::external_api::views::SledState;
 use clap::ValueEnum;
 use ipnetwork::IpNetwork;
+use newtype_uuid::GenericUuid;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
@@ -26,6 +29,7 @@ use omicron_common::disk::DiskIdentity;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::VnicUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -94,6 +98,10 @@ impl PlanningInput {
 
     pub fn target_nexus_zone_count(&self) -> usize {
         self.policy.target_nexus_zone_count
+    }
+
+    pub fn target_internal_dns_zone_count(&self) -> usize {
+        self.policy.target_internal_dns_zone_count
     }
 
     pub fn target_cockroachdb_zone_count(&self) -> usize {
@@ -723,6 +731,11 @@ pub struct Policy {
     /// desired total number of deployed Nexus zones
     pub target_nexus_zone_count: usize,
 
+    /// desired total number of internal DNS zones.
+    /// Must be <= [`omicron_common::policy::MAX_INTERNAL_DNS_REDUNDANCY`],
+    /// and should be >= [`omicron_common::policy::INTERNAL_DNS_REDUNDANCY`].
+    pub target_internal_dns_zone_count: usize,
+
     /// desired total number of deployed CockroachDB zones
     pub target_cockroachdb_zone_count: usize,
 
@@ -796,6 +809,7 @@ impl PlanningInputBuilder {
                 service_ip_pool_ranges: Vec::new(),
                 target_boundary_ntp_zone_count: 0,
                 target_nexus_zone_count: 0,
+                target_internal_dns_zone_count: 0,
                 target_cockroachdb_zone_count: 0,
                 target_cockroachdb_cluster_version:
                     CockroachDbClusterVersion::POLICY,
@@ -861,6 +875,35 @@ impl PlanningInputBuilder {
         &mut self,
     ) -> &mut OmicronZoneNetworkResources {
         &mut self.network_resources
+    }
+
+    pub fn update_network_resources_from_blueprint(
+        &mut self,
+        blueprint: &Blueprint,
+    ) -> Result<(), PlanningInputBuildError> {
+        self.network_resources = OmicronZoneNetworkResources::new();
+        for (_, zone) in
+            blueprint.all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+        {
+            let service_id = zone.id;
+            if let Some((external_ip, nic)) =
+                zone.zone_type.external_networking()
+            {
+                self.add_omicron_zone_external_ip(service_id, external_ip)?;
+                self.add_omicron_zone_nic(
+                    service_id,
+                    OmicronZoneNic {
+                        // TODO-cleanup use `TypedUuid` everywhere
+                        id: VnicUuid::from_untyped_uuid(nic.id),
+                        mac: nic.mac,
+                        ip: nic.ip,
+                        slot: nic.slot,
+                        primary: nic.primary,
+                    },
+                )?;
+            }
+        }
+        Ok(())
     }
 
     pub fn policy_mut(&mut self) -> &mut Policy {

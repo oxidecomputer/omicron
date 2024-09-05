@@ -64,5 +64,5 @@ generated inventory collection ..........<REDACTED_UUID>........... from configu
 
 > inventory-list
 ID                                   NERRORS TIME_DONE                
-..........<REDACTED_UUID>........... 0       <REDACTED     TIMESTAMP> 
+..........<REDACTED_UUID>........... 0       <REDACTED_TIMESTAMP> 
 

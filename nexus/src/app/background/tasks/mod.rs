@@ -25,6 +25,7 @@ pub mod phantom_disks;
 pub mod physical_disk_adoption;
 pub mod region_replacement;
 pub mod region_replacement_driver;
+pub mod region_snapshot_replacement_finish;
 pub mod region_snapshot_replacement_garbage_collect;
 pub mod region_snapshot_replacement_start;
 pub mod region_snapshot_replacement_step;

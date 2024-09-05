@@ -10,6 +10,7 @@ workspace = true
 [dependencies]
 anyhow.workspace = true
 cancel-safe-futures.workspace = true
+chrono.workspace = true
 debug-ignore.workspace = true
 derive-where.workspace = true
 either.workspace = true
