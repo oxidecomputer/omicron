@@ -6163,7 +6163,6 @@ dependencies = [
  "petgraph",
  "serde",
  "toml 0.8.19",
- "url",
 ]
 
 [[package]]

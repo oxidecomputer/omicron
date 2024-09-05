@@ -16,7 +16,6 @@ newtype_derive.workspace = true
 petgraph.workspace = true
 serde.workspace = true
 toml.workspace = true
-url.workspace = true
 
 [[bin]]
 name = "ls-apis"

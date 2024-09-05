@@ -60,6 +60,11 @@ fn main() -> Result<()> {
 }
 
 fn run_adoc(apis: &Apis) -> Result<()> {
+    // XXX-dap
+    // - missing Clickhouse Admin?
+    // - missing that "Maghemite DDM Admin" has another client in
+    //   "omicron:clients/ddm-admin-client"
+    // - missing that "Maghemite DDM Admin" is consumed by sled-agent
     println!(r#"[cols="1h,2,2,2a,2", options="header"]"#);
     println!("|===");
     println!("|API");
@@ -74,16 +79,16 @@ fn run_adoc(apis: &Apis) -> Result<()> {
     let metadata = apis.api_metadata();
     for api in metadata.apis() {
         println!("|{}", api.label);
-        // XXX-dap want these to include repo name
+        // XXX-dap want these to be links
         println!("|{}", apis.adoc_label(&api.server_component)?);
         println!("|{}", apis.adoc_label(&api.client_package_name)?);
-        println!("a|");
+        println!("|");
 
         for c in apis.api_consumers(&api.client_package_name) {
-            println!(" * {}", apis.adoc_label(c)?);
+            println!("* {}", apis.adoc_label(c)?);
         }
 
-        println!("|{}", api.notes.as_deref().unwrap_or(""));
+        print!("|{}", api.notes.as_deref().unwrap_or("-\n"));
         println!("");
     }
 

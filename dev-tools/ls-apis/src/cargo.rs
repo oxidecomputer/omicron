@@ -5,22 +5,22 @@
 //! Extract API metadata from Cargo metadata
 
 use crate::ClientPackageName;
+use anyhow::bail;
 use anyhow::{anyhow, ensure, Context, Result};
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
-use cargo_metadata::DependencyKind;
-use cargo_metadata::Metadata;
 use cargo_metadata::Package;
+use cargo_metadata::{DependencyKind, PackageId};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use std::fmt::Display;
-use url::Url;
 
 pub struct Workspace {
     name: String,
-    all_packages: BTreeMap<String, Package>, // XXX-dap memory usage
-    workspace_packages: BTreeMap<String, Package>, // XXX-dap memory usage
+    workspace_root: Utf8PathBuf,
+    packages_by_id: BTreeMap<PackageId, Package>,
+    nodes_by_id: BTreeMap<PackageId, cargo_metadata::Node>,
     progenitor_clients: BTreeSet<ClientPackageName>,
+    workspace_packages_by_name: BTreeMap<String, PackageId>,
 }
 
 impl Workspace {
@@ -32,45 +32,113 @@ impl Workspace {
             cmd.manifest_path(extra_repos.join(name).join("Cargo.toml"));
         }
         let metadata = cmd.exec().context("loading metadata")?;
+        let workspace_root = metadata.workspace_root;
 
-        // Find all packages with a direct non-dev, non-build dependency on
-        // "progenitor".  These generally ought to be suffixed with "-client".
-        let progenitor_clients = direct_dependents(&metadata, "progenitor")?
-            .into_iter()
-            .filter_map(|mypkg| {
-                if mypkg.name.ends_with("-client") {
-                    Some(ClientPackageName::from(mypkg.name))
-                } else {
-                    eprintln!("ignoring apparent non-client: {}", mypkg.name);
-                    None
+        // Build an index of all packages by id.  Identify duplicates because we
+        // assume this isn't possible and we want to know if our assumptions are
+        // wrong.
+        //
+        // Also build an index of workspaces packages by name so that we can
+        // quickly find their id.
+        let mut packages_by_id = BTreeMap::new();
+        let mut workspace_packages_by_name = BTreeMap::new();
+        for pkg in metadata.packages {
+            if pkg.source.is_none() {
+                if workspace_packages_by_name
+                    .insert(pkg.name.clone(), pkg.id.clone())
+                    .is_some()
+                {
+                    bail!(
+                        "workspace {:?}: unexpected duplicate workspace \
+                         package with name {:?}",
+                        name,
+                        pkg.name,
+                    );
                 }
-            })
-            .collect();
+            }
 
-        // XXX-dap do we want workspace packages or all packages?
-        let all_packages = metadata
-            .packages
-            .iter()
-            .map(|p| (p.name.clone(), p.clone()))
-            .collect();
+            if let Some(previous) = packages_by_id.insert(pkg.id.clone(), pkg) {
+                bail!(
+                    "workspace {:?}: unexpected duplicate package with id {:?}",
+                    name,
+                    previous.id
+                );
+            }
+        }
 
-        let workspace_packages = metadata
-            .packages
-            .iter()
-            .filter_map(|p| {
-                if p.source.is_none() {
-                    Some((p.name.clone(), p.clone()))
+        // Build an index mapping packages to their corresponding node in the
+        // resolved dependency tree.
+        //
+        // While we're walking the resolved dependency tree, identify any
+        // Progenitor clients.
+        let mut progenitor_clients = BTreeSet::new();
+        let mut nodes_by_id = BTreeMap::new();
+        let resolve = metadata.resolve.ok_or_else(|| {
+            anyhow!(
+                "workspace {:?}: has no package resolution information",
+                name
+            )
+        })?;
+        for node in resolve.nodes {
+            let Some(pkg) = packages_by_id.get(&node.id) else {
+                bail!(
+                    "workspace {:?}: found resolution information for package \
+                     with id {:?}, but no associated package",
+                    name,
+                    node.id,
+                );
+            };
+
+            if node.deps.iter().any(|d| {
+                d.name == "progenitor"
+                    && d.dep_kinds.iter().any(|k| {
+                        matches!(
+                            k.kind,
+                            DependencyKind::Normal | DependencyKind::Build
+                        )
+                    })
+            }) {
+                if pkg.name.ends_with("-client") {
+                    progenitor_clients
+                        .insert(ClientPackageName::from(pkg.name.clone()));
                 } else {
-                    None
+                    eprintln!(
+                        "workspace {:?}: ignoring apparent non-client that \
+                         uses progenitor: {}",
+                        name, pkg.name
+                    );
                 }
-            })
-            .collect();
+            }
+
+            if let Some(previous) = nodes_by_id.insert(node.id.clone(), node) {
+                bail!(
+                    "workspace {:?}: unexpected duplicate resolution for \
+                     package {:?}",
+                    name,
+                    previous.id,
+                );
+            }
+        }
+
+        // There should be resolution information for every package that we
+        // found.
+        for pkgid in packages_by_id.keys() {
+            ensure!(
+                nodes_by_id.contains_key(pkgid),
+                "workspace {:?}: found package {:?} with no resolution \
+                 information",
+                name,
+                pkgid,
+            );
+        }
 
         Ok(Workspace {
             name: name.to_owned(),
-            all_packages,
-            workspace_packages,
+            workspace_root,
+            packages_by_id,
+            nodes_by_id,
             progenitor_clients,
+            workspace_packages_by_name,
         })
     }
 
@@ -78,12 +146,32 @@ impl Workspace {
         self.progenitor_clients.iter()
     }
 
-    pub fn find_package(&self, pkgname: &str) -> Option<&Package> {
-        self.all_packages.get(pkgname)
+    pub fn find_workspace_package(&self, pkgname: &str) -> Option<&Package> {
+        self.workspace_packages_by_name
+            .get(pkgname)
+            .and_then(|pkgid| self.packages_by_id.get(pkgid))
     }
 
-    pub fn find_workspace_package(&self, pkgname: &str) -> Option<&Package> {
-        self.workspace_packages.get(pkgname)
+    pub fn find_workspace_package_path(
+        &self,
+        pkgname: &str,
+    ) -> Result<Utf8PathBuf> {
+        let pkg = self.find_workspace_package(pkgname).ok_or_else(|| {
+            anyhow!("workspace {:?} has no package {:?}", self.name, pkgname)
+        })?;
+        let manifest_path = &pkg.manifest_path;
+        let relative_path =
+            manifest_path.strip_prefix(&self.workspace_root).map_err(|_| {
+                anyhow!(
+                    "workspace {:?} package {:?} manifest is not under \
+                         the workspace root ({:?})",
+                    self.name,
+                    pkgname,
+                    &self.workspace_root,
+                )
+            })?;
+        let path = cargo_toml_parent(&relative_path, &manifest_path)?;
+        Ok(path)
     }
 
     pub fn name(&self) -> &str {
@@ -95,108 +183,49 @@ impl Workspace {
         root: &Package,
         func: &mut dyn FnMut(&Package, &Package),
     ) -> Result<()> {
-        let mut remaining = vec![root];
-        let mut seen: BTreeSet<String> = BTreeSet::new();
+        let root_node = self.nodes_by_id.get(&root.id).ok_or_else(|| {
+            anyhow!(
+                "workspace {:?}: walking dependencies for package {:?}: \
+                 package is not known in this workspace",
+                self.name,
+                root.name
+            )
+        })?;
+
+        let mut remaining = vec![root_node];
+        let mut seen: BTreeSet<PackageId> = BTreeSet::new();
 
         while let Some(next) = remaining.pop() {
-            for d in &next.dependencies {
-                if seen.contains(&d.name) {
+            for d in &next.deps {
+                let did = &d.pkg;
+                if seen.contains(did) {
                     continue;
                 }
 
-                seen.insert(d.name.clone());
-
-                if d.optional {
-                    continue;
-                }
-
-                if !matches!(
-                    d.kind,
-                    DependencyKind::Normal | DependencyKind::Build
-                ) {
-                    continue;
-                }
-
-                // XXX-dap this is getting an arbitrary package with this name,
-                // not necessarily the one depended-on here.
-                let pkg = self.find_package(&d.name).ok_or_else(|| {
-                    anyhow!(
-                        "package {:?} has dependency {:?} not in workspace \
-                         metadata",
-                        next.name,
-                        d.name
+                seen.insert(did.clone());
+                if !d.dep_kinds.iter().any(|k| {
+                    matches!(
+                        k.kind,
+                        DependencyKind::Normal | DependencyKind::Build
                     )
-                })?;
-                func(next, pkg);
-                remaining.push(pkg);
+                }) {
+                    continue;
+                }
+
+                // unwraps: We verified during loading that we have metadata for
+                // all package ids for which we have nodes in the dependency
+                // tree.  We also verified during loading that we have nodes in
+                // the dependency tree for all package ids for which we have
+                // package metadata.
+                let me_pkg = self.packages_by_id.get(&next.id).unwrap();
+                let dep_pkg = self.packages_by_id.get(did).unwrap();
+                let dep_node = self.nodes_by_id.get(did).unwrap();
+                func(me_pkg, dep_pkg);
+                remaining.push(dep_node);
             }
         }
 
         Ok(())
-    }
-}
-
-pub struct MyPackage {
-    name: String,
-    location: MyPackageLocation,
-}
-
-impl MyPackage {
-    fn new(workspace: &Metadata, pkg: &Package) -> Result<MyPackage> {
-        // Figure out where this thing is.  It's generally one of two places:
-        // (1) In a remote repository.  In that case, it will have a "source"
-        //     property that's the URL to a package.
-        // (2) Inside this workspace.  In that case, it will have no "source",
-        //     but it will have a manifest_path that's inside this workspace.
-        let location = if let Some(source) = &pkg.source {
-            let source_repo_str = &source.repr;
-            let repo_name =
-                source_repo_name(source_repo_str).with_context(|| {
-                    format!("parsing source {:?}", source_repo_str)
-                })?;
-
-            // Figuring out where in that repo the package lives is trickier.
-            // Here we encode some knowledge of where Cargo would have checked
-            // out the repo.
-            let cargo_home = std::env::var("CARGO_HOME")
-                .context("looking up CARGO_HOME in environment")?;
-            let cargo_path =
-                Utf8PathBuf::from(cargo_home).join("git").join("checkouts");
-            let path =
-                pkg.manifest_path.strip_prefix(&cargo_path).map_err(|_| {
-                    anyhow!(
-                    "expected non-local package manifest path ({:?}) to be \
-                     under {:?}",
-                    pkg.manifest_path,
-                    cargo_path,
-                )
-                })?;
-
-            // There should be two extra leading directory components here.
-            // Remove them.  We've gone too far if the file name isn't right
-            // after that.
-            let tail: Utf8PathBuf = path.components().skip(2).collect();
-            let path = cargo_toml_parent(&tail, &pkg.manifest_path)?;
-            MyPackageLocation::RemoteRepo { oxide_github_repo: repo_name, path }
-        } else {
-            let manifest_path = &pkg.manifest_path;
-            let relative_path = manifest_path
-                .strip_prefix(&workspace.workspace_root)
-                .map_err(|_| {
-                    anyhow!(
-                    "no \"source\", so assuming this package is inside this \
-                     repo, but its manifest path ({:?}) is not under the \
-                     workspace root ({:?})",
-                    manifest_path,
-                    &workspace.workspace_root
-                )
-                })?;
-            let path = cargo_toml_parent(&relative_path, &manifest_path)?;
-
-            MyPackageLocation::Omicron { path }
-        };
-
-        Ok(MyPackage { name: pkg.name.clone(), location })
     }
 }
 
@@ -214,71 +243,4 @@ fn cargo_toml_parent(
         .ok_or_else(|| anyhow!("unexpected manifest path: {:?}", label_path))?
         .to_owned();
     Ok(path)
-}
-
-pub enum MyPackageLocation {
-    Omicron { path: Utf8PathBuf },
-    RemoteRepo { oxide_github_repo: String, path: Utf8PathBuf },
-}
-
-impl Display for MyPackageLocation {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            MyPackageLocation::Omicron { path } => {
-                write!(f, "omicron:{}", path)
-            }
-            MyPackageLocation::RemoteRepo { oxide_github_repo, path } => {
-                write!(f, "{}:{}", oxide_github_repo, path)
-            }
-        }
-    }
-}
-
-fn source_repo_name(raw: &str) -> Result<String> {
-    let repo_url =
-        Url::parse(raw).with_context(|| format!("parsing {:?}", raw))?;
-    ensure!(repo_url.scheme() == "git+https", "unsupported URL scheme",);
-    ensure!(
-        matches!(repo_url.host_str(), Some(h) if h == "github.com"),
-        "unexpected URL host (expected \"github.com\")",
-    );
-    let path_segments: Vec<_> = repo_url
-        .path_segments()
-        .ok_or_else(|| anyhow!("expected URL to contain path segments"))?
-        .collect();
-    ensure!(
-        path_segments.len() == 2,
-        "expected exactly two path segments in URL",
-    );
-    ensure!(
-        path_segments[0] == "oxidecomputer",
-        "expected repo under Oxide's GitHub organization",
-    );
-
-    Ok(path_segments[1].to_string())
-}
-
-fn direct_dependents(
-    workspace: &Metadata,
-    pkg_name: &str,
-) -> Result<Vec<MyPackage>> {
-    workspace
-        .packages
-        .iter()
-        .filter_map(|pkg| {
-            if pkg.dependencies.iter().any(|dep| {
-                matches!(
-                    dep.kind,
-                    DependencyKind::Normal | DependencyKind::Build
-                ) && dep.name == pkg_name
-            }) {
-                Some(
-                    MyPackage::new(workspace, pkg)
-                        .with_context(|| format!("package {:?}", pkg.name)),
-                )
-            } else {
-                None
-            }
-        })
-        .collect()
 }

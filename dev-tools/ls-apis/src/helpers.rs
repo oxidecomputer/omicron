@@ -202,7 +202,8 @@ impl Apis {
 
     pub fn adoc_label(&self, pkgname: &str) -> Result<String> {
         let (workspace, _) = self.helper.find_package_workspace(pkgname)?;
-        Ok(format!("{}:{}", workspace.name(), pkgname))
+        let pkgpath = workspace.find_workspace_package_path(pkgname)?;
+        Ok(format!("{}:{}", workspace.name(), pkgpath))
     }
 
     pub fn dot_by_unit(&self) -> String {
@@ -301,8 +302,6 @@ impl ApisHelper {
         Ok(ApisHelper { api_metadata, workspaces, warnings: errors })
     }
 
-    // XXX-dap document that this really only works for packages that appear in
-    // only one workspace
     pub fn find_package_workspace(
         &self,
         server_pkgname: &str,
