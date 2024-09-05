@@ -4,6 +4,9 @@ set -o errexit
 set -o pipefail
 set -o xtrace
 
+# Color the output for easier readability.
+export CARGO_TERM_COLOR=always
+
 target_os=$1
 
 # NOTE: This version should be in sync with the recommended version in
