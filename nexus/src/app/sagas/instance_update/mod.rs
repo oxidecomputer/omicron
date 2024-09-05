@@ -1623,6 +1623,7 @@ mod test {
                     dst_propolis_id: None,
                     migration_id: None,
                     nexus_state: InstanceState::NoVmm,
+                    time_last_auto_restarted: None,
                 },
             )
             .await

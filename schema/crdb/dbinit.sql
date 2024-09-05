@@ -1107,6 +1107,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
      */
     auto_restart_policy omicron.public.instance_auto_restart,
 
+    /*
+     * The time of the most recent auto-restart attempt, or NULL if the control
+     * plane has never attempted to automatically restart this instance.
+     */
+    time_last_auto_restarted TIMESTAMPTZ,
+
     CONSTRAINT vmm_iff_active_propolis CHECK (
         ((state = 'vmm') AND (active_propolis_id IS NOT NULL)) OR
         ((state != 'vmm') AND (active_propolis_id IS NULL))
@@ -4299,7 +4305,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '98.0.0', NULL)
+    (TRUE, NOW(), NOW(), '99.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

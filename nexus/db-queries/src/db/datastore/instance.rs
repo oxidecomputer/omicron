@@ -1962,6 +1962,7 @@ mod tests {
                     dst_propolis_id: None,
                     migration_id: None,
                     nexus_state: InstanceState::NoVmm,
+                    time_last_auto_restarted: None,
                 },
             )
             .await
@@ -2023,6 +2024,7 @@ mod tests {
             dst_propolis_id: None,
             migration_id: None,
             nexus_state: InstanceState::Vmm,
+            time_last_auto_restarted: None,
         };
 
         let updated = dbg!(
@@ -2124,6 +2126,7 @@ mod tests {
             dst_propolis_id: Some(Uuid::new_v4()),
             migration_id: Some(Uuid::new_v4()),
             nexus_state: InstanceState::Vmm,
+            time_last_auto_restarted: None,
         };
         let updated = dbg!(
             datastore
@@ -2152,6 +2155,7 @@ mod tests {
                         dst_propolis_id: None,
                         migration_id: None,
                         nexus_state: InstanceState::NoVmm,
+                        time_last_auto_restarted: None,
                     },
                 )
                 .await
@@ -2322,6 +2326,7 @@ mod tests {
                     propolis_id: Some(active_vmm.id),
                     dst_propolis_id: Some(target_vmm.id),
                     migration_id: Some(migration.id),
+                    time_last_auto_restarted: None,
                 },
             )
             .await
