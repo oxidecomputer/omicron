@@ -11,8 +11,10 @@ use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use cargo_metadata::Package;
 use cargo_metadata::{DependencyKind, PackageId};
-use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::collections::{BTreeMap, VecDeque};
+
+pub type DepPath = VecDeque<PackageId>;
 
 pub struct Workspace {
     name: String,
@@ -152,6 +154,10 @@ impl Workspace {
             .and_then(|pkgid| self.packages_by_id.get(pkgid))
     }
 
+    pub fn find_pkg_by_id(&self, pkgid: &PackageId) -> Option<&Package> {
+        self.packages_by_id.get(pkgid)
+    }
+
     pub fn find_workspace_package_path(
         &self,
         pkgname: &str,
@@ -181,8 +187,13 @@ impl Workspace {
     pub fn walk_required_deps_recursively(
         &self,
         root: &Package,
-        func: &mut dyn FnMut(&Package, &Package),
+        func: &mut dyn FnMut(&Package, &DepPath),
     ) -> Result<()> {
+        struct Remaining<'a> {
+            node: &'a cargo_metadata::Node,
+            path: VecDeque<PackageId>,
+        }
+
         let root_node = self.nodes_by_id.get(&root.id).ok_or_else(|| {
             anyhow!(
                 "workspace {:?}: walking dependencies for package {:?}: \
@@ -192,10 +203,13 @@ impl Workspace {
             )
         })?;
 
-        let mut remaining = vec![root_node];
+        let mut remaining = vec![Remaining {
+            node: root_node,
+            path: VecDeque::from([root.id.clone()]),
+        }];
         let mut seen: BTreeSet<PackageId> = BTreeSet::new();
 
-        while let Some(next) = remaining.pop() {
+        while let Some(Remaining { node: next, path }) = remaining.pop() {
             for d in &next.deps {
                 let did = &d.pkg;
                 if seen.contains(did) {
@@ -217,11 +231,12 @@ impl Workspace {
                 // tree.  We also verified during loading that we have nodes in
                 // the dependency tree for all package ids for which we have
                 // package metadata.
-                let me_pkg = self.packages_by_id.get(&next.id).unwrap();
                 let dep_pkg = self.packages_by_id.get(did).unwrap();
                 let dep_node = self.nodes_by_id.get(did).unwrap();
-                func(me_pkg, dep_pkg);
-                remaining.push(dep_node);
+                func(dep_pkg, &path);
+                let mut dep_path = path.clone();
+                dep_path.push_front(did.clone());
+                remaining.push(Remaining { node: dep_node, path: dep_path })
             }
         }
 

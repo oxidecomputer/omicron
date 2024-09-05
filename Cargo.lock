@@ -6160,6 +6160,7 @@ dependencies = [
  "cargo_metadata",
  "clap",
  "newtype_derive",
+ "omicron-workspace-hack",
  "petgraph",
  "serde",
  "toml 0.8.19",

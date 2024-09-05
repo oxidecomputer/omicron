@@ -17,12 +17,6 @@
 //   client might be in repo X but we want this information for its dependents
 //   in repo Y.  So we can't do this entirely at the Workspace level.  All the
 //   Workspace can give us is an efficient way to walk reverse dependencies.
-// - Add options to the various list commands to print full dependency paths, too
-//   - Modify walk_required_deps_recursively() to provide the full path from the
-//     root to the package, not just the parent and package found.
-//   - Modify the data structures in `Apis` to keep track of not just the
-//     dependencies but the path to them
-//   - Update the commands to use these
 
 use anyhow::{Context, Result};
 use camino::Utf8PathBuf;
@@ -53,11 +47,18 @@ enum Cmds {
     /// print out an Asciidoc table summarizing the APIs
     Adoc,
     /// print out each API, what exports it, and what consumes it
-    Apis,
+    Apis(ShowDepsArgs),
     /// print out APIs exported and consumed by each deployment unit
     DeploymentUnits(DotArgs),
     /// print out APIs exported and consumed, by server component
-    Servers,
+    Servers(ShowDepsArgs),
+}
+
+#[derive(Args)]
+pub struct ShowDepsArgs {
+    /// Show the Rust dependency path resulting in the API dependency
+    #[arg(long)]
+    show_deps: bool,
 }
 
 #[derive(Args)]
@@ -65,6 +66,9 @@ pub struct DotArgs {
     /// Show output that can be fed to graphviz (dot)
     #[arg(long)]
     dot: bool,
+    /// Show the Rust dependency path resulting in the API dependency
+    #[arg(long)]
+    show_deps: bool,
 }
 
 fn main() -> Result<()> {
@@ -74,9 +78,9 @@ fn main() -> Result<()> {
 
     match cli_args.cmd {
         Cmds::Adoc => run_adoc(&apis),
-        Cmds::Apis => run_apis(&apis),
+        Cmds::Apis(args) => run_apis(&apis, args),
         Cmds::DeploymentUnits(args) => run_deployment_units(&apis, args),
-        Cmds::Servers => run_servers(&apis),
+        Cmds::Servers(args) => run_servers(&apis, args),
     }
 }
 
@@ -105,7 +109,7 @@ fn run_adoc(apis: &Apis) -> Result<()> {
         println!("|{}", apis.adoc_label(&api.client_package_name)?);
         println!("|");
 
-        for c in apis.api_consumers(&api.client_package_name) {
+        for (c, _) in apis.api_consumers(&api.client_package_name) {
             println!("* {}", apis.adoc_label(c)?);
         }
 
@@ -116,13 +120,18 @@ fn run_adoc(apis: &Apis) -> Result<()> {
     Ok(())
 }
 
-fn run_apis(apis: &Apis) -> Result<()> {
+fn run_apis(apis: &Apis, args: ShowDepsArgs) -> Result<()> {
     let metadata = apis.api_metadata();
     for api in metadata.apis() {
         println!("{} (client: {})", api.label, api.client_package_name);
-        for s in apis.api_consumers(&api.client_package_name) {
+        for (s, path) in apis.api_consumers(&api.client_package_name) {
             let (repo_name, package_path) = apis.package_label(s)?;
             println!("    consumed by: {} ({}/{})", s, repo_name, package_path);
+            if args.show_deps {
+                for p in path {
+                    println!("        via {}", p);
+                }
+            }
         }
         println!("");
     }
@@ -136,7 +145,13 @@ fn run_deployment_units(apis: &Apis, args: DotArgs) -> Result<()> {
         let metadata = apis.api_metadata();
         for (unit, server_components) in apis.all_deployment_unit_components() {
             println!("{}", unit);
-            print_server_components(apis, metadata, server_components, "    ")?;
+            print_server_components(
+                apis,
+                metadata,
+                server_components,
+                "    ",
+                args.show_deps,
+            )?;
             println!("");
         }
     }
@@ -149,6 +164,7 @@ fn print_server_components<'a>(
     metadata: &AllApiMetadata,
     server_components: impl IntoIterator<Item = &'a ServerComponent>,
     prefix: &str,
+    show_deps: bool,
 ) -> Result<()> {
     for s in server_components.into_iter() {
         let (repo_name, pkg_path) = apis.package_label(s)?;
@@ -159,9 +175,13 @@ fn print_server_components<'a>(
                 prefix, api.label, api.client_package_name
             );
         }
-        // XXX-dap add mode to print paths
-        for c in apis.component_apis_consumed(s) {
+        for (c, path) in apis.component_apis_consumed(s) {
             println!("{}    consumes: {}", prefix, c);
+            if show_deps {
+                for p in path {
+                    println!("{}        via: {}", prefix, p);
+                }
+            }
         }
 
         println!("");
@@ -169,9 +189,15 @@ fn print_server_components<'a>(
     Ok(())
 }
 
-fn run_servers(apis: &Apis) -> Result<()> {
+fn run_servers(apis: &Apis, args: ShowDepsArgs) -> Result<()> {
     let metadata = apis.api_metadata();
-    print_server_components(apis, metadata, metadata.server_components(), "")
+    print_server_components(
+        apis,
+        metadata,
+        metadata.server_components(),
+        "",
+        args.show_deps,
+    )
 }
 
 impl TryFrom<&LsApis> for LoadArgs {

@@ -5,6 +5,7 @@
 //! Higher-level helpers for working with compiled API information
 
 use crate::api_metadata::AllApiMetadata;
+use crate::cargo::DepPath;
 use crate::cargo::Workspace;
 use crate::ClientPackageName;
 use crate::DeploymentUnit;
@@ -27,8 +28,10 @@ pub struct Apis {
     server_component_units: BTreeMap<ServerComponent, DeploymentUnit>,
     unit_server_components: BTreeMap<DeploymentUnit, Vec<ServerComponent>>,
     deployment_units: BTreeSet<DeploymentUnit>,
-    apis_consumed: BTreeMap<ServerComponent, BTreeSet<ClientPackageName>>,
-    api_consumers: BTreeMap<ClientPackageName, BTreeSet<ServerComponent>>,
+    apis_consumed:
+        BTreeMap<ServerComponent, BTreeMap<ClientPackageName, DepPath>>,
+    api_consumers:
+        BTreeMap<ClientPackageName, BTreeMap<ServerComponent, DepPath>>,
     helper: ApisHelper,
 }
 
@@ -73,11 +76,18 @@ impl Apis {
         for server_pkgname in helper.api_metadata.server_components() {
             let (workspace, pkg) =
                 helper.find_package_workspace(server_pkgname)?;
-            let mut clients_used: BTreeSet<ClientPackageName> = BTreeSet::new();
+            let mut clients_used: BTreeMap<ClientPackageName, DepPath> =
+                BTreeMap::new();
             workspace
                 .walk_required_deps_recursively(
                     pkg,
-                    &mut |parent: &Package, p: &Package| {
+                    &mut |p: &Package, dep_path: &DepPath| {
+                        // unwrap(): the workspace must know about each of these
+                        // packages.
+                        let parent_id = &dep_path[0];
+                        let parent =
+                            workspace.find_pkg_by_id(parent_id).unwrap();
+
                         // TODO
                         // omicron_common depends on mg-admin-client solely to
                         // impl some `From` conversions.  That makes it look
@@ -142,7 +152,10 @@ impl Apis {
                             .client_pkgname_lookup(&p.name)
                             .is_some()
                         {
-                            clients_used.insert(p.name.clone().into());
+                            clients_used.insert(
+                                p.name.clone().into(),
+                                dep_path.clone(),
+                            );
                         }
                     },
                 )
@@ -154,12 +167,13 @@ impl Apis {
                     )
                 })?;
 
-            for c in &clients_used {
+            for (client_name, dep_path) in &clients_used {
                 api_consumers
-                    .entry(c.clone())
-                    .or_insert_with(BTreeSet::new)
-                    .insert(server_pkgname.clone());
+                    .entry(client_name.clone())
+                    .or_insert_with(BTreeMap::new)
+                    .insert(server_pkgname.clone(), dep_path.clone());
             }
+
             apis_consumed.insert(server_pkgname.clone(), clients_used);
         }
 
@@ -186,7 +200,7 @@ impl Apis {
     pub fn component_apis_consumed(
         &self,
         server_component: &ServerComponent,
-    ) -> Box<dyn Iterator<Item = &ClientPackageName> + '_> {
+    ) -> Box<dyn Iterator<Item = (&ClientPackageName, &DepPath)> + '_> {
         match self.apis_consumed.get(server_component) {
             Some(l) => Box::new(l.iter()),
             None => Box::new(std::iter::empty()),
@@ -196,7 +210,7 @@ impl Apis {
     pub fn api_consumers(
         &self,
         client: &ClientPackageName,
-    ) -> Box<dyn Iterator<Item = &ServerComponent> + '_> {
+    ) -> Box<dyn Iterator<Item = (&ServerComponent, &DepPath)> + '_> {
         match self.api_consumers.get(client) {
             Some(l) => Box::new(l.iter()),
             None => Box::new(std::iter::empty()),
@@ -231,7 +245,8 @@ impl Apis {
         {
             let my_node = nodes.get(deployment_unit).unwrap();
             for server_pkg in server_components {
-                for client_pkg in self.component_apis_consumed(server_pkg) {
+                for (client_pkg, _) in self.component_apis_consumed(server_pkg)
+                {
                     let api = self
                         .api_metadata()
                         .client_pkgname_lookup(client_pkg)
