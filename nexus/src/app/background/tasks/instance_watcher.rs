@@ -387,7 +387,13 @@ impl BackgroundTask for InstanceWatcher {
                 BTreeMap::new();
             let mut check_errors: BTreeMap<String, usize> = BTreeMap::new();
 
-            let mut curr_sled: Option<(Uuid, SledAgentClient)> = None;
+            // A `reqwest` client is a reference-counted handle to a connection
+            // poll that can be reused by multiple requests. Making a new client
+            // is fairly expensive, but cloning one is cheap, and cloning it
+            // allows reusing pooled TCP connections. Therefore, we will order
+            // the database query by sled ID, and reuse the same sled-agent
+            // client as long as we are talking to the same sled.
+            let mut curr_client: Option<(Uuid, SledAgentClient)> = None;
             while let Some(p) = paginator.next() {
                 let maybe_batch = self
                     .datastore
@@ -410,7 +416,7 @@ impl BackgroundTask for InstanceWatcher {
 
                 // Spawn a task to check on each sled in the batch.
                 for (sled, instance, vmm, project) in batch {
-                    let client = match curr_sled {
+                    let client = match curr_client {
                         // If we are still talking to the same sled, reuse the
                         // existing client and its connection pool.
                         Some((sled_id, ref client)) if sled_id == sled.id() => client.clone(),
