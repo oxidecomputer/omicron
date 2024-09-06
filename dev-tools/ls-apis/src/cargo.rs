@@ -25,6 +25,19 @@ pub struct Workspace {
     workspace_packages_by_name: BTreeMap<String, PackageId>,
 }
 
+// Packages that may be flagged as clients because they directly depend on
+// Progenitor, but which are not really clients.
+const IGNORED_NON_CLIENTS: &[&str] = &[
+    // omicron-common depends on progenitor so that it can define some generic
+    // error handling and a generic macro for defining clients.  omicron-common
+    // itself is not a progenitor-based client.
+    "omicron-common",
+    // propolis-mock-server uses Progenitor to generate types that are
+    // compatible with the real Propolis server.  It doesn't actually use the
+    // client and we don't really care about it for these purposes anyway.
+    "propolis-mock-server",
+];
+
 impl Workspace {
     pub fn load(name: &str, extra_repos: Option<&Utf8Path>) -> Result<Self> {
         eprintln!("loading metadata for workspace {name}");
@@ -103,7 +116,7 @@ impl Workspace {
                 if pkg.name.ends_with("-client") {
                     progenitor_clients
                         .insert(ClientPackageName::from(pkg.name.clone()));
-                } else {
+                } else if !IGNORED_NON_CLIENTS.contains(&pkg.name.as_str()) {
                     eprintln!(
                         "workspace {:?}: ignoring apparent non-client that \
                          uses progenitor: {}",
