@@ -274,7 +274,7 @@ mod test {
         // Use the first chunk of the UUID as the name, to avoid conflicts.
         // Start with a lower ascii character to satisfy the name constraints.
         let name = format!("instance-{id}").parse().unwrap();
-        let mut instance = Instance::new(
+        let instance = Instance::new(
             id,
             authz_project.id(),
             &params::InstanceCreate {
