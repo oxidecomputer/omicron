@@ -51,7 +51,7 @@ enum Cmds {
     /// print out APIs exported and consumed by each deployment unit
     DeploymentUnits(DotArgs),
     /// print out APIs exported and consumed, by server component
-    Servers(ShowDepsArgs),
+    Servers(DotArgs),
 }
 
 #[derive(Args)]
@@ -189,15 +189,20 @@ fn print_server_components<'a>(
     Ok(())
 }
 
-fn run_servers(apis: &Apis, args: ShowDepsArgs) -> Result<()> {
-    let metadata = apis.api_metadata();
-    print_server_components(
-        apis,
-        metadata,
-        metadata.server_components(),
-        "",
-        args.show_deps,
-    )
+fn run_servers(apis: &Apis, args: DotArgs) -> Result<()> {
+    if args.dot {
+        println!("{}", apis.dot_by_server_component())
+    } else {
+        let metadata = apis.api_metadata();
+        print_server_components(
+            apis,
+            metadata,
+            metadata.server_components(),
+            "",
+            args.show_deps,
+        )?;
+    }
+    Ok(())
 }
 
 impl TryFrom<&LsApis> for LoadArgs {

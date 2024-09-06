@@ -266,6 +266,35 @@ impl Apis {
 
         Dot::new(&graph).to_string()
     }
+
+    pub fn dot_by_server_component(&self) -> String {
+        let mut graph = petgraph::graph::Graph::new();
+        let nodes: BTreeMap<_, _> = self
+            .server_component_units
+            .keys()
+            .map(|server_component| {
+                (server_component.clone(), graph.add_node(server_component))
+            })
+            .collect();
+
+        // Now walk through the server components, walk through each one of the
+        // clients used by those, and create a corresponding edge.
+        for (server_component, consumed_apis) in &self.apis_consumed {
+            // unwrap(): we created a node for each server component above.
+            let my_node = nodes.get(server_component).unwrap();
+            for client_pkg in consumed_apis.keys() {
+                let api = self
+                    .api_metadata()
+                    .client_pkgname_lookup(client_pkg)
+                    .unwrap();
+                let other_component = &api.server_component;
+                let other_node = nodes.get(other_component).unwrap();
+                graph.add_edge(*my_node, *other_node, client_pkg.clone());
+            }
+        }
+
+        Dot::new(&graph).to_string()
+    }
 }
 
 pub struct ApisHelper {
