@@ -404,7 +404,7 @@ impl BackgroundTask for InstanceWatcher {
                         return serde_json::json!({ "error": e.to_string() });
                     }
                 };
-                paginator = p.found_batch(&batch, &|(sled, _, _, _)| sled.id());
+                paginator = p.found_batch(&batch, &|(sled, _, vmm, _)| (sled.id(), vmm.id));
 
                 // When we iterate over the batch of sled instances, we pop the
                 // first sled from the batch before looping over the rest, to
