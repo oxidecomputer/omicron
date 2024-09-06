@@ -1,3 +1,4 @@
+<!-- TODO: Removeme -->
 <clickhouse>
 
     <logger>
@@ -10,6 +11,7 @@
 
     <!-- To allow all use :: -->
     <listen_host from_env="CH_LISTEN_ADDR"/>
+    <!-- TODO: Make sure this is also part of the configuratrion file -->
     <path replace="true" from_env="CH_DATASTORE"/>
 
     <keeper_server>

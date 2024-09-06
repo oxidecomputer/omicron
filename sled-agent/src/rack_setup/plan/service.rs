@@ -69,6 +69,7 @@ const OXIMETER_COUNT: usize = 1;
 // omicron_common::policy::CLICKHOUSE_SERVER_REDUNDANCY once we enable
 // replicated ClickHouse.
 // Set to 0 when testing replicated ClickHouse.
+// TODO: Set these constants back to original values
 const CLICKHOUSE_COUNT: usize = 0;
 // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
 // when Nexus provisions Clickhouse keeper.

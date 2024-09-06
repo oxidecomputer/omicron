@@ -1,3 +1,4 @@
+<!-- TODO: Removeme -->
 <clickhouse>
     <logger replace="true">
         <level>trace</level>
