@@ -8,8 +8,8 @@ use camino_tempfile::NamedUtf8TempFile;
 use derive_more::{Add, AddAssign, Display, From};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::fs::rename;
-use std::io::Write;
+use std::fs::{create_dir, rename, File};
+use std::io::{ErrorKind, Write};
 use std::net::Ipv6Addr;
 
 pub mod config;
@@ -121,12 +121,16 @@ impl ServerSettings {
             self.datastore_path.clone(),
         );
 
-        // Writing to a temporary file and then renaming it will ensure we
-        // don't end up with a partially written file after a crash
-        let mut f = NamedUtf8TempFile::new()?;
+        match create_dir(self.config_dir.clone()) {
+            Ok(_) => (),
+            Err(e) if e.kind() == ErrorKind::AlreadyExists => (),
+            Err(e) => return Err(e.into()),
+        };
+        let mut f =
+            File::create(self.config_dir.join("replica-server-config.xml"))?;
         f.write_all(config.to_xml().as_bytes())?;
         f.flush()?;
-        rename(f.path(), self.config_dir.join("replica-server-config.xml"))?;
+
         Ok(config)
     }
 }
@@ -185,6 +189,11 @@ impl KeeperSettings {
         let mut f = NamedUtf8TempFile::new()?;
         f.write_all(config.to_xml().as_bytes())?;
         f.flush()?;
+        match create_dir(self.config_dir.clone()) {
+            Ok(_) => (),
+            Err(e) if e.kind() == ErrorKind::AlreadyExists => (),
+            Err(e) => return Err(e.into()),
+        };
         rename(f.path(), self.config_dir.join("keeper-config.xml"))?;
         Ok(config)
     }

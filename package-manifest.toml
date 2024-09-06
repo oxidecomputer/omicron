@@ -200,7 +200,7 @@ source.paths = [
   { from = "out/clickhouse", to = "/opt/oxide/clickhouse_server" },
   { from = "smf/clickhouse_server/manifest.xml", to = "/var/svc/manifest/site/clickhouse_server/manifest.xml" },
   { from = "smf/clickhouse_server/method_script.sh", to = "/opt/oxide/lib/svc/manifest/clickhouse_server.sh" },
-  { from = "smf/clickhouse_server/config_replica.xml", to = "/opt/oxide/clickhouse_server/config.d/config_replica.xml" },
+ # { from = "smf/clickhouse_server/config_replica.xml", to = "/opt/oxide/clickhouse_server/config.d/config_replica.xml" },
 ]
 output.type = "zone"
 output.intermediate_only = true
