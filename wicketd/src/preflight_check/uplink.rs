@@ -39,7 +39,6 @@ use std::sync::Mutex;
 use std::time::Duration;
 use std::time::Instant;
 use tokio::process::Command;
-use tokio::sync::mpsc;
 use wicket_common::preflight_check::EventBuffer;
 use wicket_common::preflight_check::StepContext;
 use wicket_common::preflight_check::StepProgress;
