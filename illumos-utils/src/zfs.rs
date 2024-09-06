@@ -218,65 +218,74 @@ pub struct DatasetProperties {
     pub id: Option<DatasetUuid>,
     /// The full name of the dataset.
     pub name: String,
-    /// Remaining space in the dataset and descendents.
+    /// Remaining space in the dataset and descendants.
     pub avail: ByteCount,
-    /// Space used by dataset and descendents.
+    /// Space used by dataset and descendants.
     pub used: ByteCount,
-    /// Maximum space usable by dataset and descendents.
+    /// Maximum space usable by dataset and descendants.
     pub quota: Option<ByteCount>,
-    /// Minimum space guaranteed to dataset and descendents.
+    /// Minimum space guaranteed to dataset and descendants.
     pub reservation: Option<ByteCount>,
     /// The compression algorithm used for this dataset.
+    ///
+    /// This probably aligns with a value from
+    /// [omicron_common::disk::CompressionAlgorithm], but is left as an untyped
+    /// string so that unexpected compression formats don't prevent inventory
+    /// from being collected.
     pub compression: String,
+}
+
+impl DatasetProperties {
+    // care about.
+    const ZFS_LIST_STR: &'static str =
+        "oxide:uuid,name,avail,used,quota,reservation,compression";
+}
+
+// An inner parsing function, so that the FromStr implementation can always emit
+// the string 's' that failed to parse in the error message.
+fn dataset_properties_parse(
+    s: &str,
+) -> Result<DatasetProperties, anyhow::Error> {
+    let mut iter = s.split_whitespace();
+
+    let id = match iter.next().context("Missing UUID")? {
+        "-" => None,
+        anything_else => Some(anything_else.parse::<DatasetUuid>()?),
+    };
+
+    let name = iter.next().context("Missing 'name'")?.to_string();
+    let avail =
+        iter.next().context("Missing 'avail'")?.parse::<u64>()?.try_into()?;
+    let used =
+        iter.next().context("Missing 'used'")?.parse::<u64>()?.try_into()?;
+    let quota = match iter.next().context("Missing 'quota'")?.parse::<u64>()? {
+        0 => None,
+        q => Some(q.try_into()?),
+    };
+    let reservation =
+        match iter.next().context("Missing 'reservation'")?.parse::<u64>()? {
+            0 => None,
+            r => Some(r.try_into()?),
+        };
+    let compression = iter.next().context("Missing 'compression'")?.to_string();
+
+    Ok(DatasetProperties {
+        id,
+        name,
+        avail,
+        used,
+        quota,
+        reservation,
+        compression,
+    })
 }
 
 impl FromStr for DatasetProperties {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let mut iter = s.split_whitespace();
-
-        let id = match iter.next().context("Missing UUID")? {
-            "-" => None,
-            anything_else => Some(anything_else.parse::<DatasetUuid>()?),
-        };
-
-        let name = iter.next().context("Missing 'name'")?.to_string();
-        let avail = iter
-            .next()
-            .context("Missing 'avail'")?
-            .parse::<u64>()?
-            .try_into()?;
-        let used = iter
-            .next()
-            .context("Missing 'used'")?
-            .parse::<u64>()?
-            .try_into()?;
-        let quota =
-            match iter.next().context("Missing 'quota'")?.parse::<u64>()? {
-                0 => None,
-                q => Some(q.try_into()?),
-            };
-        let reservation = match iter
-            .next()
-            .context("Missing 'reservation'")?
-            .parse::<u64>()?
-        {
-            0 => None,
-            r => Some(r.try_into()?),
-        };
-        let compression =
-            iter.next().context("Missing 'compression'")?.to_string();
-
-        Ok(DatasetProperties {
-            id,
-            name,
-            avail,
-            used,
-            quota,
-            reservation,
-            compression,
-        })
+        dataset_properties_parse(s)
+            .with_context(|| format!("Failed to parse: {s}"))
     }
 }
 
@@ -316,13 +325,13 @@ impl Zfs {
         let cmd = command.args(&["list", "-d", "1", "-rHpo"]);
 
         // Note: this is tightly coupled with the layout of DatasetProperties
-        cmd.arg("oxide:uuid,name,avail,used,quota,reservation,compression");
+        cmd.arg(DatasetProperties::ZFS_LIST_STR);
         cmd.args(datasets);
 
         let output = execute(cmd).with_context(|| {
             format!("Failed to get dataset properties for {datasets:?}")
         })?;
-        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stdout = String::from_utf8(output.stdout)?;
         let mut datasets = stdout
             .trim()
             .split('\n')

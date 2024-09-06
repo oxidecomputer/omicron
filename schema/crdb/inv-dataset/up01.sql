@@ -13,4 +13,3 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_dataset (
 
     PRIMARY KEY (inv_collection_id, sled_id, name)
 );
-
