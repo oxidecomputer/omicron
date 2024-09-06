@@ -5,13 +5,18 @@
 //! Show information about Progenitor-based APIs
 
 // XXX-dap wishlist:
-// - Inspect all the edges to make sure I understand them and that we're
-//   handling them well
-// - *Use* this to generate the Asciidoc table
+// - Fix warnings:
+//   - missing client: crucible-control-client
+//   - missing client: repair-client
+//   - missing client: dsc-client
+//   - missing client: omicron-ddm-admin-client
 //   - missing Clickhouse Admin?
 //   - missing that "Maghemite DDM Admin" has another client in
 //     "omicron:clients/ddm-admin-client"
 //   - missing that "Maghemite DDM Admin" is consumed by sled-agent
+// - Inspect all the edges to make sure I understand them and that we're
+//   handling them well
+// - *Use* this to generate the Asciidoc table
 //   - after I've compared the current one with the generated one, make package
 //     names into links
 // - Find The DAG
