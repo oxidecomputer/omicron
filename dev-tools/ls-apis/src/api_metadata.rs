@@ -11,13 +11,47 @@ use crate::ServerPackageName;
 use anyhow::bail;
 use serde::Deserialize;
 use std::collections::BTreeMap;
-use std::collections::BTreeSet;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 #[serde(try_from = "RawApiMetadata")]
 pub struct AllApiMetadata {
     apis: BTreeMap<ClientPackageName, ApiMetadata>,
+    deployment_units: BTreeMap<DeploymentUnit, DeploymentUnitInfo>,
+}
+
+impl AllApiMetadata {
+    pub fn apis(&self) -> impl Iterator<Item = &ApiMetadata> {
+        self.apis.values()
+    }
+
+    pub fn deployment_units(
+        &self,
+    ) -> impl Iterator<Item = (&DeploymentUnit, &DeploymentUnitInfo)> {
+        self.deployment_units.iter()
+    }
+
+    pub fn client_pkgnames(&self) -> impl Iterator<Item = &ClientPackageName> {
+        self.apis.keys()
+    }
+
+    pub fn server_components(&self) -> impl Iterator<Item = &ServerComponent> {
+        self.deployment_units.values().flat_map(|d| d.packages.iter())
+    }
+
+    pub fn client_pkgname_lookup(
+        &self,
+        pkgname: &ClientPackageName,
+    ) -> Option<&ApiMetadata> {
+        self.apis.get(pkgname)
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawApiMetadata {
+    apis: Vec<ApiMetadata>,
+    deployment_units: Vec<DeploymentUnitInfo>,
 }
 
 impl TryFrom<RawApiMetadata> for AllApiMetadata {
@@ -37,33 +71,19 @@ impl TryFrom<RawApiMetadata> for AllApiMetadata {
             }
         }
 
-        Ok(AllApiMetadata { apis })
-    }
-}
+        let mut deployment_units = BTreeMap::new();
+        for info in raw.deployment_units {
+            if let Some(previous) =
+                deployment_units.insert(info.label.clone(), info)
+            {
+                bail!(
+                    "duplicate deployment unit in API metadata: {}",
+                    &previous.label,
+                );
+            }
+        }
 
-impl AllApiMetadata {
-    pub fn apis(&self) -> impl Iterator<Item = &ApiMetadata> {
-        self.apis.values()
-    }
-
-    pub fn client_pkgnames(&self) -> impl Iterator<Item = &ClientPackageName> {
-        self.apis.keys()
-    }
-
-    pub fn server_components(&self) -> impl Iterator<Item = &ServerComponent> {
-        // There may be duplicates here.  That's not a mistake.  But we don't
-        // want to report duplicates here.
-        self.apis()
-            .map(|api| &api.server_component)
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-    }
-
-    pub fn client_pkgname_lookup(
-        &self,
-        pkgname: &ClientPackageName,
-    ) -> Option<&ApiMetadata> {
-        self.apis.get(pkgname)
+        Ok(AllApiMetadata { apis, deployment_units })
     }
 }
 
@@ -74,26 +94,16 @@ pub struct ApiMetadata {
     /// human-readable label for the API
     pub label: String,
     /// package name that the corresponding API lives in
-    // XXX-dap unused right now
     pub server_package_name: ServerPackageName,
-    /// package name that the corresponding server lives in
-    pub server_component: ServerComponent,
-    /// name of the unit of deployment
-    deployment_unit: Option<DeploymentUnit>,
     /// human-readable notes about this API
     pub notes: Option<String>,
 }
 
-impl ApiMetadata {
-    pub fn deployment_unit(&self) -> DeploymentUnit {
-        self.deployment_unit
-            .clone()
-            .unwrap_or_else(|| (*self.server_component).clone().into())
-    }
-}
-
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct RawApiMetadata {
-    apis: Vec<ApiMetadata>,
+pub struct DeploymentUnitInfo {
+    /// human-readable label, also used as primary key
+    pub label: DeploymentUnit,
+    /// list of Rust packages that are shipped in this unit
+    pub packages: Vec<ServerComponent>,
 }

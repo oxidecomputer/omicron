@@ -5,15 +5,6 @@
 //! Show information about Progenitor-based APIs
 
 // XXX-dap wishlist:
-// - Consider adding to metadata a list of the server components
-//   - hand-write this based on package-manifest.toml
-//   - in the future, this could be programmatically generated from
-//     package-manifest.toml
-//   - then this program could dynamically figure out which servers are in which
-//     components
-//   - pros of this:
-//     - we can look for packages that are not in any deliverable to see if
-//       we've missed something important
 // - Inspect all the edges to make sure I understand them and that we're
 //   handling them well
 // - *Use* this to generate the Asciidoc table
@@ -104,8 +95,9 @@ fn run_adoc(apis: &Apis) -> Result<()> {
 
     let metadata = apis.api_metadata();
     for api in metadata.apis() {
+        let server_component = apis.api_producer(&api.client_package_name)?;
         println!("|{}", api.label);
-        println!("|{}", apis.adoc_label(&api.server_component)?);
+        println!("|{}", apis.adoc_label(server_component)?);
         println!("|{}", apis.adoc_label(&api.client_package_name)?);
         println!("|");
 
@@ -143,7 +135,8 @@ fn run_deployment_units(apis: &Apis, args: DotArgs) -> Result<()> {
         println!("{}", apis.dot_by_unit());
     } else {
         let metadata = apis.api_metadata();
-        for (unit, server_components) in apis.all_deployment_unit_components() {
+        for unit in apis.deployment_units() {
+            let server_components = apis.deployment_unit_servers(unit)?;
             println!("{}", unit);
             print_server_components(
                 apis,
@@ -169,7 +162,9 @@ fn print_server_components<'a>(
     for s in server_components.into_iter() {
         let (repo_name, pkg_path) = apis.package_label(s)?;
         println!("{}{} ({}/{})", prefix, s, repo_name, pkg_path);
-        for api in metadata.apis().filter(|a| a.server_component == *s) {
+        for api in metadata.apis().filter(|a| {
+            apis.api_producer(&a.client_package_name).unwrap() == s
+        }) {
             println!(
                 "{}    exposes: {} (client = {})",
                 prefix, api.label, api.client_package_name

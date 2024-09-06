@@ -5,11 +5,14 @@
 //! Higher-level helpers for working with compiled API information
 
 use crate::api_metadata::AllApiMetadata;
+use crate::api_metadata::ApiMetadata;
 use crate::cargo::DepPath;
 use crate::cargo::Workspace;
 use crate::ClientPackageName;
 use crate::DeploymentUnit;
 use crate::ServerComponent;
+use crate::ServerPackageName;
+use anyhow::bail;
 use anyhow::{anyhow, ensure, Context, Result};
 use camino::Utf8Path;
 use camino::Utf8PathBuf;
@@ -18,6 +21,7 @@ use petgraph::dot::Dot;
 use serde::de::DeserializeOwned;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::collections::VecDeque;
 
 pub struct LoadArgs {
     pub api_manifest_path: Utf8PathBuf,
@@ -26,12 +30,14 @@ pub struct LoadArgs {
 
 pub struct Apis {
     server_component_units: BTreeMap<ServerComponent, DeploymentUnit>,
-    unit_server_components: BTreeMap<DeploymentUnit, Vec<ServerComponent>>,
+    unit_server_components:
+        BTreeMap<DeploymentUnit, BTreeMap<ServerComponent, DepPath>>,
     deployment_units: BTreeSet<DeploymentUnit>,
     apis_consumed:
         BTreeMap<ServerComponent, BTreeMap<ClientPackageName, DepPath>>,
     api_consumers:
         BTreeMap<ClientPackageName, BTreeMap<ServerComponent, DepPath>>,
+    api_producers: BTreeMap<ClientPackageName, (ServerComponent, DepPath)>,
     helper: ApisHelper,
 }
 
@@ -44,36 +50,114 @@ impl Apis {
             }
         }
 
-        // Collect the distinct set of deployment units for all the APIs.
-        let deployment_units: BTreeSet<_> = helper
+        // First, create an index of server package names, mapping each one to
+        // the API it corresponds to.
+        let server_packages: BTreeMap<_, _> = helper
             .api_metadata
             .apis()
-            .map(|a| a.deployment_unit().clone())
+            .map(|api| (api.server_package_name.clone(), api))
             .collect();
 
-        // Create a mapping from server package to its deployment unit.
-        let server_component_units: BTreeMap<_, _> = helper
-            .api_metadata
-            .apis()
-            .map(|a| (a.server_component.clone(), a.deployment_unit().clone()))
-            .collect();
+        // Compute the mapping from deployment unit to the set of API server
+        // packages that are inside each unit.  We do this by walking the
+        // dependencies of each of the deployment units' packages.
+        let mut deployment_units = BTreeSet::new();
+        let mut server_component_units = BTreeMap::new();
+        let mut unit_server_components = BTreeMap::new();
+        let mut api_producers = BTreeMap::new();
+        let mut errors = Vec::new();
 
-        // Compute a reverse mapping from deployment unit to the server
-        // packages deployed inside it.
-        let mut unit2components = BTreeMap::new();
-        for (server_component, deployment_unit) in &server_component_units {
-            let list = unit2components
-                .entry(deployment_unit.clone())
-                .or_insert_with(Vec::new);
-            list.push(server_component.clone());
+        for (deployment_unit, dunit_info) in
+            helper.api_metadata.deployment_units()
+        {
+            deployment_units.insert(deployment_unit.clone());
+            let mut servers_found = BTreeMap::new();
+
+            let mut found_api_producer =
+                |api: &ApiMetadata,
+                 server_pkgname: ServerComponent,
+                 dep_path: &DepPath| {
+                    servers_found
+                        .insert(server_pkgname.clone(), dep_path.clone());
+                    if let Some((previous, _)) = api_producers.insert(
+                        api.client_package_name.clone(),
+                        (server_pkgname.clone(), dep_path.clone()),
+                    ) {
+                        errors.push(anyhow!(
+                            "API for client {} appears to be \
+                                 exported by multiple components: at \
+                                 least {} and {} ({:?})",
+                            api.client_package_name,
+                            previous,
+                            server_pkgname,
+                            dep_path
+                        ));
+                    }
+                };
+
+            for dunit_pkg in &dunit_info.packages {
+                let (workspace, server_pkg) =
+                    helper.find_package_workspace(dunit_pkg)?;
+
+                // In some cases, the server API package is exactly the same as
+                // one of the deployment unit packages.
+                if let Some(api) = server_packages
+                    .get(&ServerPackageName::from(dunit_pkg.to_string()))
+                {
+                    found_api_producer(
+                        api,
+                        dunit_pkg.clone(),
+                        // XXX-dap could use newtype and a constructor here
+                        &VecDeque::from([server_pkg.id.clone()]),
+                    );
+                }
+
+                // In other cases, the deployment unit package depends (possibly
+                // indirectly) on the API package.
+                workspace.walk_required_deps_recursively(
+                    server_pkg,
+                    &mut |p: &Package, dep_path: &DepPath| {
+                        let Some(api) = server_packages.get(&p.name) else {
+                            return;
+                        };
+
+                        found_api_producer(api, dunit_pkg.clone(), dep_path);
+                    },
+                )?;
+            }
+
+            if !errors.is_empty() {
+                for e in errors {
+                    eprintln!("error: {:#}", e);
+                }
+
+                bail!("found at least one API exported by multiple servers");
+            }
+
+            for (server_component, _) in &servers_found {
+                if let Some(previous) = server_component_units
+                    .insert(server_component.clone(), deployment_unit.clone())
+                {
+                    bail!(
+                        "server component {:?} found in multiple deployment \
+                        units (at least {} and {})",
+                        server_component,
+                        deployment_unit,
+                        previous
+                    );
+                }
+            }
+
+            assert!(unit_server_components
+                .insert(deployment_unit.clone(), servers_found)
+                .is_none());
         }
 
         // For each server component, determine which client APIs it depends on
         // by walking its dependencies.
-        // XXX-dap figure out how to abstract this
         let mut apis_consumed = BTreeMap::new();
         let mut api_consumers = BTreeMap::new();
-        for server_pkgname in helper.api_metadata.server_components() {
+        for server_pkgname in server_component_units.keys() {
             let (workspace, pkg) =
                 helper.find_package_workspace(server_pkgname)?;
             let mut clients_used: BTreeMap<ClientPackageName, DepPath> =
@@ -182,17 +266,27 @@ impl Apis {
         Ok(Apis {
             server_component_units,
             deployment_units,
-            unit_server_components: unit2components,
+            unit_server_components,
             apis_consumed,
             api_consumers,
+            api_producers,
             helper,
         })
     }
 
-    pub fn all_deployment_unit_components(
+    pub fn deployment_units(&self) -> impl Iterator<Item = &DeploymentUnit> {
+        self.unit_server_components.keys()
+    }
+
+    pub fn deployment_unit_servers(
         &self,
-    ) -> impl Iterator<Item = (&DeploymentUnit, &Vec<ServerComponent>)> {
-        self.unit_server_components.iter()
+        unit: &DeploymentUnit,
+    ) -> Result<impl Iterator<Item = &ServerComponent>> {
+        Ok(self
+            .unit_server_components
+            .get(unit)
+            .ok_or_else(|| anyhow!("unknown deployment unit: {}", unit))?
+            .keys())
     }
 
     pub fn api_metadata(&self) -> &AllApiMetadata {
@@ -207,6 +301,16 @@ impl Apis {
             Some(l) => Box::new(l.iter()),
             None => Box::new(std::iter::empty()),
         }
+    }
+
+    pub fn api_producer(
+        &self,
+        client: &ClientPackageName,
+    ) -> Result<&ServerComponent> {
+        self.api_producers
+            .get(client)
+            .ok_or_else(|| anyhow!("unknown client API: {:?}", client))
+            .map(|s| &s.0)
     }
 
     pub fn api_consumers(
@@ -242,18 +346,15 @@ impl Apis {
         // Now walk through the deployment units, walk through each one's server
         // packages, walk through each one of the clients used by those, and
         // create a corresponding edge.
-        for (deployment_unit, server_components) in
-            self.all_deployment_unit_components()
-        {
+        for deployment_unit in self.deployment_units() {
+            let server_components =
+                self.deployment_unit_servers(deployment_unit).unwrap();
             let my_node = nodes.get(deployment_unit).unwrap();
             for server_pkg in server_components {
                 for (client_pkg, _) in self.component_apis_consumed(server_pkg)
                 {
-                    let api = self
-                        .api_metadata()
-                        .client_pkgname_lookup(client_pkg)
-                        .unwrap();
-                    let other_component = &api.server_component;
+                    let other_component =
+                        self.api_producer(client_pkg).unwrap();
                     let other_unit = self
                         .server_component_units
                         .get(other_component)
@@ -283,11 +384,7 @@ impl Apis {
             // unwrap(): we created a node for each server component above.
             let my_node = nodes.get(server_component).unwrap();
             for client_pkg in consumed_apis.keys() {
-                let api = self
-                    .api_metadata()
-                    .client_pkgname_lookup(client_pkg)
-                    .unwrap();
-                let other_component = &api.server_component;
+                let other_component = self.api_producer(client_pkg).unwrap();
                 let other_node = nodes.get(other_component).unwrap();
                 graph.add_edge(*my_node, *other_node, client_pkg.clone());
             }

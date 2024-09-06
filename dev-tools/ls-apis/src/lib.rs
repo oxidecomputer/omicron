@@ -14,6 +14,7 @@ pub use api_metadata::AllApiMetadata;
 pub use helpers::Apis;
 pub use helpers::ApisHelper;
 pub use helpers::LoadArgs;
+use std::borrow::Borrow;
 
 #[macro_use]
 extern crate newtype_derive;
@@ -53,3 +54,8 @@ NewtypeDeref! { () pub struct ServerComponent(String); }
 NewtypeDerefMut! { () pub struct ServerComponent(String); }
 NewtypeDisplay! { () pub struct ServerComponent(String); }
 NewtypeFrom! { () pub struct ServerComponent(String); }
+impl Borrow<String> for ServerPackageName {
+    fn borrow(&self) -> &String {
+        &self.0
+    }
+}
