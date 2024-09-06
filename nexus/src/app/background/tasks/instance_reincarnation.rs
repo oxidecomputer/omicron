@@ -8,6 +8,8 @@ use crate::app::background::BackgroundTask;
 use crate::app::saga::StartSaga;
 use crate::app::sagas::instance_start;
 use crate::app::sagas::NexusSaga;
+use chrono::TimeDelta;
+use chrono::Utc;
 use futures::future::BoxFuture;
 use nexus_db_queries::authn;
 use nexus_db_queries::context::OpContext;
@@ -28,6 +30,18 @@ pub struct InstanceReincarnation {
 const BATCH_SIZE: NonZeroU32 = unsafe {
     // Safety: last time I checked, 100 was greater than zero.
     NonZeroU32::new_unchecked(100)
+};
+
+// Do not auto-restart instances that have been auto-restarted within the last
+// 1 minute, to try and reduce the impact of tight crash loops.
+//
+// TODO(eliza): eventually, perhaps this should be a project-level configuration?
+const CHILL_OUT_TIME: TimeDelta = match TimeDelta::new(60, 0) {
+    Some(d) => d,
+    // `Option::unwrap()` isn't const fn.
+    None => panic!(
+        "60 seconds definitely ought to be in range for a `TimeDelta`..."
+    ),
 };
 
 impl BackgroundTask for InstanceReincarnation {
@@ -123,6 +137,33 @@ impl InstanceReincarnation {
             let serialized_authn = authn::saga::Serialized::for_opctx(opctx);
             for db_instance in batch {
                 let instance_id = db_instance.id();
+
+                // Don't reincarnate instances that were restarted too recently.
+                //
+                // Note that we *could* filter out instances that reincarnated
+                // too recently in the `find_reincarnatable_instances` database
+                // query, but I thought it was nice to be able to include them
+                // in this background task's OMDB status.
+                if let Some(last_reincarnation) =
+                    db_instance.runtime().time_last_auto_restarted
+                {
+                    if Utc::now().signed_duration_since(last_reincarnation)
+                        < CHILL_OUT_TIME
+                    {
+                        status
+                            .instances_in_chill_out_time
+                            .push((instance_id, last_reincarnation));
+                        debug!(
+                            opctx.log,
+                            "instance still needs to take some time to settle \
+                             down before its next reincarnation";
+                            "instance_id" => %instance_id,
+                            "last_reincarnated_at" => %last_reincarnation,
+                        );
+                        continue;
+                    }
+                }
+
                 let prepared_saga = instance_start::SagaInstanceStart::prepare(
                     &instance_start::Params {
                         db_instance,

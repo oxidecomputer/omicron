@@ -2,6 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use chrono::DateTime;
+use chrono::Utc;
 use serde::Deserialize;
 use serde::Serialize;
 use uuid::Uuid;
@@ -122,6 +124,9 @@ pub struct InstanceReincarnationStatus {
     pub instances_found: usize,
     /// UUIDs of instances reincarnated successfully by this activation.
     pub instances_reincarnated: Vec<Uuid>,
+    /// Instances which reincarnated too recently and still need to take some
+    /// time out to settle down a bit.
+    pub instances_in_chill_out_time: Vec<(Uuid, DateTime<Utc>)>,
     /// UUIDs of instances which were reincarnated by a different Nexus'
     /// instance-reincarnation task, or by a user-triggered restart saga.
     pub already_reincarnated: Vec<Uuid>,
