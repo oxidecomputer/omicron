@@ -310,22 +310,39 @@ impl ApisHelper {
             parse_toml_file(&args.api_manifest_path)?;
 
         // Load information about each of the workspaces.
-        let mut workspaces = BTreeMap::new();
-        workspaces.insert(
-            String::from("omicron"),
-            Workspace::load("omicron", None)
-                .context("loading Omicron workspace metadata")?,
-        );
+        //
+        // Each of these involves running `cargo metadata`, which is pretty I/O
+        // intensive.  Overall latency benefits significantly from
+        // parallelizing.
+        //
+        // If we had many more repos than this, we'd probably want to limit the
+        // concurrency.
+        let handles: Vec<_> =
+            ["omicron", "crucible", "maghemite", "propolis", "dendrite"]
+                .into_iter()
+                .map(|repo_name| {
+                    let extra_arg = if repo_name == "omicron" {
+                        None
+                    } else {
+                        Some(args.extra_repos_path.clone())
+                    };
+                    std::thread::spawn(move || {
+                        let arg = extra_arg.as_ref().map(|s| s.as_path());
+                        Workspace::load(repo_name, arg)
+                    })
+                })
+                .collect();
 
-        for repo in ["crucible", "maghemite", "propolis", "dendrite"] {
-            workspaces.insert(
-                String::from(repo),
-                Workspace::load(repo, Some(&args.extra_repos_path))
-                    .with_context(|| {
-                        format!("load metadata for workspace {:?}", repo)
-                    })?,
-            );
-        }
+        let workspaces: BTreeMap<_, _> = handles
+            .into_iter()
+            .map(|join_handle| {
+                let thr_result = join_handle.join().map_err(|e| {
+                    anyhow!("workspace load thread panicked: {:?}", e)
+                })?;
+                let workspace = thr_result?;
+                Ok::<_, anyhow::Error>((workspace.name().to_owned(), workspace))
+            })
+            .collect::<Result<BTreeMap<_, _>, _>>()?;
 
         // Validate the metadata against what we found in the workspaces.
         let mut client_pkgnames_unused: BTreeSet<_> =
