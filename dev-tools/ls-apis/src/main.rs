@@ -16,6 +16,11 @@
 //     names into links
 // - Find The DAG
 // - Take a pass through everything: document, and rethink abstractions a little
+//
+// Some specific notes:
+// - crucible-pantry has an erroneous dependency on sled-agent-client
+//   because it's pinned to a relatively old nexus-types that did depend on
+//   sled-agent-client
 
 use anyhow::{Context, Result};
 use camino::Utf8PathBuf;

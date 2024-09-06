@@ -77,8 +77,6 @@ impl Apis {
                 |api: &ApiMetadata,
                  server_pkgname: ServerComponent,
                  dep_path: &DepPath| {
-                    servers_found
-                        .insert(server_pkgname.clone(), dep_path.clone());
                     if let Some((previous, _)) = api_producers.insert(
                         api.client_package_name.clone(),
                         (server_pkgname.clone(), dep_path.clone()),
@@ -98,18 +96,30 @@ impl Apis {
             for dunit_pkg in &dunit_info.packages {
                 let (workspace, server_pkg) =
                     helper.find_package_workspace(dunit_pkg)?;
+                let server_component_name =
+                    ServerComponent::from(dunit_pkg.to_string());
+                // XXX-dap could use newtype and a constructor here
+                let self_dep_path = VecDeque::from([server_pkg.id.clone()]);
+                if let Some(previous) = servers_found.insert(
+                    server_component_name.clone(),
+                    self_dep_path.clone(),
+                ) {
+                    bail!(
+                        "deployment unit {}: package {} appears twice \
+                         in this deployment unit (at least: {:?} and {:?})",
+                        deployment_unit,
+                        dunit_pkg,
+                        self_dep_path,
+                        previous,
+                    );
+                }
 
                 // In some cases, the server API package is exactly the same as
                 // one of the deployment unit packages.
-                if let Some(api) = server_packages
-                    .get(&ServerPackageName::from(dunit_pkg.to_string()))
-                {
-                    found_api_producer(
-                        api,
-                        dunit_pkg.clone(),
-                        // XXX-dap could use newtype and a constructor here
-                        &VecDeque::from([server_pkg.id.clone()]),
-                    );
+                let server_pkgname =
+                    ServerPackageName::from(server_pkg.name.clone());
+                if let Some(api) = server_packages.get(&server_pkgname) {
+                    found_api_producer(api, dunit_pkg.clone(), &self_dep_path);
                 }
 
                 // In other cases, the deployment unit package depends (possibly
