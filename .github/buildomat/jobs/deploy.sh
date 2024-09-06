@@ -33,6 +33,10 @@ _exit_trap() {
 	local status=$?
 	set +o errexit
 
+	if [[ "x$OPTE_COMMIT" != "x" ]]; then
+		pfexec cp /tmp/opteadm /opt/oxide/opte/bin/opteadm
+	fi
+
 	#
 	# Stop cron in all zones (to stop logadm log rotation)
 	#
@@ -129,6 +133,22 @@ z_swadm () {
 	echo "== swadm $@"
 	pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm $@
 }
+
+set +x
+# only set this if you want to override the version of opte/xde installed by the
+# install_opte.sh script
+OPTE_COMMIT="d2acf326ae1216b3bd78e5bfd677aea813176314"
+if [[ "x$OPTE_COMMIT" != "x" ]]; then
+	curl  -sSfOL https://buildomat.eng.oxide.computer/public/file/oxidecomputer/opte/module/$OPTE_COMMIT/xde
+	pfexec rem_drv xde || true
+	pfexec mv xde /kernel/drv/amd64/xde
+	pfexec add_drv xde || true
+	curl  -sSfOL https://buildomat.eng.oxide.computer/public/file/oxidecomputer/opte/release/$OPTE_COMMIT/opteadm
+	chmod +x opteadm
+	cp opteadm /tmp/opteadm
+	pfexec mv opteadm /opt/oxide/opte/bin/opteadm
+fi
+set -x
 
 #
 # XXX work around 14537 (UFS should not allow directories to be unlinked) which
