@@ -1792,6 +1792,7 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
             Ok(InstanceReincarnationStatus {
                 instances_found,
                 instances_reincarnated,
+                instances_in_chill_out_time,
                 already_reincarnated,
                 query_error,
                 restart_errors,
@@ -1803,21 +1804,26 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                     "  instances already reincarnated:";
                 const ERRORS: &'static str =
                     "  instances which failed to be reincarnated:";
+                const CHILLING_OUT: &'static str =
+                    "  instances still in chill-out time:";
                 const WIDTH: usize = const_max_len(&[
                     FOUND,
                     REINCARNATED,
                     ALREADY_REINCARNATED,
                     ERRORS,
+                    CHILLING_OUT,
                 ]);
                 let n_restart_errors = restart_errors.len();
                 let n_restarted = instances_reincarnated.len();
                 let n_already_restarted = already_reincarnated.len();
+                let n_chilling_out = instances_in_chill_out_time.len();
                 println!("    {FOUND:<WIDTH$} {instances_found:>3}");
                 println!("    {REINCARNATED:<WIDTH$} {n_restarted:>3}");
                 println!(
                     "    {ALREADY_REINCARNATED:<WIDTH$} {:>3}",
                     n_already_restarted
                 );
+                println!("    {CHILLING_OUT:<WIDTH$} {n_chilling_out:>3}",);
                 println!("    {ERRORS:<WIDTH$} {n_restart_errors:>3}");
 
                 if let Some(e) = query_error {
@@ -1852,6 +1858,18 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                     for id in already_reincarnated {
                         println!("    > {id}")
                     }
+                }
+
+                if n_chilling_out > 0 {
+                    println!(
+                        "    the following instances still need to take some \
+                        time to chill out before\n    they can be reincarnated:",
+                    );
+                }
+                for (id, last_reincarnated) in instances_in_chill_out_time {
+                    println!(
+                        "    > {id} (reincarnated at {last_reincarnated:?})",
+                    );
                 }
             }
         };

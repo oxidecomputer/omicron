@@ -527,10 +527,11 @@ task: "instance_reincarnation"
   configured period: every 1m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     instances eligible for reincarnation:          0
       instances reincarnated:                      0
       instances already reincarnated:              0
+      instances still in chill-out time:           0
       instances which failed to be reincarnated:   0
 
 task: "instance_updater"
@@ -967,10 +968,11 @@ task: "instance_reincarnation"
   configured period: every 1m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
-    started at <REDACTED     TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     instances eligible for reincarnation:          0
       instances reincarnated:                      0
       instances already reincarnated:              0
+      instances still in chill-out time:           0
       instances which failed to be reincarnated:   0
 
 task: "instance_updater"
