@@ -57,6 +57,7 @@ impl BackgroundTask for VpcRouteManager {
     ) -> BoxFuture<'a, serde_json::Value> {
         async {
             let log = &opctx.log;
+            info!(log, "VPC route manager running");
 
             let sleds = match self
                 .datastore
@@ -94,6 +95,7 @@ impl BackgroundTask for VpcRouteManager {
             let mut vni_to_vpc = HashMap::new();
 
             for (sled, client) in sled_clients {
+                info!(log, "VPC route manager sled {}", sled.id());
                 let Ok(route_sets) = client.list_vpc_routes().await else {
                     warn!(
                         log,
@@ -208,6 +210,11 @@ impl BackgroundTask for VpcRouteManager {
                         // subnet with no custom router set. Send them
                         // the empty list, and unset its table version.
                         set_rules(set.id, None, HashSet::new());
+                        info!(
+                            log,
+                            "VPC route manager sled {} no upstream router",
+                            sled.id()
+                        );
                         continue;
                     };
 
@@ -222,7 +229,12 @@ impl BackgroundTask for VpcRouteManager {
                     // number.
                     match &set.version {
                         Some(v) if !v.is_replaced_by(&version) => {
-                            continue;
+                            info!(
+                                log,
+                                "VPC route manager sled {} push not needed",
+                                sled.id()
+                            );
+                            //TODO(ry) continue;
                         }
                         _ => {}
                     }
@@ -231,7 +243,12 @@ impl BackgroundTask for VpcRouteManager {
                     // router in a previous iteration.
                     if let Some(rules) = known_rules.get(&router_id) {
                         set_rules(set.id, Some(version), rules.clone());
-                        continue;
+                        info!(
+                            log,
+                            "VPC route manager sled {} rules already resolved",
+                            sled.id()
+                        );
+                        //TODO(ry) continue;
                     }
 
                     match self
@@ -261,7 +278,11 @@ impl BackgroundTask for VpcRouteManager {
                     for set in &mut to_push {
                         set.routes.retain(|x| match x.sled {
                             SledTarget::Any => true,
-                            SledTarget::Only(id) if id == sled.id() => true,
+                            SledTarget::Only { sled: id, interface: _ }
+                                if id == sled.id() =>
+                            {
+                                true
+                            }
                             _ => false,
                         });
                     }

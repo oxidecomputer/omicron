@@ -1586,6 +1586,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.network_interface (
     transit_ips INET[] NOT NULL DEFAULT ARRAY[]
 );
 
+CREATE INDEX IF NOT EXISTS instance_network_interface_mac
+    ON omicron.public.network_interface (mac) STORING (time_deleted);
+
 /* A view of the network_interface table for just instance-kind records. */
 CREATE VIEW IF NOT EXISTS omicron.public.instance_network_interface AS
 SELECT
@@ -3095,6 +3098,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_collection (
 CREATE INDEX IF NOT EXISTS inv_collection_by_time_started
     ON omicron.public.inv_collection (time_started);
 
+CREATE INDEX IF NOT EXISTS inv_collectionby_time_done
+    ON omicron.public.inv_collection (time_done DESC);
+
 -- list of errors generated during a collection
 CREATE TABLE IF NOT EXISTS omicron.public.inv_collection_error (
     inv_collection_id UUID NOT NULL,
@@ -3485,6 +3491,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone (
 
     PRIMARY KEY (inv_collection_id, id)
 );
+
+CREATE INDEX IF NOT EXISTS inv_omicron_zone_nic_id ON omicron.public.inv_omicron_zone
+    (nic_id) STORING (sled_id, primary_service_ip, second_service_ip, snat_ip);
 
 CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone_nic (
     inv_collection_id UUID NOT NULL,

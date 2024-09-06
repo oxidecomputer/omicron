@@ -4913,7 +4913,7 @@
         ]
       },
       "SledTarget": {
-        "description": "A VPC route resolved into a concrete target.",
+        "description": "A VPC route resolved potentially to a particular sled",
         "oneOf": [
           {
             "type": "object",
@@ -4939,8 +4939,21 @@
                 ]
               },
               "value": {
-                "type": "string",
-                "format": "uuid"
+                "type": "object",
+                "properties": {
+                  "interface": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "sled": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                },
+                "required": [
+                  "interface",
+                  "sled"
+                ]
               }
             },
             "required": [

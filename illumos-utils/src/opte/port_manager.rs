@@ -460,7 +460,7 @@ impl PortManager {
         let mut routes = self.inner.routes.lock().unwrap();
         let mut deltas = HashMap::new();
         slog::info!(self.inner.log, "new routes: {new_routes:#?}");
-        for new in new_routes {
+        for new in &new_routes {
             // Disregard any route information for a subnet we don't have.
             let Some(old) = routes.get(&new.id) else {
                 slog::warn!(self.inner.log, "ignoring route {new:#?}");
@@ -476,7 +476,19 @@ impl PortManager {
                     (Some(old_vers), Some(new_vers))
                         if !old_vers.is_replaced_by(&new_vers) =>
                     {
-                        continue;
+                        slog::info!(self.inner.log, "skipping delta compute");
+                        //TODO(ry) continue;
+                        //XXX
+                        (
+                            new.routes
+                                .difference(&old.routes)
+                                .cloned()
+                                .collect(),
+                            old.routes
+                                .difference(&new.routes)
+                                .cloned()
+                                .collect(),
+                        )
                     }
                     _ => (
                         new.routes.difference(&old.routes).cloned().collect(),
@@ -484,16 +496,6 @@ impl PortManager {
                     ),
                 };
             deltas.insert(new.id, (to_add, to_delete));
-
-            let active_ports = old.active_ports;
-            routes.insert(
-                new.id,
-                RouteSet {
-                    version: new.version,
-                    routes: new.routes,
-                    active_ports,
-                },
-            );
         }
 
         // Note: We're deliberately holding both locks here
@@ -504,7 +506,7 @@ impl PortManager {
         let hdl = opte_ioctl::OpteHdl::open(opte_ioctl::OpteHdl::XDE_CTL)?;
 
         // Propagate deltas out to all ports.
-        for port in ports.values() {
+        for (interface_id, port) in ports.iter() {
             let system_id = port.system_router_key();
             let system_delta = deltas.get(&system_id);
 
@@ -517,8 +519,12 @@ impl PortManager {
                 (RouterClass::Custom, custom_delta),
             ] {
                 let Some((to_add, to_delete)) = delta else {
+                    info!(self.inner.log, "nothing to do!!!?");
                     continue;
                 };
+
+                info!(self.inner.log, "TO ADD {to_add:#?}");
+                info!(self.inner.log, "TO DELETE {to_delete:#?}");
 
                 for route in to_delete {
                     let route = DelRouterEntryReq {
@@ -540,6 +546,20 @@ impl PortManager {
                 }
 
                 for route in to_add {
+                    match route.sled {
+                        SledTarget::Only { sled: _, interface }
+                            if interface != interface_id.0 =>
+                        {
+                            info!(self.inner.log,
+                                "skipping route entry not for this interface";
+                                "this_interface" => interface_id.0.to_string(),
+                                "route_interface" => interface.to_string(),
+                                "skipped" => format!("{route:#?}"),
+                            );
+                            continue;
+                        }
+                        _ => {}
+                    }
                     let route = AddRouterEntryReq {
                         class,
                         port_name: port.name().into(),
@@ -558,6 +578,22 @@ impl PortManager {
                     );
                 }
             }
+        }
+
+        for new in new_routes {
+            let Some(old) = routes.get(&new.id) else {
+                slog::warn!(self.inner.log, "ignoring route {new:#?}");
+                continue;
+            };
+            let active_ports = old.active_ports;
+            routes.insert(
+                new.id,
+                RouteSet {
+                    version: new.version,
+                    routes: new.routes,
+                    active_ports,
+                },
+            );
         }
 
         Ok(())

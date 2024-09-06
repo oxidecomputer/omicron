@@ -1985,7 +1985,16 @@ allow_tables_to_appear_in_same_query!(external_ip, instance);
 allow_tables_to_appear_in_same_query!(external_ip, project);
 allow_tables_to_appear_in_same_query!(external_ip, ip_pool_resource);
 allow_tables_to_appear_in_same_query!(external_ip, vmm);
+allow_tables_to_appear_in_same_query!(external_ip, network_interface);
 allow_tables_to_appear_in_same_query!(external_ip, inv_omicron_zone);
+allow_tables_to_appear_in_same_query!(external_ip, inv_omicron_zone_nic);
+allow_tables_to_appear_in_same_query!(inv_omicron_zone, inv_omicron_zone_nic);
+allow_tables_to_appear_in_same_query!(network_interface, inv_omicron_zone);
+allow_tables_to_appear_in_same_query!(network_interface, inv_omicron_zone_nic);
+allow_tables_to_appear_in_same_query!(network_interface, inv_collection);
+allow_tables_to_appear_in_same_query!(inv_omicron_zone, inv_collection);
+allow_tables_to_appear_in_same_query!(inv_omicron_zone_nic, inv_collection);
+allow_tables_to_appear_in_same_query!(external_ip, inv_collection);
 
 allow_tables_to_appear_in_same_query!(
     switch_port,

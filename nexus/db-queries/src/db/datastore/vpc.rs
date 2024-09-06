@@ -2278,36 +2278,60 @@ impl DataStore {
             })
     }
 
-    pub async fn sled_id_for_external_ip(
+    pub async fn homes_for_external_ip(
         &self,
         conn: &async_bb8_diesel::Connection<crate::db::DbConnection>,
         ip: IpAddr,
-    ) -> Result<Uuid, Error> {
+    ) -> Result<Vec<ExternalIpHome>, Error> {
         use db::schema::external_ip as eip;
         use db::schema::external_ip::dsl as eip_dsl;
+        use db::schema::inv_collection as inv;
+        use db::schema::inv_collection::dsl as inv_dsl;
         use db::schema::inv_omicron_zone as ioz;
         use db::schema::inv_omicron_zone::dsl as ioz_dsl;
+        use db::schema::inv_omicron_zone_nic as iozn;
+        use db::schema::network_interface as ni;
+        use db::schema::network_interface::dsl as ni_dsl;
         use db::schema::vmm;
         use db::schema::vmm::dsl as vmm_dsl;
 
         let ip = IpNetwork::from(ip);
 
-        // look for a vmm association
+        // look for an instance association
+
         match eip_dsl::external_ip
             .inner_join(
                 vmm::table.on(vmm::instance_id.nullable().eq(eip::parent_id)),
             )
+            .inner_join(
+                ni::table.on(ni::parent_id.nullable().eq(eip::parent_id)),
+            )
             .filter(eip::time_deleted.is_null())
+            .filter(ni::time_deleted.is_null())
             .filter(eip::ip.eq(ip))
             .filter(vmm::time_deleted.is_null())
-            .select(vmm_dsl::sled_id)
-            .get_result_async(conn)
+            .filter(ni::is_primary.eq(true))
+            .select((vmm_dsl::sled_id, ni_dsl::id))
+            // Becuase snat ips can be split across multiple homes, we need to
+            // return all of them.
+            .load_async::<(Uuid, Uuid)>(conn)
             .await
         {
-            Ok(result) => return Ok(result),
+            Ok(results) => {
+                if !results.is_empty() {
+                    return Ok(results
+                        .into_iter()
+                        .map(|(sled, interface)| ExternalIpHome {
+                            sled,
+                            interface,
+                        })
+                        .collect());
+                }
+            }
             Err(_) => {}
         };
 
+        // look for a service association
         match eip_dsl::external_ip
             .inner_join(
                 ioz::table.on(ioz::primary_service_ip
@@ -2315,48 +2339,41 @@ impl DataStore {
                     .or(ioz::second_service_ip.eq(eip::ip.nullable()))
                     .or(ioz::snat_ip.eq(eip::ip.nullable()))),
             )
+            .inner_join(iozn::table.on(ioz::nic_id.eq(iozn::id.nullable())))
+            .inner_join(ni::table.on(ni::mac.eq(iozn::mac)))
             .filter(eip::time_deleted.is_null())
-            .select(ioz_dsl::sled_id)
-            .get_result_async(conn)
+            .filter(ni::time_deleted.is_null())
+            .filter(eip::ip.eq(ip))
+            .filter(
+                ioz::inv_collection_id.eq_any(
+                    inv_dsl::inv_collection
+                        .select(inv::id)
+                        .order_by(inv::time_done.desc())
+                        .limit(1),
+                ),
+            )
+            .filter(
+                iozn::inv_collection_id.eq_any(
+                    inv_dsl::inv_collection
+                        .select(inv::id)
+                        .order_by(inv::time_done.desc())
+                        .limit(1),
+                ),
+            )
+            .select((ioz_dsl::sled_id, ni_dsl::id))
+            .load_async::<(Uuid, Uuid)>(conn)
             .await
         {
-            Ok(result) => Ok(result),
-            Err(_) => Err(Error::NotFound {
+            Ok(results) => Ok(results
+                .into_iter()
+                .map(|(sled, interface)| ExternalIpHome { sled, interface })
+                .collect()),
+            Err(e) => Err(Error::NotFound {
                 message: MessagePair::new(format!(
-                    "sled not found for ip {ip}"
+                    "sled not found for ip {ip}: {e}"
                 )),
             }),
         }
-
-        /*
-        let service_info: Vec<(IpNetwork, Option<Uuid>, Uuid)> =
-            eip_dsl::external_ip
-                .inner_join(
-                    ioz::table.on(ioz::primary_service_ip
-                        .eq(eip::ip)
-                        .or(ioz::second_service_ip.eq(eip::ip.nullable()))
-                        .or(ioz::snat_ip.eq(eip::ip.nullable()))),
-                )
-                .filter(eip::time_deleted.is_null())
-                .select((eip_dsl::ip, eip_dsl::parent_id, ioz_dsl::sled_id))
-                .load_async(&*conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
-
-        info.extend(service_info);
-
-        Ok(info
-            .into_iter()
-            .flat_map(|x| match x {
-                (ip, Some(parent), sled) => {
-                    Some(ExternalIpHome { ip: ip.ip(), parent, sled })
-                }
-                _ => None,
-            })
-            .collect())
-            */
     }
 
     /// Resolve all targets in a router into concrete details.
@@ -2727,19 +2744,32 @@ impl DataStore {
                                                 && ext_ip.ip.ip()
                                                     <= pr.last_address.ip()
                                             {
-                                                let sled_id = self
-                                                    .sled_id_for_external_ip(
+                                                let homes = match self
+                                                    .homes_for_external_ip(
                                                         &conn,
                                                         ext_ip.ip.ip(),
                                                     )
-                                                    .await?;
-                                                out.insert(ResolvedVpcRoute{
+                                                    .await
+                                                {
+                                                    Ok(id) => id,
+                                                    Err(e) => {
+                                                        warn!(
+                                                            opctx.log,
+                                                            "Internet gateway '{name}' find sled id for ip {}: {e}",
+                                                            ext_ip.ip.ip(),
+                                                        );
+                                                        continue;
+                                                    }
+                                                };
+                                                for home in &homes {
+                                                    out.insert(ResolvedVpcRoute{
                                                         dest,
                                                         target: RouterTarget::InternetGateway(
                                                             v4.into(),
                                                         ),
-                                                        sled: SledTarget::Only(sled_id),
+                                                        sled: SledTarget::Only{sled: home.sled, interface: home.interface},
                                                     });
+                                                }
                                                 info!(
                                                     opctx.log,
                                                     "Internet gateway '{name}' adding route \
@@ -2768,19 +2798,32 @@ impl DataStore {
                                                 && ext_ip.ip.ip()
                                                     <= pr.last_address.ip()
                                             {
-                                                let sled_id = self
-                                                    .sled_id_for_external_ip(
+                                                let homes = match self
+                                                    .homes_for_external_ip(
                                                         &conn,
                                                         ext_ip.ip.ip(),
                                                     )
-                                                    .await?;
-                                                out.insert(ResolvedVpcRoute{
+                                                    .await
+                                                {
+                                                    Ok(id) => id,
+                                                    Err(e) => {
+                                                        warn!(
+                                                            opctx.log,
+                                                            "Internet gateway '{name}' find sled id for ip {}: {e}",
+                                                            ext_ip.ip.ip(),
+                                                        );
+                                                        continue;
+                                                    }
+                                                };
+                                                for home in &homes {
+                                                    out.insert(ResolvedVpcRoute{
                                                         dest,
                                                         target: RouterTarget::InternetGateway(
                                                             v6.into(),
                                                         ),
-                                                        sled: SledTarget::Only(sled_id),
+                                                        sled: SledTarget::Only{ sled: home.sled, interface: home.interface },
                                                     });
+                                                }
                                                 info!(
                                                     opctx.log,
                                                     "Internet gateway '{name}' adding route \
@@ -3878,4 +3921,9 @@ mod tests {
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
+}
+
+pub struct ExternalIpHome {
+    pub sled: Uuid,
+    pub interface: Uuid,
 }

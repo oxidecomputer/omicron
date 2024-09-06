@@ -714,14 +714,14 @@ impl TryFrom<&[ipnetwork::IpNetwork]> for IpAllowList {
     }
 }
 
-/// A VPC route resolved into a concrete target.
+/// A VPC route resolved potentially to a particular sled
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]
 #[serde(tag = "type", rename_all = "snake_case", content = "value")]
 pub enum SledTarget {
     Any,
-    Only(Uuid),
+    Only { sled: Uuid, interface: Uuid },
 }
 
 /// A VPC route resolved into a concrete target.
