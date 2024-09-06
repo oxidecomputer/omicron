@@ -87,6 +87,7 @@ impl ResourceAllocator {
                 external_ips: Vec::<params::ExternalIpCreate>::new(),
                 disks: Vec::<params::InstanceDiskAttachment>::new(),
                 start: false,
+                auto_restart_policy: None,
             },
         )
         .authn_as(self.auth.clone())

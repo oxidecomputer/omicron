@@ -2289,9 +2289,12 @@ mod tests {
         let (mut instance, _vmm) = make_instance_and_vmm();
         instance.runtime_state.nexus_state = DbInstanceState::NoVmm;
         let state = InstanceAndActiveVmm::from((instance, None));
-        assert!(
-            instance_start_allowed(&logctx.log, &state, Reason::User).is_ok()
-        );
+        assert!(instance_start_allowed(
+            &logctx.log,
+            &state,
+            instance_start::Reason::User
+        )
+        .is_ok());
         logctx.cleanup_successful();
     }
 

@@ -292,7 +292,7 @@ mod test {
                 disks: Vec::new(),
                 ssh_public_keys: None,
                 start: false,
-                auto_restart_policy: Some(restart_policy),
+                auto_restart_policy: Some(restart_policy.into()),
             },
         );
         let datastore = cptestctx.server.server_context().nexus.datastore();

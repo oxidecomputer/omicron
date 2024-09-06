@@ -1016,6 +1016,7 @@ mod tests {
                 external_ips: vec![],
                 disks: vec![],
                 start: false,
+                auto_restart_policy: None,
             });
 
             let conn = self

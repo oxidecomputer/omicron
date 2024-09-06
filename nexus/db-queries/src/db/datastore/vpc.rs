@@ -2838,7 +2838,7 @@ mod tests {
                         disks: vec![],
                         ssh_public_keys: None,
                         start: false,
-                        ..Default::default()
+                        auto_restart_policy: None,
                     },
                 ),
             )

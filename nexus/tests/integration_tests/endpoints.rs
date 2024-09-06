@@ -430,6 +430,7 @@ pub static DEMO_INSTANCE_CREATE: Lazy<params::InstanceCreate> =
         }],
         disks: vec![],
         start: true,
+        auto_restart_policy: None,
     });
 
 // The instance needs a network interface, too.
