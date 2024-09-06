@@ -4,19 +4,27 @@
 
 //! Show information about Progenitor-based APIs
 
-// XXX-dap some ideas:
-// - The current approach only finds consumers that are themselves exporters of
-//   APIs.  We want to find other consumers, too.  This is a little tricky
-//   because we don't have a way of getting from a package to the list of
-//   packages that depend on it.  But perhaps we could create this reverse-index
-//   inside the Workspace.  We really only need it for the progenitor clients'
-//   reverse dependencies, but we don't know which ones those are until we've
-//   computed this for everybody.
-//
-//   It's also worth noting that we care about this cross-repo: a progenitor
-//   client might be in repo X but we want this information for its dependents
-//   in repo Y.  So we can't do this entirely at the Workspace level.  All the
-//   Workspace can give us is an efficient way to walk reverse dependencies.
+// XXX-dap wishlist:
+// - Consider adding to metadata a list of the server components
+//   - hand-write this based on package-manifest.toml
+//   - in the future, this could be programmatically generated from
+//     package-manifest.toml
+//   - then this program could dynamically figure out which servers are in which
+//     components
+//   - pros of this:
+//     - we can look for packages that are not in any deliverable to see if
+//       we've missed something important
+// - Inspect all the edges to make sure I understand them and that we're
+//   handling them well
+// - *Use* this to generate the Asciidoc table
+//   - missing Clickhouse Admin?
+//   - missing that "Maghemite DDM Admin" has another client in
+//     "omicron:clients/ddm-admin-client"
+//   - missing that "Maghemite DDM Admin" is consumed by sled-agent
+//   - after I've compared the current one with the generated one, make package
+//     names into links
+// - Find The DAG
+// - Take a pass through everything: document, and rethink abstractions a little
 
 use anyhow::{Context, Result};
 use camino::Utf8PathBuf;
@@ -85,18 +93,11 @@ fn main() -> Result<()> {
 }
 
 fn run_adoc(apis: &Apis) -> Result<()> {
-    // XXX-dap
-    // - missing Clickhouse Admin?
-    // - missing that "Maghemite DDM Admin" has another client in
-    //   "omicron:clients/ddm-admin-client"
-    // - missing that "Maghemite DDM Admin" is consumed by sled-agent
     println!(r#"[cols="1h,2,2,2a,2", options="header"]"#);
     println!("|===");
     println!("|API");
     println!("|Server location (`repo:path`)");
     println!("|Client packages (`repo:path`)");
-    // XXX-dap does this approach ignore consumers that are not themselves
-    // exporters of APIs?
     println!("|Consumers (`repo:path`; excluding omdb and tests)");
     println!("|Notes");
     println!("");
@@ -104,7 +105,6 @@ fn run_adoc(apis: &Apis) -> Result<()> {
     let metadata = apis.api_metadata();
     for api in metadata.apis() {
         println!("|{}", api.label);
-        // XXX-dap want these to be links
         println!("|{}", apis.adoc_label(&api.server_component)?);
         println!("|{}", apis.adoc_label(&api.client_package_name)?);
         println!("|");
