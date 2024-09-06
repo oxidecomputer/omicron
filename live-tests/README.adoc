@@ -25,7 +25,7 @@ Ensure the system's target blueprint is enabled. The live tests require this to 
 On a fresh system, you will have to enable the target blueprint yourself:
 
 ```
-    omdb --destructive nexus blueprints target enable current
+omdb --destructive nexus blueprints target enable current
 ```
 
 This essentially enables reconfigurator, causing it to constantly try to make the system match its target blueprint. You only need to do this once in the lifetime of the system, not every time you re-run the live tests.
