@@ -66,7 +66,6 @@ impl Apis {
         let mut unit_server_components = BTreeMap::new();
         let mut api_producers = BTreeMap::new();
         let mut errors = Vec::new();
-        let mut packages_seen = BTreeSet::new();
 
         for (deployment_unit, dunit_info) in
             helper.api_metadata.deployment_units()
@@ -99,7 +98,6 @@ impl Apis {
             for dunit_pkg in &dunit_info.packages {
                 let (workspace, server_pkg) =
                     helper.find_package_workspace(dunit_pkg)?;
-                packages_seen.insert(server_pkg.id.clone());
 
                 // In some cases, the server API package is exactly the same as
                 // one of the deployment unit packages.
@@ -119,7 +117,6 @@ impl Apis {
                 workspace.walk_required_deps_recursively(
                     server_pkg,
                     &mut |p: &Package, dep_path: &DepPath| {
-                        packages_seen.insert(p.id.clone());
                         let Some(api) = server_packages.get(&p.name) else {
                             return;
                         };
@@ -154,27 +151,6 @@ impl Apis {
             assert!(unit_server_components
                 .insert(deployment_unit.clone(), servers_found)
                 .is_none());
-        }
-
-        // Look for packages referenced in any workspace that do not appear to
-        // be used in any deployment unit.  This suggests that our metadata is
-        // incomplete.
-        let mut nextra = 0;
-        for w in helper.workspaces.values() {
-            for pkgid in w.all_package_ids() {
-                if !packages_seen.contains(pkgid) {
-                    eprintln!(
-                        "warning: workspace {}: package {}: not used in any \
-                         deployment unit",
-                        w.name(),
-                        pkgid
-                    );
-                    nextra += 1;
-                }
-            }
-        }
-        if nextra > 0 {
-            bail!("found at least one package not in any deployment unit");
         }
 
         // For each server component, determine which client APIs it depends on
