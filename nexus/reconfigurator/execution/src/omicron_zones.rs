@@ -560,8 +560,6 @@ mod test {
             .expect("failed to deploy last round of zones");
         s1.verify_and_clear();
         s2.verify_and_clear();
-
-        panic!("something failed");
     }
 
     #[nexus_test]
