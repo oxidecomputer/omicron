@@ -859,7 +859,7 @@ mod test {
         let err = DatasetProperties::from_str(&input)
             .expect_err("Should have failed to parse");
         assert!(
-            err.to_string().contains("error parsing UUID (dataset)"),
+            format!("{err:#}").contains("error parsing UUID (dataset)"),
             "{err}"
         );
     }
@@ -870,7 +870,7 @@ mod test {
         let err = DatasetProperties::from_str(&input)
             .expect_err("Should have failed to parse");
         assert!(
-            err.to_string().contains("invalid digit found in string"),
+            format!("{err:#}").contains("invalid digit found in string"),
             "{err}"
         );
     }
@@ -881,7 +881,7 @@ mod test {
         let err = DatasetProperties::from_str(&input)
             .expect_err("Should have failed to parse");
         assert!(
-            err.to_string().contains("invalid digit found in string"),
+            format!("{err:#}").contains("invalid digit found in string"),
             "{err}"
         );
     }
@@ -892,7 +892,7 @@ mod test {
         let err = DatasetProperties::from_str(&input)
             .expect_err("Should have failed to parse");
         assert!(
-            err.to_string().contains("invalid digit found in string"),
+            format!("{err:#}").contains("invalid digit found in string"),
             "{err}"
         );
     }
@@ -903,7 +903,7 @@ mod test {
         let err = DatasetProperties::from_str(&input)
             .expect_err("Should have failed to parse");
         assert!(
-            err.to_string().contains("invalid digit found in string"),
+            format!("{err:#}").contains("invalid digit found in string"),
             "{err}"
         );
     }
@@ -913,7 +913,8 @@ mod test {
         let expect_missing = |input: &str, what: &str| {
             let err = DatasetProperties::from_str(input)
                 .expect_err("Should have failed to parse");
-            assert!(err.to_string().contains(&format!("Missing {what}")));
+            let err = format!("{err:#}");
+            assert!(err.contains(&format!("Missing {what}")), "{err}");
         };
 
         expect_missing(
