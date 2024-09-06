@@ -25,19 +25,19 @@
 
             <server>
                 <id>1</id>
-                <hostname>ff::01</hostname>
+                <hostname>ff::1</hostname>
                 <port>9234</port>
             </server>
             
             <server>
                 <id>2</id>
-                <hostname>ff::02</hostname>
+                <hostname>127.0.0.1</hostname>
                 <port>9234</port>
             </server>
             
             <server>
                 <id>3</id>
-                <hostname>ff::03</hostname>
+                <hostname>ohai.com</hostname>
                 <port>9234</port>
             </server>
             
