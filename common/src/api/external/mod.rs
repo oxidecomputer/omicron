@@ -593,7 +593,18 @@ impl JsonSchema for RoleName {
 //
 // TODO: custom JsonSchema impl to describe i64::MAX limit; this is blocked by
 // https://github.com/oxidecomputer/typify/issues/589
-#[derive(Copy, Clone, Debug, Serialize, JsonSchema, PartialEq, Eq)]
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Serialize,
+    JsonSchema,
+    Hash,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+)]
 pub struct ByteCount(u64);
 
 impl<'de> Deserialize<'de> for ByteCount {

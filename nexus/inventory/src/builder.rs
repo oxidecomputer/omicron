@@ -516,6 +516,11 @@ impl CollectionBuilder {
                 .into_iter()
                 .map(|z| Zpool::new(time_collected, z))
                 .collect(),
+            datasets: inventory
+                .datasets
+                .into_iter()
+                .map(|d| d.into())
+                .collect(),
         };
 
         if let Some(previous) = self.sleds.get(&sled_id) {

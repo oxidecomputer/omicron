@@ -5480,6 +5480,7 @@ dependencies = [
 name = "nexus-sled-agent-shared"
 version = "0.1.0"
 dependencies = [
+ "illumos-utils",
  "omicron-common",
  "omicron-passwords",
  "omicron-uuid-kinds",
@@ -9847,6 +9848,7 @@ dependencies = [
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "once_cell",
  "rand",
  "schemars",
  "serde",
