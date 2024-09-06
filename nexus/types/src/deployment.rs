@@ -167,7 +167,7 @@ pub struct Blueprint {
 
     /// Configuration for Clickhouse Clusters derived from the parent blueprint
     /// and current blueprint zones
-    pub clickhouse_cluster_config: ClickhouseClusterConfig,
+    pub clickhouse_cluster_config: Option<ClickhouseClusterConfig>,
 
     /// when this blueprint was generated (for debugging)
     pub time_created: chrono::DateTime<chrono::Utc>,

@@ -44,12 +44,12 @@ use nexus_db_model::BpSledOmicronZones;
 use nexus_db_model::BpSledState;
 use nexus_db_model::BpTarget;
 use nexus_types::deployment::Blueprint;
-use nexus_types::deployment::ClickhouseClusterConfig;
 use nexus_types::deployment::BlueprintMetadata;
 use nexus_types::deployment::BlueprintPhysicalDisksConfig;
 use nexus_types::deployment::BlueprintTarget;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZonesConfig;
+use nexus_types::deployment::ClickhouseClusterConfig;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::external_api::views::SledState;
 use omicron_common::api::external::DataPageParams;
@@ -291,11 +291,6 @@ impl DataStore {
             external_dns_version,
             cockroachdb_fingerprint,
             cockroachdb_setting_preserve_downgrade,
-            clickhouse_cluster_generation,
-            clickhouse_max_used_server_id,
-            clickhouse_max_used_keeeper_id,
-            clickhouse_cluster_name,
-            clickhouse_cluster_secret,
             time_created,
             creator,
             comment,
@@ -638,7 +633,7 @@ impl DataStore {
             external_dns_version,
             cockroachdb_fingerprint,
             cockroachdb_setting_preserve_downgrade,
-            clickhouse_cluster_config: ClickhouseClusterConfig::new(
+            clickhouse_cluster_config: None,
             time_created,
             creator,
             comment,

@@ -1008,7 +1008,6 @@ impl<'a> BlueprintBuilder<'a> {
         &mut self,
         sled_id: SledUuid,
         desired_zone_count: usize,
-        inventory: &Collection,
     ) -> Result<EnsureMultiple, Error> {
         //  How many clickhouse keeper zones do we want to add?
         let clickhouse_keeper_count = self.sled_num_running_zones_of_kind(
@@ -1028,18 +1027,7 @@ impl<'a> BlueprintBuilder<'a> {
                 }
             };
 
-        // Clickhouse keeper clusters only allow adding or removing one node at
-        // a time. We must make sure that a keeper node is not currently being
-        // added or removed before we add a new one.
-        //
-        // Therefore, we always return only 0 or 1 zones here, even if
-        // `num_clickhouse_keepers_to_add` is greater than 1.
-        if num_clickhouse_keepers_to_add > 0 {
-            if self.is_active_clickhouse_keeper_reconfiguration(inventory) {
-                // We are currently trying to add or remove a node and cannot
-                // perform a concurrent addition
-                return Ok(EnsureMultiple::NotNeeded);
-            }
+        for _ in 0..num_clickhouse_keepers_to_add {
             let zone_id = self.rng.zone_rng.next();
             let underlay_ip = self.sled_alloc_ip(sled_id)?;
             let pool_name =
@@ -1067,7 +1055,10 @@ impl<'a> BlueprintBuilder<'a> {
             self.sled_add_zone(sled_id, zone)?;
         }
 
-        Ok(EnsureMultiple::Changed { added: 1, removed: 0 })
+        Ok(EnsureMultiple::Changed {
+            added: num_clickhouse_keepers_to_add,
+            removed: 0,
+        })
     }
 
     pub fn sled_promote_internal_ntp_to_boundary_ntp(
