@@ -1,7 +1,6 @@
 # Describes all the Dropshot/OpenAPI/Progenitor APIs in the system
 # XXX-dap there's similar metadata in the openapi manager
-# XXX-dap can server_component, deployment_unit be determined from package
-# metadata?
+# XXX-dap it'd be nice to get some of this from package-manifest.toml
 
 # XXX-dap stuff I'm ignoring from package-manifest.toml:
 # - faux_mgs
@@ -11,9 +10,9 @@
 # - pumpkind (XXX-dap)
 # - thundermuffin (XXX-dap)
 
-#
-# List of deployment units
-#
+#############################################################
+# Deployment Units
+#############################################################
 
 # The host OS includes Sled Agent, Propolis, and all the components that get
 # bundled into the switch zone.
@@ -62,9 +61,9 @@ label = "Oximeter"
 packages = [ "oximeter-collector" ]
 
 
-#
-# List of APIs
-#
+#############################################################
+# APIs
+#############################################################
 
 [[apis]]
 client_package_name = "bootstrap-agent-client"

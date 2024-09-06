@@ -144,6 +144,10 @@ impl Workspace {
         })
     }
 
+    pub fn all_package_ids(&self) -> impl Iterator<Item = &PackageId> {
+        self.packages_by_id.keys()
+    }
+
     pub fn client_packages(&self) -> impl Iterator<Item = &ClientPackageName> {
         self.progenitor_clients.iter()
     }
