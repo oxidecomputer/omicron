@@ -71,12 +71,12 @@ impl DataStore {
         // modified and the service address, rather than propagating a
         // constraint violation to the caller.
         //
-        // TODO(john) - Should we ignore time_deleted or explicitly set it to
-        // NULL? We _shouldn't_ be called by an Oximeter that's been deleted,
-        // and if we are that indicates a bug somewhere else in the system
-        // (probably in reconfigurator or its related tasks). For now, we refuse
-        // to resurrect a deleted Oximeter: if we're called with a deleted
-        // instance, we'll leave it deleted.
+        // TODO-completeness - We should return an error if `info.id()` maps to
+        // an existing row that has been deleted. We don't expect that to happen
+        // in practice (it would mean an expunged Oximeter zone has come back to
+        // life and reregistered itself). If it does happen, as written we'll
+        // update time_modified/ip/port but leave time_deleted set to whatever
+        // it was (which will leave the Oximeter in the "deleted" state).
         diesel::insert_into(dsl::oximeter)
             .values(*info)
             .on_conflict(dsl::id)

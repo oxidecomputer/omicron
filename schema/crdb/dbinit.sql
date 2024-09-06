@@ -1343,7 +1343,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.oximeter (
     time_deleted TIMESTAMPTZ
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS lookup_non_deleted_oximeter ON omicron.public.oximeter (
+/*
+ * The query Nexus runs to choose an Oximeter instance for new metric producers
+ * involves listing the non-deleted instances sorted by ID, which would require
+ * a full table scan without this index.
+ */
+CREATE UNIQUE INDEX IF NOT EXISTS list_non_deleted_oximeter ON omicron.public.oximeter (
     id
 ) WHERE
     time_deleted IS NULL;
