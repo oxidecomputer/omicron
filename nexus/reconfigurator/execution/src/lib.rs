@@ -131,7 +131,6 @@ pub async fn realize_blueprint_with_overrides(
         "blueprint_id" => %blueprint.id
     );
 
-    // Large enough to handle all the messages.
     let engine = UpdateEngine::new(&opctx.log, sender);
 
     register_zone_external_networking_step(
@@ -349,13 +348,12 @@ fn register_plumb_firewall_rules_step<'a>(
     datastore: &'a DataStore,
 ) {
     // After deploying omicron zones, we may need to refresh OPTE service
-    // firewall rules. This is an idempotent operation, so we don't attempt
-    // to optimize out calling it in unnecessary cases, although it is only
-    // needed in cases where we've changed the set of services on one or more
-    // sleds, or the sleds have lost their firewall rules for some reason.
-    // Fixing the latter case is a side effect and should really be handled by a
-    // firewall-rule-specific RPW; once that RPW exists, we could trigger it
-    // here instead of pluming firewall rules ourselves.
+    // firewall rules. This is an idempotent operation, so we don't attempt to
+    // optimize out calling it in unnecessary cases, although it is only needed
+    // in cases where we've changed the set of services on one or more sleds.
+    //
+    // TODO-cleanup: We should trigger the `service-firewall-rules` RPW here
+    // instead of doing this ourselves.
     registrar
         .new_step(
             ExecutionStepId::Ensure,
@@ -563,7 +561,10 @@ fn register_reassign_sagas_step<'a>(
                     }
                     Err(error) => {
                         // We treat errors as non-fatal here, but we still want
-                        // to log them.
+                        // to log them. It's okay to just log the message here
+                        // without the chain of sources, since we collect the
+                        // full chain in the last step
+                        // (`register_finalize_step`).
                         let message = error.to_string();
                         let output = ReassignSagaOutput {
                             needs_saga_recovery: false,
@@ -592,6 +593,10 @@ fn register_cockroachdb_settings_step<'a>(
                     cockroachdb::ensure_settings(&opctx, datastore, blueprint)
                         .await
                 {
+                    // We treat errors as non-fatal here, but we still want to
+                    // log them. It's okay to just log the message here without
+                    // the chain of sources, since we collect the full chain in
+                    // the last step (`register_finalize_step`).
                     let message = error.to_string();
                     StepWarning::new(Some(error), message).into()
                 } else {

@@ -88,7 +88,7 @@ pub(super) async fn run_local_uplink_preflight_check(
     );
 
     // Build the update executor.
-    let (sender, mut receiver) = mpsc::channel(128);
+    let (sender, mut receiver) = update_engine::channel();
     let mut engine = UpdateEngine::new(log, sender);
 
     for (port, uplink) in network_config.port_map(our_switch_location) {

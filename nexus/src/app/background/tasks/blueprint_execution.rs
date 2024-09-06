@@ -16,7 +16,7 @@ use nexus_types::deployment::{
 };
 use serde_json::json;
 use std::sync::Arc;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::watch;
 use update_engine::NestedError;
 use uuid::Uuid;
 
@@ -90,9 +90,7 @@ impl BlueprintExecutor {
             });
         }
 
-        // Pick a large-ish buffer for reconfigurator execution to avoid
-        // blocking it.
-        let (sender, mut receiver) = mpsc::channel(256);
+        let (sender, mut receiver) = update_engine::channel();
 
         let receiver_task = tokio::spawn(async move {
             // TODO: report progress

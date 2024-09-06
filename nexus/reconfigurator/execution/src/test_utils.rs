@@ -19,6 +19,7 @@ pub(crate) async fn realize_blueprint_and_expect(
     blueprint: &Blueprint,
     overrides: &Overridables,
 ) -> (RealizeBlueprintOutput, EventBuffer) {
+    // Large enough to handle incoming messages without stalling.
     let (sender, mut receiver) = tokio::sync::mpsc::channel(128);
     let receiver_task = tokio::spawn(async move {
         let mut buffer = EventBuffer::default();

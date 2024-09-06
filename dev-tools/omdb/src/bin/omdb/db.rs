@@ -4744,6 +4744,51 @@ fn inv_collection_print_sleds(collection: &Collection) {
             sled.reservoir_size.to_whole_gibibytes()
         );
 
+        if !sled.zpools.is_empty() {
+            println!("    physical disks:");
+        }
+        for disk in &sled.disks {
+            let nexus_types::inventory::PhysicalDisk {
+                identity,
+                variant,
+                slot,
+            } = disk;
+            println!("      {variant:?}: {identity:?} in {slot}");
+        }
+
+        if !sled.zpools.is_empty() {
+            println!("    zpools");
+        }
+        for zpool in &sled.zpools {
+            let nexus_types::inventory::Zpool { id, total_size, .. } = zpool;
+            println!("      {id}: total size: {total_size}");
+        }
+
+        if !sled.datasets.is_empty() {
+            println!("    datasets:");
+        }
+        for dataset in &sled.datasets {
+            let nexus_types::inventory::Dataset {
+                id,
+                name,
+                available,
+                used,
+                quota,
+                reservation,
+                compression,
+            } = dataset;
+
+            let id = if let Some(id) = id {
+                id.to_string()
+            } else {
+                String::from("none")
+            };
+
+            println!("      {name} - id: {id}, compression: {compression}");
+            println!("        available: {available}, used: {used}");
+            println!("        reservation: {reservation:?}, quota: {quota:?}");
+        }
+
         if let Some(zones) = collection.omicron_zones.get(&sled.sled_id) {
             println!(
                 "    zones collected from {} at {}",
