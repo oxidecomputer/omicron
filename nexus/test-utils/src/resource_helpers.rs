@@ -481,11 +481,14 @@ pub async fn create_instance(
         // External IPs=
         Vec::<params::ExternalIpCreate>::new(),
         true,
+        None,
     )
     .await
 }
 
 /// Creates an instance with attached resources.
+// I know, Clippy. I don't like it either...
+#[allow(clippy::too_many_arguments)]
 pub async fn create_instance_with(
     client: &ClientTestContext,
     project_name: &str,
@@ -494,6 +497,7 @@ pub async fn create_instance_with(
     disks: Vec<params::InstanceDiskAttachment>,
     external_ips: Vec<params::ExternalIpCreate>,
     start: bool,
+    auto_restart_policy: Option<params::InstanceAutoRestart>,
 ) -> Instance {
     let url = format!("/v1/instances?project={}", project_name);
     object_create(
@@ -515,7 +519,7 @@ pub async fn create_instance_with(
             external_ips,
             disks,
             start,
-            auto_restart_policy: None,
+            auto_restart_policy,
         },
     )
     .await
