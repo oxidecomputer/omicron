@@ -16,15 +16,21 @@ There are some safeguards so that these tests won't run on production systems: t
 
 == Usage
 
-These tests are not currently run automatically (though they are _built_ in CI).
+These tests are not currently run automatically (though they are _built_ in CI). You can run them yourself.
 
-You can run them yourself.  First, deploy Omicron using `a4x2` or one of the hardware test rigs.  In your Omicron workspace, run `cargo xtask live-tests` to build an archive and then follow the instructions:
+First, deploy Omicron using `a4x2` or one of the hardware test rigs.
 
-The live tests require that the system's target blueprint is enabled. This is to avoid a case where the live tests generate blueprints based on a target blueprint that is not current and then wind up making a bunch of unrelated changes to the system. On a fresh system, you will have to enable the target blueprint yourself:
+Ensure the system's target blueprint is enabled. The live tests require this to avoid a case where the live tests generate blueprints based on a target blueprint that is not current, and then make a bunch of changes to the system unrelated to the tests.
 
+On a fresh system, you will have to enable the target blueprint yourself:
+
+```
     omdb --destructive nexus blueprints target enable current
+```
 
 This essentially enables reconfigurator, causing it to constantly try to make the system match its target blueprint. You only need to do this once in the lifetime of the system, not every time you re-run the live tests.
+
+At this point the system is prepared for testing. In your Omicron workspace, run `cargo xtask live-tests` to build an archive and then follow the instructions:
 
 ```
 $ cargo xtask live-tests
