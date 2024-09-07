@@ -7,10 +7,8 @@
 // XXX-dap wishlist:
 // - Fix warnings:
 //   - missing client: crucible-control-client
-//   - missing client: repair-client
 //   - missing client: dsc-client
 //   - missing client: omicron-ddm-admin-client
-//   - missing Clickhouse Admin?
 //   - missing that "Maghemite DDM Admin" has another client in
 //     "omicron:clients/ddm-admin-client"
 //   - missing that "Maghemite DDM Admin" is consumed by sled-agent
@@ -26,6 +24,7 @@
 // - crucible-pantry has an erroneous dependency on sled-agent-client
 //   because it's pinned to a relatively old nexus-types that did depend on
 //   sled-agent-client
+// - clickhouse-admin has no client yet
 
 use anyhow::{Context, Result};
 use camino::Utf8PathBuf;

@@ -37,8 +37,8 @@ packages = [ "installinator" ]
 # The rest of these get bundled by standard control plane zone images.
 
 [[deployment_units]]
-label = "Crucible Agent"
-packages = [ "crucible-agent" ]
+label = "Crucible"
+packages = [ "crucible-agent", "crucible-downstairs" ]
 
 [[deployment_units]]
 label = "Crucible Pantry"
@@ -47,6 +47,10 @@ packages = [ "crucible-pantry" ]
 [[deployment_units]]
 label = "Cockroach Admin"
 packages = [ "omicron-cockroach-admin" ]
+
+[[deployment_units]]
+label = "Clickhouse Admin"
+packages = [ "omicron-clickhouse-admin" ]
 
 [[deployment_units]]
 label = "DNS Server"
@@ -83,6 +87,16 @@ configuration and monitoring that requires the `cockroach` CLI.
 client_package_name = "crucible-agent-client"
 label = "Crucible Agent"
 server_package_name = "crucible-agent"
+
+[[apis]]
+client_package_name = "repair-client"
+label = "Crucible Repair"
+server_package_name = "crucible-downstairs"
+notes = """
+The repair service offered by a crucible-downstairs supports both repairing \
+one downstairs from another, and making a clone of a read-only downstairs \
+when creating a new region in the crucible agent.
+"""
 
 [[apis]]
 client_package_name = "crucible-pantry-client"
