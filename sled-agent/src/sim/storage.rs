@@ -18,7 +18,6 @@ use crucible_agent_client::types::{
 use dropshot::HandlerTaskMode;
 use dropshot::HttpError;
 use futures::lock::Mutex;
-use serde::Serialize;
 use omicron_common::disk::DatasetManagementStatus;
 use omicron_common::disk::DatasetsConfig;
 use omicron_common::disk::DatasetsManagementResult;
@@ -32,6 +31,7 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use propolis_client::types::VolumeConstructionRequest;
+use serde::Serialize;
 use slog::Logger;
 use std::collections::HashMap;
 use std::collections::HashSet;
