@@ -20,10 +20,10 @@ impl VlanID {
     /// Creates a new VLAN ID, returning an error if it is out of range.
     pub fn new(id: u16) -> Result<Self, Error> {
         if VLAN_MAX < id {
-            return Err(Error::InvalidValue {
-                label: id.to_string(),
-                message: "Invalid VLAN value".to_string(),
-            });
+            return Err(Error::invalid_value(
+                id.to_string(),
+                "Invalid VLAN value",
+            ));
         }
         Ok(Self(id))
     }
@@ -38,9 +38,9 @@ impl fmt::Display for VlanID {
 impl FromStr for VlanID {
     type Err = Error;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::new(s.parse().map_err(|e| Error::InvalidValue {
-            label: s.to_string(),
-            message: format!("{}", e),
-        })?)
+        Self::new(
+            s.parse::<u16>()
+                .map_err(|e| Error::invalid_value(s, e.to_string()))?,
+        )
     }
 }

@@ -5,7 +5,12 @@
 // Copyright 2023 Oxide Computer Company
 
 use std::{
-    borrow::Cow, fmt, ops::ControlFlow, pin::Pin, sync::Mutex, task::Poll,
+    borrow::Cow,
+    fmt,
+    ops::ControlFlow,
+    pin::Pin,
+    sync::{Arc, Mutex},
+    task::Poll,
 };
 
 use cancel_safe_futures::coop_cancel;
@@ -28,7 +33,7 @@ use crate::{
         StepEvent, StepEventKind, StepInfo, StepInfoWithMetadata, StepOutcome,
         StepProgress,
     },
-    AsError, CompletionContext, MetadataContext, StepContext,
+    AsError, CompletionContext, MetadataContext, NestedSpec, StepContext,
     StepContextPayload, StepHandle, StepSpec,
 };
 
@@ -64,7 +69,7 @@ pub struct UpdateEngine<'a, S: StepSpec> {
     // be a graph in the future.
     log: slog::Logger,
     execution_id: ExecutionId,
-    sender: mpsc::Sender<Event<S>>,
+    sender: EngineSender<S>,
 
     // This is set to None in Self::execute.
     canceler: Option<coop_cancel::Canceler<String>>,
@@ -82,6 +87,21 @@ pub struct UpdateEngine<'a, S: StepSpec> {
 impl<'a, S: StepSpec + 'a> UpdateEngine<'a, S> {
     /// Creates a new `UpdateEngine`.
     pub fn new(log: &slog::Logger, sender: mpsc::Sender<Event<S>>) -> Self {
+        let sender = Arc::new(DefaultSender { sender });
+        Self::new_impl(log, EngineSender { sender })
+    }
+
+    // See the comment on `StepContext::with_nested_engine` for why this is
+    // necessary.``
+    pub(crate) fn new_nested<S2: StepSpec>(
+        log: &slog::Logger,
+        sender: mpsc::Sender<StepContextPayload<S2>>,
+    ) -> Self {
+        let sender = Arc::new(NestedSender { sender });
+        Self::new_impl(log, EngineSender { sender })
+    }
+
+    fn new_impl(log: &slog::Logger, sender: EngineSender<S>) -> Self {
         let execution_id = ExecutionId(Uuid::new_v4());
         let (canceler, cancel_receiver) = coop_cancel::new_pair();
         Self {
@@ -300,6 +320,91 @@ impl<'a, S: StepSpec + 'a> UpdateEngine<'a, S> {
         reporter.last_step(step_res).await?;
 
         Ok(CompletionContext::new())
+    }
+}
+
+/// Abstraction used to send events to whatever receiver is interested in them.
+///
+/// # Why is this type so weird?
+///
+/// `EngineSender` is a wrapper around a cloneable trait object. Why do we need
+/// that?
+///
+/// `SenderImpl` has two implementations:
+///
+/// 1. `DefaultSender`, which is a wrapper around an `mpsc::Sender<Event<S>>`.
+///    This is used when the receiver is user code.
+/// 2. `NestedSender`, which is a more complex wrapper around an
+///    `mpsc::Sender<StepContextPayload<S>>`.
+///
+/// You might imagine that we could just have `EngineSender` be an enum with
+/// these two variants. But we actually want `NestedSender<S>` to implement
+/// `SenderImpl<S>` for *any* StepSpec, not just `S`, to allow nested engines to
+/// be a different StepSpec than the outer engine.
+///
+/// In other words, `NestedSender` doesn't just represent a single
+/// `mpsc::Sender<StepContextPayload<S>>`, it represents the universe of all
+/// possible StepSpecs S. This is an infinite number of variants, and requires a
+/// trait object to represent.
+#[derive_where(Clone, Debug)]
+struct EngineSender<S: StepSpec> {
+    sender: Arc<dyn SenderImpl<S>>,
+}
+
+impl<S: StepSpec> EngineSender<S> {
+    async fn send(&self, event: Event<S>) -> Result<(), ExecutionError<S>> {
+        self.sender.send(event).await
+    }
+}
+
+trait SenderImpl<S: StepSpec>: Send + Sync + fmt::Debug {
+    fn send(
+        &self,
+        event: Event<S>,
+    ) -> BoxFuture<'_, Result<(), ExecutionError<S>>>;
+}
+
+#[derive_where(Debug)]
+struct DefaultSender<S: StepSpec> {
+    sender: mpsc::Sender<Event<S>>,
+}
+
+impl<S: StepSpec> SenderImpl<S> for DefaultSender<S> {
+    fn send(
+        &self,
+        event: Event<S>,
+    ) -> BoxFuture<'_, Result<(), ExecutionError<S>>> {
+        self.sender.send(event).map_err(|error| error.into()).boxed()
+    }
+}
+
+#[derive_where(Debug)]
+struct NestedSender<S: StepSpec> {
+    sender: mpsc::Sender<StepContextPayload<S>>,
+}
+
+// Note that NestedSender<S> implements SenderImpl<S2> for any S2: StepSpec.
+// That is to allow nested engines to implement arbitrary StepSpecs.
+impl<S: StepSpec, S2: StepSpec> SenderImpl<S2> for NestedSender<S> {
+    fn send(
+        &self,
+        event: Event<S2>,
+    ) -> BoxFuture<'_, Result<(), ExecutionError<S2>>> {
+        let now = Instant::now();
+        async move {
+            let (done, done_rx) = oneshot::channel();
+            self.sender
+                .send(StepContextPayload::NestedSingle {
+                    now,
+                    event: event.into_generic(),
+                    done,
+                })
+                .await
+                .expect("our code always keeps payload_receiver open");
+            _ = done_rx.await;
+            Ok(())
+        }
+        .boxed()
     }
 }
 
@@ -819,6 +924,16 @@ impl<'a, S: StepSpec> StepExec<'a, S> {
                         Ok(ControlFlow::Continue(()))
                     }
 
+                    // Note: payload_receiver is always kept open while step_fut
+                    // is being driven. It is only dropped before completion if
+                    // the step is aborted, in which case step_fut is also
+                    // cancelled without being driven further. A bunch of
+                    // expects with "our code always keeps payload_receiver
+                    // open" rely on this.
+                    //
+                    // If we ever move the payload receiver to another task so
+                    // it runs in parallel, this situation would have to be
+                    // handled with care.
                     payload = payload_receiver.recv(), if !payload_done => {
                         match payload {
                             Some(payload) => {
@@ -868,14 +983,14 @@ struct ExecutionContext<S: StepSpec, F> {
     execution_id: ExecutionId,
     next_event_index: DebugIgnore<F>,
     total_start: Instant,
-    sender: mpsc::Sender<Event<S>>,
+    sender: EngineSender<S>,
 }
 
 impl<S: StepSpec, F> ExecutionContext<S, F> {
     fn new(
         execution_id: ExecutionId,
         next_event_index: F,
-        sender: mpsc::Sender<Event<S>>,
+        sender: EngineSender<S>,
     ) -> Self {
         let total_start = Instant::now();
         Self {
@@ -906,7 +1021,7 @@ struct StepExecutionContext<S: StepSpec, F> {
     next_event_index: DebugIgnore<F>,
     total_start: Instant,
     step_info: StepInfoWithMetadata<S>,
-    sender: mpsc::Sender<Event<S>>,
+    sender: EngineSender<S>,
 }
 
 type StepMetadataFn<'a, S> = Box<
@@ -941,7 +1056,7 @@ struct StepProgressReporter<S: StepSpec, F> {
     step_start: Instant,
     attempt: usize,
     attempt_start: Instant,
-    sender: mpsc::Sender<Event<S>>,
+    sender: EngineSender<S>,
 }
 
 impl<S: StepSpec, F: FnMut() -> usize> StepProgressReporter<S, F> {
@@ -963,51 +1078,32 @@ impl<S: StepSpec, F: FnMut() -> usize> StepProgressReporter<S, F> {
     async fn handle_payload(
         &mut self,
         payload: StepContextPayload<S>,
-    ) -> Result<(), mpsc::error::SendError<Event<S>>> {
+    ) -> Result<(), ExecutionError<S>> {
         match payload {
-            StepContextPayload::Progress(progress) => {
-                self.handle_progress(progress).await
+            StepContextPayload::Progress { now, progress, done } => {
+                self.handle_progress(now, progress).await?;
+                std::mem::drop(done);
             }
-            StepContextPayload::Nested(Event::Step(event)) => {
-                self.sender
-                    .send(Event::Step(StepEvent {
-                        spec: S::schema_name(),
-                        execution_id: self.execution_id,
-                        event_index: (self.next_event_index)(),
-                        total_elapsed: self.total_start.elapsed(),
-                        kind: StepEventKind::Nested {
-                            step: self.step_info.clone(),
-                            attempt: self.attempt,
-                            event: Box::new(event),
-                            step_elapsed: self.step_start.elapsed(),
-                            attempt_elapsed: self.attempt_start.elapsed(),
-                        },
-                    }))
-                    .await
+            StepContextPayload::NestedSingle { now, event, done } => {
+                self.handle_nested(now, event).await?;
+                std::mem::drop(done);
             }
-            StepContextPayload::Nested(Event::Progress(event)) => {
-                self.sender
-                    .send(Event::Progress(ProgressEvent {
-                        spec: S::schema_name(),
-                        execution_id: self.execution_id,
-                        total_elapsed: self.total_start.elapsed(),
-                        kind: ProgressEventKind::Nested {
-                            step: self.step_info.clone(),
-                            attempt: self.attempt,
-                            event: Box::new(event),
-                            step_elapsed: self.step_start.elapsed(),
-                            attempt_elapsed: self.attempt_start.elapsed(),
-                        },
-                    }))
-                    .await
+            StepContextPayload::Nested { now, event } => {
+                self.handle_nested(now, event).await?;
+            }
+            StepContextPayload::Sync { done } => {
+                std::mem::drop(done);
             }
         }
+
+        Ok(())
     }
 
     async fn handle_progress(
         &mut self,
+        now: Instant,
         progress: StepProgress<S>,
-    ) -> Result<(), mpsc::error::SendError<Event<S>>> {
+    ) -> Result<(), ExecutionError<S>> {
         match progress {
             StepProgress::Progress { progress, metadata } => {
                 // Send the progress to the sender.
@@ -1015,14 +1111,14 @@ impl<S: StepSpec, F: FnMut() -> usize> StepProgressReporter<S, F> {
                     .send(Event::Progress(ProgressEvent {
                         spec: S::schema_name(),
                         execution_id: self.execution_id,
-                        total_elapsed: self.total_start.elapsed(),
+                        total_elapsed: now - self.total_start,
                         kind: ProgressEventKind::Progress {
                             step: self.step_info.clone(),
                             attempt: self.attempt,
                             progress,
                             metadata,
-                            step_elapsed: self.step_start.elapsed(),
-                            attempt_elapsed: self.attempt_start.elapsed(),
+                            step_elapsed: now - self.step_start,
+                            attempt_elapsed: now - self.attempt_start,
                         },
                     }))
                     .await
@@ -1034,13 +1130,13 @@ impl<S: StepSpec, F: FnMut() -> usize> StepProgressReporter<S, F> {
                         spec: S::schema_name(),
                         execution_id: self.execution_id,
                         event_index: (self.next_event_index)(),
-                        total_elapsed: self.total_start.elapsed(),
+                        total_elapsed: now - self.total_start,
                         kind: StepEventKind::ProgressReset {
                             step: self.step_info.clone(),
                             attempt: self.attempt,
                             metadata,
-                            step_elapsed: self.step_start.elapsed(),
-                            attempt_elapsed: self.attempt_start.elapsed(),
+                            step_elapsed: now - self.step_start,
+                            attempt_elapsed: now - self.attempt_start,
                             message,
                         },
                     }))
@@ -1049,7 +1145,7 @@ impl<S: StepSpec, F: FnMut() -> usize> StepProgressReporter<S, F> {
             StepProgress::Retry { message } => {
                 // Retry this step.
                 self.attempt += 1;
-                let attempt_elapsed = self.attempt_start.elapsed();
+                let attempt_elapsed = now - self.attempt_start;
                 self.attempt_start = Instant::now();
 
                 // Send the retry message.
@@ -1058,13 +1154,55 @@ impl<S: StepSpec, F: FnMut() -> usize> StepProgressReporter<S, F> {
                         spec: S::schema_name(),
                         execution_id: self.execution_id,
                         event_index: (self.next_event_index)(),
-                        total_elapsed: self.total_start.elapsed(),
+                        total_elapsed: now - self.total_start,
                         kind: StepEventKind::AttemptRetry {
                             step: self.step_info.clone(),
                             next_attempt: self.attempt,
-                            step_elapsed: self.step_start.elapsed(),
+                            step_elapsed: now - self.step_start,
                             attempt_elapsed,
                             message,
+                        },
+                    }))
+                    .await
+            }
+        }
+    }
+
+    async fn handle_nested(
+        &mut self,
+        now: Instant,
+        event: Event<NestedSpec>,
+    ) -> Result<(), ExecutionError<S>> {
+        match event {
+            Event::Step(event) => {
+                self.sender
+                    .send(Event::Step(StepEvent {
+                        spec: S::schema_name(),
+                        execution_id: self.execution_id,
+                        event_index: (self.next_event_index)(),
+                        total_elapsed: now - self.total_start,
+                        kind: StepEventKind::Nested {
+                            step: self.step_info.clone(),
+                            attempt: self.attempt,
+                            event: Box::new(event),
+                            step_elapsed: now - self.step_start,
+                            attempt_elapsed: now - self.attempt_start,
+                        },
+                    }))
+                    .await
+            }
+            Event::Progress(event) => {
+                self.sender
+                    .send(Event::Progress(ProgressEvent {
+                        spec: S::schema_name(),
+                        execution_id: self.execution_id,
+                        total_elapsed: now - self.total_start,
+                        kind: ProgressEventKind::Nested {
+                            step: self.step_info.clone(),
+                            attempt: self.attempt,
+                            event: Box::new(event),
+                            step_elapsed: now - self.step_start,
+                            attempt_elapsed: now - self.attempt_start,
                         },
                     }))
                     .await
@@ -1100,9 +1238,9 @@ impl<S: StepSpec, F: FnMut() -> usize> StepProgressReporter<S, F> {
                 component: self.step_info.info.component.clone(),
                 id: self.step_info.info.id.clone(),
                 description: self.step_info.info.description.clone(),
-                message: message,
+                message,
             },
-            Err(error) => error.into(),
+            Err(error) => error,
         }
     }
 
@@ -1187,7 +1325,7 @@ impl<S: StepSpec, F: FnMut() -> usize> StepProgressReporter<S, F> {
     async fn send_error(
         mut self,
         error: &S::Error,
-    ) -> Result<(), mpsc::error::SendError<Event<S>>> {
+    ) -> Result<(), ExecutionError<S>> {
         // Stringify `error` into a message + list causes; this is written the
         // way it is to avoid `error` potentially living across the `.await`
         // below (which can cause lifetime issues in callers).

@@ -4,6 +4,7 @@
 
 //! Integration tests for oximeter collectors and producers.
 
+use crate::integration_tests::metrics::wait_for_producer;
 use nexus_test_interface::NexusServer;
 use nexus_test_utils_macros::nexus_test;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
@@ -39,23 +40,31 @@ async fn test_oximeter_database_records(context: &ControlPlaneTestContext) {
         "Oximeter ID does not match the ID returned from the database"
     );
 
+    // Kind of silly, but let's wait until the producer is actually registered
+    // with Oximeter.
+    let producer_id = nexus_test_utils::PRODUCER_UUID.parse().unwrap();
+    wait_for_producer(&context.oximeter, &producer_id).await;
+
     // Verify that the producer lives in the DB.
-    let result = conn
+    let results = conn
         .query("SELECT * FROM omicron.public.metric_producer;", &[])
         .await
         .unwrap();
-    assert_eq!(
-        result.len(),
-        1,
-        "Expected a single metric producer instance in the database"
+    assert!(
+        !result.is_empty(),
+        "Expected at least 1 metric producer instance in the database"
     );
-    let actual_id = result[0].get::<&str, Uuid>("id");
-    assert_eq!(
-        actual_id,
-        nexus_test_utils::PRODUCER_UUID.parse().unwrap(),
-        "Producer ID does not match the ID returned from the database"
-    );
-    let actual_oximeter_id = result[0].get::<&str, Uuid>("oximeter_id");
+    let actual_oximeter_id = results
+        .iter()
+        .find_map(|row| {
+            let id = row.get::<&str, Uuid>("id");
+            if id == producer_id {
+                Some(row.get::<&str, Uuid>("oximeter_id"))
+            } else {
+                None
+            }
+        })
+        .expect("The database doesn't contain a record of our producer");
     assert_eq!(
         actual_oximeter_id,
         nexus_test_utils::OXIMETER_UUID.parse().unwrap(),
@@ -70,36 +79,43 @@ async fn test_oximeter_reregistration() {
     )
     .await;
     let db = &context.database;
-    let producer_id = nexus_test_utils::PRODUCER_UUID.parse().unwrap();
-    let oximeter_id = nexus_test_utils::OXIMETER_UUID.parse().unwrap();
+    let producer_id: Uuid = nexus_test_utils::PRODUCER_UUID.parse().unwrap();
+    let oximeter_id: Uuid = nexus_test_utils::OXIMETER_UUID.parse().unwrap();
 
     // Get a handle to the DB, for various tests
     let conn = db.connect().await.unwrap();
 
-    // Helper to get a record for a single metric producer
+    // Helper to get the record for our test metric producer
     let get_record = || async {
         let result = conn
             .query("SELECT * FROM omicron.public.metric_producer;", &[])
             .await
             .unwrap();
-        assert_eq!(
-            result.len(),
-            1,
-            "Expected a single metric producer instance in the database"
-        );
-        let actual_id = result[0].get::<&str, Uuid>("id");
-        assert_eq!(
-            actual_id, producer_id,
-            "Producer ID does not match the ID returned from the database"
-        );
+
+        // There may be multiple producers in the DB, since Nexus and the
+        // simulated sled agent register their own. We just care about the
+        // actual integration test producer here.
         result
+            .into_iter()
+            .find(|row| row.get::<&str, Uuid>("id") == producer_id)
+            .ok_or_else(|| CondCheckError::<()>::NotYet)
     };
 
     // Get the original time modified, for comparison later.
-    let original_time_modified = {
-        let result = get_record().await;
-        result[0].get::<&str, chrono::DateTime<chrono::Utc>>("time_modified")
-    };
+    //
+    // Note that the record may not show up right away, so we'll wait for it
+    // here.
+    const PRODUCER_POLL_INTERVAL: Duration = Duration::from_secs(1);
+    const PRODUCER_POLL_DURATION: Duration = Duration::from_secs(60);
+    let row = wait_for_condition(
+        get_record,
+        &PRODUCER_POLL_INTERVAL,
+        &PRODUCER_POLL_DURATION,
+    )
+    .await
+    .expect("Integration test producer is not in the database");
+    let original_time_modified =
+        row.get::<&str, chrono::DateTime<chrono::Utc>>("time_modified");
 
     // ClickHouse client for verifying collection.
     let ch_address = net::SocketAddrV6::new(
@@ -145,7 +161,7 @@ async fn test_oximeter_reregistration() {
 
     // Timeouts for checks
     const POLL_INTERVAL: Duration = Duration::from_millis(100);
-    const POLL_DURATION: Duration = Duration::from_secs(30);
+    const POLL_DURATION: Duration = Duration::from_secs(60);
 
     // We must have at exactly one timeseries, with at least one sample.
     let timeseries =
@@ -217,7 +233,6 @@ async fn test_oximeter_reregistration() {
         context.server.get_http_server_internal_address().await,
         nexus_test_utils::PRODUCER_UUID.parse().unwrap(),
     )
-    .await
     .expect("Failed to restart metric producer server");
     nexus_test_utils::register_test_producer(&context.producer)
         .expect("Failed to register producer");
@@ -261,11 +276,11 @@ async fn test_oximeter_reregistration() {
     // Note that it's _probably_ not the case that the port is the same as the original, but it is
     // possible. We can verify that the modification time has been changed.
     let (new_port, new_time_modified) = {
-        let result = get_record().await;
+        let row =
+            get_record().await.expect("Expected the producer record to exist");
         (
-            result[0].get::<&str, i32>("port") as u16,
-            result[0]
-                .get::<&str, chrono::DateTime<chrono::Utc>>("time_modified"),
+            row.get::<&str, i32>("port") as u16,
+            row.get::<&str, chrono::DateTime<chrono::Utc>>("time_modified"),
         )
     };
     assert_eq!(new_port, context.producer.address().port());

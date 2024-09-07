@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 set -eu
 
@@ -84,6 +84,15 @@ function retry
   exit $retry_rc
 }
 
+function xtask
+{
+  if [ -z ${XTASK_BIN+x} ]; then
+    cargo xtask "$@"
+  else
+    "$XTASK_BIN" "$@"
+  fi
+}
+
 # Packages to be installed Helios:
 #
 # - libpq, the PostgreSQL client lib.
@@ -120,8 +129,6 @@ function install_packages {
       exit "$rc"
     fi
 
-    pfexec svcadm enable chrony
-
     pkg list -v "${packages[@]}"
   elif [[ "${HOST_OS}" == "Linux" ]]; then
     packages=(
@@ -155,8 +162,8 @@ if [[ "${HOST_OS}" == "SunOS" ]]; then
 
     # Grab the SoftNPU machinery (ASIC simulator, scadm, P4 program, etc.)
     #
-    # create_virtual_hardware.sh will use those to setup the softnpu zone
-    retry ./tools/ci_download_softnpu_machinery
+    # "cargo xtask virtual-hardware create" will use those to setup the softnpu zone
+    retry xtask download softnpu
 fi
 
 echo "All runner prerequisites installed successfully"

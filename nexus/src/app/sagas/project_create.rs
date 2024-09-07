@@ -154,12 +154,10 @@ async fn spc_create_vpc_params(
 #[cfg(test)]
 mod test {
     use crate::{
-        app::saga::create_saga_dag, app::sagas::project_create::Params,
+        app::sagas::project_create::Params,
         app::sagas::project_create::SagaProjectCreate, external_api::params,
     };
-    use async_bb8_diesel::{
-        AsyncConnection, AsyncRunQueryDsl, AsyncSimpleConnection,
-    };
+    use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
     use diesel::{
         ExpressionMethods, OptionalExtension, QueryDsl, SelectableHelper,
     };
@@ -190,7 +188,7 @@ mod test {
     fn test_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
         OpContext::for_tests(
             cptestctx.logctx.log.new(o!()),
-            cptestctx.server.apictx().nexus.datastore().clone(),
+            cptestctx.server.server_context().nexus.datastore().clone(),
         )
     }
 
@@ -233,20 +231,20 @@ mod test {
         use nexus_db_queries::db::model::VirtualProvisioningCollection;
         use nexus_db_queries::db::schema::virtual_provisioning_collection::dsl;
 
-        datastore.pool_connection_for_tests()
-            .await
-            .unwrap()
-            .transaction_async(|conn| async move {
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        datastore
+            .transaction_retry_wrapper("no_virtual_provisioning_collection_records_for_projects")
+            .transaction(&conn, |conn| async move {
                 conn
                     .batch_execute_async(nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL)
                     .await
                     .unwrap();
-                Ok::<_, nexus_db_queries::db::TransactionError<()>>(
+                Ok(
                     dsl::virtual_provisioning_collection
                         .filter(dsl::collection_type.eq(nexus_db_queries::db::model::CollectionTypeProvisioned::Project.to_string()))
                         // ignore built-in services project
                         .filter(dsl::id.ne(*SERVICES_PROJECT_ID))
-
                         .select(VirtualProvisioningCollection::as_select())
                         .get_results_async::<VirtualProvisioningCollection>(&conn)
                         .await
@@ -260,20 +258,16 @@ mod test {
     async fn test_saga_basic_usage_succeeds(
         cptestctx: &ControlPlaneTestContext,
     ) {
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
 
         // Before running the test, confirm we have no records of any projects.
         verify_clean_slate(nexus.datastore()).await;
 
-        // Build the saga DAG with the provided test parameters
+        // Build the saga DAG with the provided test parameters and run it.
         let opctx = test_opctx(&cptestctx);
         let authz_silo = opctx.authn.silo_required().unwrap();
         let params = new_test_params(&opctx, authz_silo);
-        let dag = create_saga_dag::<SagaProjectCreate>(params).unwrap();
-        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
-
-        // Actually run the saga
-        nexus.run_saga(runnable_saga).await.unwrap();
+        nexus.sagas.saga_execute::<SagaProjectCreate>(params).await.unwrap();
     }
 
     #[nexus_test(server = crate::Server)]
@@ -281,7 +275,7 @@ mod test {
         cptestctx: &ControlPlaneTestContext,
     ) {
         let log = &cptestctx.logctx.log;
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let opctx = test_opctx(&cptestctx);
         crate::app::sagas::test_helpers::action_failure_can_unwind::<
             SagaProjectCreate,

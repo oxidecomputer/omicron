@@ -10,10 +10,10 @@ use gateway_messages::SpComponent;
 use gateway_messages::SpPort;
 use gateway_test_utils::current_simulator_state;
 use gateway_test_utils::setup;
-use omicron_gateway::http_entrypoints::SpComponentInfo;
-use omicron_gateway::http_entrypoints::SpComponentList;
-use omicron_gateway::http_entrypoints::SpComponentPresence;
-use omicron_gateway::http_entrypoints::SpType;
+use gateway_types::component::SpComponentInfo;
+use gateway_types::component::SpComponentList;
+use gateway_types::component::SpComponentPresence;
+use gateway_types::component::SpType;
 
 #[tokio::test]
 async fn component_list() {
@@ -57,7 +57,71 @@ async fn component_list() {
                 capabilities: DeviceCapabilities::HAS_MEASUREMENT_CHANNELS
                     .bits(),
                 presence: SpComponentPresence::Failed,
-            }
+            },
+            SpComponentInfo {
+                component: "dev-1".to_string(),
+                device: "tmp117".to_string(),
+                serial_number: None,
+                description: "FAKE temperature sensor".to_string(),
+                capabilities: DeviceCapabilities::HAS_MEASUREMENT_CHANNELS
+                    .bits(),
+                presence: SpComponentPresence::Present,
+            },
+            SpComponentInfo {
+                component: "dev-2".to_string(),
+                device: "tmp117".to_string(),
+                serial_number: None,
+                description: "FAKE Southeast temperature sensor".to_string(),
+                capabilities: DeviceCapabilities::HAS_MEASUREMENT_CHANNELS
+                    .bits(),
+                presence: SpComponentPresence::Present,
+            },
+            SpComponentInfo {
+                component: "dev-6".to_string(),
+                device: "at24csw080".to_string(),
+                serial_number: None,
+                description: "FAKE U.2 Sharkfin A VPD".to_string(),
+                capabilities: 0,
+                presence: SpComponentPresence::Present,
+            },
+            SpComponentInfo {
+                component: "dev-7".to_string(),
+                device: "max5970".to_string(),
+                serial_number: None,
+                description: "FAKE U.2 Sharkfin A hot swap controller"
+                    .to_string(),
+                capabilities: DeviceCapabilities::HAS_MEASUREMENT_CHANNELS
+                    .bits(),
+                presence: SpComponentPresence::Present,
+            },
+            SpComponentInfo {
+                component: "dev-8".to_string(),
+                device: "nvme_bmc".to_string(),
+                serial_number: None,
+                description: "FAKE U.2 A NVMe Basic Management Command"
+                    .to_string(),
+                capabilities: DeviceCapabilities::HAS_MEASUREMENT_CHANNELS
+                    .bits(),
+                presence: SpComponentPresence::Present,
+            },
+            SpComponentInfo {
+                component: "dev-39".to_string(),
+                device: "tmp451".to_string(),
+                serial_number: None,
+                description: "FAKE T6 temperature sensor".to_string(),
+                capabilities: DeviceCapabilities::HAS_MEASUREMENT_CHANNELS
+                    .bits(),
+                presence: SpComponentPresence::Present,
+            },
+            SpComponentInfo {
+                component: "dev-53".to_string(),
+                device: "max31790".to_string(),
+                serial_number: None,
+                description: "FAKE Fan controller".to_string(),
+                capabilities: DeviceCapabilities::HAS_MEASUREMENT_CHANNELS
+                    .bits(),
+                presence: SpComponentPresence::Present,
+            },
         ]
     );
 
@@ -67,14 +131,89 @@ async fn component_list() {
 
     assert_eq!(
         resp.components,
-        &[SpComponentInfo {
-            component: SpComponent::SP3_HOST_CPU.const_as_str().to_string(),
-            device: SpComponent::SP3_HOST_CPU.const_as_str().to_string(),
-            serial_number: None,
-            description: "FAKE host cpu".to_string(),
-            capabilities: 0,
-            presence: SpComponentPresence::Present,
-        },]
+        &[
+            SpComponentInfo {
+                component: SpComponent::SP3_HOST_CPU.const_as_str().to_string(),
+                device: SpComponent::SP3_HOST_CPU.const_as_str().to_string(),
+                serial_number: None,
+                description: "FAKE host cpu".to_string(),
+                capabilities: 0,
+                presence: SpComponentPresence::Present,
+            },
+            SpComponentInfo {
+                component: "dev-0".to_string(),
+                device: "tmp117".to_string(),
+                serial_number: None,
+                description: "FAKE temperature sensor".to_string(),
+                capabilities: DeviceCapabilities::HAS_MEASUREMENT_CHANNELS
+                    .bits(),
+                presence: SpComponentPresence::Present,
+            },
+            SpComponentInfo {
+                component: "dev-1".to_string(),
+                device: "tmp117".to_string(),
+                serial_number: None,
+                description: "FAKE temperature sensor".to_string(),
+                capabilities: DeviceCapabilities::HAS_MEASUREMENT_CHANNELS
+                    .bits(),
+                presence: SpComponentPresence::Present,
+            },
+            SpComponentInfo {
+                component: "dev-2".to_string(),
+                device: "tmp117".to_string(),
+                serial_number: None,
+                description: "FAKE Southeast temperature sensor".to_string(),
+                capabilities: DeviceCapabilities::HAS_MEASUREMENT_CHANNELS
+                    .bits(),
+                presence: SpComponentPresence::Present,
+            },
+            SpComponentInfo {
+                component: "dev-6".to_string(),
+                device: "at24csw080".to_string(),
+                serial_number: None,
+                description: "FAKE U.2 Sharkfin A VPD".to_string(),
+                capabilities: 0,
+                presence: SpComponentPresence::Present,
+            },
+            SpComponentInfo {
+                component: "dev-7".to_string(),
+                device: "max5970".to_string(),
+                serial_number: None,
+                description: "FAKE U.2 Sharkfin A hot swap controller"
+                    .to_string(),
+                capabilities: DeviceCapabilities::HAS_MEASUREMENT_CHANNELS
+                    .bits(),
+                presence: SpComponentPresence::Present,
+            },
+            SpComponentInfo {
+                component: "dev-8".to_string(),
+                device: "nvme_bmc".to_string(),
+                serial_number: None,
+                description: "FAKE U.2 A NVMe Basic Management Command"
+                    .to_string(),
+                capabilities: DeviceCapabilities::HAS_MEASUREMENT_CHANNELS
+                    .bits(),
+                presence: SpComponentPresence::Present,
+            },
+            SpComponentInfo {
+                component: "dev-39".to_string(),
+                device: "tmp451".to_string(),
+                serial_number: None,
+                description: "FAKE T6 temperature sensor".to_string(),
+                capabilities: DeviceCapabilities::HAS_MEASUREMENT_CHANNELS
+                    .bits(),
+                presence: SpComponentPresence::Present,
+            },
+            SpComponentInfo {
+                component: "dev-53".to_string(),
+                device: "max31790".to_string(),
+                serial_number: None,
+                description: "FAKE Fan controller".to_string(),
+                capabilities: DeviceCapabilities::HAS_MEASUREMENT_CHANNELS
+                    .bits(),
+                presence: SpComponentPresence::Present,
+            },
+        ]
     );
 
     // Get the component list for switch 0.

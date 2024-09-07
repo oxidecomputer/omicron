@@ -5,36 +5,114 @@ edition = "2021"
 description = "Tools for interacting with the Oxide control plane telemetry database"
 license = "MPL-2.0"
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow.workspace = true
+async-recursion = "1.1.1"
 async-trait.workspace = true
 bcs.workspace = true
-bytes = { workspace = true, features = [ "serde" ] }
+camino.workspace = true
 chrono.workspace = true
 clap.workspace = true
+clickward.workspace = true
 dropshot.workspace = true
+futures.workspace = true
 highway.workspace = true
+num.workspace = true
+omicron-common.workspace = true
+omicron-workspace-hack.workspace = true
 oximeter.workspace = true
+oxql-types.workspace = true
 regex.workspace = true
-reqwest = { workspace = true, features = [ "json" ] }
-schemars = { workspace = true, features = [ "uuid1", "bytes", "chrono" ] }
 serde.workspace = true
 serde_json.workspace = true
 slog.workspace = true
 slog-async.workspace = true
+slog-dtrace.workspace = true
 slog-term.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = [ "rt-multi-thread", "macros" ] }
 usdt.workspace = true
 uuid.workspace = true
-omicron-workspace-hack.workspace = true
+
+[dependencies.bytes]
+workspace = true
+features = [ "serde" ]
+
+[dependencies.crossterm]
+workspace = true
+optional = true
+
+[dependencies.indexmap]
+workspace = true
+optional = true
+
+[dependencies.peg]
+workspace = true
+optional = true
+
+[dependencies.reedline]
+workspace = true
+optional = true
+
+[dependencies.reqwest]
+workspace = true
+features = [ "json" ]
+
+[dependencies.rustyline]
+workspace = true
+optional = true
+
+[dependencies.schemars]
+workspace = true
+features = [ "uuid1", "bytes", "chrono" ]
+
+[dependencies.sqlformat]
+workspace = true
+optional = true
+
+[dependencies.sqlparser]
+workspace = true
+optional = true
+
+[dependencies.tabled]
+workspace = true
+optional = true
+
+[dependencies.tokio]
+workspace = true
+features = [ "rt-multi-thread", "macros" ]
 
 [dev-dependencies]
+camino-tempfile.workspace = true
 expectorate.workspace = true
+indexmap.workspace = true
 itertools.workspace = true
 omicron-test-utils.workspace = true
+oximeter-test-utils.workspace = true
 slog-dtrace.workspace = true
+sqlformat.workspace = true
+sqlparser.workspace = true
 strum.workspace = true
+tempfile.workspace = true
+
+[features]
+default = [ "oxql", "sql" ]
+sql = [
+    "dep:indexmap",
+    "dep:reedline",
+    "dep:rustyline",
+    "dep:sqlformat",
+    "dep:sqlparser",
+    "dep:tabled"
+]
+oxql = [
+    "dep:crossterm",
+    "dep:peg",
+    "dep:reedline",
+    "dep:tabled",
+]
 
 [[bin]]
 name = "oxdb"

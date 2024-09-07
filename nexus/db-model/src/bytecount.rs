@@ -53,12 +53,6 @@ where
     }
 }
 
-impl From<ByteCount> for sled_agent_client::types::ByteCount {
-    fn from(b: ByteCount) -> Self {
-        Self(b.to_bytes())
-    }
-}
-
 impl From<BlockSize> for ByteCount {
     fn from(bs: BlockSize) -> Self {
         Self(bs.to_bytes().into())
@@ -99,7 +93,7 @@ impl TryFrom<diesel::pg::data_types::PgNumeric> for ByteCount {
                 let mut multiplier = 1;
 
                 for digit in digits.iter().rev() {
-                    result += *digit as i64 * multiplier;
+                    result += i64::from(*digit) * multiplier;
                     multiplier *= 10000;
                 }
 

@@ -232,12 +232,26 @@ pub trait DatastoreAttachTarget<ResourceType>:
                 .filter(collection_table().primary_key().eq(collection_id))
                 .filter(Self::CollectionTimeDeletedColumn::default().is_null()),
         );
-        let resource_query = Box::new(
-            resource_query
-                .filter(resource_table().primary_key().eq(resource_id))
-                .filter(Self::ResourceTimeDeletedColumn::default().is_null())
-                .filter(Self::ResourceCollectionIdColumn::default().is_null()),
-        );
+        let resource_query = if Self::ALLOW_FROM_ATTACHED {
+            Box::new(
+                resource_query
+                    .filter(resource_table().primary_key().eq(resource_id))
+                    .filter(
+                        Self::ResourceTimeDeletedColumn::default().is_null(),
+                    ),
+            )
+        } else {
+            Box::new(
+                resource_query
+                    .filter(resource_table().primary_key().eq(resource_id))
+                    .filter(
+                        Self::ResourceTimeDeletedColumn::default().is_null(),
+                    )
+                    .filter(
+                        Self::ResourceCollectionIdColumn::default().is_null(),
+                    ),
+            )
+        };
 
         let update_resource_statement = update
             .into_boxed()
@@ -563,13 +577,8 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::db::{
-        self, error::TransactionError, identity::Resource as IdentityResource,
-    };
-    use async_bb8_diesel::{
-        AsyncConnection, AsyncRunQueryDsl, AsyncSimpleConnection,
-        ConnectionManager,
-    };
+    use crate::db::{self, identity::Resource as IdentityResource};
+    use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
     use chrono::Utc;
     use db_macros::Resource;
     use diesel::expression_methods::ExpressionMethods;
@@ -606,8 +615,8 @@ mod test {
 
     async fn setup_db(
         pool: &crate::db::Pool,
-    ) -> bb8::PooledConnection<ConnectionManager<DbConnection>> {
-        let connection = pool.pool().get().await.unwrap();
+    ) -> crate::db::datastore::DataStoreConnection {
+        let connection = pool.claim().await.unwrap();
         (*connection)
             .batch_execute_async(
                 "CREATE SCHEMA IF NOT EXISTS test_schema; \
@@ -862,7 +871,7 @@ mod test {
             dev::test_setup_log("test_attach_missing_collection_fails");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&logctx.log, &cfg);
+        let pool = db::Pool::new_single_host(&logctx.log, &cfg);
 
         let conn = setup_db(&pool).await;
 
@@ -891,7 +900,7 @@ mod test {
         let logctx = dev::test_setup_log("test_attach_missing_resource_fails");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&logctx.log, &cfg);
+        let pool = db::Pool::new_single_host(&logctx.log, &cfg);
 
         let conn = setup_db(&pool).await;
 
@@ -928,7 +937,7 @@ mod test {
         let logctx = dev::test_setup_log("test_attach_once");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&logctx.log, &cfg);
+        let pool = db::Pool::new_single_host(&logctx.log, &cfg);
 
         let conn = setup_db(&pool).await;
 
@@ -976,7 +985,7 @@ mod test {
         let logctx = dev::test_setup_log("test_attach_once_synchronous");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&logctx.log, &cfg);
+        let pool = db::Pool::new_single_host(&logctx.log, &cfg);
 
         let conn = setup_db(&pool).await;
 
@@ -999,22 +1008,12 @@ mod test {
                 .set(resource::dsl::collection_id.eq(collection_id)),
         );
 
-        type TxnError =
-            TransactionError<AttachError<Resource, Collection, DieselError>>;
-        let result = conn
-            .transaction_async(|conn| async move {
-                attach_query.attach_and_get_result_async(&conn).await.map_err(
-                    |e| match e {
-                        AttachError::DatabaseError(e) => TxnError::from(e),
-                        e => TxnError::CustomError(e),
-                    },
-                )
-            })
-            .await;
-
         // "attach_and_get_result" should return the "attached" resource.
-        let (returned_collection, returned_resource) =
-            result.expect("Attach should have worked");
+        let (returned_collection, returned_resource) = attach_query
+            .attach_and_get_result_async(&conn)
+            .await
+            .expect("Attach should have worked");
+
         assert_eq!(
             returned_resource.collection_id.expect("Expected a collection ID"),
             collection_id
@@ -1035,7 +1034,7 @@ mod test {
         let logctx = dev::test_setup_log("test_attach_multiple_times");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&logctx.log, &cfg);
+        let pool = db::Pool::new_single_host(&logctx.log, &cfg);
 
         let conn = setup_db(&pool).await;
 
@@ -1091,7 +1090,7 @@ mod test {
         let logctx = dev::test_setup_log("test_attach_beyond_capacity_fails");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&logctx.log, &cfg);
+        let pool = db::Pool::new_single_host(&logctx.log, &cfg);
 
         let conn = setup_db(&pool).await;
 
@@ -1155,7 +1154,7 @@ mod test {
         let logctx = dev::test_setup_log("test_attach_while_already_attached");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&logctx.log, &cfg);
+        let pool = db::Pool::new_single_host(&logctx.log, &cfg);
 
         let conn = setup_db(&pool).await;
 
@@ -1262,7 +1261,7 @@ mod test {
         let logctx = dev::test_setup_log("test_attach_once");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&logctx.log, &cfg);
+        let pool = db::Pool::new_single_host(&logctx.log, &cfg);
 
         let conn = setup_db(&pool).await;
 
@@ -1317,7 +1316,7 @@ mod test {
         let logctx = dev::test_setup_log("test_attach_deleted_resource_fails");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&logctx.log, &cfg);
+        let pool = db::Pool::new_single_host(&logctx.log, &cfg);
 
         let conn = setup_db(&pool).await;
 
@@ -1362,7 +1361,7 @@ mod test {
         let logctx = dev::test_setup_log("test_attach_without_update_filter");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&logctx.log, &cfg);
+        let pool = db::Pool::new_single_host(&logctx.log, &cfg);
 
         let conn = setup_db(&pool).await;
 

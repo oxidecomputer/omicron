@@ -5,21 +5,26 @@ edition = "2021"
 license = "MPL-2.0"
 publish = false
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow = { workspace = true, features = ["backtrace"] }
+async-trait.workspace = true
 buf-list.workspace = true
 bytes.workspace = true
-bytesize = { workspace = true, features = ["serde"] }
 camino.workspace = true
 camino-tempfile.workspace = true
 chrono.workspace = true
 debug-ignore.workspace = true
 flate2.workspace = true
 fs-err.workspace = true
+futures.workspace = true
 hex.workspace = true
 hubtools.workspace = true
 itertools.workspace = true
 omicron-common.workspace = true
+parse-size.workspace = true
 rand.workspace = true
 ring = { workspace = true, features = ["std"] }
 serde.workspace = true
@@ -28,11 +33,13 @@ serde_path_to_error.workspace = true
 sha2.workspace = true
 slog.workspace = true
 tar.workspace = true
+tokio.workspace = true
 toml.workspace = true
 tough.workspace = true
-url = "2.4.1"
+url.workspace = true
 zip.workspace = true
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 omicron-test-utils.workspace = true
+tokio = { workspace = true, features = ["test-util"] }

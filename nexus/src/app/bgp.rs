@@ -1,21 +1,28 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
 use crate::app::authz;
 use crate::external_api::params;
+use mg_admin_client::types::MessageHistoryRequest;
 use nexus_db_model::{BgpAnnounceSet, BgpAnnouncement, BgpConfig};
 use nexus_db_queries::context::OpContext;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
-    BgpImportedRouteIpv4, BgpPeerStatus, CreateResult, DeleteResult, Ipv4Net,
-    ListResultVec, LookupResult, NameOrId,
+    self, BgpExported, BgpImportedRouteIpv4, BgpMessageHistory, BgpPeerStatus,
+    CreateResult, DeleteResult, ListResultVec, LookupResult, NameOrId,
+    SwitchBgpHistory,
 };
+use std::net::IpAddr;
 
 impl super::Nexus {
-    pub async fn bgp_config_set(
+    pub async fn bgp_config_create(
         &self,
         opctx: &OpContext,
         config: &params::BgpConfigCreate,
     ) -> CreateResult<BgpConfig> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
-        let result = self.db_datastore.bgp_config_set(opctx, config).await?;
+        let result = self.db_datastore.bgp_config_create(opctx, config).await?;
         Ok(result)
     }
 
@@ -47,24 +54,28 @@ impl super::Nexus {
         Ok(result)
     }
 
-    pub async fn bgp_create_announce_set(
+    pub async fn bgp_update_announce_set(
         &self,
         opctx: &OpContext,
         announce: &params::BgpAnnounceSetCreate,
     ) -> CreateResult<(BgpAnnounceSet, Vec<BgpAnnouncement>)> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let result =
-            self.db_datastore.bgp_create_announce_set(opctx, announce).await?;
+            self.db_datastore.bgp_update_announce_set(opctx, announce).await?;
+
+        // eagerly propagate changes via rpw
+        self.background_tasks
+            .activate(&self.background_tasks.task_switch_port_settings_manager);
         Ok(result)
     }
 
-    pub async fn bgp_announce_list(
+    pub async fn bgp_announce_set_list(
         &self,
         opctx: &OpContext,
-        sel: &params::BgpAnnounceSetSelector,
-    ) -> ListResultVec<BgpAnnouncement> {
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<BgpAnnounceSet> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-        self.db_datastore.bgp_announce_list(opctx, sel).await
+        self.db_datastore.bgp_announce_set_list(opctx, pagparams).await
     }
 
     pub async fn bgp_delete_announce_set(
@@ -78,14 +89,27 @@ impl super::Nexus {
         Ok(result)
     }
 
+    pub async fn bgp_announcement_list(
+        &self,
+        opctx: &OpContext,
+        sel: &params::BgpAnnounceSetSelector,
+    ) -> ListResultVec<BgpAnnouncement> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        self.db_datastore.bgp_announcement_list(opctx, sel).await
+    }
+
     pub async fn bgp_peer_status(
         &self,
         opctx: &OpContext,
     ) -> ListResultVec<BgpPeerStatus> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let mut result = Vec::new();
-        for (switch, client) in &self.mg_clients {
-            let router_info = match client.inner.get_routers().await {
+        for (switch, client) in &self.mg_clients().await.map_err(|e| {
+            external::Error::internal_error(&format!(
+                "failed to get mg clients: {e}"
+            ))
+        })? {
+            let router_info = match client.read_routers().await {
                 Ok(result) => result.into_inner(),
                 Err(e) => {
                     error!(
@@ -97,13 +121,29 @@ impl super::Nexus {
             };
 
             for r in &router_info {
-                for (addr, info) in &r.peers {
-                    let Ok(addr) = addr.parse() else {
+                let asn = r.asn;
+
+                let peers = match client.get_neighbors(asn).await {
+                    Ok(result) => result.into_inner(),
+                    Err(e) => {
+                        error!(
+                        self.log,
+                        "failed to get peers for asn {asn} from {switch}: {e}"
+                    );
+                        continue;
+                    }
+                };
+                for (host, info) in peers {
+                    let Ok(host) = host.parse() else {
+                        error!(
+                            self.log,
+                            "failed to parse peer host address {host}",
+                        );
                         continue;
                     };
                     result.push(BgpPeerStatus {
                         switch: *switch,
-                        addr,
+                        addr: host,
                         local_asn: r.asn,
                         remote_asn: info.asn.unwrap_or(0),
                         state: info.state.into(),
@@ -115,6 +155,113 @@ impl super::Nexus {
         Ok(result)
     }
 
+    pub async fn bgp_exported(
+        &self,
+        opctx: &OpContext,
+    ) -> LookupResult<BgpExported> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        let mut result = BgpExported::default();
+        for (switch, client) in &self.mg_clients().await.map_err(|e| {
+            external::Error::internal_error(&format!(
+                "failed to get mg clients: {e}"
+            ))
+        })? {
+            let router_info = match client.read_routers().await {
+                Ok(result) => result.into_inner(),
+                Err(e) => {
+                    error!(
+                        self.log,
+                        "failed to get routers from {switch}: {e}"
+                    );
+                    continue;
+                }
+            };
+            for r in &router_info {
+                let asn = r.asn;
+
+                let exported = match client
+                    .get_exported(&mg_admin_client::types::AsnSelector { asn })
+                    .await
+                {
+                    Ok(result) => result.into_inner(),
+                    Err(e) => {
+                        error!(
+                        self.log,
+                        "failed to get exports for asn {asn} from {switch}: {e}"
+                    );
+                        continue;
+                    }
+                };
+                for (addr, exports) in exported {
+                    let mut xps = Vec::new();
+                    for ex in exports.iter() {
+                        let net = match ex {
+                            mg_admin_client::types::Prefix::V4(v4) => {
+                                oxnet::Ipv4Net::new_unchecked(
+                                    v4.value, v4.length,
+                                )
+                            }
+                            mg_admin_client::types::Prefix::V6(v6) => {
+                                let v6 = oxnet::IpNet::V6(
+                                    oxnet::Ipv6Net::new_unchecked(
+                                        v6.value, v6.length,
+                                    ),
+                                );
+                                warn!(
+                                    self.log,
+                                    "{v6}: ipv6 exports not supported yet"
+                                );
+                                continue;
+                            }
+                        };
+                        xps.push(net);
+                    }
+                    result.exports.insert(addr.to_string(), xps);
+                }
+            }
+        }
+        Ok(result)
+    }
+
+    pub async fn bgp_message_history(
+        &self,
+        opctx: &OpContext,
+        sel: &params::BgpRouteSelector,
+    ) -> ListResultVec<SwitchBgpHistory> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+
+        let mut result = Vec::new();
+        for (switch, client) in &self.mg_clients().await.map_err(|e| {
+            external::Error::internal_error(&format!(
+                "failed to get mg clients: {e}"
+            ))
+        })? {
+            let history = match client
+                .message_history(&MessageHistoryRequest { asn: sel.asn })
+                .await
+            {
+                Ok(result) => result.into_inner().by_peer.clone(),
+                Err(e) => {
+                    error!(
+                        self.log,
+                        "failed to get bgp history from {switch}: {e}"
+                    );
+                    continue;
+                }
+            };
+
+            result.push(SwitchBgpHistory {
+                switch: *switch,
+                history: history
+                    .into_iter()
+                    .map(|(k, v)| (k, BgpMessageHistory::new(v)))
+                    .collect(),
+            });
+        }
+
+        Ok(result)
+    }
+
     pub async fn bgp_imported_routes_ipv4(
         &self,
         opctx: &OpContext,
@@ -122,30 +269,49 @@ impl super::Nexus {
     ) -> ListResultVec<BgpImportedRouteIpv4> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let mut result = Vec::new();
-        for (switch, client) in &self.mg_clients {
-            let imported: Vec<BgpImportedRouteIpv4> = match client
-                .inner
-                .get_imported4(&mg_admin_client::types::GetImported4Request {
+        for (switch, client) in &self.mg_clients().await.map_err(|e| {
+            external::Error::internal_error(&format!(
+                "failed to get mg clients: {e}"
+            ))
+        })? {
+            let mut imported: Vec<BgpImportedRouteIpv4> = Vec::new();
+            match client
+                .get_imported(&mg_admin_client::types::AsnSelector {
                     asn: sel.asn,
                 })
                 .await
             {
-                Ok(result) => result
-                    .into_inner()
-                    .into_iter()
-                    .map(|x| BgpImportedRouteIpv4 {
-                        switch: *switch,
-                        prefix: Ipv4Net(
-                            ipnetwork::Ipv4Network::new(
-                                x.prefix.value,
-                                x.prefix.length,
-                            )
-                            .unwrap(),
-                        ),
-                        nexthop: x.nexthop,
-                        id: x.id,
-                    })
-                    .collect(),
+                Ok(result) => {
+                    for (prefix, paths) in result.into_inner().iter() {
+                        let ipnet = match prefix.parse() {
+                            Ok(p) => p,
+                            Err(e) => {
+                                error!(
+                                    self.log,
+                                    "failed to parse prefix {prefix}: {e}"
+                                );
+                                continue;
+                            }
+                        };
+                        for p in paths.iter() {
+                            let nexthop = match p.nexthop {
+                                IpAddr::V4(addr) => addr,
+                                IpAddr::V6(_) => continue,
+                            };
+                            let x = BgpImportedRouteIpv4 {
+                                switch: *switch,
+                                prefix: ipnet,
+                                id: p
+                                    .bgp
+                                    .as_ref()
+                                    .map(|bgp| bgp.id)
+                                    .unwrap_or(0),
+                                nexthop,
+                            };
+                            imported.push(x);
+                        }
+                    }
+                }
                 Err(e) => {
                     error!(
                         self.log,

@@ -9,7 +9,9 @@ jobs:
   check-opte-ver:
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }} # see omicron#4461
       - name: Install jq
         run: sudo apt-get install -y jq
       - name: Install toml-cli

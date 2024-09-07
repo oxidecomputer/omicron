@@ -4,12 +4,19 @@
 
 //! Params define the request bodies of API endpoints for creating or updating resources.
 
+use crate::deployment::Blueprint;
 use crate::external_api::params::PhysicalDiskKind;
-use crate::external_api::params::UserId;
+use crate::external_api::shared::Baseboard;
 use crate::external_api::shared::IpRange;
+use nexus_sled_agent_shared::inventory::SledRole;
+use nexus_sled_agent_shared::recovery_silo::RecoverySiloConfig;
 use omicron_common::api::external::ByteCount;
+use omicron_common::api::external::Generation;
 use omicron_common::api::external::MacAddr;
 use omicron_common::api::external::Name;
+use omicron_common::api::internal::nexus::Certificate;
+use omicron_common::api::internal::shared::AllowedSourceIps;
+use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::api::internal::shared::ExternalPortDiscovery;
 use omicron_common::api::internal::shared::RackNetworkConfig;
 use omicron_common::api::internal::shared::SourceNatConfig;
@@ -21,32 +28,9 @@ use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use uuid::Uuid;
 
-/// Describes the role of the sled within the rack.
-///
-/// Note that this may change if the sled is physically moved
-/// within the rack.
-#[derive(Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum SledRole {
-    /// The sled is a general compute sled.
-    Gimlet,
-    /// The sled is attached to the network switch, and has additional
-    /// responsibilities.
-    Scrimlet,
-}
-
-// TODO: We need a unified representation of these hardware identifiers
-/// Describes properties that should uniquely identify Oxide manufactured hardware
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-pub struct Baseboard {
-    pub serial_number: String,
-    pub part_number: String,
-    pub revision: i64,
-}
-
-/// Sent by a sled agent on startup to Nexus to request further instruction
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct SledAgentStartupInfo {
+/// Sent by a sled agent to Nexus to inform about resources
+#[derive(Serialize, Deserialize, Debug, JsonSchema)]
+pub struct SledAgentInfo {
     /// The address of the sled agent's API endpoint
     pub sa_address: SocketAddrV6,
 
@@ -66,6 +50,15 @@ pub struct SledAgentStartupInfo {
     ///
     /// Must be smaller than "usable_physical_ram"
     pub reservoir_size: ByteCount,
+
+    /// The generation number of this request from sled-agent
+    pub generation: Generation,
+
+    /// Whether the sled-agent has been decommissioned by nexus
+    ///
+    /// This flag is only set to true by nexus. Setting it on an upsert from
+    /// sled-agent has no effect.
+    pub decommissioned: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -79,6 +72,8 @@ pub struct SwitchPutResponse {}
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct PhysicalDiskPutRequest {
+    pub id: Uuid,
+
     pub vendor: String,
     pub serial: String,
     pub model: String,
@@ -87,62 +82,13 @@ pub struct PhysicalDiskPutRequest {
     pub sled_id: Uuid,
 }
 
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct PhysicalDiskPutResponse {}
-
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-pub struct PhysicalDiskDeleteRequest {
-    pub vendor: String,
-    pub serial: String,
-    pub model: String,
-
-    pub sled_id: Uuid,
-}
-
-/// Sent by a sled agent on startup to Nexus to request further instruction
+/// Identifies information about a Zpool that should be part of the control
+/// plane.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct ZpoolPutRequest {
-    /// Total size of the pool.
-    pub size: ByteCount,
-
-    // Information to identify the disk to which this zpool belongs
-    pub disk_vendor: String,
-    pub disk_serial: String,
-    pub disk_model: String,
-    // TODO: We could include any other data from `ZpoolInfo` we want,
-    // such as "allocated/free" space and pool health?
-}
-
-#[derive(Serialize, Deserialize, JsonSchema)]
-pub struct ZpoolPutResponse {}
-
-/// Describes the purpose of the dataset.
-#[derive(
-    Debug, Serialize, Deserialize, JsonSchema, Clone, Copy, PartialEq, Eq,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum DatasetKind {
-    Crucible,
-    Cockroach,
-    Clickhouse,
-    ClickhouseKeeper,
-    ExternalDns,
-    InternalDns,
-}
-
-impl fmt::Display for DatasetKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use DatasetKind::*;
-        let s = match self {
-            Crucible => "crucible",
-            Cockroach => "cockroach",
-            Clickhouse => "clickhouse",
-            ClickhouseKeeper => "clickhouse_keeper",
-            ExternalDns => "external_dns",
-            InternalDns => "internal_dns",
-        };
-        write!(f, "{}", s)
-    }
+    pub id: Uuid,
+    pub sled_id: Uuid,
+    pub physical_disk_id: Uuid,
 }
 
 /// Describes a dataset within a pool.
@@ -163,6 +109,7 @@ pub struct ServiceNic {
     pub name: Name,
     pub ip: IpAddr,
     pub mac: MacAddr,
+    pub slot: u8,
 }
 
 /// Describes the purpose of the service.
@@ -207,20 +154,6 @@ impl fmt::Display for ServiceKind {
     }
 }
 
-/// Describes a service on a sled
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-pub struct ServicePutRequest {
-    pub service_id: Uuid,
-    pub sled_id: Uuid,
-    pub zone_id: Option<Uuid>,
-
-    /// Address on which a service is responding to requests.
-    pub address: SocketAddrV6,
-
-    /// Type of service being inserted.
-    pub kind: ServiceKind,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct DatasetCreateRequest {
     pub zpool_id: Uuid,
@@ -228,25 +161,17 @@ pub struct DatasetCreateRequest {
     pub request: DatasetPutRequest,
 }
 
-#[derive(Clone, Serialize, Deserialize, JsonSchema)]
-pub struct Certificate {
-    pub cert: String,
-    pub key: String,
-}
-
-impl std::fmt::Debug for Certificate {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Certificate")
-            .field("cert", &self.cert)
-            .field("key", &"<redacted>")
-            .finish()
-    }
-}
-
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct RackInitializationRequest {
-    /// Services on the rack which have been created by RSS.
-    pub services: Vec<ServicePutRequest>,
+    /// Blueprint describing services initialized by RSS.
+    pub blueprint: Blueprint,
+
+    /// "Managed" physical disks owned by the control plane
+    pub physical_disks: Vec<PhysicalDiskPutRequest>,
+
+    /// Zpools created within the physical disks created by the control plane.
+    pub zpools: Vec<ZpoolPutRequest>,
+
     /// Datasets on the rack which have been provisioned by RSS.
     pub datasets: Vec<DatasetCreateRequest>,
     /// Ranges of the service IP pool which may be used for internal services,
@@ -263,20 +188,15 @@ pub struct RackInitializationRequest {
     /// The external qsfp ports per sidecar
     pub external_port_count: ExternalPortDiscovery,
     /// Initial rack network configuration
-    pub rack_network_config: Option<RackNetworkConfig>,
+    pub rack_network_config: RackNetworkConfig,
+    /// IPs or subnets allowed to make requests to user-facing services
+    pub allowed_source_ips: AllowedSourceIps,
 }
 
 pub type DnsConfigParams = dns_service_client::types::DnsConfigParams;
 pub type DnsConfigZone = dns_service_client::types::DnsConfigZone;
 pub type DnsRecord = dns_service_client::types::DnsRecord;
 pub type Srv = dns_service_client::types::Srv;
-
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
-pub struct RecoverySiloConfig {
-    pub silo_name: Name,
-    pub user_name: UserId,
-    pub user_password_hash: omicron_passwords::NewPasswordHash,
-}
 
 /// Message used to notify Nexus that this oximeter instance is up and running.
 #[derive(Debug, Clone, Copy, JsonSchema, Serialize, Deserialize)]
@@ -286,4 +206,11 @@ pub struct OximeterInfo {
 
     /// The address on which this oximeter instance listens for requests
     pub address: SocketAddr,
+}
+
+/// Parameters used when migrating an instance.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InstanceMigrateRequest {
+    /// The ID of the sled to which to migrate the target instance.
+    pub dst_sled_id: Uuid,
 }

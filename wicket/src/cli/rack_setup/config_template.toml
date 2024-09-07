@@ -1,0 +1,165 @@
+# TODO Explanatory block comment
+
+# Delegated external DNS zone name
+#
+# The rack provides separate external API and console endpoints for each Silo.
+# These are named `$silo_name.sys.$external_dns_zone_name`.  For a Silo called
+# "eng" with delegated domain "oxide.example", the API would be accessible at
+# "eng.sys.oxide.example".  The rack runs external DNS servers that serve A/AAAA
+# records for these DNS names.
+external_dns_zone_name = ""
+
+# IP addresses for authoritative external DNS servers operated by the rack for
+# the DNS domain delegated to the rack by the customer. Each of these addresses
+# must be contained in one of the "internal services" IP Pool ranges listed
+# below.
+external_dns_ips = []
+
+# External NTP servers; e.g., "ntp.eng.oxide.computer".
+ntp_servers = [
+]
+
+# External DNS server IP Addresses; e.g., "1.1.1.1", "9.9.9.9".
+dns_servers = []
+
+# Ranges of the service IP pool which may be used for internal services.
+#
+# Elements of this list should be of the form:
+#
+#    { first = "first_ip", last = "last_ip" }
+#
+# where `last_ip` is equal to or higher than `first_ip`; e.g.,
+#
+#    { first = "172.20.26.1", last = "172.20.26.10" }
+internal_services_ip_pool_ranges = []
+
+# List of sleds to initialize.
+#
+# Confirm this list contains all expected sleds before continuing!
+bootstrap_sleds = []
+
+# Allowlist of source IPs that can make requests to user-facing services.
+#
+# Use the key:
+#
+# allow = "any"
+#
+# to indicate any external IPs are allowed to make requests. This is the default.
+#
+# Use the below two lines to only allow requests from the specified IP subnets.
+# Requests from any other source IPs are refused. Note that individual addresses
+# must include the netmask, e.g., "1.2.3.4/32".
+#
+# allow = "list"
+# ips = [ "1.2.3.4/5", "5.6.7.8/10" ]
+[allowed_source_ips]
+allow = "any"
+
+# TODO: docs on network config
+[rack_network_config]
+infra_ip_first = ""
+infra_ip_last = ""
+
+# A table of ports to initialize on the rack. The keys are the switch (switch0,
+# switch1) and the port name (qsfp0, qsfp1, etc). Copy and paste this section
+# for each port.
+
+[rack_network_config.switch0.qsfp0]
+
+    # Routes associated with this port.
+    # { nexthop = "1.2.3.4", destination = "0.0.0.0/0" }
+    routes = []
+
+    # Addresses associated with this port.
+    # "1.2.3.4/24"
+    addresses = []
+
+    # `speed40_g`, `speed100_g`, ...
+    uplink_port_speed = ""
+
+    # `none`, `firecode`, or `rs`
+    uplink_port_fec = ""
+
+    # Whether or not to set autonegotiation: `true` or `false`
+    autoneg = false
+
+    # A list of BGP peers for this port. Copy this section, changing the port name
+    # as desired. Remove if not needed.
+    [[rack_network_config.switch0.qsfp0.bgp_peers]]
+
+        # The autonomous system number (required). This must match one of the `asn`
+        # values in the `[[rack_network_config.bgp]]` section.
+        asn = 0
+
+        # The switch port the peer is reachable on (required).
+        port = ""
+
+        # The IPv4 address of the peer (required): e.g. 1.2.3.4.
+        addr = ""
+
+        # How long to keep a session alive without a keepalive, in seconds.
+        hold_time = 6
+
+        # How long to keep a peer in idle after a state machine reset, in seconds.
+        idle_hold_time = 3
+
+        # How long to delay sending open messages to a peer, in seconds.
+        delay_open = 0
+
+        # The interval in seconds between peer connection retry attempts.
+        connect_retry = 3
+
+        # The interval to send keepalive messages at, in seconds.
+        keepalive = 2
+
+        # Require that a peer has a specified ASN (optional).
+        # remote_asn = 0
+
+        # Require messages from a peer have a minimum IP time to live field (optional).
+        # min_ttl = 0
+
+        # If BGP authentication is desired, a key identifier. Multiple peers
+        # can share the same key ID, if desired.
+        #
+        # The actual keys are provided via `wicket setup set-bgp-auth-key`.
+        # Currently, only TCP-MD5 authentication is supported.
+        # auth_key_id = "key1"
+
+        # Apply the provided multi-exit discriminator (MED) for updates sent to the
+        # peer (optional).
+        # multi_exit_discriminator = 0
+
+        # Include the provided communities in updates sent to the peer (optional).
+        # communities = [28, 47]
+
+        # Apply a local preference to routes sent to the peer (optional).
+        # local_pref = 0
+
+        # Enforce that the first AS in paths received from the peer is the
+        # peer's AS.
+        enforce_first_as = false
+
+        # Apply import policy to this peer with an allowlist of prefixes
+        # (optional). Defaults to allowing all prefixes. Use an empty list to
+        # indicate that no prefixes are allowed.
+        # allowed_import = ["224.0.0.0/8"]
+
+        # Apply export policy to this peer with an allowlist of prefixes
+        # (optional). Defaults to allowing all prefixes. Use an empty list to
+        # indicate that no prefixes are allowed.
+        # allowed_export = []
+
+        # Associate a VLAN ID with this BGP session (optional).
+        # vlan_id = 0
+
+[rack_network_config.switch1]
+
+# Optional BGP configuration, as a list of entries. Duplicate or remove this
+# section as needed.
+[[rack_network_config.bgp]]
+
+# The autonomous system number.
+asn = 0
+
+# Prefixes to originate e.g., ["10.0.0.0/16"].
+originate = []

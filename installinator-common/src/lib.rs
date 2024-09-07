@@ -4,6 +4,10 @@
 
 //! Common types shared by the installinator client and server.
 
+mod block_size_writer;
 mod progress;
+mod raw_disk_writer;
 
+pub use block_size_writer::*;
 pub use progress::*;
+pub use raw_disk_writer::*;

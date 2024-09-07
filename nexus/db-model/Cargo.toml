@@ -4,39 +4,53 @@ version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 
+[lints]
+workspace = true
+
 [build-dependencies]
 omicron-rpaths.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+camino.workspace = true
 chrono.workspace = true
+derive-where.workspace = true
 diesel = { workspace = true, features = ["postgres", "r2d2", "chrono", "serde_json", "network-address", "uuid"] }
 hex.workspace = true
 ipnetwork.workspace = true
 macaddr.workspace = true
 newtype_derive.workspace = true
+omicron-uuid-kinds.workspace = true
+once_cell.workspace = true
+oxnet.workspace = true
 parse-display.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
 pq-sys = "*"
 rand.workspace = true
 ref-cast.workspace = true
-thiserror.workspace = true
 schemars = { workspace = true, features = ["chrono", "uuid1"] }
 semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+slog.workspace = true
+slog-error-chain.workspace = true
 steno.workspace = true
 strum.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
 uuid.workspace = true
 
 db-macros.workspace = true
 omicron-certificates.workspace = true
 omicron-common.workspace = true
+nexus-config.workspace = true
 nexus-defaults.workspace = true
+nexus-sled-agent-shared.workspace = true
 nexus-types.workspace = true
 omicron-passwords.workspace = true
 sled-agent-client.workspace = true
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
+camino-tempfile.workspace = true
 expectorate.workspace = true

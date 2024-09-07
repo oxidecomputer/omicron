@@ -6,10 +6,12 @@
 //! configuration
 
 use crate::management_switch::SwitchConfig;
+use crate::metrics::MetricsConfig;
+use camino::Utf8Path;
+use camino::Utf8PathBuf;
 use dropshot::ConfigLogging;
 use serde::{Deserialize, Serialize};
-use std::path::Path;
-use std::path::PathBuf;
+use slog_error_chain::SlogInlineError;
 use thiserror::Error;
 
 /// Configuration for a gateway server
@@ -24,19 +26,19 @@ pub struct Config {
     pub switch: SwitchConfig,
     /// Server-wide logging configuration.
     pub log: ConfigLogging,
+    /// Configuration for SP sensor metrics.
+    pub metrics: Option<MetricsConfig>,
 }
 
 impl Config {
     /// Load a `Config` from the given TOML file
     ///
     /// This config object can then be used to create a new gateway server.
-    // The format is described in the README. // TODO add a README
-    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Config, LoadError> {
-        let path = path.as_ref();
+    pub fn from_file(path: &Utf8Path) -> Result<Config, LoadError> {
         let file_contents = std::fs::read_to_string(path)
-            .map_err(|e| (path.to_path_buf(), e))?;
+            .map_err(|err| LoadError::Io { path: path.into(), err })?;
         let config_parsed: Config = toml::from_str(&file_contents)
-            .map_err(|e| (path.to_path_buf(), e))?;
+            .map_err(|err| LoadError::Parse { path: path.into(), err })?;
         Ok(config_parsed)
     }
 }
@@ -46,32 +48,18 @@ pub struct PartialDropshotConfig {
     pub request_body_max_bytes: usize,
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, SlogInlineError)]
 pub enum LoadError {
-    #[error("error reading \"{}\": {}", path.display(), err)]
-    Io { path: PathBuf, err: std::io::Error },
-    #[error("error parsing \"{}\": {}", path.display(), err)]
-    Parse { path: PathBuf, err: toml::de::Error },
-}
-
-impl From<(PathBuf, std::io::Error)> for LoadError {
-    fn from((path, err): (PathBuf, std::io::Error)) -> Self {
-        LoadError::Io { path, err }
-    }
-}
-
-impl From<(PathBuf, toml::de::Error)> for LoadError {
-    fn from((path, err): (PathBuf, toml::de::Error)) -> Self {
-        LoadError::Parse { path, err }
-    }
-}
-
-impl std::cmp::PartialEq<std::io::Error> for LoadError {
-    fn eq(&self, other: &std::io::Error) -> bool {
-        if let LoadError::Io { err, .. } = self {
-            err.kind() == other.kind()
-        } else {
-            false
-        }
-    }
+    #[error("error reading \"{path}\": {err}")]
+    Io {
+        path: Utf8PathBuf,
+        #[source]
+        err: std::io::Error,
+    },
+    #[error("error parsing \"{path}\": {err}")]
+    Parse {
+        path: Utf8PathBuf,
+        #[source]
+        err: toml::de::Error,
+    },
 }

@@ -6,9 +6,11 @@
 
 extern crate proc_macro;
 
+use nexus_macros_common::PrimaryKeyType;
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use serde_tokenstream::ParseWrapper;
+use syn::parse_quote;
 
 /// Defines a structure and helpers for describing an API resource for authz
 ///
@@ -81,6 +83,24 @@ use serde_tokenstream::ParseWrapper;
 /// }
 /// ```
 ///
+/// ## Resources with typed UUID primary keys
+///
+/// Some resources use a [newtype_uuid](https://crates.io/crates/newtype_uuid)
+/// `TypedUuid` as their primary key (and resources should generally move over
+/// to that model).
+///
+/// This can be specified with `primary_key = { uuid_kind = MyKind }`:
+///
+/// ```ignore
+/// authz_resource! {
+///     name = "LoopbackAddress",
+///     parent = "Fleet",
+///     primary_key = { uuid_kind = LoopbackAddressKind },
+///     roles_allowed = false,
+///     polar_snippet = FleetChild,
+/// }
+/// ```
+///
 /// ## Resources with non-id primary keys
 ///
 /// Most API resources use "id" (a Uuid) as an immutable, unique identifier.
@@ -95,6 +115,33 @@ use serde_tokenstream::ParseWrapper;
 ///     polar_snippet = FleetChild,
 /// }
 /// ```
+///
+/// In some cases, it may be more convenient to identify a composite key with a
+/// struct rather than relying on tuples. This is supported too:
+///
+/// ```ignore
+/// struct SomeCompositeId {
+///     foo: String,
+///     bar: String,
+/// }
+///
+/// // There needs to be a `From` impl from the composite ID to the primary key.
+/// impl From<SomeCompositeId> for (String, String) {
+///     fn from(id: SomeCompositeId) -> Self {
+///         (id.foo, id.bar)
+///     }
+/// }
+///
+/// authz_resource! {
+///     name = "MyResource",
+///     parent = "Fleet",
+///     primary_key = (String, String),
+///     input_key = SomeCompositeId,
+///     roles_allowed = false,
+///     polar_snippet = FleetChild,
+/// }
+/// ```
+
 // Allow private intra-doc links.  This is useful because the `Input` struct
 // cannot be exported (since we're a proc macro crate, and we can't expose
 // a struct), but its documentation is very useful.
@@ -110,7 +157,7 @@ pub fn authz_resource(
 }
 
 /// Arguments for [`authz_resource!`]
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, Debug)]
 struct Input {
     /// Name of the resource
     ///
@@ -119,16 +166,93 @@ struct Input {
     name: String,
     /// Name of the parent `authz` resource
     parent: String,
-    /// Rust type for the primary key for this resource
-    primary_key: ParseWrapper<syn::Type>,
+    /// Rust type for the primary key for this resource.
+    primary_key: InputPrimaryKeyType,
+    /// The `TypedUuidKind` for this resource. Must be exclusive
+    ///
+    /// Rust type for the input key for this resource (the key users specify
+    /// for this resource, convertible to `primary_key`).
+    ///
+    /// This is the same as primary_key if not specified.
+    #[serde(default)]
+    input_key: Option<ParseWrapper<syn::Type>>,
     /// Whether roles may be attached directly to this resource
     roles_allowed: bool,
     /// How to generate the Polar snippet for this resource
     polar_snippet: PolarSnippet,
 }
 
+#[derive(Debug)]
+struct InputPrimaryKeyType(PrimaryKeyType);
+
+impl<'de> serde::Deserialize<'de> for InputPrimaryKeyType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        // Attempt to parse as either a string or a map.
+        struct PrimaryKeyVisitor;
+
+        impl<'de2> serde::de::Visitor<'de2> for PrimaryKeyVisitor {
+            type Value = PrimaryKeyType;
+
+            fn expecting(
+                &self,
+                formatter: &mut std::fmt::Formatter,
+            ) -> std::fmt::Result {
+                formatter.write_str(
+                    "a Rust type, or a map with a single key `uuid_kind`",
+                )
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                syn::parse_str(value)
+                    .map(PrimaryKeyType::Standard)
+                    .map_err(|e| E::custom(e.to_string()))
+            }
+
+            // seq represents a tuple type
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::SeqAccess<'de2>,
+            {
+                let mut elements = vec![];
+                while let Some(element) =
+                    seq.next_element::<ParseWrapper<syn::Type>>()?
+                {
+                    elements.push(element.into_inner());
+                }
+                Ok(PrimaryKeyType::Standard(parse_quote!((#(#elements,)*))))
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::MapAccess<'de2>,
+            {
+                let key: String = map.next_key()?.ok_or_else(|| {
+                    serde::de::Error::custom("expected a single key")
+                })?;
+                if key == "uuid_kind" {
+                    // uuid kinds must be plain identifiers
+                    let value: ParseWrapper<syn::Ident> = map.next_value()?;
+                    Ok(PrimaryKeyType::new_typed_uuid(&value))
+                } else {
+                    Err(serde::de::Error::custom(
+                        "expected a single key `uuid_kind`",
+                    ))
+                }
+            }
+        }
+
+        deserializer.deserialize_any(PrimaryKeyVisitor).map(InputPrimaryKeyType)
+    }
+}
+
 /// How to generate the Polar snippet for this resource
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, Debug)]
 enum PolarSnippet {
     /// Don't generate it at all -- it's generated elsewhere
     Custom,
@@ -152,7 +276,9 @@ fn do_authz_resource(
     let resource_name = format_ident!("{}", input.name);
     let parent_resource_name = format_ident!("{}", input.parent);
     let parent_as_snake = heck::AsSnakeCase(&input.parent).to_string();
-    let primary_key_type = &*input.primary_key;
+    let primary_key_type = input.primary_key.0.external();
+    let input_key_type = input.input_key.as_deref().unwrap_or(primary_key_type);
+
     let (has_role_body, as_roles_body, api_resource_roles_trait) =
         if input.roles_allowed {
             (
@@ -335,6 +461,21 @@ fn do_authz_resource(
             /// `lookup_type`
             pub fn new(
                 parent: #parent_resource_name,
+                key: #input_key_type,
+                lookup_type: LookupType,
+            ) -> #resource_name {
+                #resource_name {
+                    parent,
+                    key: key.into(),
+                    lookup_type,
+                }
+            }
+
+            /// A version of `new` that takes the primary key type directly.
+            /// This is only different from [`Self::new`] if this resource
+            /// uses a different input key type.
+            pub fn with_primary_key(
+                parent: #parent_resource_name,
                 key: #primary_key_type,
                 lookup_type: LookupType,
             ) -> #resource_name {
@@ -346,7 +487,7 @@ fn do_authz_resource(
             }
 
             pub fn id(&self) -> #primary_key_type {
-                self.key.clone()
+                self.key.clone().into()
             }
 
             /// Describes how to register this type with Oso
@@ -409,17 +550,53 @@ fn do_authz_resource(
     })
 }
 
-// See the test for lookup_resource.
 #[cfg(test)]
-#[test]
-fn test_authz_dump() {
-    let output = do_authz_resource(quote! {
-        name = "Organization",
-        parent = "Fleet",
-        primary_key = Uuid,
-        roles_allowed = false,
-        polar_snippet = Custom,
-    })
-    .unwrap();
-    println!("{}", output);
+mod tests {
+    use super::*;
+    use expectorate::assert_contents;
+
+    /// Ensures that generated code is as expected.
+    ///
+    /// For more information, see `test_lookup_snapshots` in
+    /// nexus/db-macros/src/lookup.rs.
+    #[test]
+    fn test_authz_snapshots() {
+        let output = do_authz_resource(quote! {
+            name = "Organization",
+            parent = "Fleet",
+            primary_key = Uuid,
+            roles_allowed = false,
+            polar_snippet = Custom,
+        })
+        .unwrap();
+        assert_contents("outputs/organization.txt", &pretty_format(output));
+
+        let output = do_authz_resource(quote! {
+            name = "Instance",
+            parent = "Project",
+            primary_key = (String, String),
+            // The SomeCompositeId type doesn't exist, but that's okay because
+            // this code is never compiled, just printed out.
+            input_key = SomeCompositeId,
+            roles_allowed = false,
+            polar_snippet = InProject,
+        })
+        .unwrap();
+        assert_contents("outputs/instance.txt", &pretty_format(output));
+
+        let output = do_authz_resource(quote! {
+            name = "Rack",
+            parent = "Fleet",
+            primary_key = { uuid_kind = RackKind },
+            roles_allowed = false,
+            polar_snippet = FleetChild,
+        })
+        .unwrap();
+        assert_contents("outputs/rack.txt", &pretty_format(output));
+    }
+
+    fn pretty_format(input: TokenStream) -> String {
+        let parsed = syn::parse2(input).unwrap();
+        prettyplease::unparse(&parsed)
+    }
 }

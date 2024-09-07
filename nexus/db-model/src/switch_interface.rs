@@ -9,12 +9,14 @@ use ipnetwork::IpNetwork;
 use nexus_types::external_api::params;
 use nexus_types::identity::Asset;
 use omicron_common::api::external;
+use omicron_uuid_kinds::LoopbackAddressKind;
+use omicron_uuid_kinds::TypedUuid;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 impl_enum_type!(
     #[derive(SqlType, Debug, Clone, Copy)]
-    #[diesel(postgres_type(name = "switch_interface_kind"))]
+    #[diesel(postgres_type(name = "switch_interface_kind", schema = "public"))]
     pub struct DbSwitchInterfaceKindEnum;
 
     #[derive(
@@ -105,6 +107,7 @@ impl Into<external::SwitchVlanInterfaceConfig> for SwitchVlanInterfaceConfig {
     Deserialize,
 )]
 #[diesel(table_name = loopback_address)]
+#[asset(uuid_kind = LoopbackAddressKind)]
 pub struct LoopbackAddress {
     #[diesel(embed)]
     pub identity: LoopbackAddressIdentity,
@@ -118,7 +121,7 @@ pub struct LoopbackAddress {
 
 impl LoopbackAddress {
     pub fn new(
-        id: Option<Uuid>,
+        id: Option<TypedUuid<LoopbackAddressKind>>,
         address_lot_block_id: Uuid,
         rsvd_address_lot_block_id: Uuid,
         rack_id: Uuid,
@@ -128,7 +131,7 @@ impl LoopbackAddress {
     ) -> Self {
         Self {
             identity: LoopbackAddressIdentity::new(
-                id.unwrap_or(Uuid::new_v4()),
+                id.unwrap_or(TypedUuid::new_v4()),
             ),
             address_lot_block_id,
             rsvd_address_lot_block_id,

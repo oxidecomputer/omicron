@@ -26,6 +26,9 @@ declare_saga_actions! {
     SPACE_ACCOUNT -> "no_result2" {
         + ssd_account_space
     }
+    NOOP -> "no_result3" {
+        + ssd_noop
+    }
 }
 
 #[derive(Debug)]
@@ -71,7 +74,7 @@ impl NexusSaga for SagaSnapshotDelete {
             DELETE_VOLUME_DESTINATION_PARAMS,
             serde_json::to_value(&volume_delete_params).map_err(|e| {
                 super::SagaInitError::SerializeError(
-                    String::from("volume_id"),
+                    String::from("destination_volume_id"),
                     e,
                 )
             })?,
@@ -83,16 +86,21 @@ impl NexusSaga for SagaSnapshotDelete {
             ));
             sagas::volume_delete::create_dag(subsaga_builder)
         };
-        builder.append(steno::Node::subsaga(
-            "delete_volume",
-            make_volume_delete_dag()?,
-            DELETE_VOLUME_PARAMS,
-        ));
-        builder.append(steno::Node::subsaga(
-            "delete_destination_volume",
-            make_volume_delete_dag()?,
-            DELETE_VOLUME_DESTINATION_PARAMS,
-        ));
+
+        builder.append_parallel(vec![
+            steno::Node::subsaga(
+                "delete_volume",
+                make_volume_delete_dag()?,
+                DELETE_VOLUME_PARAMS,
+            ),
+            steno::Node::subsaga(
+                "delete_destination_volume",
+                make_volume_delete_dag()?,
+                DELETE_VOLUME_DESTINATION_PARAMS,
+            ),
+        ]);
+
+        builder.append(noop_action());
 
         Ok(builder.build()?)
     }
@@ -146,5 +154,10 @@ async fn ssd_account_space(
         )
         .await
         .map_err(ActionError::action_failed)?;
+    Ok(())
+}
+
+// Sagas must end in one node, not parallel
+async fn ssd_noop(_sagactx: NexusActionContext) -> Result<(), ActionError> {
     Ok(())
 }

@@ -12,6 +12,7 @@
   "paths": {
     "/info": {
       "get": {
+        "summary": "Return identifying information about this collector.",
         "operationId": "collector_info",
         "responses": {
           "200": {
@@ -35,6 +36,7 @@
     },
     "/producers": {
       "get": {
+        "summary": "List all producers.",
         "operationId": "producers_list",
         "parameters": [
           {
@@ -81,6 +83,7 @@
         }
       },
       "post": {
+        "summary": "Handle a request from Nexus to register a new producer with this collector.",
         "operationId": "producers_post",
         "requestBody": {
           "content": {
@@ -107,6 +110,7 @@
     },
     "/producers/{producer_id}": {
       "delete": {
+        "summary": "Delete a producer by ID.",
         "operationId": "producer_delete",
         "parameters": [
           {
@@ -134,18 +138,6 @@
     }
   },
   "components": {
-    "responses": {
-      "Error": {
-        "description": "Error",
-        "content": {
-          "application/json": {
-            "schema": {
-              "$ref": "#/components/schemas/Error"
-            }
-          }
-        }
-      }
-    },
     "schemas": {
       "CollectorInfo": {
         "type": "object",
@@ -154,6 +146,12 @@
             "description": "The collector's UUID.",
             "type": "string",
             "format": "uuid"
+          },
+          "last_refresh": {
+            "nullable": true,
+            "description": "Last time we refreshed our producer list with Nexus.",
+            "type": "string",
+            "format": "date-time"
           }
         },
         "required": [
@@ -203,24 +201,36 @@
         "type": "object",
         "properties": {
           "address": {
-            "type": "string"
-          },
-          "base_route": {
+            "description": "The IP address and port at which `oximeter` can collect metrics from the producer.",
             "type": "string"
           },
           "id": {
+            "description": "A unique ID for this producer.",
             "type": "string",
             "format": "uuid"
           },
           "interval": {
-            "$ref": "#/components/schemas/Duration"
+            "description": "The interval on which `oximeter` should collect metrics.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          },
+          "kind": {
+            "description": "The kind of producer.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProducerKind"
+              }
+            ]
           }
         },
         "required": [
           "address",
-          "base_route",
           "id",
-          "interval"
+          "interval",
+          "kind"
         ]
       },
       "ProducerEndpointResultsPage": {
@@ -243,6 +253,51 @@
         "required": [
           "items"
         ]
+      },
+      "ProducerKind": {
+        "description": "The kind of metric producer this is.",
+        "oneOf": [
+          {
+            "description": "The producer is a sled-agent.",
+            "type": "string",
+            "enum": [
+              "sled_agent"
+            ]
+          },
+          {
+            "description": "The producer is an Omicron-managed service.",
+            "type": "string",
+            "enum": [
+              "service"
+            ]
+          },
+          {
+            "description": "The producer is a Propolis VMM managing a guest instance.",
+            "type": "string",
+            "enum": [
+              "instance"
+            ]
+          },
+          {
+            "description": "The producer is a management gateway service.",
+            "type": "string",
+            "enum": [
+              "management_gateway"
+            ]
+          }
+        ]
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Error",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
       }
     }
   }

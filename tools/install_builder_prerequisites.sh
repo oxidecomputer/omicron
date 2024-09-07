@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 set -eu
 
@@ -85,6 +85,15 @@ function retry
   exit $retry_rc
 }
 
+function xtask
+{
+  if [ -z ${XTASK_BIN+x} ]; then
+    cargo xtask "$@"
+  else
+    "$XTASK_BIN" "$@"
+  fi
+}
+
 # Packages to be installed on all OSes:
 #
 # - libpq, the PostgreSQL client lib.
@@ -105,6 +114,12 @@ HOST_OS=$(uname -s)
 
 function install_packages {
   if [[ "${HOST_OS}" == "Linux" ]]; then
+    # If Nix is in use, we don't need to install any packagess here,
+    # as they're provided by the Nix flake. 
+    if nix flake show &> /dev/null; then
+      return
+    fi
+
     packages=(
       'libpq-dev'
       'pkg-config'
@@ -122,6 +137,7 @@ function install_packages {
     fi
   elif [[ "${HOST_OS}" == "SunOS" ]]; then
     CLANGVER=15
+    RTVER=13
     PGVER=13
     packages=(
       "pkg:/package/pkg"
@@ -129,8 +145,12 @@ function install_packages {
       "library/postgresql-$PGVER"
       "pkg-config"
       "library/libxmlsec1"
+      "system/library/gcc-runtime@$RTVER"
+      "system/library/g++-runtime@$RTVER"
       # "bindgen leverages libclang to preprocess, parse, and type check C and C++ header files."
       "pkg:/ooce/developer/clang-$CLANGVER"
+      "system/library/gcc-runtime"
+      "system/library/g++-runtime"
     )
 
     # Install/update the set of packages.
@@ -151,7 +171,8 @@ function install_packages {
     }
 
     pkg mediator -a
-    pkg list -v "${packages[@]}"
+    pkg publisher
+    pkg list -afv "${packages[@]}"
   elif [[ "${HOST_OS}" == "Darwin" ]]; then
     packages=(
       'coreutils'
@@ -179,31 +200,14 @@ retry install_packages
 # - Packaging: When constructing packages on Helios, these utilities
 # are packaged into zones which may be launched by the sled agent.
 
-retry ./tools/ci_download_cockroachdb
-retry ./tools/ci_download_clickhouse
-
-# Install static console assets. These are used when packaging Nexus.
-retry ./tools/ci_download_console
-
-# Download the OpenAPI spec for maghemite. This is required to build the
-# ddm-admin-api crate.
-retry ./tools/ci_download_maghemite_openapi
-
-# Download the OpenAPI spec for dendrite. This is required to build the
-# dpd-client crate.
-retry ./tools/ci_download_dendrite_openapi
-
-# Download dendrite-stub. This is required to run tests without a live
-# asic and running dendrite instance
-retry ./tools/ci_download_dendrite_stub
-
-# Download mgd. This is required to run tests that invovle dynamic external
-# routing
-retry ./tools/ci_download_maghemite_mgd
-
-# Download transceiver-control. This is used as the source for the
-# xcvradm binary which is bundled with the switch zone.
-retry ./tools/ci_download_transceiver_control
+retry xtask download \
+    cockroach \
+    clickhouse \
+    console \
+    dendrite-openapi \
+    dendrite-stub \
+    maghemite-mgd \
+    transceiver-control
 
 # Validate the PATH:
 expected_in_path=(

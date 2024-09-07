@@ -39,7 +39,7 @@ pub fn path_to_executable(cmd_name: &str) -> PathBuf {
 #[track_caller]
 pub fn assert_exit_code(exit_status: ExitStatus, code: u32, stderr_text: &str) {
     if let ExitStatus::Exited(exit_code) = exit_status {
-        assert_eq!(exit_code, code);
+        assert_eq!(exit_code, code, "stderr:\n{}", stderr_text);
     } else {
         panic!(
             "expected normal process exit with code {}, got {:?}\n\nprocess stderr:{}",
@@ -119,4 +119,233 @@ pub fn temp_file_path(label: &str) -> PathBuf {
 /// found.
 pub fn error_for_enoent() -> String {
     io::Error::from_raw_os_error(libc::ENOENT).to_string()
+}
+
+/// Redacts text from a string (usually stdout/stderr) that may change from
+/// invocation to invocation (e.g., assigned TCP port numbers, timestamps)
+///
+/// This allows use to use expectorate to verify the shape of the CLI output.
+pub fn redact_variable(input: &str) -> String {
+    // Replace TCP port numbers. We include the localhost
+    // characters to avoid catching any random sequence of numbers.
+    let s = regex::Regex::new(r"\[::1\]:\d{4,5}")
+        .unwrap()
+        .replace_all(&input, "[::1]:REDACTED_PORT")
+        .to_string();
+    let s = regex::Regex::new(r"\[::ffff:127.0.0.1\]:\d{4,5}")
+        .unwrap()
+        .replace_all(&s, "[::ffff:127.0.0.1]:REDACTED_PORT")
+        .to_string();
+    let s = regex::Regex::new(r"127\.0\.0\.1:\d{4,5}")
+        .unwrap()
+        .replace_all(&s, "127.0.0.1:REDACTED_PORT")
+        .to_string();
+
+    // Replace uuids.
+    //
+    // The length of a UUID is 32 nibbles for the hex encoding of a u128 + 4
+    // dashes = 36.
+    const UUID_LEN: usize = 36;
+    let s = regex::Regex::new(
+        "[a-zA-Z0-9]{8}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-\
+        [a-zA-Z0-9]{4}-[a-zA-Z0-9]{12}",
+    )
+    .unwrap()
+    .replace_all(&s, fill_redaction_text("uuid", UUID_LEN))
+    .to_string();
+
+    // Replace timestamps.
+    //
+    // Format: RFC 3339 (ISO 8601)
+    // Examples:
+    //  1970-01-01T00:00:00Z
+    //  1970-01-01T00:00:00.00001Z
+    //
+    // Note that depending on the amount of trailing zeros,
+    // this value can have different widths. However, "<REDACTED_TIMESTAMP>"
+    // has a deterministic width, so that's used instead.
+    let s = regex::Regex::new(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z")
+        .unwrap()
+        .replace_all(&s, "<REDACTED_TIMESTAMP>")
+        .to_string();
+
+    // Replace formatted durations.  These are pretty specific to the background
+    // task output.
+    let s = regex::Regex::new(r"\d+s ago")
+        .unwrap()
+        .replace_all(&s, "<REDACTED DURATION>s ago")
+        .to_string();
+
+    // Replace interval (s).
+    let s = regex::Regex::new(r"\d+s")
+        .unwrap()
+        .replace_all(&s, "<REDACTED_DURATION>s")
+        .to_string();
+
+    // Replace interval (ms).
+    let s = regex::Regex::new(r"\d+ms")
+        .unwrap()
+        .replace_all(&s, "<REDACTED DURATION>ms")
+        .to_string();
+
+    let s = regex::Regex::new(
+        r"note: database schema version matches expected \(\d+\.\d+\.\d+\)",
+    )
+    .unwrap()
+    .replace_all(
+        &s,
+        "note: database schema version matches expected \
+        (<redacted database version>)",
+    )
+    .to_string();
+
+    let s = regex::Regex::new(r"iter \d+,")
+        .unwrap()
+        .replace_all(&s, "<REDACTED ITERATIONS>,")
+        .to_string();
+
+    s
+}
+
+/// Redact text from a string, allowing for extra redactions to be specified.
+pub fn redact_extra(
+    input: &str,
+    extra_redactions: &ExtraRedactions<'_>,
+) -> String {
+    // Perform extra redactions at the beginning, not the end. This is because
+    // some of the built-in redactions in redact_variable might match a
+    // substring of something that should be handled by extra_redactions (e.g.
+    // a temporary path).
+    let mut s = input.to_owned();
+    for (name, replacement) in &extra_redactions.redactions {
+        s = s.replace(name, replacement);
+    }
+    redact_variable(&s)
+}
+
+/// Represents a list of extra redactions for [`redact_variable`].
+///
+/// Extra redactions are applied in-order, before any builtin redactions.
+#[derive(Clone, Debug, Default)]
+pub struct ExtraRedactions<'a> {
+    // A pair of redaction and replacement strings.
+    redactions: Vec<(&'a str, String)>,
+}
+
+impl<'a> ExtraRedactions<'a> {
+    pub fn new() -> Self {
+        Self { redactions: Vec::new() }
+    }
+
+    pub fn fixed_length(
+        &mut self,
+        name: &str,
+        text_to_redact: &'a str,
+    ) -> &mut Self {
+        // Use the same number of chars as the number of bytes in
+        // text_to_redact. We're almost entirely in ASCII-land so they're the
+        // same, and getting the length right is nice but doesn't matter for
+        // correctness.
+        //
+        // A technically more correct impl would use unicode-width, but ehhh.
+        let replacement = fill_redaction_text(name, text_to_redact.len());
+        self.redactions.push((text_to_redact, replacement));
+        self
+    }
+
+    pub fn variable_length(
+        &mut self,
+        name: &str,
+        text_to_redact: &'a str,
+    ) -> &mut Self {
+        let gen = format!("<{}_REDACTED>", name.to_uppercase());
+        let replacement = gen.to_string();
+
+        self.redactions.push((text_to_redact, replacement));
+        self
+    }
+}
+
+fn fill_redaction_text(name: &str, text_to_redact_len: usize) -> String {
+    // The overall plan is to generate a string of the form
+    // ---<REDACTED_NAME>---, depending on the length of the text to
+    // redact.
+    //
+    // * Always include the < > signs for clarity, and either shorten the
+    //   text or add dashes to compensate for the length.
+
+    let base = format!("REDACTED_{}", name.to_uppercase());
+
+    let text_len_minus_2 = text_to_redact_len.saturating_sub(2);
+
+    let replacement = if text_len_minus_2 <= base.len() {
+        // Shorten the base string to fit the text.
+        format!("<{:.width$}>", base, width = text_len_minus_2)
+    } else {
+        // Add dashes on both sides to make up the difference.
+        let dash_len = text_len_minus_2 - base.len();
+        format!(
+            "{}<{base}>{}",
+            ".".repeat(dash_len / 2),
+            ".".repeat(dash_len - dash_len / 2)
+        )
+    };
+    replacement
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{DateTime, Utc};
+
+    #[test]
+    fn test_redact_extra() {
+        let input = "time: 123ms, path: /var/tmp/tmp.456ms123s, \
+            path2: /short, \
+            path3: /variable-length/path";
+        let actual = redact_extra(
+            input,
+            ExtraRedactions::new()
+                .fixed_length("tp", "/var/tmp/tmp.456ms123s")
+                .fixed_length("short_redact", "/short")
+                .variable_length("variable", "/variable-length/path"),
+        );
+        assert_eq!(
+            actual,
+            "time: <REDACTED DURATION>ms, path: ....<REDACTED_TP>....., \
+             path2: <REDA>, \
+             path3: <VARIABLE_REDACTED>"
+        );
+    }
+
+    #[test]
+    fn test_redact_timestamps() {
+        let times = [
+            DateTime::<Utc>::from_timestamp_nanos(0),
+            DateTime::<Utc>::from_timestamp_nanos(1),
+            DateTime::<Utc>::from_timestamp_nanos(10),
+            DateTime::<Utc>::from_timestamp_nanos(100000),
+            DateTime::<Utc>::from_timestamp_nanos(123456789),
+            // This doesn't impact the test at all, but as a fun fact, this
+            // happened on March 18th, 2005.
+            DateTime::<Utc>::from_timestamp_nanos(1111111111100000000),
+            DateTime::<Utc>::from_timestamp_nanos(1111111111111100000),
+            DateTime::<Utc>::from_timestamp_nanos(1111111111111111110),
+            DateTime::<Utc>::from_timestamp_nanos(1111111111111111111),
+            // ... and this one happens on June 6th, 2040.
+            DateTime::<Utc>::from_timestamp_nanos(2222222222000000000),
+            DateTime::<Utc>::from_timestamp_nanos(2222222222222200000),
+            DateTime::<Utc>::from_timestamp_nanos(2222222222222222220),
+            DateTime::<Utc>::from_timestamp_nanos(2222222222222222222),
+        ];
+        for time in times {
+            let input = format!("{:?}", time);
+            assert_eq!(
+                redact_variable(&input),
+                "<REDACTED_TIMESTAMP>",
+                "Failed to redact {:?}",
+                time
+            );
+        }
+    }
 }

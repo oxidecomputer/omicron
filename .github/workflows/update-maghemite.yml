@@ -29,7 +29,7 @@ jobs:
     steps:
 
       # Checkout both the target and integration branches
-      - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
         with:
           token: ${{ inputs.reflector_access_token }}
           fetch-depth: 0
@@ -39,7 +39,7 @@ jobs:
           . ./tools/reflector/helpers.sh
 
           PATHS=("tools")
-          merge $TARGET_BRANCH $INT_BRANCH ${{ inputs.reflector_user_id }} $PATHS
+          merge $TARGET_BRANCH $INT_BRANCH ${{ inputs.reflector_user_id }} "${PATHS[@]}"
 
       - name: Update maghemite versions
         run: |
@@ -47,7 +47,7 @@ jobs:
 
       - name: Extract new maghemite package version
         run: |
-          eval $(cat tools/maghemite_openapi_version | grep COMMIT)
+          eval $(cat tools/maghemite_mg_openapi_version | grep COMMIT)
           echo "version=${COMMIT:0:7}" >> $GITHUB_OUTPUT
         id: updated
 
@@ -55,7 +55,7 @@ jobs:
         run: |
           . ./tools/reflector/helpers.sh
 
-          PATHS=("tools/maghemite_openapi_version")
+          PATHS=("tools/maghemite_ddm_openapi_version" "tools/maghemite_mg_openapi_version" "tools/maghemite_mgd_checksums" "package-manifest.toml")
           CHANGES=()
           commit $TARGET_BRANCH $INT_BRANCH ${{ inputs.reflector_user_id }} PATHS CHANGES
 

@@ -2,7 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use super::{Generation, PhysicalDiskKind};
+use super::{
+    Generation, PhysicalDiskKind, PhysicalDiskPolicy, PhysicalDiskState,
+};
 use crate::collection::DatastoreCollectionConfig;
 use crate::schema::{physical_disk, zpool};
 use chrono::{DateTime, Utc};
@@ -25,10 +27,14 @@ pub struct PhysicalDisk {
 
     pub variant: PhysicalDiskKind,
     pub sled_id: Uuid,
+    pub disk_policy: PhysicalDiskPolicy,
+    pub disk_state: PhysicalDiskState,
 }
 
 impl PhysicalDisk {
+    /// Creates a new in-service, active disk
     pub fn new(
+        id: Uuid,
         vendor: String,
         serial: String,
         model: String,
@@ -36,7 +42,7 @@ impl PhysicalDisk {
         sled_id: Uuid,
     ) -> Self {
         Self {
-            identity: PhysicalDiskIdentity::new(Uuid::new_v4()),
+            identity: PhysicalDiskIdentity::new(id),
             time_deleted: None,
             rcgen: Generation::new(),
             vendor,
@@ -44,21 +50,13 @@ impl PhysicalDisk {
             model,
             variant,
             sled_id,
+            disk_policy: PhysicalDiskPolicy::InService,
+            disk_state: PhysicalDiskState::Active,
         }
     }
 
-    pub fn uuid(&self) -> Uuid {
+    pub fn id(&self) -> Uuid {
         self.identity.id
-    }
-
-    // This is slightly gross, but:
-    // the `authz_resource` macro really expects that the "primary_key"
-    // for an object can be acquired by "id()".
-    //
-    // The PhysicalDisk object does actually have a separate convenience
-    // UUID, but may be looked by up vendor/serial/model too.
-    pub fn id(&self) -> (String, String, String) {
-        (self.vendor.clone(), self.serial.clone(), self.model.clone())
     }
 
     pub fn time_deleted(&self) -> Option<DateTime<Utc>> {
@@ -70,6 +68,8 @@ impl From<PhysicalDisk> for views::PhysicalDisk {
     fn from(disk: PhysicalDisk) -> Self {
         Self {
             identity: disk.identity(),
+            policy: disk.disk_policy.into(),
+            state: disk.disk_state.into(),
             sled_id: Some(disk.sled_id),
             vendor: disk.vendor,
             serial: disk.serial,
@@ -85,3 +85,75 @@ impl DatastoreCollectionConfig<super::Zpool> for PhysicalDisk {
     type CollectionTimeDeletedColumn = physical_disk::dsl::time_deleted;
     type CollectionIdColumn = zpool::dsl::sled_id;
 }
+
+mod diesel_util {
+    use diesel::{
+        helper_types::{And, EqAny},
+        prelude::*,
+        query_dsl::methods::FilterDsl,
+    };
+    use nexus_types::{
+        deployment::DiskFilter,
+        external_api::views::{PhysicalDiskPolicy, PhysicalDiskState},
+    };
+
+    /// An extension trait to apply a [`DiskFilter`] to a Diesel expression.
+    ///
+    /// This is applicable to any Diesel expression which includes the `physical_disk`
+    /// table.
+    ///
+    /// This needs to live here, rather than in `nexus-db-queries`, because it
+    /// names the `DbPhysicalDiskPolicy` type which is private to this crate.
+    pub trait ApplyPhysicalDiskFilterExt {
+        type Output;
+
+        /// Applies a [`DiskFilter`] to a Diesel expression.
+        fn physical_disk_filter(self, filter: DiskFilter) -> Self::Output;
+    }
+
+    impl<E> ApplyPhysicalDiskFilterExt for E
+    where
+        E: FilterDsl<PhysicalDiskFilterQuery>,
+    {
+        type Output = E::Output;
+
+        fn physical_disk_filter(self, filter: DiskFilter) -> Self::Output {
+            use crate::schema::physical_disk::dsl as physical_disk_dsl;
+
+            // These are only boxed for ease of reference above.
+            let all_matching_policies: BoxedIterator<
+                crate::PhysicalDiskPolicy,
+            > = Box::new(
+                PhysicalDiskPolicy::all_matching(filter).map(Into::into),
+            );
+            let all_matching_states: BoxedIterator<crate::PhysicalDiskState> =
+                Box::new(
+                    PhysicalDiskState::all_matching(filter).map(Into::into),
+                );
+
+            FilterDsl::filter(
+                self,
+                physical_disk_dsl::disk_policy
+                    .eq_any(all_matching_policies)
+                    .and(
+                        physical_disk_dsl::disk_state
+                            .eq_any(all_matching_states),
+                    ),
+            )
+        }
+    }
+
+    type BoxedIterator<T> = Box<dyn Iterator<Item = T>>;
+    type PhysicalDiskFilterQuery = And<
+        EqAny<
+            crate::schema::physical_disk::disk_policy,
+            BoxedIterator<crate::PhysicalDiskPolicy>,
+        >,
+        EqAny<
+            crate::schema::physical_disk::disk_state,
+            BoxedIterator<crate::PhysicalDiskState>,
+        >,
+    >;
+}
+
+pub use diesel_util::ApplyPhysicalDiskFilterExt;

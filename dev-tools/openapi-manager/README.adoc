@@ -1,0 +1,81 @@
+= OpenAPI manager
+
+This tool manages the OpenAPI documents (JSON files) checked into Omicron's `openapi` directory, using Dropshot's support for *API traits*.
+
+NOTE: For more information about API traits, see https://rfd.shared.oxide.computer/rfd/0479[RFD 479].
+
+== Basic usage
+
+The OpenAPI manager is meant to be invoked via `cargo xtask openapi`. Currently, three commands are provided:
+
+* `cargo xtask openapi list`: List information about OpenAPI documents.
+* `cargo xtask openapi check`: Check that all of the documents are up-to-date.
+* `cargo xtask openapi generate`: Update and generate OpenAPI documents.
+
+There is also a test which makes sure that all documents are up-to-date, and tells you to run `cargo xtask openapi generate` if they aren't.
+
+=== API crates [[api_crates]]
+
+The OpenAPI manager has dependencies on a set of *API crates*. An API crate is a Rust library that consists of the API trait, and possibly supporting types. Each OpenAPI document should have a separate API crate.
+
+To keep compile times down, ensure that the API crate has as few dependencies as possible. In particular, *strongly avoid any dependencies on Diesel or other database logic*.
+
+The ideal set of dependencies is:
+    
+* Common crates within omicron: `omicron-common`, perhaps `omicron-uuid-kinds` if typed UUIDs are in use, and a `types` crate for your service.
+* Core external crates: `dropshot`, `serde`, `schemars`, and `uuid`.
+
+For an archetypal way to organize code, see the dependency graph in https://rfd.shared.oxide.computer/rfd/0479#functions_vs_traits[RFD 479's _Choosing between functions and traits_].
+
+== Managing OpenAPI documents
+
+For OpenAPI documents to be managed by this tool, the corresponding interfaces must be defined via *API traits* rather than traditional Dropshot function-based servers.
+
+TIP: For examples within Omicron, search the repo for `dropshot::api_description`.
+
+=== Adding new documents
+
+If you're defining a new service fronted by OpenAPI, first create an API crate (see <<api_crates>> above).
+
+. Add the API crate to the workspace's `Cargo.toml`: `members` and `default-members`, and a reference in `[workspace.dependencies]`.
+. Following the example in https://rfd.shared.oxide.computer/rfd/0479#guide_trait_definition[RFD 479's _Trait definition_], define the API trait.
+
+In the implementation crate:
+
+. Add a dependency on the API crate.
+. Following the example in https://rfd.shared.oxide.computer/rfd/0479#guide_api_implementation[RFD 479's _API implementation_], provide an implementation of the trait.
+
+Once the API crate is defined, inform the OpenAPI manager of its existence. Within this directory:
+
+. In `Cargo.toml`, add a dependency on the API crate.
+. In `src/spec.rs`, add the crate to the `all_apis` function. (Please keep the list sorted by filename.)
+
+To ensure everything works well, run `cargo xtask openapi generate`. Your
+OpenAPI document should be generated on disk and listed in the output.
+
+==== Performing extra validation [[extra_validation]]
+
+By default, the OpenAPI manager does basic validation on the generated document. Some documents require extra validation steps.
+
+It's best to put extra validation next to the trait, within the API crate.
+
+. In the API crate, add dependencies on `openapiv3` and `openapi-manager-types`.
+. Define a function with signature `fn validate_api(spec: &openapiv3::OpenAPI, mut cx: openapi_manager_types::ValidationContext<'_>) which performs the extra validation steps.
+. In `all_apis`, set the `extra_validation` field to this function.
+
+Currently, the validator can do two things:
+
+. Via the `ValidationContext::report_error` function, report validation errors.
+. Via the `ValidationContext::record_file_contents` function, assert the contents of other generated files.
+
+(This can be made richer as needed.)
+
+For an example, see `validate_api` in the `nexus-external-api` crate.
+
+== Design notes
+
+The OpenAPI manager uses the new support for Dropshot API traits described in https://rfd.shared.oxide.computer/rfd/0479[RFD 479].
+
+With traditional function-based Dropshot servers, generating the OpenAPI document requires the implementation to be compiled. With API traits, that is no longer necessary. The OpenAPI manager leverages this to provide a fast and easy way to regenerate API documents.
+
+This does mean that the OpenAPI manager requires the use of API traits, and that eventually all of Omicron's Dropshot APIs should be switched over to traits.

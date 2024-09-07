@@ -1,0 +1,188 @@
+#
+# Example configuration file for running a second Nexus instance locally
+# alongside the stack started by `omicron-dev run-all`.  See the
+# how-to-run-simulated instructions for details.
+#
+
+################################################################################
+# INSTRUCTIONS: To run Nexus against an existing stack started with 	       #
+# `omicron-dev run-all`, see the very bottom of this file.  		       #
+################################################################################
+
+[console]
+# Directory for static assets. Absolute path or relative to CWD.
+static_dir = "out/console-assets"
+session_idle_timeout_minutes = 480 # 8 hours
+session_absolute_timeout_minutes = 1440 # 24 hours
+
+# List of authentication schemes to support.
+[authn]
+schemes_external = ["session_cookie", "access_token"]
+
+[log]
+# Show log messages of this level and more severe
+level = "info"
+
+# Example output to a terminal (with colors)
+mode = "stderr-terminal"
+
+# Example output to a file, appending if it already exists.
+#mode = "file"
+#path = "logs/server.log"
+#if_exists = "append"
+
+# Configuration for interacting with the timeseries database
+[timeseries_db]
+address = "[::1]:8123"
+
+
+
+[deployment]
+# Identifier for this instance of Nexus
+id = "a4ef738a-1fb0-47b1-9da2-4919c7ec7c7f"
+rack_id = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc"
+# Since we expect to be the second instance of Nexus running on this system,
+# pick any available port.
+techport_external_server_port = 0
+
+# Nexus may need to resolve external hosts (e.g. to grab IdP metadata).
+# These are the DNS servers it should use.
+external_dns_servers = ["1.1.1.1", "9.9.9.9"]
+
+[deployment.dropshot_external]
+# IP Address and TCP port on which to listen for the external API
+# This config file uses 12222 to avoid colliding with the usual 12220 that's
+# used by `omicron-dev run-all`
+bind_address = "127.0.0.1:12222"
+# Allow large request bodies to support uploading TUF archives. The number here
+# is picked based on the typical size for tuf-mupdate.zip as of 2024-01
+# (~1.5GiB) and multiplying it by 2.
+#
+# This should be brought back down to a more reasonable value once per-endpoint
+# request body limits are implemented.
+request_body_max_bytes = 3221225472
+# To have Nexus's external HTTP endpoint use TLS, uncomment the line below.  You
+# will also need to provide an initial TLS certificate during rack
+# initialization.  If you're using this config file, you're probably running a
+# simulated system.  In that case, the initial certificate is provided to the
+# simulated sled agent (acting as RSS) via command-line arguments.
+#tls = true
+
+[deployment.dropshot_internal]
+# IP Address and TCP port on which to listen for the internal API
+# This config file uses 12223 to avoid colliding with the usual 12221 that's
+# used by `omicron-dev run-all`
+bind_address = "[::1]:12223"
+request_body_max_bytes = 1048576
+
+#[deployment.internal_dns]
+## These values are overridden at the bottom of this file.
+#type = "from_address"
+#address = "[::1]:3535"
+
+#[deployment.database]
+## These values are overridden at the bottom of this file.
+#type = "from_url"
+#url = "postgresql://root@[::1]:32221/omicron?sslmode=disable"
+
+# Tunable configuration parameters, for testing or experimentation
+[tunables]
+
+# The maximum allowed prefix (thus smallest size) for a VPC Subnet's
+# IPv4 subnetwork. This size allows for ~60 hosts.
+max_vpc_ipv4_subnet_prefix = 26
+
+# Configuration for interacting with the dataplane daemon
+[dendrite.switch0]
+address = "[::1]:12224"
+
+[background_tasks]
+dns_internal.period_secs_config = 60
+dns_internal.period_secs_servers = 60
+dns_internal.period_secs_propagation = 60
+dns_internal.max_concurrent_server_updates = 5
+dns_external.period_secs_config = 60
+dns_external.period_secs_servers = 60
+dns_external.period_secs_propagation = 60
+dns_external.max_concurrent_server_updates = 5
+metrics_producer_gc.period_secs = 60
+# How frequently we check the list of stored TLS certificates.  This is
+# approximately an upper bound on how soon after updating the list of
+# certificates it will take _other_ Nexus instances to notice and stop serving
+# them (on a sunny day).
+external_endpoints.period_secs = 60
+nat_cleanup.period_secs = 30
+bfd_manager.period_secs = 30
+# How frequently to collect hardware/software inventory from the whole system
+# (even if we don't have reason to believe anything has changed).
+inventory.period_secs = 600
+# Maximum number of past collections to keep in the database
+inventory.nkeep = 5
+# Disable inventory collection altogether (for emergencies)
+inventory.disable = false
+phantom_disks.period_secs = 30
+physical_disk_adoption.period_secs = 30
+decommissioned_disk_cleaner.period_secs = 60
+blueprints.period_secs_load = 10
+blueprints.period_secs_execute = 60
+blueprints.period_secs_collect_crdb_node_ids = 180
+sync_service_zone_nat.period_secs = 30
+switch_port_settings_manager.period_secs = 30
+region_replacement.period_secs = 30
+region_replacement_driver.period_secs = 10
+# How frequently to query the status of active instances.
+instance_watcher.period_secs = 30
+# How frequently to schedule new instance update sagas.
+instance_updater.period_secs = 30
+service_firewall_propagation.period_secs = 300
+v2p_mapping_propagation.period_secs = 30
+abandoned_vmm_reaper.period_secs = 60
+saga_recovery.period_secs = 600
+lookup_region_port.period_secs = 60
+region_snapshot_replacement_start.period_secs = 30
+region_snapshot_replacement_garbage_collection.period_secs = 30
+region_snapshot_replacement_step.period_secs = 30
+region_snapshot_replacement_finish.period_secs = 30
+
+[default_region_allocation_strategy]
+# allocate region on 3 random distinct zpools, on 3 random distinct sleds.
+type = "random_with_distinct_sleds"
+
+# the same as random_with_distinct_sleds, but without requiring distinct sleds
+# type = "random"
+
+# setting `seed` to a fixed value will make dataset selection ordering use the
+# same shuffling order for every region allocation.
+# seed = 0
+
+################################################################################
+# INSTRUCTIONS: To run Nexus against an existing stack started with            #
+# `omicron-dev run-all`, you should only have to modify values in this 	       #
+# section. 								       #
+# 									       #
+# Modify the port numbers below based on the output of `omicron-dev run-all`   #
+################################################################################
+
+[mgd]
+# Look for "management gateway:    http://[::1]:49188 (switch0)"
+# The "http://" does not go in this string -- just the socket address.
+switch0.address = "[::1]:49188"
+
+# Look for "management gateway:    http://[::1]:39352 (switch1)"
+# The "http://" does not go in this string -- just the socket address.
+switch1.address = "[::1]:39352"
+
+[deployment.internal_dns]
+# Look for "internal DNS:          [::1]:54025"
+# and adjust the port number below.
+address = "[::1]:54025"
+# You should not need to change this.
+type = "from_address"
+
+[deployment.database]
+# Look for "cockroachdb URL:       postgresql://root@[::1]:43256/omicron?sslmode=disable"
+# and adjust the port number below.
+url = "postgresql://root@[::1]:43256/omicron?sslmode=disable"
+# You should not need to change this.
+type = "from_url"
+################################################################################

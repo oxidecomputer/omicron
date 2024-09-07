@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow.workspace = true
 chrono.workspace = true
@@ -11,11 +14,11 @@ dns-service-client.workspace = true
 futures.workspace = true
 hyper.workspace = true
 omicron-common.workspace = true
+omicron-uuid-kinds.workspace = true
 reqwest = { workspace = true, features = ["rustls-tls", "stream"] }
 slog.workspace = true
 thiserror.workspace = true
-trust-dns-proto.workspace = true
-trust-dns-resolver.workspace = true
+hickory-resolver.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
 

@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS one_default_pool_per_scope;

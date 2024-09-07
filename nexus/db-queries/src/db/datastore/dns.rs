@@ -6,6 +6,7 @@ use super::DataStore;
 use crate::authz;
 use crate::context::OpContext;
 use crate::db;
+use crate::db::datastore::SQL_BATCH_SIZE;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::model::DnsGroup;
@@ -15,11 +16,14 @@ use crate::db::model::DnsZone;
 use crate::db::model::Generation;
 use crate::db::model::InitialDnsGroup;
 use crate::db::pagination::paginated;
+use crate::db::pagination::Paginator;
 use crate::db::pool::DbConnection;
 use crate::db::TransactionError;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
+use futures::future::BoxFuture;
+use futures::FutureExt;
 use nexus_types::internal_api::params::DnsConfigParams;
 use nexus_types::internal_api::params::DnsConfigZone;
 use nexus_types::internal_api::params::DnsRecord;
@@ -67,7 +71,9 @@ impl DataStore {
         dns_group: DnsGroup,
     ) -> ListResultVec<DnsZone> {
         let conn = self.pool_connection_authorized(opctx).await?;
-        self.dns_zones_list_all_on_connection(opctx, &conn, dns_group).await
+        Ok(self
+            .dns_zones_list_all_on_connection(opctx, &conn, dns_group)
+            .await?)
     }
 
     /// Variant of [`Self::dns_zones_list_all`] which may be called from a
@@ -77,7 +83,7 @@ impl DataStore {
         opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         dns_group: DnsGroup,
-    ) -> ListResultVec<DnsZone> {
+    ) -> Result<Vec<DnsZone>, TransactionError<Error>> {
         use db::schema::dns_zone::dsl;
         const LIMIT: usize = 5;
 
@@ -88,8 +94,7 @@ impl DataStore {
             .limit(i64::try_from(LIMIT).unwrap())
             .select(DnsZone::as_select())
             .load_async(conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+            .await?;
 
         bail_unless!(
             list.len() < LIMIT,
@@ -106,12 +111,14 @@ impl DataStore {
         opctx: &OpContext,
         dns_group: DnsGroup,
     ) -> LookupResult<DnsVersion> {
-        self.dns_group_latest_version_conn(
-            opctx,
-            &*self.pool_connection_authorized(opctx).await?,
-            dns_group,
-        )
-        .await
+        let version = self
+            .dns_group_latest_version_conn(
+                opctx,
+                &*self.pool_connection_authorized(opctx).await?,
+                dns_group,
+            )
+            .await?;
+        Ok(version)
     }
 
     pub async fn dns_group_latest_version_conn(
@@ -119,7 +126,7 @@ impl DataStore {
         opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         dns_group: DnsGroup,
-    ) -> LookupResult<DnsVersion> {
+    ) -> Result<DnsVersion, TransactionError<Error>> {
         opctx.authorize(authz::Action::Read, &authz::DNS_CONFIG).await?;
         use db::schema::dns_version::dsl;
         let versions = dsl::dns_version
@@ -128,8 +135,7 @@ impl DataStore {
             .limit(1)
             .select(DnsVersion::as_select())
             .load_async(conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+            .await?;
 
         bail_unless!(
             versions.len() == 1,
@@ -240,9 +246,8 @@ impl DataStore {
         let mut zones = Vec::with_capacity(dns_zones.len());
         for zone in dns_zones {
             let mut zone_records = Vec::new();
-            let mut marker = None;
-
-            loop {
+            let mut paginator = Paginator::new(batch_size);
+            while let Some(p) = paginator.next() {
                 debug!(log, "listing DNS names for zone";
                     "dns_zone_id" => zone.id.to_string(),
                     "dns_zone_name" => &zone.zone_name,
@@ -250,25 +255,16 @@ impl DataStore {
                     "found_so_far" => zone_records.len(),
                     "batch_size" => batch_size.get(),
                 );
-                let pagparams = DataPageParams {
-                    marker: marker.as_ref(),
-                    direction: dropshot::PaginationOrder::Ascending,
-                    limit: batch_size,
-                };
                 let names_batch = self
-                    .dns_names_list(opctx, zone.id, version.version, &pagparams)
+                    .dns_names_list(
+                        opctx,
+                        zone.id,
+                        version.version,
+                        &p.current_pagparams(),
+                    )
                     .await?;
-                let done = names_batch.len()
-                    < usize::try_from(batch_size.get()).unwrap();
-                if let Some((last_name, _)) = names_batch.last() {
-                    marker = Some(last_name.clone());
-                } else {
-                    assert!(done);
-                }
+                paginator = p.found_batch(&names_batch, &|(n, _)| n.clone());
                 zone_records.extend(names_batch.into_iter());
-                if done {
-                    break;
-                }
             }
 
             debug!(log, "found all DNS names for zone";
@@ -353,7 +349,76 @@ impl DataStore {
         Ok(())
     }
 
+    /// Update the configuration of a DNS zone as specified in `update`,
+    /// conditional on the _current_ DNS version being `old_version`.
+    ///
+    /// Unlike `dns_update_incremental()`, this function assumes the caller has
+    /// already constructed `update` based on a specific DNS version
+    /// (`old_version`) and only wants to apply these changes if the DNS version
+    /// in the database has not changed.
+    ///
+    /// Also unlike `dns_update_incremental()`, this function creates its own
+    /// transaction to apply the update.
+    ///
+    /// Like `dns_update_incremental()`, **callers almost certainly want to wake
+    /// up the corresponding Nexus background task to cause these changes to be
+    /// propagated to the corresponding DNS servers.**
+    pub async fn dns_update_from_version(
+        &self,
+        opctx: &OpContext,
+        update: DnsVersionUpdateBuilder,
+        old_version: Generation,
+    ) -> Result<(), Error> {
+        opctx.authorize(authz::Action::Modify, &authz::DNS_CONFIG).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        conn.transaction_async(|c| async move {
+            let zones = self
+                .dns_zones_list_all_on_connection(opctx, &c, update.dns_group)
+                .await?;
+            // This looks like a time-of-check-to-time-of-use race, but this
+            // approach works because we're inside a transaction and the
+            // isolation level is SERIALIZABLE.
+            let version = self
+                .dns_group_latest_version_conn(opctx, &c, update.dns_group)
+                .await?;
+            if version.version != old_version {
+                return Err(TransactionError::CustomError(Error::conflict(
+                    format!(
+                        "expected current DNS version to be {}, found {}",
+                        *old_version, *version.version,
+                    ),
+                )));
+            }
+
+            self.dns_write_version_internal(
+                &c,
+                update,
+                zones,
+                Generation(old_version.next()),
+            )
+            .await
+        })
+        .await
+        .map_err(|e| match e {
+            TransactionError::CustomError(e) => e,
+            TransactionError::Database(e) => {
+                public_error_from_diesel(e, ErrorHandler::Server)
+            }
+        })
+    }
+
     /// Update the configuration of a DNS zone as specified in `update`
+    ///
+    /// Unlike `dns_update_from_version()`, this function assumes that the
+    /// caller's changes are valid regardless of the current DNS configuration.
+    /// This function fetches the latest version and always writes the updated
+    /// config as the next version.  This is appropriate if the caller is adding
+    /// something wholly new or removing something that it knows should be
+    /// present (as in the case when we add or remove DNS names for a Silo,
+    /// since we control exactly when that happens).  This is _not_ appropriate
+    /// if the caller is making arbitrary changes that might conflict with a
+    /// concurrent caller.  For that, you probably want
+    /// `dns_update_from_version()`.
     ///
     /// This function runs the body inside a transaction (if no transaction is
     /// open) or a nested transaction (savepoint, if a transaction is already
@@ -365,51 +430,53 @@ impl DataStore {
     ///
     /// It's recommended to put this step last in any transaction because the
     /// more time elapses between running this function and attempting to commit
-    /// the transaction, the greater the change of either transaction failure
+    /// the transaction, the greater the chance of either transaction failure
     /// due to a conflict error (if some other caller attempts to update the
     /// same DNS group) or another client blocking (for the same reason).
     ///
     /// **Callers almost certainly want to wake up the corresponding Nexus
     /// background task to cause these changes to be propagated to the
     /// corresponding DNS servers.**
-    pub async fn dns_update(
+    pub async fn dns_update_incremental(
         &self,
         opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         update: DnsVersionUpdateBuilder,
-    ) -> Result<(), Error> {
+    ) -> Result<(), TransactionError<Error>> {
         opctx.authorize(authz::Action::Modify, &authz::DNS_CONFIG).await?;
 
         let zones = self
             .dns_zones_list_all_on_connection(opctx, conn, update.dns_group)
             .await?;
 
-        let result = conn
-            .transaction_async(|c| async move {
-                self.dns_update_internal(opctx, &c, update, zones)
-                    .await
-                    .map_err(TransactionError::CustomError)
-            })
-            .await;
-
-        match result {
-            Ok(()) => Ok(()),
-            Err(TransactionError::CustomError(e)) => Err(e),
-            Err(TransactionError::Database(e)) => {
-                Err(public_error_from_diesel(e, ErrorHandler::Server))
-            }
-        }
+        conn.transaction_async(|c| async move {
+            let version = self
+                .dns_group_latest_version_conn(opctx, conn, update.dns_group)
+                .await?;
+            self.dns_write_version_internal(
+                &c,
+                update,
+                zones,
+                Generation(version.version.next()),
+            )
+            .await
+        })
+        .await
     }
 
     // This must only be used inside a transaction.  Otherwise, it may make
-    // invalid changes to the database state.  Use `dns_update()` instead.
-    async fn dns_update_internal(
+    // invalid changes to the database state.  Use one of the `dns_update_*()`
+    // functions instead.
+    //
+    // The caller should already have checked (in the same transaction) that
+    // their version number is the correct next version.
+    async fn dns_write_version_internal(
         &self,
-        opctx: &OpContext,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         update: DnsVersionUpdateBuilder,
         zones: Vec<DnsZone>,
-    ) -> Result<(), Error> {
+        new_version_num: Generation,
+    ) -> Result<(), TransactionError<Error>> {
         // TODO-scalability TODO-performance This would be much better as a CTE
         // for all the usual reasons described in RFD 192.  Using an interactive
         // transaction here means that either we wind up holding database locks
@@ -419,11 +486,6 @@ impl DataStore {
         // operations fail spuriously as far as the client is concerned).  We
         // expect these problems to be small or unlikely at small scale but
         // significant as the system scales up.
-        let dns_group = update.dns_group;
-        let version =
-            self.dns_group_latest_version_conn(opctx, conn, dns_group).await?;
-        let new_version_num =
-            nexus_db_model::Generation(version.version.next());
         let new_version = DnsVersion {
             dns_group: update.dns_group,
             version: new_version_num,
@@ -455,10 +517,7 @@ impl DataStore {
             diesel::insert_into(dsl::dns_version)
                 .values(new_version)
                 .execute_async(conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .await?;
         }
 
         {
@@ -480,8 +539,7 @@ impl DataStore {
             )
             .set(dsl::version_removed.eq(new_version_num))
             .execute_async(conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+            .await?;
 
             bail_unless!(
                 nremoved == ntoremove,
@@ -495,10 +553,7 @@ impl DataStore {
             let nadded = diesel::insert_into(dsl::dns_name)
                 .values(new_names)
                 .execute_async(conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
+                .await?;
 
             bail_unless!(
                 nadded == ntoadd,
@@ -523,15 +578,16 @@ impl DataStore {
 /// and add the name back with different records.
 ///
 /// You use this object to build up a _description_ of the changes to the DNS
-/// zone's configuration.  Then you call [`DataStore::dns_update()`] to apply
-/// these changes transactionally to the database.  The changes are then
-/// propagated asynchronously to the DNS servers.  No changes are made (to
-/// either the database or the DNS servers) while you modify this object.
+/// zone's configuration.  Then you call [`DataStore::dns_update_incremental()`]
+/// or [`DataStore::dns_update_from_version()`] to apply these changes
+/// transactionally to the database.  The changes are then propagated
+/// asynchronously to the DNS servers.  No changes are made (to either the
+/// database or the DNS servers) while you modify this object.
 ///
 /// This object changes all of the zones associated with a particular DNS group
 /// because the assumption right now is that they're equivalent.  (In practice,
 /// we should only ever have one zone in each group right now.)
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct DnsVersionUpdateBuilder {
     dns_group: DnsGroup,
     comment: String,
@@ -621,11 +677,67 @@ impl DnsVersionUpdateBuilder {
             Ok(())
         }
     }
+
+    pub fn names_removed(&self) -> impl Iterator<Item = &str> {
+        self.names_removed.iter().map(AsRef::as_ref)
+    }
+
+    pub fn names_added(&self) -> impl Iterator<Item = (&str, &[DnsRecord])> {
+        self.names_added
+            .iter()
+            .map(|(name, list)| (name.as_ref(), list.as_ref()))
+    }
+}
+
+/// Extra interfaces that are not intended for use in Nexus, but useful for
+/// testing and `omdb`
+pub trait DataStoreDnsTest: Send + Sync {
+    /// Fetch the DNS configuration for a specific group and version
+    fn dns_config_read_version<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+        dns_group: DnsGroup,
+        version: omicron_common::api::external::Generation,
+    ) -> BoxFuture<'_, Result<DnsConfigParams, Error>>;
+}
+
+impl DataStoreDnsTest for DataStore {
+    fn dns_config_read_version<'a>(
+        &'a self,
+        opctx: &'a OpContext,
+        dns_group: DnsGroup,
+        version: omicron_common::api::external::Generation,
+    ) -> BoxFuture<'_, Result<DnsConfigParams, Error>> {
+        async move {
+            use db::schema::dns_version::dsl;
+            let dns_version = dsl::dns_version
+                .filter(dsl::dns_group.eq(dns_group))
+                .filter(dsl::version.eq(Generation::from(version)))
+                .select(DnsVersion::as_select())
+                .first_async(&*self.pool_connection_authorized(opctx).await?)
+                .await
+                .map_err(|e| {
+                    // Technically, we could produce a `NotFound` error here.
+                    // But since this is only for testing, it's okay to produce
+                    // an InternalError.
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+            self.dns_config_read_version(
+                opctx,
+                &opctx.log,
+                SQL_BATCH_SIZE,
+                &dns_version,
+            )
+            .await
+        }
+        .boxed()
+    }
 }
 
 #[cfg(test)]
 mod test {
-    use crate::db::datastore::datastore_test;
+    use crate::db::datastore::test_utils::datastore_test;
     use crate::db::datastore::DnsVersionUpdateBuilder;
     use crate::db::DataStore;
     use crate::db::TransactionError;
@@ -1385,8 +1497,8 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_dns_update() {
-        let logctx = dev::test_setup_log("test_dns_update");
+    async fn test_dns_update_incremental() {
+        let logctx = dev::test_setup_log("test_dns_update_incremental");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
         let now = Utc::now();
@@ -1482,7 +1594,10 @@ mod test {
             update.add_name(String::from("n2"), records2.clone()).unwrap();
 
             let conn = datastore.pool_connection_for_tests().await.unwrap();
-            datastore.dns_update(&opctx, &conn, update).await.unwrap();
+            datastore
+                .dns_update_incremental(&opctx, &conn, update)
+                .await
+                .unwrap();
         }
 
         // Verify the new config.
@@ -1515,7 +1630,10 @@ mod test {
             update.add_name(String::from("n1"), records12.clone()).unwrap();
 
             let conn = datastore.pool_connection_for_tests().await.unwrap();
-            datastore.dns_update(&opctx, &conn, update).await.unwrap();
+            datastore
+                .dns_update_incremental(&opctx, &conn, update)
+                .await
+                .unwrap();
         }
 
         let dns_config = datastore
@@ -1545,7 +1663,10 @@ mod test {
             update.remove_name(String::from("n1")).unwrap();
 
             let conn = datastore.pool_connection_for_tests().await.unwrap();
-            datastore.dns_update(&opctx, &conn, update).await.unwrap();
+            datastore
+                .dns_update_incremental(&opctx, &conn, update)
+                .await
+                .unwrap();
         }
 
         let dns_config = datastore
@@ -1572,7 +1693,10 @@ mod test {
             update.add_name(String::from("n1"), records2.clone()).unwrap();
 
             let conn = datastore.pool_connection_for_tests().await.unwrap();
-            datastore.dns_update(&opctx, &conn, update).await.unwrap();
+            datastore
+                .dns_update_incremental(&opctx, &conn, update)
+                .await
+                .unwrap();
         }
 
         let dns_config = datastore
@@ -1611,7 +1735,9 @@ mod test {
             let copctx = opctx.child(std::collections::BTreeMap::new());
             let mut fut = conn1
                 .transaction_async(|c1| async move {
-                    cds.dns_update(&copctx, &c1, update1).await.unwrap();
+                    cds.dns_update_incremental(&copctx, &c1, update1)
+                        .await
+                        .unwrap();
                     // Let the outside scope know we've done the update, but we
                     // haven't committed the transaction yet.  Wait for them to
                     // tell us to proceed.
@@ -1638,7 +1764,10 @@ mod test {
                 String::from("the test suite"),
             );
             update2.add_name(String::from("n1"), records1.clone()).unwrap();
-            datastore.dns_update(&opctx, &conn2, update2).await.unwrap();
+            datastore
+                .dns_update_incremental(&opctx, &conn2, update2)
+                .await
+                .unwrap();
 
             // Now let the first one finish.
             wait2_tx.send(()).unwrap();
@@ -1682,8 +1811,14 @@ mod test {
             update.remove_name(String::from("n4")).unwrap();
 
             let conn = datastore.pool_connection_for_tests().await.unwrap();
-            let error =
-                datastore.dns_update(&opctx, &conn, update).await.unwrap_err();
+            let error = datastore
+                .dns_update_incremental(&opctx, &conn, update)
+                .await
+                .unwrap_err();
+            let error = match error {
+                TransactionError::CustomError(err) => err,
+                _ => panic!("Unexpected error: {:?}", error),
+            };
             assert_eq!(
                 error.to_string(),
                 "Internal Error: updated wrong number of dns_name \
@@ -1707,11 +1842,18 @@ mod test {
             update.add_name(String::from("n2"), records1.clone()).unwrap();
 
             let conn = datastore.pool_connection_for_tests().await.unwrap();
-            let error =
-                datastore.dns_update(&opctx, &conn, update).await.unwrap_err();
+            let error = Error::from(
+                datastore
+                    .dns_update_incremental(&opctx, &conn, update)
+                    .await
+                    .unwrap_err(),
+            );
             let msg = error.to_string();
-            assert!(msg.starts_with("Internal Error: "));
-            assert!(msg.contains("violates unique constraint"));
+            assert!(msg.starts_with("Internal Error: "), "Message: {msg:}");
+            assert!(
+                msg.contains("violates unique constraint"),
+                "Message: {msg:}"
+            );
         }
 
         let dns_config = datastore
@@ -1727,6 +1869,119 @@ mod test {
         );
         assert_eq!(dns_config.zones[1].zone_name, "oxide2.test");
         assert_eq!(dns_config.zones[0].records, dns_config.zones[1].records,);
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_dns_update_from_version() {
+        let logctx = dev::test_setup_log("test_dns_update_from_version");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        // The guts of `dns_update_from_version()` are shared with
+        // `dns_update_incremental()`.  The main cases worth testing here are
+        // (1) quick check that the happy path works, plus (2) make sure it
+        // fails when the precondition fails (current version doesn't match
+        // what's expected).
+        //
+        // Start by loading some initial data.
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        let initial_data = InitialDnsGroup::new(
+            DnsGroup::Internal,
+            "my-zone",
+            "test-suite",
+            "test-suite",
+            HashMap::from([
+                (
+                    "wendell".to_string(),
+                    vec![DnsRecord::Aaaa(Ipv6Addr::LOCALHOST)],
+                ),
+                (
+                    "krabappel".to_string(),
+                    vec![DnsRecord::Aaaa(Ipv6Addr::LOCALHOST)],
+                ),
+            ]),
+        );
+        DataStore::load_dns_data(&conn, initial_data)
+            .await
+            .expect("failed to insert initial data");
+
+        // Construct an update and apply it conditional on the current
+        // generation matching the initial one.  This should succeed.
+        let mut update1 = DnsVersionUpdateBuilder::new(
+            DnsGroup::Internal,
+            String::from("test-suite-1"),
+            String::from("test-suite-1"),
+        );
+        update1.remove_name(String::from("wendell")).unwrap();
+        update1
+            .add_name(
+                String::from("nelson"),
+                vec![DnsRecord::Aaaa(Ipv6Addr::LOCALHOST)],
+            )
+            .unwrap();
+        let gen1 = Generation::new();
+        datastore
+            .dns_update_from_version(&opctx, update1, gen1)
+            .await
+            .expect("failed to update from first generation");
+
+        // Now construct another update based on the _first_ version and try to
+        // apply that.  It should not work because the version has changed from
+        // under us.
+        let mut update2 = DnsVersionUpdateBuilder::new(
+            DnsGroup::Internal,
+            String::from("test-suite-2"),
+            String::from("test-suite-2"),
+        );
+        update2.remove_name(String::from("krabappel")).unwrap();
+        update2
+            .add_name(
+                String::from("hoover"),
+                vec![DnsRecord::Aaaa(Ipv6Addr::LOCALHOST)],
+            )
+            .unwrap();
+        let error = datastore
+            .dns_update_from_version(&opctx, update2.clone(), gen1)
+            .await
+            .expect_err("update unexpectedly succeeded");
+        assert!(error
+            .to_string()
+            .contains("expected current DNS version to be 1, found 2"));
+
+        // At this point, the database state should reflect the first update but
+        // not the second.
+        let config = datastore
+            .dns_config_read(&opctx, DnsGroup::Internal)
+            .await
+            .expect("failed to read config");
+        let gen2 = nexus_db_model::Generation(gen1.next());
+        assert_eq!(u64::from(*gen2), config.generation);
+        assert_eq!(1, config.zones.len());
+        let records = &config.zones[0].records;
+        assert!(records.contains_key("nelson"));
+        assert!(!records.contains_key("wendell"));
+        assert!(records.contains_key("krabappel"));
+
+        // We can apply the second update, as long as we say it's conditional on
+        // the current generation.
+        datastore
+            .dns_update_from_version(&opctx, update2, gen2)
+            .await
+            .expect("failed to update from first generation");
+        let config = datastore
+            .dns_config_read(&opctx, DnsGroup::Internal)
+            .await
+            .expect("failed to read config");
+        assert_eq!(u64::from(gen2.next()), config.generation);
+        assert_eq!(1, config.zones.len());
+        let records = &config.zones[0].records;
+        assert!(records.contains_key("nelson"));
+        assert!(!records.contains_key("wendell"));
+        assert!(!records.contains_key("krabappel"));
+        assert!(records.contains_key("hoover"));
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();

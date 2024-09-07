@@ -4,6 +4,8 @@ These tests run in Buildomat. They are built by the xref:../.github/buildomat/jo
 
 This package is not built or run by default (it is excluded from `default-members` in xref:../Cargo.toml[]).
 
+See also: xref:../live-tests/README.adoc[omicron-live-tests].
+
 == Running these tests on your machine
 
 1. xref:../docs/how-to-run.adoc[Make yourself a Gimlet].

@@ -58,32 +58,29 @@ impl IgnitionPopup {
     ) -> PopupBuilder<'static> {
         PopupBuilder {
             header: Line::from(vec![Span::styled(
-                format!("IGNITION: {}", component),
+                format!("IGNITION: {}", component.to_string_uppercase()),
                 style::header(true),
             )]),
-            body: Text {
-                lines: vec![
-                    Line::from(vec![Span::styled(
-                        "Power On",
-                        style::line(
-                            self.selected_command == IgnitionCommand::PowerOn,
-                        ),
-                    )]),
-                    Line::from(vec![Span::styled(
-                        "Power Off",
-                        style::line(
-                            self.selected_command == IgnitionCommand::PowerOff,
-                        ),
-                    )]),
-                    Line::from(vec![Span::styled(
-                        "Power Reset",
-                        style::line(
-                            self.selected_command
-                                == IgnitionCommand::PowerReset,
-                        ),
-                    )]),
-                ],
-            },
+            body: Text::from(vec![
+                Line::from(vec![Span::styled(
+                    "Power On",
+                    style::line(
+                        self.selected_command == IgnitionCommand::PowerOn,
+                    ),
+                )]),
+                Line::from(vec![Span::styled(
+                    "Power Off",
+                    style::line(
+                        self.selected_command == IgnitionCommand::PowerOff,
+                    ),
+                )]),
+                Line::from(vec![Span::styled(
+                    "Power Reset",
+                    style::line(
+                        self.selected_command == IgnitionCommand::PowerReset,
+                    ),
+                )]),
+            ]),
             buttons: vec![ButtonText::new("Close", "Esc")],
         }
     }

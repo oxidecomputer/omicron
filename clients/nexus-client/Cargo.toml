@@ -4,12 +4,17 @@ version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 
+[lints]
+workspace = true
+
 [dependencies]
 chrono.workspace = true
 futures.workspace = true
-ipnetwork.workspace = true
+nexus-types.workspace = true
+nexus-sled-agent-shared.workspace = true
 omicron-common.workspace = true
 omicron-passwords.workspace = true
+oxnet.workspace = true
 progenitor.workspace = true
 regress.workspace = true
 reqwest = { workspace = true, features = ["rustls-tls", "stream"] }
@@ -19,3 +24,4 @@ serde_json.workspace = true
 slog.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
+omicron-uuid-kinds.workspace = true

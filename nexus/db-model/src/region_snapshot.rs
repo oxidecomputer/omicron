@@ -27,12 +27,35 @@ pub struct RegionSnapshot {
     pub region_id: Uuid,
     pub snapshot_id: Uuid,
 
-    // used for identifying volumes that reference this
+    /// used for identifying volumes that reference this
     pub snapshot_addr: String,
 
-    // how many volumes reference this?
+    /// how many volumes reference this?
     pub volume_references: i64,
 
-    // true if part of a volume's `resources_to_clean_up` already
+    /// true if part of a volume's `resources_to_clean_up` already
+    // this column was added in `schema/crdb/6.0.0/up1.sql` with a default of
+    // false, so instruct serde to deserialize default as false if an old
+    // serialized version of RegionSnapshot is being deserialized.
+    #[serde(default)]
     pub deleting: bool,
+}
+
+impl RegionSnapshot {
+    pub fn new(
+        dataset_id: Uuid,
+        region_id: Uuid,
+        snapshot_id: Uuid,
+        snapshot_addr: String,
+    ) -> Self {
+        RegionSnapshot {
+            dataset_id,
+            region_id,
+            snapshot_id,
+            snapshot_addr,
+
+            volume_references: 0,
+            deleting: false,
+        }
+    }
 }

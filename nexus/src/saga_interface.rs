@@ -13,10 +13,9 @@ use std::sync::Arc;
 // TODO-design Should this be the same thing as ServerContext?  It's
 // very analogous, but maybe there's utility in having separate views for the
 // HTTP server and sagas.
-pub(crate) struct SagaContext {
+pub struct SagaContext {
     nexus: Arc<Nexus>,
     log: Logger,
-    authz: Arc<authz::Authz>,
 }
 
 impl fmt::Debug for SagaContext {
@@ -26,12 +25,8 @@ impl fmt::Debug for SagaContext {
 }
 
 impl SagaContext {
-    pub(crate) fn new(
-        nexus: Arc<Nexus>,
-        log: Logger,
-        authz: Arc<authz::Authz>,
-    ) -> SagaContext {
-        SagaContext { authz, nexus, log }
+    pub(crate) fn new(nexus: Arc<Nexus>, log: Logger) -> SagaContext {
+        SagaContext { nexus, log }
     }
 
     pub(crate) fn log(&self) -> &Logger {
@@ -39,7 +34,7 @@ impl SagaContext {
     }
 
     pub(crate) fn authz(&self) -> &Arc<authz::Authz> {
-        &self.authz
+        &self.nexus.authz()
     }
 
     pub(crate) fn nexus(&self) -> &Arc<Nexus> {

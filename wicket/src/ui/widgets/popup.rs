@@ -195,7 +195,7 @@ impl PopupScrollability for Scrollable {
 ///
 /// This is currently 80% of screen width.
 pub fn popup_max_width(full_screen_width: u16) -> u16 {
-    (full_screen_width as u32 * 4 / 5) as u16
+    (u32::from(full_screen_width) * 4 / 5) as u16
 }
 
 /// Returns the maximum width that this popup can have, not including outer
@@ -210,7 +210,7 @@ pub fn popup_max_content_width(full_screen_width: u16) -> u16 {
 ///
 /// This is currently 80% of screen height.
 pub fn popup_max_height(full_screen_height: u16) -> u16 {
-    (full_screen_height as u32 * 4 / 5) as u16
+    (u32::from(full_screen_height) * 4 / 5) as u16
 }
 
 /// Returns the wrap options that should be used in most cases for popups.
@@ -464,7 +464,7 @@ pub fn draw_buttons(
     let button_rects = Layout::default()
         .direction(Direction::Horizontal)
         .horizontal_margin(2)
-        .constraints(constraints.as_ref())
+        .constraints(constraints)
         .split(rect);
 
     let block = Block::default()

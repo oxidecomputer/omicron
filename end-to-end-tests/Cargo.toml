@@ -4,24 +4,37 @@ version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow = { workspace = true, features = ["backtrace"] }
 async-trait.workspace = true
 base64.workspace = true
-camino.workspace = true
 chrono.workspace = true
-futures.workspace = true
 http.workspace = true
+hyper.workspace = true
 omicron-sled-agent.workspace = true
 omicron-test-utils.workspace = true
 oxide-client.workspace = true
 rand.workspace = true
-reqwest.workspace = true
-russh = "0.38.0"
-russh-keys = "0.38.0"
+reqwest = { workspace = true, features = ["cookies"] }
+russh = "0.45.0"
+russh-keys = "0.45.0"
+serde.workspace = true
 serde_json.workspace = true
+sled-agent-types.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 toml.workspace = true
-trust-dns-resolver.workspace = true
+hickory-resolver.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
+ispf.workspace = true
+internet-checksum.workspace = true
+humantime.workspace = true
+socket2.workspace = true
+colored.workspace = true
+anstyle.workspace = true
+clap.workspace = true
+dhcproto = "0.12"
+macaddr.workspace = true

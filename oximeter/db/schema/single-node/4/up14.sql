@@ -1,0 +1,1 @@
+ALTER TABLE oximeter.measurements_cumulativef32 MODIFY COLUMN datum Nullable(Float32)

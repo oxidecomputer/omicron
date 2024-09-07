@@ -9,24 +9,6 @@ set -o pipefail
 LISTEN_ADDR="$(svcprop -c -p config/listen_addr "${SMF_FMRI}")"
 LISTEN_PORT="$(svcprop -c -p config/listen_port "${SMF_FMRI}")"
 DATASTORE="$(svcprop -c -p config/store "${SMF_FMRI}")"
-DATALINK="$(svcprop -c -p config/datalink "${SMF_FMRI}")"
-GATEWAY="$(svcprop -c -p config/gateway "${SMF_FMRI}")"
-
-if [[ $DATALINK == unknown ]] || [[ $GATEWAY == unknown ]]; then
-    printf 'ERROR: missing datalink or gateway\n' >&2
-    exit "$SMF_EXIT_ERR_CONFIG"
-fi
-
-# TODO remove when https://github.com/oxidecomputer/stlouis/issues/435 is addressed
-ipadm delete-if "$DATALINK" || true
-ipadm create-if -t "$DATALINK"
-
-ipadm set-ifprop -t -p mtu=9000 -m ipv4 "$DATALINK"
-ipadm set-ifprop -t -p mtu=9000 -m ipv6 "$DATALINK"
-
-ipadm show-addr "$DATALINK/ll" || ipadm create-addr -t -T addrconf "$DATALINK/ll"
-ipadm show-addr "$DATALINK/omicron6"  || ipadm create-addr -t -T static -a "$LISTEN_ADDR" "$DATALINK/omicron6"
-route get -inet6 default -inet6 "$GATEWAY" || route add -inet6 default -inet6 "$GATEWAY"
 
 # Retrieve hostnames (SRV records in internal DNS) of all keeper nodes.
 K_ADDRS="$(/opt/oxide/internal-dns-cli/bin/dnswait clickhouse-keeper -H)"
@@ -57,20 +39,22 @@ KEEPER_HOST_01="${keepers[0]}"
 KEEPER_HOST_02="${keepers[1]}"
 KEEPER_HOST_03="${keepers[2]}"
 
-# Generate unique reproduceable number IDs by removing letters from KEEPER_IDENTIFIER_*
-# Keeper IDs must be numbers, and they cannot be reused (i.e. when a keeper node is 
-# unrecoverable the ID must be changed to something new). 
-# By trimming the hosts we can make sure all keepers will always be up to date when 
-# a new keeper is spun up. Clickhouse does not allow very large numbers, so we will
-# be reducing to 7 characters. This should be enough entropy given the small amount
-# of keepers we have.
+# Generate unique reproduceable number IDs by removing letters from
+# KEEPER_IDENTIFIER_* Keeper IDs must be numbers, and they cannot be reused
+# (i.e. when a keeper node is unrecoverable the ID must be changed to something
+# new). By trimming the hosts we can make sure all keepers will always be up to
+# date when a new keeper is spun up. Clickhouse does not allow very large
+# numbers, so we will be reducing to 7 characters. This should be enough
+# entropy given the small amount of keepers we have.
 KEEPER_ID_01="$( echo "${KEEPER_HOST_01}" | tr -dc [:digit:] | cut -c1-7)"
 KEEPER_ID_02="$( echo "${KEEPER_HOST_02}" | tr -dc [:digit:] | cut -c1-7)"
 KEEPER_ID_03="$( echo "${KEEPER_HOST_03}" | tr -dc [:digit:] | cut -c1-7)"
 
-# Identify the node type this is as this will influence how the config is constructed
-# TODO(https://github.com/oxidecomputer/omicron/issues/3824): There are probably much better ways to do this service name lookup, but this works
-# for now. The services contain the same IDs as the hostnames.
+# Identify the node type this is as this will influence how the config is
+# constructed
+# TODO(https://github.com/oxidecomputer/omicron/issues/3824): There are
+# probably much better ways to do this service name lookup, but this works for
+# now. The services contain the same IDs as the hostnames.
 KEEPER_SVC="$(zonename | tr -dc [:digit:] | cut -c1-7)"
 if [[ $KEEPER_ID_01 == $KEEPER_SVC ]]
 then
@@ -86,9 +70,9 @@ else
     exit "$SMF_EXIT_ERR_CONFIG"
 fi
 
-# Setting environment variables this way is best practice, but has the downside of
-# obscuring the field values to anyone ssh=ing into the zone.  To mitigate this,
-# we will be saving them to ${DATASTORE}/config_env_vars
+# Setting environment variables this way is best practice, but has the downside
+# of obscuring the field values to anyone ssh=ing into the zone.  To mitigate
+# this, we will be saving them to ${DATASTORE}/config_env_vars
 export CH_LOG="${DATASTORE}/clickhouse-keeper.log"
 export CH_ERROR_LOG="${DATASTORE}/clickhouse-keeper.err.log"
 export CH_LISTEN_ADDR=${LISTEN_ADDR}
@@ -121,7 +105,7 @@ CH_KEEPER_HOST_03="${CH_KEEPER_HOST_03}""
 
 echo $content >> "${DATASTORE}/config_env_vars"
 
-# The clickhouse binary must be run from within the directory that contains it. 
+# The clickhouse binary must be run from within the directory that contains it.
 # Otherwise, it does not automatically detect the configuration files, nor does
 # it append them when necessary
 cd /opt/oxide/clickhouse_keeper/

@@ -4,11 +4,16 @@
 <service_bundle type='manifest' name='wicketd'>
 
 <service name='oxide/wicketd' type='service' version='1'>
-  <create_default_instance enabled='false' />
+  <create_default_instance enabled='true' />
 
   <dependency name='multi_user' grouping='require_all' restart_on='none'
     type='service'>
   <service_fmri value='svc:/milestone/multi-user:default' />
+  </dependency>
+
+  <dependency name='switch_zone_setup' grouping='require_all' restart_on='none'
+    type='service'>
+  <service_fmri value='svc:/oxide/switch_zone_setup:default' />
   </dependency>
 
   <exec_method type='method' name='start'
@@ -32,7 +37,7 @@
     it expected https).
   -->
   <exec_method type='method' name='refresh'
-      exec='curl -X POST http://%{config/address}/reload-config'
+      exec='/opt/oxide/wicketd/bin/wicketd refresh-config /var/svc/manifest/site/wicketd/config.toml --address %{config/address}'
       timeout_seconds='0' />
 
   <property_group name='startd' type='framework'>
@@ -45,7 +50,6 @@
     <propval name='mgs-address' type='astring' value='unknown' />
     <propval name='nexus-proxy-address' type='astring' value='unknown' />
     <propval name='baseboard-file' type='astring' value='unknown' />
-
     <!--
       In a standard deployment, this will remain `unknown` until rack setup
       is complete, at which point it will be populated. Prior to this being

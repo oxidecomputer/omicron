@@ -58,6 +58,8 @@ use std::fmt::Debug;
 use std::num::NonZeroU32;
 use uuid::Uuid;
 
+use super::SimpleIdentity;
+
 // General pagination infrastructure
 
 /// Specifies which page of results we're on
@@ -147,15 +149,14 @@ pub fn marker_for_id<S, T: ObjectIdentity>(_: &S, t: &T) -> Uuid {
 ///
 /// This is intended for use with [`ScanByNameOrId::results_page`] with objects
 /// that impl [`ObjectIdentity`].
-pub fn marker_for_name_or_id<T: ObjectIdentity, Selector>(
+pub fn marker_for_name_or_id<T: SimpleIdentity, Selector>(
     scan: &ScanByNameOrId<Selector>,
     item: &T,
 ) -> NameOrId {
-    let identity = item.identity();
     match scan.sort_by {
-        NameOrIdSortMode::NameAscending => identity.name.clone().into(),
-        NameOrIdSortMode::NameDescending => identity.name.clone().into(),
-        NameOrIdSortMode::IdAscending => identity.id.into(),
+        NameOrIdSortMode::NameAscending => item.name().clone().into(),
+        NameOrIdSortMode::NameDescending => item.name().clone().into(),
+        NameOrIdSortMode::IdAscending => item.id().into(),
     }
 }
 

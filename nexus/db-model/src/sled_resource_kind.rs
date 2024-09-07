@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 impl_enum_type!(
     #[derive(Clone, SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "sled_resource_kind"))]
+    #[diesel(postgres_type(name = "sled_resource_kind", schema = "public"))]
     pub struct SledResourceKindEnum;
 
     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, Serialize, Deserialize, PartialEq)]
@@ -15,8 +15,5 @@ impl_enum_type!(
     pub enum SledResourceKind;
 
     // Enum values
-    Dataset => b"dataset"
-    Service => b"service"
     Instance => b"instance"
-    Reserved => b"reserved"
 );

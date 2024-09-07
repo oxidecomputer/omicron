@@ -20,6 +20,7 @@ pub use self::location_map::SwitchPortConfig;
 pub use self::location_map::SwitchPortDescription;
 use self::location_map::ValidatedLocationConfig;
 use crate::error::SpCommsError;
+use crate::error::SpLookupError;
 use crate::error::StartupError;
 use gateway_messages::IgnitionState;
 use gateway_sp_comms::default_discovery_addr;
@@ -69,12 +70,54 @@ impl SpIdentifier {
     }
 }
 
+impl From<gateway_types::component::SpIdentifier> for SpIdentifier {
+    fn from(id: gateway_types::component::SpIdentifier) -> Self {
+        Self {
+            typ: id.typ.into(),
+            // id.slot may come from an untrusted source, but usize >= 32 bits
+            // on any platform that will run this code, so unwrap is fine
+            slot: usize::try_from(id.slot).unwrap(),
+        }
+    }
+}
+
+impl From<SpIdentifier> for gateway_types::component::SpIdentifier {
+    fn from(id: SpIdentifier) -> Self {
+        Self {
+            typ: id.typ.into(),
+            // id.slot comes from a trusted source (crate::management_switch)
+            // and will not exceed u32::MAX
+            slot: u32::try_from(id.slot).unwrap(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SpType {
     Switch,
     Sled,
     Power,
+}
+
+impl From<gateway_types::component::SpType> for SpType {
+    fn from(typ: gateway_types::component::SpType) -> Self {
+        match typ {
+            gateway_types::component::SpType::Sled => Self::Sled,
+            gateway_types::component::SpType::Power => Self::Power,
+            gateway_types::component::SpType::Switch => Self::Switch,
+        }
+    }
+}
+
+impl From<SpType> for gateway_types::component::SpType {
+    fn from(typ: SpType) -> Self {
+        match typ {
+            SpType::Sled => Self::Sled,
+            SpType::Power => Self::Power,
+            SpType::Switch => Self::Switch,
+        }
+    }
 }
 
 // We derive `Serialize` to be able to send `SwitchPort`s to usdt probes, but
@@ -274,18 +317,18 @@ impl ManagementSwitch {
         self.location_map.get().is_some()
     }
 
-    fn location_map(&self) -> Result<&LocationMap, SpCommsError> {
+    fn location_map(&self) -> Result<&LocationMap, SpLookupError> {
         let discovery_result = self
             .location_map
             .get()
-            .ok_or(SpCommsError::DiscoveryNotYetComplete)?;
+            .ok_or(SpLookupError::DiscoveryNotYetComplete)?;
         discovery_result
             .as_ref()
-            .map_err(|s| SpCommsError::DiscoveryFailed { reason: s.clone() })
+            .map_err(|s| SpLookupError::DiscoveryFailed { reason: s.clone() })
     }
 
     /// Get the identifier of our local switch.
-    pub fn local_switch(&self) -> Result<SpIdentifier, SpCommsError> {
+    pub fn local_switch(&self) -> Result<SpIdentifier, SpLookupError> {
         let location_map = self.location_map()?;
         Ok(location_map.port_to_id(self.local_ignition_controller_port))
     }
@@ -305,11 +348,11 @@ impl ManagementSwitch {
     /// This method will fail if discovery is not yet complete (i.e., we don't
     /// know the logical identifiers of any SP yet!) or if `id` specifies an SP
     /// that doesn't exist in our discovered location map.
-    fn get_port(&self, id: SpIdentifier) -> Result<SwitchPort, SpCommsError> {
+    fn get_port(&self, id: SpIdentifier) -> Result<SwitchPort, SpLookupError> {
         let location_map = self.location_map()?;
         let port = location_map
             .id_to_port(id)
-            .ok_or(SpCommsError::SpDoesNotExist(id))?;
+            .ok_or(SpLookupError::SpDoesNotExist(id))?;
         Ok(port)
     }
 
@@ -320,7 +363,7 @@ impl ManagementSwitch {
     /// This method will fail if discovery is not yet complete (i.e., we don't
     /// know the logical identifiers of any SP yet!) or if `id` specifies an SP
     /// that doesn't exist in our discovered location map.
-    pub fn sp(&self, id: SpIdentifier) -> Result<&SingleSp, SpCommsError> {
+    pub fn sp(&self, id: SpIdentifier) -> Result<&SingleSp, SpLookupError> {
         let port = self.get_port(id)?;
         Ok(self.port_to_sp(port))
     }
@@ -335,7 +378,7 @@ impl ManagementSwitch {
     pub fn ignition_target(
         &self,
         id: SpIdentifier,
-    ) -> Result<u8, SpCommsError> {
+    ) -> Result<u8, SpLookupError> {
         let port = self.get_port(id)?;
         Ok(self.port_to_ignition_target[port.0])
     }
@@ -347,7 +390,7 @@ impl ManagementSwitch {
     /// therefore can't map our switch ports to SP identities).
     pub(crate) fn all_sps(
         &self,
-    ) -> Result<impl Iterator<Item = (SpIdentifier, &SingleSp)>, SpCommsError>
+    ) -> Result<impl Iterator<Item = (SpIdentifier, &SingleSp)>, SpLookupError>
     {
         let location_map = self.location_map()?;
         Ok(location_map
@@ -383,7 +426,14 @@ impl ManagementSwitch {
     > {
         let controller = self.ignition_controller();
         let location_map = self.location_map()?;
-        let bulk_state = controller.bulk_ignition_state().await?;
+        let bulk_state =
+            controller.bulk_ignition_state().await.map_err(|err| {
+                SpCommsError::SpCommunicationFailed {
+                    sp: location_map
+                        .port_to_id(self.local_ignition_controller_port),
+                    err,
+                }
+            })?;
 
         Ok(bulk_state.into_iter().enumerate().filter_map(|(target, state)| {
             // If the SP returns an ignition target we don't have a port
@@ -402,11 +452,8 @@ impl ManagementSwitch {
                 None => {
                     warn!(
                         self.log,
-                        concat!(
-                            "ignoring unknown ignition target {}",
-                            " returned by ignition controller SP"
-                        ),
-                        target,
+                        "ignoring unknown ignition target {target} \
+                         returned by ignition controller SP",
                     );
                     None
                 }

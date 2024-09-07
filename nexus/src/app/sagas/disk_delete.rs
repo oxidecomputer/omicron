@@ -32,10 +32,8 @@ pub(crate) struct Params {
 declare_saga_actions! {
     disk_delete;
     DELETE_DISK_RECORD -> "deleted_disk" {
-        // TODO: See the comment on the "DeleteRegions" step,
-        // we may want to un-delete the disk if we cannot remove
-        // underlying regions.
         + sdd_delete_disk_record
+        - sdd_delete_disk_record_undo
     }
     SPACE_ACCOUNT -> "no_result1" {
         + sdd_account_space
@@ -117,6 +115,21 @@ async fn sdd_delete_disk_record(
     Ok(disk)
 }
 
+async fn sdd_delete_disk_record_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+
+    osagactx
+        .datastore()
+        .project_undelete_disk_set_faulted_no_auth(&params.disk_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    Ok(())
+}
+
 async fn sdd_account_space(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
@@ -171,38 +184,29 @@ pub(crate) mod test {
         app::saga::create_saga_dag, app::sagas::disk_delete::Params,
         app::sagas::disk_delete::SagaDiskDelete,
     };
-    use dropshot::test_util::ClientTestContext;
     use nexus_db_model::Disk;
     use nexus_db_queries::authn::saga::Serialized;
     use nexus_db_queries::context::OpContext;
-    use nexus_test_utils::resource_helpers::create_ip_pool;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::external_api::params;
     use omicron_common::api::external::Name;
-    use uuid::Uuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
 
     const PROJECT_NAME: &str = "springfield-squidport";
 
-    async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
-        create_ip_pool(&client, "p0", None).await;
-        let project = create_project(client, PROJECT_NAME).await;
-        project.identity.id
-    }
-
     pub fn test_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
         OpContext::for_tests(
             cptestctx.logctx.log.new(o!()),
-            cptestctx.server.apictx.nexus.datastore().clone(),
+            cptestctx.server.server_context().nexus.datastore().clone(),
         )
     }
 
     async fn create_disk(cptestctx: &ControlPlaneTestContext) -> Disk {
-        let nexus = &cptestctx.server.apictx.nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let opctx = test_opctx(&cptestctx);
 
         let project_selector = params::ProjectSelector {
@@ -228,11 +232,11 @@ pub(crate) mod test {
         DiskTest::new(cptestctx).await;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx.nexus;
-        let project_id = create_org_and_project(&client).await;
+        let nexus = &cptestctx.server.server_context().nexus;
+        let project_id = create_project(client, PROJECT_NAME).await.identity.id;
         let disk = create_disk(&cptestctx).await;
 
-        // Build the saga DAG with the provided test parameters
+        // Build the saga DAG with the provided test parameters and run it.
         let opctx = test_opctx(&cptestctx);
         let params = Params {
             serialized_authn: Serialized::for_opctx(&opctx),
@@ -240,11 +244,7 @@ pub(crate) mod test {
             disk_id: disk.id(),
             volume_id: disk.volume_id,
         };
-        let dag = create_saga_dag::<SagaDiskDelete>(params).unwrap();
-        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
-
-        // Actually run the saga
-        nexus.run_saga(runnable_saga).await.unwrap();
+        nexus.sagas.saga_execute::<SagaDiskDelete>(params).await.unwrap();
     }
 
     #[nexus_test(server = crate::Server)]
@@ -254,8 +254,8 @@ pub(crate) mod test {
         let test = DiskTest::new(cptestctx).await;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx.nexus;
-        let project_id = create_org_and_project(&client).await;
+        let nexus = &cptestctx.server.server_context().nexus;
+        let project_id = create_project(client, PROJECT_NAME).await.identity.id;
         let disk = create_disk(&cptestctx).await;
 
         // Build the saga DAG with the provided test parameters

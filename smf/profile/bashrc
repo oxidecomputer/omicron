@@ -1,0 +1,42 @@
+
+C_RED='\[\033[01;31m\]'
+C_GREEN='\[\033[01;32m\]'
+C_CYAN='\[\033[01;36m\]'
+C_BLD='\[\033[1m\]'
+C_NUL='\[\033[00m\]'
+
+typeset _hst="$HOSTNAME"
+typeset _hstc="$C_RED$HOSTNAME"
+case "$_hst" in
+    oxz_switch)
+	# Try to determine which switch zone we are
+	_switchid=$(curl -s http://localhost:12225/local/switch-id \
+	    | /opt/ooce/bin/jq -r .slot)
+	if (( $? == 0 )) && [[ -n "$_switchid" ]]; then
+		_hst+="$_switchid"
+		_hstc+="$C_CYAN$_switchid"
+	fi
+	;;
+    oxz_*-*)
+	# Shorten the hostname by truncating the UUID so that the prompt
+	# doesn't take up an excessive amount of width
+	_hst="${HOSTNAME%%-*}"
+	_hstc="$C_RED${HOSTNAME%%-*}"
+	;;
+esac
+
+if [[ -n $SSH_CLIENT ]]; then
+	echo -ne "\033]0;${_hst} \007"
+	export PROMPT_COMMAND='history -a'
+fi
+
+case "$TERM" in
+xterm*|rxvt*|screen*|sun-color)
+	PS1="$C_GREEN\\u$C_NUL@$_hstc$C_NUL:$C_RED\\w$C_NUL$C_BLD\\\$$C_NUL "
+        ;;
+*)
+	PS1="\\u@$_hst:\\w\\$ "
+esac
+
+export PS1
+

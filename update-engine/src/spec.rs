@@ -15,7 +15,7 @@ use serde::{de::DeserializeOwned, Serialize};
 ///
 /// NOTE: `StepSpec` is only required to implement `JsonSchema` to obtain the
 /// name of the schema. This is an upstream limitation in `JsonSchema`.
-pub trait StepSpec: JsonSchema + Send {
+pub trait StepSpec: JsonSchema + Send + 'static {
     /// A component associated with each step.
     type Component: Clone
         + fmt::Debug
@@ -149,8 +149,19 @@ pub struct NestedError {
 }
 
 impl NestedError {
+    /// Creates a new `NestedError` from an error.
+    pub fn new(error: &dyn std::error::Error) -> Self {
+        Self {
+            message: format!("{}", error),
+            source: error.source().map(|s| Box::new(Self::new(s))),
+        }
+    }
+
     /// Creates a new `NestedError` from a message and a list of causes.
-    pub fn new(message: String, causes: Vec<String>) -> Self {
+    pub fn from_message_and_causes(
+        message: String,
+        causes: Vec<String>,
+    ) -> Self {
         // Yes, this is an actual singly-linked list. You rarely ever see them
         // in Rust but they're required to implement Error::source.
         let mut next = None;
@@ -174,6 +185,47 @@ impl std::error::Error for NestedError {
     }
 }
 
+mod nested_error_serde {
+    use super::*;
+    use serde::Deserialize;
+
+    #[derive(Serialize, Deserialize)]
+    struct SerializedNestedError {
+        message: String,
+        causes: Vec<String>,
+    }
+
+    impl Serialize for NestedError {
+        fn serialize<S: serde::Serializer>(
+            &self,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error> {
+            let mut causes = Vec::new();
+            let mut cause = self.source.as_ref();
+            while let Some(c) = cause {
+                causes.push(c.message.clone());
+                cause = c.source.as_ref();
+            }
+
+            let serialized =
+                SerializedNestedError { message: self.message.clone(), causes };
+            serialized.serialize(serializer)
+        }
+    }
+
+    impl<'de> Deserialize<'de> for NestedError {
+        fn deserialize<D: serde::Deserializer<'de>>(
+            deserializer: D,
+        ) -> Result<Self, D::Error> {
+            let serialized = SerializedNestedError::deserialize(deserializer)?;
+            Ok(NestedError::from_message_and_causes(
+                serialized.message,
+                serialized.causes,
+            ))
+        }
+    }
+}
+
 impl AsError for NestedError {
     fn as_error(&self) -> &(dyn std::error::Error + 'static) {
         self
@@ -183,7 +235,7 @@ impl AsError for NestedError {
 /// Trait that abstracts over concrete errors and `anyhow::Error`.
 ///
 /// This needs to be manually implemented for any custom error types.
-pub trait AsError: fmt::Debug + Send + Sync {
+pub trait AsError: fmt::Debug + Send + Sync + 'static {
     fn as_error(&self) -> &(dyn std::error::Error + 'static);
 }
 

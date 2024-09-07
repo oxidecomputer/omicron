@@ -1,0 +1,13 @@
+disallowed-methods = [
+    # `ON CONFLICT ... WHERE ... DO UPDATE` is easy to misuse.
+    #
+    # If you mean a conditional upsert, import
+    # diesel::query_dsl::methods::FilterDsl, then use
+    # `do_update().set(...).filter(...)`. (This is not part of the
+    # documentation as of Diesel 2.1.4, but it works.)
+    #
+    # If you mean to specify a bound on a partial index, use the
+    # `IncompleteOnConflictExt::as_partial_index` in `nexus-db-queries`.
+    # See the documentation of that method for more.
+    "diesel::upsert::DecoratableTarget::filter_target",
+]

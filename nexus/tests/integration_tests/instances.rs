@@ -4,35 +4,51 @@
 
 //! Tests basic instance support in the API
 
+use crate::integration_tests::metrics::wait_for_producer;
+
+use super::external_ips::floating_ip_get;
+use super::external_ips::get_floating_ip_by_id_url;
 use super::metrics::{get_latest_silo_metric, get_latest_system_metric};
 
 use camino::Utf8Path;
 use http::method::Method;
 use http::StatusCode;
+use itertools::Itertools;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
-use nexus_db_queries::db::fixed_data::silo::SILO_ID;
+use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO_ID;
 use nexus_db_queries::db::lookup::LookupPath;
+use nexus_db_queries::db::DataStore;
 use nexus_test_interface::NexusServer;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
+use nexus_test_utils::resource_helpers::assert_ip_pool_utilization;
+use nexus_test_utils::resource_helpers::create_default_ip_pool;
 use nexus_test_utils::resource_helpers::create_disk;
+use nexus_test_utils::resource_helpers::create_floating_ip;
 use nexus_test_utils::resource_helpers::create_ip_pool;
 use nexus_test_utils::resource_helpers::create_local_user;
 use nexus_test_utils::resource_helpers::create_silo;
 use nexus_test_utils::resource_helpers::grant_iam;
+use nexus_test_utils::resource_helpers::link_ip_pool;
 use nexus_test_utils::resource_helpers::object_create;
+use nexus_test_utils::resource_helpers::object_create_error;
+use nexus_test_utils::resource_helpers::object_delete;
+use nexus_test_utils::resource_helpers::object_delete_error;
+use nexus_test_utils::resource_helpers::object_put;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
-use nexus_test_utils::resource_helpers::populate_ip_pool;
 use nexus_test_utils::resource_helpers::DiskTest;
 use nexus_test_utils::start_sled_agent;
+use nexus_types::external_api::params::SshKeyCreate;
 use nexus_types::external_api::shared::IpKind;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::shared::Ipv4Range;
 use nexus_types::external_api::shared::SiloIdentityMode;
+use nexus_types::external_api::views::SshKey;
 use nexus_types::external_api::{params, views};
 use nexus_types::identity::Resource;
+use nexus_types::internal_api::params::InstanceMigrateRequest;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskState;
@@ -42,19 +58,28 @@ use omicron_common::api::external::Instance;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::InstanceNetworkInterface;
 use omicron_common::api::external::InstanceState;
-use omicron_common::api::external::Ipv4Net;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::Vni;
+use omicron_common::api::internal::shared::ResolvedVpcRoute;
+use omicron_common::api::internal::shared::RouterId;
+use omicron_common::api::internal::shared::RouterKind;
 use omicron_nexus::app::MAX_MEMORY_BYTES_PER_INSTANCE;
 use omicron_nexus::app::MAX_VCPU_PER_INSTANCE;
 use omicron_nexus::app::MIN_MEMORY_BYTES_PER_INSTANCE;
 use omicron_nexus::Nexus;
 use omicron_nexus::TestInterfaces as _;
 use omicron_sled_agent::sim::SledAgent;
+use omicron_test_utils::dev::poll::wait_for_condition;
+use omicron_uuid_kinds::PropolisUuid;
+use omicron_uuid_kinds::SledUuid;
+use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use sled_agent_client::TestInterfaces as _;
+use std::collections::HashSet;
 use std::convert::TryFrom;
+use std::net::Ipv4Addr;
 use std::sync::Arc;
+use std::time::Duration;
 use uuid::Uuid;
 
 use dropshot::test_util::ClientTestContext;
@@ -62,13 +87,14 @@ use dropshot::{HttpErrorResponseBody, ResultsPage};
 
 use nexus_test_utils::identity_eq;
 use nexus_test_utils::resource_helpers::{
-    create_instance, create_instance_with, create_project,
+    create_instance, create_instance_with, create_instance_with_error,
+    create_project,
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::shared::SiloRole;
 use omicron_sled_agent::sim;
-
-use httptest::{matchers::*, responders::*, Expectation, ServerBuilder};
+use omicron_test_utils::dev::poll;
+use omicron_test_utils::dev::poll::CondCheckError;
 
 type ControlPlaneTestContext =
     nexus_test_utils::ControlPlaneTestContext<omicron_nexus::Server>;
@@ -99,10 +125,11 @@ fn default_vpc_subnets_url() -> String {
     format!("/v1/vpc-subnets?{}&vpc=default", get_project_selector())
 }
 
-async fn create_org_and_project(client: &ClientTestContext) -> Uuid {
-    populate_ip_pool(&client, "default", None).await;
-    let project = create_project(client, PROJECT_NAME).await;
-    project.identity.id
+pub async fn create_project_and_pool(
+    client: &ClientTestContext,
+) -> views::Project {
+    create_default_ip_pool(client).await;
+    create_project(client, PROJECT_NAME).await
 }
 
 #[nexus_test]
@@ -156,12 +183,69 @@ async fn test_instances_access_before_create_returns_not_found(
     );
 }
 
+// Regression tests for https://github.com/oxidecomputer/omicron/issues/4923.
+#[nexus_test]
+async fn test_cannot_create_instance_with_bad_hostname(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    test_create_instance_with_bad_hostname_impl(cptestctx, "bad_hostname")
+        .await;
+}
+
+#[nexus_test]
+async fn test_cannot_create_instance_with_empty_hostname(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    test_create_instance_with_bad_hostname_impl(cptestctx, "").await;
+}
+
+async fn test_create_instance_with_bad_hostname_impl(
+    cptestctx: &ControlPlaneTestContext,
+    hostname: &str,
+) {
+    let client = &cptestctx.external_client;
+    let _project = create_project_and_pool(client).await;
+
+    // Create an instance, with what should be an invalid hostname.
+    //
+    // We'll do this by creating a _valid_ set of parameters, convert it to
+    // JSON, and then muck with the hostname.
+    let instance_name = "happy-accident";
+    let params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: instance_name.parse().unwrap(),
+            description: format!("instance {:?}", instance_name),
+        },
+        ncpus: InstanceCpuCount(4),
+        memory: ByteCount::from_gibibytes_u32(1),
+        hostname: "the-host".parse().unwrap(),
+        user_data:
+            b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
+                .to_vec(),
+        network_interfaces: Default::default(),
+        external_ips: vec![],
+        disks: vec![],
+        start: false,
+        ssh_public_keys: None,
+    };
+    let mut body: serde_json::Value =
+        serde_json::from_str(&serde_json::to_string(&params).unwrap()).unwrap();
+    body["hostname"] = hostname.into();
+    let err = create_instance_with_error(
+        client,
+        PROJECT_NAME,
+        &body,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+    assert!(err.message.contains("Hostnames must comply with RFC 1035"));
+}
+
 #[nexus_test]
 async fn test_instance_access(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    populate_ip_pool(&client, "default", None).await;
-    let project = create_project(client, PROJECT_NAME).await;
+    let project = create_project_and_pool(client).await;
 
     // Create an instance.
     let instance_name = "test-instance";
@@ -205,11 +289,11 @@ async fn test_instances_create_reboot_halt(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.apictx();
+    let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     let instance_name = "just-rainsticks";
 
-    create_org_and_project(&client).await;
+    create_project_and_pool(&client).await;
 
     // Create an instance.
     let instance_url = get_instance_url(instance_name);
@@ -223,7 +307,7 @@ async fn test_instances_create_reboot_halt(
     // These particulars are hardcoded in create_instance().
     assert_eq!(nfoundcpus, 4);
     assert_eq!(instance.memory.to_whole_gibibytes(), 1);
-    assert_eq!(instance.hostname, "the_host");
+    assert_eq!(instance.hostname.as_str(), "the-host");
     assert_eq!(instance.runtime.run_state, InstanceState::Starting);
 
     // Attempt to create a second instance with a conflicting name.
@@ -239,8 +323,9 @@ async fn test_instances_create_reboot_halt(
                 },
                 ncpus: instance.ncpus,
                 memory: instance.memory,
-                hostname: instance.hostname.clone(),
+                hostname: instance.hostname.parse().unwrap(),
                 user_data: vec![],
+                ssh_public_keys: None,
                 network_interfaces:
                     params::InstanceNetworkInterfaceAttachment::Default,
                 external_ips: vec![],
@@ -287,7 +372,8 @@ async fn test_instances_create_reboot_halt(
     );
 
     // Now, simulate completion of instance boot and check the state reported.
-    instance_simulate(nexus, &instance.identity.id).await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+    instance_simulate(nexus, &instance_id).await;
     let instance_next = instance_get(&client, &instance_url).await;
     identity_eq(&instance.identity, &instance_next.identity);
     assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
@@ -316,7 +402,7 @@ async fn test_instances_create_reboot_halt(
     );
 
     let instance = instance_next;
-    instance_simulate(nexus, &instance.identity.id).await;
+    instance_simulate(nexus, &instance_id).await;
     let instance_next = instance_get(&client, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
     assert!(
@@ -335,9 +421,10 @@ async fn test_instances_create_reboot_halt(
     );
 
     let instance = instance_next;
-    instance_simulate(nexus, &instance.identity.id).await;
-    let instance_next = instance_get(&client, &instance_url).await;
-    assert_eq!(instance_next.runtime.run_state, InstanceState::Stopped);
+    instance_simulate(nexus, &instance_id).await;
+    let instance_next =
+        instance_wait_for_state(client, instance_id, InstanceState::Stopped)
+            .await;
     assert!(
         instance_next.runtime.time_run_state_updated
             > instance.runtime.time_run_state_updated
@@ -396,7 +483,7 @@ async fn test_instances_create_reboot_halt(
     );
 
     let instance = instance_next;
-    instance_simulate(nexus, &instance.identity.id).await;
+    instance_simulate(nexus, &instance_id).await;
     let instance_next = instance_get(&client, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
     assert!(
@@ -430,9 +517,10 @@ async fn test_instances_create_reboot_halt(
     .unwrap();
     // assert_eq!(error.message, "cannot reboot instance in state \"stopping\"");
     let instance = instance_next;
-    instance_simulate(nexus, &instance.identity.id).await;
-    let instance_next = instance_get(&client, &instance_url).await;
-    assert_eq!(instance_next.runtime.run_state, InstanceState::Stopped);
+    instance_simulate(nexus, &instance_id).await;
+    let instance_next =
+        instance_wait_for_state(client, instance_id, InstanceState::Stopped)
+            .await;
     assert!(
         instance_next.runtime.time_run_state_updated
             > instance.runtime.time_run_state_updated
@@ -509,7 +597,7 @@ async fn test_instance_start_creates_networking_state(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.apictx();
+    let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     let instance_name = "series-of-tubes";
 
@@ -517,7 +605,7 @@ async fn test_instance_start_creates_networking_state(
     let nsleds = 3;
     let mut additional_sleds = Vec::with_capacity(nsleds);
     for _ in 0..nsleds {
-        let sa_id = Uuid::new_v4();
+        let sa_id = SledUuid::new_v4();
         let log =
             cptestctx.logctx.log.new(o!( "sled_id" => sa_id.to_string() ));
         let addr = cptestctx.server.get_http_server_internal_address().await;
@@ -535,17 +623,16 @@ async fn test_instance_start_creates_networking_state(
         );
     }
 
-    create_org_and_project(&client).await;
+    create_project_and_pool(&client).await;
     let instance_url = get_instance_url(instance_name);
     let instance = create_instance(client, PROJECT_NAME, instance_name).await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
 
     // Drive the instance to Running, then stop it.
-    instance_simulate(nexus, &instance.identity.id).await;
-    let instance =
-        instance_post(&client, instance_name, InstanceOp::Stop).await;
-    instance_simulate(nexus, &instance.identity.id).await;
-    let instance = instance_get(&client, &instance_url).await;
-    assert_eq!(instance.runtime.run_state, InstanceState::Stopped);
+    instance_simulate(nexus, &instance_id).await;
+    instance_post(&client, instance_name, InstanceOp::Stop).await;
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
 
     // Forcibly clear the instance's V2P mappings to simulate what happens when
     // the control plane comes up when an instance is stopped.
@@ -558,9 +645,8 @@ async fn test_instance_start_creates_networking_state(
     }
 
     // Start the instance and make sure that it gets to Running.
-    let instance =
-        instance_post(&client, instance_name, InstanceOp::Start).await;
-    instance_simulate(nexus, &instance.identity.id).await;
+    instance_post(&client, instance_name, InstanceOp::Start).await;
+    instance_simulate(nexus, &instance_id).await;
     let instance = instance_get(&client, &instance_url).await;
     assert_eq!(instance.runtime.run_state, InstanceState::Running);
 
@@ -584,14 +670,6 @@ async fn test_instance_start_creates_networking_state(
         .await
         .unwrap();
 
-    let instance_state = datastore
-        .instance_fetch_with_vmm(&opctx, &authz_instance)
-        .await
-        .unwrap();
-
-    let sled_id =
-        instance_state.sled_id().expect("running instance should have a sled");
-
     let guest_nics = datastore
         .derive_guest_network_interface_info(&opctx, &authz_instance)
         .await
@@ -599,33 +677,77 @@ async fn test_instance_start_creates_networking_state(
 
     assert_eq!(guest_nics.len(), 1);
     for agent in &sled_agents {
-        // TODO(#3107) Remove this bifurcation when Nexus programs all mappings
-        // itself.
-        if agent.id != sled_id {
-            assert_sled_v2p_mappings(
+        assert_sled_v2p_mappings(agent, &nics[0], guest_nics[0].vni).await;
+    }
+
+    // Ensure that the target sled agent for our instance has received
+    // up-to-date VPC routes.
+    let with_vmm = datastore
+        .instance_fetch_with_vmm(&opctx, &authz_instance)
+        .await
+        .unwrap();
+
+    let mut checked = false;
+    for agent in &sled_agents {
+        if Some(agent.id) == with_vmm.sled_id().map(SledUuid::into_untyped_uuid)
+        {
+            assert_sled_vpc_routes(
                 agent,
-                &nics[0],
-                guest_nics[0].vni.clone().into(),
+                &opctx,
+                datastore,
+                nics[0].subnet_id,
+                guest_nics[0].vni,
             )
             .await;
-        } else {
-            assert!(agent.v2p_mappings.lock().await.is_empty());
+            checked = true;
         }
     }
+    assert!(checked);
 }
 
 #[nexus_test]
 async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
+    use nexus_db_model::Migration;
+    use omicron_common::api::internal::nexus::MigrationState;
+    async fn migration_fetch(
+        cptestctx: &ControlPlaneTestContext,
+        migration_id: Uuid,
+    ) -> Migration {
+        use async_bb8_diesel::AsyncRunQueryDsl;
+        use diesel::prelude::*;
+        use nexus_db_queries::db::schema::migration::dsl;
+
+        let datastore =
+            cptestctx.server.server_context().nexus.datastore().clone();
+        let db_state = dsl::migration
+            // N.B. that for the purposes of this test, we explicitly should
+            // *not* filter out migrations that are marked as deleted, as the
+            // migration record is marked as deleted once the migration completes.
+            .filter(dsl::id.eq(migration_id))
+            .select(Migration::as_select())
+            .get_results_async::<Migration>(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
+            .await
+            .unwrap();
+
+        info!(&cptestctx.logctx.log, "refetched migration info from db";
+                "migration" => ?db_state);
+
+        db_state.into_iter().next().unwrap()
+    }
+
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.apictx();
+    let internal_client = &cptestctx.internal_client;
+    let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     let instance_name = "bird-ecology";
 
     // Create a second sled to migrate to/from.
-    let default_sled_id: Uuid =
+    let default_sled_id: SledUuid =
         nexus_test_utils::SLED_AGENT_UUID.parse().unwrap();
     let update_dir = Utf8Path::new("/should/be/unused");
-    let other_sled_id = Uuid::new_v4();
+    let other_sled_id = SledUuid::new_v4();
     let _other_sa = nexus_test_utils::start_sled_agent(
         cptestctx.logctx.log.new(o!("sled_id" => other_sled_id.to_string())),
         cptestctx.server.get_http_server_internal_address().await,
@@ -636,7 +758,7 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     .await
     .unwrap();
 
-    create_org_and_project(&client).await;
+    create_project_and_pool(&client).await;
     let instance_url = get_instance_url(instance_name);
 
     // Explicitly create an instance with no disks. Simulated sled agent assumes
@@ -648,21 +770,23 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
         &params::InstanceNetworkInterfaceAttachment::Default,
         Vec::<params::InstanceDiskAttachment>::new(),
         Vec::<params::ExternalIpCreate>::new(),
+        true,
     )
     .await;
-    let instance_id = instance.identity.id;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
 
     // Poke the instance into an active state.
     instance_simulate(nexus, &instance_id).await;
     let instance_next = instance_get(&client, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
 
-    let original_sled = nexus
-        .instance_sled_id(&instance_id)
+    let sled_info = nexus
+        .active_instance_info(&instance_id, None)
         .await
         .unwrap()
         .expect("running instance should have a sled");
 
+    let original_sled = sled_info.sled_id;
     let dst_sled_id = if original_sled == default_sled_id {
         other_sled_id
     } else {
@@ -670,10 +794,12 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     };
 
     let migrate_url =
-        format!("/v1/instances/{}/migrate", &instance_id.to_string());
-    let _ = NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &migrate_url)
-            .body(Some(&params::InstanceMigrate { dst_sled_id }))
+        format!("/instances/{}/migrate", &instance_id.to_string());
+    let instance = NexusRequest::new(
+        RequestBuilder::new(internal_client, Method::POST, &migrate_url)
+            .body(Some(&InstanceMigrateRequest {
+                dst_sled_id: dst_sled_id.into_untyped_uuid(),
+            }))
             .expect_status(Some(StatusCode::OK)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -683,36 +809,120 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     .parsed_body::<Instance>()
     .unwrap();
 
-    let current_sled = nexus
-        .instance_sled_id(&instance_id)
+    let new_sled_info = nexus
+        .active_instance_info(&instance_id, None)
         .await
         .unwrap()
         .expect("running instance should have a sled");
 
+    let current_sled = new_sled_info.sled_id;
     assert_eq!(current_sled, original_sled);
 
-    // Explicitly simulate the migration action on the target. Simulated
-    // migrations always succeed. The state transition on the target is
-    // sufficient to move the instance back into a Running state (strictly
-    // speaking no further updates from the source are required if the target
-    // successfully takes over).
-    instance_simulate_on_sled(cptestctx, nexus, dst_sled_id, instance_id).await;
-    let instance = instance_get(&client, &instance_url).await;
-    assert_eq!(instance.runtime.run_state, InstanceState::Running);
+    // Ensure that both sled agents report that the migration is in progress.
+    let migration_id = {
+        let datastore = apictx.nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.new(o!()),
+            datastore.clone(),
+        );
+        let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+            .instance_id(instance.identity.id)
+            .lookup_for(nexus_db_queries::authz::Action::Read)
+            .await
+            .unwrap();
+        datastore
+            .instance_refetch(&opctx, &authz_instance)
+            .await
+            .unwrap()
+            .runtime_state
+            .migration_id
+            .expect("since we've started a migration, the instance record must have a migration id!")
+    };
+    let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
+    assert_eq!(migration.target_state, MigrationState::Pending.into());
+    assert_eq!(migration.source_state, MigrationState::Pending.into());
 
-    let current_sled = nexus
-        .instance_sled_id(&instance_id)
+    let info = nexus
+        .active_instance_info(&instance_id, None)
         .await
         .unwrap()
-        .expect("migrated instance should still have a sled");
+        .expect("instance should be on a sled");
+    let src_propolis_id = info.propolis_id;
+    let dst_propolis_id =
+        info.dst_propolis_id.expect("instance should have a migration target");
+
+    // Simulate the migration. We will use `instance_single_step_on_sled` to
+    // single-step both sled-agents through the migration state machine and
+    // ensure that the migration state looks nice at each step.
+    instance_simulate_migration_source(
+        cptestctx,
+        nexus,
+        original_sled,
+        src_propolis_id,
+        migration_id,
+    )
+    .await;
+
+    // Move source to "migrating".
+    vmm_single_step_on_sled(cptestctx, nexus, original_sled, src_propolis_id)
+        .await;
+    vmm_single_step_on_sled(cptestctx, nexus, original_sled, src_propolis_id)
+        .await;
+
+    let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
+    assert_eq!(migration.source_state, MigrationState::InProgress.into());
+    assert_eq!(migration.target_state, MigrationState::Pending.into());
+    let instance = instance_get(&client, &instance_url).await;
+    assert_eq!(instance.runtime.run_state, InstanceState::Migrating);
+
+    // Move target to "migrating".
+    vmm_single_step_on_sled(cptestctx, nexus, dst_sled_id, dst_propolis_id)
+        .await;
+    vmm_single_step_on_sled(cptestctx, nexus, dst_sled_id, dst_propolis_id)
+        .await;
+
+    let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
+    assert_eq!(migration.source_state, MigrationState::InProgress.into());
+    assert_eq!(migration.target_state, MigrationState::InProgress.into());
+    let instance = instance_get(&client, &instance_url).await;
+    assert_eq!(instance.runtime.run_state, InstanceState::Migrating);
+
+    // Move the source to "completed"
+    vmm_simulate_on_sled(cptestctx, nexus, original_sled, src_propolis_id)
+        .await;
+
+    let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
+    assert_eq!(migration.source_state, MigrationState::Completed.into());
+    assert_eq!(migration.target_state, MigrationState::InProgress.into());
+    let instance = dbg!(instance_get(&client, &instance_url).await);
+    assert_eq!(instance.runtime.run_state, InstanceState::Migrating);
+
+    // Move the target to "completed".
+    vmm_simulate_on_sled(cptestctx, nexus, dst_sled_id, dst_propolis_id).await;
+
+    instance_wait_for_state(&client, instance_id, InstanceState::Running).await;
+
+    let current_sled = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("migrated instance should still have a sled")
+        .sled_id;
 
     assert_eq!(current_sled, dst_sled_id);
+
+    let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
+    assert_eq!(migration.target_state, MigrationState::Completed.into());
+    assert_eq!(migration.source_state, MigrationState::Completed.into());
 }
 
 #[nexus_test]
-async fn test_instance_migrate_v2p(cptestctx: &ControlPlaneTestContext) {
+async fn test_instance_migrate_v2p_and_routes(
+    cptestctx: &ControlPlaneTestContext,
+) {
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.apictx();
+    let internal_client = &cptestctx.internal_client;
+    let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     let datastore = nexus.datastore();
     let opctx =
@@ -723,7 +933,7 @@ async fn test_instance_migrate_v2p(cptestctx: &ControlPlaneTestContext) {
     let nsleds = 3;
     let mut other_sleds = Vec::with_capacity(nsleds);
     for _ in 0..nsleds {
-        let sa_id = Uuid::new_v4();
+        let sa_id = SledUuid::new_v4();
         let log = cptestctx.logctx.log.new(o!("sled_id" => sa_id.to_string()));
         let update_dir = Utf8Path::new("/should/be/unused");
         let sa = nexus_test_utils::start_sled_agent(
@@ -740,8 +950,8 @@ async fn test_instance_migrate_v2p(cptestctx: &ControlPlaneTestContext) {
     }
 
     // Set up the project and test instance.
-    populate_ip_pool(&client, "default", None).await;
-    create_project(client, PROJECT_NAME).await;
+    create_project_and_pool(client).await;
+
     let instance = nexus_test_utils::resource_helpers::create_instance_with(
         client,
         PROJECT_NAME,
@@ -751,9 +961,10 @@ async fn test_instance_migrate_v2p(cptestctx: &ControlPlaneTestContext) {
         // located with their instances.
         Vec::<params::InstanceDiskAttachment>::new(),
         Vec::<params::ExternalIpCreate>::new(),
+        true,
     )
     .await;
-    let instance_id = instance.identity.id;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
 
     // The default configuration gives one NIC.
     let nics_url = format!("/v1/network-interfaces?instance={}", instance_id);
@@ -771,7 +982,7 @@ async fn test_instance_migrate_v2p(cptestctx: &ControlPlaneTestContext) {
 
     // Ensure that all of the V2P information is correct.
     let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
-        .instance_id(instance_id)
+        .instance_id(instance_id.into_untyped_uuid())
         .lookup_for(nexus_db_queries::authz::Action::Read)
         .await
         .unwrap();
@@ -779,52 +990,36 @@ async fn test_instance_migrate_v2p(cptestctx: &ControlPlaneTestContext) {
         .derive_guest_network_interface_info(&opctx, &authz_instance)
         .await
         .unwrap();
+
     let original_sled_id = nexus
-        .instance_sled_id(&instance_id)
+        .active_instance_info(&instance_id, None)
         .await
         .unwrap()
-        .expect("running instance should have a sled");
+        .expect("running instance should have a sled")
+        .sled_id;
 
     let mut sled_agents = vec![cptestctx.sled_agent.sled_agent.clone()];
     sled_agents.extend(other_sleds.iter().map(|tup| tup.1.sled_agent.clone()));
     for sled_agent in &sled_agents {
-        // Starting the instance should have programmed V2P mappings to all the
-        // sleds except the one where the instance is running.
-        //
-        // TODO(#3107): In practice, the instance's sled also has V2P mappings, but
-        // these are established during VMM setup (i.e. as part of creating the
-        // instance's OPTE ports) instead of being established by explicit calls
-        // from Nexus. Simulated sled agent handles the latter calls but does
-        // not currently update any mappings during simulated instance creation,
-        // so the check below verifies that no mappings exist on the instance's
-        // own sled instead of checking for a real mapping. Once Nexus programs
-        // all mappings explicitly (without skipping the instance's current
-        // sled) this bifurcation should be removed.
-        if sled_agent.id != original_sled_id {
-            assert_sled_v2p_mappings(
-                sled_agent,
-                &nics[0],
-                guest_nics[0].vni.clone().into(),
-            )
-            .await;
-        } else {
-            assert!(sled_agent.v2p_mappings.lock().await.is_empty());
-        }
+        assert_sled_v2p_mappings(sled_agent, &nics[0], guest_nics[0].vni).await;
     }
 
-    let dst_sled_id = if original_sled_id == cptestctx.sled_agent.sled_agent.id
-    {
+    let testctx_sled_id =
+        SledUuid::from_untyped_uuid(cptestctx.sled_agent.sled_agent.id);
+    let dst_sled_id = if original_sled_id == testctx_sled_id {
         other_sleds[0].0
     } else {
-        cptestctx.sled_agent.sled_agent.id
+        testctx_sled_id
     };
 
     // Kick off migration and simulate its completion on the target.
     let migrate_url =
-        format!("/v1/instances/{}/migrate", &instance_id.to_string());
+        format!("/instances/{}/migrate", &instance_id.to_string());
     let _ = NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &migrate_url)
-            .body(Some(&params::InstanceMigrate { dst_sled_id }))
+        RequestBuilder::new(internal_client, Method::POST, &migrate_url)
+            .body(Some(&InstanceMigrateRequest {
+                dst_sled_id: dst_sled_id.into_untyped_uuid(),
+            }))
             .expect_status(Some(StatusCode::OK)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -834,14 +1029,55 @@ async fn test_instance_migrate_v2p(cptestctx: &ControlPlaneTestContext) {
     .parsed_body::<Instance>()
     .unwrap();
 
-    instance_simulate_on_sled(cptestctx, nexus, dst_sled_id, instance_id).await;
-    let instance = instance_get(&client, &instance_url).await;
-    assert_eq!(instance.runtime.run_state, InstanceState::Running);
-    let current_sled = nexus
-        .instance_sled_id(&instance_id)
+    let migration_id = {
+        let datastore = apictx.nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.new(o!()),
+            datastore.clone(),
+        );
+        let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+            .instance_id(instance.identity.id)
+            .lookup_for(nexus_db_queries::authz::Action::Read)
+            .await
+            .unwrap();
+        datastore
+            .instance_refetch(&opctx, &authz_instance)
+            .await
+            .unwrap()
+            .runtime_state
+            .migration_id
+            .expect("since we've started a migration, the instance record must have a migration id!")
+    };
+
+    let info = nexus
+        .active_instance_info(&instance_id, None)
         .await
         .unwrap()
-        .expect("migrated instance should have a sled");
+        .expect("instance should be on a sled");
+    let src_propolis_id = info.propolis_id;
+    let dst_propolis_id =
+        info.dst_propolis_id.expect("instance should have a migration target");
+
+    // Tell both sled-agents to pretend to do the migration.
+    instance_simulate_migration_source(
+        cptestctx,
+        nexus,
+        original_sled_id,
+        src_propolis_id,
+        migration_id,
+    )
+    .await;
+    vmm_simulate_on_sled(cptestctx, nexus, original_sled_id, src_propolis_id)
+        .await;
+    vmm_simulate_on_sled(cptestctx, nexus, dst_sled_id, dst_propolis_id).await;
+    instance_wait_for_state(&client, instance_id, InstanceState::Running).await;
+
+    let current_sled = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("migrated instance should have a sled")
+        .sled_id;
     assert_eq!(current_sled, dst_sled_id);
 
     for sled_agent in &sled_agents {
@@ -853,15 +1089,284 @@ async fn test_instance_migrate_v2p(cptestctx: &ControlPlaneTestContext) {
         // updated here because Nexus presumes that the instance's new sled
         // agent will have updated any mappings there. Remove this bifurcation
         // when Nexus programs all mappings explicitly.
-        if sled_agent.id != dst_sled_id {
-            assert_sled_v2p_mappings(
+        if sled_agent.id != dst_sled_id.into_untyped_uuid() {
+            assert_sled_v2p_mappings(sled_agent, &nics[0], guest_nics[0].vni)
+                .await;
+        } else {
+            assert_sled_vpc_routes(
                 sled_agent,
-                &nics[0],
-                guest_nics[0].vni.clone().into(),
+                &opctx,
+                datastore,
+                nics[0].subnet_id,
+                guest_nics[0].vni,
             )
             .await;
         }
     }
+}
+
+// Verifies that if a request to reboot or stop an instance fails because of a
+// 404 error from sled agent, then the instance moves to the Failed state, and
+// can be restarted once it has transitioned to that state..
+#[nexus_test]
+async fn test_instance_failed_after_sled_agent_forgets_vmm_can_be_restarted(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let instance_name = "losing-is-fun";
+    let instance_id = make_forgotten_instance(&cptestctx, instance_name).await;
+
+    // Attempting to reboot the forgotten instance will result in a 404
+    // NO_SUCH_INSTANCE from the sled-agent, which Nexus turns into a 503.
+    expect_instance_reboot_fail(
+        client,
+        instance_name,
+        http::StatusCode::SERVICE_UNAVAILABLE,
+    )
+    .await;
+
+    // Wait for the instance to transition to Failed.
+    instance_wait_for_state(client, instance_id, InstanceState::Failed).await;
+
+    // Now, the instance should be restartable.
+    expect_instance_start_ok(client, instance_name).await;
+}
+
+// Verifies that if a request to reboot or stop an instance fails because of a
+// 404 error from sled agent, then the instance moves to the Failed state, and
+// can be deleted once it has transitioned to that state..
+#[nexus_test]
+async fn test_instance_failed_after_sled_agent_forgets_vmm_can_be_deleted(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let instance_name = "losing-is-fun";
+    let instance_id = make_forgotten_instance(&cptestctx, instance_name).await;
+
+    // Attempting to reboot the forgotten instance will result in a 404
+    // NO_SUCH_INSTANCE from the sled-agent, which Nexus turns into a 503.
+    expect_instance_reboot_fail(
+        client,
+        instance_name,
+        http::StatusCode::SERVICE_UNAVAILABLE,
+    )
+    .await;
+
+    // Wait for the instance to transition to Failed.
+    instance_wait_for_state(client, instance_id, InstanceState::Failed).await;
+
+    // Now, the instance should be deleteable.
+    expect_instance_delete_ok(client, instance_name).await;
+}
+
+// Verifies that the instance-watcher background task transitions an instance
+// to Failed when the sled-agent returns a 404, and that the instance can be
+// deleted after it transitions to Failed.
+#[nexus_test]
+async fn test_instance_failed_by_instance_watcher_can_be_deleted(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let instance_name = "losing-is-fun";
+    let instance_id = make_forgotten_instance(&cptestctx, instance_name).await;
+
+    nexus_test_utils::background::activate_background_task(
+        &cptestctx.internal_client,
+        "instance_watcher",
+    )
+    .await;
+
+    // Wait for the instance to transition to Failed.
+    instance_wait_for_state(client, instance_id, InstanceState::Failed).await;
+
+    // Now, the instance should be deleteable.
+    expect_instance_delete_ok(&client, instance_name).await;
+}
+
+// Verifies that the instance-watcher background task transitions an instance
+// to Failed when the sled-agent returns a 404, and that the instance can be
+// deleted after it transitions to Failed.
+#[nexus_test]
+async fn test_instance_failed_by_instance_watcher_can_be_restarted(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let instance_name = "losing-is-fun";
+    let instance_id = make_forgotten_instance(&cptestctx, instance_name).await;
+
+    nexus_test_utils::background::activate_background_task(
+        &cptestctx.internal_client,
+        "instance_watcher",
+    )
+    .await;
+
+    // Wait for the instance to transition to Failed.
+    instance_wait_for_state(client, instance_id, InstanceState::Failed).await;
+
+    // Now, the instance should be deleteable.
+    expect_instance_delete_ok(&client, instance_name).await;
+}
+
+#[nexus_test]
+async fn test_instances_are_not_marked_failed_on_other_sled_agent_errors(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+    let instance_name = "my-cool-instance";
+
+    // Create and start the test instance.
+    create_project_and_pool(&client).await;
+    let instance_url = get_instance_url(instance_name);
+    let instance = create_instance(client, PROJECT_NAME, instance_name).await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+    instance_simulate(nexus, &instance_id).await;
+    let instance_next = instance_get(&client, &instance_url).await;
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
+
+    let sled_agent = &cptestctx.sled_agent.sled_agent;
+    sled_agent
+        .set_instance_ensure_state_error(Some(
+            omicron_common::api::external::Error::internal_error(
+                "somebody set up us the bomb",
+            ),
+        ))
+        .await;
+
+    // Attempting to reboot the instance will fail, but it should *not* go to
+    // Failed.
+    expect_instance_reboot_fail(
+        client,
+        instance_name,
+        http::StatusCode::INTERNAL_SERVER_ERROR,
+    )
+    .await;
+
+    let instance_next = instance_get(&client, &instance_url).await;
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
+
+    sled_agent.set_instance_ensure_state_error(None).await;
+
+    expect_instance_reboot_ok(client, instance_name).await;
+}
+
+#[nexus_test]
+async fn test_instances_are_not_marked_failed_on_other_sled_agent_errors_by_instance_watcher(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+    let instance_name = "my-cool-instance";
+
+    // Create and start the test instance.
+    create_project_and_pool(&client).await;
+    let instance_url = get_instance_url(instance_name);
+    let instance = create_instance(client, PROJECT_NAME, instance_name).await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+    instance_simulate(nexus, &instance_id).await;
+    let instance_next = instance_get(&client, &instance_url).await;
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
+
+    let sled_agent = &cptestctx.sled_agent.sled_agent;
+    sled_agent
+        .set_instance_ensure_state_error(Some(
+            omicron_common::api::external::Error::internal_error(
+                "you have no chance to survive, make your time",
+            ),
+        ))
+        .await;
+
+    nexus_test_utils::background::activate_background_task(
+        &cptestctx.internal_client,
+        "instance_watcher",
+    )
+    .await;
+
+    let instance_next = instance_get(&client, &instance_url).await;
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
+}
+
+/// Prepare an instance and sled-agent for one of the "instance fails after
+/// sled-agent forgets VMM" tests.
+async fn make_forgotten_instance(
+    cptestctx: &ControlPlaneTestContext,
+    instance_name: &str,
+) -> InstanceUuid {
+    let client = &cptestctx.external_client;
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+
+    // Create and start the test instance.
+    create_project_and_pool(&client).await;
+    let instance_url = get_instance_url(instance_name);
+    let instance = create_instance(client, PROJECT_NAME, instance_name).await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+    instance_simulate(nexus, &instance_id).await;
+    let instance_next = instance_get(&client, &instance_url).await;
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
+
+    // Forcibly unregister the instance from the sled-agent without telling
+    // Nexus. It will now behave as though it has forgotten the instance and
+    // return a 404 error with the "NO_SUCH_INSTANCE" error code
+    let vmm_id = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("running instance must be on a sled")
+        .propolis_id;
+    let sled_agent = &cptestctx.sled_agent.sled_agent;
+    sled_agent
+        .instance_unregister(vmm_id)
+        .await
+        .expect("instance_unregister must succeed");
+
+    instance_id
+}
+
+async fn expect_instance_delete_ok(
+    client: &ClientTestContext,
+    instance_name: &str,
+) {
+    NexusRequest::object_delete(&client, &get_instance_url(instance_name))
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("instance should be deleted");
+}
+
+async fn expect_instance_reboot_fail(
+    client: &ClientTestContext,
+    instance_name: &str,
+    status: http::StatusCode,
+) {
+    let url = get_instance_url(format!("{instance_name}/reboot").as_str());
+    let builder = RequestBuilder::new(client, Method::POST, &url)
+        .body(None as Option<&serde_json::Value>)
+        .expect_status(Some(status));
+    NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("expected instance reboot to fail");
+}
+
+async fn expect_instance_reboot_ok(
+    client: &ClientTestContext,
+    instance_name: &str,
+) {
+    let url = get_instance_url(format!("{instance_name}/reboot").as_str());
+    let builder = RequestBuilder::new(client, Method::POST, &url)
+        .body(None as Option<&serde_json::Value>)
+        .expect_status(Some(http::StatusCode::ACCEPTED));
+    NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("expected instance reboot to succeed");
 }
 
 /// Assert values for fleet, silo, and project using both system and silo
@@ -894,7 +1399,7 @@ async fn assert_metrics(
             ram
         );
     }
-    for id in &[None, Some(*SILO_ID)] {
+    for id in &[None, Some(*DEFAULT_SILO_ID)] {
         assert_eq!(
             get_latest_system_metric(
                 cptestctx,
@@ -917,18 +1422,17 @@ async fn assert_metrics(
 
 #[nexus_test]
 async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
-    // Normally, Nexus is not registered as a producer for tests.
-    // Turn this bit on so we can also test some metrics from Nexus itself.
-    cptestctx.server.register_as_producer().await;
-
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.apictx();
+    let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     let datastore = nexus.datastore();
 
     // Create an IP pool and project that we'll use for testing.
-    populate_ip_pool(&client, "default", None).await;
-    let project_id = create_project(&client, PROJECT_NAME).await.identity.id;
+    let project = create_project_and_pool(&client).await;
+    let project_id = project.identity.id;
+
+    // Wait until Nexus is registered as a metric producer with Oximeter.
+    wait_for_producer(&cptestctx.oximeter, nexus.id()).await;
 
     // Query the view of these metrics stored within CRDB
     let opctx =
@@ -959,10 +1463,9 @@ async fn test_instance_metrics(cptestctx: &ControlPlaneTestContext) {
     // deprovisioned.
     let instance =
         instance_post(&client, instance_name, InstanceOp::Stop).await;
-    instance_simulate(nexus, &instance.identity.id).await;
-    let instance =
-        instance_get(&client, &get_instance_url(&instance_name)).await;
-    assert_eq!(instance.runtime.run_state, InstanceState::Stopped);
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
 
     let virtual_provisioning_collection = datastore
         .virtual_provisioning_collection_get(&opctx, project_id)
@@ -999,15 +1502,23 @@ async fn test_instance_metrics_with_migration(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.apictx();
+    let internal_client = &cptestctx.internal_client;
+    let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     let instance_name = "bird-ecology";
 
+    // Wait until Nexus registers as a producer with Oximeter.
+    wait_for_producer(
+        &cptestctx.oximeter,
+        cptestctx.server.server_context().nexus.id(),
+    )
+    .await;
+
     // Create a second sled to migrate to/from.
-    let default_sled_id: Uuid =
+    let default_sled_id: SledUuid =
         nexus_test_utils::SLED_AGENT_UUID.parse().unwrap();
     let update_dir = Utf8Path::new("/should/be/unused");
-    let other_sled_id = Uuid::new_v4();
+    let other_sled_id = SledUuid::new_v4();
     let _other_sa = nexus_test_utils::start_sled_agent(
         cptestctx.logctx.log.new(o!("sled_id" => other_sled_id.to_string())),
         cptestctx.server.get_http_server_internal_address().await,
@@ -1018,7 +1529,8 @@ async fn test_instance_metrics_with_migration(
     .await
     .unwrap();
 
-    let project_id = create_org_and_project(&client).await;
+    let project = create_project_and_pool(&client).await;
+    let project_id = project.identity.id;
     let instance_url = get_instance_url(instance_name);
 
     // Explicitly create an instance with no disks. Simulated sled agent assumes
@@ -1030,9 +1542,10 @@ async fn test_instance_metrics_with_migration(
         &params::InstanceNetworkInterfaceAttachment::Default,
         Vec::<params::InstanceDiskAttachment>::new(),
         Vec::<params::ExternalIpCreate>::new(),
+        true,
     )
     .await;
-    let instance_id = instance.identity.id;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
 
     // Poke the instance into an active state.
     instance_simulate(nexus, &instance_id).await;
@@ -1066,10 +1579,11 @@ async fn test_instance_metrics_with_migration(
     // Request migration to the other sled. This reserves resources on the
     // target sled, but shouldn't change the virtual provisioning counters.
     let original_sled = nexus
-        .instance_sled_id(&instance_id)
+        .active_instance_info(&instance_id, None)
         .await
         .unwrap()
-        .expect("running instance should have a sled");
+        .expect("running instance should have a sled")
+        .sled_id;
 
     let dst_sled_id = if original_sled == default_sled_id {
         other_sled_id
@@ -1078,10 +1592,12 @@ async fn test_instance_metrics_with_migration(
     };
 
     let migrate_url =
-        format!("/v1/instances/{}/migrate", &instance_id.to_string());
+        format!("/instances/{}/migrate", &instance_id.to_string());
     let _ = NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &migrate_url)
-            .body(Some(&params::InstanceMigrate { dst_sled_id }))
+        RequestBuilder::new(internal_client, Method::POST, &migrate_url)
+            .body(Some(&InstanceMigrateRequest {
+                dst_sled_id: dst_sled_id.into_untyped_uuid(),
+            }))
             .expect_status(Some(StatusCode::OK)),
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -1091,14 +1607,63 @@ async fn test_instance_metrics_with_migration(
     .parsed_body::<Instance>()
     .unwrap();
 
+    let migration_id = {
+        let datastore = apictx.nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.new(o!()),
+            datastore.clone(),
+        );
+        let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+            .instance_id(instance.identity.id)
+            .lookup_for(nexus_db_queries::authz::Action::Read)
+            .await
+            .unwrap();
+        datastore
+            .instance_refetch(&opctx, &authz_instance)
+            .await
+            .unwrap()
+            .runtime_state
+            .migration_id
+            .expect("since we've started a migration, the instance record must have a migration id!")
+    };
+
+    let info = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("instance should be on a sled");
+    let src_propolis_id = info.propolis_id;
+    let dst_propolis_id =
+        info.dst_propolis_id.expect("instance should have a migration target");
+
+    // Wait for the instance to be in the `Migrating` state. Otherwise, the
+    // subsequent `instance_wait_for_state(..., Running)` may see the `Running`
+    // state from the *old* VMM, rather than waiting for the migration to
+    // complete.
+    instance_simulate_migration_source(
+        cptestctx,
+        nexus,
+        original_sled,
+        src_propolis_id,
+        migration_id,
+    )
+    .await;
+    vmm_single_step_on_sled(cptestctx, nexus, original_sled, src_propolis_id)
+        .await;
+    vmm_single_step_on_sled(cptestctx, nexus, dst_sled_id, dst_propolis_id)
+        .await;
+    instance_wait_for_state(&client, instance_id, InstanceState::Migrating)
+        .await;
+
     check_provisioning_state(4, 1).await;
 
     // Complete migration on the target. Simulated migrations always succeed.
     // After this the instance should be running and should continue to appear
     // to be provisioned.
-    instance_simulate_on_sled(cptestctx, nexus, dst_sled_id, instance_id).await;
-    let instance = instance_get(&client, &instance_url).await;
-    assert_eq!(instance.runtime.run_state, InstanceState::Running);
+    vmm_simulate_on_sled(cptestctx, nexus, original_sled, src_propolis_id)
+        .await;
+    vmm_simulate_on_sled(cptestctx, nexus, dst_sled_id, dst_propolis_id).await;
+    instance_wait_for_state(&client, instance_id, InstanceState::Running).await;
 
     check_provisioning_state(4, 1).await;
 
@@ -1108,12 +1673,9 @@ async fn test_instance_metrics_with_migration(
     // instance (whose demise wasn't simulated here), but this is intentionally
     // not reflected in the virtual provisioning counters (which reflect the
     // logical states of instances ignoring migration).
-    let instance =
-        instance_post(&client, instance_name, InstanceOp::Stop).await;
-    instance_simulate(nexus, &instance.identity.id).await;
-    let instance =
-        instance_get(&client, &get_instance_url(&instance_name)).await;
-    assert_eq!(instance.runtime.run_state, InstanceState::Stopped);
+    instance_post(&client, instance_name, InstanceOp::Stop).await;
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(&client, instance_id, InstanceState::Stopped).await;
 
     check_provisioning_state(0, 0).await;
 }
@@ -1123,11 +1685,11 @@ async fn test_instances_create_stopped_start(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.apictx();
+    let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     let instance_name = "just-rainsticks";
 
-    create_org_and_project(&client).await;
+    create_project_and_pool(&client).await;
 
     // Create an instance in a stopped state.
     let instance: Instance = object_create(
@@ -1140,8 +1702,9 @@ async fn test_instances_create_stopped_start(
             },
             ncpus: InstanceCpuCount(4),
             memory: ByteCount::from_gibibytes_u32(1),
-            hostname: String::from("the_host"),
+            hostname: "the-host".parse().unwrap(),
             user_data: vec![],
+            ssh_public_keys: None,
             network_interfaces:
                 params::InstanceNetworkInterfaceAttachment::Default,
             external_ips: vec![],
@@ -1156,9 +1719,10 @@ async fn test_instances_create_stopped_start(
     let instance_url = get_instance_url(instance_name);
     let instance =
         instance_post(&client, instance_name, InstanceOp::Start).await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
 
     // Now, simulate completion of instance boot and check the state reported.
-    instance_simulate(nexus, &instance.identity.id).await;
+    instance_simulate(nexus, &instance_id).await;
     let instance_next = instance_get(&client, &instance_url).await;
     identity_eq(&instance.identity, &instance_next.identity);
     assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
@@ -1173,18 +1737,19 @@ async fn test_instances_delete_fails_when_running_succeeds_when_stopped(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.apictx();
+    let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     let instance_name = "just-rainsticks";
 
-    create_org_and_project(&client).await;
+    create_project_and_pool(&client).await;
 
     // Create an instance.
     let instance_url = get_instance_url(instance_name);
     let instance = create_instance(client, PROJECT_NAME, instance_name).await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
 
     // Simulate the instance booting.
-    instance_simulate(nexus, &instance.identity.id).await;
+    instance_simulate(nexus, &instance_id).await;
     let instance_next = instance_get(&client, &instance_url).await;
     identity_eq(&instance.identity, &instance_next.identity);
     assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
@@ -1208,11 +1773,9 @@ async fn test_instances_delete_fails_when_running_succeeds_when_stopped(
     );
 
     // Stop the instance
-    let instance =
-        instance_post(&client, instance_name, InstanceOp::Stop).await;
-    instance_simulate(nexus, &instance.identity.id).await;
-    let instance = instance_get(&client, &instance_url).await;
-    assert_eq!(instance.runtime.run_state, InstanceState::Stopped);
+    instance_post(&client, instance_name, InstanceOp::Stop).await;
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(&client, instance_id, InstanceState::Stopped).await;
 
     // Now deletion should succeed.
     NexusRequest::object_delete(&client, &instance_url)
@@ -1273,19 +1836,7 @@ async fn test_instance_using_image_from_other_project_fails(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    create_org_and_project(&client).await;
-
-    let server = ServerBuilder::new().run().unwrap();
-    server.expect(
-        Expectation::matching(request::method_path("HEAD", "/image.raw"))
-            .times(1..)
-            .respond_with(
-                status_code(200).append_header(
-                    "Content-Length",
-                    format!("{}", 4096 * 1000),
-                ),
-            ),
-    );
+    create_project_and_pool(&client).await;
 
     // Create an image in springfield-squidport.
     let images_url = format!("/v1/images?project={}", PROJECT_NAME);
@@ -1298,10 +1849,7 @@ async fn test_instance_using_image_from_other_project_fails(
         },
         os: "alpine".to_string(),
         version: "edge".to_string(),
-        source: params::ImageSource::Url {
-            url: server.url("/image.raw").to_string(),
-            block_size: params::BlockSize::try_from(512).unwrap(),
-        },
+        source: params::ImageSource::YouCanBootAnythingAsLongAsItsAlpine,
     };
     let image =
         NexusRequest::objects_post(client, &images_url, &image_create_params)
@@ -1322,8 +1870,9 @@ async fn test_instance_using_image_from_other_project_fails(
                 },
                 ncpus: InstanceCpuCount(4),
                 memory: ByteCount::from_gibibytes_u32(1),
-                hostname: "stolen".into(),
+                hostname: "stolen".parse().unwrap(),
                 user_data: vec![],
+                ssh_public_keys: None,
                 network_interfaces:
                     params::InstanceNetworkInterfaceAttachment::Default,
                 external_ips: vec![],
@@ -1369,7 +1918,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
     let client = &cptestctx.external_client;
 
     // Create test IP pool, organization and project
-    create_org_and_project(&client).await;
+    create_project_and_pool(&client).await;
 
     // The network interface parameters.
     let default_name = "default".parse::<Name>().unwrap();
@@ -1396,8 +1945,9 @@ async fn test_instance_create_saga_removes_instance_database_record(
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_gibibytes_u32(4),
-        hostname: String::from("inst"),
+        hostname: "inst".parse().unwrap(),
         user_data: vec![],
+        ssh_public_keys: None,
         network_interfaces: interface_params.clone(),
         external_ips: vec![],
         disks: vec![],
@@ -1423,8 +1973,9 @@ async fn test_instance_create_saga_removes_instance_database_record(
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_gibibytes_u32(4),
-        hostname: String::from("inst2"),
+        hostname: "inst2".parse().unwrap(),
         user_data: vec![],
+        ssh_public_keys: None,
         network_interfaces: interface_params,
         external_ips: vec![],
         disks: vec![],
@@ -1484,7 +2035,7 @@ async fn test_instance_with_single_explicit_ip_address(
 ) {
     let client = &cptestctx.external_client;
 
-    create_org_and_project(&client).await;
+    create_project_and_pool(&client).await;
 
     // Create the parameters for the interface.
     let default_name = "default".parse::<Name>().unwrap();
@@ -1511,8 +2062,9 @@ async fn test_instance_with_single_explicit_ip_address(
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_gibibytes_u32(4),
-        hostname: String::from("nic-test"),
+        hostname: "nic-test".parse().unwrap(),
         user_data: vec![],
+        ssh_public_keys: None,
         network_interfaces: interface_params,
         external_ips: vec![],
         disks: vec![],
@@ -1558,7 +2110,7 @@ async fn test_instance_with_new_custom_network_interfaces(
 ) {
     let client = &cptestctx.external_client;
 
-    create_org_and_project(&client).await;
+    create_project_and_pool(&client).await;
     // Create a VPC Subnet other than the default.
     //
     // We'll create one interface in the default VPC Subnet and one in this new
@@ -1571,8 +2123,9 @@ async fn test_instance_with_new_custom_network_interfaces(
             name: non_default_subnet_name.clone(),
             description: String::from("A non-default subnet"),
         },
-        ipv4_block: Ipv4Net("172.31.0.0/24".parse().unwrap()),
+        ipv4_block: "172.31.0.0/24".parse().unwrap(),
         ipv6_block: None,
+        custom_router: None,
     };
     let _response = NexusRequest::objects_post(
         client,
@@ -1624,8 +2177,9 @@ async fn test_instance_with_new_custom_network_interfaces(
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_gibibytes_u32(4),
-        hostname: String::from("nic-test"),
+        hostname: "nic-test".parse().unwrap(),
         user_data: vec![],
+        ssh_public_keys: None,
         network_interfaces: interface_params,
         external_ips: vec![],
         disks: vec![],
@@ -1705,10 +2259,10 @@ async fn test_instance_create_delete_network_interface(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let instance_name = "nic-attach-test-inst";
 
-    create_org_and_project(&client).await;
+    create_project_and_pool(&client).await;
 
     // Create the VPC Subnet for the secondary interface
     let secondary_subnet = params::VpcSubnetCreate {
@@ -1716,8 +2270,9 @@ async fn test_instance_create_delete_network_interface(
             name: Name::try_from(String::from("secondary")).unwrap(),
             description: String::from("A secondary VPC subnet"),
         },
-        ipv4_block: Ipv4Net("172.31.0.0/24".parse().unwrap()),
+        ipv4_block: "172.31.0.0/24".parse().unwrap(),
         ipv6_block: None,
+        custom_router: None,
     };
     let _response = NexusRequest::objects_post(
         client,
@@ -1737,8 +2292,9 @@ async fn test_instance_create_delete_network_interface(
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_gibibytes_u32(4),
-        hostname: String::from("nic-test"),
+        hostname: "nic-test".parse().unwrap(),
         user_data: vec![],
+        ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::None,
         external_ips: vec![],
         disks: vec![],
@@ -1818,7 +2374,9 @@ async fn test_instance_create_delete_network_interface(
 
     // Stop the instance
     let instance = instance_post(client, instance_name, InstanceOp::Stop).await;
-    instance_simulate(nexus, &instance.identity.id).await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
 
     // Verify we can now make the requests again
     let mut interfaces = Vec::with_capacity(2);
@@ -1844,9 +2402,8 @@ async fn test_instance_create_delete_network_interface(
     }
 
     // Restart the instance, verify the interfaces are still correct.
-    let instance =
-        instance_post(client, instance_name, InstanceOp::Start).await;
-    instance_simulate(nexus, &instance.identity.id).await;
+    instance_post(client, instance_name, InstanceOp::Start).await;
+    instance_simulate(nexus, &instance_id).await;
 
     // Get all interfaces in one request.
     let other_interfaces = objects_list_page_authz::<InstanceNetworkInterface>(
@@ -1887,8 +2444,9 @@ async fn test_instance_create_delete_network_interface(
     }
 
     // Stop the instance and verify we can delete the interface
-    let instance = instance_post(client, instance_name, InstanceOp::Stop).await;
-    instance_simulate(nexus, &instance.identity.id).await;
+    instance_post(client, instance_name, InstanceOp::Stop).await;
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
 
     // We should not be able to delete the primary interface, while the
     // secondary still exists
@@ -1945,10 +2503,10 @@ async fn test_instance_update_network_interfaces(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let instance_name = "nic-update-test-inst";
 
-    create_org_and_project(&client).await;
+    create_project_and_pool(&client).await;
 
     // Create the VPC Subnet for the secondary interface
     let secondary_subnet = params::VpcSubnetCreate {
@@ -1956,8 +2514,9 @@ async fn test_instance_update_network_interfaces(
             name: Name::try_from(String::from("secondary")).unwrap(),
             description: String::from("A secondary VPC subnet"),
         },
-        ipv4_block: Ipv4Net("172.31.0.0/24".parse().unwrap()),
+        ipv4_block: "172.31.0.0/24".parse().unwrap(),
         ipv6_block: None,
+        custom_router: None,
     };
     let _response = NexusRequest::objects_post(
         client,
@@ -1977,8 +2536,9 @@ async fn test_instance_update_network_interfaces(
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_gibibytes_u32(4),
-        hostname: String::from("nic-test"),
+        hostname: "nic-test".parse().unwrap(),
         user_data: vec![],
+        ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::None,
         external_ips: vec![],
         disks: vec![],
@@ -2023,7 +2583,9 @@ async fn test_instance_update_network_interfaces(
 
     // Stop the instance
     let instance = instance_post(client, instance_name, InstanceOp::Stop).await;
-    instance_simulate(nexus, &instance.identity.id).await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
 
     // Create the first interface on the instance.
     let primary_iface = NexusRequest::objects_post(
@@ -2043,9 +2605,8 @@ async fn test_instance_update_network_interfaces(
 
     // Restart the instance, to ensure we can only modify things when it's
     // stopped.
-    let instance =
-        instance_post(client, instance_name, InstanceOp::Start).await;
-    instance_simulate(nexus, &instance.identity.id).await;
+    instance_post(client, instance_name, InstanceOp::Start).await;
+    instance_simulate(nexus, &instance_id).await;
 
     // We'll change the interface's name and description
     let new_name = Name::try_from(String::from("new-if0")).unwrap();
@@ -2056,6 +2617,7 @@ async fn test_instance_update_network_interfaces(
             description: Some(new_description.clone()),
         },
         primary: false,
+        transit_ips: vec![],
     };
 
     // Verify we fail to update the NIC when the instance is running
@@ -2082,8 +2644,10 @@ async fn test_instance_update_network_interfaces(
     );
 
     // Stop the instance again, and now verify that the update works.
-    let instance = instance_post(client, instance_name, InstanceOp::Stop).await;
-    instance_simulate(nexus, &instance.identity.id).await;
+    instance_post(client, instance_name, InstanceOp::Stop).await;
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
+
     let updated_primary_iface = NexusRequest::object_put(
         client,
         &format!("/v1/network-interfaces/{}", primary_iface.identity.id),
@@ -2132,6 +2696,7 @@ async fn test_instance_update_network_interfaces(
             description: None,
         },
         primary: true,
+        transit_ips: vec![],
     };
     let updated_primary_iface1 = NexusRequest::object_put(
         client,
@@ -2185,9 +2750,8 @@ async fn test_instance_update_network_interfaces(
     );
 
     // Restart the instance, and verify that we can't update either interface.
-    let instance =
-        instance_post(client, instance_name, InstanceOp::Start).await;
-    instance_simulate(nexus, &instance.identity.id).await;
+    instance_post(client, instance_name, InstanceOp::Start).await;
+    instance_simulate(nexus, &instance_id).await;
 
     for if_id in
         [&updated_primary_iface.identity.id, &secondary_iface.identity.id]
@@ -2215,8 +2779,9 @@ async fn test_instance_update_network_interfaces(
     }
 
     // Stop the instance again.
-    let instance = instance_post(client, instance_name, InstanceOp::Stop).await;
-    instance_simulate(nexus, &instance.identity.id).await;
+    instance_post(client, instance_name, InstanceOp::Stop).await;
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
 
     // Verify that we can set the secondary as the new primary, and that nothing
     // else changes about the NICs.
@@ -2226,6 +2791,7 @@ async fn test_instance_update_network_interfaces(
             description: None,
         },
         primary: true,
+        transit_ips: vec![],
     };
     let new_primary_iface = NexusRequest::object_put(
         client,
@@ -2369,8 +2935,9 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_gibibytes_u32(4),
-        hostname: String::from("nic-test"),
+        hostname: "nic-test".parse().unwrap(),
         user_data: vec![],
+        ssh_public_keys: None,
         network_interfaces: interface_params,
         external_ips: vec![],
         disks: vec![],
@@ -2412,7 +2979,7 @@ async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
 
     // Test pre-reqs
     DiskTest::new(&cptestctx).await;
-    create_org_and_project(&client).await;
+    create_project_and_pool(&client).await;
 
     // Create the "probablydata" disk
     create_disk(&client, PROJECT_NAME, "probablydata").await;
@@ -2434,8 +3001,9 @@ async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_gibibytes_u32(4),
-        hostname: String::from("nfs"),
+        hostname: "nfs".parse().unwrap(),
         user_data: vec![],
+        ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![params::InstanceDiskAttachment::Attach(
@@ -2482,7 +3050,7 @@ async fn test_instance_create_attach_disks(
 
     // Test pre-reqs
     DiskTest::new(&cptestctx).await;
-    create_org_and_project(&client).await;
+    create_project_and_pool(&client).await;
     let attachable_disk =
         create_disk(&client, PROJECT_NAME, "attachable-disk").await;
 
@@ -2493,8 +3061,9 @@ async fn test_instance_create_attach_disks(
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_gibibytes_u32(3),
-        hostname: String::from("nfs"),
+        hostname: "nfs".parse().unwrap(),
         user_data: vec![],
+        ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![
@@ -2556,12 +3125,12 @@ async fn test_instance_create_attach_disks_undo(
 
     // Test pre-reqs
     DiskTest::new(&cptestctx).await;
-    create_org_and_project(&client).await;
+    create_project_and_pool(&client).await;
     let regular_disk = create_disk(&client, PROJECT_NAME, "a-reg-disk").await;
     let faulted_disk = create_disk(&client, PROJECT_NAME, "faulted-disk").await;
 
     // set `faulted_disk` to the faulted state
-    let apictx = &cptestctx.server.apictx();
+    let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     assert!(nexus
         .set_disk_as_faulted(&faulted_disk.identity.id)
@@ -2589,8 +3158,9 @@ async fn test_instance_create_attach_disks_undo(
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_gibibytes_u32(4),
-        hostname: String::from("nfs"),
+        hostname: "nfs".parse().unwrap(),
         user_data: vec![],
+        ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![
@@ -2649,7 +3219,7 @@ async fn test_attach_eight_disks_to_instance(
 
     // Test pre-reqs
     DiskTest::new(&cptestctx).await;
-    create_org_and_project(&client).await;
+    create_project_and_pool(&client).await;
 
     // Make 8 disks
     for i in 0..8 {
@@ -2673,8 +3243,9 @@ async fn test_attach_eight_disks_to_instance(
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_gibibytes_u32(4),
-        hostname: String::from("nfs"),
+        hostname: "nfs".parse().unwrap(),
         user_data: vec![],
+        ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: (0..8)
@@ -2753,8 +3324,9 @@ async fn test_cannot_attach_nine_disks_to_instance(
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_gibibytes_u32(4),
-        hostname: String::from("nfs"),
+        hostname: "nfs".parse().unwrap(),
         user_data: vec![],
+        ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: (0..9)
@@ -2802,7 +3374,7 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     // Test pre-reqs
     DiskTest::new(&cptestctx).await;
-    create_org_and_project(&client).await;
+    create_project_and_pool(&client).await;
 
     // Make 8 disks
     for i in 0..8 {
@@ -2819,7 +3391,7 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(disks.len(), 8);
 
     // Set the 7th to FAULTED
-    let apictx = &cptestctx.server.apictx();
+    let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     assert!(nexus.set_disk_as_faulted(&disks[6].identity.id).await.unwrap());
 
@@ -2847,8 +3419,9 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_gibibytes_u32(4),
-        hostname: String::from("nfs"),
+        hostname: "nfs".parse().unwrap(),
         user_data: vec![],
+        ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: (0..8)
@@ -2902,7 +3475,7 @@ async fn test_disks_detached_when_instance_destroyed(
 
     // Test pre-reqs
     DiskTest::new(&cptestctx).await;
-    create_org_and_project(&client).await;
+    create_project_and_pool(&client).await;
 
     // Make 8 disks
     for i in 0..8 {
@@ -2930,8 +3503,9 @@ async fn test_disks_detached_when_instance_destroyed(
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_gibibytes_u32(4),
-        hostname: String::from("nfs"),
+        hostname: "nfs".parse().unwrap(),
         user_data: vec![],
+        ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: (0..8)
@@ -2975,21 +3549,21 @@ async fn test_disks_detached_when_instance_destroyed(
     // sled.
     let instance_url = format!("/v1/instances/nfs?project={}", PROJECT_NAME);
     let instance = instance_get(&client, &instance_url).await;
-    let apictx = &cptestctx.server.apictx();
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+    let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     let sa = nexus
-        .instance_sled_by_id(&instance.identity.id)
+        .active_instance_info(&instance_id, None)
         .await
         .unwrap()
-        .expect("instance should be on a sled while it's running");
+        .expect("instance should be on a sled while it's running")
+        .sled_client;
 
     // Stop and delete instance
-    let instance =
-        instance_post(&client, instance_name, InstanceOp::Stop).await;
+    instance_post(&client, instance_name, InstanceOp::Stop).await;
 
-    instance_simulate(nexus, &instance.identity.id).await;
-    let instance = instance_get(&client, &instance_url).await;
-    assert_eq!(instance.runtime.run_state, InstanceState::Stopped);
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(&client, instance_id, InstanceState::Stopped).await;
 
     NexusRequest::object_delete(&client, &instance_url)
         .authn_as(AuthnMode::PrivilegedUser)
@@ -3020,8 +3594,9 @@ async fn test_disks_detached_when_instance_destroyed(
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_gibibytes_u32(4),
-        hostname: String::from("nfsv2"),
+        hostname: "nfsv2".parse().unwrap(),
         user_data: vec![],
+        ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: (0..8)
@@ -3068,7 +3643,7 @@ async fn test_instances_memory_rejected_less_than_min_memory_size(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     // Attempt to create the instance, observe a server error.
     let instance_name = "just-rainsticks";
@@ -3079,10 +3654,11 @@ async fn test_instances_memory_rejected_less_than_min_memory_size(
         },
         ncpus: InstanceCpuCount(1),
         memory: ByteCount::from(MIN_MEMORY_BYTES_PER_INSTANCE / 2),
-        hostname: String::from("inst"),
+        hostname: "inst".parse().unwrap(),
         user_data:
             b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
                 .to_vec(),
+        ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![],
@@ -3117,7 +3693,7 @@ async fn test_instances_memory_not_divisible_by_min_memory_size(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     // Attempt to create the instance, observe a server error.
     let instance_name = "just-rainsticks";
@@ -3128,10 +3704,11 @@ async fn test_instances_memory_not_divisible_by_min_memory_size(
         },
         ncpus: InstanceCpuCount(1),
         memory: ByteCount::from(1024 * 1024 * 1024 + 300),
-        hostname: String::from("inst"),
+        hostname: "inst".parse().unwrap(),
         user_data:
             b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
                 .to_vec(),
+        ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![],
@@ -3165,7 +3742,7 @@ async fn test_instances_memory_greater_than_max_size(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    create_org_and_project(client).await;
+    create_project_and_pool(client).await;
 
     // Attempt to create the instance, observe a server error.
     let instance_name = "just-rainsticks";
@@ -3177,10 +3754,11 @@ async fn test_instances_memory_greater_than_max_size(
         ncpus: InstanceCpuCount(1),
         memory: ByteCount::try_from(MAX_MEMORY_BYTES_PER_INSTANCE + (1 << 30))
             .unwrap(),
-        hostname: String::from("inst"),
+        hostname: "inst".parse().unwrap(),
         user_data:
             b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
                 .to_vec(),
+        ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![],
@@ -3202,7 +3780,189 @@ async fn test_instances_memory_greater_than_max_size(
     assert!(error.message.contains("memory must be less than"));
 }
 
-async fn expect_instance_start_fail_unavailable(
+#[nexus_test]
+async fn test_instance_create_with_ssh_keys(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let instance_name = "ssh-keys";
+
+    cptestctx
+        .sled_agent
+        .sled_agent
+        .start_local_mock_propolis_server(&cptestctx.logctx.log)
+        .await
+        .unwrap();
+
+    // Test pre-reqs
+    DiskTest::new(&cptestctx).await;
+    create_project_and_pool(&client).await;
+
+    // Add some SSH keys
+    let key_configs = vec![
+        ("key1", "an SSH public key", "ssh-test AAAAAAAA"),
+        ("key2", "another SSH public key", "ssh-test BBBBBBBB"),
+        ("key3", "yet another public key", "ssh-test CCCCCCCC"),
+    ];
+    let mut user_keys: Vec<SshKey> = Vec::new();
+    for (name, description, public_key) in &key_configs {
+        let new_key: SshKey = NexusRequest::objects_post(
+            client,
+            "/v1/me/ssh-keys",
+            &SshKeyCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: name.parse().unwrap(),
+                    description: description.to_string(),
+                },
+                public_key: public_key.to_string(),
+            },
+        )
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to make POST request")
+        .parsed_body()
+        .unwrap();
+        assert_eq!(new_key.identity.name.as_str(), *name);
+        assert_eq!(new_key.identity.description, *description);
+        assert_eq!(new_key.public_key, *public_key);
+        user_keys.push(new_key);
+    }
+
+    // Create an instance
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: instance_name.parse().unwrap(),
+            description: String::from("probably serving data"),
+        },
+        ncpus: InstanceCpuCount::try_from(2).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(4),
+        // By default should transfer all profile keys
+        ssh_public_keys: None,
+        start: false,
+        hostname: instance_name.parse().unwrap(),
+        user_data: vec![],
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![],
+        disks: vec![],
+    };
+
+    let builder =
+        RequestBuilder::new(client, http::Method::POST, &get_instances_url())
+            .body(Some(&instance_params))
+            .expect_status(Some(http::StatusCode::CREATED));
+
+    let response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Expected instance creation!");
+
+    let instance = response.parsed_body::<Instance>().unwrap();
+
+    let keys = objects_list_page_authz::<SshKey>(
+        client,
+        format!("/v1/instances/{}/ssh-public-keys", instance.identity.id)
+            .as_str(),
+    )
+    .await
+    .items;
+
+    assert_eq!(keys[0], user_keys[0]);
+    assert_eq!(keys[1], user_keys[1]);
+    assert_eq!(keys[2], user_keys[2]);
+
+    // Test creating an instance with only allow listed keys
+
+    let instance_name = "ssh-keys-2";
+    // Create an instance
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: instance_name.parse().unwrap(),
+            description: String::from("probably serving data"),
+        },
+        ncpus: InstanceCpuCount::try_from(2).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(4),
+        // Should only transfer the first key
+        ssh_public_keys: Some(vec![user_keys[0].identity.name.clone().into()]),
+        start: false,
+        hostname: instance_name.parse().unwrap(),
+        user_data: vec![],
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![],
+        disks: vec![],
+    };
+
+    let builder =
+        RequestBuilder::new(client, http::Method::POST, &get_instances_url())
+            .body(Some(&instance_params))
+            .expect_status(Some(http::StatusCode::CREATED));
+
+    let response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Expected instance creation!");
+
+    let instance = response.parsed_body::<Instance>().unwrap();
+
+    let keys = objects_list_page_authz::<SshKey>(
+        client,
+        format!("/v1/instances/{}/ssh-public-keys", instance.identity.id)
+            .as_str(),
+    )
+    .await
+    .items;
+
+    assert_eq!(keys.len(), 1);
+    assert_eq!(keys[0], user_keys[0]);
+
+    // Test creating an instance with no keys
+
+    let instance_name = "ssh-keys-3";
+    // Create an instance
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: instance_name.parse().unwrap(),
+            description: String::from("probably serving data"),
+        },
+        ncpus: InstanceCpuCount::try_from(2).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(4),
+        // Should transfer no keys
+        ssh_public_keys: Some(vec![]),
+        start: false,
+        hostname: instance_name.parse().unwrap(),
+        user_data: vec![],
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![],
+        disks: vec![],
+    };
+
+    let builder =
+        RequestBuilder::new(client, http::Method::POST, &get_instances_url())
+            .body(Some(&instance_params))
+            .expect_status(Some(http::StatusCode::CREATED));
+
+    let response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Expected instance creation!");
+
+    let instance = response.parsed_body::<Instance>().unwrap();
+
+    let keys = objects_list_page_authz::<SshKey>(
+        client,
+        format!("/v1/instances/{}/ssh-public-keys", instance.identity.id)
+            .as_str(),
+    )
+    .await
+    .items;
+
+    assert_eq!(keys.len(), 0);
+}
+
+async fn expect_instance_start_fail_507(
     client: &ClientTestContext,
     instance_name: &str,
 ) {
@@ -3211,13 +3971,15 @@ async fn expect_instance_start_fail_unavailable(
         http::Method::POST,
         &get_instance_start_url(instance_name),
     )
-    .expect_status(Some(http::StatusCode::SERVICE_UNAVAILABLE));
+    .expect_status(Some(http::StatusCode::INSUFFICIENT_STORAGE));
 
     NexusRequest::new(builder)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
-        .expect("Expected instance start to fail with SERVICE_UNAVAILABLE");
+        .expect(
+            "Expected instance start to fail with 507 Insufficient Storage",
+        );
 }
 
 async fn expect_instance_start_ok(
@@ -3259,8 +4021,7 @@ async fn test_cannot_provision_instance_beyond_cpu_capacity(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    create_project(client, PROJECT_NAME).await;
-    populate_ip_pool(&client, "default", None).await;
+    create_project_and_pool(client).await;
 
     // The third item in each tuple specifies whether instance start should
     // succeed or fail if all these configs are visited in order and started in
@@ -3288,8 +4049,9 @@ async fn test_cannot_provision_instance_beyond_cpu_capacity(
             },
             ncpus,
             memory: ByteCount::from_gibibytes_u32(1),
-            hostname: config.0.to_string(),
+            hostname: config.0.parse().unwrap(),
             user_data: vec![],
+            ssh_public_keys: None,
             network_interfaces:
                 params::InstanceNetworkInterfaceAttachment::Default,
             external_ips: vec![],
@@ -3308,18 +4070,19 @@ async fn test_cannot_provision_instance_beyond_cpu_capacity(
     for config in &configs {
         match config.2 {
             Ok(_) => expect_instance_start_ok(client, config.0).await,
-            Err(_) => {
-                expect_instance_start_fail_unavailable(client, config.0).await
-            }
+            Err(_) => expect_instance_start_fail_507(client, config.0).await,
         }
     }
 
     // Make the started instance transition to Running, shut it down, and verify
     // that the other reasonably-sized instance can now start.
-    let nexus = &cptestctx.server.apictx().nexus;
-    instance_simulate(nexus, &instances[1].identity.id).await;
+    let nexus = &cptestctx.server.server_context().nexus;
+    let instance_id = InstanceUuid::from_untyped_uuid(instances[1].identity.id);
+    instance_simulate(nexus, &instance_id).await;
     instances[1] = instance_post(client, configs[1].0, InstanceOp::Stop).await;
-    instance_simulate(nexus, &instances[1].identity.id).await;
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
+
     expect_instance_start_ok(client, configs[2].0).await;
 }
 
@@ -3328,8 +4091,7 @@ async fn test_cannot_provision_instance_beyond_cpu_limit(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    create_project(client, PROJECT_NAME).await;
-    populate_ip_pool(&client, "default", None).await;
+    create_project_and_pool(client).await;
 
     let too_many_cpus =
         InstanceCpuCount::try_from(i64::from(MAX_VCPU_PER_INSTANCE + 1))
@@ -3344,8 +4106,9 @@ async fn test_cannot_provision_instance_beyond_cpu_limit(
         },
         ncpus: too_many_cpus,
         memory: ByteCount::from_gibibytes_u32(4),
-        hostname: String::from("test"),
+        hostname: "test".parse().unwrap(),
         user_data: vec![],
+        ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![],
@@ -3370,8 +4133,7 @@ async fn test_cannot_provision_instance_beyond_ram_capacity(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    create_project(client, PROJECT_NAME).await;
-    populate_ip_pool(&client, "default", None).await;
+    create_project_and_pool(client).await;
 
     let configs = vec![
         (
@@ -3396,8 +4158,9 @@ async fn test_cannot_provision_instance_beyond_ram_capacity(
             },
             ncpus: InstanceCpuCount::try_from(i64::from(1)).unwrap(),
             memory: ByteCount::try_from(config.1).unwrap(),
-            hostname: config.0.to_string(),
+            hostname: config.0.parse().unwrap(),
             user_data: vec![],
+            ssh_public_keys: None,
             network_interfaces:
                 params::InstanceNetworkInterfaceAttachment::Default,
             external_ips: vec![],
@@ -3416,36 +4179,37 @@ async fn test_cannot_provision_instance_beyond_ram_capacity(
     for config in &configs {
         match config.2 {
             Ok(_) => expect_instance_start_ok(client, config.0).await,
-            Err(_) => {
-                expect_instance_start_fail_unavailable(client, config.0).await
-            }
+            Err(_) => expect_instance_start_fail_507(client, config.0).await,
         }
     }
 
     // Make the started instance transition to Running, shut it down, and verify
     // that the other reasonably-sized instance can now start.
-    let nexus = &cptestctx.server.apictx().nexus;
-    instance_simulate(nexus, &instances[1].identity.id).await;
+    let nexus = &cptestctx.server.server_context().nexus;
+    let instance_id = InstanceUuid::from_untyped_uuid(instances[1].identity.id);
+    instance_simulate(nexus, &instance_id).await;
     instances[1] = instance_post(client, configs[1].0, InstanceOp::Stop).await;
-    instance_simulate(nexus, &instances[1].identity.id).await;
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
+
     expect_instance_start_ok(client, configs[2].0).await;
 }
 
 #[nexus_test]
 async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let apictx = &cptestctx.server.apictx();
+    let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     let instance_name = "kris-picks";
 
-    cptestctx
+    let propolis_addr = cptestctx
         .sled_agent
         .sled_agent
         .start_local_mock_propolis_server(&cptestctx.logctx.log)
         .await
         .unwrap();
 
-    create_org_and_project(&client).await;
+    create_project_and_pool(&client).await;
     let instance_url = get_instance_url(instance_name);
 
     // Make sure we get a 404 if we try to access the serial console before creation.
@@ -3470,10 +4234,23 @@ async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
 
     // Create an instance and poke it to ensure it's running.
     let instance = create_instance(client, PROJECT_NAME, instance_name).await;
-    instance_simulate(nexus, &instance.identity.id).await;
-    let instance_next = instance_get(&client, &instance_url).await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+    let instance_next = poll::wait_for_condition(
+        || async {
+            instance_simulate(nexus, &instance_id).await;
+            let instance_next = instance_get(&client, &instance_url).await;
+            if instance_next.runtime.run_state == InstanceState::Running {
+                Ok(instance_next)
+            } else {
+                Err(CondCheckError::<()>::NotYet)
+            }
+        },
+        &Duration::from_secs(5),
+        &Duration::from_secs(60),
+    )
+    .await
+    .unwrap();
     identity_eq(&instance.identity, &instance_next.identity);
-    assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
     assert!(
         instance_next.runtime.time_run_state_updated
             > instance.runtime.time_run_state_updated
@@ -3491,16 +4268,18 @@ async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
         .fetch()
         .await
         .unwrap();
-    let propolis_id = db_instance
-        .runtime()
-        .propolis_id
-        .expect("running instance should have vmm");
-    let localhost = std::net::IpAddr::V6(std::net::Ipv6Addr::LOCALHOST);
+    let propolis_id = PropolisUuid::from_untyped_uuid(
+        db_instance
+            .runtime()
+            .propolis_id
+            .expect("running instance should have vmm"),
+    );
     let updated_vmm = datastore
-        .vmm_overwrite_ip_for_test(&opctx, &propolis_id, localhost.into())
+        .vmm_overwrite_addr_for_test(&opctx, &propolis_id, propolis_addr)
         .await
         .unwrap();
-    assert_eq!(updated_vmm.propolis_ip.ip(), localhost);
+    assert_eq!(updated_vmm.propolis_ip.ip(), propolis_addr.ip());
+    assert_eq!(updated_vmm.propolis_port.0, propolis_addr.port());
 
     // Query serial output history endpoint
     // This is the first line of output generated by the mock propolis-server.
@@ -3534,9 +4313,10 @@ async fn test_instance_serial(cptestctx: &ControlPlaneTestContext) {
     );
 
     let instance = instance_next;
-    instance_simulate(nexus, &instance.identity.id).await;
-    let instance_next = instance_get(&client, &instance_url).await;
-    assert_eq!(instance_next.runtime.run_state, InstanceState::Stopped);
+    instance_simulate(nexus, &instance_id).await;
+    let instance_next =
+        instance_wait_for_state(&client, instance_id, InstanceState::Stopped)
+            .await;
     assert!(
         instance_next.runtime.time_run_state_updated
             > instance.runtime.time_run_state_updated
@@ -3562,86 +4342,402 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
     //
     // The first is given to the "default" pool, the provided to a distinct
     // explicit pool.
-    let default_pool_range = IpRange::V4(
+    let range1 = IpRange::V4(
         Ipv4Range::new(
             std::net::Ipv4Addr::new(10, 0, 0, 1),
             std::net::Ipv4Addr::new(10, 0, 0, 5),
         )
         .unwrap(),
     );
-    let other_pool_range = IpRange::V4(
+    let range2 = IpRange::V4(
         Ipv4Range::new(
             std::net::Ipv4Addr::new(10, 1, 0, 1),
             std::net::Ipv4Addr::new(10, 1, 0, 5),
         )
         .unwrap(),
     );
-    populate_ip_pool(&client, "default", Some(default_pool_range)).await;
-    create_ip_pool(&client, "other-pool", Some(other_pool_range)).await;
+
+    // make first pool the default for the priv user's silo
+    create_ip_pool(&client, "pool1", Some(range1)).await;
+    link_ip_pool(&client, "pool1", &DEFAULT_SILO.id(), /*default*/ true).await;
+
+    assert_ip_pool_utilization(client, "pool1", 0, 5, 0, 0).await;
+
+    // second pool is associated with the silo but not default
+    create_ip_pool(&client, "pool2", Some(range2)).await;
+    link_ip_pool(&client, "pool2", &DEFAULT_SILO.id(), /*default*/ false).await;
+
+    assert_ip_pool_utilization(client, "pool2", 0, 5, 0, 0).await;
 
     // Create an instance with pool name blank, expect IP from default pool
-    create_instance_with_pool(client, "default-pool-inst", None).await;
+    create_instance_with_pool(client, "pool1-inst", None).await;
 
-    let ip = fetch_instance_ephemeral_ip(client, "default-pool-inst").await;
+    let ip = fetch_instance_ephemeral_ip(client, "pool1-inst").await;
     assert!(
-        ip.ip >= default_pool_range.first_address()
-            && ip.ip <= default_pool_range.last_address(),
-        "Expected ephemeral IP to come from default pool"
+        ip.ip() >= range1.first_address() && ip.ip() <= range1.last_address(),
+        "Expected ephemeral IP to come from pool1"
+    );
+    // 1 ephemeral + 1 snat
+    assert_ip_pool_utilization(client, "pool1", 2, 5, 0, 0).await;
+    // pool2 unaffected
+    assert_ip_pool_utilization(client, "pool2", 0, 5, 0, 0).await;
+
+    // Create an instance explicitly using the non-default "other-pool".
+    create_instance_with_pool(client, "pool2-inst", Some("pool2")).await;
+    let ip = fetch_instance_ephemeral_ip(client, "pool2-inst").await;
+    assert!(
+        ip.ip() >= range2.first_address() && ip.ip() <= range2.last_address(),
+        "Expected ephemeral IP to come from pool2"
     );
 
-    // Create an instance explicitly using the "other-pool".
-    create_instance_with_pool(client, "other-pool-inst", Some("other-pool"))
-        .await;
-    let ip = fetch_instance_ephemeral_ip(client, "other-pool-inst").await;
-    assert!(
-        ip.ip >= other_pool_range.first_address()
-            && ip.ip <= other_pool_range.last_address(),
-        "Expected ephemeral IP to come from other pool"
-    );
+    // SNAT comes from default pool, but count does not change because
+    // SNAT IPs can be shared. https://github.com/oxidecomputer/omicron/issues/5043
+    // is about getting SNAT IP from specified pool instead of default.
+    assert_ip_pool_utilization(client, "pool1", 2, 5, 0, 0).await;
 
-    // now create a third pool, a silo default, to confirm it gets used. not
-    // using create_ip_pool because we need to specify a silo and default: true
-    let pool_name = "silo-pool";
-    let _silo_pool: views::IpPool = object_create(
+    // ephemeral IP comes from specified pool
+    assert_ip_pool_utilization(client, "pool2", 1, 5, 0, 0).await;
+
+    // make pool2 default and create instance with default pool. check that it now it comes from pool2
+    let _: views::IpPoolSiloLink = object_put(
         client,
-        "/v1/system/ip-pools",
-        &params::IpPoolCreate {
-            identity: IdentityMetadataCreateParams {
-                name: pool_name.parse().unwrap(),
-                description: String::from("an ip pool"),
-            },
-            silo: Some(NameOrId::Id(DEFAULT_SILO.id())),
-            is_default: true,
-        },
+        &format!("/v1/system/ip-pools/pool2/silos/{}", DEFAULT_SILO.id()),
+        &params::IpPoolSiloUpdate { is_default: true },
     )
     .await;
-    let silo_pool_range = IpRange::V4(
+
+    create_instance_with_pool(client, "pool2-inst2", None).await;
+    let ip = fetch_instance_ephemeral_ip(client, "pool2-inst2").await;
+    assert!(
+        ip.ip() >= range2.first_address() && ip.ip() <= range2.last_address(),
+        "Expected ephemeral IP to come from pool2"
+    );
+
+    // pool1 unchanged
+    assert_ip_pool_utilization(client, "pool1", 2, 5, 0, 0).await;
+    // +1 snat (now that pool2 is default) and +1 ephemeral
+    assert_ip_pool_utilization(client, "pool2", 3, 5, 0, 0).await;
+
+    // try to delete association with pool1, but it fails because there is an
+    // instance with an IP from the pool in this silo
+    let pool1_silo_url =
+        format!("/v1/system/ip-pools/pool1/silos/{}", DEFAULT_SILO.id());
+    let error =
+        object_delete_error(client, &pool1_silo_url, StatusCode::BAD_REQUEST)
+            .await;
+    assert_eq!(
+        error.message,
+        "IP addresses from this pool are in use in the linked silo"
+    );
+
+    // stop and delete instances with IPs from pool1. perhaps surprisingly, that
+    // includes pool2-inst also because the SNAT IP comes from the default pool
+    // even when different pool is specified for the ephemeral IP
+    stop_and_delete_instance(&cptestctx, "pool1-inst").await;
+    stop_and_delete_instance(&cptestctx, "pool2-inst").await;
+
+    // pool1 is down to 0 because it had 1 snat + 1 ephemeral from pool1-inst
+    // and 1 snat from pool2-inst
+    assert_ip_pool_utilization(client, "pool1", 0, 5, 0, 0).await;
+    // pool2 drops one because it had 1 ephemeral from pool2-inst
+    assert_ip_pool_utilization(client, "pool2", 2, 5, 0, 0).await;
+
+    // now unlink works
+    object_delete(client, &pool1_silo_url).await;
+
+    // create instance with pool1, expecting allocation to fail
+    let instance_name = "pool1-inst-fail";
+    let url = format!("/v1/instances?project={}", PROJECT_NAME);
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: instance_name.parse().unwrap(),
+            description: format!("instance {:?}", instance_name),
+        },
+        ncpus: InstanceCpuCount(4),
+        memory: ByteCount::from_gibibytes_u32(1),
+        hostname: "the-host".parse().unwrap(),
+        user_data: vec![],
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![params::ExternalIpCreate::Ephemeral {
+            pool: Some("pool1".parse::<Name>().unwrap().into()),
+        }],
+        ssh_public_keys: None,
+        disks: vec![],
+        start: true,
+    };
+    let error = object_create_error(
+        client,
+        &url,
+        &instance_params,
+        StatusCode::NOT_FOUND,
+    )
+    .await;
+    assert_eq!(error.message, "not found: ip-pool with name \"pool1\"");
+}
+
+async fn stop_and_delete_instance(
+    cptestctx: &ControlPlaneTestContext,
+    instance_name: &str,
+) {
+    let client = &cptestctx.external_client;
+    let instance =
+        instance_post(&client, instance_name, InstanceOp::Stop).await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+    let nexus = &cptestctx.server.server_context().nexus;
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
+    let url =
+        format!("/v1/instances/{}?project={}", instance_name, PROJECT_NAME);
+    object_delete(client, &url).await;
+}
+
+// IP pool that exists but is not associated with any silo (or with a silo other
+// than the current user's) cannot be used to get IPs
+#[nexus_test]
+async fn test_instance_ephemeral_ip_from_orphan_pool(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let _ = create_project(&client, PROJECT_NAME).await;
+
+    // make first pool the default for the priv user's silo
+    create_ip_pool(&client, "default", None).await;
+    link_ip_pool(&client, "default", &DEFAULT_SILO.id(), true).await;
+
+    let orphan_pool_range = IpRange::V4(
         Ipv4Range::new(
-            std::net::Ipv4Addr::new(10, 2, 0, 1),
-            std::net::Ipv4Addr::new(10, 2, 0, 5),
+            std::net::Ipv4Addr::new(10, 1, 0, 1),
+            std::net::Ipv4Addr::new(10, 1, 0, 5),
         )
         .unwrap(),
     );
-    populate_ip_pool(client, pool_name, Some(silo_pool_range)).await;
+    create_ip_pool(&client, "orphan-pool", Some(orphan_pool_range)).await;
 
-    create_instance_with_pool(client, "silo-pool-inst", Some("silo-pool"))
-        .await;
-    let ip = fetch_instance_ephemeral_ip(client, "silo-pool-inst").await;
-    assert!(
-        ip.ip >= silo_pool_range.first_address()
-            && ip.ip <= silo_pool_range.last_address(),
-        "Expected ephemeral IP to come from the silo default pool"
+    let instance_name = "orphan-pool-inst";
+    let body = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: instance_name.parse().unwrap(),
+            description: format!("instance {:?}", instance_name),
+        },
+        ncpus: InstanceCpuCount(4),
+        memory: ByteCount::from_gibibytes_u32(1),
+        hostname: "the-host".parse().unwrap(),
+        user_data: vec![],
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![params::ExternalIpCreate::Ephemeral {
+            pool: Some("orphan-pool".parse::<Name>().unwrap().into()),
+        }],
+        ssh_public_keys: None,
+        disks: vec![],
+        start: true,
+    };
+
+    // instance create 404s
+    let url = format!("/v1/instances?project={}", PROJECT_NAME);
+    let error =
+        object_create_error(client, &url, &body, StatusCode::NOT_FOUND).await;
+
+    assert_eq!(error.error_code.unwrap(), "ObjectNotFound".to_string());
+    assert_eq!(
+        error.message,
+        "not found: ip-pool with name \"orphan-pool\"".to_string()
     );
 
-    // we can still specify other pool even though we now have a silo default
-    create_instance_with_pool(client, "other-pool-inst-2", Some("other-pool"))
-        .await;
+    // associate the pool with a different silo and we should get the same
+    // error on instance create
+    let params = params::IpPoolLinkSilo {
+        silo: NameOrId::Name(cptestctx.silo_name.clone()),
+        is_default: false,
+    };
+    let _: views::IpPoolSiloLink =
+        object_create(client, "/v1/system/ip-pools/orphan-pool/silos", &params)
+            .await;
 
-    let ip = fetch_instance_ephemeral_ip(client, "other-pool-inst-2").await;
-    assert!(
-        ip.ip >= other_pool_range.first_address()
-            && ip.ip <= other_pool_range.last_address(),
-        "Expected ephemeral IP to come from the other pool"
+    let error =
+        object_create_error(client, &url, &body, StatusCode::NOT_FOUND).await;
+
+    assert_eq!(error.error_code.unwrap(), "ObjectNotFound".to_string());
+    assert_eq!(
+        error.message,
+        "not found: ip-pool with name \"orphan-pool\"".to_string()
+    );
+}
+
+// Test the error when creating an instance with an IP from the default pool,
+// but there is no default pool
+#[nexus_test]
+async fn test_instance_ephemeral_ip_no_default_pool_error(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let _ = create_project(&client, PROJECT_NAME).await;
+
+    // important: no pool create, so there is no pool
+
+    let body = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "no-default-pool".parse().unwrap(),
+            description: "".to_string(),
+        },
+        ncpus: InstanceCpuCount(4),
+        memory: ByteCount::from_gibibytes_u32(1),
+        hostname: "the-host".parse().unwrap(),
+        user_data: vec![],
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![params::ExternalIpCreate::Ephemeral {
+            pool: None, // <--- the only important thing here
+        }],
+        ssh_public_keys: None,
+        disks: vec![],
+        start: true,
+    };
+
+    let url = format!("/v1/instances?project={}", PROJECT_NAME);
+    let error =
+        object_create_error(client, &url, &body, StatusCode::NOT_FOUND).await;
+    let msg = "not found: default IP pool for current silo".to_string();
+    assert_eq!(error.message, msg);
+
+    // same deal if you specify a pool that doesn't exist
+    let body = params::InstanceCreate {
+        external_ips: vec![params::ExternalIpCreate::Ephemeral {
+            pool: Some("nonexistent-pool".parse::<Name>().unwrap().into()),
+        }],
+        ..body
+    };
+    let error =
+        object_create_error(client, &url, &body, StatusCode::NOT_FOUND).await;
+    assert_eq!(error.message, msg);
+}
+
+#[nexus_test]
+async fn test_instance_attach_several_external_ips(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let _ = create_project(&client, PROJECT_NAME).await;
+
+    // Create a single (large) IP pool
+    let default_pool_range = IpRange::V4(
+        Ipv4Range::new(
+            std::net::Ipv4Addr::new(10, 0, 0, 1),
+            std::net::Ipv4Addr::new(10, 0, 0, 10),
+        )
+        .unwrap(),
+    );
+    create_ip_pool(&client, "default", Some(default_pool_range)).await;
+    link_ip_pool(&client, "default", &DEFAULT_SILO.id(), true).await;
+
+    assert_ip_pool_utilization(client, "default", 0, 10, 0, 0).await;
+
+    // Create several floating IPs for the instance, totalling 8 IPs.
+    let mut external_ip_create =
+        vec![params::ExternalIpCreate::Ephemeral { pool: None }];
+    let mut fips = vec![];
+    for i in 1..8 {
+        let name = format!("fip-{i}");
+        fips.push(
+            create_floating_ip(&client, &name, PROJECT_NAME, None, None).await,
+        );
+        external_ip_create.push(params::ExternalIpCreate::Floating {
+            floating_ip: name.parse::<Name>().unwrap().into(),
+        });
+    }
+
+    // Create an instance with pool name blank, expect IP from default pool
+    let instance_name = "many-fips";
+    let instance = create_instance_with(
+        &client,
+        PROJECT_NAME,
+        instance_name,
+        &params::InstanceNetworkInterfaceAttachment::Default,
+        vec![],
+        external_ip_create,
+        true,
+    )
+    .await;
+
+    // 1 ephemeral + 7 floating + 1 SNAT
+    assert_ip_pool_utilization(client, "default", 9, 10, 0, 0).await;
+
+    // Verify that all external IPs are visible on the instance and have
+    // been allocated in order.
+    let external_ips =
+        fetch_instance_external_ips(&client, instance_name, PROJECT_NAME).await;
+    assert_eq!(external_ips.len(), 8);
+    eprintln!("{external_ips:?}");
+    for (i, eip) in external_ips
+        .iter()
+        .sorted_unstable_by(|a, b| a.ip().cmp(&b.ip()))
+        .enumerate()
+    {
+        let last_octet = i + if i != external_ips.len() - 1 {
+            assert_eq!(eip.kind(), IpKind::Floating);
+            1
+        } else {
+            // SNAT will occupy 1.0.0.8 here, since it it alloc'd before
+            // the ephemeral.
+            assert_eq!(eip.kind(), IpKind::Ephemeral);
+            2
+        };
+        assert_eq!(eip.ip(), Ipv4Addr::new(10, 0, 0, last_octet as u8));
+    }
+
+    // Verify that all floating IPs are bound to their parent instance.
+    for fip in fips {
+        let fetched_fip = floating_ip_get(
+            &client,
+            &get_floating_ip_by_id_url(&fip.identity.id),
+        )
+        .await;
+        assert_eq!(fetched_fip.instance_id, Some(instance.identity.id));
+    }
+}
+
+#[nexus_test]
+async fn test_instance_allow_only_one_ephemeral_ip(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let _ = create_project(&client, PROJECT_NAME).await;
+
+    // don't need any IP pools because request fails at parse time
+
+    let ephemeral_create = params::ExternalIpCreate::Ephemeral {
+        pool: Some("default".parse::<Name>().unwrap().into()),
+    };
+    let create_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "default-pool-inst".parse().unwrap(),
+            description: "instance default-pool-inst".into(),
+        },
+        ncpus: InstanceCpuCount(4),
+        memory: ByteCount::from_gibibytes_u32(1),
+        hostname: "the-host".parse().unwrap(),
+        user_data:
+            b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
+                .to_vec(),
+        ssh_public_keys: None,
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![ephemeral_create.clone(), ephemeral_create],
+        disks: vec![],
+        start: true,
+    };
+    let error = object_create_error(
+        client,
+        &get_instances_url(),
+        &create_params,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
+
+    assert_eq!(
+        error.message,
+        "An instance may not have more than 1 ephemeral IP address"
     );
 }
 
@@ -3657,19 +4753,20 @@ async fn create_instance_with_pool(
         &params::InstanceNetworkInterfaceAttachment::Default,
         vec![],
         vec![params::ExternalIpCreate::Ephemeral {
-            pool_name: pool_name.map(|name| name.parse().unwrap()),
+            pool: pool_name.map(|name| name.parse::<Name>().unwrap().into()),
         }],
+        true,
     )
     .await
 }
 
-async fn fetch_instance_ephemeral_ip(
+pub async fn fetch_instance_external_ips(
     client: &ClientTestContext,
     instance_name: &str,
-) -> views::ExternalIp {
+    project_name: &str,
+) -> Vec<views::ExternalIp> {
     let ips_url = format!(
-        "/v1/instances/{}/external-ips?project={}",
-        instance_name, PROJECT_NAME
+        "/v1/instances/{instance_name}/external-ips?project={project_name}",
     );
     let ips = NexusRequest::object_get(client, &ips_url)
         .authn_as(AuthnMode::PrivilegedUser)
@@ -3678,9 +4775,18 @@ async fn fetch_instance_ephemeral_ip(
         .expect("Failed to fetch external IPs")
         .parsed_body::<ResultsPage<views::ExternalIp>>()
         .expect("Failed to parse external IPs");
-    assert_eq!(ips.items.len(), 1);
-    assert_eq!(ips.items[0].kind, IpKind::Ephemeral);
-    ips.items[0].clone()
+    ips.items
+}
+
+async fn fetch_instance_ephemeral_ip(
+    client: &ClientTestContext,
+    instance_name: &str,
+) -> views::ExternalIp {
+    fetch_instance_external_ips(client, instance_name, PROJECT_NAME)
+        .await
+        .into_iter()
+        .find(|v| v.kind() == IpKind::Ephemeral)
+        .unwrap()
 }
 
 #[nexus_test]
@@ -3707,8 +4813,11 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
     )
     .await;
 
-    // Populate IP Pool
-    populate_ip_pool(&client, "default", None).await;
+    // can't use create_default_ip_pool because we need to link to the silo we just made
+    create_ip_pool(&client, "default", None).await;
+    link_ip_pool(&client, "default", &silo.identity.id, true).await;
+
+    assert_ip_pool_utilization(client, "default", 0, 65536, 0, 0).await;
 
     // Create test projects
     NexusRequest::objects_post(
@@ -3738,11 +4847,12 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
         memory: ByteCount::from_gibibytes_u32(4),
-        hostname: String::from("inst"),
+        hostname: "inst".parse().unwrap(),
         user_data: vec![],
+        ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![params::ExternalIpCreate::Ephemeral {
-            pool_name: Some(Name::try_from(String::from("default")).unwrap()),
+            pool: Some("default".parse::<Name>().unwrap().into()),
         }],
         disks: vec![],
         start: true,
@@ -3758,11 +4868,12 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
 
     // Make sure the instance can actually start even though a collaborator
     // created it.
-    let apictx = &cptestctx.server.apictx();
+    let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     let authn = AuthnMode::SiloUser(user_id);
     let instance_url = get_instance_url(instance_name);
     let instance = instance_get_as(&client, &instance_url, authn.clone()).await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
     info!(&cptestctx.logctx.log, "test got instance"; "instance" => ?instance);
     assert_eq!(instance.runtime.run_state, InstanceState::Starting);
 
@@ -3780,9 +4891,40 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
         ),
         nexus.datastore().clone(),
     );
-    instance_simulate_with_opctx(nexus, &instance.identity.id, &opctx).await;
+    instance_simulate_with_opctx(nexus, &instance_id, &opctx).await;
     let instance = instance_get_as(&client, &instance_url, authn).await;
     assert_eq!(instance.runtime.run_state, InstanceState::Running);
+
+    // Stop the instance
+    NexusRequest::new(
+        RequestBuilder::new(
+            client,
+            Method::POST,
+            &format!("/v1/instances/{}/stop", instance.identity.id),
+        )
+        .body(None as Option<&serde_json::Value>)
+        .expect_status(Some(StatusCode::ACCEPTED)),
+    )
+    .authn_as(AuthnMode::SiloUser(user_id))
+    .execute()
+    .await
+    .expect("Failed to stop the instance");
+
+    instance_simulate_with_opctx(nexus, &instance_id, &opctx).await;
+    instance_wait_for_state_as(
+        client,
+        AuthnMode::SiloUser(user_id),
+        instance_id,
+        InstanceState::Stopped,
+    )
+    .await;
+
+    // Delete the instance
+    NexusRequest::object_delete(client, &instance_url)
+        .authn_as(AuthnMode::SiloUser(user_id))
+        .execute()
+        .await
+        .expect("Failed to delete the instance");
 }
 
 /// Test that appropriate OPTE V2P mappings are created and deleted.
@@ -3790,14 +4932,13 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
 async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    populate_ip_pool(&client, "default", None).await;
-    create_project(client, PROJECT_NAME).await;
+    create_project_and_pool(client).await;
 
     // Add a few more sleds
     let nsleds = 3;
     let mut additional_sleds = Vec::with_capacity(nsleds);
     for _ in 0..nsleds {
-        let sa_id = Uuid::new_v4();
+        let sa_id = SledUuid::new_v4();
         let log =
             cptestctx.logctx.log.new(o!( "sled_id" => sa_id.to_string() ));
         let addr = cptestctx.server.get_http_server_internal_address().await;
@@ -3818,6 +4959,7 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
     // Create an instance.
     let instance_name = "test-instance";
     let instance = create_instance(client, PROJECT_NAME, instance_name).await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
 
     let nics_url =
         format!("/v1/network-interfaces?instance={}", instance.identity.id,);
@@ -3832,7 +4974,7 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
 
     // Validate that every sled (except the instance's sled) now has a V2P
     // mapping for this instance
-    let apictx = &cptestctx.server.apictx();
+    let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     let datastore = nexus.datastore();
     let opctx =
@@ -3843,14 +4985,6 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
         .lookup_for(nexus_db_queries::authz::Action::Read)
         .await
         .unwrap();
-
-    let instance_state = datastore
-        .instance_fetch_with_vmm(&opctx, &authz_instance)
-        .await
-        .unwrap();
-
-    let sled_id =
-        instance_state.sled_id().expect("running instance should have a sled");
 
     let guest_nics = datastore
         .derive_guest_network_interface_info(&opctx, &authz_instance)
@@ -3864,24 +4998,14 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
     sled_agents.push(&cptestctx.sled_agent.sled_agent);
 
     for sled_agent in &sled_agents {
-        // TODO(#3107) Remove this bifurcation when Nexus programs all mappings
-        // itself.
-        if sled_agent.id != sled_id {
-            assert_sled_v2p_mappings(
-                sled_agent,
-                &nics[0],
-                guest_nics[0].vni.clone().into(),
-            )
-            .await;
-        } else {
-            assert!(sled_agent.v2p_mappings.lock().await.is_empty());
-        }
+        assert_sled_v2p_mappings(sled_agent, &nics[0], guest_nics[0].vni).await;
     }
 
     // Delete the instance
-    instance_simulate(nexus, &instance.identity.id).await;
+    instance_simulate(nexus, &instance_id).await;
     instance_post(&client, instance_name, InstanceOp::Stop).await;
-    instance_simulate(nexus, &instance.identity.id).await;
+    instance_simulate(nexus, &instance_id).await;
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
 
     let instance_url = get_instance_url(instance_name);
     NexusRequest::object_delete(client, &instance_url)
@@ -3892,8 +5016,21 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
 
     // Validate that every sled no longer has the V2P mapping for this instance
     for sled_agent in &sled_agents {
-        let v2p_mappings = sled_agent.v2p_mappings.lock().await;
-        assert!(v2p_mappings.is_empty());
+        let condition = || async {
+            let v2p_mappings = sled_agent.v2p_mappings.lock().await;
+            if v2p_mappings.is_empty() {
+                Ok(())
+            } else {
+                Err(CondCheckError::NotYet::<()>)
+            }
+        };
+        wait_for_condition(
+            condition,
+            &Duration::from_secs(1),
+            &Duration::from_secs(30),
+        )
+        .await
+        .expect("v2p mappings should be empty");
     }
 }
 
@@ -3933,6 +5070,73 @@ pub enum InstanceOp {
     Start,
     Stop,
     Reboot,
+}
+
+pub async fn instance_wait_for_state(
+    client: &ClientTestContext,
+    instance_id: InstanceUuid,
+    state: omicron_common::api::external::InstanceState,
+) -> Instance {
+    instance_wait_for_state_as(
+        client,
+        AuthnMode::PrivilegedUser,
+        instance_id,
+        state,
+    )
+    .await
+}
+
+/// Line [`instance_wait_for_state`], but with an [`AuthnMode`] parameter for
+/// the instance lookup requests.
+pub async fn instance_wait_for_state_as(
+    client: &ClientTestContext,
+    authn_as: AuthnMode,
+    instance_id: InstanceUuid,
+    state: omicron_common::api::external::InstanceState,
+) -> Instance {
+    const MAX_WAIT: Duration = Duration::from_secs(120);
+
+    slog::info!(
+        &client.client_log,
+        "waiting for instance {instance_id} to transition to {state}...";
+    );
+    let url = format!("/v1/instances/{instance_id}");
+    let result = wait_for_condition(
+        || async {
+            let instance: Instance = NexusRequest::object_get(client, &url)
+                .authn_as(authn_as.clone())
+                .execute()
+                .await?
+                .parsed_body()?;
+            if instance.runtime.run_state == state {
+                Ok(instance)
+            } else {
+                slog::info!(
+                    &client.client_log,
+                    "instance {instance_id} has not transitioned to {state}";
+                    "instance_id" => %instance.identity.id,
+                    "instance_runtime_state" => ?instance.runtime,
+                );
+                Err(CondCheckError::<anyhow::Error>::NotYet)
+            }
+        },
+        &Duration::from_secs(1),
+        &MAX_WAIT,
+    )
+    .await;
+    match result {
+        Ok(instance) => {
+            slog::info!(
+                &client.client_log,
+                "instance {instance_id} has transitioned to {state}"
+            );
+            instance
+        }
+        Err(e) => panic!(
+            "instance {instance_id} did not transition to {state:?} \
+             after {MAX_WAIT:?}: {e}"
+        ),
+    }
 }
 
 pub async fn instance_post(
@@ -3990,53 +5194,186 @@ async fn assert_sled_v2p_mappings(
     nic: &InstanceNetworkInterface,
     vni: Vni,
 ) {
-    let v2p_mappings = sled_agent.v2p_mappings.lock().await;
-    assert!(!v2p_mappings.is_empty());
+    let condition = || async {
+        let v2p_mappings = sled_agent.v2p_mappings.lock().await;
+        let mapping = v2p_mappings.iter().find(|mapping| {
+            mapping.virtual_ip == nic.ip
+                && mapping.virtual_mac == nic.mac
+                && mapping.physical_host_ip == sled_agent.ip
+                && mapping.vni == vni
+        });
 
-    let mapping = v2p_mappings.get(&nic.identity.id).unwrap().last().unwrap();
-    assert_eq!(mapping.virtual_ip, nic.ip);
-    assert_eq!(mapping.virtual_mac, nic.mac);
-    assert_eq!(mapping.physical_host_ip, sled_agent.ip);
-    assert_eq!(mapping.vni, vni);
+        if mapping.is_some() {
+            Ok(())
+        } else {
+            Err(CondCheckError::NotYet::<()>)
+        }
+    };
+    wait_for_condition(
+        condition,
+        &Duration::from_secs(1),
+        &Duration::from_secs(30),
+    )
+    .await
+    .expect("matching v2p mapping should be present");
+}
+
+/// Asserts that supplied sled agent's most recent VPC route sets
+/// contain up-to-date routes for a known subnet.
+pub async fn assert_sled_vpc_routes(
+    sled_agent: &Arc<SledAgent>,
+    opctx: &OpContext,
+    datastore: &DataStore,
+    subnet_id: Uuid,
+    vni: Vni,
+) -> (HashSet<ResolvedVpcRoute>, HashSet<ResolvedVpcRoute>) {
+    let (.., authz_vpc, _, db_subnet) = LookupPath::new(opctx, datastore)
+        .vpc_subnet_id(subnet_id)
+        .fetch()
+        .await
+        .unwrap();
+
+    let custom_routes: HashSet<_> =
+        if let Some(router_id) = db_subnet.custom_router_id {
+            datastore
+                .vpc_resolve_router_rules(opctx, router_id)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|(dest, target)| ResolvedVpcRoute { dest, target })
+                .collect()
+        } else {
+            Default::default()
+        };
+
+    let (.., vpc) = LookupPath::new(opctx, datastore)
+        .vpc_id(authz_vpc.id())
+        .fetch()
+        .await
+        .unwrap();
+
+    let system_routes: HashSet<_> = datastore
+        .vpc_resolve_router_rules(opctx, vpc.system_router_id)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|(dest, target)| ResolvedVpcRoute { dest, target })
+        .collect();
+
+    assert!(!system_routes.is_empty());
+
+    let condition = || async {
+        let vpc_routes = sled_agent.vpc_routes.lock().await;
+        let sys_routes_found = vpc_routes.iter().any(|(id, set)| {
+            *id == RouterId { vni, kind: RouterKind::System }
+                && set.routes == system_routes
+        });
+        let custom_routes_found = vpc_routes.iter().any(|(id, set)| {
+            *id == RouterId {
+                vni,
+                kind: RouterKind::Custom(db_subnet.ipv4_block.0.into()),
+            } && set.routes == custom_routes
+        });
+
+        if sys_routes_found && custom_routes_found {
+            Ok(())
+        } else {
+            Err(CondCheckError::NotYet::<()>)
+        }
+    };
+    wait_for_condition(
+        condition,
+        &Duration::from_secs(1),
+        &Duration::from_secs(30),
+    )
+    .await
+    .expect("matching vpc routes should be present");
+
+    (system_routes, custom_routes)
 }
 
 /// Simulate completion of an ongoing instance state transition.  To do this, we
 /// have to look up the instance, then get the sled agent associated with that
 /// instance, and then tell it to finish simulating whatever async transition is
 /// going on.
-pub async fn instance_simulate(nexus: &Arc<Nexus>, id: &Uuid) {
-    let sa = nexus
-        .instance_sled_by_id(id)
+pub async fn instance_simulate(nexus: &Arc<Nexus>, id: &InstanceUuid) {
+    let sled_info = nexus
+        .active_instance_info(id, None)
         .await
         .unwrap()
         .expect("instance must be on a sled to simulate a state change");
-    sa.instance_finish_transition(*id).await;
+
+    sled_info.sled_client.vmm_finish_transition(sled_info.propolis_id).await;
+}
+
+/// Simulate one step of an ongoing instance state transition.  To do this, we
+/// have to look up the instance, then get the sled agent associated with that
+/// instance, and then tell it to finish simulating whatever async transition is
+/// going on.
+async fn vmm_single_step_on_sled(
+    cptestctx: &ControlPlaneTestContext,
+    nexus: &Arc<Nexus>,
+    sled_id: SledUuid,
+    propolis_id: PropolisUuid,
+) {
+    info!(&cptestctx.logctx.log, "Single-stepping simulated instance on sled";
+          "propolis_id" => %propolis_id, "sled_id" => %sled_id);
+    let sa = nexus.sled_client(&sled_id).await.unwrap();
+    sa.vmm_single_step(propolis_id).await;
 }
 
 pub async fn instance_simulate_with_opctx(
     nexus: &Arc<Nexus>,
-    id: &Uuid,
+    id: &InstanceUuid,
     opctx: &OpContext,
 ) {
-    let sa = nexus
-        .instance_sled_by_id_with_opctx(id, opctx)
+    let sled_info = nexus
+        .active_instance_info(id, Some(opctx))
         .await
         .unwrap()
         .expect("instance must be on a sled to simulate a state change");
-    sa.instance_finish_transition(*id).await;
+
+    sled_info.sled_client.vmm_finish_transition(sled_info.propolis_id).await;
 }
 
 /// Simulates state transitions for the incarnation of the instance on the
 /// supplied sled (which may not be the sled ID currently stored in the
 /// instance's CRDB record).
-async fn instance_simulate_on_sled(
+async fn vmm_simulate_on_sled(
     cptestctx: &ControlPlaneTestContext,
     nexus: &Arc<Nexus>,
-    sled_id: Uuid,
-    instance_id: Uuid,
+    sled_id: SledUuid,
+    propolis_id: PropolisUuid,
 ) {
     info!(&cptestctx.logctx.log, "Poking simulated instance on sled";
-          "instance_id" => %instance_id, "sled_id" => %sled_id);
+          "propolis_id" => %propolis_id, "sled_id" => %sled_id);
     let sa = nexus.sled_client(&sled_id).await.unwrap();
-    sa.instance_finish_transition(instance_id).await;
+    sa.vmm_finish_transition(propolis_id).await;
+}
+
+/// Simulates a migration source for the provided instance ID, sled ID, and
+/// migration ID.
+async fn instance_simulate_migration_source(
+    cptestctx: &ControlPlaneTestContext,
+    nexus: &Arc<Nexus>,
+    sled_id: SledUuid,
+    propolis_id: PropolisUuid,
+    migration_id: Uuid,
+) {
+    info!(
+        &cptestctx.logctx.log,
+        "Simulating migration source sled";
+        "propolis_id" => %propolis_id,
+        "sled_id" => %sled_id,
+        "migration_id" => %migration_id,
+    );
+    let sa = nexus.sled_client(&sled_id).await.unwrap();
+    sa.vmm_simulate_migration_source(
+        propolis_id,
+        sled_agent_client::SimulateMigrationSource {
+            migration_id,
+            result: sled_agent_client::SimulatedMigrationResult::Success,
+        },
+    )
+    .await;
 }

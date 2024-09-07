@@ -9,7 +9,6 @@ serial_number = "SimSidecar0"
 manufacturing_root_cert_seed = "01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de01de"
 device_id_cert_seed = "01de000000000000000000000000000000000000000000000000000000000000"
 
-
 [[simulated_sps.gimlet]]
 multicast_addr = "ff15:0:1de::1"
 bind_addrs = ["[::]:33310", "[::]:33311"]
@@ -21,9 +20,19 @@ device_id_cert_seed = "01de00000000000000000000000000000000000000000000000000000
 id = "sp3-host-cpu"
 device = "sp3-host-cpu"
 description = "FAKE host cpu"
-capabilities.bits = 0
+capabilities = 0
 presence = "Present"
 serial_console = "[::1]:33312"
+
+[[simulated_sps.gimlet.components]]
+id = "dev-0"
+device = "tmp117"
+description = "FAKE Southwest temperature sensor"
+capabilities = 2
+presence = "Present"
+sensors = [
+    { name = "Southwest", kind = "Temperature", last_data.value = 41.7890625, last_data.timestamp = 1234 },
+]
 
 [[simulated_sps.gimlet]]
 multicast_addr = "ff15:0:1de::2"
@@ -36,9 +45,20 @@ device_id_cert_seed = "01de00000000000000000000000000000000000000000000000000000
 id = "sp3-host-cpu"
 device = "sp3-host-cpu"
 description = "FAKE host cpu"
-capabilities.bits = 0
+capabilities = 0
 presence = "Present"
 serial_console = "[::1]:33322"
+
+[[simulated_sps.gimlet.components]]
+id = "dev-0"
+device = "tmp117"
+description = "FAKE Southwest temperature sensor"
+capabilities = 2
+presence = "Present"
+sensors = [
+    { name = "Southwest", kind = "Temperature", last_data.value = 41.7890625, last_data.timestamp = 1234 },
+]
+
 
 [log]
 # Show log messages of this level and more severe

@@ -7,25 +7,33 @@ This directory describes the schema(s) used by CockroachDB.
 
 We use the following conventions:
 
-* `schema/crdb/VERSION/up.sql`: The necessary idempotent migrations to transition from the
-  previous version of CockroachDB to this version. These migrations will always be placed
-  within one transaction per file.
-** If more than one change is needed per version, any number of files starting with `up`
-   and ending with `.sql` may be used. These files will be sorted in lexicographic order
-   before being executed, and each will be executed in a separate transaction.
-** CockroachDB documentation recommends the following: "Execute schema changes... in a single
-   explicit transaction consisting of the single schema change statement".
-   Practically this means: If you want to change multiple tables, columns,
-   types, indices, or constraints, do so in separate files.
-** More information can be found here: https://www.cockroachlabs.com/docs/stable/online-schema-changes
-* `schema/crdb/dbinit.sql`: The necessary operations to create the latest version
-  of the schema. Should be equivalent to running all `up.sql` migrations, in-order.
-* `schema/crdb/dbwipe.sql`: The necessary operations to delete the latest version
-  of the schema.
+* `schema/crdb/VERSION/up*.sql`: Files containing the necessary idempotent
+  statements to transition from the previous version of the database schema to
+  this version.  All of the statements in a given file will be executed
+  together in one transaction; however, usually only one statement should
+  appear in each file.  More on this below.
+** If there's only one statement required, we put it into `up.sql`.
+** If more than one change is needed, any number of files starting with `up`
+   and ending with `.sql` may be used. These files  must follow a
+   numerically-increasing pattern starting with 1 (leading prefixes are allowed,
+   so `up1.sql`, `up2.sql`, ..., or `up01.sql`, `up02.sql`, etc.), and they will
+   be sorted numerically by these values.  Each will be executed in a separate
+   transaction.
+** CockroachDB documentation recommends the following: "Execute schema
+   changes ... in an explicit transaction consisting of the single schema
+   change statement.".  Practically this means: If you want to change multiple
+   tables, columns, types, indices, or constraints, do so in separate files.
+   See https://www.cockroachlabs.com/docs/stable/online-schema-changes for
+   more.
+* `schema/crdb/dbinit.sql`: The necessary operations to create the latest
+  version of the schema. Should be equivalent to running all `up.sql`
+  migrations, in-order.
+* `schema/crdb/dbwipe.sql`: The necessary operations to delete the latest
+  version of the schema.
 
-Note that to upgrade from version N to version N+2, we always need to apply the
-N+1 upgrade first, before applying the N+2 upgrade. This simplifies our model
-of DB schema changes as an incremental linear history.
+Note that to upgrade from version N to version N+2, we always apply the N+1
+upgrade first, before applying the N+2 upgrade. This simplifies our model of DB
+schema changes by ensuring an incremental, linear history.
 
 == Offline Upgrade
 
@@ -34,9 +42,9 @@ This means we're operating with the following constraints:
 
 * We assume that downtime is acceptable to perform an update.
 * We assume that while an update is occuring, all Nexus services
-are running the same version of software.
+  are running the same version of software.
 * We assume that no (non-upgrade) concurrent database requests will happen for
-the duration of the migration.
+  the duration of the migration.
 
 This is not an acceptable long-term solution - we must be able to update
 without downtime - but it is an interim solution, and one which provides a
@@ -44,59 +52,121 @@ fall-back pathway for performing upgrades.
 
 See RFD 319 for more discussion of the online upgrade plans.
 
-=== How to change the schema
+== How to change the schema
 
 Assumptions:
 
-* The (previously) latest schema version is referred to as `OLD_VERSION`
-* Your new changes will bring the schema to a new version, `NEW_VERSION`
+* We'll call the (previously) latest schema version `OLD_VERSION`.
+* We'll call your new schema version `NEW_VERSION`.  This will always be a major
+  version bump from `OLD_VERSION`.  So if `OLD_VERSION` is 43.0.0, `NEW_VERSION`
+  should be `44.0.0`.
+* You can write a sequence of SQL statements to update a database that's
+  currently running `OLD_VERSION` to one running `NEW_VERSION`.
 
 Process:
 
-* Choose a `NEW_VERSION` number. This should almost certainly be a major version bump over `OLD_VERSION`.
-* Add a file to `schema/crdb/NEW_VERSION/up.sql` with your changes to the schema.
-** This file should validate the expected current version transactionally.
-** This file should only issue a single schema-modifying statement per transaction.
-** This file should not issue any data-modifying operations within the schema-modifying transactions.
-* Update `schema/crdb/dbinit.sql` to match what the database should look like
-  after your update is applied. Don't forget to update the version field of
-  `db_metadata` at the bottom of the file!
-** If necessary, do the same thing for `schema/crdb/dbwipe.sql`.
-* Update Nexus's idea of the latest schema, by updating its `SCHEMA_VERSION` to
-  `NEW_VERSION` within `nexus/db-model/src/schema.rs`.
+* Create a directory of SQL files describing how to update a database running
+  version `OLD_VERSION` to one running version `NEW_VERSION`:
+** Choose a unique, descriptive name for the directory.  It's suggested that
+   you stick to lowercase letters, numbers, and hyphen.  For example, if you're
+   adding a table called `widgets`, you might create a directory called
+   `create-table-widgets`.
+** Create the directory: `schema/crdb/NAME`.
+*** If only one SQL statement is necessary to get from `OLD_VERSION` to
+    `NEW_VERSION`, put that statement into `schema/crdb/NAME/up.sql`.  If
+    multiple statements are required, put each one into a separate file, naming
+    these `schema/crdb/NAME/upN.sql` for as many `N` as you need, starting with
+    `N=1`.
+*** Each file should contain _either_ one schema-modifying statement _or_ some
+    number of data-modifying statements.  You can combine multiple data-modifying
+    statements.  But you should not mix schema-modifying statements and
+    data-modifying statements in one file.  And you should not include multiple
+    schema-modifying statements in one file.
+*** Beware that the entire file will be run in one transaction.  Expensive data-
+    modifying operations leading to long-running transactions are generally
+    to-be-avoided; however, there's no better way to do this today if you really
+    do need to update thousands of rows as part of the update.
+* Update `schema/crdb/dbinit.sql`:
+** Update the SQL statements to match what the database should look like
+   after your up*.sql files are applied.
+** Update the version field of `db_metadata` at the bottom of the file.
+* Update `schema/crdb/dbwipe.sql` if needed.  (This is rare.)
+* Update `nexus/db-model/src/schema_versions.rs`:
+** Update the major number of `SCHEMA_VERSION` so that it matches `NEW_VERSION`.
+** Add a new entry to the *top* of `KNOWN_VERSIONS`.  It should be just one
+   line: `KnownVersion::new(NEW_VERSION.major, NAME)`
+* Optional: check some of this work by running `cargo nextest run -p nexus-db-model -- schema_versions`.  This is recommended because if you get
+  one of these steps wrong, these tests should be able to tell you, whereas
+  other tests might fail in much worse ways (e.g., they can hang if you've
+  updated `SCHEMA_VERSION` but not the database schema version).
 
-SQL Validation, via Automated Tests:
+There are automated tests to validate many of these steps:
 
-* The `SCHEMA_VERSION` matches the version used in `dbinit.sql`
-* The combination of all `up.sql` files results in the same schema as `dbinit.sql`
-* All `up.sql` files can be applied twice without error
+* The `SCHEMA_VERSION` matches the version used in `dbinit.sql`.  (This catches
+  the case where you forget to update either one of these).
+* The `KNOWN_VERSIONS` are all strictly increasing semvers.  New known versions
+  must be sequential major numbers with minor and micro both being `0`.  (This
+  catches various mismerge errors: accidentally duplicating a version, putting
+  versions in the wrong order, etc.)
+* The combination of all `up*.sql` files results in the same schema as
+  `dbinit.sql`.  (This catches forgetting to update dbinit.sql, forgetting to
+  implement a schema update altogether, or a mismatch between dbinit.sql and
+  the update.)
+* All `up*.sql` files can be applied twice without error.  (This catches
+  non-idempotent update steps.)
 
-==== Handling common schema changes
+**If you've finished all this and another PR lands on "main" that chose the
+same `NEW_VERSION`:**, then your `OLD_VERSION` has changed and so _your_
+`NEW_VERSION` needs to change, too.  You'll need to:
 
-Although CockroachDB's schema includes some opaque internally-generated fields
-that are order dependent - such as the names of anonymous CHECK constraints -
-our schema comparison tools intentionally ignore these values. As a result,
-when performing schema changes, the order of new tables and constraints should
-generally not be important.
+* In `nexus/db-model/src/schema_versions.rs`.
+** Make sure `SCHEMA_VERSION` reflects your new `NEW_VERSION`.
+** Make sure the `KNOWN_VERSIONS` entry that you added reflects your new
+   `NEW_VERSION` and still appears at the top of the list (logically after the
+   new version that came in from "main").
+* Update the version in `dbinit.sql` to match the new `NEW_VERSION`.
 
-As convention, however, we recommend keeping the `db_metadata` file at the end of
-`dbinit.sql`, so that the database does not contain a version until it is fully
-populated.
+=== Constraints on Schema Updates
 
-==== Adding new source tables to an existing view
+==== Adding a new column without a default value [[add_column_constraint]]
 
-An upgrade can add a new table and then use a `CREATE OR REPLACE VIEW` statement
-to make an existing view depend on that table. To do this in `dbinit.sql` while
-maintaining table and view ordering, use `CREATE VIEW` to create a "placeholder"
-view in the correct position, then add the table to the bottom of `dbinit.sql`
-and use `CREATE OR REPLACE VIEW` to "fill out" the placeholder definition to
-refer to the new table. (You may need to do the `CREATE OR REPLACE VIEW` in a
-separate transaction from the original `CREATE VIEW`.)
+When adding a new non-nullable column to an existing table, that column must
+contain a default to help back-fill existing rows in that table which may
+exist. Without this default value, the schema upgrade might fail with
+an error like `null value in column "..." violates not-null constraint`.
+Unfortunately, it's possible that the schema upgrade might NOT fail with that
+error, if no rows are present in the table when the schema is updated. This
+results in an inconsistent state, where the schema upgrade might succeed on
+some deployments but fail on others.
 
-Note that `CREATE OR REPLACE VIEW` requires that the new view maintain all of
-the columns of the old view with the same type and same order (though the query
-used to populate them can change. See
-https://www.postgresql.org/docs/15/sql-createview.html.
+If you'd like to add a column without a default value, we recommend
+doing the following, if a `DEFAULT` value makes sense for a one-time update:
+
+1. Adding the column with a `DEFAULT` value.
+2. Dropping the `DEFAULT` constraint.
+
+If a `DEFAULT` value does not make sense, then you need to implement a
+multi-step process.
+
+. Add the column without a `NOT NULL` constraint.
+. Migrate existing data to a non-null value.
+. Once all data has been migrated to a non-null value, alter the table again to
+add the `NOT NULL` constraint.
+
+For the time being, if you can write the data migration in SQL (e.g., using a
+SQL `UPDATE`), then you can do this with a single new schema version where the
+second step is an `UPDATE`. See schema version 54 (`blueprint-add-external-ip-id`)
+for an example of this (though that one did not make the new column `NOT NULL` --
+you'd want to do that in another step). Update the `validate_data_migration()`
+test in `nexus/tests/integration_tests/schema.rs` to add a test for this.
+
+In the future when schema updates happen while the control plane is online,
+this may not be a tenable path because the operation may take a very long time
+on large tables.
+
+If you cannot write the data migration in SQL, you would need to figure out a
+different way to backfill the data before you can apply the step that adds the
+`NOT NULL` constraint. This is likely a substantial project
 
 ==== Renaming columns
 
@@ -109,3 +179,66 @@ functions as a workaround.)
 An (imperfect) workaround is to use the `#[diesel(column_name = foo)]` attribute
 in Rust code to preserve the existing name of a column in the database while
 giving its corresponding struct field a different, more meaningful name.
+
+Note that this constraint does not apply to renaming tables: the statement
+`ALTER TABLE IF EXISTS ... RENAME TO ...` is valid and idempotent.
+
+=== Fixing broken Schema Updates
+
+WARNING: This section is somewhat speculative - what "broken" means may differ
+significantly from one schema update to the next. Take this as as a recommendation
+based on experience, but not as a hard truth that will apply to all broken schema
+updates.
+
+In cases where a schema update cannot complete successfully, additional steps
+may be necessary to enable schema updates to proceed (for example, if a schema
+update tried <<add_column_constraint>>). In these situations, the goal should be
+the following:
+
+. Fix the schema update such that deployments which have not applied it yet
+do not fail.
+.. It is important to update the *exact* "upN.sql" file which failed, rather than
+re-numbering or otherwise changing the order of schema updates. Internally, Nexus
+tracks which individual step of a schema update has been applied, to avoid applying
+older schema upgrades which may no longer be relevant.
+. Add a follow-up named schema update to ensure that deployments which have
+*already* applied it arrive at the same state. This is only necessary if it is
+possible for the schema update to apply successfully in any possible
+deployment. This schema update should be added like any other "new" schema update,
+appended to the list of all updates, rather than re-ordering history. This
+schema update will run on systems that deployed both versions of the earlier
+schema update.
+. Determine whether any of the schema versions after the broken one need to
+change because they depended on the specific behavior that you changed to _fix_
+that version.
+
+We can use the following terminology here:
+
+* `S(bad)`: The particular `upN.sql` schema update which is "broken".
+* `S(fixed)`: That same `upN.sql` file after being updated to a non-broken version.
+* `S(converge)`: Some later schema update that converges the deployment to a known-good
+state.
+
+**This process is risky**. By changing the contents of the old schema update `S(bad)`
+to `S(fixed)`, we create two divergent histories on our deployments: one where `S(bad)`
+may have been applied, and one where only `S(fixed)` was applied.
+
+Although the goal of `S(converge)` is to make sure that these deployments end
+up looking the same, there are no guarantees that other schema updates between
+`S(bad)` and `S(converge)` will be identical between these two variant update
+timelines. When fixing broken schema updates, do so with caution, and consider
+all schema updates between `S(bad)` and `S(converge)` - these updates must be
+able to complete successfully regardless of which one of `S(bad)` or `S(fixed)`
+was applied.
+
+=== General notes
+
+CockroachDB's representation of the schema includes some opaque
+internally-generated fields that are order dependent, like the names of
+anonymous CHECK constraints.  Our schema comparison tools intentionally ignore
+these values. As a result, when performing schema changes, the order of new
+tables and constraints should generally not be important.
+
+As convention, however, we recommend keeping the `db_metadata` row insertion at
+the end of `dbinit.sql`, so that the database does not contain a version until
+it is fully populated.

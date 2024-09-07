@@ -154,11 +154,11 @@ impl super::Nexus {
                 | Error::Forbidden
                 | Error::InternalError { .. }
                 | Error::ServiceUnavailable { .. }
-                | Error::MethodNotAllowed { .. }
+                | Error::InsufficientCapacity { .. }
                 | Error::TypeVersionMismatch { .. }
-                | Error::Conflict { .. } => {
-                    Reason::UnknownError { source: error }
-                }
+                | Error::Conflict { .. }
+                | Error::NotFound { .. }
+                | Error::Gone => Reason::UnknownError { source: error },
             })?;
         Ok(db_silo_user.silo_id)
     }

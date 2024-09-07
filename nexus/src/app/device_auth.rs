@@ -114,9 +114,7 @@ impl super::Nexus {
                     token,
                 )
                 .await?;
-            Err(Error::InvalidRequest {
-                message: "device authorization request expired".to_string(),
-            })
+            Err(Error::invalid_request("device authorization request expired"))
         } else {
             self.db_datastore
                 .device_access_token_create(

@@ -10,10 +10,8 @@ use crate::context::OpContext;
 use crate::db;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
-use crate::db::error::TransactionError;
 use crate::db::model::DeviceAccessToken;
 use crate::db::model::DeviceAuthRequest;
-use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use omicron_common::api::external::CreateResult;
@@ -75,35 +73,40 @@ impl DataStore {
             RequestNotFound,
             TooManyRequests,
         }
-        type TxnError = TransactionError<TokenGrantError>;
 
-        self.pool_connection_authorized(opctx)
-            .await?
-            .transaction_async(|conn| async move {
-                match delete_request.execute_async(&conn).await? {
-                    0 => {
-                        Err(TxnError::CustomError(TokenGrantError::RequestNotFound))
+        let err = crate::transaction_retry::OptionalError::new();
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        self.transaction_retry_wrapper("device_access_token_create")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                let insert_token = insert_token.clone();
+                let delete_request = delete_request.clone();
+                async move {
+                    match delete_request.execute_async(&conn).await? {
+                        0 => Err(err.bail(TokenGrantError::RequestNotFound)),
+                        1 => Ok(insert_token.get_result_async(&conn).await?),
+                        _ => Err(err.bail(TokenGrantError::TooManyRequests)),
                     }
-                    1 => Ok(insert_token.get_result_async(&conn).await?),
-                    _ => Err(TxnError::CustomError(
-                        TokenGrantError::TooManyRequests,
-                    )),
                 }
             })
             .await
-            .map_err(|e| match e {
-                TxnError::CustomError(TokenGrantError::RequestNotFound) => {
-                    Error::ObjectNotFound {
-                        type_name: ResourceType::DeviceAuthRequest,
-                        lookup_type: LookupType::ByCompositeId(
-                            authz_request.id(),
-                        ),
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    match err {
+                        TokenGrantError::RequestNotFound => {
+                            Error::ObjectNotFound {
+                                type_name: ResourceType::DeviceAuthRequest,
+                                lookup_type: LookupType::ByCompositeId(
+                                    authz_request.id(),
+                                ),
+                            }
+                        }
+                        TokenGrantError::TooManyRequests => {
+                            Error::internal_error("unexpectedly found multiple device auth requests for the same user code")
+                        }
                     }
-                }
-                TxnError::CustomError(TokenGrantError::TooManyRequests) => {
-                    Error::internal_error("unexpectedly found multiple device auth requests for the same user code")
-                }
-                TxnError::Database(e) => {
+                } else {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 }
             })

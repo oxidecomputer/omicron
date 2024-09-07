@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 
+[lints]
+workspace = true
+
 [build-dependencies]
 omicron-rpaths.workspace = true
 
@@ -12,14 +15,17 @@ anyhow.workspace = true
 assert_matches.workspace = true
 async-trait.workspace = true
 base64.workspace = true
-bb8.workspace = true
+buf-list.workspace = true
+bytes.workspace = true
 cancel-safe-futures.workspace = true
 camino.workspace = true
+camino-tempfile.workspace = true
 clap.workspace = true
 chrono.workspace = true
-cookie.workspace = true
+cockroach-admin-client.workspace = true
 crucible-agent-client.workspace = true
 crucible-pantry-client.workspace = true
+crucible-common.workspace = true
 dns-service-client.workspace = true
 dpd-client.workspace = true
 mg-admin-client.workspace = true
@@ -29,25 +35,30 @@ futures.workspace = true
 gateway-client.workspace = true
 headers.workspace = true
 hex.workspace = true
+hickory-resolver.workspace = true
 http.workspace = true
 hyper.workspace = true
+illumos-utils.workspace = true
 internal-dns.workspace = true
 ipnetwork.workspace = true
-lazy_static.workspace = true
+itertools.workspace = true
 macaddr.workspace = true
-mime_guess.workspace = true
-newtype_derive.workspace = true
 # Not under "dev-dependencies"; these also need to be implemented for
 # integration tests.
+nexus-client.workspace = true
+nexus-config.workspace = true
+nexus-external-api.workspace = true
+nexus-internal-api.workspace = true
+nexus-networking.workspace = true
+nexus-saga-recovery.workspace = true
 nexus-test-interface.workspace = true
 num-integer.workspace = true
 once_cell.workspace = true
 openssl.workspace = true
-openssl-sys.workspace = true
-openssl-probe.workspace = true
-oso.workspace = true
 oximeter-client.workspace = true
-oximeter-db.workspace = true
+oximeter-db = { workspace = true, default-features = false, features = [ "oxql" ] }
+oxnet.workspace = true
+oxql-types.workspace = true
 parse-display.workspace = true
 paste.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.
@@ -69,21 +80,28 @@ sled-agent-client.workspace = true
 slog.workspace = true
 slog-async.workspace = true
 slog-dtrace.workspace = true
+slog-error-chain.workspace = true
+display-error-chain.workspace = true
 slog-term.workspace = true
 steno.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tokio-postgres = { workspace = true, features = ["with-serde_json-1"] }
-toml.workspace = true
+tokio-util = { workspace = true, features = ["codec"] }
 tough.workspace = true
-trust-dns-resolver.workspace = true
 uuid.workspace = true
-usdt.workspace = true
 
+nexus-auth.workspace = true
 nexus-defaults.workspace = true
 nexus-db-model.workspace = true
 nexus-db-queries.workspace = true
+nexus-inventory.workspace = true
+nexus-metrics-producer-gc.workspace = true
+nexus-reconfigurator-execution.workspace = true
+nexus-reconfigurator-planning.workspace = true
+nexus-reconfigurator-preparation.workspace = true
+nexus-sled-agent-shared.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
 omicron-passwords.workspace = true
@@ -91,18 +109,23 @@ oximeter.workspace = true
 oximeter-instruments = { workspace = true, features = ["http-instruments"] }
 oximeter-producer.workspace = true
 rustls = { workspace = true }
+rustls-pemfile = { workspace = true }
+update-common.workspace = true
 omicron-workspace-hack.workspace = true
+omicron-uuid-kinds.workspace = true
 
 [dev-dependencies]
 async-bb8-diesel.workspace = true
+camino-tempfile.workspace = true
 criterion.workspace = true
 diesel.workspace = true
 dns-server.workspace = true
 expectorate.workspace = true
 hyper-rustls.workspace = true
-itertools.workspace = true
 gateway-messages.workspace = true
 gateway-test-utils.workspace = true
+hubtools.workspace = true
+nexus-db-queries = { workspace = true, features = ["testing"] }
 nexus-test-utils-macros.workspace = true
 nexus-test-utils.workspace = true
 omicron-sled-agent.workspace = true
@@ -110,16 +133,21 @@ omicron-test-utils.workspace = true
 openapi-lint.workspace = true
 openapiv3.workspace = true
 oxide-client.workspace = true
+oximeter-collector.workspace = true
 pem.workspace = true
 petgraph.workspace = true
 pretty_assertions.workspace = true
 rcgen.workspace = true
 regex.workspace = true
 similar-asserts.workspace = true
-rustls = { workspace = true }
+sled-agent-types.workspace = true
+sp-sim.workspace = true
+rustls.workspace = true
 subprocess.workspace = true
 term.workspace = true
-trust-dns-resolver.workspace = true
+hickory-resolver.workspace = true
+tufaceous.workspace = true
+tufaceous-lib.workspace = true
 httptest.workspace = true
 strum.workspace = true
 

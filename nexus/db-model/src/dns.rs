@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 impl_enum_type!(
     #[derive(SqlType, Debug)]
-    #[diesel(postgres_type(name = "dns_group"))]
+    #[diesel(postgres_type(name = "dns_group", schema = "public"))]
     pub struct DnsGroupEnum;
 
     #[derive(Clone, Copy, Debug, AsExpression, FromSqlRow, PartialEq)]

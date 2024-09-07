@@ -5,16 +5,21 @@ edition = "2021"
 description = "The oximeter metric collection server"
 license = "MPL-2.0"
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow.workspace = true
+camino.workspace = true
+chrono.workspace = true
 clap.workspace = true
 dropshot.workspace = true
 futures.workspace = true
 internal-dns.workspace = true
-nexus-client.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
 oximeter.workspace = true
+oximeter-api.workspace = true
 oximeter-client.workspace = true
 oximeter-db.workspace = true
 rand.workspace = true
@@ -25,14 +30,17 @@ slog.workspace = true
 slog-async.workspace = true
 slog-dtrace.workspace = true
 slog-term.workspace = true
+strum.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 toml.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
+nexus-client.workspace = true
 
 [dev-dependencies]
 expectorate.workspace = true
+hyper.workspace = true
 omicron-test-utils.workspace = true
 openapi-lint.workspace = true
 openapiv3.workspace = true

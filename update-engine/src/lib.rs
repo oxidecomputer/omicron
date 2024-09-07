@@ -57,6 +57,7 @@
 
 mod buffer;
 mod context;
+pub mod display;
 mod engine;
 pub mod errors;
 pub mod events;

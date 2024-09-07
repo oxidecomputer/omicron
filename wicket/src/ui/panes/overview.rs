@@ -16,17 +16,18 @@ use crate::ui::defaults::style;
 use crate::ui::widgets::IgnitionPopup;
 use crate::ui::widgets::{BoxConnector, BoxConnectorKind, Rack};
 use crate::ui::wrap::wrap_text;
-use crate::{Action, Cmd, Frame, State};
+use crate::{Action, Cmd, State};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
-use wicketd_client::types::RotState;
-use wicketd_client::types::SpComponentCaboose;
-use wicketd_client::types::SpComponentInfo;
-use wicketd_client::types::SpComponentPresence;
-use wicketd_client::types::SpIgnition;
-use wicketd_client::types::SpState;
+use ratatui::Frame;
+use wicket_common::inventory::RotState;
+use wicket_common::inventory::SpComponentCaboose;
+use wicket_common::inventory::SpComponentInfo;
+use wicket_common::inventory::SpComponentPresence;
+use wicket_common::inventory::SpIgnition;
+use wicket_common::inventory::SpState;
 
 enum PopupKind {
     Ignition,
@@ -343,7 +344,7 @@ impl Control for InventoryView {
         let title_bar = Paragraph::new(Line::from(vec![
             Span::styled("OXIDE RACK / ", border_style),
             Span::styled(
-                state.rack_state.selected.to_string(),
+                state.rack_state.selected.to_string_uppercase(),
                 component_style,
             ),
         ]))
@@ -674,7 +675,255 @@ fn inventory_description(component: &Component) -> Text {
     let mut label = vec![Span::styled("Root of Trust: ", label_style)];
     if let Some(rot) = sp.state().map(|sp| &sp.rot) {
         match rot {
-            RotState::Enabled {
+            RotState::V3 {
+                active,
+                pending_persistent_boot_preference,
+                persistent_boot_preference,
+                slot_a_fwid,
+                slot_b_fwid,
+                stage0_fwid,
+                stage0next_fwid,
+                transient_boot_preference,
+                slot_a_error,
+                slot_b_error,
+                stage0_error,
+                stage0next_error,
+            } => {
+                spans.push(label.into());
+                spans.push(
+                    vec![
+                        bullet(),
+                        Span::styled("Active Slot: ", label_style),
+                        Span::styled(format!("{active:?}"), ok_style),
+                    ]
+                    .into(),
+                );
+                spans.push(
+                    vec![
+                        bullet(),
+                        Span::styled(
+                            "Persistent Boot Preference: ",
+                            label_style,
+                        ),
+                        Span::styled(
+                            format!("{persistent_boot_preference:?}"),
+                            ok_style,
+                        ),
+                    ]
+                    .into(),
+                );
+                spans.push(
+                    vec![
+                        bullet(),
+                        Span::styled(
+                            "Pending Persistent Boot Preference: ",
+                            label_style,
+                        ),
+                        Span::styled(
+                            match pending_persistent_boot_preference.as_ref() {
+                                Some(pref) => Cow::from(format!("{pref:?}")),
+                                None => Cow::from("None"),
+                            },
+                            ok_style,
+                        ),
+                    ]
+                    .into(),
+                );
+                spans.push(
+                    vec![
+                        bullet(),
+                        Span::styled(
+                            "Transient Boot Preference: ",
+                            label_style,
+                        ),
+                        Span::styled(
+                            match transient_boot_preference.as_ref() {
+                                Some(pref) => Cow::from(format!("{pref:?}")),
+                                None => Cow::from("None"),
+                            },
+                            ok_style,
+                        ),
+                    ]
+                    .into(),
+                );
+                spans.push(
+                    vec![bullet(), Span::styled("Slot A:", label_style)].into(),
+                );
+                spans.push(
+                    vec![
+                        nest_bullet(),
+                        Span::styled("Image SHA3-256: ", label_style),
+                        Span::styled(slot_a_fwid.clone(), ok_style),
+                    ]
+                    .into(),
+                );
+                if let Some(caboose) =
+                    sp.rot().and_then(|r| r.caboose_a.as_ref())
+                {
+                    append_caboose(&mut spans, nest_bullet(), caboose);
+                } else {
+                    spans.push(
+                        vec![
+                            nest_bullet(),
+                            Span::styled("No further information", warn_style),
+                        ]
+                        .into(),
+                    );
+                }
+                if let Some(e) = slot_a_error {
+                    spans.push(
+                        vec![
+                            nest_bullet(),
+                            Span::styled("Image status: ", label_style),
+                            Span::styled(format!("Error: {e:?}"), bad_style),
+                        ]
+                        .into(),
+                    );
+                } else {
+                    spans.push(
+                        vec![
+                            nest_bullet(),
+                            Span::styled("Image status: ", label_style),
+                            Span::styled("Status Good", ok_style),
+                        ]
+                        .into(),
+                    );
+                }
+                spans.push(
+                    vec![bullet(), Span::styled("Slot B:", label_style)].into(),
+                );
+                spans.push(
+                    vec![
+                        nest_bullet(),
+                        Span::styled("Image SHA3-256: ", label_style),
+                        Span::styled(slot_b_fwid.clone(), ok_style),
+                    ]
+                    .into(),
+                );
+                if let Some(caboose) =
+                    sp.rot().and_then(|r| r.caboose_b.as_ref())
+                {
+                    append_caboose(&mut spans, nest_bullet(), caboose);
+                } else {
+                    spans.push(
+                        vec![
+                            nest_bullet(),
+                            Span::styled("No further information", warn_style),
+                        ]
+                        .into(),
+                    );
+                }
+                if let Some(e) = slot_b_error {
+                    spans.push(
+                        vec![
+                            nest_bullet(),
+                            Span::styled("Image status: ", label_style),
+                            Span::styled(format!("Error: {e:?}"), bad_style),
+                        ]
+                        .into(),
+                    );
+                } else {
+                    spans.push(
+                        vec![
+                            nest_bullet(),
+                            Span::styled("Image status: ", label_style),
+                            Span::styled("Status Good", ok_style),
+                        ]
+                        .into(),
+                    );
+                }
+
+                spans.push(
+                    vec![bullet(), Span::styled("Stage0:", label_style)].into(),
+                );
+                spans.push(
+                    vec![
+                        nest_bullet(),
+                        Span::styled("Image SHA3-256: ", label_style),
+                        Span::styled(stage0_fwid.clone(), ok_style),
+                    ]
+                    .into(),
+                );
+                if let Some(caboose) = sp.rot().and_then(|r| {
+                    r.caboose_stage0.as_ref().map_or(None, |x| x.as_ref())
+                }) {
+                    append_caboose(&mut spans, nest_bullet(), caboose);
+                } else {
+                    spans.push(
+                        vec![
+                            nest_bullet(),
+                            Span::styled("No further information", warn_style),
+                        ]
+                        .into(),
+                    );
+                }
+                if let Some(e) = stage0_error {
+                    spans.push(
+                        vec![
+                            nest_bullet(),
+                            Span::styled("Image status: ", label_style),
+                            Span::styled(format!("Error: {e:?}"), bad_style),
+                        ]
+                        .into(),
+                    );
+                } else {
+                    spans.push(
+                        vec![
+                            nest_bullet(),
+                            Span::styled("Image status: ", label_style),
+                            Span::styled("Status Good", ok_style),
+                        ]
+                        .into(),
+                    );
+                }
+
+                spans.push(
+                    vec![bullet(), Span::styled("Stage0Next:", label_style)]
+                        .into(),
+                );
+                spans.push(
+                    vec![
+                        nest_bullet(),
+                        Span::styled("Image SHA3-256: ", label_style),
+                        Span::styled(stage0next_fwid.clone(), ok_style),
+                    ]
+                    .into(),
+                );
+                if let Some(caboose) = sp.rot().and_then(|r| {
+                    r.caboose_stage0next.as_ref().map_or(None, |x| x.as_ref())
+                }) {
+                    append_caboose(&mut spans, nest_bullet(), caboose);
+                } else {
+                    spans.push(
+                        vec![
+                            nest_bullet(),
+                            Span::styled("No further information", warn_style),
+                        ]
+                        .into(),
+                    );
+                }
+                if let Some(e) = stage0next_error {
+                    spans.push(
+                        vec![
+                            nest_bullet(),
+                            Span::styled("Image status: ", label_style),
+                            Span::styled(format!("Error: {e:?}"), bad_style),
+                        ]
+                        .into(),
+                    );
+                } else {
+                    spans.push(
+                        vec![
+                            nest_bullet(),
+                            Span::styled("Image status: ", label_style),
+                            Span::styled("Status Good", ok_style),
+                        ]
+                        .into(),
+                    );
+                }
+            }
+
+            RotState::V2 {
                 active,
                 pending_persistent_boot_preference,
                 persistent_boot_preference,
@@ -885,7 +1134,6 @@ fn append_caboose(
     } = caboose;
     let label_style = style::text_label();
     let ok_style = style::text_success();
-    let bad_style = style::text_failure();
 
     spans.push(
         vec![
@@ -905,9 +1153,5 @@ fn append_caboose(
     );
     let mut version_spans =
         vec![prefix.clone(), Span::styled("Version: ", label_style)];
-    if let Some(v) = version.as_ref() {
-        version_spans.push(Span::styled(v.clone(), ok_style));
-    } else {
-        version_spans.push(Span::styled("Unknown", bad_style));
-    }
+    version_spans.push(Span::styled(version, ok_style));
 }

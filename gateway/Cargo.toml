@@ -4,45 +4,50 @@ version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow.workspace = true
-async-trait.workspace = true
 base64.workspace = true
-ciborium.workspace = true
+camino.workspace = true
+chrono.workspace = true
 clap.workspace = true
 dropshot.workspace = true
 futures.workspace = true
+gateway-api.workspace = true
 gateway-messages.workspace = true
 gateway-sp-comms.workspace = true
+gateway-types.workspace = true
 hex.workspace = true
 http.workspace = true
 hyper.workspace = true
 illumos-utils.workspace = true
-ipcc-key-value.workspace = true
+ipcc.workspace = true
 omicron-common.workspace = true
 once_cell.workspace = true
 schemars.workspace = true
 serde.workspace = true
-serde_human_bytes.workspace = true
 signal-hook.workspace = true
 signal-hook-tokio.workspace = true
 slog.workspace = true
 slog-dtrace.workspace = true
+slog-error-chain.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tokio-stream.workspace = true
 tokio-tungstenite.workspace = true
-tokio-util.workspace = true
 toml.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
+oximeter.workspace = true
+oximeter-producer.workspace = true
+oximeter-instruments = { workspace = true, features = ["http-instruments"] }
 
 [dev-dependencies]
 expectorate.workspace = true
 gateway-test-utils.workspace = true
 omicron-test-utils.workspace = true
-openapi-lint.workspace = true
-openapiv3.workspace = true
 serde_json.workspace = true
 sp-sim.workspace = true
 subprocess.workspace = true

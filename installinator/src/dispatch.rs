@@ -151,13 +151,13 @@ struct InstallOpts {
     #[clap(long)]
     install_on_gimlet: bool,
 
-    //TODO(ry) this probably needs to get plumbed somewhere instead of relying
+    //TODO this probably needs to get plumbed somewhere instead of relying
     //on a default.
     /// The first gimlet data link to use.
     #[clap(long, default_value = "cxgbe0")]
     data_link0: String,
 
-    //TODO(ry) this probably needs to get plumbed somewhere instead of relying
+    //TODO this probably needs to get plumbed somewhere instead of relying
     //on a default.
     /// The second gimlet data link to use.
     #[clap(long, default_value = "cxgbe1")]

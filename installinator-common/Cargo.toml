@@ -4,15 +4,24 @@ version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow.workspace = true
 camino.workspace = true
 illumos-utils.workspace = true
 omicron-common.workspace = true
+libc.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_with.workspace = true
 thiserror.workspace = true
+tokio.workspace = true
 update-engine.workspace = true
 omicron-workspace-hack.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true
+test-strategy.workspace = true

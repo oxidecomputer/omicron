@@ -7,10 +7,11 @@ use clap::Parser;
 use slog::Drain;
 use tufaceous::Args;
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let log = setup_log();
     let args = Args::parse();
-    args.exec(&log)
+    args.exec(&log).await
 }
 
 fn setup_log() -> slog::Logger {

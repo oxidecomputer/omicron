@@ -5,18 +5,22 @@ edition = "2021"
 license = "MPL-2.0"
 publish = false
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow = { workspace = true, features = ["backtrace"] }
 camino.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
 chrono.workspace = true
-console = { version = "0.15.7", default-features = false }
+console = { version = "0.15.8", default-features = false }
 humantime.workspace = true
 omicron-common.workspace = true
 slog.workspace = true
 slog-async.workspace = true
 slog-envlogger.workspace = true
 slog-term.workspace = true
+tokio.workspace = true
 tufaceous-lib.workspace = true
 omicron-workspace-hack.workspace = true
 
@@ -27,6 +31,7 @@ fs-err.workspace = true
 omicron-test-utils.workspace = true
 predicates.workspace = true
 tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
 
 [[test]]
 name = "manifest-tests"

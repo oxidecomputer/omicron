@@ -4,13 +4,17 @@ version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
 base64.workspace = true
+buf-list.workspace = true
 bytes.workspace = true
-camino.workspace = true
 camino-tempfile.workspace = true
+camino.workspace = true
 clap.workspace = true
 debug-ignore.workspace = true
 display-error-chain.workspace = true
@@ -21,42 +25,46 @@ flume.workspace = true
 futures.workspace = true
 gateway-messages.workspace = true
 hex.workspace = true
-hubtools.workspace = true
+hickory-resolver.workspace = true
 http.workspace = true
+hubtools.workspace = true
 hyper.workspace = true
 illumos-utils.workspace = true
-ipnetwork.workspace = true
 internal-dns.workspace = true
 itertools.workspace = true
+once_cell.workspace = true
+oxnet.workspace = true
 reqwest.workspace = true
 schemars.workspace = true
 serde.workspace = true
-sha2.workspace = true
 serde_json.workspace = true
-slog.workspace = true
+sha2.workspace = true
 slog-dtrace.workspace = true
+slog.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
 tokio-stream.workspace = true
 tokio-util.workspace = true
-tough.workspace = true
-trust-dns-resolver.workspace = true
-snafu.workspace = true
 toml.workspace = true
+tough.workspace = true
 uuid.workspace = true
 
 bootstrap-agent-client.workspace = true
-ddm-admin-client.workspace = true
+omicron-ddm-admin-client.workspace = true
 gateway-client.workspace = true
-installinator-artifactd.workspace = true
+installinator-api.workspace = true
 installinator-common.workspace = true
 omicron-certificates.workspace = true
 omicron-common.workspace = true
 omicron-passwords.workspace = true
-sled-hardware.workspace = true
+omicron-uuid-kinds.workspace = true
+sled-hardware-types.workspace = true
 tufaceous-lib.workspace = true
+update-common.workspace = true
 update-engine.workspace = true
 wicket-common.workspace = true
+wicketd-api.workspace = true
+wicketd-client.workspace = true
 omicron-workspace-hack.workspace = true
 
 [[bin]]
@@ -70,7 +78,8 @@ fs-err.workspace = true
 gateway-test-utils.workspace = true
 http.workspace = true
 installinator.workspace = true
-installinator-artifact-client.workspace = true
+installinator-client.workspace = true
+maplit.workspace = true
 omicron-test-utils.workspace = true
 openapi-lint.workspace = true
 openapiv3.workspace = true
@@ -80,4 +89,4 @@ subprocess.workspace = true
 tar.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 tufaceous.workspace = true
-wicketd-client.workspace = true
+wicket.workspace = true

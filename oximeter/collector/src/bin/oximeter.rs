@@ -6,10 +6,10 @@
 
 // Copyright 2023 Oxide Computer Company
 
+use anyhow::{anyhow, Context};
 use clap::Parser;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
-use oximeter_collector::oximeter_api;
 use oximeter_collector::standalone_nexus_api;
 use oximeter_collector::Config;
 use oximeter_collector::Oximeter;
@@ -21,16 +21,6 @@ use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use std::path::PathBuf;
 use uuid::Uuid;
-
-pub fn run_openapi() -> Result<(), String> {
-    oximeter_api()
-        .openapi("Oxide Oximeter API", "0.0.1")
-        .description("API for interacting with oximeter")
-        .contact_url("https://oxide.computer")
-        .contact_email("api@oxide.computer")
-        .write(&mut std::io::stdout())
-        .map_err(|e| e.to_string())
-}
 
 pub fn run_standalone_openapi() -> Result<(), String> {
     standalone_nexus_api()
@@ -46,9 +36,6 @@ pub fn run_standalone_openapi() -> Result<(), String> {
 #[derive(Parser)]
 #[clap(name = "oximeter", about = "See README.adoc for more information")]
 enum Args {
-    /// Print the external OpenAPI Spec document and exit
-    Openapi,
-
     /// Start an Oximeter server
     Run {
         /// Path to TOML file with configuration for the server
@@ -132,7 +119,6 @@ async fn main() {
 async fn do_run() -> Result<(), CmdError> {
     let args = Args::parse();
     match args {
-        Args::Openapi => run_openapi().map_err(CmdError::Failure),
         Args::Run { config_file, id, address } => {
             let config = Config::from_file(config_file).unwrap();
             let args = OximeterArguments { id, address };
@@ -141,13 +127,15 @@ async fn do_run() -> Result<(), CmdError> {
                 .unwrap()
                 .serve_forever()
                 .await
-                .map_err(|e| CmdError::Failure(e.to_string()))
+                .context("Failed to create oximeter")
+                .map_err(CmdError::Failure)
         }
         Args::Standalone { id, address, nexus, clickhouse, log_level } => {
             // Start the standalone Nexus server, for registration of both the
             // collector and producers.
             let nexus_server = StandaloneNexus::new(nexus.into(), log_level)
-                .map_err(|e| CmdError::Failure(e.to_string()))?;
+                .context("Failed to create nexus")
+                .map_err(CmdError::Failure)?;
             let args = OximeterArguments { id, address };
             Oximeter::new_standalone(
                 nexus_server.log(),
@@ -159,10 +147,10 @@ async fn do_run() -> Result<(), CmdError> {
             .unwrap()
             .serve_forever()
             .await
-            .map_err(|e| CmdError::Failure(e.to_string()))
+            .context("Failed to create standalone oximeter")
+            .map_err(CmdError::Failure)
         }
-        Args::StandaloneOpenapi => {
-            run_standalone_openapi().map_err(CmdError::Failure)
-        }
+        Args::StandaloneOpenapi => run_standalone_openapi()
+            .map_err(|err| CmdError::Failure(anyhow!(err))),
     }
 }

@@ -116,12 +116,18 @@ impl Display for ServiceBuilder {
 
 pub struct ServiceInstanceBuilder {
     name: String,
+    enabled: bool,
     property_groups: Vec<PropertyGroupBuilder>,
 }
 
 impl ServiceInstanceBuilder {
     pub fn new(name: &str) -> Self {
-        Self { name: name.to_string(), property_groups: vec![] }
+        Self { name: name.to_string(), enabled: true, property_groups: vec![] }
+    }
+
+    pub fn disable(mut self) -> Self {
+        self.enabled = false;
+        self
     }
 
     pub fn add_property_group(
@@ -137,9 +143,10 @@ impl Display for ServiceInstanceBuilder {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(
             f,
-            r#"    <instance enabled="true" name="{name}">
+            r#"    <instance enabled="{enabled}" name="{name}">
 "#,
-            name = self.name
+            name = self.name,
+            enabled = self.enabled
         )?;
 
         for property_group in &self.property_groups {
@@ -156,6 +163,7 @@ impl Display for ServiceInstanceBuilder {
     }
 }
 
+#[derive(Clone)]
 pub struct PropertyGroupBuilder {
     name: String,
     /// names of the properties that were added, in the order they were added
@@ -176,7 +184,12 @@ impl PropertyGroupBuilder {
         }
     }
 
-    pub fn add_property(mut self, name: &str, ty: &str, value: &str) -> Self {
+    pub fn add_property<S: Into<String>>(
+        mut self,
+        name: &str,
+        ty: &str,
+        value: S,
+    ) -> Self {
         // The data structures here are oriented around a few goals:
         //
         // - Properties will be written out in the order that they were added.
@@ -202,7 +215,7 @@ impl PropertyGroupBuilder {
             .property_values
             .entry(name.to_string())
             .or_insert_with(Vec::new);
-        values.push(value.to_string());
+        values.push(value.into());
         self
     }
 }
@@ -221,7 +234,7 @@ impl Display for PropertyGroupBuilder {
             if values.len() == 1 {
                 write!(
                     f,
-                    r#"        <propval type="{ty}" name="{name}" value="{value}"/>
+                    r#"        <propval type="{ty}" name="{name}" value='{value}'/>
 "#,
                     name = property_name,
                     value = &values[0],
@@ -290,7 +303,7 @@ mod tests {
 <service_bundle type="profile" name="myprofile">
   <service version="1" type="service" name="myservice">
       <property_group type="application" name="mypg">
-        <propval type="astring" name="myprop" value="myvalue"/>
+        <propval type="astring" name="myprop" value='myvalue'/>
       </property_group>
   </service>
 </service_bundle>"#,
@@ -309,6 +322,24 @@ mod tests {
 <service_bundle type="profile" name="myprofile">
   <service version="1" type="service" name="myservice">
     <instance enabled="true" name="default">
+    </instance>
+  </service>
+</service_bundle>"#,
+        );
+    }
+
+    #[test]
+    fn test_disabled_instance() {
+        let builder = ProfileBuilder::new("myprofile")
+            .add_service(ServiceBuilder::new("myservice").add_instance(
+                ServiceInstanceBuilder::new("default").disable(),
+            ));
+        assert_eq!(
+            format!("{}", builder),
+            r#"<!DOCTYPE service_bundle SYSTEM "/usr/share/lib/xml/dtd/service_bundle.dtd.1">
+<service_bundle type="profile" name="myprofile">
+  <service version="1" type="service" name="myservice">
+    <instance enabled="false" name="default">
     </instance>
   </service>
 </service_bundle>"#,
@@ -354,7 +385,7 @@ mod tests {
   <service version="1" type="service" name="myservice">
     <instance enabled="true" name="default">
       <property_group type="application" name="mypg">
-        <propval type="type" name="prop" value="value"/>
+        <propval type="type" name="prop" value='value'/>
       </property_group>
     </instance>
   </service>
@@ -399,11 +430,11 @@ mod tests {
       </property_group>
     <instance enabled="true" name="default">
       <property_group type="application" name="mypg">
-        <propval type="type" name="prop" value="value"/>
-        <propval type="type" name="prop2" value="value2"/>
+        <propval type="type" name="prop" value='value'/>
+        <propval type="type" name="prop2" value='value2'/>
       </property_group>
       <property_group type="application" name="mypg2">
-        <propval type="type" name="prop3" value="value3"/>
+        <propval type="type" name="prop3" value='value3'/>
       </property_group>
     </instance>
   </service>

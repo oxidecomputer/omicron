@@ -2,10 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::app::sagas;
 use crate::external_api::params;
 use db::model::{LoopbackAddress, Name};
-use nexus_db_queries::authn;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
@@ -13,9 +11,9 @@ use nexus_db_queries::db::lookup;
 use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::{
-    CreateResult, DataPageParams, DeleteResult, Error, InternalContext, IpNet,
-    ListResultVec,
+    CreateResult, DataPageParams, DeleteResult, Error, ListResultVec,
 };
+use oxnet::IpNet;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -43,21 +41,23 @@ impl super::Nexus {
 
         validate_switch_location(params.switch_location.as_str())?;
 
-        let saga_params = sagas::loopback_address_create::Params {
-            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
-            loopback_address: params.clone(),
-        };
+        // Just a check to make sure a valid rack id was passed in.
+        self.rack_lookup(&opctx, &params.rack_id).await?;
 
-        let saga_output = self.execute_saga::<
-            sagas::loopback_address_create::SagaLoopbackAddressCreate>(
-                saga_params).await?;
+        let address_lot_lookup =
+            self.address_lot_lookup(&opctx, params.address_lot.clone())?;
 
-        let value = saga_output
-            .lookup_node_output::<LoopbackAddress>(
-                "created_loopback_address_record",
-            )
-            .map_err(|e| Error::internal_error(&format!("{:#}", &e)))
-            .internal_context("looking up output from loopback create saga")?;
+        let (.., authz_address_lot) =
+            address_lot_lookup.lookup_for(authz::Action::CreateChild).await?;
+
+        let value = self
+            .db_datastore
+            .loopback_address_create(&opctx, &params, None, &authz_address_lot)
+            .await?;
+
+        // eagerly propagate changes via rpw
+        self.background_tasks
+            .activate(&self.background_tasks.task_switch_port_settings_manager);
 
         Ok(value)
     }
@@ -69,16 +69,23 @@ impl super::Nexus {
         switch_location: Name,
         address: IpNet,
     ) -> DeleteResult {
-        let saga_params = sagas::loopback_address_delete::Params {
-            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
-            address,
+        let loopback_address_lookup = self.loopback_address_lookup(
+            &opctx,
             rack_id,
             switch_location,
-        };
+            address,
+        )?;
 
-        self.execute_saga::<
-            sagas::loopback_address_delete::SagaLoopbackAddressDelete>(
-                saga_params).await?;
+        let (.., authz_loopback_address) =
+            loopback_address_lookup.lookup_for(authz::Action::Delete).await?;
+
+        self.db_datastore
+            .loopback_address_delete(&opctx, &authz_loopback_address)
+            .await?;
+
+        // eagerly propagate changes via rpw
+        self.background_tasks
+            .activate(&self.background_tasks.task_switch_port_settings_manager);
 
         Ok(())
     }
@@ -95,9 +102,9 @@ impl super::Nexus {
 
 pub fn validate_switch_location(switch_location: &str) -> Result<(), Error> {
     if switch_location != "switch0" && switch_location != "switch1" {
-        return Err(Error::InvalidRequest {
-            message: "Switch location must be switch0 or switch1".into(),
-        });
+        return Err(Error::invalid_request(
+            "Switch location must be switch0 or switch1",
+        ));
     }
     Ok(())
 }

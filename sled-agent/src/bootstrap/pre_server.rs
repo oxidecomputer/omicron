@@ -11,15 +11,18 @@
 #![allow(clippy::result_large_err)]
 
 use super::maghemite;
-use super::secret_retriever::LrtqOrHardcodedSecretRetriever;
+use super::pumpkind;
 use super::server::StartError;
 use crate::config::Config;
+use crate::config::SidecarRevision;
+use crate::long_running_tasks::{
+    spawn_all_longrunning_tasks, LongRunningTaskHandles,
+};
 use crate::services::ServiceManager;
+use crate::services::TimeSyncConfig;
 use crate::sled_agent::SledAgent;
-use crate::storage_manager::StorageManager;
 use camino::Utf8PathBuf;
 use cancel_safe_futures::TryStreamExt;
-use ddm_admin_client::Client as DdmAdminClient;
 use futures::stream;
 use futures::StreamExt;
 use illumos_utils::addrobj::AddrObject;
@@ -29,115 +32,18 @@ use illumos_utils::zfs;
 use illumos_utils::zfs::Zfs;
 use illumos_utils::zone;
 use illumos_utils::zone::Zones;
-use key_manager::KeyManager;
-use key_manager::StorageKeyRequester;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::FileKv;
+use omicron_ddm_admin_client::Client as DdmAdminClient;
 use sled_hardware::underlay;
 use sled_hardware::DendriteAsic;
-use sled_hardware::HardwareManager;
-use sled_hardware::HardwareUpdate;
 use sled_hardware::SledMode;
+use sled_hardware_types::underlay::BootstrapInterface;
 use slog::Drain;
 use slog::Logger;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
-use tokio::sync::broadcast;
-use tokio::task::JoinHandle;
-
-pub(super) struct BootstrapManagers {
-    pub(super) hardware: HardwareManager,
-    pub(super) storage: StorageManager,
-    pub(super) service: ServiceManager,
-}
-
-impl BootstrapManagers {
-    pub(super) async fn handle_hardware_update(
-        &self,
-        update: Result<HardwareUpdate, broadcast::error::RecvError>,
-        sled_agent: Option<&SledAgent>,
-        log: &Logger,
-    ) {
-        match update {
-            Ok(update) => match update {
-                HardwareUpdate::TofinoLoaded => {
-                    let baseboard = self.hardware.baseboard();
-                    if let Err(e) = self
-                        .service
-                        .activate_switch(
-                            sled_agent.map(|sa| sa.switch_zone_underlay_info()),
-                            baseboard,
-                        )
-                        .await
-                    {
-                        warn!(log, "Failed to activate switch: {e}");
-                    }
-                }
-                HardwareUpdate::TofinoUnloaded => {
-                    if let Err(e) = self.service.deactivate_switch().await {
-                        warn!(log, "Failed to deactivate switch: {e}");
-                    }
-                }
-                HardwareUpdate::TofinoDeviceChange => {
-                    if let Some(sled_agent) = sled_agent {
-                        sled_agent.notify_nexus_about_self(log);
-                    }
-                }
-                HardwareUpdate::DiskAdded(disk) => {
-                    self.storage.upsert_disk(disk).await;
-                }
-                HardwareUpdate::DiskRemoved(disk) => {
-                    self.storage.delete_disk(disk).await;
-                }
-            },
-            Err(broadcast::error::RecvError::Lagged(count)) => {
-                warn!(log, "Hardware monitor missed {count} messages");
-                self.check_latest_hardware_snapshot(sled_agent, log).await;
-            }
-            Err(broadcast::error::RecvError::Closed) => {
-                // The `HardwareManager` monitoring task is an infinite loop -
-                // the only way for us to get `Closed` here is if it panicked,
-                // so we will propagate such a panic.
-                panic!("Hardware manager monitor task panicked");
-            }
-        }
-    }
-
-    // Observe the current hardware state manually.
-    //
-    // We use this when we're monitoring hardware for the first
-    // time, and if we miss notifications.
-    pub(super) async fn check_latest_hardware_snapshot(
-        &self,
-        sled_agent: Option<&SledAgent>,
-        log: &Logger,
-    ) {
-        let underlay_network = sled_agent.map(|sled_agent| {
-            sled_agent.notify_nexus_about_self(log);
-            sled_agent.switch_zone_underlay_info()
-        });
-        info!(
-            log, "Checking current full hardware snapshot";
-            "underlay_network_info" => ?underlay_network,
-        );
-        if self.hardware.is_scrimlet_driver_loaded() {
-            let baseboard = self.hardware.baseboard();
-            if let Err(e) =
-                self.service.activate_switch(underlay_network, baseboard).await
-            {
-                warn!(log, "Failed to activate switch: {e}");
-            }
-        } else {
-            if let Err(e) = self.service.deactivate_switch().await {
-                warn!(log, "Failed to deactivate switch: {e}");
-            }
-        }
-
-        self.storage
-            .ensure_using_exactly_these_disks(self.hardware.disks())
-            .await;
-    }
-}
+use tokio::sync::oneshot;
 
 pub(super) struct BootstrapAgentStartup {
     pub(super) config: Config,
@@ -145,13 +51,23 @@ pub(super) struct BootstrapAgentStartup {
     pub(super) ddm_admin_localhost_client: DdmAdminClient,
     pub(super) base_log: Logger,
     pub(super) startup_log: Logger,
-    pub(super) managers: BootstrapManagers,
-    pub(super) key_manager_handle: JoinHandle<()>,
+    pub(super) service_manager: ServiceManager,
+    pub(super) long_running_task_handles: LongRunningTaskHandles,
+    pub(super) sled_agent_started_tx: oneshot::Sender<SledAgent>,
 }
 
 impl BootstrapAgentStartup {
     pub(super) async fn run(config: Config) -> Result<Self, StartError> {
         let base_log = build_logger(&config)?;
+
+        // Ensure we have a thread that automatically reaps process contracts
+        // when they become empty. See the comments in
+        // illumos-utils/src/running_zone.rs for more detail.
+        //
+        // We're going to start monitoring for hardware below, which could
+        // trigger launching the switch zone, and we need the contract reaper to
+        // exist before entering any zones.
+        illumos_utils::running_zone::ensure_contract_reaper(&base_log);
 
         let log = base_log.new(o!("component" => "BootstrapAgentStartup"));
 
@@ -160,6 +76,7 @@ impl BootstrapAgentStartup {
         let (config, log, ddm_admin_localhost_client, startup_networking) =
             tokio::task::spawn_blocking(move || {
                 enable_mg_ddm(&config, &log)?;
+                pumpkind::enable_pumpkind_service(&log)?;
                 ensure_zfs_key_directory_exists(&log)?;
 
                 let startup_networking = BootstrapNetworking::setup(&config)?;
@@ -200,51 +117,50 @@ impl BootstrapAgentStartup {
         // This should be a no-op if already enabled.
         BootstrapNetworking::enable_ipv6_forwarding().await?;
 
-        // Spawn the `KeyManager` which is needed by the the StorageManager to
-        // retrieve encryption keys.
-        let (storage_key_requester, key_manager_handle) =
-            spawn_key_manager_task(&base_log);
-
+        // Are we a gimlet or scrimlet?
         let sled_mode = sled_mode_from_config(&config)?;
 
-        // Start monitoring hardware. This is blocking so we use
-        // `spawn_blocking`; similar to above, we move some things in and (on
-        // success) it gives them back.
-        let (base_log, log, hardware_manager) = {
-            tokio::task::spawn_blocking(move || {
-                info!(
-                    log, "Starting hardware monitor";
-                    "sled_mode" => ?sled_mode,
-                );
-                let hardware_manager =
-                    HardwareManager::new(&base_log, sled_mode)
-                        .map_err(StartError::StartHardwareManager)?;
-                Ok::<_, StartError>((base_log, log, hardware_manager))
-            })
-            .await
-            .unwrap()?
-        };
-
-        // Create a `StorageManager` and (possibly) synthetic disks.
-        let storage_manager =
-            StorageManager::new(&base_log, storage_key_requester).await;
-        upsert_synthetic_zpools_if_needed(&log, &storage_manager, &config)
-            .await;
+        // Spawn all important long running tasks that live for the lifetime of
+        // the process and are used by both the bootstrap agent and sled agent
+        let (
+            long_running_task_handles,
+            sled_agent_started_tx,
+            service_manager_ready_tx,
+        ) = spawn_all_longrunning_tasks(
+            &base_log,
+            sled_mode,
+            startup_networking.global_zone_bootstrap_ip,
+            &config,
+        )
+        .await;
 
         let global_zone_bootstrap_ip =
             startup_networking.global_zone_bootstrap_ip;
+
+        let time_sync = if let Some(true) = config.skip_timesync {
+            TimeSyncConfig::Skip
+        } else {
+            TimeSyncConfig::Normal
+        };
 
         let service_manager = ServiceManager::new(
             &base_log,
             ddm_admin_localhost_client.clone(),
             startup_networking,
             sled_mode,
-            config.skip_timesync,
+            time_sync,
             config.sidecar_revision.clone(),
             config.switch_zone_maghemite_links.clone(),
-            storage_manager.resources().clone(),
-            storage_manager.zone_bundler().clone(),
+            long_running_task_handles.storage_manager.clone(),
+            long_running_task_handles.zone_bundler.clone(),
         );
+
+        // Inform the hardware monitor that the service manager is ready
+        // This is a onetime operation, and so we use a oneshot channel
+        service_manager_ready_tx
+            .send(service_manager.clone())
+            .map_err(|_| ())
+            .expect("Failed to send to StorageMonitor");
 
         Ok(Self {
             config,
@@ -252,12 +168,9 @@ impl BootstrapAgentStartup {
             ddm_admin_localhost_client,
             base_log,
             startup_log: log,
-            managers: BootstrapManagers {
-                hardware: hardware_manager,
-                storage: storage_manager,
-                service: service_manager,
-            },
-            key_manager_handle,
+            service_manager,
+            long_running_task_handles,
+            sled_agent_started_tx,
         })
     }
 }
@@ -339,6 +252,7 @@ async fn cleanup_all_old_global_state(log: &Logger) -> Result<(), StartError> {
 }
 
 fn enable_mg_ddm(config: &Config, log: &Logger) -> Result<(), StartError> {
+    info!(log, "finding links {:?}", config.data_links);
     let mg_addr_objs = underlay::find_nics(&config.data_links)
         .map_err(StartError::FindMaghemiteAddrObjs)?;
     if mg_addr_objs.is_empty() {
@@ -357,13 +271,10 @@ fn ensure_zfs_key_directory_exists(log: &Logger) -> Result<(), StartError> {
     // to create and mount encrypted datasets.
     info!(
         log, "Ensuring zfs key directory exists";
-        "path" => sled_hardware::disk::KEYPATH_ROOT,
+        "path" => zfs::KEYPATH_ROOT,
     );
-    std::fs::create_dir_all(sled_hardware::disk::KEYPATH_ROOT).map_err(|err| {
-        StartError::CreateZfsKeyDirectory {
-            dir: sled_hardware::disk::KEYPATH_ROOT,
-            err,
-        }
+    std::fs::create_dir_all(zfs::KEYPATH_ROOT).map_err(|err| {
+        StartError::CreateZfsKeyDirectory { dir: zfs::KEYPATH_ROOT, err }
     })
 }
 
@@ -386,23 +297,6 @@ fn ensure_zfs_ramdisk_dataset() -> Result<(), StartError> {
     .map_err(StartError::EnsureZfsRamdiskDataset)
 }
 
-async fn upsert_synthetic_zpools_if_needed(
-    log: &Logger,
-    storage_manager: &StorageManager,
-    config: &Config,
-) {
-    if let Some(pools) = &config.zpools {
-        for pool in pools {
-            info!(
-                log,
-                "Upserting synthetic zpool to Storage Manager: {}",
-                pool.to_string()
-            );
-            storage_manager.upsert_synthetic_disk(pool.clone()).await;
-        }
-    }
-}
-
 // Combine the `sled_mode` config with the build-time switch type to determine
 // the actual sled mode.
 fn sled_mode_from_config(config: &Config) -> Result<SledMode, StartError> {
@@ -423,7 +317,16 @@ fn sled_mode_from_config(config: &Config) -> Result<SledMode, StartError> {
             } else if cfg!(feature = "switch-stub") {
                 DendriteAsic::TofinoStub
             } else if cfg!(feature = "switch-softnpu") {
-                DendriteAsic::SoftNpu
+                match config.sidecar_revision {
+                    SidecarRevision::SoftZone(_) => DendriteAsic::SoftNpuZone,
+                    SidecarRevision::SoftPropolis(_) => {
+                        DendriteAsic::SoftNpuPropolisDevice
+                    }
+                    _ => return Err(StartError::IncorrectBuildPackaging(
+                        "sled-agent configured to run on softnpu zone but dosen't \
+                         have a softnpu sidecar revision",
+                    )),
+                }
             } else {
                 return Err(StartError::IncorrectBuildPackaging(
                     "sled-agent configured to run on scrimlet but wasn't \
@@ -434,19 +337,6 @@ fn sled_mode_from_config(config: &Config) -> Result<SledMode, StartError> {
         }
     };
     Ok(sled_mode)
-}
-
-fn spawn_key_manager_task(
-    log: &Logger,
-) -> (StorageKeyRequester, JoinHandle<()>) {
-    let secret_retriever = LrtqOrHardcodedSecretRetriever::new();
-    let (mut key_manager, storage_key_requester) =
-        KeyManager::new(log, secret_retriever);
-
-    let key_manager_handle =
-        tokio::spawn(async move { key_manager.run().await });
-
-    (storage_key_requester, key_manager_handle)
 }
 
 #[derive(Debug, Clone)]
@@ -462,7 +352,7 @@ pub(crate) struct BootstrapNetworking {
 impl BootstrapNetworking {
     fn setup(config: &Config) -> Result<Self, StartError> {
         let link_for_mac = config.get_link().map_err(StartError::ConfigLink)?;
-        let global_zone_bootstrap_ip = underlay::BootstrapInterface::GlobalZone
+        let global_zone_bootstrap_ip = BootstrapInterface::GlobalZone
             .ip(&link_for_mac)
             .map_err(StartError::BootstrapLinkMac)?;
 
@@ -499,7 +389,7 @@ impl BootstrapNetworking {
                 IpAddr::V6(addr) => addr,
             };
 
-        let switch_zone_bootstrap_ip = underlay::BootstrapInterface::SwitchZone
+        let switch_zone_bootstrap_ip = BootstrapInterface::SwitchZone
             .ip(&link_for_mac)
             .map_err(StartError::BootstrapLinkMac)?;
 

@@ -3,13 +3,20 @@
 #
 name: Rust
 
-on: [ push, pull_request ]
+on:
+  push:
+    branches:
+      - main
+      - 'rel/**'
+  pull_request: {}
 
 jobs:
   check-style:
     runs-on: ubuntu-22.04
     steps:
-    - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
+    - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+      with:
+        ref: ${{ github.event.pull_request.head.sha }} # see omicron#4461
     - name: Report cargo version
       run: cargo --version
     - name: Report rustfmt version
@@ -19,16 +26,21 @@ jobs:
 
   check-omicron-deployment:
     runs-on: ${{ matrix.os }}
+    env:
+      CARGO_INCREMENTAL: 0
     strategy:
       fail-fast: false
       matrix:
-        os: [ ubuntu-22.04, macos-12 ]
+        os: [ ubuntu-22.04, macos-14 ]
     steps:
     # This repo is unstable and unnecessary: https://github.com/microsoft/linux-package-repositories/issues/34
     - name: Disable packages.microsoft.com repo
+      if: ${{ startsWith(matrix.os, 'ubuntu') }}
       run: sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list
-    - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
-    - uses: Swatinem/rust-cache@6fd3edff6979b79f87531400ad694fb7f2c84b1f # v2.2.1
+    - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+      with:
+        ref: ${{ github.event.pull_request.head.sha }} # see omicron#4461
+    - uses: Swatinem/rust-cache@23bce251a8cd2ffc3c1075eaa2367cf899916d84 # v2.7.3
       if: ${{ github.ref != 'refs/heads/main' }}
     - name: Report cargo version
       run: cargo --version
@@ -46,15 +58,19 @@ jobs:
       run: cargo run --bin omicron-package -- -t default check
 
   # Note that `cargo clippy` includes `cargo check, so this ends up checking all
-  # of our code.
+  # of our (default) code.
   clippy-lint:
     runs-on: ubuntu-22.04
+    env:
+      CARGO_INCREMENTAL: 0
     steps:
     # This repo is unstable and unnecessary: https://github.com/microsoft/linux-package-repositories/issues/34
     - name: Disable packages.microsoft.com repo
       run: sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list
-    - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
-    - uses: Swatinem/rust-cache@6fd3edff6979b79f87531400ad694fb7f2c84b1f # v2.2.1
+    - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+      with:
+        ref: ${{ github.event.pull_request.head.sha }} # see omicron#4461
+    - uses: Swatinem/rust-cache@23bce251a8cd2ffc3c1075eaa2367cf899916d84 # v2.7.3
       if: ${{ github.ref != 'refs/heads/main' }}
     - name: Report cargo version
       run: cargo --version
@@ -71,16 +87,50 @@ jobs:
     - name: Run Clippy Lints
       run: cargo xtask clippy
 
-  # This is just a test build of docs.  Publicly available docs are built via
-  # the separate "rustdocs" repo.
-  build-docs:
+  check-features:
     runs-on: ubuntu-22.04
+    env:
+      CARGO_INCREMENTAL: 0
     steps:
     # This repo is unstable and unnecessary: https://github.com/microsoft/linux-package-repositories/issues/34
     - name: Disable packages.microsoft.com repo
       run: sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list
-    - uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v3.6.0
-    - uses: Swatinem/rust-cache@6fd3edff6979b79f87531400ad694fb7f2c84b1f # v2.2.1
+    - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+      with:
+        ref: ${{ github.event.pull_request.head.sha }} # see omicron#4461
+    - uses: Swatinem/rust-cache@23bce251a8cd2ffc3c1075eaa2367cf899916d84 # v2.7.3
+      if: ${{ github.ref != 'refs/heads/main' }}
+    - name: Report cargo version
+      run: cargo --version
+    - name: Update PATH
+      run: |
+        set -x
+        export PATH="./out/cargo-hack:$PATH"
+        source "./env.sh"; echo "PATH=$PATH" >> "$GITHUB_ENV"
+    - name: Print PATH
+      run: echo $PATH
+    - name: Print GITHUB_ENV
+      run: cat "$GITHUB_ENV"
+    - name: Install Pre-Requisites
+      run: ./tools/install_builder_prerequisites.sh -y
+    - name: Run Check on Feature Combinations (Feature-Powerset, No-Dev-Deps)
+      timeout-minutes: 120 # 2 hours
+      run: cargo xtask check-features --ci
+
+  # This is just a test build of docs.  Publicly available docs are built via
+  # the separate "rustdocs" repo.
+  build-docs:
+    runs-on: ubuntu-22.04
+    env:
+      CARGO_INCREMENTAL: 0
+    steps:
+    # This repo is unstable and unnecessary: https://github.com/microsoft/linux-package-repositories/issues/34
+    - name: Disable packages.microsoft.com repo
+      run: sudo rm -f /etc/apt/sources.list.d/microsoft-prod.list
+    - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+      with:
+        ref: ${{ github.event.pull_request.head.sha }} # see omicron#4461
+    - uses: Swatinem/rust-cache@23bce251a8cd2ffc3c1075eaa2367cf899916d84 # v2.7.3
       if: ${{ github.ref != 'refs/heads/main' }}
     - name: Report cargo version
       run: cargo --version
@@ -93,4 +143,4 @@ jobs:
     - name: Install Pre-Requisites
       run: ./tools/install_builder_prerequisites.sh -y
     - name: Test build documentation
-      run: RUSTDOCFLAGS="-Dwarnings" cargo doc
+      run: RUSTDOCFLAGS="--document-private-items -D warnings" cargo doc --workspace --no-deps

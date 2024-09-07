@@ -2,19 +2,22 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use anyhow::Result;
 use ratatui::style::Style;
+use wicket_common::rack_update::{ClearUpdateStateOptions, StartUpdateOptions};
 use wicket_common::update_events::{
     EventReport, ProgressEventKind, StepEventKind, UpdateComponent,
     UpdateStepId,
 };
 
+use crate::helpers::{get_update_simulated_result, get_update_test_error};
 use crate::{events::EventReportMap, ui::defaults::style};
 
 use super::{ComponentId, ParsableComponentId, ALL_COMPONENT_IDS};
 use omicron_common::api::internal::nexus::KnownArtifactKind;
 use serde::{Deserialize, Serialize};
-use slog::{warn, Logger};
-use std::collections::{BTreeMap, HashSet};
+use slog::Logger;
+use std::collections::BTreeMap;
 use std::fmt::Display;
 use wicketd_client::types::{ArtifactId, SemverVersion};
 
@@ -42,6 +45,7 @@ impl RackUpdateState {
                             *id,
                             vec![
                                 UpdateComponent::Rot,
+                                UpdateComponent::RotBootloader,
                                 UpdateComponent::Sp,
                                 UpdateComponent::Host,
                             ],
@@ -51,14 +55,22 @@ impl RackUpdateState {
                         *id,
                         UpdateItem::new(
                             *id,
-                            vec![UpdateComponent::Rot, UpdateComponent::Sp],
+                            vec![
+                                UpdateComponent::Rot,
+                                UpdateComponent::RotBootloader,
+                                UpdateComponent::Sp,
+                            ],
                         ),
                     ),
                     ComponentId::Psc(_) => (
                         *id,
                         UpdateItem::new(
                             *id,
-                            vec![UpdateComponent::Rot, UpdateComponent::Sp],
+                            vec![
+                                UpdateComponent::Rot,
+                                UpdateComponent::RotBootloader,
+                                UpdateComponent::Sp,
+                            ],
                         ),
                     ),
                 })
@@ -102,33 +114,17 @@ impl RackUpdateState {
             }
         }
 
-        let mut updated_component_ids = HashSet::new();
-
-        for (sp_type, logs) in reports {
-            for (i, log) in logs {
-                let Ok(id) = ComponentId::try_from(ParsableComponentId {
-                    sp_type: &sp_type,
-                    i: &i,
-                }) else {
-                    warn!(
-                        logger,
-                        "Invalid ComponentId in EventReport: {} {}",
-                        &sp_type,
-                        &i
-                    );
-                    continue;
-                };
-                let item_state = self.items.get_mut(&id).unwrap();
-                item_state.update(log);
-                updated_component_ids.insert(id);
+        let reports = parse_event_report_map(logger, reports);
+        // Reset all component IDs that aren't in the event report map.
+        for (id, item) in &mut self.items {
+            if !reports.contains_key(id) {
+                item.reset();
             }
         }
 
-        // Reset all component IDs that weren't updated.
-        for (id, item) in &mut self.items {
-            if !updated_component_ids.contains(id) {
-                item.reset();
-            }
+        for (id, report) in reports {
+            let item_state = self.items.get_mut(&id).unwrap();
+            item_state.update(report);
         }
     }
 }
@@ -262,12 +258,15 @@ impl UpdateItem {
                 }
                 | StepEventKind::StepCompleted { step, outcome, .. } => {
                     if step.info.is_last_step_in_component() {
-                        // The RoT and SP components each have two steps in
-                        // them. If the second step ("Updating RoT/SP") is
+                        // The RoT (and bootloader) and SP components each
+                        // have two steps in them. If the second step
+                        // ("Updating RoT Bootloader/RoT/SP") is
                         // skipped, then treat the component as skipped.
                         if matches!(
                             step.info.component,
-                            UpdateComponent::Sp | UpdateComponent::Rot
+                            UpdateComponent::Sp
+                                | UpdateComponent::Rot
+                                | UpdateComponent::RotBootloader
                         ) {
                             assert_eq!(
                                 step.info.id,
@@ -345,6 +344,7 @@ impl UpdateItem {
     }
 }
 
+#[derive(Debug, Copy, Clone)]
 pub enum UpdateState {
     NotStarted,
     Starting,
@@ -440,8 +440,92 @@ fn update_component_state(
 #[allow(unused)]
 pub fn update_component_title(component: UpdateComponent) -> &'static str {
     match component {
+        UpdateComponent::RotBootloader => "ROT_BOOTLOADER",
         UpdateComponent::Rot => "ROT",
         UpdateComponent::Sp => "SP",
         UpdateComponent::Host => "HOST",
     }
+}
+
+pub struct CreateStartUpdateOptions {
+    pub(crate) force_update_rot_bootloader: bool,
+    pub(crate) force_update_rot: bool,
+    pub(crate) force_update_sp: bool,
+}
+
+impl CreateStartUpdateOptions {
+    pub fn to_start_update_options(&self) -> Result<StartUpdateOptions> {
+        let test_error =
+            get_update_test_error("WICKET_TEST_START_UPDATE_ERROR")?;
+
+        // This is a debug environment variable used to
+        // add a test step.
+        let test_step_seconds =
+            std::env::var("WICKET_UPDATE_TEST_STEP_SECONDS").ok().map(|v| {
+                v.parse().expect(
+                    "parsed WICKET_UPDATE_TEST_STEP_SECONDS \
+                            as a u64",
+                )
+            });
+        let test_simulate_rot_bootloader_result = get_update_simulated_result(
+            "WICKET_UPDATE_TEST_SIMULATE_ROT_BOOTLOADER_RESULT",
+        )?;
+        let test_simulate_rot_result = get_update_simulated_result(
+            "WICKET_UPDATE_TEST_SIMULATE_ROT_RESULT",
+        )?;
+        let test_simulate_sp_result = get_update_simulated_result(
+            "WICKET_UPDATE_TEST_SIMULATE_SP_RESULT",
+        )?;
+
+        Ok(StartUpdateOptions {
+            test_error,
+            test_step_seconds,
+            test_simulate_rot_bootloader_result,
+            test_simulate_rot_result,
+            test_simulate_sp_result,
+            skip_rot_bootloader_version_check: self.force_update_rot_bootloader,
+            skip_rot_version_check: self.force_update_rot,
+            skip_sp_version_check: self.force_update_sp,
+        })
+    }
+}
+
+pub struct CreateClearUpdateStateOptions {}
+
+impl CreateClearUpdateStateOptions {
+    pub fn to_clear_update_state_options(
+        &self,
+    ) -> Result<ClearUpdateStateOptions> {
+        let test_error =
+            get_update_test_error("WICKET_TEST_CLEAR_UPDATE_STATE_ERROR")?;
+
+        Ok(ClearUpdateStateOptions { test_error })
+    }
+}
+
+/// Converts an `EventReportMap` to a map by component ID.
+pub fn parse_event_report_map(
+    log: &Logger,
+    reports: EventReportMap,
+) -> BTreeMap<ComponentId, EventReport> {
+    let mut component_id_map = BTreeMap::new();
+    for (sp_type, logs) in reports {
+        for (i, event_report) in logs {
+            let Ok(id) = ComponentId::try_from(ParsableComponentId {
+                sp_type: &sp_type,
+                i: &i,
+            }) else {
+                slog::warn!(
+                    log,
+                    "Invalid ComponentId in EventReportMap: {} {}",
+                    &sp_type,
+                    &i
+                );
+                continue;
+            };
+            component_id_map.insert(id, event_report);
+        }
+    }
+
+    component_id_map
 }

@@ -8,6 +8,7 @@ use super::ActionRegistry;
 use super::NexusActionContext;
 use super::NexusSaga;
 use crate::app::sagas::declare_saga_actions;
+use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::{authn, authz, db};
 use omicron_common::api::external::{Error, ResourceType};
 use omicron_common::api::internal::shared::SwitchLocation;
@@ -39,6 +40,9 @@ declare_saga_actions! {
     DEALLOCATE_EXTERNAL_IP -> "no_result3" {
         + sid_deallocate_external_ip
     }
+    INSTANCE_DELETE_NAT -> "no_result4" {
+        + sid_delete_nat
+    }
 }
 
 // instance delete saga: definition
@@ -57,6 +61,7 @@ impl NexusSaga for SagaInstanceDelete {
         _params: &Self::Params,
         mut builder: steno::DagBuilder,
     ) -> Result<steno::Dag, super::SagaInitError> {
+        builder.append(instance_delete_nat_action());
         builder.append(instance_delete_record_action());
         builder.append(delete_network_interfaces_action());
         builder.append(deallocate_external_ip_action());
@@ -97,6 +102,7 @@ async fn sid_delete_network_interfaces(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
+    let nexus = osagactx.nexus();
     let params = sagactx.saga_params::<Params>()?;
     let opctx = crate::context::op_context_for_saga_action(
         &sagactx,
@@ -107,6 +113,33 @@ async fn sid_delete_network_interfaces(
         .instance_delete_all_network_interfaces(&opctx, &params.authz_instance)
         .await
         .map_err(ActionError::action_failed)?;
+    nexus.background_tasks.activate(&nexus.background_tasks.task_v2p_manager);
+    Ok(())
+}
+
+async fn sid_delete_nat(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let params = sagactx.saga_params::<Params>()?;
+    let instance_id = params.authz_instance.id();
+    let osagactx = sagactx.user_data();
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    let (.., authz_instance) = LookupPath::new(&opctx, &osagactx.datastore())
+        .instance_id(instance_id)
+        .lookup_for(authz::Action::Modify)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    osagactx
+        .nexus()
+        .instance_delete_dpd_config(&opctx, &authz_instance)
+        .await
+        .map_err(ActionError::action_failed)?;
+
     Ok(())
 }
 
@@ -127,6 +160,11 @@ async fn sid_deallocate_external_ip(
         )
         .await
         .map_err(ActionError::action_failed)?;
+    osagactx
+        .datastore()
+        .detach_floating_ips_by_instance_id(&opctx, params.authz_instance.id())
+        .await
+        .map_err(ActionError::action_failed)?;
     Ok(())
 }
 
@@ -142,9 +180,9 @@ mod test {
     use nexus_db_queries::{
         authn::saga::Serialized, context::OpContext, db, db::lookup::LookupPath,
     };
+    use nexus_test_utils::resource_helpers::create_default_ip_pool;
     use nexus_test_utils::resource_helpers::create_disk;
     use nexus_test_utils::resource_helpers::create_project;
-    use nexus_test_utils::resource_helpers::populate_ip_pool;
     use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::identity::Resource;
@@ -163,7 +201,7 @@ mod test {
     const DISK_NAME: &str = "my-disk";
 
     async fn create_org_project_and_disk(client: &ClientTestContext) -> Uuid {
-        populate_ip_pool(&client, "default", None).await;
+        create_default_ip_pool(&client).await;
         let project = create_project(client, PROJECT_NAME).await;
         create_disk(&client, PROJECT_NAME, DISK_NAME).await;
         project.identity.id
@@ -174,7 +212,7 @@ mod test {
         instance_id: Uuid,
     ) -> Params {
         let opctx = test_opctx(&cptestctx);
-        let datastore = cptestctx.server.apictx().nexus.datastore();
+        let datastore = cptestctx.server.server_context().nexus.datastore();
 
         let (.., authz_instance, instance) =
             LookupPath::new(&opctx, &datastore)
@@ -199,12 +237,13 @@ mod test {
             },
             ncpus: InstanceCpuCount::try_from(2).unwrap(),
             memory: ByteCount::from_gibibytes_u32(4),
-            hostname: String::from("inst"),
+            hostname: "inst".parse().unwrap(),
             user_data: vec![],
+            ssh_public_keys: Some(Vec::new()),
             network_interfaces:
                 params::InstanceNetworkInterfaceAttachment::Default,
             external_ips: vec![params::ExternalIpCreate::Ephemeral {
-                pool_name: None,
+                pool: None,
             }],
             disks: vec![params::InstanceDiskAttachment::Attach(
                 params::InstanceDiskAttach { name: DISK_NAME.parse().unwrap() },
@@ -216,7 +255,7 @@ mod test {
     pub fn test_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
         OpContext::for_tests(
             cptestctx.logctx.log.new(o!()),
-            cptestctx.server.apictx().nexus.datastore().clone(),
+            cptestctx.server.server_context().nexus.datastore().clone(),
         )
     }
 
@@ -226,25 +265,20 @@ mod test {
     ) {
         DiskTest::new(cptestctx).await;
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         create_org_project_and_disk(&client).await;
 
-        // Build the saga DAG with the provided test parameters
-        let dag = create_saga_dag::<SagaInstanceDelete>(
-            new_test_params(
-                &cptestctx,
-                create_instance(&cptestctx, new_instance_create_params())
-                    .await
-                    .id(),
-            )
-            .await,
+        // Build the saga DAG with the provided test parameters and run it.
+        let params = new_test_params(
+            &cptestctx,
+            create_instance(&cptestctx, new_instance_create_params())
+                .await
+                .id(),
         )
-        .unwrap();
-        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
-
-        // Actually run the saga
+        .await;
         nexus
-            .run_saga(runnable_saga)
+            .sagas
+            .saga_execute::<SagaInstanceDelete>(params)
             .await
             .expect("Saga should have succeeded");
     }
@@ -253,7 +287,7 @@ mod test {
         cptestctx: &ControlPlaneTestContext,
         params: params::InstanceCreate,
     ) -> db::model::Instance {
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let opctx = test_opctx(&cptestctx);
 
         let project_selector = params::ProjectSelector {
@@ -267,7 +301,8 @@ mod test {
             .await
             .unwrap();
 
-        let datastore = cptestctx.server.apictx().nexus.datastore().clone();
+        let datastore =
+            cptestctx.server.server_context().nexus.datastore().clone();
         let (.., db_instance) = LookupPath::new(&opctx, &datastore)
             .instance_id(instance_state.instance().id())
             .fetch()
@@ -284,7 +319,7 @@ mod test {
         DiskTest::new(cptestctx).await;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         create_org_project_and_disk(&client).await;
 
         // Build the saga DAG with the provided test parameters

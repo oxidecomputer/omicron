@@ -91,32 +91,31 @@
 use super::{
     common_storage::{
         call_pantry_attach_for_disk, call_pantry_detach_for_disk,
-        delete_crucible_regions, delete_crucible_running_snapshot,
-        delete_crucible_snapshot, ensure_all_datasets_and_regions,
         get_pantry_address,
     },
     ActionRegistry, NexusActionContext, NexusSaga, SagaInitError,
     ACTION_GENERATE_ID,
 };
 use crate::app::sagas::declare_saga_actions;
-use crate::app::sagas::retry_until_known_result;
 use crate::app::{authn, authz, db};
 use crate::external_api::params;
 use anyhow::anyhow;
-use crucible_agent_client::{types::RegionId, Client as CrucibleAgentClient};
 use nexus_db_model::Generation;
 use nexus_db_queries::db::identity::{Asset, Resource};
 use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::api::external;
 use omicron_common::api::external::Error;
+use omicron_common::retry_until_known_result;
+use omicron_uuid_kinds::{GenericUuid, PropolisUuid, SledUuid};
 use rand::{rngs::StdRng, RngCore, SeedableRng};
 use serde::Deserialize;
 use serde::Serialize;
 use sled_agent_client::types::CrucibleOpts;
-use sled_agent_client::types::InstanceIssueDiskSnapshotRequestBody;
+use sled_agent_client::types::VmmIssueDiskSnapshotRequestBody;
 use sled_agent_client::types::VolumeConstructionRequest;
 use slog::info;
 use std::collections::BTreeMap;
+use std::collections::VecDeque;
 use std::net::SocketAddrV6;
 use steno::ActionError;
 use steno::Node;
@@ -130,13 +129,18 @@ pub(crate) struct Params {
     pub silo_id: Uuid,
     pub project_id: Uuid,
     pub disk_id: Uuid,
-    pub attached_instance_and_sled: Option<(Uuid, Uuid)>,
+    pub attach_instance_id: Option<Uuid>,
+    pub use_the_pantry: bool,
     pub create_params: params::SnapshotCreate,
 }
 
 // snapshot create saga: actions
 declare_saga_actions! {
     snapshot_create;
+    TAKE_VOLUME_LOCK -> "volume_lock" {
+        + ssc_take_volume_lock
+        - ssc_take_volume_lock_undo
+    }
     REGIONS_ALLOC -> "datasets_and_regions" {
         + ssc_alloc_regions
         - ssc_alloc_regions_undo
@@ -200,6 +204,9 @@ declare_saga_actions! {
     FINALIZE_SNAPSHOT_RECORD -> "finalized_snapshot" {
         + ssc_finalize_snapshot_record
     }
+    RELEASE_VOLUME_LOCK -> "volume_unlock" {
+        + ssc_release_volume_lock
+    }
 }
 
 // snapshot create saga: definition
@@ -237,6 +244,14 @@ impl NexusSaga for SagaSnapshotCreate {
             ACTION_GENERATE_ID.as_ref(),
         ));
 
+        builder.append(Node::action(
+            "lock_id",
+            "GenerateLockId",
+            ACTION_GENERATE_ID.as_ref(),
+        ));
+
+        builder.append(take_volume_lock_action());
+
         // (DB) Allocate region space for snapshot to store blocks post-scrub
         builder.append(regions_alloc_action());
         // (Sleds) Reaches out to each dataset, and ensures the regions exist
@@ -251,8 +266,7 @@ impl NexusSaga for SagaSnapshotCreate {
         // (DB) Tracks virtual resource provisioning.
         builder.append(space_account_action());
 
-        let use_the_pantry = params.attached_instance_and_sled.is_none();
-        if !use_the_pantry {
+        if !params.use_the_pantry {
             // (Sleds) If the disk is attached to an instance, send a
             // snapshot request to sled-agent to create a ZFS snapshot.
             builder.append(send_snapshot_request_to_sled_agent_action());
@@ -284,13 +298,15 @@ impl NexusSaga for SagaSnapshotCreate {
         // (DB) Mark snapshot as "ready"
         builder.append(finalize_snapshot_record_action());
 
-        if use_the_pantry {
+        if params.use_the_pantry {
             // (Pantry) Set the state back to Detached
             //
             // This has to be the last saga node! Otherwise, concurrent
             // operation on this disk is possible.
             builder.append(detach_disk_from_pantry_action());
         }
+
+        builder.append(release_volume_lock_action());
 
         Ok(builder.build()?)
     }
@@ -299,6 +315,106 @@ impl NexusSaga for SagaSnapshotCreate {
 // snapshot create saga: action implementations
 
 async fn ssc_noop(_sagactx: NexusActionContext) -> Result<(), ActionError> {
+    Ok(())
+}
+
+async fn ssc_take_volume_lock(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let lock_id = sagactx.lookup::<Uuid>("lock_id")?;
+
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    // Without a lock on the volume, this saga can race with the region
+    // replacement saga, causing (at least!) two problems:
+    //
+    // - the request that this saga sends to a propolis to create a snapshot
+    //   races with the vcr_replace request that the region replacement drive
+    //   saga sends. Imagining that the region set for a disk's volume is [A, B,
+    //   C] before either saga starts, then the following scenarios can occur:
+    //
+    //   1. the snapshot request lands before the vcr_replace request, meaning
+    //      snapshots are created for the A, B, and C regions, but the region
+    //      set was then modified to [A, B, D]: this means that two of the three
+    //      regions have associated snapshots, and this will cause this saga to
+    //      unwind when it checks that the associated region snapshots were
+    //      created ok. as it's currently written, this saga could also error
+    //      during unwind, as it's trying to clean up the snapshots for A, B,
+    //      and C, and it could see a "Not Found" when querying C for the
+    //      snapshot.
+    //
+    //   2. the vcr_replace request lands before the snapshot request, meaning
+    //      snapshots would be created for the A, B, and D regions. this is a
+    //      problem because D is new (having been allocated to replace C), and
+    //      the upstairs could be performing live repair. taking a snapshot of
+    //      an upstairs during live repair means either:
+    //
+    //      a. the Upstairs will reject it, causing this saga to unwind ok
+    //
+    //      b. the Upstairs will allow it, meaning any read-only Upstairs that
+    //         uses the associated snapshots ([A', B', D']) will detect that
+    //         reconciliation is required, not be able to perform reconciliation
+    //         because it is read-only, and panic. note: accepting and
+    //         performing a snapshot during live repair is almost certainly a
+    //         bug in Crucible, not Nexus!
+    //
+    //      if the upstairs is _not_ performing live repair yet, then the
+    //      snapshot could succeed. This means each of the A, B, and D regions
+    //      will have an associated snapshot, but the D snapshot is of a blank
+    //      region! the same problem will occur as 2b: a read-only Upstairs that
+    //      uses those snapshots as targets will panic because the data doesn't
+    //      match and it can't perform reconciliation.
+    //
+    // - get_allocated_regions will change during the execution of this saga,
+    //   due to region replacement(s) occurring.
+    //
+    // With a lock on the volume, the snapshot creation and region replacement
+    // drive sagas are serialized. Note this does mean that region replacement
+    // is blocked by a snapshot being created, and snapshot creation is blocked
+    // by region replacement.
+
+    let (.., disk) = LookupPath::new(&opctx, &osagactx.datastore())
+        .disk_id(params.disk_id)
+        .fetch()
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    osagactx
+        .datastore()
+        .volume_repair_lock(&opctx, disk.volume_id, lock_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    Ok(())
+}
+
+async fn ssc_take_volume_lock_undo(
+    sagactx: NexusActionContext,
+) -> anyhow::Result<()> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let lock_id = sagactx.lookup::<Uuid>("lock_id")?;
+
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    let (.., disk) = LookupPath::new(&opctx, &osagactx.datastore())
+        .disk_id(params.disk_id)
+        .fetch()
+        .await?;
+
+    osagactx
+        .datastore()
+        .volume_repair_unlock(&opctx, disk.volume_id, lock_id)
+        .await?;
+
     Ok(())
 }
 
@@ -336,7 +452,7 @@ async fn ssc_alloc_regions(
 
     let datasets_and_regions = osagactx
         .datastore()
-        .region_allocate(
+        .disk_region_allocate(
             &opctx,
             destination_volume_id,
             &params::DiskSource::Blank {
@@ -380,13 +496,16 @@ async fn ssc_regions_ensure(
     let destination_volume_id =
         sagactx.lookup::<Uuid>("destination_volume_id")?;
 
-    let datasets_and_regions = ensure_all_datasets_and_regions(
-        &log,
-        sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
-            "datasets_and_regions",
-        )?,
-    )
-    .await?;
+    let datasets_and_regions = osagactx
+        .nexus()
+        .ensure_all_datasets_and_regions(
+            &log,
+            sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
+                "datasets_and_regions",
+            )?,
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
 
     let block_size = datasets_and_regions[0].1.block_size;
     let blocks_per_extent = datasets_and_regions[0].1.extent_size;
@@ -400,7 +519,7 @@ async fn ssc_regions_ensure(
         sub_volumes: vec![VolumeConstructionRequest::Region {
             block_size,
             blocks_per_extent,
-            extent_count: extent_count.try_into().unwrap(),
+            extent_count,
             gen: 1,
             opts: CrucibleOpts {
                 id: destination_volume_id,
@@ -409,9 +528,17 @@ async fn ssc_regions_ensure(
                     .map(|(dataset, region)| {
                         dataset
                             .address_with_port(region.port_number)
-                            .to_string()
+                            .ok_or_else(|| {
+                                ActionError::action_failed(
+                                    Error::internal_error(&format!(
+                                        "missing IP address for dataset {}",
+                                        dataset.id(),
+                                    )),
+                                )
+                            })
+                            .map(|addr| addr.to_string())
                     })
-                    .collect(),
+                    .collect::<Result<Vec<_>, ActionError>>()?,
 
                 lossy: false,
                 flush_timeout: None,
@@ -458,15 +585,18 @@ async fn ssc_regions_ensure(
 async fn ssc_regions_ensure_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
-    let log = sagactx.user_data().log();
+    let osagactx = sagactx.user_data();
+    let log = osagactx.log();
     warn!(log, "ssc_regions_ensure_undo: Deleting crucible regions");
-    delete_crucible_regions(
-        log,
-        sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
-            "datasets_and_regions",
-        )?,
-    )
-    .await?;
+    osagactx
+        .nexus()
+        .delete_crucible_regions(
+            log,
+            sagactx.lookup::<Vec<(db::model::Dataset, db::model::Region)>>(
+                "datasets_and_regions",
+            )?,
+        )
+        .await?;
     info!(log, "ssc_regions_ensure_undo: Deleted crucible regions");
     Ok(())
 }
@@ -496,17 +626,19 @@ async fn ssc_create_destination_volume_record(
 async fn ssc_create_destination_volume_record_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
+    let log = sagactx.user_data().log();
     let osagactx = sagactx.user_data();
 
     let destination_volume_id =
         sagactx.lookup::<Uuid>("destination_volume_id")?;
 
-    osagactx
-        .datastore()
-        .decrease_crucible_resource_count_and_soft_delete_volume(
-            destination_volume_id,
-        )
-        .await?;
+    // This saga contains what is necessary to clean up the destination volume
+    // resources. It's safe here to perform a volume hard delete without
+    // decreasing the crucible resource count because the destination volume is
+    // guaranteed to never have read only resources that require that
+    // accounting.
+
+    info!(log, "hard deleting volume {}", destination_volume_id,);
 
     osagactx.datastore().volume_hard_delete(destination_volume_id).await?;
 
@@ -673,36 +805,65 @@ async fn ssc_send_snapshot_request_to_sled_agent(
     let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
 
     // If this node was reached, the saga initiator thought the disk was
-    // attached to an instance that was running on a specific sled. Contact that
-    // sled and ask it to initiate a snapshot. Note that this is best-effort:
-    // the instance may have stopped (or may be have stopped, had the disk
-    // detached, and resumed running on the same sled) while the saga was
-    // executing.
-    let (instance_id, sled_id) =
-        params.attached_instance_and_sled.ok_or_else(|| {
-            ActionError::action_failed(Error::internal_error(
-                "snapshot saga in send_snapshot_request_to_sled_agent but no \
-                instance/sled pair was provided",
-            ))
-        })?;
+    // attached to an instance that _may_ have a running Propolis. Contact that
+    // Propolis and ask it to initiate a snapshot. Note that this is
+    // best-effort: the instance may have stopped (or may be have stopped, had
+    // the disk detached, and resumed running on the same sled) while the saga
+    // was executing.
+    let Some(attach_instance_id) = params.attach_instance_id else {
+        return Err(ActionError::action_failed(Error::internal_error(
+            "attach instance id is None!",
+        )));
+    };
+
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    let (.., authz_instance) = LookupPath::new(&opctx, &osagactx.datastore())
+        .instance_id(attach_instance_id)
+        .lookup_for(authz::Action::Read)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    let instance_and_vmm = osagactx
+        .datastore()
+        .instance_fetch_with_vmm(&opctx, &authz_instance)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    let vmm = instance_and_vmm.vmm();
+
+    // If this instance does not currently have a sled, we can't continue this
+    // saga - the user will have to reissue the snapshot request and it will get
+    // run on a Pantry.
+    let Some((propolis_id, sled_id)) =
+        vmm.as_ref().map(|vmm| (vmm.id, vmm.sled_id))
+    else {
+        return Err(ActionError::action_failed(Error::unavail(
+            "instance no longer has an active VMM!",
+        )));
+    };
 
     info!(log, "asking for disk snapshot from Propolis via sled agent";
           "disk_id" => %params.disk_id,
-          "instance_id" => %instance_id,
+          "instance_id" => %attach_instance_id,
+          "propolis_id" => %propolis_id,
           "sled_id" => %sled_id);
 
     let sled_agent_client = osagactx
         .nexus()
-        .sled_client(&sled_id)
+        .sled_client(&SledUuid::from_untyped_uuid(sled_id))
         .await
         .map_err(ActionError::action_failed)?;
 
     retry_until_known_result(log, || async {
         sled_agent_client
-            .instance_issue_disk_snapshot_request(
-                &instance_id,
+            .vmm_issue_disk_snapshot_request(
+                &PropolisUuid::from_untyped_uuid(propolis_id),
                 &params.disk_id,
-                &InstanceIssueDiskSnapshotRequestBody { snapshot_id },
+                &VmmIssueDiskSnapshotRequestBody { snapshot_id },
             )
             .await
     })
@@ -737,10 +898,9 @@ async fn ssc_send_snapshot_request_to_sled_agent_undo(
 
     // ... and instruct each of those regions to delete the snapshot.
     for (dataset, region) in datasets_and_regions {
-        let url = format!("http://{}", dataset.address());
-        let client = CrucibleAgentClient::new(&url);
-
-        delete_crucible_snapshot(log, &client, region.id(), snapshot_id)
+        osagactx
+            .nexus()
+            .delete_crucible_snapshot(log, &dataset, region.id(), snapshot_id)
             .await?;
     }
 
@@ -834,6 +994,16 @@ async fn ssc_attach_disk_to_pantry(
             // specified an optional snapshot should be taken. No state change
             // is required.
             info!(log, "disk {} in state finalizing", params.disk_id);
+        }
+
+        external::DiskState::Attached(attach_instance_id) => {
+            // No state change required
+            info!(
+                log,
+                "disk {} in state attached to instance id {}",
+                params.disk_id,
+                attach_instance_id
+            );
         }
 
         _ => {
@@ -1053,10 +1223,9 @@ async fn ssc_call_pantry_snapshot_for_disk_undo(
 
     // ... and instruct each of those regions to delete the snapshot.
     for (dataset, region) in datasets_and_regions {
-        let url = format!("http://{}", dataset.address());
-        let client = CrucibleAgentClient::new(&url);
-
-        delete_crucible_snapshot(log, &client, region.id(), snapshot_id)
+        osagactx
+            .nexus()
+            .delete_crucible_snapshot(log, &dataset, region.id(), snapshot_id)
             .await?;
     }
     Ok(())
@@ -1173,7 +1342,7 @@ async fn ssc_start_running_snapshot(
     );
 
     let snapshot_id = sagactx.lookup::<Uuid>("snapshot_id")?;
-    info!(log, "starting running snapshot for {snapshot_id}");
+    info!(log, "starting running snapshot"; "snapshot_id" => %snapshot_id);
 
     let (.., disk) = LookupPath::new(&opctx, &osagactx.datastore())
         .disk_id(params.disk_id)
@@ -1192,61 +1361,52 @@ async fn ssc_start_running_snapshot(
     let mut map: BTreeMap<String, String> = BTreeMap::new();
 
     for (dataset, region) in datasets_and_regions {
-        // Create a Crucible agent client
-        let url = format!("http://{}", dataset.address());
-        let client = CrucibleAgentClient::new(&url);
-
-        info!(log, "dataset {:?} region {:?} url {}", dataset, region, url);
-
-        // Validate with the Crucible agent that the snapshot exists
-        let crucible_region = retry_until_known_result(log, || async {
-            client.region_get(&RegionId(region.id().to_string())).await
-        })
-        .await
-        .map_err(|e| e.to_string())
-        .map_err(ActionError::action_failed)?;
-
-        info!(log, "crucible region {:?}", crucible_region);
-
-        let crucible_snapshot = retry_until_known_result(log, || async {
-            client
-                .region_get_snapshot(
-                    &RegionId(region.id().to_string()),
-                    &snapshot_id.to_string(),
-                )
-                .await
-        })
-        .await
-        .map_err(|e| e.to_string())
-        .map_err(ActionError::action_failed)?;
-
-        info!(log, "crucible snapshot {:?}", crucible_snapshot);
+        let Some(dataset_addr) = dataset.address() else {
+            return Err(ActionError::action_failed(Error::internal_error(
+                &format!("Missing IP address for dataset {}", dataset.id(),),
+            )));
+        };
 
         // Start the snapshot running
-        let crucible_running_snapshot =
-            retry_until_known_result(log, || async {
-                client
-                    .region_run_snapshot(
-                        &RegionId(region.id().to_string()),
-                        &snapshot_id.to_string(),
-                    )
-                    .await
-            })
+        let (crucible_region, _, crucible_running_snapshot) = osagactx
+            .nexus()
+            .ensure_crucible_running_snapshot(
+                &log,
+                &dataset,
+                region.id(),
+                snapshot_id,
+            )
             .await
             .map_err(|e| e.to_string())
             .map_err(ActionError::action_failed)?;
 
-        info!(log, "crucible running snapshot {:?}", crucible_running_snapshot);
+        info!(
+            log,
+            "successfully started running region snapshot";
+            "running snapshot" => ?crucible_running_snapshot
+        );
 
         // Map from the region to the snapshot
         let region_addr = format!(
             "{}",
-            dataset.address_with_port(crucible_region.port_number)
+            SocketAddrV6::new(
+                *dataset_addr.ip(),
+                crucible_region.port_number,
+                0,
+                0
+            )
         );
+
         let snapshot_addr = format!(
             "{}",
-            dataset.address_with_port(crucible_running_snapshot.port_number)
+            SocketAddrV6::new(
+                *dataset_addr.ip(),
+                crucible_running_snapshot.port_number,
+                0,
+                0
+            )
         );
+
         info!(log, "map {} to {}", region_addr, snapshot_addr);
         map.insert(region_addr, snapshot_addr.clone());
 
@@ -1295,16 +1455,15 @@ async fn ssc_start_running_snapshot_undo(
 
     // ... and instruct each of those regions to delete the running snapshot.
     for (dataset, region) in datasets_and_regions {
-        let url = format!("http://{}", dataset.address());
-        let client = CrucibleAgentClient::new(&url);
-
-        delete_crucible_running_snapshot(
-            &log,
-            &client,
-            region.id(),
-            snapshot_id,
-        )
-        .await?;
+        osagactx
+            .nexus()
+            .delete_crucible_running_snapshot(
+                &log,
+                &dataset,
+                region.id(),
+                snapshot_id,
+            )
+            .await?;
 
         osagactx
             .datastore()
@@ -1338,7 +1497,10 @@ async fn ssc_create_volume_record(
 
     let disk_volume = osagactx
         .datastore()
-        .volume_checkout(disk.volume_id)
+        .volume_checkout(
+            disk.volume_id,
+            db::datastore::VolumeCheckoutReason::CopyAndModify,
+        )
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -1361,7 +1523,7 @@ async fn ssc_create_volume_record(
     let snapshot_volume_construction_request: VolumeConstructionRequest =
         create_snapshot_from_disk(
             &disk_volume_construction_request,
-            Some(&replace_sockets_map),
+            &replace_sockets_map,
         )
         .map_err(|e| {
             ActionError::action_failed(Error::internal_error(&e.to_string()))
@@ -1396,16 +1558,21 @@ async fn ssc_create_volume_record_undo(
     let osagactx = sagactx.user_data();
     let volume_id = sagactx.lookup::<Uuid>("volume_id")?;
 
+    // `volume_create` will increase the resource count for read only resources
+    // in a volume, which there are guaranteed to be for snapshot volumes.
+    // decreasing crucible resources is necessary as an undo step. Do not call
+    // `volume_hard_delete` here: soft deleting volumes is necessary for
+    // `find_deleted_volume_regions` to work.
+
     info!(
         log,
         "calling decrease crucible resource count for volume {}", volume_id
     );
+
     osagactx
         .datastore()
         .decrease_crucible_resource_count_and_soft_delete_volume(volume_id)
         .await?;
-
-    osagactx.datastore().volume_hard_delete(volume_id).await?;
 
     Ok(())
 }
@@ -1449,13 +1616,40 @@ async fn ssc_finalize_snapshot_record(
     Ok(snapshot)
 }
 
+async fn ssc_release_volume_lock(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let lock_id = sagactx.lookup::<Uuid>("lock_id")?;
+
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    let (.., disk) = LookupPath::new(&opctx, &osagactx.datastore())
+        .disk_id(params.disk_id)
+        .fetch()
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    osagactx
+        .datastore()
+        .volume_repair_unlock(&opctx, disk.volume_id, lock_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    Ok(())
+}
+
 // helper functions
 
 /// Create a Snapshot VolumeConstructionRequest by copying a disk's
 /// VolumeConstructionRequest and modifying it accordingly.
 fn create_snapshot_from_disk(
     disk: &VolumeConstructionRequest,
-    socket_map: Option<&BTreeMap<String, String>>,
+    socket_map: &BTreeMap<String, String>,
 ) -> anyhow::Result<VolumeConstructionRequest> {
     // When copying a disk's VolumeConstructionRequest to turn it into a
     // snapshot:
@@ -1464,81 +1658,73 @@ fn create_snapshot_from_disk(
     // - set read-only
     // - remove any control sockets
 
-    match disk {
-        VolumeConstructionRequest::Volume {
-            id: _,
-            block_size,
-            sub_volumes,
-            read_only_parent,
-        } => Ok(VolumeConstructionRequest::Volume {
-            id: Uuid::new_v4(),
-            block_size: *block_size,
-            sub_volumes: sub_volumes
-                .iter()
-                .map(|subvol| -> anyhow::Result<VolumeConstructionRequest> {
-                    create_snapshot_from_disk(&subvol, socket_map)
-                })
-                .collect::<anyhow::Result<Vec<VolumeConstructionRequest>>>()?,
-            read_only_parent: if let Some(read_only_parent) = read_only_parent {
-                Some(Box::new(create_snapshot_from_disk(
-                    read_only_parent,
-                    // no socket modification required for read-only parents
-                    None,
-                )?))
-            } else {
-                None
-            },
-        }),
+    let mut new_vcr = disk.clone();
 
-        VolumeConstructionRequest::Url { id: _, block_size, url } => {
-            Ok(VolumeConstructionRequest::Url {
-                id: Uuid::new_v4(),
-                block_size: *block_size,
-                url: url.clone(),
-            })
-        }
+    struct Work<'a> {
+        vcr_part: &'a mut VolumeConstructionRequest,
+        socket_modification_required: bool,
+    }
 
-        VolumeConstructionRequest::Region {
-            block_size,
-            blocks_per_extent,
-            extent_count,
-            opts,
-            gen,
-        } => {
-            let mut opts = opts.clone();
+    let mut parts: VecDeque<Work> = VecDeque::new();
+    parts.push_back(Work {
+        vcr_part: &mut new_vcr,
+        socket_modification_required: true,
+    });
 
-            if let Some(socket_map) = socket_map {
-                for target in &mut opts.target {
-                    *target = socket_map
-                        .get(target)
-                        .ok_or_else(|| {
-                            anyhow!("target {} not found in map!", target)
-                        })?
-                        .clone();
+    while let Some(work) = parts.pop_front() {
+        match work.vcr_part {
+            VolumeConstructionRequest::Volume {
+                id,
+                sub_volumes,
+                read_only_parent,
+                ..
+            } => {
+                *id = Uuid::new_v4();
+
+                for sub_volume in sub_volumes {
+                    parts.push_back(Work {
+                        vcr_part: sub_volume,
+                        // Inherit if socket modification is required from the
+                        // parent layer
+                        socket_modification_required: work
+                            .socket_modification_required,
+                    });
+                }
+
+                if let Some(read_only_parent) = read_only_parent {
+                    parts.push_back(Work {
+                        vcr_part: read_only_parent,
+                        // no socket modification required for read-only parents
+                        socket_modification_required: false,
+                    });
                 }
             }
 
-            opts.id = Uuid::new_v4();
-            opts.read_only = true;
-            opts.control = None;
+            VolumeConstructionRequest::Url { id, .. } => {
+                *id = Uuid::new_v4();
+            }
 
-            Ok(VolumeConstructionRequest::Region {
-                block_size: *block_size,
-                blocks_per_extent: *blocks_per_extent,
-                extent_count: *extent_count,
-                opts,
-                gen: *gen,
-            })
-        }
+            VolumeConstructionRequest::Region { opts, .. } => {
+                opts.id = Uuid::new_v4();
+                opts.read_only = true;
+                opts.control = None;
 
-        VolumeConstructionRequest::File { id: _, block_size, path } => {
-            Ok(VolumeConstructionRequest::File {
-                id: Uuid::new_v4(),
-                block_size: *block_size,
-                path: path.clone(),
-            })
+                if work.socket_modification_required {
+                    for target in &mut opts.target {
+                        target.clone_from(socket_map.get(target).ok_or_else(
+                            || anyhow!("target {} not found in map!", target),
+                        )?);
+                    }
+                }
+            }
+
+            VolumeConstructionRequest::File { id, .. } => {
+                *id = Uuid::new_v4();
+            }
         }
     }
+
+    Ok(new_vcr)
 }
 
 #[cfg(test)]
@@ -1547,7 +1733,6 @@ mod test {
 
     use crate::app::saga::create_saga_dag;
     use crate::app::sagas::test_helpers;
-    use crate::external_api::shared::IpRange;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use diesel::{
         ExpressionMethods, OptionalExtension, QueryDsl, SelectableHelper,
@@ -1556,13 +1741,11 @@ mod test {
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::datastore::InstanceAndActiveVmm;
     use nexus_db_queries::db::DataStore;
+    use nexus_test_utils::resource_helpers::create_default_ip_pool;
     use nexus_test_utils::resource_helpers::create_disk;
-    use nexus_test_utils::resource_helpers::create_ip_pool;
     use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils::resource_helpers::delete_disk;
     use nexus_test_utils::resource_helpers::object_create;
-    use nexus_test_utils::resource_helpers::populate_ip_pool;
-    use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::external_api::params::InstanceDiskAttachment;
     use omicron_common::api::external::ByteCount;
@@ -1573,8 +1756,10 @@ mod test {
     use omicron_common::api::external::NameOrId;
     use sled_agent_client::types::CrucibleOpts;
     use sled_agent_client::TestInterfaces as SledAgentTestInterfaces;
-    use std::net::Ipv4Addr;
     use std::str::FromStr;
+
+    type DiskTest<'a> =
+        nexus_test_utils::resource_helpers::DiskTest<'a, crate::Server>;
 
     #[test]
     fn test_create_snapshot_from_disk_modify_request() {
@@ -1661,7 +1846,7 @@ mod test {
         );
 
         let snapshot =
-            create_snapshot_from_disk(&disk, Some(&replace_sockets)).unwrap();
+            create_snapshot_from_disk(&disk, &replace_sockets).unwrap();
 
         eprintln!("{:?}", serde_json::to_string(&snapshot).unwrap());
 
@@ -1778,8 +1963,10 @@ mod test {
     const DISK_NAME: &str = "disky-mcdiskface";
     const INSTANCE_NAME: &str = "base-instance";
 
-    async fn create_org_project_and_disk(client: &ClientTestContext) -> Uuid {
-        create_ip_pool(&client, "p0", None).await;
+    async fn create_project_and_disk_and_pool(
+        client: &ClientTestContext,
+    ) -> Uuid {
+        create_default_ip_pool(&client).await;
         create_project(client, PROJECT_NAME).await;
         create_disk(client, PROJECT_NAME, DISK_NAME).await.identity.id
     }
@@ -1791,14 +1978,16 @@ mod test {
         project_id: Uuid,
         disk_id: Uuid,
         disk: NameOrId,
-        instance_and_sled: Option<(Uuid, Uuid)>,
+        attach_instance_id: Option<Uuid>,
+        use_the_pantry: bool,
     ) -> Params {
         Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             silo_id,
             project_id,
             disk_id,
-            attached_instance_and_sled: instance_and_sled,
+            attach_instance_id,
+            use_the_pantry,
             create_params: params::SnapshotCreate {
                 identity: IdentityMetadataCreateParams {
                     name: "my-snapshot".parse().expect("Invalid disk name"),
@@ -1812,7 +2001,7 @@ mod test {
     pub fn test_opctx(cptestctx: &ControlPlaneTestContext) -> OpContext {
         OpContext::for_tests(
             cptestctx.logctx.log.new(o!()),
-            cptestctx.server.apictx().nexus.datastore().clone(),
+            cptestctx.server.server_context().nexus.datastore().clone(),
         )
     }
 
@@ -1825,8 +2014,8 @@ mod test {
         DiskTest::new(cptestctx).await;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
-        let disk_id = create_org_project_and_disk(&client).await;
+        let nexus = &cptestctx.server.server_context().nexus;
+        let disk_id = create_project_and_disk_and_pool(&client).await;
 
         // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(cptestctx);
@@ -1847,13 +2036,15 @@ mod test {
             project_id,
             disk_id,
             Name::from_str(DISK_NAME).unwrap().into(),
-            None,
+            None, // not attached to an instance
+            true, // use the pantry
         );
-        let dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
-        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
-
         // Actually run the saga
-        let output = nexus.run_saga(runnable_saga).await.unwrap();
+        let output = nexus
+            .sagas
+            .saga_execute::<SagaSnapshotCreate>(params)
+            .await
+            .unwrap();
 
         let snapshot = output
             .lookup_node_output::<nexus_db_queries::db::model::Snapshot>(
@@ -1896,7 +2087,7 @@ mod test {
 
     async fn verify_clean_slate(
         cptestctx: &ControlPlaneTestContext,
-        test: &DiskTest,
+        test: &DiskTest<'_>,
     ) {
         // Verifies:
         // - No disk records exist
@@ -1911,7 +2102,7 @@ mod test {
         // Verifies:
         // - No snapshot records exist
         // - No region snapshot records exist
-        let datastore = cptestctx.server.apictx().nexus.datastore();
+        let datastore = cptestctx.server.server_context().nexus.datastore();
         assert!(no_snapshot_records_exist(datastore).await);
         assert!(no_region_snapshot_records_exist(datastore).await);
     }
@@ -1934,10 +2125,11 @@ mod test {
                 },
                 ncpus: InstanceCpuCount(2),
                 memory: ByteCount::from_gibibytes_u32(1),
-                hostname: String::from("base_instance"),
+                hostname: "base-instance".parse().unwrap(),
                 user_data:
                     b"#cloud-config\nsystem_info:\n  default_user:\n    name: oxide"
                         .to_vec(),
+                ssh_public_keys:  Some(Vec::new()),
                 network_interfaces:
                     params::InstanceNetworkInterfaceAttachment::None,
                 disks: disks_to_attach,
@@ -1950,7 +2142,7 @@ mod test {
         // Read out the instance's assigned sled, then poke the instance to get
         // it from the Starting state to the Running state so the test disk can
         // be snapshotted.
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let opctx = test_opctx(&cptestctx);
         let (.., authz_instance) = LookupPath::new(&opctx, nexus.datastore())
             .instance_id(instance.identity.id)
@@ -1964,12 +2156,15 @@ mod test {
             .await
             .unwrap();
 
-        let sled_id = instance_state
-            .sled_id()
-            .expect("starting instance should have a sled");
+        let vmm_state = instance_state
+            .vmm()
+            .as_ref()
+            .expect("starting instance should have a vmm");
+        let propolis_id = PropolisUuid::from_untyped_uuid(vmm_state.id);
+        let sled_id = SledUuid::from_untyped_uuid(vmm_state.sled_id);
         let sa = nexus.sled_client(&sled_id).await.unwrap();
+        sa.vmm_finish_transition(propolis_id).await;
 
-        sa.instance_finish_transition(instance.identity.id).await;
         let instance_state = nexus
             .datastore()
             .instance_fetch_with_vmm(&opctx, &authz_instance)
@@ -1981,13 +2176,9 @@ mod test {
             .as_ref()
             .expect("running instance should have a sled")
             .runtime
-            .state
-            .0;
+            .state;
 
-        assert_eq!(
-            new_state,
-            omicron_common::api::external::InstanceState::Running
-        );
+        assert_eq!(new_state, nexus_db_model::VmmState::Running);
 
         instance_state
     }
@@ -2014,8 +2205,8 @@ mod test {
         let log = &cptestctx.logctx.log;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
-        let disk_id = create_org_project_and_disk(&client).await;
+        let nexus = &cptestctx.server.server_context().nexus;
+        let disk_id = create_project_and_disk_and_pool(&client).await;
 
         // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(&cptestctx);
@@ -2032,24 +2223,6 @@ mod test {
         // As a concession to the test helper, make sure the disk is gone
         // before the first attempt to run the saga recreates it.
         delete_disk(client, PROJECT_NAME, DISK_NAME).await;
-
-        // The no-pantry variant of the test needs to see the disk attached to
-        // an instance. Set up an IP pool so that instances can be created
-        // against it.
-        if !use_the_pantry {
-            populate_ip_pool(
-                &client,
-                "default",
-                Some(
-                    IpRange::try_from((
-                        Ipv4Addr::new(10, 1, 0, 0),
-                        Ipv4Addr::new(10, 1, 255, 255),
-                    ))
-                    .unwrap(),
-                ),
-            )
-            .await;
-        }
 
         crate::app::sagas::test_helpers::action_failure_can_unwind::<
             SagaSnapshotCreate,
@@ -2072,7 +2245,7 @@ mod test {
                         // since this is just a test, bypass the normal
                         // attachment machinery and just update the disk's
                         // database record directly.
-                        let instance_and_sled = if !use_the_pantry {
+                        let attach_instance_id = if !use_the_pantry {
                             let state = setup_test_instance(
                                 cptestctx,
                                 client,
@@ -2085,11 +2258,7 @@ mod test {
                             )
                             .await;
 
-                            let sled_id = state
-                                .sled_id()
-                                .expect("running instance should have a vmm");
-
-                            Some((state.instance().id(), sled_id))
+                            Some(state.instance().id())
                         } else {
                             None
                         };
@@ -2100,7 +2269,8 @@ mod test {
                             project_id,
                             disk_id,
                             Name::from_str(DISK_NAME).unwrap().into(),
-                            instance_and_sled,
+                            attach_instance_id,
+                            use_the_pantry,
                         )
                     }
                 })
@@ -2146,6 +2316,20 @@ mod test {
                             PROJECT_NAME,
                         )
                         .await;
+                        // Wait until the instance has advanced to the `NoVmm`
+                        // state before deleting it. This may not happen
+                        // immediately, as the `Nexus::cpapi_instances_put` API
+                        // endpoint simply writes the new VMM state to the
+                        // database and *starts* an `instance-update` saga, and
+                        // the instance record isn't updated until that saga
+                        // completes.
+                        test_helpers::instance_wait_for_state_by_name(
+                            cptestctx,
+                            INSTANCE_NAME,
+                            PROJECT_NAME,
+                            nexus_db_model::InstanceState::NoVmm,
+                        )
+                        .await;
                         test_helpers::instance_delete_by_name(
                             cptestctx,
                             INSTANCE_NAME,
@@ -2174,8 +2358,8 @@ mod test {
         DiskTest::new(cptestctx).await;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
-        let disk_id = create_org_project_and_disk(&client).await;
+        let nexus = &cptestctx.server.server_context().nexus;
+        let disk_id = create_project_and_disk_and_pool(&client).await;
 
         // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(cptestctx);
@@ -2198,36 +2382,35 @@ mod test {
             Name::from_str(DISK_NAME).unwrap().into(),
             // The disk isn't attached at this time, so don't supply a sled.
             None,
+            true, // use the pantry
         );
 
         let dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
-        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
+        let runnable_saga = nexus.sagas.saga_prepare(dag).await.unwrap();
 
         // Before running the saga, attach the disk to an instance!
-        let (.., authz_disk, db_disk) =
-            LookupPath::new(&opctx, nexus.datastore())
-                .disk_id(disk_id)
-                .fetch_for(authz::Action::Read)
-                .await
-                .expect("Failed to look up created disk");
-
-        assert!(nexus
-            .datastore()
-            .disk_update_runtime(
-                &opctx,
-                &authz_disk,
-                &db_disk.runtime().attach(Uuid::new_v4()),
-            )
-            .await
-            .expect("failed to attach disk"));
+        let _instance_and_vmm = setup_test_instance(
+            &cptestctx,
+            &client,
+            vec![params::InstanceDiskAttachment::Attach(
+                params::InstanceDiskAttach {
+                    name: Name::from_str(DISK_NAME).unwrap(),
+                },
+            )],
+        )
+        .await;
 
         // Actually run the saga
-        let output = nexus.run_saga(runnable_saga).await;
+        let output = runnable_saga
+            .run_to_completion()
+            .await
+            .unwrap()
+            .into_omicron_result();
 
-        // Expect to see 503
+        // Expect to see 409
         match output {
             Err(e) => {
-                assert!(matches!(e, Error::ServiceUnavailable { .. }));
+                assert!(matches!(e, Error::Conflict { .. }));
             }
 
             Ok(_) => {
@@ -2262,11 +2445,11 @@ mod test {
             Name::from_str(DISK_NAME).unwrap().into(),
             // The disk isn't attached at this time, so don't supply a sled.
             None,
+            true, // use the pantry
         );
 
-        let dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
-        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
-        let output = nexus.run_saga(runnable_saga).await;
+        let output =
+            nexus.sagas.saga_execute::<SagaSnapshotCreate>(params).await;
 
         // Expect 200
         assert!(output.is_ok());
@@ -2283,8 +2466,8 @@ mod test {
         DiskTest::new(cptestctx).await;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
-        let disk_id = create_org_project_and_disk(&client).await;
+        let nexus = &cptestctx.server.server_context().nexus;
+        let disk_id = create_project_and_disk_and_pool(&client).await;
 
         // Build the saga DAG with the provided test parameters
         let opctx = test_opctx(cptestctx);
@@ -2306,8 +2489,6 @@ mod test {
         // the saga, stopping the instance, detaching the disk, and then letting
         // the saga run.
         let fake_instance_id = Uuid::new_v4();
-        let fake_sled_id =
-            Uuid::parse_str(nexus_test_utils::SLED_AGENT_UUID).unwrap();
 
         let params = new_test_params(
             &opctx,
@@ -2315,11 +2496,12 @@ mod test {
             project_id,
             disk_id,
             Name::from_str(DISK_NAME).unwrap().into(),
-            Some((fake_instance_id, fake_sled_id)),
+            Some(fake_instance_id),
+            false, // use the pantry
         );
 
         let dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
-        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
+        let runnable_saga = nexus.sagas.saga_prepare(dag).await.unwrap();
 
         // Before running the saga, detach the disk!
         let (.., authz_disk, db_disk) =
@@ -2340,24 +2522,15 @@ mod test {
             .expect("failed to detach disk"));
 
         // Actually run the saga. This should fail.
-        let output = nexus.run_saga(runnable_saga).await;
+        let output = runnable_saga
+            .run_to_completion()
+            .await
+            .unwrap()
+            .into_omicron_result();
 
         assert!(output.is_err());
 
         // Attach the disk to an instance, then rerun the saga
-        populate_ip_pool(
-            &client,
-            "default",
-            Some(
-                IpRange::try_from((
-                    Ipv4Addr::new(10, 1, 0, 0),
-                    Ipv4Addr::new(10, 1, 255, 255),
-                ))
-                .unwrap(),
-            ),
-        )
-        .await;
-
         let instance_state = setup_test_instance(
             cptestctx,
             client,
@@ -2369,10 +2542,6 @@ mod test {
         )
         .await;
 
-        let sled_id = instance_state
-            .sled_id()
-            .expect("running instance should have a vmm");
-
         // Rerun the saga
         let params = new_test_params(
             &opctx,
@@ -2380,12 +2549,12 @@ mod test {
             project_id,
             disk_id,
             Name::from_str(DISK_NAME).unwrap().into(),
-            Some((instance_state.instance().id(), sled_id)),
+            Some(instance_state.instance().id()),
+            false, // use the pantry
         );
 
-        let dag = create_saga_dag::<SagaSnapshotCreate>(params).unwrap();
-        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
-        let output = nexus.run_saga(runnable_saga).await;
+        let output =
+            nexus.sagas.saga_execute::<SagaSnapshotCreate>(params).await;
 
         // Expect 200
         assert!(output.is_ok());

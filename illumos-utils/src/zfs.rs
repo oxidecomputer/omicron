@@ -5,9 +5,14 @@
 //! Utilities for poking at ZFS.
 
 use crate::{execute, PFEXEC};
-use camino::Utf8PathBuf;
+use anyhow::Context;
+use camino::{Utf8Path, Utf8PathBuf};
+use omicron_common::api::external::ByteCount;
+use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::disk::DiskIdentity;
+use omicron_uuid_kinds::DatasetUuid;
 use std::fmt;
+use std::str::FromStr;
 
 // These locations in the ramdisk must only be used by the switch zone.
 //
@@ -20,6 +25,13 @@ pub const ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT: &str = "/zone";
 pub const ZONE_ZFS_RAMDISK_DATASET: &str = "rpool/zone";
 
 pub const ZFS: &str = "/usr/sbin/zfs";
+
+/// This path is intentionally on a `tmpfs` to prevent copy-on-write behavior
+/// and to ensure it goes away on power off.
+///
+/// We want minimize the time the key files are in memory, and so we rederive
+/// the keys and recreate the files on demand when creating and mounting
+/// encrypted filesystems. We then zero them and unlink them.
 pub const KEYPATH_ROOT: &str = "/var/run/oxide/";
 
 /// Error returned by [`Zfs::list_datasets`].
@@ -99,12 +111,13 @@ enum GetValueErrorRaw {
     MissingValue,
 }
 
-/// Error returned by [`Zfs::get_oxide_value`].
+/// Error returned by [`Zfs::get_oxide_value`] or [`Zfs::get_value`].
 #[derive(thiserror::Error, Debug)]
-#[error("Failed to get value '{name}' from filesystem {filesystem}: {err}")]
+#[error("Failed to get value '{name}' from filesystem {filesystem}")]
 pub struct GetValueError {
     filesystem: String,
     name: String,
+    #[source]
     err: GetValueErrorRaw,
 }
 
@@ -158,15 +171,30 @@ impl fmt::Display for Keypath {
     }
 }
 
-impl From<&DiskIdentity> for Keypath {
-    fn from(id: &DiskIdentity) -> Self {
+impl Keypath {
+    /// Constructs a Keypath for the specified disk within the supplied root
+    /// directory.
+    ///
+    /// By supplying "root", tests can override the location where these paths
+    /// are stored to non-global locations.
+    pub fn new<P: AsRef<Utf8Path>>(id: &DiskIdentity, root: &P) -> Keypath {
+        let keypath_root = Utf8PathBuf::from(KEYPATH_ROOT);
+        let mut keypath = keypath_root.as_path();
+        let keypath_directory = loop {
+            match keypath.strip_prefix("/") {
+                Ok(stripped) => keypath = stripped,
+                Err(_) => break root.as_ref().join(keypath),
+            }
+        };
+        std::fs::create_dir_all(&keypath_directory)
+            .expect("Cannot ensure directory for keys");
+
         let filename = format!(
             "{}-{}-{}-zfs-aes-256-gcm.key",
             id.vendor, id.serial, id.model
         );
-        let mut path = Utf8PathBuf::new();
-        path.push(KEYPATH_ROOT);
-        path.push(filename);
+        let path: Utf8PathBuf =
+            [keypath_directory.as_str(), &filename].iter().collect();
         Keypath(path)
     }
 }
@@ -179,13 +207,93 @@ pub struct EncryptionDetails {
 
 #[derive(Debug, Default)]
 pub struct SizeDetails {
-    pub quota: Option<usize>,
-    pub compression: Option<&'static str>,
+    pub quota: Option<ByteCount>,
+    pub reservation: Option<ByteCount>,
+    pub compression: CompressionAlgorithm,
+}
+
+#[derive(Debug)]
+pub struct DatasetProperties {
+    /// The Uuid of the dataset
+    pub id: Option<DatasetUuid>,
+    /// The full name of the dataset.
+    pub name: String,
+    /// Remaining space in the dataset and descendants.
+    pub avail: ByteCount,
+    /// Space used by dataset and descendants.
+    pub used: ByteCount,
+    /// Maximum space usable by dataset and descendants.
+    pub quota: Option<ByteCount>,
+    /// Minimum space guaranteed to dataset and descendants.
+    pub reservation: Option<ByteCount>,
+    /// The compression algorithm used for this dataset.
+    ///
+    /// This probably aligns with a value from
+    /// [omicron_common::disk::CompressionAlgorithm], but is left as an untyped
+    /// string so that unexpected compression formats don't prevent inventory
+    /// from being collected.
+    pub compression: String,
+}
+
+impl DatasetProperties {
+    // care about.
+    const ZFS_LIST_STR: &'static str =
+        "oxide:uuid,name,avail,used,quota,reservation,compression";
+}
+
+// An inner parsing function, so that the FromStr implementation can always emit
+// the string 's' that failed to parse in the error message.
+fn dataset_properties_parse(
+    s: &str,
+) -> Result<DatasetProperties, anyhow::Error> {
+    let mut iter = s.split_whitespace();
+
+    let id = match iter.next().context("Missing UUID")? {
+        "-" => None,
+        anything_else => Some(anything_else.parse::<DatasetUuid>()?),
+    };
+
+    let name = iter.next().context("Missing 'name'")?.to_string();
+    let avail =
+        iter.next().context("Missing 'avail'")?.parse::<u64>()?.try_into()?;
+    let used =
+        iter.next().context("Missing 'used'")?.parse::<u64>()?.try_into()?;
+    let quota = match iter.next().context("Missing 'quota'")?.parse::<u64>()? {
+        0 => None,
+        q => Some(q.try_into()?),
+    };
+    let reservation =
+        match iter.next().context("Missing 'reservation'")?.parse::<u64>()? {
+            0 => None,
+            r => Some(r.try_into()?),
+        };
+    let compression = iter.next().context("Missing 'compression'")?.to_string();
+
+    Ok(DatasetProperties {
+        id,
+        name,
+        avail,
+        used,
+        quota,
+        reservation,
+        compression,
+    })
+}
+
+impl FromStr for DatasetProperties {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        dataset_properties_parse(s)
+            .with_context(|| format!("Failed to parse: {s}"))
+    }
 }
 
 #[cfg_attr(any(test, feature = "testing"), mockall::automock, allow(dead_code))]
 impl Zfs {
     /// Lists all datasets within a pool or existing dataset.
+    ///
+    /// Strips the input `name` from the output dataset names.
     pub fn list_datasets(name: &str) -> Result<Vec<String>, ListDatasetsError> {
         let mut command = std::process::Command::new(ZFS);
         let cmd = command.args(&["list", "-d", "1", "-rHpo", "name", name]);
@@ -202,6 +310,38 @@ impl Zfs {
             })
             .collect();
         Ok(filesystems)
+    }
+
+    /// Get information about datasets within a list of zpools / datasets.
+    ///
+    /// This function is similar to [Zfs::list_datasets], but provides a more
+    /// substantial results about the datasets found.
+    ///
+    /// Sorts results and de-duplicates them by name.
+    pub fn get_dataset_properties(
+        datasets: &[String],
+    ) -> Result<Vec<DatasetProperties>, anyhow::Error> {
+        let mut command = std::process::Command::new(ZFS);
+        let cmd = command.args(&["list", "-d", "1", "-rHpo"]);
+
+        // Note: this is tightly coupled with the layout of DatasetProperties
+        cmd.arg(DatasetProperties::ZFS_LIST_STR);
+        cmd.args(datasets);
+
+        let output = execute(cmd).with_context(|| {
+            format!("Failed to get dataset properties for {datasets:?}")
+        })?;
+        let stdout = String::from_utf8(output.stdout)?;
+        let mut datasets = stdout
+            .trim()
+            .split('\n')
+            .map(|row| row.parse::<DatasetProperties>())
+            .collect::<Result<Vec<_>, _>>()?;
+
+        datasets.sort_by(|d1, d2| d1.name.partial_cmp(&d2.name).unwrap());
+        datasets.dedup_by(|d1, d2| d1.name.eq(&d2.name));
+
+        Ok(datasets)
     }
 
     /// Return the name of a dataset for a ZFS object.
@@ -236,9 +376,27 @@ impl Zfs {
         Ok(())
     }
 
-    /// Creates a new ZFS filesystem named `name`, unless one already exists.
+    /// Creates a new ZFS filesystem unless one already exists.
     ///
-    /// Applies an optional quota, provided _in bytes_.
+    /// - `name`: the full path to the zfs dataset
+    /// - `mountpoint`: The expected mountpoint of this filesystem.
+    /// If the filesystem already exists, and is not mounted here, and error is
+    /// returned.
+    /// - `zoned`: identifies whether or not this filesystem should be
+    /// used in a zone. Only used when creating a new filesystem - ignored
+    /// if the filesystem already exists.
+    /// - `do_format`: if "false", prevents a new filesystem from being created,
+    /// and returns an error if it is not found.
+    /// - `encryption_details`: Ensures a filesystem as an encryption root.
+    /// For new filesystems, this supplies the key, and all datasets within this
+    /// root are implicitly encrypted. For existing filesystems, ensures that
+    /// they are mounted (and that keys are loaded), but does not verify the
+    /// input details.
+    /// - `size_details`: If supplied, sets size-related information. These
+    /// values are set on both new filesystem creation as well as when loading
+    /// existing filesystems.
+    /// - `additional_options`: Additional ZFS options, which are only set when
+    /// creating new filesystems.
     #[allow(clippy::too_many_arguments)]
     pub fn ensure_filesystem(
         name: &str,
@@ -251,10 +409,18 @@ impl Zfs {
     ) -> Result<(), EnsureFilesystemError> {
         let (exists, mounted) = Self::dataset_exists(name, &mountpoint)?;
         if exists {
-            if let Some(SizeDetails { quota, compression }) = size_details {
+            if let Some(SizeDetails { quota, reservation, compression }) =
+                size_details
+            {
                 // apply quota and compression mode (in case they've changed across
                 // sled-agent versions since creation)
-                Self::apply_properties(name, &mountpoint, quota, compression)?;
+                Self::apply_properties(
+                    name,
+                    &mountpoint,
+                    quota,
+                    reservation,
+                    compression,
+                )?;
             }
 
             if encryption_details.is_none() {
@@ -314,42 +480,78 @@ impl Zfs {
             err: err.into(),
         })?;
 
-        if let Some(SizeDetails { quota, compression }) = size_details {
+        // We ensure that the currently running process has the ability to
+        // act on the underlying mountpoint.
+        if !zoned {
+            let mut command = std::process::Command::new(PFEXEC);
+            let user = whoami::username();
+            let mount = format!("{mountpoint}");
+            let cmd = command.args(["chown", "-R", &user, &mount]);
+            execute(cmd).map_err(|err| EnsureFilesystemError {
+                name: name.to_string(),
+                mountpoint: mountpoint.clone(),
+                err: err.into(),
+            })?;
+        }
+
+        if let Some(SizeDetails { quota, reservation, compression }) =
+            size_details
+        {
             // Apply any quota and compression mode.
-            Self::apply_properties(name, &mountpoint, quota, compression)?;
+            Self::apply_properties(
+                name,
+                &mountpoint,
+                quota,
+                reservation,
+                compression,
+            )?;
         }
 
         Ok(())
     }
 
+    /// Applies the following properties to the filesystem.
+    ///
+    /// If any of the options are not supplied, a default "none" or "off"
+    /// value is supplied.
     fn apply_properties(
         name: &str,
         mountpoint: &Mountpoint,
-        quota: Option<usize>,
-        compression: Option<&'static str>,
+        quota: Option<ByteCount>,
+        reservation: Option<ByteCount>,
+        compression: CompressionAlgorithm,
     ) -> Result<(), EnsureFilesystemError> {
-        if let Some(quota) = quota {
-            if let Err(err) =
-                Self::set_value(name, "quota", &format!("{quota}"))
-            {
-                return Err(EnsureFilesystemError {
-                    name: name.to_string(),
-                    mountpoint: mountpoint.clone(),
-                    // Take the execution error from the SetValueError
-                    err: err.err.into(),
-                });
-            }
+        let quota = quota
+            .map(|q| q.to_bytes().to_string())
+            .unwrap_or_else(|| String::from("none"));
+        let reservation = reservation
+            .map(|r| r.to_bytes().to_string())
+            .unwrap_or_else(|| String::from("none"));
+        let compression = compression.to_string();
+
+        if let Err(err) = Self::set_value(name, "quota", &quota) {
+            return Err(EnsureFilesystemError {
+                name: name.to_string(),
+                mountpoint: mountpoint.clone(),
+                // Take the execution error from the SetValueError
+                err: err.err.into(),
+            });
         }
-        if let Some(compression) = compression {
-            if let Err(err) = Self::set_value(name, "compression", compression)
-            {
-                return Err(EnsureFilesystemError {
-                    name: name.to_string(),
-                    mountpoint: mountpoint.clone(),
-                    // Take the execution error from the SetValueError
-                    err: err.err.into(),
-                });
-            }
+        if let Err(err) = Self::set_value(name, "reservation", &reservation) {
+            return Err(EnsureFilesystemError {
+                name: name.to_string(),
+                mountpoint: mountpoint.clone(),
+                // Take the execution error from the SetValueError
+                err: err.err.into(),
+            });
+        }
+        if let Err(err) = Self::set_value(name, "compression", &compression) {
+            return Err(EnsureFilesystemError {
+                name: name.to_string(),
+                mountpoint: mountpoint.clone(),
+                // Take the execution error from the SetValueError
+                err: err.err.into(),
+            });
         }
         Ok(())
     }
@@ -447,28 +649,13 @@ impl Zfs {
         Zfs::get_value(filesystem_name, &format!("oxide:{}", name))
     }
 
+    /// Calls "zfs get" with a single value
     pub fn get_value(
         filesystem_name: &str,
         name: &str,
     ) -> Result<String, GetValueError> {
-        let mut command = std::process::Command::new(PFEXEC);
-        let cmd =
-            command.args(&[ZFS, "get", "-Ho", "value", &name, filesystem_name]);
-        let output = execute(cmd).map_err(|err| GetValueError {
-            filesystem: filesystem_name.to_string(),
-            name: name.to_string(),
-            err: err.into(),
-        })?;
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let value = stdout.trim();
-        if value == "-" {
-            return Err(GetValueError {
-                filesystem: filesystem_name.to_string(),
-                name: name.to_string(),
-                err: GetValueErrorRaw::MissingValue,
-            });
-        }
-        Ok(value.to_string())
+        let [value] = Self::get_values(filesystem_name, &[name])?;
+        Ok(value)
     }
 
     /// List all extant snapshots.
@@ -532,6 +719,43 @@ impl Zfs {
     }
 }
 
+// These methods don't work with mockall, so they exist in a separate impl block
+impl Zfs {
+    /// Calls "zfs get" to acquire multiple values
+    pub fn get_values<const N: usize>(
+        filesystem_name: &str,
+        names: &[&str; N],
+    ) -> Result<[String; N], GetValueError> {
+        let mut cmd = std::process::Command::new(PFEXEC);
+        let all_names =
+            names.into_iter().map(|n| *n).collect::<Vec<&str>>().join(",");
+        cmd.args(&[ZFS, "get", "-Ho", "value", &all_names, filesystem_name]);
+        let output = execute(&mut cmd).map_err(|err| GetValueError {
+            filesystem: filesystem_name.to_string(),
+            name: format!("{:?}", names),
+            err: err.into(),
+        })?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let values = stdout.trim();
+
+        const EMPTY_STRING: String = String::new();
+        let mut result: [String; N] = [EMPTY_STRING; N];
+
+        for (i, value) in values.lines().enumerate() {
+            let value = value.trim();
+            if value == "-" {
+                return Err(GetValueError {
+                    filesystem: filesystem_name.to_string(),
+                    name: names[i].to_string(),
+                    err: GetValueErrorRaw::MissingValue,
+                });
+            }
+            result[i] = value.to_string();
+        }
+        Ok(result)
+    }
+}
+
 /// A read-only snapshot of a ZFS filesystem.
 #[derive(Clone, Debug)]
 pub struct Snapshot {
@@ -563,7 +787,8 @@ pub fn get_all_omicron_datasets_for_delete() -> anyhow::Result<Vec<String>> {
     // This includes cockroachdb, clickhouse, and crucible datasets.
     let zpools = crate::zpool::Zpool::list()?;
     for pool in &zpools {
-        let internal = pool.kind() == crate::zpool::ZpoolKind::Internal;
+        let internal =
+            pool.kind() == omicron_common::zpool_name::ZpoolKind::Internal;
         let pool = pool.to_string();
         for dataset in &Zfs::list_datasets(&pool)? {
             // Avoid erasing crashdump, backing data and swap datasets on
@@ -588,4 +813,122 @@ pub fn get_all_omicron_datasets_for_delete() -> anyhow::Result<Vec<String>> {
     };
 
     Ok(datasets)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn parse_dataset_props() {
+        let input =
+            "-       dataset_name        1234   5678   0       0       off";
+        let props = DatasetProperties::from_str(&input)
+            .expect("Should have parsed data");
+
+        assert_eq!(props.id, None);
+        assert_eq!(props.name, "dataset_name");
+        assert_eq!(props.avail.to_bytes(), 1234);
+        assert_eq!(props.used.to_bytes(), 5678);
+        assert_eq!(props.quota, None);
+        assert_eq!(props.reservation, None);
+        assert_eq!(props.compression, "off");
+    }
+
+    #[test]
+    fn parse_dataset_props_with_optionals() {
+        let input = "d4e1e554-7b98-4413-809e-4a42561c3d0c       dataset_name        1234   5678   111       222       off";
+        let props = DatasetProperties::from_str(&input)
+            .expect("Should have parsed data");
+
+        assert_eq!(
+            props.id,
+            Some("d4e1e554-7b98-4413-809e-4a42561c3d0c".parse().unwrap())
+        );
+        assert_eq!(props.name, "dataset_name");
+        assert_eq!(props.avail.to_bytes(), 1234);
+        assert_eq!(props.used.to_bytes(), 5678);
+        assert_eq!(props.quota.map(|q| q.to_bytes()), Some(111));
+        assert_eq!(props.reservation.map(|r| r.to_bytes()), Some(222));
+        assert_eq!(props.compression, "off");
+    }
+
+    #[test]
+    fn parse_dataset_bad_uuid() {
+        let input = "bad       dataset_name        1234   5678   111       222       off";
+        let err = DatasetProperties::from_str(&input)
+            .expect_err("Should have failed to parse");
+        assert!(
+            format!("{err:#}").contains("error parsing UUID (dataset)"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn parse_dataset_bad_avail() {
+        let input = "-       dataset_name        BADAVAIL   5678   111       222       off";
+        let err = DatasetProperties::from_str(&input)
+            .expect_err("Should have failed to parse");
+        assert!(
+            format!("{err:#}").contains("invalid digit found in string"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn parse_dataset_bad_usage() {
+        let input = "-       dataset_name        1234   BADUSAGE   111       222       off";
+        let err = DatasetProperties::from_str(&input)
+            .expect_err("Should have failed to parse");
+        assert!(
+            format!("{err:#}").contains("invalid digit found in string"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn parse_dataset_bad_quota() {
+        let input = "-       dataset_name        1234   5678   BADQUOTA      222       off";
+        let err = DatasetProperties::from_str(&input)
+            .expect_err("Should have failed to parse");
+        assert!(
+            format!("{err:#}").contains("invalid digit found in string"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn parse_dataset_bad_reservation() {
+        let input = "-       dataset_name        1234   5678   111      BADRES       off";
+        let err = DatasetProperties::from_str(&input)
+            .expect_err("Should have failed to parse");
+        assert!(
+            format!("{err:#}").contains("invalid digit found in string"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn parse_dataset_missing_fields() {
+        let expect_missing = |input: &str, what: &str| {
+            let err = DatasetProperties::from_str(input)
+                .expect_err("Should have failed to parse");
+            let err = format!("{err:#}");
+            assert!(err.contains(&format!("Missing {what}")), "{err}");
+        };
+
+        expect_missing(
+            "-       dataset_name        1234   5678   111      222",
+            "'compression'",
+        );
+        expect_missing(
+            "-       dataset_name        1234   5678   111",
+            "'reservation'",
+        );
+        expect_missing("-       dataset_name        1234   5678", "'quota'");
+        expect_missing("-       dataset_name        1234", "'used'");
+        expect_missing("-       dataset_name", "'avail'");
+        expect_missing("-", "'name'");
+        expect_missing("", "UUID");
+    }
 }

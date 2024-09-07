@@ -60,14 +60,14 @@ impl From<CertificateError> for Error {
             | InvalidValidationHostname(_)
             | ErrorValidatingHostname(_)
             | NoDnsNameMatchingHostname { .. }
-            | UnsupportedPurpose => Error::InvalidValue {
-                label: String::from("certificate"),
-                message: DisplayErrorChain::new(&error).to_string(),
-            },
-            BadPrivateKey(_) => Error::InvalidValue {
-                label: String::from("private-key"),
-                message: DisplayErrorChain::new(&error).to_string(),
-            },
+            | UnsupportedPurpose => Error::invalid_value(
+                "certificate",
+                DisplayErrorChain::new(&error).to_string(),
+            ),
+            BadPrivateKey(_) => Error::invalid_value(
+                "private-key",
+                DisplayErrorChain::new(&error).to_string(),
+            ),
             Unexpected(_) => Error::InternalError {
                 internal_message: DisplayErrorChain::new(&error).to_string(),
             },
@@ -412,7 +412,7 @@ mod tests {
         // Valid certs: either no key usage values, or valid ones.
         for ext_key_usage in &valid_ext_key_usage {
             let mut params = CertificateParams::new(vec![HOST.to_string()]);
-            params.extended_key_usages = ext_key_usage.clone();
+            params.extended_key_usages.clone_from(ext_key_usage);
 
             assert!(
                 validate_cert_with_params(params, &[HOST]).is_ok(),
@@ -431,7 +431,7 @@ mod tests {
 
         for ext_key_usage in &invalid_ext_key_usage {
             let mut params = CertificateParams::new(vec![HOST.to_string()]);
-            params.extended_key_usages = ext_key_usage.clone();
+            params.extended_key_usages.clone_from(ext_key_usage);
 
             assert!(
                 matches!(

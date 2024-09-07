@@ -1,0 +1,180 @@
+{
+  "rack_id": "ed6bcf59-9620-491d-8ebd-4a4eebf2e136",
+  "sleds": {
+    "[fdb0:a840:2504:157::1]:12346": {
+      "generation": 0,
+      "schema_version": 1,
+      "body": {
+        "id": "168e1ad6-1e4b-4f7a-b894-157974bd8bb8",
+        "rack_id": "ed6bcf59-9620-491d-8ebd-4a4eebf2e136",
+        "use_trust_quorum": true,
+        "is_lrtq_learner": false,
+        "subnet": {
+          "net": "fd00:1122:3344:104::/64"
+        }
+      }
+    },
+    "[fdb0:a840:2504:355::1]:12346": {
+      "generation": 0,
+      "schema_version": 1,
+      "body": {
+        "id": "b9877212-212b-4588-b818-9c7b53c5b143",
+        "rack_id": "ed6bcf59-9620-491d-8ebd-4a4eebf2e136",
+        "use_trust_quorum": true,
+        "is_lrtq_learner": false,
+        "subnet": {
+          "net": "fd00:1122:3344:102::/64"
+        }
+      }
+    },
+    "[fdb0:a840:2504:396::1]:12346": {
+      "generation": 0,
+      "schema_version": 1,
+      "body": {
+        "id": "b3e78a88-0f2e-476e-a8a9-2d8c90a169d6",
+        "rack_id": "ed6bcf59-9620-491d-8ebd-4a4eebf2e136",
+        "use_trust_quorum": true,
+        "is_lrtq_learner": false,
+        "subnet": {
+          "net": "fd00:1122:3344:103::/64"
+        }
+      }
+    },
+    "[fdb0:a840:2504:3d2::1]:12346": {
+      "generation": 0,
+      "schema_version": 1,
+      "body": {
+        "id": "c3a0f8be-5b05-4ee8-8c4e-2514de6501b6",
+        "rack_id": "ed6bcf59-9620-491d-8ebd-4a4eebf2e136",
+        "use_trust_quorum": true,
+        "is_lrtq_learner": false,
+        "subnet": {
+          "net": "fd00:1122:3344:101::/64"
+        }
+      }
+    }
+  },
+  "config": {
+    "trust_quorum_peers": [
+      {
+        "type": "gimlet",
+        "identifier": "BRM42220081",
+        "model": "913-0000019",
+        "revision": 6
+      },
+      {
+        "type": "gimlet",
+        "identifier": "BRM42220046",
+        "model": "913-0000019",
+        "revision": 6
+      },
+      {
+        "type": "gimlet",
+        "identifier": "BRM44220001",
+        "model": "913-0000019",
+        "revision": 6
+      },
+      {
+        "type": "gimlet",
+        "identifier": "BRM42220004",
+        "model": "913-0000019",
+        "revision": 6
+      }
+    ],
+    "bootstrap_discovery": {
+      "type": "only_these",
+      "addrs": [
+        "fdb0:a840:2504:157::1",
+        "fdb0:a840:2504:355::1",
+        "fdb0:a840:2504:396::1",
+        "fdb0:a840:2504:3d2::1"
+      ]
+    },
+    "ntp_servers": [
+      "ntp.eng.oxide.computer"
+    ],
+    "dns_servers": [
+      "1.1.1.1",
+      "9.9.9.9"
+    ],
+    "internal_services_ip_pool_ranges": [
+      {
+        "first": "172.20.28.1",
+        "last": "172.20.28.10"
+      }
+    ],
+    "external_dns_ips": [
+      "172.20.28.1"
+    ],
+    "external_dns_zone_name": "madrid.eng.oxide.computer",
+    "external_certificates": [
+      {
+        "cert": "<censored>",
+        "key": "<censored>"
+      }
+    ],
+    "recovery_silo": {
+      "silo_name": "recovery",
+      "user_name": "recovery",
+      "user_password_hash": "$argon2id$v=19$m=98304,t=13,p=1$RUlWc0ZxaHo0WFdrN0N6ZQ$S8p52j85GPvMhR/ek3GL0el/oProgTwWpHJZ8lsQQoY"
+    },
+    "rack_network_config": {
+      "rack_subnet": "fd00:1122:3344:1::/56",
+      "infra_ip_first": "172.20.15.37",
+      "infra_ip_last": "172.20.15.38",
+      "ports": [
+        {
+          "routes": [
+            {
+              "destination": "0.0.0.0/0",
+              "nexthop": "172.20.15.33",
+              "vlan_id": null,
+              "local_pref": null
+            }
+          ],
+          "addresses": [
+            {
+              "address": "172.20.15.38/29",
+              "vlan_id": null
+            }
+          ],
+          "switch": "switch0",
+          "port": "qsfp0",
+          "uplink_port_speed": "speed40_g",
+          "uplink_port_fec": "none",
+          "bgp_peers": [],
+          "autoneg": false,
+          "lldp": null
+        },
+        {
+          "routes": [
+            {
+              "destination": "0.0.0.0/0",
+              "nexthop": "172.20.15.33",
+              "vlan_id": null,
+              "local_pref": null
+            }
+          ],
+          "addresses": [
+            {
+              "address": "172.20.15.37/29",
+              "vlan_id": null
+            }
+          ],
+          "switch": "switch1",
+          "port": "qsfp0",
+          "uplink_port_speed": "speed40_g",
+          "uplink_port_fec": "none",
+          "bgp_peers": [],
+          "autoneg": false,
+          "lldp": null
+        }
+      ],
+      "bgp": [],
+      "bfd": []
+    },
+    "allowed_source_ips": {
+      "allow": "any"
+    }
+  }
+}

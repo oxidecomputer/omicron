@@ -11,6 +11,7 @@ use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use opte_ioctl::OpteHdl;
 use slog::info;
 use slog::Logger;
+use std::net::IpAddr;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -46,6 +47,18 @@ pub enum Error {
 
     #[error("Tried to release non-existent port ({0}, {1:?})")]
     ReleaseMissingPort(uuid::Uuid, NetworkInterfaceKind),
+
+    #[error("Tried to update external IPs on non-existent port ({0}, {1:?})")]
+    ExternalIpUpdateMissingPort(uuid::Uuid, NetworkInterfaceKind),
+
+    #[error("Could not find Primary NIC")]
+    NoPrimaryNic,
+
+    #[error("Can't attach new ephemeral IP {0}, currently have {1}")]
+    ImplicitEphemeralIpDetach(IpAddr, IpAddr),
+
+    #[error("No matching NIC found for port {0} at slot {1}.")]
+    NoNicforPort(String, u32),
 }
 
 /// Delete all xde devices on the system.
@@ -82,7 +95,7 @@ pub fn initialize_xde_driver(
         const MESSAGE: &str = concat!(
             "There must be at least two underlay NICs for the xde ",
             "driver to operate. These are currently created by ",
-            "`./tools/create_virtual_hardware.sh`. Please ensure that ",
+            "`cargo xtask virtual-hardware create`. Please ensure that ",
             "script has been run, and that two VNICs named `net{0,1}` ",
             "exist on the system."
         );

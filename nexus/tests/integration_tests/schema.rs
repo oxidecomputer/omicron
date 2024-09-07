@@ -5,21 +5,22 @@
 use camino::Utf8PathBuf;
 use chrono::{DateTime, Utc};
 use dropshot::test_util::LogContext;
-use nexus_db_model::schema::SCHEMA_VERSION as LATEST_SCHEMA_VERSION;
-use nexus_db_queries::db::datastore::{
-    all_sql_for_version_migration, EARLIEST_SUPPORTED_VERSION,
-};
+use futures::future::BoxFuture;
+use nexus_config::NexusConfig;
+use nexus_config::SchemaConfig;
+use nexus_db_model::EARLIEST_SUPPORTED_VERSION;
+use nexus_db_model::SCHEMA_VERSION as LATEST_SCHEMA_VERSION;
+use nexus_db_model::{AllSchemaVersions, SchemaVersion};
+use nexus_db_queries::db::DISALLOW_FULL_TABLE_SCAN_SQL;
 use nexus_test_utils::{db, load_test_config, ControlPlaneTestContextBuilder};
 use omicron_common::api::external::SemverVersion;
 use omicron_common::api::internal::shared::SwitchLocation;
-use omicron_common::nexus_config::Config;
-use omicron_common::nexus_config::SchemaConfig;
-use omicron_test_utils::dev::db::CockroachInstance;
+use omicron_test_utils::dev::db::{Client, CockroachInstance};
 use pretty_assertions::{assert_eq, assert_ne};
 use similar_asserts;
 use slog::Logger;
-use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
+use std::collections::BTreeMap;
+use std::net::IpAddr;
 use tokio::time::timeout;
 use tokio::time::Duration;
 use uuid::Uuid;
@@ -43,7 +44,7 @@ async fn test_setup_just_crdb<'a>(
 // Helper to ensure we perform the same setup for the positive and negative test
 // cases.
 async fn test_setup<'a>(
-    config: &'a mut Config,
+    config: &'a mut NexusConfig,
     name: &'static str,
 ) -> ControlPlaneTestContextBuilder<'a, omicron_nexus::Server> {
     let mut builder =
@@ -52,7 +53,7 @@ async fn test_setup<'a>(
         );
     let populate = false;
     builder.start_crdb(populate).await;
-    let schema_dir = PathBuf::from(SCHEMA_DIR);
+    let schema_dir = Utf8PathBuf::from(SCHEMA_DIR);
     builder.config.pkg.schema = Some(SchemaConfig { schema_dir });
     builder.start_internal_dns().await;
     builder.start_external_dns().await;
@@ -109,35 +110,59 @@ async fn apply_update_as_transaction(
 async fn apply_update(
     log: &Logger,
     crdb: &CockroachInstance,
-    version: &str,
+    version: &SchemaVersion,
     times_to_apply: usize,
 ) {
-    let log = log.new(o!("target version" => version.to_string()));
+    let log = log.new(o!("target version" => version.semver().to_string()));
     info!(log, "Performing upgrade");
 
     let client = crdb.connect().await.expect("failed to connect");
 
+    client
+        .batch_execute(DISALLOW_FULL_TABLE_SCAN_SQL)
+        .await
+        .expect("failed to disallow full table scans");
+
     // We skip this for the earliest supported version because these tables
     // might not exist yet.
-    if version != EARLIEST_SUPPORTED_VERSION {
+    if *version.semver() != EARLIEST_SUPPORTED_VERSION {
         info!(log, "Updating schema version in db_metadata (setting target)");
-        let sql = format!("UPDATE omicron.public.db_metadata SET target_version = '{}' WHERE singleton = true;", version);
+        let sql = format!(
+            "UPDATE omicron.public.db_metadata SET target_version = '{}' \
+            WHERE singleton = true;",
+            version
+        );
         client
             .batch_execute(&sql)
             .await
             .expect("Failed to bump version number");
     }
 
-    let target_dir = Utf8PathBuf::from(SCHEMA_DIR).join(version);
-    let schema_change =
-        all_sql_for_version_migration(&target_dir).await.unwrap();
+    // Each step is applied `times_to_apply` times, but once we start applying
+    // a step within an upgrade, we will not attempt to apply prior steps.
+    for step in version.upgrade_steps() {
+        info!(
+            log,
+            "Applying sql schema upgrade step";
+            "file" => step.label()
+        );
 
-    for _ in 0..times_to_apply {
-        for nexus_db_queries::db::datastore::SchemaUpgradeStep { path, sql } in
-            &schema_change.steps
-        {
-            info!(log, "Applying sql schema upgrade step"; "path" => path.to_string());
-            apply_update_as_transaction(&log, &client, sql).await;
+        for _ in 0..times_to_apply {
+            apply_update_as_transaction(&log, &client, step.sql()).await;
+
+            // The following is a set of "versions exempt from being
+            // re-applied" multiple times. PLEASE AVOID ADDING TO THIS LIST.
+            const NOT_IDEMPOTENT_VERSIONS: [semver::Version; 1] = [
+                // Why: This calls "ALTER TYPE ... DROP VALUE", which does not
+                // support the "IF EXISTS" syntax in CockroachDB.
+                //
+                // https://github.com/cockroachdb/cockroach/issues/120801
+                semver::Version::new(10, 0, 0),
+            ];
+
+            if NOT_IDEMPOTENT_VERSIONS.contains(&version.semver().0) {
+                break;
+            }
         }
     }
 
@@ -145,7 +170,11 @@ async fn apply_update(
     //
     // We do so explicitly here.
     info!(log, "Updating schema version in db_metadata (removing target)");
-    let sql = format!("UPDATE omicron.public.db_metadata SET version = '{}', target_version = NULL WHERE singleton = true;", version);
+    let sql = format!(
+        "UPDATE omicron.public.db_metadata SET version = '{}', \
+        target_version = NULL WHERE singleton = true;",
+        version
+    );
     client.batch_execute(&sql).await.expect("Failed to bump version number");
 
     client.cleanup().await.expect("cleaning up after wipe");
@@ -163,22 +192,82 @@ async fn query_crdb_schema_version(crdb: &CockroachInstance) -> String {
     version
 }
 
+#[derive(PartialEq, Clone, Debug)]
+struct SqlEnum {
+    name: String,
+    variant: String,
+}
+
+impl From<(&str, &str)> for SqlEnum {
+    fn from((name, variant): (&str, &str)) -> Self {
+        Self { name: name.to_string(), variant: variant.to_string() }
+    }
+}
+
 // A newtype wrapper around a string, which allows us to more liberally
 // interpret SQL types.
 //
 // Note that for the purposes of schema comparisons, we don't care about parsing
-// the contents of the database, merely the schema and equality of contained data.
-#[derive(Eq, PartialEq, Clone, Debug)]
+// the contents of the database, merely the schema and equality of contained
+// data.
+#[derive(PartialEq, Clone, Debug)]
 enum AnySqlType {
-    DateTime,
-    String(String),
     Bool(bool),
-    Uuid(Uuid),
+    DateTime,
+    Enum(SqlEnum),
+    Float4(f32),
     Int8(i64),
+    Json(serde_json::value::Value),
+    String(String),
+    TextArray(Vec<String>),
+    Uuid(Uuid),
+    Inet(IpAddr),
     // TODO: This isn't exhaustive, feel free to add more.
     //
     // These should only be necessary for rows where the database schema changes also choose to
     // populate data.
+}
+
+impl From<bool> for AnySqlType {
+    fn from(b: bool) -> Self {
+        Self::Bool(b)
+    }
+}
+
+impl From<SqlEnum> for AnySqlType {
+    fn from(value: SqlEnum) -> Self {
+        Self::Enum(value)
+    }
+}
+
+impl From<f32> for AnySqlType {
+    fn from(value: f32) -> Self {
+        Self::Float4(value)
+    }
+}
+
+impl From<i64> for AnySqlType {
+    fn from(value: i64) -> Self {
+        Self::Int8(value)
+    }
+}
+
+impl From<String> for AnySqlType {
+    fn from(value: String) -> Self {
+        Self::String(value)
+    }
+}
+
+impl From<Uuid> for AnySqlType {
+    fn from(value: Uuid) -> Self {
+        Self::Uuid(value)
+    }
+}
+
+impl From<IpAddr> for AnySqlType {
+    fn from(value: IpAddr) -> Self {
+        Self::Inet(value)
+    }
 }
 
 impl AnySqlType {
@@ -213,10 +302,39 @@ impl<'a> tokio_postgres::types::FromSql<'a> for AnySqlType {
         if i64::accepts(ty) {
             return Ok(AnySqlType::Int8(i64::from_sql(ty, raw)?));
         }
-        Err(anyhow::anyhow!(
-            "Cannot parse type {ty}. If you're trying to use this type in a table which is populated \
-during a schema migration, consider adding it to `AnySqlType`."
-            ).into())
+        if f32::accepts(ty) {
+            return Ok(AnySqlType::Float4(f32::from_sql(ty, raw)?));
+        }
+        if serde_json::value::Value::accepts(ty) {
+            return Ok(AnySqlType::Json(serde_json::value::Value::from_sql(
+                ty, raw,
+            )?));
+        }
+        if Vec::<String>::accepts(ty) {
+            return Ok(AnySqlType::TextArray(Vec::<String>::from_sql(
+                ty, raw,
+            )?));
+        }
+        if IpAddr::accepts(ty) {
+            return Ok(AnySqlType::Inet(IpAddr::from_sql(ty, raw)?));
+        }
+
+        use tokio_postgres::types::Kind;
+        match ty.kind() {
+            Kind::Enum(_) => {
+                Ok(AnySqlType::Enum(SqlEnum {
+                    name: ty.name().to_string(),
+                    variant: std::str::from_utf8(raw)?.to_string(),
+                }))
+            },
+            _ => {
+                Err(anyhow::anyhow!(
+                    "Cannot parse type {ty:?}. \
+                    If you're trying to use this type in a table which is populated \
+                    during a schema migration, consider adding it to `AnySqlType`."
+                    ).into())
+            }
+        }
     }
 
     fn accepts(_ty: &tokio_postgres::types::Type) -> bool {
@@ -224,15 +342,19 @@ during a schema migration, consider adding it to `AnySqlType`."
     }
 }
 
-#[derive(Eq, PartialEq, Debug)]
-struct NamedSqlValue {
-    // It's a little redunant to include the column name alongside each value,
-    // but it results in a prettier diff.
+// It's a little redunant to include the column name alongside each value,
+// but it results in a prettier diff.
+#[derive(PartialEq, Debug)]
+struct ColumnValue {
     column: String,
     value: Option<AnySqlType>,
 }
 
-impl NamedSqlValue {
+impl ColumnValue {
+    fn new<V: Into<AnySqlType>>(column: &str, value: V) -> Self {
+        Self { column: String::from(column), value: Some(value.into()) }
+    }
+
     fn expect(&self, column: &str) -> Option<&AnySqlType> {
         assert_eq!(self.column, column);
         self.value.as_ref()
@@ -240,9 +362,9 @@ impl NamedSqlValue {
 }
 
 // A generic representation of a row of SQL data
-#[derive(Eq, PartialEq, Debug)]
+#[derive(PartialEq, Debug)]
 struct Row {
-    values: Vec<NamedSqlValue>,
+    values: Vec<ColumnValue>,
 }
 
 impl Row {
@@ -262,6 +384,22 @@ impl<'a> From<&'a [&'static str]> for ColumnSelector<'a> {
     }
 }
 
+fn process_rows(rows: &Vec<tokio_postgres::Row>) -> Vec<Row> {
+    let mut result = vec![];
+    for row in rows {
+        let mut row_result = Row::new();
+        for i in 0..row.len() {
+            let column_name = row.columns()[i].name();
+            row_result.values.push(ColumnValue {
+                column: column_name.to_string(),
+                value: row.get(i),
+            });
+        }
+        result.push(row_result);
+    }
+    result
+}
+
 async fn crdb_show_constraints(
     crdb: &CockroachInstance,
     table: &str,
@@ -275,19 +413,7 @@ async fn crdb_show_constraints(
         .unwrap_or_else(|_| panic!("failed to query {table}"));
     client.cleanup().await.expect("cleaning up after wipe");
 
-    let mut result = vec![];
-    for row in rows {
-        let mut row_result = Row::new();
-        for i in 0..row.len() {
-            let column_name = row.columns()[i].name();
-            row_result.values.push(NamedSqlValue {
-                column: column_name.to_string(),
-                value: row.get(i),
-            });
-        }
-        result.push(row_result);
-    }
-    result
+    process_rows(&rows)
 }
 
 async fn crdb_select(
@@ -324,35 +450,24 @@ async fn crdb_select(
         .unwrap_or_else(|_| panic!("failed to query {table}"));
     client.cleanup().await.expect("cleaning up after wipe");
 
-    let mut result = vec![];
-    for row in rows {
-        let mut row_result = Row::new();
-        for i in 0..row.len() {
-            let column_name = row.columns()[i].name();
-            row_result.values.push(NamedSqlValue {
-                column: column_name.to_string(),
-                value: row.get(i),
-            });
-        }
-        result.push(row_result);
-    }
-    result
+    process_rows(&rows)
 }
 
-async fn read_all_schema_versions() -> BTreeSet<SemverVersion> {
-    let mut all_versions = BTreeSet::new();
+async fn crdb_list_enums(crdb: &CockroachInstance) -> Vec<Row> {
+    let client = crdb.connect().await.expect("failed to connect");
 
-    let mut dir =
-        tokio::fs::read_dir(SCHEMA_DIR).await.expect("Access schema dir");
-    while let Some(entry) = dir.next_entry().await.expect("Read dirent") {
-        if entry.file_type().await.unwrap().is_dir() {
-            let name = entry.file_name().into_string().unwrap();
-            if let Ok(observed_version) = name.parse::<SemverVersion>() {
-                all_versions.insert(observed_version);
-            }
-        }
-    }
-    all_versions
+    // https://www.cockroachlabs.com/docs/stable/show-enums
+    let rows = client
+        .query("show enums;", &[])
+        .await
+        .unwrap_or_else(|_| panic!("failed to list enums"));
+    client.cleanup().await.expect("cleaning up after wipe");
+
+    process_rows(&rows)
+}
+
+fn read_all_schema_versions() -> AllSchemaVersions {
+    AllSchemaVersions::load(camino::Utf8Path::new(SCHEMA_DIR)).unwrap()
 }
 
 // This test confirms the following behavior:
@@ -370,20 +485,30 @@ async fn nexus_applies_update_on_boot() {
     let crdb = builder.database.as_ref().expect("Should have started CRDB");
 
     // We started with an empty database -- apply an update here to bring
-    // us forward to our oldest supported schema version before trying to boot nexus.
-    apply_update(log, &crdb, EARLIEST_SUPPORTED_VERSION, 1).await;
+    // us forward to our oldest supported schema version before trying to boot
+    // nexus.
+    let all_versions = read_all_schema_versions();
+    let earliest = all_versions
+        .iter_versions()
+        .next()
+        .expect("missing earliest schema version");
+    apply_update(log, &crdb, earliest, 1).await;
     assert_eq!(
-        EARLIEST_SUPPORTED_VERSION,
+        EARLIEST_SUPPORTED_VERSION.to_string(),
         query_crdb_schema_version(&crdb).await
     );
 
     // Start Nexus. It should auto-format itself to the latest version,
     // upgrading through each intermediate update.
     //
+    // The timeout here is a bit longer than usual (120s vs 60s) because if
+    // lots of tests are running at the same time, there can be contention
+    // here.
+    //
     // NOTE: If this grows excessively, we could break it into several smaller
     // tests.
     assert!(
-        timeout(Duration::from_secs(60), builder.start_nexus_internal())
+        timeout(Duration::from_secs(120), builder.start_nexus_internal())
             .await
             .is_ok(),
         "Nexus should have started"
@@ -434,16 +559,26 @@ async fn nexus_cannot_apply_update_from_unknown_version() {
     let log = &builder.logctx.log;
     let crdb = builder.database.as_ref().expect("Should have started CRDB");
 
-    apply_update(log, &crdb, EARLIEST_SUPPORTED_VERSION, 1).await;
+    let all_versions = read_all_schema_versions();
+    let earliest = all_versions
+        .iter_versions()
+        .next()
+        .expect("missing earliest schema version");
+    apply_update(log, &crdb, earliest, 1).await;
     assert_eq!(
-        EARLIEST_SUPPORTED_VERSION,
+        EARLIEST_SUPPORTED_VERSION.to_string(),
         query_crdb_schema_version(&crdb).await
     );
 
     // This version is not valid; it does not exist.
     let version = "0.0.0";
-    crdb.connect().await.expect("Failed to connect")
-        .batch_execute(&format!("UPDATE omicron.public.db_metadata SET version = '{version}' WHERE singleton = true"))
+    crdb.connect()
+        .await
+        .expect("Failed to connect")
+        .batch_execute(&format!(
+            "UPDATE omicron.public.db_metadata SET version = '{version}' \
+            WHERE singleton = true"
+        ))
         .await
         .expect("Failed to update schema");
 
@@ -475,11 +610,13 @@ async fn versions_have_idempotent_up() {
     let populate = false;
     let mut crdb = test_setup_just_crdb(&logctx.log, populate).await;
 
-    let all_versions = read_all_schema_versions().await;
-
-    for version in &all_versions {
-        apply_update(log, &crdb, &version.to_string(), 2).await;
-        assert_eq!(version.to_string(), query_crdb_schema_version(&crdb).await);
+    let all_versions = read_all_schema_versions();
+    for version in all_versions.iter_versions() {
+        apply_update(log, &crdb, &version, 2).await;
+        assert_eq!(
+            version.semver().to_string(),
+            query_crdb_schema_version(&crdb).await
+        );
     }
     assert_eq!(
         LATEST_SCHEMA_VERSION.to_string(),
@@ -569,10 +706,11 @@ const PG_INDEXES: [&'static str; 5] =
 const TABLES: [&'static str; 4] =
     ["table_catalog", "table_schema", "table_name", "table_type"];
 
-#[derive(Eq, PartialEq, Debug)]
+#[derive(PartialEq, Debug)]
 struct InformationSchema {
     columns: Vec<Row>,
     constraint_column_usage: Vec<Row>,
+    enums: Vec<Row>,
     key_column_usage: Vec<Row>,
     referential_constraints: Vec<Row>,
     views: Vec<Row>,
@@ -589,6 +727,13 @@ impl InformationSchema {
         // the columns diff especially needs this: it can be 20k lines otherwise
         similar_asserts::assert_eq!(self.tables, other.tables);
         similar_asserts::assert_eq!(self.columns, other.columns);
+        similar_asserts::assert_eq!(
+            self.enums,
+            other.enums,
+            "Enums did not match. Members must have the same order in dbinit.sql and \
+            migrations. If a migration adds a member, it should use BEFORE or AFTER \
+            to add it in the same order as dbinit.sql."
+        );
         similar_asserts::assert_eq!(self.views, other.views);
         similar_asserts::assert_eq!(
             self.table_constraints,
@@ -606,7 +751,17 @@ impl InformationSchema {
             self.referential_constraints,
             other.referential_constraints
         );
-        similar_asserts::assert_eq!(self.statistics, other.statistics);
+        similar_asserts::assert_eq!(
+            self.statistics,
+            other.statistics,
+            "Statistics did not match. This often means that in dbinit.sql, a new \
+            column was added into the middle of a table rather than to the end. \
+            If that is the case:\n\n \
+            \
+            * Change dbinit.sql to add the column to the end of the table.\n\
+            * Update nexus/db-model/src/schema.rs and the corresponding \
+            Queryable/Insertable struct with the new column ordering."
+        );
         similar_asserts::assert_eq!(self.sequences, other.sequences);
         similar_asserts::assert_eq!(self.pg_indexes, other.pg_indexes);
     }
@@ -623,6 +778,8 @@ impl InformationSchema {
             Some("table_schema = 'public'"),
         )
         .await;
+
+        let enums = crdb_list_enums(crdb).await;
 
         let constraint_column_usage = crdb_select(
             crdb,
@@ -694,6 +851,7 @@ impl InformationSchema {
         Self {
             columns,
             constraint_column_usage,
+            enums,
             key_column_usage,
             referential_constraints,
             views,
@@ -781,12 +939,35 @@ async fn dbinit_equals_sum_of_all_up() {
     let populate = false;
     let mut crdb = test_setup_just_crdb(&logctx.log, populate).await;
 
-    let all_versions = read_all_schema_versions().await;
+    let all_versions = read_all_schema_versions();
 
-    // Go from the first version to the latest version.
-    for version in &all_versions {
-        apply_update(log, &crdb, &version.to_string(), 1).await;
-        assert_eq!(version.to_string(), query_crdb_schema_version(&crdb).await);
+    // Apply the very first schema migration. In particular, this creates the
+    // `omicron` database, which allows us to construct a `db::Pool` below.
+    for version in all_versions.iter_versions().take(1) {
+        apply_update(log, &crdb, version, 1).await;
+        assert_eq!(
+            version.semver().to_string(),
+            query_crdb_schema_version(&crdb).await
+        );
+    }
+
+    // Create a connection pool after we apply the first schema version but
+    // before applying the rest, and grab a connection from that pool. We'll use
+    // it for an extra check later.
+    let pool = nexus_db_queries::db::Pool::new_single_host(
+        log,
+        &nexus_db_queries::db::Config { url: crdb.pg_config().clone() },
+    );
+    let conn_from_pool =
+        pool.claim().await.expect("failed to get pooled connection");
+
+    // Go from the second version to the latest version.
+    for version in all_versions.iter_versions().skip(1) {
+        apply_update(log, &crdb, version, 1).await;
+        assert_eq!(
+            version.semver().to_string(),
+            query_crdb_schema_version(&crdb).await
+        );
     }
     assert_eq!(
         LATEST_SCHEMA_VERSION.to_string(),
@@ -796,6 +977,38 @@ async fn dbinit_equals_sum_of_all_up() {
     // Query the newly constructed DB for information about its schema
     let observed_schema = InformationSchema::new(&crdb).await;
     let observed_data = observed_schema.query_all_tables(log, &crdb).await;
+
+    // Using the connection we got from the connection pool prior to applying
+    // the schema migrations, attempt to insert a sled resource. This involves
+    // the `sled_resource_kind` enum, whose OID was changed by the schema
+    // migration in version 53.0.0 (by virtue of the enum being dropped and
+    // added back with a different set of variants). If the diesel OID cache was
+    // populated when we acquired the connection from the pool, this will fail
+    // with a `type with ID $NUM does not exist` error.
+    {
+        use async_bb8_diesel::AsyncRunQueryDsl;
+        use nexus_db_model::schema::sled_resource::dsl;
+        use nexus_db_model::Resources;
+        use nexus_db_model::SledResource;
+        use nexus_db_model::SledResourceKind;
+
+        diesel::insert_into(dsl::sled_resource)
+            .values(SledResource {
+                id: Uuid::new_v4(),
+                sled_id: Uuid::new_v4(),
+                kind: SledResourceKind::Instance,
+                resources: Resources {
+                    hardware_threads: 8_u32.into(),
+                    rss_ram: 1024_i64.try_into().unwrap(),
+                    reservoir_ram: 1024_i64.try_into().unwrap(),
+                },
+            })
+            .execute_async(&*conn_from_pool)
+            .await
+            .expect("failed to insert - did we poison the OID cache?");
+    }
+    std::mem::drop(conn_from_pool);
+    std::mem::drop(pool);
     crdb.cleanup().await.unwrap();
 
     // Create a new DB with data populated from dbinit.sql for comparison
@@ -808,6 +1021,386 @@ async fn dbinit_equals_sum_of_all_up() {
     observed_schema.pretty_assert_eq(&expected_schema);
 
     assert_eq!(observed_data, expected_data);
+    crdb.cleanup().await.unwrap();
+    logctx.cleanup_successful();
+}
+
+type BeforeFn = for<'a> fn(client: &'a Client) -> BoxFuture<'a, ()>;
+type AfterFn = for<'a> fn(client: &'a Client) -> BoxFuture<'a, ()>;
+
+// Describes the operations which we might take before and after
+// migrations to check that they worked.
+struct DataMigrationFns {
+    before: Option<BeforeFn>,
+    after: AfterFn,
+}
+
+// "51F0" -> "Silo"
+const SILO1: Uuid = Uuid::from_u128(0x111151F0_5c3d_4647_83b0_8f3515da7be1);
+const SILO2: Uuid = Uuid::from_u128(0x222251F0_5c3d_4647_83b0_8f3515da7be1);
+
+// "6001" -> "Pool"
+const POOL0: Uuid = Uuid::from_u128(0x00006001_5c3d_4647_83b0_8f3515da7be1);
+const POOL1: Uuid = Uuid::from_u128(0x11116001_5c3d_4647_83b0_8f3515da7be1);
+const POOL2: Uuid = Uuid::from_u128(0x22226001_5c3d_4647_83b0_8f3515da7be1);
+const POOL3: Uuid = Uuid::from_u128(0x33336001_5c3d_4647_83b0_8f3515da7be1);
+const POOL4: Uuid = Uuid::from_u128(0x44446001_5c3d_4647_83b0_8f3515da7be1);
+
+// "513D" -> "Sled"
+const SLED1: Uuid = Uuid::from_u128(0x1111513d_5c3d_4647_83b0_8f3515da7be1);
+const SLED2: Uuid = Uuid::from_u128(0x2222513d_5c3d_4647_83b0_8f3515da7be1);
+
+// "7AC4" -> "Rack"
+const RACK1: Uuid = Uuid::from_u128(0x11117ac4_5c3d_4647_83b0_8f3515da7be1);
+
+// "6701" -> "Proj"ect
+const PROJECT: Uuid = Uuid::from_u128(0x11116701_5c3d_4647_83b0_8f3515da7be1);
+
+// "1257" -> "Inst"ance
+const INSTANCE1: Uuid = Uuid::from_u128(0x11111257_5c3d_4647_83b0_8f3515da7be1);
+const INSTANCE2: Uuid = Uuid::from_u128(0x22221257_5c3d_4647_83b0_8f3515da7be1);
+const INSTANCE3: Uuid = Uuid::from_u128(0x33331257_5c3d_4647_83b0_8f3515da7be1);
+
+// "67060115" -> "Prop"olis
+const PROPOLIS: Uuid = Uuid::from_u128(0x11116706_5c3d_4647_83b0_8f3515da7be1);
+
+fn before_23_0_0(client: &Client) -> BoxFuture<'_, ()> {
+    Box::pin(async move {
+        // Create two silos
+        client.batch_execute(&format!("INSERT INTO silo
+            (id, name, description, time_created, time_modified, time_deleted, discoverable, authentication_mode, user_provision_type, mapped_fleet_roles, rcgen) VALUES
+          ('{SILO1}', 'silo1', '', now(), now(), NULL, false, 'local', 'jit', '{{}}', 1),
+          ('{SILO2}', 'silo2', '', now(), now(), NULL, false, 'local', 'jit', '{{}}', 1);
+        ")).await.expect("Failed to create silo");
+
+        // Create an IP pool for each silo, and a third "fleet pool" which has
+        // no corresponding silo.
+        client.batch_execute(&format!("INSERT INTO ip_pool
+            (id, name, description, time_created, time_modified, time_deleted, rcgen, silo_id, is_default) VALUES
+          ('{POOL0}', 'pool2', '', now(), now(), now(), 1, '{SILO2}', true),
+          ('{POOL1}', 'pool1', '', now(), now(), NULL, 1, '{SILO1}', true),
+          ('{POOL2}', 'pool2', '', now(), now(), NULL, 1, '{SILO2}', false),
+          ('{POOL3}', 'pool3', '', now(), now(), NULL, 1, null, true),
+          ('{POOL4}', 'pool4', '', now(), now(), NULL, 1, null, false);
+        ")).await.expect("Failed to create IP Pool");
+    })
+}
+
+fn after_23_0_0(client: &Client) -> BoxFuture<'_, ()> {
+    Box::pin(async {
+        // Confirm that the ip_pool_resource objects have been created
+        // by the migration.
+        let rows = client
+            .query("SELECT * FROM ip_pool_resource ORDER BY ip_pool_id", &[])
+            .await
+            .expect("Failed to query ip pool resource");
+        let ip_pool_resources = process_rows(&rows);
+
+        assert_eq!(ip_pool_resources.len(), 6);
+
+        fn assert_row(
+            row: &Vec<ColumnValue>,
+            ip_pool_id: Uuid,
+            silo_id: Uuid,
+            is_default: bool,
+        ) {
+            let type_silo = SqlEnum::from(("ip_pool_resource_type", "silo"));
+            assert_eq!(
+                row,
+                &vec![
+                    ColumnValue::new("ip_pool_id", ip_pool_id),
+                    ColumnValue::new("resource_type", type_silo),
+                    ColumnValue::new("resource_id", silo_id),
+                    ColumnValue::new("is_default", is_default),
+                ],
+            );
+        }
+
+        // pool1 was default on silo1, so gets an entry in the join table
+        // reflecting that
+        assert_row(&ip_pool_resources[0].values, POOL1, SILO1, true);
+
+        // pool1 was default on silo1, so gets an entry in the join table
+        // reflecting that
+        assert_row(&ip_pool_resources[1].values, POOL2, SILO2, false);
+
+        // fleet-scoped silos are a little more complicated
+
+        // pool3 was a fleet-level default, so now it's associated with both
+        // silos. silo1 had its own default pool as well (pool1), so pool3
+        // cannot also be default for silo1. silo2 did not have its own default,
+        // so pool3 is default for silo2.
+        assert_row(&ip_pool_resources[2].values, POOL3, SILO1, false);
+        assert_row(&ip_pool_resources[3].values, POOL3, SILO2, true);
+
+        // fleet-level pool that was not default becomes non-default on all silos
+        assert_row(&ip_pool_resources[4].values, POOL4, SILO1, false);
+        assert_row(&ip_pool_resources[5].values, POOL4, SILO2, false);
+    })
+}
+
+fn before_24_0_0(client: &Client) -> BoxFuture<'_, ()> {
+    // IP addresses were pulled off dogfood sled 16
+    Box::pin(async move {
+        // Create two sleds. (SLED2 is marked non_provisionable for
+        // after_37_0_1.)
+        client
+            .batch_execute(&format!(
+                "INSERT INTO sled
+            (id, time_created, time_modified, time_deleted, rcgen, rack_id,
+            is_scrimlet, serial_number, part_number, revision,
+            usable_hardware_threads, usable_physical_ram, reservoir_size, ip,
+            port, last_used_address, provision_state) VALUES
+
+          ('{SLED1}', now(), now(), NULL, 1, '{RACK1}', true, 'abcd', 'defg',
+             '1', 64, 12345678, 77, 'fd00:1122:3344:104::1', 12345,
+            'fd00:1122:3344:104::1ac', 'provisionable'),
+          ('{SLED2}', now(), now(), NULL, 1, '{RACK1}', false, 'zzzz', 'xxxx',
+             '2', 64, 12345678, 77,'fd00:1122:3344:107::1', 12345,
+            'fd00:1122:3344:107::d4', 'non_provisionable');
+        "
+            ))
+            .await
+            .expect("Failed to create sleds");
+    })
+}
+
+fn after_24_0_0(client: &Client) -> BoxFuture<'_, ()> {
+    Box::pin(async {
+        // Confirm that the IP Addresses have the last 2 bytes changed to `0xFFFF`
+        let rows = client
+            .query("SELECT last_used_address FROM sled ORDER BY id", &[])
+            .await
+            .expect("Failed to sled last_used_address");
+        let last_used_addresses = process_rows(&rows);
+
+        let expected_addr_1: IpAddr =
+            "fd00:1122:3344:104::ffff".parse().unwrap();
+        let expected_addr_2: IpAddr =
+            "fd00:1122:3344:107::ffff".parse().unwrap();
+
+        assert_eq!(
+            last_used_addresses[0].values,
+            vec![ColumnValue::new("last_used_address", expected_addr_1)]
+        );
+        assert_eq!(
+            last_used_addresses[1].values,
+            vec![ColumnValue::new("last_used_address", expected_addr_2)]
+        );
+    })
+}
+
+// This reuses the sleds created in before_24_0_0.
+fn after_37_0_1(client: &Client) -> BoxFuture<'_, ()> {
+    Box::pin(async {
+        // Confirm that the IP Addresses have the last 2 bytes changed to `0xFFFF`
+        let rows = client
+            .query("SELECT sled_policy, sled_state FROM sled ORDER BY id", &[])
+            .await
+            .expect("Failed to select sled policy and state");
+        let policy_and_state = process_rows(&rows);
+
+        assert_eq!(
+            policy_and_state[0].values,
+            vec![
+                ColumnValue::new(
+                    "sled_policy",
+                    SqlEnum::from(("sled_policy", "in_service"))
+                ),
+                ColumnValue::new(
+                    "sled_state",
+                    SqlEnum::from(("sled_state", "active"))
+                ),
+            ]
+        );
+        assert_eq!(
+            policy_and_state[1].values,
+            vec![
+                ColumnValue::new(
+                    "sled_policy",
+                    SqlEnum::from(("sled_policy", "no_provision"))
+                ),
+                ColumnValue::new(
+                    "sled_state",
+                    SqlEnum::from(("sled_state", "active"))
+                ),
+            ]
+        );
+    })
+}
+
+fn before_70_0_0(client: &Client) -> BoxFuture<'_, ()> {
+    Box::pin(async move {
+        client
+            .batch_execute(&format!(
+                "
+        INSERT INTO instance (id, name, description, time_created,
+        time_modified, time_deleted, project_id, user_data, state,
+        time_state_updated, state_generation, active_propolis_id,
+        target_propolis_id, migration_id, ncpus, memory, hostname,
+        boot_on_fault, updater_id, updater_gen) VALUES
+
+        ('{INSTANCE1}', 'inst1', '', now(), now(), NULL, '{PROJECT}', '',
+        'stopped', now(), 1, NULL, NULL, NULL, 2, 1073741824, 'inst1', false,
+        NULL, 1),
+        ('{INSTANCE2}', 'inst2', '', now(), now(), NULL, '{PROJECT}', '',
+        'running', now(), 1, '{PROPOLIS}', NULL, NULL, 2, 1073741824, 'inst2',
+        false, NULL, 1),
+        ('{INSTANCE3}', 'inst3', '', now(), now(), NULL, '{PROJECT}', '',
+        'failed', now(), 1, NULL, NULL, NULL, 2, 1073741824, 'inst3', false,
+        NULL, 1);
+        "
+            ))
+            .await
+            .expect("failed to create instances");
+
+        client
+            .batch_execute(&format!(
+                "
+        INSERT INTO vmm (id, time_created, time_deleted, instance_id, state,
+        time_state_updated, state_generation, sled_id, propolis_ip,
+        propolis_port) VALUES
+
+        ('{PROPOLIS}', now(), NULL, '{INSTANCE2}', 'running', now(), 1,
+        '{SLED1}', 'fd00:1122:3344:200::1', '12400');
+                "
+            ))
+            .await
+            .expect("failed to create VMMs");
+    })
+}
+
+fn after_70_0_0(client: &Client) -> BoxFuture<'_, ()> {
+    Box::pin(async {
+        let rows = client
+            .query("SELECT state FROM instance ORDER BY id", &[])
+            .await
+            .expect("failed to load instance states");
+        let instance_states = process_rows(&rows);
+
+        assert_eq!(
+            instance_states[0].values,
+            vec![ColumnValue::new(
+                "state",
+                SqlEnum::from(("instance_state_v2", "no_vmm"))
+            )]
+        );
+        assert_eq!(
+            instance_states[1].values,
+            vec![ColumnValue::new(
+                "state",
+                SqlEnum::from(("instance_state_v2", "vmm"))
+            )]
+        );
+        assert_eq!(
+            instance_states[2].values,
+            vec![ColumnValue::new(
+                "state",
+                SqlEnum::from(("instance_state_v2", "failed"))
+            )]
+        );
+
+        let rows = client
+            .query("SELECT state FROM vmm ORDER BY id", &[])
+            .await
+            .expect("failed to load VMM states");
+        let vmm_states = process_rows(&rows);
+
+        assert_eq!(
+            vmm_states[0].values,
+            vec![ColumnValue::new(
+                "state",
+                SqlEnum::from(("vmm_state", "running"))
+            )]
+        );
+    })
+}
+
+// Lazily initializes all migration checks. The combination of Rust function
+// pointers and async makes defining a static table fairly painful, so we're
+// using lazy initialization instead.
+//
+// Each "check" is implemented as a pair of {before, after} migration function
+// pointers, called precisely around the migration under test.
+fn get_migration_checks() -> BTreeMap<SemverVersion, DataMigrationFns> {
+    let mut map = BTreeMap::new();
+
+    map.insert(
+        SemverVersion(semver::Version::parse("23.0.0").unwrap()),
+        DataMigrationFns { before: Some(before_23_0_0), after: after_23_0_0 },
+    );
+    map.insert(
+        SemverVersion(semver::Version::parse("24.0.0").unwrap()),
+        DataMigrationFns { before: Some(before_24_0_0), after: after_24_0_0 },
+    );
+    map.insert(
+        SemverVersion(semver::Version::parse("37.0.1").unwrap()),
+        DataMigrationFns { before: None, after: after_37_0_1 },
+    );
+    map.insert(
+        SemverVersion(semver::Version::parse("70.0.0").unwrap()),
+        DataMigrationFns { before: Some(before_70_0_0), after: after_70_0_0 },
+    );
+
+    map
+}
+
+// Performs all schema changes and runs version-specific assertions.
+//
+// HOW TO ADD A MIGRATION CHECK:
+// - Add a new "map.insert" line to "get_migration_checks", with the semver of
+// the version you'd like to inspect before / after.
+// - Define your "before" (optional) and "after" (required) functions. These
+// act on a connection to CockroachDB, and can observe and mutate arbitrary
+// state.
+//
+// ADVICE FOR MIGRATION CHECKS:
+// - Your migration check will run in the same test as all other migration
+// checks, because performing schema migrations isn't that fast. If you
+// perform an operation that could be disruptive to subsequent checks, I
+// recommend cleaning up after yourself (e.g., DELETE relevant rows).
+// - I recommend using schema checks that are NOT strongly-typed. When you
+// add a migration check, it'll happen to match the "latest" static schemas
+// defined by Nexus, but that won't always be the case. As the schema
+// continues to change (maybe a table you're trying to check gets a new column
+// in a later version), your code should continue operating on the OLD version,
+// and as such, should avoid needing any updates.
+#[tokio::test]
+async fn validate_data_migration() {
+    let config = load_test_config();
+    let logctx = LogContext::new("validate_data_migration", &config.pkg.log);
+    let log = &logctx.log;
+
+    let populate = false;
+    let mut crdb = test_setup_just_crdb(&logctx.log, populate).await;
+    let client = crdb.connect().await.expect("Failed to access CRDB client");
+
+    let all_versions = read_all_schema_versions();
+    let all_checks = get_migration_checks();
+
+    // Go from the first version to the latest version.
+    for version in all_versions.iter_versions() {
+        // If this check has preconditions (or setup), run them.
+        let checks = all_checks.get(version.semver());
+        if let Some(before) = checks.and_then(|check| check.before) {
+            before(&client).await;
+        }
+
+        apply_update(log, &crdb, version, 1).await;
+        assert_eq!(
+            version.semver().to_string(),
+            query_crdb_schema_version(&crdb).await
+        );
+
+        // If this check has postconditions (or cleanup), run them.
+        if let Some(after) = checks.map(|check| check.after) {
+            after(&client).await;
+        }
+    }
+    assert_eq!(
+        LATEST_SCHEMA_VERSION.to_string(),
+        query_crdb_schema_version(&crdb).await
+    );
 
     crdb.cleanup().await.unwrap();
     logctx.cleanup_successful();

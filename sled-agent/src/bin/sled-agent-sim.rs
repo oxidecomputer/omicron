@@ -6,21 +6,21 @@
 
 // TODO see the TODO for nexus.
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use camino::Utf8PathBuf;
 use clap::Parser;
 use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
-use dropshot::HandlerTaskMode;
-use nexus_client::types as NexusTypes;
+use omicron_common::api::internal::nexus::Certificate;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
 use omicron_sled_agent::sim::RssArgs;
 use omicron_sled_agent::sim::{
-    run_standalone_server, Config, ConfigHardware, ConfigStorage,
-    ConfigUpdates, ConfigZpool, SimMode,
+    run_standalone_server, Config, ConfigHardware, ConfigStorage, ConfigZpool,
+    SimMode,
 };
+use sled_hardware_types::Baseboard;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use uuid::Uuid;
@@ -96,47 +96,52 @@ async fn do_run() -> Result<(), CmdError> {
     let args = Args::parse();
 
     let tmp = camino_tempfile::tempdir()
-        .map_err(|e| CmdError::Failure(e.to_string()))?;
+        .map_err(|e| CmdError::Failure(anyhow!(e)))?;
     let config = Config {
-        id: args.uuid,
-        sim_mode: args.sim_mode,
-        nexus_address: args.nexus_addr,
         dropshot: ConfigDropshot {
             bind_address: args.sled_agent_addr.into(),
-            request_body_max_bytes: 1024 * 1024,
-            default_handler_task_mode: HandlerTaskMode::Detached,
+            ..Default::default()
         },
-        log: ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Info },
         storage: ConfigStorage {
             // Create 10 "virtual" U.2s, with 1 TB of storage.
             zpools: vec![ConfigZpool { size: 1 << 40 }; 10],
             ip: (*args.sled_agent_addr.ip()).into(),
         },
-        updates: ConfigUpdates { zone_artifact_path: tmp.path().to_path_buf() },
         hardware: ConfigHardware {
             hardware_threads: 32,
             physical_ram: 64 * (1 << 30),
             reservoir_ram: 32 * (1 << 30),
+            baseboard: Baseboard::Gimlet {
+                identifier: format!("sim-{}", args.uuid),
+                model: String::from("sim-gimlet"),
+                revision: 3,
+            },
         },
+        ..Config::for_testing(
+            args.uuid,
+            args.sim_mode,
+            Some(args.nexus_addr),
+            Some(tmp.path()),
+            None,
+        )
     };
 
-    let tls_certificate = match (args.rss_tls_cert, args.rss_tls_key) {
-        (None, None) => None,
-        (Some(cert_path), Some(key_path)) => {
-            let cert_bytes = std::fs::read_to_string(&cert_path)
-                .with_context(|| format!("read {:?}", &cert_path))
-                .map_err(|e| CmdError::Failure(e.to_string()))?;
-            let key_bytes = std::fs::read_to_string(&key_path)
-                .with_context(|| format!("read {:?}", &key_path))
-                .map_err(|e| CmdError::Failure(e.to_string()))?;
-            Some(NexusTypes::Certificate { cert: cert_bytes, key: key_bytes })
-        }
-        _ => {
-            return Err(CmdError::Usage(String::from(
+    let tls_certificate =
+        match (args.rss_tls_cert, args.rss_tls_key) {
+            (None, None) => None,
+            (Some(cert_path), Some(key_path)) => {
+                let cert_bytes = std::fs::read_to_string(&cert_path)
+                    .with_context(|| format!("read {:?}", &cert_path))
+                    .map_err(CmdError::Failure)?;
+                let key_bytes = std::fs::read_to_string(&key_path)
+                    .with_context(|| format!("read {:?}", &key_path))
+                    .map_err(CmdError::Failure)?;
+                Some(Certificate { cert: cert_bytes, key: key_bytes })
+            }
+            _ => return Err(CmdError::Usage(String::from(
                 "--rss-tls-key and --rss-tls-cert must be specified together",
-            )))
-        }
-    };
+            ))),
+        };
 
     let rss_args = RssArgs {
         nexus_external_addr: args.rss_nexus_external_addr,
@@ -145,7 +150,9 @@ async fn do_run() -> Result<(), CmdError> {
         tls_certificate,
     };
 
-    run_standalone_server(&config, &rss_args)
+    let config_logging =
+        ConfigLogging::StderrTerminal { level: ConfigLoggingLevel::Info };
+    run_standalone_server(&config, &config_logging, &rss_args)
         .await
-        .map_err(|e| CmdError::Failure(e.to_string()))
+        .map_err(CmdError::Failure)
 }

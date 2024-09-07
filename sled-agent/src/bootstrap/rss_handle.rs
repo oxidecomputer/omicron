@@ -5,11 +5,8 @@
 //! sled-agent's handle to the Rack Setup Service it spawns
 
 use super::client as bootstrap_agent_client;
-use super::params::StartSledAgentRequest;
-use crate::rack_setup::config::SetupServiceConfig;
 use crate::rack_setup::service::RackSetupService;
 use crate::rack_setup::service::SetupServiceError;
-use crate::storage_manager::StorageResources;
 use ::bootstrap_agent_client::Client as BootstrapAgentClient;
 use bootstore::schemes::v0 as bootstore;
 use futures::stream::FuturesUnordered;
@@ -17,11 +14,16 @@ use futures::StreamExt;
 use omicron_common::backoff::retry_notify;
 use omicron_common::backoff::retry_policy_local;
 use omicron_common::backoff::BackoffError;
+use sled_agent_types::rack_init::RackInitializeRequest;
+use sled_agent_types::rack_ops::RssStep;
+use sled_agent_types::sled::StartSledAgentRequest;
+use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
+use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
 pub(super) struct RssHandle {
@@ -44,19 +46,21 @@ impl RssHandle {
     /// Executes the rack setup service until it has completed
     pub(super) async fn run_rss(
         log: &Logger,
-        config: SetupServiceConfig,
+        config: RackInitializeRequest,
         our_bootstrap_address: Ipv6Addr,
-        storage_resources: StorageResources,
+        storage_manager: StorageHandle,
         bootstore: bootstore::NodeHandle,
+        step_tx: watch::Sender<RssStep>,
     ) -> Result<(), SetupServiceError> {
         let (tx, rx) = rss_channel(our_bootstrap_address);
 
         let rss = RackSetupService::new(
             log.new(o!("component" => "RSS")),
             config,
-            storage_resources,
+            storage_manager,
             tx,
             bootstore,
+            step_tx,
         );
         let log = log.new(o!("component" => "BootstrapAgentRssHandler"));
         rx.await_local_rss_request(&log).await;
@@ -297,13 +301,5 @@ impl BootstrapAgentHandleReceiver {
 
         // All requests succeeded; inform RSS of completion.
         tx.send(Ok(())).unwrap();
-    }
-}
-
-struct AbortOnDrop<T>(JoinHandle<T>);
-
-impl<T> Drop for AbortOnDrop<T> {
-    fn drop(&mut self) {
-        self.0.abort();
     }
 }

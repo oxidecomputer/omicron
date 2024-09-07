@@ -6,7 +6,6 @@ use std::{
     collections::{btree_map::Entry, BTreeMap, BTreeSet},
     fmt,
     io::{self, Read},
-    os::fd::AsRawFd,
     time::Duration,
 };
 
@@ -15,16 +14,16 @@ use async_trait::async_trait;
 use buf_list::BufList;
 use bytes::Buf;
 use camino::{Utf8Path, Utf8PathBuf};
-use illumos_utils::{
-    dkio::{self, MediaInfoExtended},
-    zpool::{Zpool, ZpoolName},
-};
+use illumos_utils::zpool::{Zpool, ZpoolName};
 use installinator_common::{
-    ControlPlaneZonesSpec, ControlPlaneZonesStepId, M2Slot, StepContext,
+    ControlPlaneZonesSpec, ControlPlaneZonesStepId, RawDiskWriter, StepContext,
     StepProgress, StepResult, StepSuccess, UpdateEngine, WriteComponent,
     WriteError, WriteOutput, WriteSpec, WriteStepId,
 };
-use omicron_common::update::{ArtifactHash, ArtifactHashId};
+use omicron_common::{
+    disk::M2Slot,
+    update::{ArtifactHash, ArtifactHashId},
+};
 use sha2::{Digest, Sha256};
 use slog::{info, warn, Logger};
 use tokio::{
@@ -36,10 +35,7 @@ use update_engine::{
     errors::NestedEngineError, events::ProgressUnits, StepSpec,
 };
 
-use crate::{
-    async_temp_file::AsyncNamedTempFile, block_size_writer::BlockSizeBufWriter,
-    hardware::Hardware,
-};
+use crate::{async_temp_file::AsyncNamedTempFile, hardware::Hardware};
 
 #[derive(Clone, Debug)]
 struct ArtifactDestination {
@@ -122,8 +118,10 @@ impl WriteDestination {
                     );
 
                     let zpool_name = disk.zpool_name().clone();
-                    let control_plane_dir = zpool_name
-                        .dataset_mountpoint(sled_hardware::INSTALL_DATASET);
+                    let control_plane_dir = zpool_name.dataset_mountpoint(
+                        illumos_utils::zpool::ZPOOL_MOUNTPOINT_ROOT.into(),
+                        sled_storage::dataset::INSTALL_DATASET,
+                    );
 
                     match drives.entry(slot) {
                         Entry::Vacant(entry) => {
@@ -753,28 +751,13 @@ impl WriteTransportWriter for AsyncNamedTempFile {
 }
 
 #[async_trait]
-impl WriteTransportWriter for BlockSizeBufWriter<tokio::fs::File> {
+impl WriteTransportWriter for RawDiskWriter {
     fn block_size(&self) -> Option<usize> {
-        Some(BlockSizeBufWriter::block_size(self))
+        Some(RawDiskWriter::block_size(self))
     }
 
     async fn finalize(self) -> io::Result<()> {
-        let f = self.into_inner();
-        f.sync_all().await?;
-
-        // We only create `BlockSizeBufWriter` for the raw block device storing
-        // the OS ramdisk. After `fsync`'ing, also flush the write cache.
-        tokio::task::spawn_blocking(move || {
-            match dkio::flush_write_cache(f.as_raw_fd()) {
-                Ok(()) => Ok(()),
-                // Some drives don't support `flush_write_cache`; we don't want
-                // to fail in this case.
-                Err(err) if err.raw_os_error() == Some(libc::ENOTSUP) => Ok(()),
-                Err(err) => Err(err),
-            }
-        })
-        .await
-        .unwrap()
+        RawDiskWriter::finalize(self).await
     }
 }
 
@@ -809,7 +792,7 @@ struct BlockDeviceTransport;
 
 #[async_trait]
 impl WriteTransport for BlockDeviceTransport {
-    type W = BlockSizeBufWriter<tokio::fs::File>;
+    type W = RawDiskWriter;
 
     async fn make_writer(
         &mut self,
@@ -818,12 +801,7 @@ impl WriteTransport for BlockDeviceTransport {
         destination: &Utf8Path,
         total_bytes: u64,
     ) -> Result<Self::W, WriteError> {
-        let f = tokio::fs::OpenOptions::new()
-            .create(false)
-            .write(true)
-            .truncate(false)
-            .custom_flags(libc::O_SYNC)
-            .open(destination)
+        let writer = RawDiskWriter::open(destination.as_std_path())
             .await
             .map_err(|error| WriteError::WriteError {
                 component,
@@ -833,18 +811,7 @@ impl WriteTransport for BlockDeviceTransport {
                 error,
             })?;
 
-        let media_info =
-            MediaInfoExtended::from_fd(f.as_raw_fd()).map_err(|error| {
-                WriteError::WriteError {
-                    component,
-                    slot,
-                    written_bytes: 0,
-                    total_bytes,
-                    error,
-                }
-            })?;
-
-        let block_size = u64::from(media_info.logical_block_size);
+        let block_size = writer.block_size() as u64;
 
         // When writing to a block device, we must write a multiple of the block
         // size. We can assume the image we're given should be
@@ -857,12 +824,15 @@ impl WriteTransport for BlockDeviceTransport {
                 total_bytes,
                 error: io::Error::new(
                     io::ErrorKind::InvalidData,
-                    format!("file size ({total_bytes}) is not a multiple of target device block size ({block_size})")
+                    format!(
+                        "file size ({total_bytes}) is not a multiple of \
+                         target device block size ({block_size})"
+                    ),
                 ),
             });
         }
 
-        Ok(BlockSizeBufWriter::with_block_size(block_size as usize, f))
+        Ok(writer)
     }
 }
 
@@ -948,6 +918,7 @@ mod tests {
     use anyhow::Result;
     use bytes::{Buf, Bytes};
     use camino::Utf8Path;
+    use camino_tempfile::tempdir;
     use futures::StreamExt;
     use installinator_common::{
         Event, InstallinatorCompletionMetadata, InstallinatorComponent,
@@ -964,7 +935,6 @@ mod tests {
         PartialAsyncWrite, PartialOp,
     };
     use proptest::prelude::*;
-    use tempfile::tempdir;
     use test_strategy::proptest;
     use tokio::io::AsyncReadExt;
     use tokio::sync::Mutex;
@@ -1062,7 +1032,7 @@ mod tests {
     ) -> Result<()> {
         let logctx = test_setup_log("test_write_artifact");
         let tempdir = tempdir()?;
-        let tempdir_path: &Utf8Path = tempdir.path().try_into()?;
+        let tempdir_path = tempdir.path();
 
         let destination_host = tempdir_path.join("test-host.bin");
         let destination_control_plane =

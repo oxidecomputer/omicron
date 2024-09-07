@@ -1,9 +1,8 @@
 //! Common code shared between `omicron-package` and `thing-flinger` binaries.
 
+use camino::{Utf8Path, Utf8PathBuf};
 use clap::Subcommand;
 use serde::de::DeserializeOwned;
-use std::path::Path;
-use std::path::PathBuf;
 use thiserror::Error;
 
 pub mod dot;
@@ -13,12 +12,12 @@ pub mod target;
 #[derive(Error, Debug)]
 pub enum ParseError {
     #[error("Error deserializing toml from {path}: {err}")]
-    Toml { path: PathBuf, err: toml::de::Error },
+    Toml { path: Utf8PathBuf, err: toml::de::Error },
     #[error("IO error: {message}: {err}")]
     Io { message: String, err: std::io::Error },
 }
 
-pub fn parse<P: AsRef<Path>, C: DeserializeOwned>(
+pub fn parse<P: AsRef<Utf8Path>, C: DeserializeOwned>(
     path: P,
 ) -> Result<C, ParseError> {
     let path = path.as_ref();
@@ -69,6 +68,21 @@ pub enum TargetCommand {
         /// fail in a single-sled environment. `single-sled` relaxes this
         /// requirement.
         rack_topology: crate::target::RackTopology,
+
+        #[clap(
+            short,
+            long,
+            default_value = Some("single-node"),
+            required = false
+        )]
+        // TODO (https://github.com/oxidecomputer/omicron/issues/4148): Remove
+        // once single-node functionality is removed.
+        /// Specify whether clickhouse will be deployed as a replicated cluster
+        /// or single-node configuration.
+        ///
+        /// Replicated cluster configuration is an experimental feature to be
+        /// used only for testing.
+        clickhouse_topology: crate::target::ClickhouseTopology,
     },
     /// List all existing targets
     List,
@@ -91,9 +105,23 @@ pub enum BuildCommand {
     },
     /// Make a `dot` graph to visualize the package tree
     Dot,
+    /// List the output packages for the current target
+    ListOutputs {
+        #[clap(long)]
+        intermediate: bool,
+    },
     /// Builds the packages specified in a manifest, and places them into an
     /// 'out' directory.
-    Package,
+    Package {
+        /// If true, disables the cache.
+        ///
+        /// By default, the cache is used.
+        #[clap(short, long)]
+        disable_cache: bool,
+        /// Limit to building only these packages
+        #[clap(long)]
+        only: Vec<String>,
+    },
     /// Stamps semver versions onto packages within a manifest
     Stamp {
         /// The name of the artifact to be stamped.
@@ -116,7 +144,7 @@ pub enum DeployCommand {
         ///
         /// Defaults to "/opt/oxide".
         #[clap(long = "out", default_value = "/opt/oxide", action)]
-        install_dir: PathBuf,
+        install_dir: Utf8PathBuf,
     },
     /// Unpacks the files created by `package` to an install directory.
     /// Issues the `uninstall` command.
@@ -134,7 +162,7 @@ pub enum DeployCommand {
         ///
         /// Defaults to "/opt/oxide".
         #[clap(long = "out", default_value = "/opt/oxide", action)]
-        install_dir: PathBuf,
+        install_dir: Utf8PathBuf,
     },
     /// Imports and starts the sled-agent illumos service
     ///
@@ -145,7 +173,7 @@ pub enum DeployCommand {
         ///
         /// Defaults to "/opt/oxide".
         #[clap(long = "out", default_value = "/opt/oxide", action)]
-        install_dir: PathBuf,
+        install_dir: Utf8PathBuf,
     },
     /// Deletes all Omicron zones and stops all services.
     ///
@@ -166,6 +194,6 @@ pub enum DeployCommand {
         ///
         /// Defaults to "/opt/oxide".
         #[clap(long = "out", default_value = "/opt/oxide", action)]
-        install_dir: PathBuf,
+        install_dir: Utf8PathBuf,
     },
 }

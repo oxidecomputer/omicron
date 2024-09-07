@@ -13,9 +13,9 @@ use crate::db::error::TransactionError;
 use crate::db::model::Name;
 use crate::db::model::{AddressLot, AddressLotBlock, AddressLotReservedBlock};
 use crate::db::pagination::paginated;
-use async_bb8_diesel::{AsyncConnection, AsyncRunQueryDsl, Connection};
+use crate::transaction_retry::OptionalError;
+use async_bb8_diesel::{AsyncRunQueryDsl, Connection};
 use chrono::Utc;
-use diesel::result::Error as DieselError;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use diesel_dtrace::DTraceConnection;
 use ipnetwork::IpNetwork;
@@ -45,21 +45,43 @@ impl DataStore {
         use db::schema::address_lot::dsl as lot_dsl;
         use db::schema::address_lot_block::dsl as block_dsl;
 
-        self.pool_connection_authorized(opctx)
-            .await?
-            // TODO https://github.com/oxidecomputer/omicron/issues/2811
-            // Audit external networking database transaction usage
-            .transaction_async(|conn| async move {
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        // TODO https://github.com/oxidecomputer/omicron/issues/2811
+        // Audit external networking database transaction usage
+        self.transaction_retry_wrapper("address_lot_create")
+            .transaction(&conn, |conn| async move {
                 let lot = AddressLot::new(&params.identity, params.kind.into());
 
-                let db_lot: AddressLot =
-                    diesel::insert_into(lot_dsl::address_lot)
-                        .values(lot)
-                        .returning(AddressLot::as_returning())
-                        .get_result_async(&conn)
-                        .await?;
+                // @internet-diglett says:
+                // I hate this. I know how to replace this transaction with
+                // CTEs but for the life of me I can't get it to work in
+                // diesel. I gave up and just extended the logic inside
+                // of the transaction instead chasing diesel trait bound errors.
+                let found_lot: Option<AddressLot> = lot_dsl::address_lot
+                    .filter(
+                        lot_dsl::name
+                            .eq(Name::from(params.identity.name.clone())),
+                    )
+                    .filter(lot_dsl::time_deleted.is_null())
+                    .select(AddressLot::as_select())
+                    .limit(1)
+                    .first_async(&conn)
+                    .await
+                    .ok();
 
-                let blocks: Vec<AddressLotBlock> = params
+                let db_lot = match found_lot {
+                    Some(v) => v,
+                    None => {
+                        diesel::insert_into(lot_dsl::address_lot)
+                            .values(lot)
+                            .returning(AddressLot::as_returning())
+                            .get_result_async(&conn)
+                            .await?
+                    }
+                };
+
+                let desired_blocks: Vec<AddressLotBlock> = params
                     .blocks
                     .iter()
                     .map(|b| {
@@ -71,25 +93,61 @@ impl DataStore {
                     })
                     .collect();
 
-                let db_blocks =
-                    diesel::insert_into(block_dsl::address_lot_block)
-                        .values(blocks)
-                        .returning(AddressLotBlock::as_returning())
+                let found_blocks: Vec<AddressLotBlock> =
+                    block_dsl::address_lot_block
+                        .filter(block_dsl::address_lot_id.eq(db_lot.id()))
+                        .filter(
+                            block_dsl::first_address.eq_any(
+                                desired_blocks
+                                    .iter()
+                                    .map(|b| b.first_address)
+                                    .collect::<Vec<_>>(),
+                            ),
+                        )
+                        .filter(
+                            block_dsl::last_address.eq_any(
+                                desired_blocks
+                                    .iter()
+                                    .map(|b| b.last_address)
+                                    .collect::<Vec<_>>(),
+                            ),
+                        )
                         .get_results_async(&conn)
                         .await?;
 
-                Ok(AddressLotCreateResult { lot: db_lot, blocks: db_blocks })
+                let mut blocks = vec![];
+
+                // If the block is found in the database, use the found block.
+                // If the block is not found in the database, insert it.
+                for desired_block in desired_blocks {
+                    let block = match found_blocks.iter().find(|db_b| {
+                        db_b.first_address == desired_block.first_address
+                            && db_b.last_address == desired_block.last_address
+                    }) {
+                        Some(block) => block.clone(),
+                        None => {
+                            diesel::insert_into(block_dsl::address_lot_block)
+                                .values(desired_block)
+                                .returning(AddressLotBlock::as_returning())
+                                .get_results_async(&conn)
+                                .await?[0]
+                                .clone()
+                        }
+                    };
+                    blocks.push(block);
+                }
+
+                Ok(AddressLotCreateResult { lot: db_lot, blocks })
             })
             .await
-            .map_err(|e| match e {
-                DieselError::DatabaseError(_, _) => public_error_from_diesel(
+            .map_err(|e| {
+                public_error_from_diesel(
                     e,
                     ErrorHandler::Conflict(
                         ResourceType::AddressLot,
-                        &params.identity.name.as_str(),
+                        params.identity.name.as_str(),
                     ),
-                ),
-                _ => public_error_from_diesel(e, ErrorHandler::Server),
+                )
             })
     }
 
@@ -113,47 +171,54 @@ impl DataStore {
             LotInUse,
         }
 
-        type TxnError = TransactionError<AddressLotDeleteError>;
+        let err = OptionalError::new();
 
         // TODO https://github.com/oxidecomputer/omicron/issues/2811
         // Audit external networking database transaction usage
-        conn.transaction_async(|conn| async move {
-            let rsvd: Vec<AddressLotReservedBlock> =
-                rsvd_block_dsl::address_lot_rsvd_block
-                    .filter(rsvd_block_dsl::address_lot_id.eq(id))
-                    .select(AddressLotReservedBlock::as_select())
-                    .limit(1)
-                    .load_async(&conn)
-                    .await?;
+        self.transaction_retry_wrapper("address_lot_delete")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                async move {
+                    let rsvd: Vec<AddressLotReservedBlock> =
+                        rsvd_block_dsl::address_lot_rsvd_block
+                            .filter(rsvd_block_dsl::address_lot_id.eq(id))
+                            .select(AddressLotReservedBlock::as_select())
+                            .limit(1)
+                            .load_async(&conn)
+                            .await?;
 
-            if !rsvd.is_empty() {
-                Err(TxnError::CustomError(AddressLotDeleteError::LotInUse))?;
-            }
+                    if !rsvd.is_empty() {
+                        return Err(err.bail(AddressLotDeleteError::LotInUse));
+                    }
 
-            let now = Utc::now();
-            diesel::update(lot_dsl::address_lot)
-                .filter(lot_dsl::time_deleted.is_null())
-                .filter(lot_dsl::id.eq(id))
-                .set(lot_dsl::time_deleted.eq(now))
-                .execute_async(&conn)
-                .await?;
+                    let now = Utc::now();
+                    diesel::update(lot_dsl::address_lot)
+                        .filter(lot_dsl::time_deleted.is_null())
+                        .filter(lot_dsl::id.eq(id))
+                        .set(lot_dsl::time_deleted.eq(now))
+                        .execute_async(&conn)
+                        .await?;
 
-            diesel::delete(block_dsl::address_lot_block)
-                .filter(block_dsl::address_lot_id.eq(id))
-                .execute_async(&conn)
-                .await?;
+                    diesel::delete(block_dsl::address_lot_block)
+                        .filter(block_dsl::address_lot_id.eq(id))
+                        .execute_async(&conn)
+                        .await?;
 
-            Ok(())
-        })
-        .await
-        .map_err(|e| match e {
-            TxnError::Database(e) => {
-                public_error_from_diesel(e, ErrorHandler::Server)
-            }
-            TxnError::CustomError(AddressLotDeleteError::LotInUse) => {
-                Error::invalid_request("lot is in use")
-            }
-        })
+                    Ok(())
+                }
+            })
+            .await
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    match err {
+                        AddressLotDeleteError::LotInUse => {
+                            Error::invalid_request("lot is in use")
+                        }
+                    }
+                } else {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
+            })
     }
 
     pub async fn address_lot_list(
@@ -217,6 +282,35 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         Ok(address_lot_id)
+    }
+
+    // Take the name of an address lot and look up its blocks
+    pub async fn address_lot_blocks_by_name(
+        &self,
+        opctx: &OpContext,
+        name: String,
+    ) -> LookupResult<Vec<AddressLotBlock>> {
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        use db::schema::address_lot::dsl as lot_dsl;
+        use db::schema::address_lot_block::dsl as block_dsl;
+
+        let address_lot_id = lot_dsl::address_lot
+            .filter(lot_dsl::name.eq(name))
+            .select(lot_dsl::id)
+            .limit(1)
+            .first_async::<Uuid>(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        let blocks = block_dsl::address_lot_block
+            .filter(block_dsl::address_lot_id.eq(address_lot_id))
+            .select(AddressLotBlock::as_select())
+            .load_async::<AddressLotBlock>(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(blocks)
     }
 }
 
@@ -290,7 +384,7 @@ pub(crate) async fn try_reserve_block(
         address_lot_id: lot_id,
         first_address: inet,
         last_address: inet,
-        anycast: anycast,
+        anycast,
     };
 
     diesel::insert_into(rsvd_block_dsl::address_lot_rsvd_block)

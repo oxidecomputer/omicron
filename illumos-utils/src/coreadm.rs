@@ -1,62 +1,57 @@
-use camino::Utf8PathBuf;
-use std::ffi::OsString;
-use std::os::unix::ffi::OsStringExt;
+use crate::{execute, ExecutionError};
 use std::process::Command;
-
-#[derive(thiserror::Error, Debug)]
-pub enum CoreAdmError {
-    #[error("Error obtaining or modifying coreadm configuration. core_dir: {core_dir:?}")]
-    Execution { core_dir: Utf8PathBuf },
-
-    #[error("Invalid invocation of coreadm: {0:?} {1:?}")]
-    InvalidCommand(Vec<String>, OsString),
-
-    #[error("coreadm process was terminated by a signal.")]
-    TerminatedBySignal,
-
-    #[error("coreadm invocation exited with unexpected return code {0}")]
-    UnexpectedExitCode(i32),
-
-    #[error("Failed to execute dumpadm process: {0}")]
-    Exec(std::io::Error),
-}
 
 const COREADM: &str = "/usr/bin/coreadm";
 
-pub fn coreadm(core_dir: &Utf8PathBuf) -> Result<(), CoreAdmError> {
-    let mut cmd = Command::new(COREADM);
-    cmd.env_clear();
+pub struct CoreAdm {
+    cmd: Command,
+}
 
-    // disable per-process core patterns
-    cmd.arg("-d").arg("process");
-    cmd.arg("-d").arg("proc-setid");
+pub enum CoreFileOption {
+    Global,
+    GlobalSetid,
+    Log,
+    Process,
+    ProcSetid,
+}
 
-    // use the global core pattern
-    cmd.arg("-e").arg("global");
-    cmd.arg("-e").arg("global-setid");
-
-    // set the global pattern to place all cores into core_dir,
-    // with filenames of "core.[zone-name].[exe-filename].[pid].[time]"
-    cmd.arg("-g").arg(core_dir.join("core.%z.%f.%p.%t"));
-
-    // also collect DWARF data from the exe and its library deps
-    cmd.arg("-G").arg("default+debug");
-
-    let out = cmd.output().map_err(CoreAdmError::Exec)?;
-
-    match out.status.code() {
-        Some(0) => Ok(()),
-        Some(1) => Err(CoreAdmError::Execution { core_dir: core_dir.clone() }),
-        Some(2) => {
-            // unwrap: every arg we've provided in this function is UTF-8
-            let mut args =
-                vec![cmd.get_program().to_str().unwrap().to_string()];
-            cmd.get_args()
-                .for_each(|arg| args.push(arg.to_str().unwrap().to_string()));
-            let stderr = OsString::from_vec(out.stderr);
-            Err(CoreAdmError::InvalidCommand(args, stderr))
+impl AsRef<str> for CoreFileOption {
+    fn as_ref(&self) -> &str {
+        match self {
+            CoreFileOption::Global => "global",
+            CoreFileOption::GlobalSetid => "global-setid",
+            CoreFileOption::Log => "log",
+            CoreFileOption::Process => "process",
+            CoreFileOption::ProcSetid => "proc-setid",
         }
-        Some(n) => Err(CoreAdmError::UnexpectedExitCode(n)),
-        None => Err(CoreAdmError::TerminatedBySignal),
+    }
+}
+
+impl CoreAdm {
+    pub fn new() -> Self {
+        let mut cmd = Command::new(COREADM);
+        cmd.env_clear();
+        Self { cmd }
+    }
+
+    pub fn disable(&mut self, opt: CoreFileOption) {
+        self.cmd.arg("-d").arg(opt.as_ref());
+    }
+
+    pub fn enable(&mut self, opt: CoreFileOption) {
+        self.cmd.arg("-e").arg(opt.as_ref());
+    }
+
+    pub fn global_pattern(&mut self, pat: impl AsRef<std::ffi::OsStr>) {
+        self.cmd.arg("-g").arg(pat);
+    }
+
+    pub fn global_contents(&mut self, contents: &str) {
+        self.cmd.arg("-G").arg(contents);
+    }
+
+    pub fn execute(mut self) -> Result<(), ExecutionError> {
+        execute(&mut self.cmd)?;
+        Ok(())
     }
 }

@@ -4,28 +4,27 @@
 
 //! Executable for wicketd: technician port based management service
 
+use anyhow::{anyhow, Context};
+use camino::Utf8PathBuf;
 use clap::Parser;
 use omicron_common::{
     address::Ipv6Subnet,
     cmd::{fatal, CmdError},
 };
-use sled_hardware::Baseboard;
+use sled_hardware_types::Baseboard;
 use std::net::{Ipv6Addr, SocketAddrV6};
 use std::path::PathBuf;
-use wicketd::{self, run_openapi, Config, Server, SmfConfigValues};
+use wicketd::{Config, Server, SmfConfigValues};
 
 #[derive(Debug, Parser)]
 #[clap(name = "wicketd", about = "See README.adoc for more information")]
 enum Args {
-    /// Print the external OpenAPI Spec document and exit
-    Openapi,
-
     /// Start a wicketd server
     Run {
         #[clap(name = "CONFIG_FILE_PATH", action)]
-        config_file_path: PathBuf,
+        config_file_path: Utf8PathBuf,
 
-        /// The address for the technician port
+        /// The address on which the main wicketd dropshot server should listen
         #[clap(short, long, action)]
         address: SocketAddrV6,
 
@@ -56,6 +55,19 @@ enum Args {
         #[clap(long, action, conflicts_with("read_smf_config"))]
         rack_subnet: Option<Ipv6Addr>,
     },
+
+    /// Instruct a running wicketd server to refresh its config
+    ///
+    /// Mechanically, this hits a specific endpoint served by wicketd's dropshot
+    /// server
+    RefreshConfig {
+        #[clap(name = "CONFIG_FILE_PATH", action)]
+        config_file_path: Utf8PathBuf,
+
+        /// The address of the server to refresh
+        #[clap(short, long, action)]
+        address: SocketAddrV6,
+    },
 }
 
 #[tokio::main]
@@ -69,7 +81,6 @@ async fn do_run() -> Result<(), CmdError> {
     let args = Args::parse();
 
     match args {
-        Args::Openapi => run_openapi().map_err(CmdError::Failure),
         Args::Run {
             config_file_path,
             address,
@@ -82,10 +93,10 @@ async fn do_run() -> Result<(), CmdError> {
         } => {
             let baseboard = if let Some(baseboard_file) = baseboard_file {
                 let baseboard_file = std::fs::read_to_string(baseboard_file)
-                    .map_err(|e| CmdError::Failure(e.to_string()))?;
+                    .map_err(|e| CmdError::Failure(anyhow!(e)))?;
                 let baseboard: Baseboard =
                     serde_json::from_str(&baseboard_file)
-                        .map_err(|e| CmdError::Failure(e.to_string()))?;
+                        .map_err(|e| CmdError::Failure(anyhow!(e)))?;
 
                 // TODO-correctness `Baseboard::unknown()` is slated for removal
                 // after some refactoring in sled-agent, at which point we'll
@@ -100,19 +111,15 @@ async fn do_run() -> Result<(), CmdError> {
                 None
             };
 
-            let config = Config::from_file(&config_file_path).map_err(|e| {
-                CmdError::Failure(format!(
-                    "failed to parse {}: {}",
-                    config_file_path.display(),
-                    e
-                ))
-            })?;
+            let config = Config::from_file(&config_file_path)
+                .with_context(|| format!("failed to parse {config_file_path}"))
+                .map_err(CmdError::Failure)?;
 
             let rack_subnet = match rack_subnet {
                 Some(addr) => Some(Ipv6Subnet::new(addr)),
                 None if read_smf_config => {
                     let smf_values = SmfConfigValues::read_current()
-                        .map_err(|e| CmdError::Failure(e.to_string()))?;
+                        .map_err(CmdError::Failure)?;
                     smf_values.rack_subnet
                 }
                 None => None,
@@ -126,12 +133,36 @@ async fn do_run() -> Result<(), CmdError> {
                 baseboard,
                 rack_subnet,
             };
-            let log = config.log.to_logger("wicketd").map_err(|msg| {
-                CmdError::Failure(format!("initializing logger: {}", msg))
-            })?;
+            let log = config
+                .log
+                .to_logger("wicketd")
+                .context("failed to initialize logger")
+                .map_err(CmdError::Failure)?;
             let server =
                 Server::start(log, args).await.map_err(CmdError::Failure)?;
-            server.wait_for_finish().await.map_err(CmdError::Failure)
+            server
+                .wait_for_finish()
+                .await
+                .map_err(|err| CmdError::Failure(anyhow!(err)))
+        }
+        Args::RefreshConfig { config_file_path, address } => {
+            let config = Config::from_file(&config_file_path)
+                .with_context(|| format!("failed to parse {config_file_path}"))
+                .map_err(CmdError::Failure)?;
+
+            let log = config
+                .log
+                .to_logger("wicketd")
+                .context("failed to initialize logger")
+                .map_err(CmdError::Failure)?;
+
+            // When run via `svcadm refresh ...`, we need to respect the special
+            // [SMF exit codes](https://illumos.org/man/7/smf_method). Returning
+            // an error from main exits with code 1 (from libc::EXIT_FAILURE),
+            // which does not collide with any special SMF codes.
+            Server::refresh_config(log, address)
+                .await
+                .map_err(CmdError::Failure)
         }
     }
 }

@@ -15,7 +15,9 @@ use crate::db::pool::DbConnection;
 use crate::db::queries::virtual_provisioning_collection_update::VirtualProvisioningCollectionUpdate;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
+use diesel::result::Error as DieselError;
 use omicron_common::api::external::{DeleteResult, Error};
+use omicron_uuid_kinds::InstanceUuid;
 use uuid::Uuid;
 
 /// The types of resources which can consume storage space.
@@ -52,13 +54,14 @@ impl DataStore {
             virtual_provisioning_collection,
         )
         .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     pub(crate) async fn virtual_provisioning_collection_create_on_connection(
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         virtual_provisioning_collection: VirtualProvisioningCollection,
-    ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
+    ) -> Result<Vec<VirtualProvisioningCollection>, DieselError> {
         use db::schema::virtual_provisioning_collection::dsl;
 
         let provisions: Vec<VirtualProvisioningCollection> =
@@ -66,12 +69,10 @@ impl DataStore {
                 .values(virtual_provisioning_collection)
                 .on_conflict_do_nothing()
                 .get_results_async(conn)
-                .await
-                .map_err(|e| {
-                    public_error_from_diesel(e, ErrorHandler::Server)
-                })?;
-        self.virtual_provisioning_collection_producer
-            .append_all_metrics(&provisions)?;
+                .await?;
+        let _ = self
+            .virtual_provisioning_collection_producer
+            .append_all_metrics(&provisions);
         Ok(provisions)
     }
 
@@ -103,16 +104,20 @@ impl DataStore {
         id: Uuid,
     ) -> DeleteResult {
         let conn = self.pool_connection_authorized(opctx).await?;
-        self.virtual_provisioning_collection_delete_on_connection(&conn, id)
-            .await
+        self.virtual_provisioning_collection_delete_on_connection(
+            &opctx.log, &conn, id,
+        )
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Delete a [`VirtualProvisioningCollection`] object.
     pub(crate) async fn virtual_provisioning_collection_delete_on_connection(
         &self,
+        log: &slog::Logger,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         id: Uuid,
-    ) -> DeleteResult {
+    ) -> Result<(), DieselError> {
         use db::schema::virtual_provisioning_collection::dsl;
 
         // NOTE: We don't really need to extract the value we're deleting from
@@ -122,12 +127,12 @@ impl DataStore {
             .filter(dsl::id.eq(id))
             .returning(VirtualProvisioningCollection::as_select())
             .get_result_async(conn)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-        assert!(
-            collection.is_empty(),
-            "Collection deleted while non-empty: {collection:?}"
-        );
+            .await?;
+
+        if !collection.is_empty() {
+            warn!(log, "Collection deleted while non-empty: {collection:?}");
+            return Err(DieselError::RollbackTransaction);
+        }
         Ok(())
     }
 
@@ -191,7 +196,9 @@ impl DataStore {
             )
             .get_results_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+            .map_err(|e| {
+                crate::db::queries::virtual_provisioning_collection_update::from_diesel(e)
+            })?;
         self.virtual_provisioning_collection_producer
             .append_disk_metrics(&provisions)?;
         Ok(provisions)
@@ -245,7 +252,7 @@ impl DataStore {
             )
             .get_results_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+            .map_err(|e| crate::db::queries::virtual_provisioning_collection_update::from_diesel(e))?;
         self.virtual_provisioning_collection_producer
             .append_disk_metrics(&provisions)?;
         Ok(provisions)
@@ -255,7 +262,7 @@ impl DataStore {
     pub async fn virtual_provisioning_collection_insert_instance(
         &self,
         opctx: &OpContext,
-        id: Uuid,
+        id: InstanceUuid,
         project_id: Uuid,
         cpus_diff: i64,
         ram_diff: ByteCount,
@@ -266,37 +273,32 @@ impl DataStore {
             )
             .get_results_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+            .map_err(|e| crate::db::queries::virtual_provisioning_collection_update::from_diesel(e))?;
         self.virtual_provisioning_collection_producer
             .append_cpu_metrics(&provisions)?;
         Ok(provisions)
     }
 
     /// Transitively removes the CPU and memory charges for an instance from the
-    /// instance's project, silo, and fleet, provided that the instance's state
-    /// generation is less than `max_instance_gen`. This allows a caller who is
-    /// about to apply generation G to an instance to avoid deleting resources
-    /// if its update was superseded.
+    /// instance's project, silo, and fleet.
     pub async fn virtual_provisioning_collection_delete_instance(
         &self,
         opctx: &OpContext,
-        id: Uuid,
+        id: InstanceUuid,
         project_id: Uuid,
         cpus_diff: i64,
         ram_diff: ByteCount,
-        max_instance_gen: i64,
     ) -> Result<Vec<VirtualProvisioningCollection>, Error> {
         let provisions =
             VirtualProvisioningCollectionUpdate::new_delete_instance(
                 id,
-                max_instance_gen,
                 cpus_diff,
                 ram_diff,
                 project_id,
             )
             .get_results_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+            .map_err(|e| crate::db::queries::virtual_provisioning_collection_update::from_diesel(e))?;
         self.virtual_provisioning_collection_producer
             .append_cpu_metrics(&provisions)?;
         Ok(provisions)
@@ -306,7 +308,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
     ) -> Result<(), Error> {
-        let id = *db::fixed_data::FLEET_ID;
+        let id = *nexus_db_fixed_data::FLEET_ID;
         self.virtual_provisioning_collection_create(
             opctx,
             db::model::VirtualProvisioningCollection::new(
@@ -317,5 +319,482 @@ impl DataStore {
         .await?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    use crate::db::datastore::test_utils::datastore_test;
+    use crate::db::lookup::LookupPath;
+    use nexus_db_model::Instance;
+    use nexus_db_model::Project;
+    use nexus_db_model::SiloQuotasUpdate;
+    use nexus_test_utils::db::test_setup_database;
+    use nexus_types::external_api::params;
+    use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_test_utils::dev;
+    use uuid::Uuid;
+
+    async fn verify_collection_usage(
+        datastore: &DataStore,
+        opctx: &OpContext,
+        id: Uuid,
+        expected_cpus: i64,
+        expected_memory: i64,
+        expected_storage: i64,
+    ) {
+        let collection = datastore
+            .virtual_provisioning_collection_get(opctx, id)
+            .await
+            .expect("Could not lookup collection");
+
+        assert_eq!(collection.cpus_provisioned, expected_cpus);
+        assert_eq!(
+            collection.ram_provisioned.0.to_bytes(),
+            expected_memory as u64
+        );
+        assert_eq!(
+            collection.virtual_disk_bytes_provisioned.0.to_bytes(),
+            expected_storage as u64
+        );
+    }
+
+    struct TestData {
+        project_id: Uuid,
+        silo_id: Uuid,
+        fleet_id: Uuid,
+        authz_project: crate::authz::Project,
+    }
+
+    impl TestData {
+        fn ids(&self) -> [Uuid; 3] {
+            [self.project_id, self.silo_id, self.fleet_id]
+        }
+    }
+
+    // Use the default fleet and silo, but create a new project.
+    async fn setup_collections(
+        datastore: &DataStore,
+        opctx: &OpContext,
+    ) -> TestData {
+        let fleet_id = *nexus_db_fixed_data::FLEET_ID;
+        let silo_id = *nexus_db_fixed_data::silo::DEFAULT_SILO_ID;
+        let project_id = Uuid::new_v4();
+
+        let (authz_project, _project) = datastore
+            .project_create(
+                &opctx,
+                Project::new_with_id(
+                    project_id,
+                    silo_id,
+                    params::ProjectCreate {
+                        identity: IdentityMetadataCreateParams {
+                            name: "myproject".parse().unwrap(),
+                            description: "It's a project".into(),
+                        },
+                    },
+                ),
+            )
+            .await
+            .unwrap();
+
+        // Ensure the silo has a quota that can fit our requested instance.
+        //
+        // This also acts as a guard against a change in the default silo quota
+        // -- we overwrite it for the test unconditionally.
+
+        let quotas_update = SiloQuotasUpdate {
+            cpus: Some(24),
+            memory: Some(1 << 40),
+            storage: Some(1 << 50),
+            time_modified: chrono::Utc::now(),
+        };
+        let authz_silo = LookupPath::new(&opctx, &datastore)
+            .silo_id(silo_id)
+            .lookup_for(crate::authz::Action::Modify)
+            .await
+            .unwrap()
+            .0;
+        datastore
+            .silo_update_quota(&opctx, &authz_silo, quotas_update)
+            .await
+            .unwrap();
+
+        TestData { fleet_id, silo_id, project_id, authz_project }
+    }
+
+    async fn create_instance_record(
+        datastore: &DataStore,
+        opctx: &OpContext,
+        authz_project: &crate::authz::Project,
+        instance_id: InstanceUuid,
+        project_id: Uuid,
+        cpus: i64,
+        memory: ByteCount,
+    ) {
+        datastore
+            .project_create_instance(
+                &opctx,
+                &authz_project,
+                Instance::new(
+                    instance_id,
+                    project_id,
+                    &params::InstanceCreate {
+                        identity: IdentityMetadataCreateParams {
+                            name: "myinstance".parse().unwrap(),
+                            description: "It's an instance".into(),
+                        },
+                        ncpus: cpus.try_into().unwrap(),
+                        memory: memory.try_into().unwrap(),
+                        hostname: "myhostname".try_into().unwrap(),
+                        user_data: Vec::new(),
+                        network_interfaces:
+                            params::InstanceNetworkInterfaceAttachment::None,
+                        external_ips: Vec::new(),
+                        disks: Vec::new(),
+                        ssh_public_keys: None,
+                        start: false,
+                    },
+                ),
+            )
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_instance_create_and_delete() {
+        let logctx = dev::test_setup_log("test_instance_create_and_delete");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        let test_data = setup_collections(&datastore, &opctx).await;
+        let ids = test_data.ids();
+        let project_id = test_data.project_id;
+        let authz_project = test_data.authz_project;
+
+        // Actually provision the instance
+
+        let instance_id = InstanceUuid::new_v4();
+        let cpus = 12;
+        let ram = ByteCount::try_from(1 << 30).unwrap();
+
+        for id in ids {
+            verify_collection_usage(&datastore, &opctx, id, 0, 0, 0).await;
+        }
+
+        create_instance_record(
+            &datastore,
+            &opctx,
+            &authz_project,
+            instance_id,
+            project_id,
+            cpus,
+            ram,
+        )
+        .await;
+
+        datastore
+            .virtual_provisioning_collection_insert_instance(
+                &opctx,
+                instance_id,
+                project_id,
+                cpus,
+                ram,
+            )
+            .await
+            .unwrap();
+
+        for id in ids {
+            verify_collection_usage(&datastore, &opctx, id, 12, 1 << 30, 0)
+                .await;
+        }
+
+        // Delete the instance
+
+        datastore
+            .virtual_provisioning_collection_delete_instance(
+                &opctx,
+                instance_id,
+                project_id,
+                cpus,
+                ram,
+            )
+            .await
+            .unwrap();
+
+        for id in ids {
+            verify_collection_usage(&datastore, &opctx, id, 0, 0, 0).await;
+        }
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_instance_create_and_delete_twice() {
+        let logctx =
+            dev::test_setup_log("test_instance_create_and_delete_twice");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        let test_data = setup_collections(&datastore, &opctx).await;
+        let ids = test_data.ids();
+        let project_id = test_data.project_id;
+        let authz_project = test_data.authz_project;
+
+        // Actually provision the instance
+
+        let instance_id = InstanceUuid::new_v4();
+        let cpus = 12;
+        let ram = ByteCount::try_from(1 << 30).unwrap();
+
+        for id in ids {
+            verify_collection_usage(&datastore, &opctx, id, 0, 0, 0).await;
+        }
+
+        create_instance_record(
+            &datastore,
+            &opctx,
+            &authz_project,
+            instance_id,
+            project_id,
+            cpus,
+            ram,
+        )
+        .await;
+
+        datastore
+            .virtual_provisioning_collection_insert_instance(
+                &opctx,
+                instance_id,
+                project_id,
+                cpus,
+                ram,
+            )
+            .await
+            .unwrap();
+
+        for id in ids {
+            verify_collection_usage(&datastore, &opctx, id, 12, 1 << 30, 0)
+                .await;
+        }
+
+        // Attempt to provision that same instance once more.
+        //
+        // The "virtual_provisioning_collection_insert" call should succeed for
+        // idempotency reasons, but we should not be double-dipping on the
+        // instance object's provisioning accounting.
+
+        datastore
+            .virtual_provisioning_collection_insert_instance(
+                &opctx,
+                instance_id,
+                project_id,
+                cpus,
+                ram,
+            )
+            .await
+            .unwrap();
+
+        // Verify that the usage is the same as before the call
+        for id in ids {
+            verify_collection_usage(&datastore, &opctx, id, 12, 1 << 30, 0)
+                .await;
+        }
+
+        // Delete the instance
+
+        datastore
+            .virtual_provisioning_collection_delete_instance(
+                &opctx,
+                instance_id,
+                project_id,
+                cpus,
+                ram,
+            )
+            .await
+            .unwrap();
+
+        for id in ids {
+            verify_collection_usage(&datastore, &opctx, id, 0, 0, 0).await;
+        }
+
+        // Attempt to delete the same instance once more.
+        //
+        // Just like "double-adding", double deletion should be an idempotent
+        // operation.
+
+        datastore
+            .virtual_provisioning_collection_delete_instance(
+                &opctx,
+                instance_id,
+                project_id,
+                cpus,
+                ram,
+            )
+            .await
+            .unwrap();
+
+        for id in ids {
+            verify_collection_usage(&datastore, &opctx, id, 0, 0, 0).await;
+        }
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_storage_create_and_delete() {
+        let logctx = dev::test_setup_log("test_storage_create_and_delete");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        let test_data = setup_collections(&datastore, &opctx).await;
+        let ids = test_data.ids();
+        let project_id = test_data.project_id;
+
+        // Actually provision storage
+
+        let disk_id = Uuid::new_v4();
+        let disk_byte_diff = ByteCount::try_from(1 << 30).unwrap();
+
+        for id in ids {
+            verify_collection_usage(&datastore, &opctx, id, 0, 0, 0).await;
+        }
+
+        datastore
+            .virtual_provisioning_collection_insert_storage(
+                &opctx,
+                disk_id,
+                project_id,
+                disk_byte_diff,
+                StorageType::Disk,
+            )
+            .await
+            .unwrap();
+
+        for id in ids {
+            verify_collection_usage(&datastore, &opctx, id, 0, 0, 1 << 30)
+                .await;
+        }
+
+        // Delete the disk
+
+        datastore
+            .virtual_provisioning_collection_delete_storage(
+                &opctx,
+                disk_id,
+                project_id,
+                disk_byte_diff,
+            )
+            .await
+            .unwrap();
+
+        for id in ids {
+            verify_collection_usage(&datastore, &opctx, id, 0, 0, 0).await;
+        }
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_storage_create_and_delete_twice() {
+        let logctx =
+            dev::test_setup_log("test_storage_create_and_delete_twice");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        let test_data = setup_collections(&datastore, &opctx).await;
+        let ids = test_data.ids();
+        let project_id = test_data.project_id;
+
+        // Actually provision the disk
+
+        let disk_id = Uuid::new_v4();
+        let disk_byte_diff = ByteCount::try_from(1 << 30).unwrap();
+
+        for id in ids {
+            verify_collection_usage(&datastore, &opctx, id, 0, 0, 0).await;
+        }
+
+        datastore
+            .virtual_provisioning_collection_insert_storage(
+                &opctx,
+                disk_id,
+                project_id,
+                disk_byte_diff,
+                StorageType::Disk,
+            )
+            .await
+            .unwrap();
+
+        for id in ids {
+            verify_collection_usage(&datastore, &opctx, id, 0, 0, 1 << 30)
+                .await;
+        }
+
+        // Attempt to provision that same disk once more.
+        //
+        // The "virtual_provisioning_collection_insert" call should succeed for
+        // idempotency reasons, but we should not be double-dipping on the
+        // disk object's provisioning accounting.
+
+        datastore
+            .virtual_provisioning_collection_insert_storage(
+                &opctx,
+                disk_id,
+                project_id,
+                disk_byte_diff,
+                StorageType::Disk,
+            )
+            .await
+            .unwrap();
+
+        // Verify that the usage is the same as before the call
+        for id in ids {
+            verify_collection_usage(&datastore, &opctx, id, 0, 0, 1 << 30)
+                .await;
+        }
+
+        // Delete the disk
+
+        datastore
+            .virtual_provisioning_collection_delete_storage(
+                &opctx,
+                disk_id,
+                project_id,
+                disk_byte_diff,
+            )
+            .await
+            .unwrap();
+
+        for id in ids {
+            verify_collection_usage(&datastore, &opctx, id, 0, 0, 0).await;
+        }
+
+        // Attempt to delete the same disk once more.
+        //
+        // Just like "double-adding", double deletion should be an idempotent
+        // operation.
+
+        datastore
+            .virtual_provisioning_collection_delete_storage(
+                &opctx,
+                disk_id,
+                project_id,
+                disk_byte_diff,
+            )
+            .await
+            .unwrap();
+
+        for id in ids {
+            verify_collection_usage(&datastore, &opctx, id, 0, 0, 0).await;
+        }
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
     }
 }

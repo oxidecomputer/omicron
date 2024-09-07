@@ -5,12 +5,15 @@ version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
 base64.workspace = true
-bincode.workspace = true
 bootstore.workspace = true
+bootstrap-agent-api.workspace = true
 bootstrap-agent-client.workspace = true
 bytes.workspace = true
 camino.workspace = true
@@ -20,55 +23,68 @@ cfg-if.workspace = true
 chrono.workspace = true
 clap.workspace = true
 # Only used by the simulated sled agent.
-crucible-client-types.workspace = true
 crucible-agent-client.workspace = true
-ddm-admin-client.workspace = true
 derive_more.workspace = true
 dns-server.workspace = true
 dns-service-client.workspace = true
 dpd-client.workspace = true
+display-error-chain.workspace = true
 dropshot.workspace = true
 flate2.workspace = true
+flume.workspace = true
 futures.workspace = true
 glob.workspace = true
+hex.workspace = true
 http.workspace = true
 hyper-staticfile.workspace = true
 gateway-client.workspace = true
 illumos-utils.workspace = true
+installinator-common.workspace = true
 internal-dns.workspace = true
 ipnetwork.workspace = true
 itertools.workspace = true
 key-manager.workspace = true
 libc.workspace = true
 macaddr.workspace = true
+mg-admin-client.workspace = true
 nexus-client.workspace = true
+nexus-config.workspace = true
+nexus-sled-agent-shared.workspace = true
+nexus-types.workspace = true
 omicron-common.workspace = true
+omicron-ddm-admin-client.workspace = true
+omicron-uuid-kinds.workspace = true
 once_cell.workspace = true
 oximeter.workspace = true
+oximeter-instruments.workspace = true
 oximeter-producer.workspace = true
-percent-encoding.workspace = true
-progenitor.workspace = true
-propolis-client = { workspace = true, features = [ "generated-migration" ] }
-propolis-server.workspace = true # Only used by the simulated sled agent
+oxnet.workspace = true
+propolis-client.workspace = true
+propolis-mock-server.workspace = true # Only used by the simulated sled agent
 rand = { workspace = true, features = ["getrandom"] }
 reqwest = { workspace = true, features = ["rustls-tls", "stream"] }
-schemars = { workspace = true, features = [ "chrono", "uuid1" ] }
+schemars = { workspace = true, features = ["chrono", "uuid1"] }
 semver.workspace = true
 serde.workspace = true
-serde_json = {workspace = true, features = ["raw_value"]}
+serde_human_bytes.workspace = true
+serde_json = { workspace = true, features = ["raw_value"] }
 sha3.workspace = true
+sled-agent-api.workspace = true
 sled-agent-client.workspace = true
+sled-agent-types.workspace = true
 sled-hardware.workspace = true
+sled-hardware-types.workspace = true
+sled-storage.workspace = true
 slog.workspace = true
 slog-async.workspace = true
 slog-dtrace.workspace = true
 slog-term.workspace = true
 smf.workspace = true
+strum.workspace = true
 tar.workspace = true
 thiserror.workspace = true
 tofino.workspace = true
-tokio = { workspace = true, features = [ "full" ] }
-tokio-tungstenite.workspace = true
+tokio = { workspace = true, features = ["full"] }
 toml.workspace = true
 usdt.workspace = true
 uuid.workspace = true
@@ -76,6 +92,8 @@ zeroize.workspace = true
 zone.workspace = true
 static_assertions.workspace = true
 omicron-workspace-hack.workspace = true
+slog-error-chain.workspace = true
+walkdir.workspace = true
 
 [target.'cfg(target_os = "illumos")'.dependencies]
 opte-ioctl.workspace = true
@@ -83,20 +101,21 @@ opte-ioctl.workspace = true
 [dev-dependencies]
 assert_matches.workspace = true
 expectorate.workspace = true
+guppy.workspace = true
 http.workspace = true
 hyper.workspace = true
 omicron-test-utils.workspace = true
-openapi-lint.workspace = true
-openapiv3.workspace = true
 pretty_assertions.workspace = true
 rcgen.workspace = true
-serial_test.workspace = true
 subprocess.workspace = true
 slog-async.workspace = true
 slog-term.workspace = true
 tempfile.workspace = true
+tokio-stream.workspace = true
+tokio-util.workspace = true
 
 illumos-utils = { workspace = true, features = ["testing"] }
+sled-storage = { workspace = true, features = ["testing"] }
 
 #
 # Disable doc builds by default for our binaries to work around issue
@@ -111,13 +130,7 @@ name = "sled-agent"
 doc = false
 
 [features]
-image-standard = []
 image-trampoline = []
-machine-gimlet = []
-machine-gimlet-standalone = []
-machine-non-gimlet = []
 switch-asic = []
 switch-stub = []
 switch-softnpu = []
-rack-topology-single-sled = []
-rack-topology-multi-sled = []

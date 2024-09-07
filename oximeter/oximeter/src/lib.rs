@@ -2,6 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+// Copyright 2024 Oxide Computer Company
+
 //! Tools for generating and collecting metric data in the Oxide rack.
 //!
 //! Overview
@@ -18,33 +20,121 @@
 //! sensor. A _target_ is the thing being measured -- the service or the DIMM, in these cases. Both
 //! targets and metrics may have key-value pairs associated with them, called _fields_.
 //!
-//! Motivating example
-//! ------------------
+//! Defining timeseries schema
+//! --------------------------
+//!
+//! Creating a timeseries starts by defining its schema. This includes the name
+//! for the target and metric, as well as other metadata such as descriptions,
+//! data types, and version numbers. Let's start by looking at an example:
+//!
+//! ```text
+//! [target]
+//! name = "foo"
+//! description = "Statistics about the foo server"
+//! authz_scope = "fleet"
+//! versions = [
+//!     { version = 1, fields = ["name", "id"],
+//! ]
+//!
+//! [[metrics]]
+//! name = "total_requests"
+//! description = "The cumulative number of requests served"
+//! datum_type = "cumulative_u64"
+//! units = "count"
+//! versions = [
+//!     { added_in = 1, fields = ["route", "method", "response_code"],
+//! ]
+//!
+//! [fields.name]
+//! type = "string"
+//! description = "The name of this server"
+//!
+//! [fields.id]
+//! type = "uuid"
+//! description = "Unique ID of this server"
+//!
+//! [fields.route]
+//! type = "string"
+//! description = "The route used in the HTTP request"
+//!
+//! [fields.method]
+//! type = "string"
+//! description = "The method used in the HTTP request"
+//!
+//! [fields.response_code]
+//! type = u16
+//! description = "Status code the server responded with"
+//! ```
+//!
+//! In this case, our target is an HTTP server, which we identify with the
+//! fields "name" and "id". Those fields are described in the `fields` TOML key,
+//! and referred to by name in the target definition. A target also needs to
+//! have a description and an _authorization scope_, which describes the
+//! visibility of the timeseries and its data. See
+//! [`crate::schema::AuthzScope`] for details.
+//!
+//! A target can have one or more metrics defined for it. As with the target, a
+//! metric also has a name and description, and additionally a datum type and
+//! units. It may also have fields, again referred to by name.
+//!
+//! This file should live in the `oximeter/schema` subdirectory, so that it can
+//! be used to generate Rust code for producing data.
+//!
+//! Versions
+//! --------
+//!
+//! Both targets and metrics have version numbers associated with them. For a
+//! target, these numbers must be the numbers 1, 2, 3, ... (increasing, no
+//! gaps). As the target or any of its metrics evolves, these numbers are
+//! incremented, and the new fields for that version are specified.
+//!
+//! The fields on the metrics may be specified a bit more flexibly. The first
+//! version they appear in must have the form: `{ added_in = X, fields = [ ...
+//! ] }`. After, the versions may be omitted, meaning that the previous version
+//! of the metric is unchanged; or the metric may be removed entirely with a
+//! version like `{ removed_in = Y }`.
+//!
+//! In all cases, the TOML definition is checked for consistency. Any existing
+//! metric versions must match up with a target version, and they must have
+//! distinct field names (targets and metrics cannot share fields).
+//!
+//! Using these primitives, fields may be added, removed, or renamed, with one
+//! caveat: a field may not **change type**.
+//!
+//! Generated code
+//! --------------
+//!
+//! This TOML definition can be used in a number of ways, but the most relevant
+//! is to actually produce data from the resulting timeseries. This can be done
+//! with the `[use_timeseries]` proc-macro, like this:
+//!
+//! ```ignore
+//! oximeter::use_timeseries!("http-server.toml");
+//! ```
+//!
+//! The macro will first validate the timeseries definition, and then generate
+//! Rust code like the following:
 //!
 //! ```rust
-//! use uuid::Uuid;
-//! use oximeter::{types::Cumulative, Metric, Target};
-//!
-//! #[derive(Target)]
+//! #[derive(oximeter::Target)]
 //! struct HttpServer {
 //!     name: String,
-//!     id: Uuid,
+//!     id: uuid::Uuid,
 //! }
 //!
-//! #[derive(Metric)]
+//! #[derive(oximeter::Metric)]
 //! struct TotalRequests {
 //!     route: String,
 //!     method: String,
-//!     response_code: i64,
+//!     response_code: u16,
 //!     #[datum]
-//!     total: Cumulative<i64>,
+//!     total: oximeter::types::Cumulative<u64>,
 //! }
 //! ```
 //!
-//! In this case, our target is some HTTP server, which we identify with the fields "name" and
-//! "id". The metric of interest is the total count of requests, by route/method/response code,
-//! over time. The [`types::Cumulative`] type keeps track of cumulative scalar values, an integer
-//! in this case.
+//! This code can be used to create **samples** from this timeseries. The target
+//! and metric structs can be filled in with the timeseries's _fields_, and the
+//! _datum_ may be populated to generate new samples.
 //!
 //! Datum, measurement, and samples
 //! -------------------------------
@@ -95,40 +185,97 @@
 //! `Producer`s may be registered with the same `ProducerServer`, each with potentially different
 //! sampling intervals.
 
-// Copyright 2023 Oxide Computer Company
+pub use oximeter_macro_impl::{Metric, Target};
+pub use oximeter_timeseries_macro::use_timeseries;
+pub use oximeter_types::*;
 
-pub use oximeter_macro_impl::*;
+#[cfg(test)]
+mod test {
+    use oximeter_schema::ir::load_schema;
+    use oximeter_types::schema::{FieldSource, SCHEMA_DIRECTORY};
+    use oximeter_types::TimeseriesSchema;
+    use std::collections::BTreeMap;
+    use std::fs;
 
-// Export the current crate as `oximeter`. The macros defined in `oximeter-macro-impl` generate
-// code referring to symbols like `oximeter::traits::Target`. In consumers of this crate, that's
-// fine, but internally there _is_ no crate named `oximeter`, it's just `self` or `crate`.
-//
-// See https://github.com/rust-lang/rust/pull/55275 for the PR introducing this fix, which links to
-// lots of related issues and discussion.
-extern crate self as oximeter;
+    /// This test checks that changes to timeseries schema are all consistent.
+    ///
+    /// Timeseries schema are described in a TOML format that makes it relatively
+    /// easy to add new versions of the timeseries. Those definitions are ingested
+    /// at compile-time and checked for self-consistency, but it's still possible
+    /// for two unrelated definitions to conflict. This test catches those.
+    #[test]
+    fn timeseries_schema_consistency() {
+        let mut all_schema = BTreeMap::new();
+        for entry in fs::read_dir(SCHEMA_DIRECTORY).unwrap() {
+            let entry = entry.unwrap();
+            println!(
+                "examining timeseries schema from: '{}'",
+                entry.path().canonicalize().unwrap().display()
+            );
+            let contents = fs::read_to_string(entry.path()).unwrap();
+            let list = load_schema(&contents).unwrap_or_else(|e| {
+                panic!(
+                    "Expected a valid timeseries definition in {}, \
+                    but found error: {}",
+                    entry.path().canonicalize().unwrap().display(),
+                    e,
+                )
+            });
+            println!("found {} schema", list.len());
+            for schema in list.into_iter() {
+                let key = (schema.timeseries_name.clone(), schema.version);
+                println!(" {} v{}", key.0, key.1);
+                if let Some(dup) = all_schema.insert(key, schema.clone()) {
+                    panic!(
+                        "Timeseries '{}' version {} is duplicated.\
+                        \noriginal:\n{}\nduplicate:{}\n",
+                        schema.timeseries_name,
+                        schema.version,
+                        pretty_print_schema(&schema),
+                        pretty_print_schema(&dup),
+                    );
+                }
+            }
+        }
+    }
 
-pub mod histogram;
-pub mod test_util;
-pub mod traits;
-pub mod types;
-
-pub use traits::Metric;
-pub use traits::Producer;
-pub use traits::Target;
-pub use types::Datum;
-pub use types::DatumType;
-pub use types::Field;
-pub use types::FieldType;
-pub use types::FieldValue;
-pub use types::Measurement;
-pub use types::MetricsError;
-pub use types::Sample;
-
-/// Construct the timeseries name for a Target and Metric.
-pub fn timeseries_name<T, M>(target: &T, metric: &M) -> String
-where
-    T: Target,
-    M: Metric,
-{
-    format!("{}:{}", target.name(), metric.name())
+    fn pretty_print_schema(schema: &TimeseriesSchema) -> String {
+        use std::fmt::Write;
+        let mut out = String::new();
+        writeln!(out, " name: {}", schema.timeseries_name).unwrap();
+        writeln!(out, " version: {}", schema.version).unwrap();
+        writeln!(out, " target").unwrap();
+        writeln!(out, "   description: {}", schema.description.target).unwrap();
+        writeln!(out, "   fields:").unwrap();
+        for field in schema
+            .field_schema
+            .iter()
+            .filter(|field| field.source == FieldSource::Target)
+        {
+            writeln!(
+                out,
+                "    {} ({}): {}",
+                field.name, field.field_type, field.description
+            )
+            .unwrap();
+        }
+        writeln!(out, " metric").unwrap();
+        writeln!(out, "   description: {}", schema.description.metric).unwrap();
+        writeln!(out, "   fields:").unwrap();
+        for field in schema
+            .field_schema
+            .iter()
+            .filter(|field| field.source == FieldSource::Metric)
+        {
+            writeln!(
+                out,
+                "    {} ({}): {}",
+                field.name, field.field_type, field.description
+            )
+            .unwrap();
+        }
+        writeln!(out, "   datum type: {}", schema.datum_type).unwrap();
+        writeln!(out, "   units: {:?}", schema.units).unwrap();
+        out
+    }
 }

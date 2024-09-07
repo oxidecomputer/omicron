@@ -4,22 +4,15 @@
 
 //! Executable program to run the sled agent
 
+use anyhow::anyhow;
 use camino::Utf8PathBuf;
-use clap::{Parser, Subcommand};
+use clap::Parser;
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
 use omicron_sled_agent::bootstrap::server as bootstrap_server;
 use omicron_sled_agent::bootstrap::RssAccessError;
-use omicron_sled_agent::rack_setup::config::SetupServiceConfig as RssConfig;
-use omicron_sled_agent::{config::Config as SledConfig, server as sled_server};
-
-#[derive(Subcommand, Debug)]
-enum OpenapiFlavor {
-    /// Generates bootstrap agent openapi spec
-    Bootstrap,
-    /// Generates sled agent openapi spec
-    Sled,
-}
+use omicron_sled_agent::config::Config as SledConfig;
+use sled_agent_types::rack_init::RackInitializeRequest;
 
 #[derive(Debug, Parser)]
 #[clap(
@@ -28,10 +21,6 @@ enum OpenapiFlavor {
     version
 )]
 enum Args {
-    /// Generates the OpenAPI specification.
-    #[command(subcommand)]
-    Openapi(OpenapiFlavor),
-
     /// Runs the Sled Agent server.
     Run {
         #[clap(name = "CONFIG_FILE_PATH", action)]
@@ -50,17 +39,9 @@ async fn do_run() -> Result<(), CmdError> {
     let args = Args::parse();
 
     match args {
-        Args::Openapi(flavor) => match flavor {
-            OpenapiFlavor::Sled => {
-                sled_server::run_openapi().map_err(CmdError::Failure)
-            }
-            OpenapiFlavor::Bootstrap => {
-                bootstrap_server::run_openapi().map_err(CmdError::Failure)
-            }
-        },
         Args::Run { config_path } => {
             let config = SledConfig::from_file(&config_path)
-                .map_err(|e| CmdError::Failure(e.to_string()))?;
+                .map_err(|e| CmdError::Failure(anyhow!(e)))?;
 
             // - Sled agent starts with the normal config file - typically
             // called "config.toml".
@@ -82,8 +63,8 @@ async fn do_run() -> Result<(), CmdError> {
             };
             let rss_config = if rss_config_path.exists() {
                 Some(
-                    RssConfig::from_file(rss_config_path)
-                        .map_err(|e| CmdError::Failure(e.to_string()))?,
+                    RackInitializeRequest::from_file(rss_config_path)
+                        .map_err(|e| CmdError::Failure(anyhow!(e)))?,
                 )
             } else {
                 None
@@ -91,7 +72,7 @@ async fn do_run() -> Result<(), CmdError> {
 
             let server = bootstrap_server::Server::start(config)
                 .await
-                .map_err(|err| CmdError::Failure(format!("{err:#}")))?;
+                .map_err(|err| CmdError::Failure(anyhow!(err)))?;
 
             // If requested, automatically supply the RSS configuration.
             //
@@ -103,12 +84,15 @@ async fn do_run() -> Result<(), CmdError> {
                     // abandon the server.
                     Ok(_) | Err(RssAccessError::AlreadyInitialized) => {}
                     Err(e) => {
-                        return Err(CmdError::Failure(e.to_string()));
+                        return Err(CmdError::Failure(anyhow!(e)));
                     }
                 }
             }
 
-            server.wait_for_finish().await.map_err(CmdError::Failure)?;
+            server
+                .wait_for_finish()
+                .await
+                .map_err(|err| CmdError::Failure(anyhow!(err)))?;
 
             Ok(())
         }

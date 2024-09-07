@@ -1,8 +1,11 @@
 [package]
-name = "ddm-admin-client"
+name = "omicron-ddm-admin-client"
 version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
+
+[lints]
+workspace = true
 
 [dependencies]
 either.workspace = true
@@ -12,10 +15,11 @@ serde.workspace = true
 slog.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
-
 omicron-common.workspace = true
-sled-hardware.workspace = true
+sled-hardware-types.workspace = true
 omicron-workspace-hack.workspace = true
+ddm-admin-client.workspace = true
+uuid.workspace = true
 
 [build-dependencies]
 anyhow.workspace = true

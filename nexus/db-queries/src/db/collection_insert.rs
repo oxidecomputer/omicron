@@ -204,6 +204,27 @@ where
 
     /// Issues the CTE asynchronously and parses the result.
     ///
+    /// The four outcomes are:
+    /// - Ok(Some(new row))
+    /// - Ok(None)
+    /// - Error(collection not found)
+    /// - Error(other diesel error)
+    pub async fn insert_and_get_optional_result_async(
+        self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> AsyncInsertIntoCollectionResult<Option<ResourceType>>
+    where
+        // We require this bound to ensure that "Self" is runnable as query.
+        Self: query_methods::LoadQuery<'static, DbConnection, ResourceType>,
+    {
+        self.get_result_async::<ResourceType>(conn)
+            .await
+            .optional()
+            .map_err(|e| Self::translate_async_error(e))
+    }
+
+    /// Issues the CTE asynchronously and parses the result.
+    ///
     /// The three outcomes are:
     /// - Ok(Vec of new rows)
     /// - Error(collection not found)
@@ -385,10 +406,8 @@ where
 mod test {
     use super::*;
     use crate::db::{self, identity::Resource as IdentityResource};
-    use async_bb8_diesel::{
-        AsyncRunQueryDsl, AsyncSimpleConnection, ConnectionManager,
-    };
-    use chrono::{NaiveDateTime, TimeZone, Utc};
+    use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
+    use chrono::{DateTime, Utc};
     use db_macros::Resource;
     use diesel::expression_methods::ExpressionMethods;
     use diesel::pg::Pg;
@@ -422,8 +441,8 @@ mod test {
 
     async fn setup_db(
         pool: &crate::db::Pool,
-    ) -> bb8::PooledConnection<ConnectionManager<DbConnection>> {
-        let connection = pool.pool().get().await.unwrap();
+    ) -> crate::db::datastore::DataStoreConnection {
+        let connection = pool.claim().await.unwrap();
         (*connection)
             .batch_execute_async(
                 "CREATE SCHEMA IF NOT EXISTS test_schema; \
@@ -477,12 +496,8 @@ mod test {
         let resource_id =
             uuid::Uuid::parse_str("223cb7f7-0d3a-4a4e-a5e1-ad38ecb785d8")
                 .unwrap();
-        let create_time = Utc.from_utc_datetime(
-            &NaiveDateTime::from_timestamp_opt(0, 0).unwrap(),
-        );
-        let modify_time = Utc.from_utc_datetime(
-            &NaiveDateTime::from_timestamp_opt(1, 0).unwrap(),
-        );
+        let create_time = DateTime::from_timestamp(0, 0).unwrap();
+        let modify_time = DateTime::from_timestamp(1, 0).unwrap();
         let insert = Collection::insert_resource(
             collection_id,
             diesel::insert_into(resource::table).values(vec![(
@@ -543,7 +558,7 @@ mod test {
         let logctx = dev::test_setup_log("test_collection_not_present");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&logctx.log, &cfg);
+        let pool = db::Pool::new_single_host(&logctx.log, &cfg);
 
         let conn = setup_db(&pool).await;
 
@@ -573,7 +588,7 @@ mod test {
         let logctx = dev::test_setup_log("test_collection_present");
         let mut db = test_setup_database(&logctx.log).await;
         let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new(&logctx.log, &cfg);
+        let pool = db::Pool::new_single_host(&logctx.log, &cfg);
 
         let conn = setup_db(&pool).await;
 
@@ -594,12 +609,8 @@ mod test {
             .await
             .unwrap();
 
-        let create_time = Utc.from_utc_datetime(
-            &NaiveDateTime::from_timestamp_opt(0, 0).unwrap(),
-        );
-        let modify_time = Utc.from_utc_datetime(
-            &NaiveDateTime::from_timestamp_opt(1, 0).unwrap(),
-        );
+        let create_time = DateTime::from_timestamp(0, 0).unwrap();
+        let modify_time = DateTime::from_timestamp(1, 0).unwrap();
         let resource = Collection::insert_resource(
             collection_id,
             diesel::insert_into(resource::table).values(vec![(

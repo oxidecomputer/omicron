@@ -29,6 +29,9 @@
 //! rules, so our model layer knows about our views. That seems to be a
 //! relatively minor offense, so it's the way we leave things for now.
 
+pub mod authn;
+pub mod deployment;
 pub mod external_api;
 pub mod identity;
 pub mod internal_api;
+pub mod inventory;

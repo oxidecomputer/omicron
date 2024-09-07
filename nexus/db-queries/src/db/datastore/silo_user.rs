@@ -363,11 +363,11 @@ impl DataStore {
         let builtin_users = [
             // Note: "db_init" is also a builtin user, but that one by necessity
             // is created with the database.
-            &*authn::USER_SERVICE_BALANCER,
-            &*authn::USER_INTERNAL_API,
-            &*authn::USER_INTERNAL_READ,
-            &*authn::USER_EXTERNAL_AUTHN,
-            &*authn::USER_SAGA_RECOVERY,
+            &authn::USER_SERVICE_BALANCER,
+            &authn::USER_INTERNAL_API,
+            &authn::USER_INTERNAL_READ,
+            &authn::USER_EXTERNAL_AUTHN,
+            &authn::USER_SAGA_RECOVERY,
         ]
         .iter()
         .map(|u| {
@@ -429,7 +429,9 @@ impl DataStore {
         use db::schema::role_assignment::dsl;
         debug!(opctx.log, "attempting to create silo user role assignments");
         let count = diesel::insert_into(dsl::role_assignment)
-            .values(&*db::fixed_data::silo_user::ROLE_ASSIGNMENTS_PRIVILEGED)
+            .values(
+                &*nexus_db_fixed_data::silo_user::ROLE_ASSIGNMENTS_PRIVILEGED,
+            )
             .on_conflict((
                 dsl::identity_type,
                 dsl::identity_id,

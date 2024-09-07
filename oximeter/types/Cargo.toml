@@ -1,0 +1,37 @@
+[package]
+name = "oximeter-types"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+bytes = { workspace = true, features = [ "serde" ] }
+chrono.workspace = true
+float-ord.workspace = true
+num.workspace = true
+omicron-common.workspace = true
+omicron-workspace-hack.workspace = true
+regex.workspace = true
+schemars = { workspace = true, features = [ "uuid1", "bytes", "chrono" ] }
+serde.workspace = true
+strum.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+approx.workspace = true
+# For benchmark
+criterion.workspace = true
+oximeter-macro-impl.workspace = true
+rand = { workspace = true, features = ["std_rng"] }
+rand_distr.workspace = true
+rstest.workspace = true
+serde_json.workspace = true
+trybuild.workspace = true
+
+[[bench]]
+name = "quantile"
+harness = false

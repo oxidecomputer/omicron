@@ -20,7 +20,7 @@ use uuid::Uuid;
 
 impl_enum_type!(
     #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "authentication_mode"))]
+    #[diesel(postgres_type(name = "authentication_mode", schema = "public"))]
     pub struct AuthenticationModeEnum;
 
     #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq, Eq)]
@@ -52,7 +52,7 @@ impl From<AuthenticationMode> for shared::AuthenticationMode {
 
 impl_enum_type!(
     #[derive(SqlType, Debug, QueryId)]
-    #[diesel(postgres_type(name = "user_provision_type"))]
+    #[diesel(postgres_type(name = "user_provision_type", schema = "public"))]
     pub struct UserProvisionTypeEnum;
 
     #[derive(Copy, Clone, Debug, AsExpression, FromSqlRow, PartialEq, Eq)]

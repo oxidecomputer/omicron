@@ -14,7 +14,15 @@ use serde::Deserialize;
 use serde::Serialize;
 
 #[derive(
-    Clone, Debug, Copy, AsExpression, FromSqlRow, Serialize, Deserialize,
+    Clone,
+    Debug,
+    Copy,
+    AsExpression,
+    FromSqlRow,
+    Serialize,
+    Deserialize,
+    Eq,
+    PartialEq,
 )]
 #[diesel(sql_type = sql_types::Int4)]
 pub struct Vni(pub external::Vni);

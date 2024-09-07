@@ -4,40 +4,43 @@ version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow.workspace = true
 camino.workspace = true
 chrono.workspace = true
 clap.workspace = true
+dns-server-api.workspace = true
 dns-service-client.workspace = true
 dropshot.workspace = true
+hickory-client.workspace = true
+hickory-proto.workspace = true
+hickory-resolver.workspace = true
+hickory-server.workspace = true
 http.workspace = true
 pretty-hex.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sled.workspace = true
-slog.workspace = true
-slog-term.workspace = true
 slog-async.workspace = true
 slog-envlogger.workspace = true
+slog-term.workspace = true
+slog.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
 toml.workspace = true
-trust-dns-client.workspace = true
-trust-dns-proto.workspace = true
-trust-dns-resolver.workspace = true
-trust-dns-server.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
+camino-tempfile.workspace = true
 expectorate.workspace = true
 omicron-test-utils.workspace = true
 openapiv3.workspace = true
 openapi-lint.workspace = true
 serde_json.workspace = true
 subprocess.workspace = true
-tempdir.workspace = true
-trust-dns-resolver.workspace = true

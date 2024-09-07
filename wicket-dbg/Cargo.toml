@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow.workspace = true
 bytes.workspace = true
@@ -11,7 +14,6 @@ camino.workspace = true
 ciborium.workspace = true
 clap.workspace = true
 crossterm.workspace = true
-ratatui.workspace = true
 serde.workspace = true
 slog.workspace = true
 slog-async.workspace = true
@@ -21,7 +23,7 @@ tokio = { workspace = true, features = ["full"] }
 wicket.workspace = true
 
 # used only by wicket-dbg binary
-reedline = "0.23.0"
+reedline.workspace = true
 omicron-workspace-hack.workspace = true
 
 [[bin]]

@@ -1,6 +1,11 @@
-error: the following required arguments were not provided:
-  <CONFIG_FILE_PATH>
+See README.adoc for more information
 
-Usage: nexus <CONFIG_FILE_PATH>
+Usage: nexus [CONFIG_FILE_PATH]
 
-For more information, try '--help'.
+Arguments:
+  [CONFIG_FILE_PATH]  
+
+Options:
+  -h, --help  Print help
+
+nexus: CONFIG_FILE_PATH is required

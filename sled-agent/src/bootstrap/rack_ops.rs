@@ -4,15 +4,14 @@
 
 //! Internal API for rack-level bootstrap agent operations.
 
-use crate::bootstrap::http_entrypoints::RackOperationStatus;
-use crate::bootstrap::params::RackInitializeRequest;
 use crate::bootstrap::rss_handle::RssHandle;
 use crate::rack_setup::service::SetupServiceError;
-use crate::storage_manager::StorageResources;
 use bootstore::schemes::v0 as bootstore;
-use schemars::JsonSchema;
-use serde::Deserialize;
-use serde::Serialize;
+use omicron_uuid_kinds::RackInitUuid;
+use omicron_uuid_kinds::RackResetUuid;
+use sled_agent_types::rack_init::RackInitializeRequest;
+use sled_agent_types::rack_ops::{RackOperationStatus, RssStep};
+use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::mem;
 use std::net::Ipv6Addr;
@@ -20,37 +19,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use tokio::sync::oneshot;
 use tokio::sync::oneshot::error::TryRecvError;
-use uuid::Uuid;
-
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    PartialOrd,
-    Ord,
-    Serialize,
-    Deserialize,
-    JsonSchema,
-)]
-pub struct RackInitId(pub Uuid);
-
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    PartialOrd,
-    Ord,
-    Serialize,
-    Deserialize,
-    JsonSchema,
-)]
-pub struct RackResetId(pub Uuid);
+use tokio::sync::watch;
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum RssAccessError {
@@ -94,7 +63,7 @@ impl RssAccess {
         let mut status = self.status.lock().unwrap();
 
         match &mut *status {
-            RssStatus::Initializing { id, completion } => {
+            RssStatus::Initializing { id, completion, step_rx } => {
                 let id = *id;
                 // This is our only chance to notice the initialization task has
                 // panicked: if it dropped the sending half of `completion`
@@ -107,7 +76,11 @@ impl RssAccess {
                     }
                     Err(TryRecvError::Empty) => {
                         // Initialization task is still running
-                        RackOperationStatus::Initializing { id }
+                        // Update the step we are on.
+                        RackOperationStatus::Initializing {
+                            id,
+                            step: *step_rx.borrow(),
+                        }
                     }
                     Err(TryRecvError::Closed) => {
                         // Initialization task has panicked!
@@ -171,10 +144,10 @@ impl RssAccess {
         &self,
         parent_log: &Logger,
         global_zone_bootstrap_ip: Ipv6Addr,
-        storage_resources: &StorageResources,
+        storage_manager: &StorageHandle,
         bootstore_node_handle: &bootstore::NodeHandle,
         request: RackInitializeRequest,
-    ) -> Result<RackInitId, RssAccessError> {
+    ) -> Result<RackInitUuid, RssAccessError> {
         let mut status = self.status.lock().unwrap();
 
         match &*status {
@@ -202,21 +175,22 @@ impl RssAccess {
             }
             RssStatus::Uninitialized { .. } => {
                 let (completion_tx, completion) = oneshot::channel();
-                let id = RackInitId(Uuid::new_v4());
-                *status = RssStatus::Initializing { id, completion };
+                let id = RackInitUuid::new_v4();
+                let (step_tx, step_rx) = watch::channel(RssStep::Requested);
+                *status = RssStatus::Initializing { id, completion, step_rx };
                 mem::drop(status);
-
                 let parent_log = parent_log.clone();
-                let storage_resources = storage_resources.clone();
+                let storage_manager = storage_manager.clone();
                 let bootstore_node_handle = bootstore_node_handle.clone();
                 let status = Arc::clone(&self.status);
                 tokio::spawn(async move {
                     let result = rack_initialize(
                         &parent_log,
                         global_zone_bootstrap_ip,
-                        storage_resources,
+                        storage_manager,
                         bootstore_node_handle,
                         request,
+                        step_tx,
                     )
                     .await;
                     let new_status = match result {
@@ -240,7 +214,7 @@ impl RssAccess {
         &self,
         parent_log: &Logger,
         global_zone_bootstrap_ip: Ipv6Addr,
-    ) -> Result<RackResetId, RssAccessError> {
+    ) -> Result<RackResetUuid, RssAccessError> {
         let mut status = self.status.lock().unwrap();
 
         match &*status {
@@ -267,7 +241,7 @@ impl RssAccess {
             }
             RssStatus::Initialized { .. } => {
                 let (completion_tx, completion) = oneshot::channel();
-                let id = RackResetId(Uuid::new_v4());
+                let id = RackResetUuid::new_v4();
                 *status = RssStatus::Resetting { id, completion };
                 mem::drop(status);
 
@@ -302,56 +276,61 @@ enum RssStatus {
         // We can either be uninitialized on startup (in which case `reset_id`
         // is None) or because a reset has completed (in which case `reset_id`
         // is Some).
-        reset_id: Option<RackResetId>,
+        reset_id: Option<RackResetUuid>,
     },
     Initialized {
         // We can either be initialized on startup (in which case `id`
         // is None) or because initialization has completed (in which case `id`
         // is Some).
-        id: Option<RackInitId>,
+        id: Option<RackInitUuid>,
     },
 
     // Tranistory states (which we may be in for a long time, even on human time
     // scales, but should eventually leave).
     Initializing {
-        id: RackInitId,
+        id: RackInitUuid,
         completion: oneshot::Receiver<()>,
+        // Used by the RSS task to update us with what step it is on.
+        // This holds the current RSS step.
+        step_rx: watch::Receiver<RssStep>,
     },
     Resetting {
-        id: RackResetId,
+        id: RackResetUuid,
         completion: oneshot::Receiver<()>,
     },
 
     // Terminal failure states; these require support intervention.
     InitializationFailed {
-        id: RackInitId,
+        id: RackInitUuid,
         err: SetupServiceError,
     },
     InitializationPanicked {
-        id: RackInitId,
+        id: RackInitUuid,
     },
     ResetFailed {
-        id: RackResetId,
+        id: RackResetUuid,
         err: SetupServiceError,
     },
     ResetPanicked {
-        id: RackResetId,
+        id: RackResetUuid,
     },
 }
 
 async fn rack_initialize(
     parent_log: &Logger,
     global_zone_bootstrap_ip: Ipv6Addr,
-    storage_resources: StorageResources,
+    storage_manager: StorageHandle,
     bootstore_node_handle: bootstore::NodeHandle,
     request: RackInitializeRequest,
+    step_tx: watch::Sender<RssStep>,
 ) -> Result<(), SetupServiceError> {
     RssHandle::run_rss(
         parent_log,
         request,
         global_zone_bootstrap_ip,
-        storage_resources,
+        storage_manager,
         bootstore_node_handle,
+        step_tx,
     )
     .await
 }

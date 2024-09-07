@@ -4,8 +4,11 @@ version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 
+[lints]
+workspace = true
+
 [dependencies]
-argon2 = { version = "0.5.2", features = ["alloc", "password-hash", "rand", "std"] }
+argon2 = { version = "0.5.3", features = ["alloc", "password-hash", "rand", "std"] }
 rand.workspace = true
 thiserror.workspace = true
 schemars.workspace = true
@@ -14,8 +17,13 @@ serde_with.workspace = true
 omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
-argon2alt = { package = "rust-argon2", version = "1.0" }
+# For tests
+argon2alt = { package = "rust-argon2", version = "2.1.0" }
+# For benchmark
 criterion.workspace = true
+# For the "argon2" example
+anyhow.workspace = true
+clap.workspace = true
 
 [[bench]]
 name = "argon2"

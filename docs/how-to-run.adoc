@@ -173,7 +173,7 @@ Then install prerequisite software with the following script:
 
 [source,text]
 ----
-$ pfexec ./tools/install_prerequisites.sh
+$ ./tools/install_prerequisites.sh
 ----
 
 You need to do this step once per workspace and potentially again each time you fetch new changes.  If the script reports any PATH problems, you'll need to correct those before proceeding.
@@ -199,46 +199,40 @@ The rest of these instructions assume that you're building and running Omicron o
 The Sled Agent supports operation on both:
 
 * a Gimlet (i.e., real Oxide hardware), and
-* an ordinary PC that's been set up to look like a Gimlet using the `./tools/create_virtual_hardware.sh` script (described next).
+* an ordinary PC running illumos that's been set up to look like a Gimlet using `cargo xtask virtual-hardware create` (described next).
 
 This script also sets up a "softnpu" zone to implement Boundary Services.  SoftNPU simulates the Tofino device that's used in real systems.  Just like Tofino, it can implement sled-to-sled networking, but that's beyond the scope of this doc.
 
-If you're running on a PC and using either of the networking configurations mentioned above, you can usually just run this script with a few environment vaiables set. These environment variables tell SoftNPU about your local network.  You will need the gateway for your network as well as the whole range of IPs that you've carved out for the Oxide system (see <<_external_networking>> above):
+If you're running on a PC and using either of the networking configurations mentioned above, you can usually just run this script with a few argumnets set. These arguments tell SoftNPU about your local network.  You will need the gateway for your network as well as the whole range of IPs that you've carved out for the Oxide system (see <<_external_networking>> above):
 
 [source,bash]
 ----
-export GATEWAY_IP=192.168.1.199     # The gateway IP address for your local network (see above)
-export PXA_START=192.168.1.20       # The first IP address your Oxide cluster can use (see above)
-export PXA_END=192.168.1.40         # The last IP address your Oxide cluster can use (see above)
+cargo xtask virtual-hardware create
+    --gateway-ip 192.168.1.199     # The gateway IP address for your local network (see above)
+    --pxa-start 192.168.1.20       # The first IP address your Oxide cluster can use (see above)
+    --pxa-end 192.168.1.40         # The last IP address your Oxide cluster can use (see above)
 ----
 
-If you're using the fake sled-local external network mentioned above, then you'll need to set PHYSICAL_LINK:
+If you're using the fake sled-local external network mentioned above, then you'll need to set `--physical-link`:
 
 [source,bash]
 ----
-export PHYSICAL_LINK=fake_external_stub0 	# The etherstub for the fake external network
+    --physical-link fake_external_stub0    # The etherstub for the fake external network
 ----
 
 If you're using an existing external network, you likely don't need to specify anything here because the script will choose one.  You can specify a particular one if you want, though:
 
 [source,bash]
 ----
-export PHYSICAL_LINK=igb0           # The physical link for your external network.
+    --physical-link igb0           # The physical link for your external network.
 ----
 
-Having set those variables, you're ready to run:
+If you're running on a bench Gimlet, you may not need (or want) most of what `cargo xtask virtual-hardware create` does, but you do still need SoftNPU. You can tweak what resources are created with the `--scope` flag.
 
-[source,bash]
-----
-$ pfexec ./tools/create_virtual_hardware.sh
-----
-
-If you're running on a Gimlet, you don't need (or want) most of what `create_virtual_hardware.sh` does, but you do still need SoftNPU.  You'll have to look at the script and run that part by hand.
-
-Later, you can clean up the resources created by `create_virtual_hardware.sh` with:
+Later, you can clean up the resources created by `cargo xtask virtual-hardware create` with:
 
 ----
-$ pfexec ./tools/destroy_virtual_hardware.sh
+$ cargo xtask virtual-hardware destroy
 ----
 
 If you've done all this before and Omicron is still running, these resources will be in use and this script will fail.  Uninstall Omicron (see below) before running this script.
@@ -250,7 +244,7 @@ You can skip this step.  In that case, the externally-facing services (API and c
 You can generate a self-signed TLS certificate chain with:
 
 ----
-$ cargo run --bin=omicron-dev -- cert-create ./smf/sled-agent/$MACHINE/initial-tls- '*.sys.oxide.test'
+$ cargo xtask cert-dev create ./smf/sled-agent/$MACHINE/initial-tls- '*.sys.oxide.test'
 ----
 
 === Rack setup configuration
@@ -266,26 +260,52 @@ last = "192.168.1.29"
 
 This is a range of IP addresses on your external network that Omicron can assign to externally-facing services (like DNS and the API).  You'll need to change these if you've picked different addresses for your external network.  See <<_external_networking>> above for more on this.
 
+You will also need to update route information if your `$GATEWAY_IP` differs from the default.
+The below example demonstrates a single static gateway route; in-depth explanations for testing with BGP can be found https://docs.oxide.computer/guides/system/network-preparations#_rack_switch_configuration_with_bgp[in the Network Preparations guide] and https://docs.oxide.computer/guides/operator/configuring-bgp[the Configuring BGP guide]:
+
 [source,toml]
 ----
 # Configuration to bring up boundary services and make Nexus reachable from the
 # outside.  This block assumes that you're following option (2) above: putting
 # your Oxide system on an existing network that you control.
 [rack_network_config]
-# The gateway for the external network
-gateway_ip = "192.168.1.199"
+# An internal-only IPv6 address block which contains AZ-wide services.
+# This does not need to be changed.
+rack_subnet = "fd00:1122:3344:0100::/56"
 # A range of IP addresses used by Boundary Services on the network.  In a real
 # system, these would be addresses of the uplink ports on the Sidecar.  With
 # softnpu, only one address is used.
 infra_ip_first = "192.168.1.30"
 infra_ip_last = "192.168.1.30"
-# Name of the port.  This should always be "qsfp0" when using softnpu.
-uplink_port = "qsfp0"
-uplink_port_speed = "40G"
-uplink_port_fec="none"
+
+# Configurations for BGP routers to run on the scrimlets.
+# This array can typically be safely left empty for home/local use,
+# otherwise this is a list of { asn: u32, originate: ["<v4 network>"] }
+# structs which will be be inserted when Nexus is started by sled-agent.
+# See the 'Network Preparations' guide linked above.
+bgp = []
+
+[[rack_network_config.ports]]
+# Routes associated with this port.
+# NOTE: The below `nexthop` should be set to $GATEWAY_IP for your configuration
+routes = [{nexthop = "192.168.1.199", destination = "0.0.0.0/0"}]
+# Addresses associated with this port.
 # For softnpu, an address within the "infra" block above that will be used for
 # the softnpu uplink port.  You can just pick the first address in that pool.
-uplink_ip = "192.168.1.30"
+addresses = [{address = "192.168.1.30/24"}]
+# Name of the uplink port.  This should always be "qsfp0" when using softnpu.
+port = "qsfp0"
+# The speed of this port.
+uplink_port_speed = "40G"
+# The forward error correction mode for this port.
+uplink_port_fec="none"
+# Switch to use for the uplink. For single-rack deployments this can be
+# "switch0" (upper slot) or "switch1" (lower slot). For single-node softnpu
+# and dendrite stub environments, use "switch0"
+switch = "switch0"
+# Neighbors we expect to peer with over BGP on this port.
+# see: common/src/api/internal/shared.rs – BgpPeerConfig
+bgp_peers = []
 ----
 
 In some configurations (not the one described here), it may be necessary to update `smf/sled-agent/$MACHINE/config.toml`:
@@ -390,9 +410,9 @@ $ pfexec ./target/release/omicron-package install
 
 [WARNING]
 ====
-**Do not use `pfexec cargo run` directly**; it will cause files in `~/.cargo` and `target/` to be owned by root, which will cause problems down the road.
+**Do not use `pfexec cargo run` directly**; it will cause files in `~/.cargo`, `out/`, and `target/` to be owned by root, which will cause problems down the road.
 
-If you've done this already, and you wish to recover, run from the root of this repository `pfexec chown -R $USER:$(id -ng $USER) target ${CARGO_HOME:-~/.cargo}`.
+If you've done this already, and you wish to recover, run from the root of this repository `pfexec chown -R $USER:$(id -ng $USER) out target ${CARGO_HOME:-~/.cargo}`.
 ====
 
 This command installs an SMF service called `svc:/oxide/sled-agent:default`, which itself starts the other required services.  This will take a few minutes.  You can watch the progress by looking at the Sled Agent log:
@@ -429,14 +449,16 @@ This won't be in public DNS, though.  You'd need to be using the deployed system
 [source,console]
 ----
 $ dig recovery.sys.oxide.test @192.168.1.20 +short
-192.168.1.21
+192.168.1.22
+192.168.1.23
+192.168.1.24
 ----
 
-Where did 192.168.1.20 come from?  That's the external address of the external
-DNS server.  We knew that because it's listed in the `external_dns_ips` entry of
+Where did 192.168.1.20 come from?  That's an external address of the external
+DNS server.  We knew that because it's listed in the `external_dns_ips` array in
 the `config-rss.toml` file we're using.
 
-Having looked this up, the easiest thing will be to use `http://192.168.1.21` for your URL (replacing with `https` if you used a certificate, and replacing that IP if needed).  If you've set up networking right, you should be able to reach this from your web browser.  You may have to instruct the browser to accept a self-signed TLS certificate.  See also <<connecting-securely-with-tls-using-the-cli>>.
+Having looked this up, the easiest thing will be to use `http://192.168.1.22` for your URL (replacing with `https` if you used a certificate, and replacing that IP if needed).  If you've set up networking right, you should be able to reach this from your web browser.  You may have to instruct the browser to accept a self-signed TLS certificate.  See also <<connecting-securely-with-tls-using-the-cli>>.
 
 === Setting up an SSH tunnel for console access
 
@@ -465,48 +487,102 @@ via something like: `127.0.0.1:1234`, using the port from the `ssh` command.
 
 === Using the CLI
 
-Follow the instructions to set up the https://github.com/oxidecomputer/oxide.rs[Oxide CLI].  See the previous section to find the URL for the API.  Then you can log in with:
+Follow the instructions to set up the https://github.com/oxidecomputer/oxide.rs[Oxide CLI]. See the previous section to find the URL for the API. Then you can start the login flow with:
 
 [source,console]
 ----
-oxide auth login --host http://192.168.1.21
+$ oxide auth login --host http://192.168.1.22
+
+Opened this URL in your browser:
+  http://192.168.1.22/device/verify
+
+Enter the code: CXKX-KPBK
+----
+
+Assuming you haven't already logged in, this page will bring you to the recovery silo login. The username and password are defined in `config-rss.toml` and default to:
+
+```
+username: recovery
+password: oxide
+```
+
+Once logged in, enter the 8-character code to complete the login flow. In a few moments the CLI should show you're logged in.
+
+[NOTE]
+====
+If you're using an SSH tunnel, you will either need to change the `device/verify` URL (if running the CLI on the same host as the control plane) or the `--host` URL (if running the CLI on a different host) to point to your tunnel. In the previous section's example, the URL is `http://127.0.0.1:1234`.
+====
+
+=== Configure quotas for your silo
+
+Setting resource quotas is required before you can begin uploading images, provisioning instances, etc.
+In this example we'll update the recovery silo so we can provision instances directly from it:
+
+[source, console]
+----
+$ oxide silo quotas update \
+    --silo fa12b74d-30f8-4d5a-bc0e-4d229f13c6e5 \
+    --cpus 9999999999 \
+    --memory 999999999999999999 \
+    --storage 999999999999999999
+
+# example response
+{
+  "cpus": 9999999999,
+  "memory": 999999999999999999,
+  "silo_id": "fa12b74d-30f8-4d5a-bc0e-4d229f13c6e5",
+  "storage": 999999999999999999
+}
 ----
 
 === Create an IP pool
 
 An IP pool is needed to provide external connectivity to Instances.  The addresses you use here should be addresses you've reserved from the external network (see <<_external_networking>>).
 
+Here we will first create an ip pool for the recovery silo:
 [source,console]
 ----
-$ oxide ip-pool range add --pool default --first 192.168.1.31 --last 192.168.1.40
-success
-IpPoolRange {
-    id: 4a61e65a-d96d-4c56-9cfd-dc1e44d9e99b,
-    ip_pool_id: 1b1289a7-cefe-4a7e-a8c9-d93330846301,
-    range: V4(
-        Ipv4Range {
-            first: 192.168.1.31,
-            last: 192.168.1.40,
-        },
-    ),
-    time_created: 2023-08-02T16:31:43.679785Z,
+$ oxide ip-pool create --name "default" --description "default ip-pool"
+
+# example response
+{
+  "description": "default ip-pool",
+  "id": "1c3dfa5c-7b00-46ff-987a-4e59e512b250",
+  "name": "default",
+  "time_created": "2024-01-16T22:51:54.679751Z",
+  "time_modified": "2024-01-16T22:51:54.679751Z"
 }
 ----
 
-With SoftNPU you will generally also need to configure Proxy ARP.  Below, `IP_POOL_START` and `IP_POOL_END` are the first and last addresses you used in the previous command:
+Now we will associate (link) the pool with the recovery silo.
+[source,console]
+----
+$ oxide ip-pool silo link --pool default --is-default true --silo recovery
+
+# example response
+{
+  "ip_pool_id": "1c3dfa5c-7b00-46ff-987a-4e59e512b250",
+  "is_default": true,
+  "silo_id": "5c0aca09-d7ee-4be6-b7b1-060655659f74"
+}
+----
+
+Now we will add an address range to the recovery silo:
 
 [source,console]
 ----
-# dladm won't return leading zeroes but `scadm` expects them
-$ SOFTNPU_MAC=$(dladm show-vnic sc0_1 -p -o macaddress | gsed 's/\b\(\w\)\b/0\1/g')
-$ pfexec zlogin sidecar_softnpu /softnpu/scadm \
-  --server /softnpu/server \
-  --client /softnpu/client \
-  standalone \
-  add-proxy-arp \
-  $IP_POOL_START \
-  $IP_POOL_END \
-  $SOFTNPU_MAC
+oxide ip-pool range add --pool default --first $IP_POOL_START --last $IP_POOL_END
+
+# example response
+{
+  "id": "6209516e-2b38-4cbd-bff4-688ffa39d50b",
+  "ip_pool_id": "1c3dfa5c-7b00-46ff-987a-4e59e512b250",
+  "range": {
+    "first": "192.168.1.35",
+    "last": "192.168.1.40"
+  },
+  "time_created": "2024-01-16T22:53:43.179726Z"
+}
 ----
 
 === Create a Project and Image
@@ -624,7 +700,7 @@ Once all the Omicron services are uninstalled, you can also remove the previousl
 
 [source,console]
 ----
-$ pfexec ./tools/destroy_virtual_hardware.sh
+$ cargo xtask virtual-hardware destroy
 ----
 
 == More information
@@ -635,12 +711,12 @@ If you provided TLS certificates during setup, you can connect securely to the A
 
 [source,console]
 ----
-$ curl -i --resolve recovery.sys.oxide.test:443:192.168.1.21 --cacert ./smf/sled-agent/$MACHINE/initial-tls-key.pem https://recovery.sys.oxide.test
+$ curl -i --resolve recovery.sys.oxide.test:443:192.168.1.22 --cacert ./smf/sled-agent/$MACHINE/initial-tls-key.pem https://recovery.sys.oxide.test
 ----
 
 [source,console]
 ----
-$ oxide --resolve recovery.sys.oxide.test:443:192.168.1.21 --cacert ./smf/sled-agent/$MACHINE/initial-tls-key.pem auth login --host https://recovery.sys.oxide.test
+$ oxide --resolve recovery.sys.oxide.test:443:192.168.1.22 --cacert ./smf/sled-agent/$MACHINE/initial-tls-key.pem auth login --host https://recovery.sys.oxide.test
 ----
 
 === Switch Zone
@@ -691,7 +767,10 @@ The components of Omicron are deployed into separate zones that act as separate 
 | Crucible Downstairs 3      | `[fd00:1122:3344:0101::9]:32345`
 | Internal DNS Service       | `[fd00:1122:3344:0001::1]:5353`
 | External DNS               | `192.168.1.20:53`
-| Nexus: External API        | `192.168.1.21:80`
+| External DNS               | `192.168.1.21:53`
+| Nexus: External API        | `192.168.1.22:80`
+| Nexus: External API        | `192.168.1.23:80`
+| Nexus: External API        | `192.168.1.24:80`
 |===================================================================================================
 
 Note that Sled Agent runs in the global zone and is the one responsible for bringing up all the other other services and allocating them with VNICs and IPv6 addresses.

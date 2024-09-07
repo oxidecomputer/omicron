@@ -11,6 +11,11 @@
   <service_fmri value='svc:/milestone/multi-user:default' />
   </dependency>
 
+  <dependency name='zone_network_setup' grouping='require_all' restart_on='none'
+    type='service'>
+  <service_fmri value='svc:/oxide/zone-network-setup:default' />
+  </dependency>
+
   <exec_method type='method' name='start'
     exec='/opt/oxide/lib/svc/manifest/cockroachdb.sh'
     timeout_seconds='0'>
@@ -23,10 +28,7 @@
   <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
 
   <property_group name='config' type='application'>
-    <propval name='datalink' type='astring' value='unknown' />
-    <propval name='gateway' type='astring' value='unknown' />
     <propval name='listen_addr' type='astring' value='unknown' />
-    <propval name='listen_port' type='astring' value='unknown' />
     <propval name='store' type='astring' value='unknown' />
   </property_group>
 

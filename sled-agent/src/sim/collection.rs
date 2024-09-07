@@ -217,6 +217,16 @@ impl<S: Simulatable + 'static> SimCollection<S> {
         }
     }
 
+    /// Forcibly removes the object `id` from the collection without simulating
+    /// any further state changes for it.
+    pub async fn sim_force_remove(&self, id: Uuid) {
+        let mut objects = self.objects.lock().await;
+        let object = objects.remove(&id).unwrap();
+        if let Some(mut tx) = object.channel_tx {
+            tx.close_channel();
+        }
+    }
+
     /// Complete a desired asynchronous state transition for object `id`.
     /// This is invoked either by `sim_step()` (if the simulation mode is
     /// `SimMode::Auto`) or `instance_finish_transition` (if the simulation mode
@@ -354,35 +364,6 @@ impl<S: Simulatable + 'static> SimCollection<S> {
     pub async fn contains_key(self: &Arc<Self>, id: &Uuid) -> bool {
         self.objects.lock().await.contains_key(id)
     }
-
-    /// Iterates over all of the existing objects in the collection and, for any
-    /// that meet `condition`, asks to transition them into the supplied target
-    /// state.
-    ///
-    /// If any such transition fails, this routine short-circuits and does not
-    /// attempt to transition any other objects.
-    //
-    // TODO: It's likely more idiomatic to have an `iter_mut` routine that
-    // returns a struct that impls Iterator and yields &mut S references. The
-    // tricky bit is that the struct must hold the objects lock during the
-    // iteration. Figure out if there's a better way to arrange all this.
-    pub async fn sim_ensure_for_each_where<C>(
-        self: &Arc<Self>,
-        condition: C,
-        target: &S::RequestedState,
-    ) -> Result<(), Error>
-    where
-        C: Fn(&S) -> bool,
-    {
-        let mut objects = self.objects.lock().await;
-        for o in objects.values_mut() {
-            if condition(&o.object) {
-                o.transition(target.clone())?;
-            }
-        }
-
-        Ok(())
-    }
 }
 
 impl<S: Simulatable + Clone + 'static> SimCollection<S> {
@@ -400,7 +381,6 @@ impl<S: Simulatable + Clone + 'static> SimCollection<S> {
 
 #[cfg(test)]
 mod test {
-    use crate::params::{DiskStateRequested, InstanceStateRequested};
     use crate::sim::collection::SimObject;
     use crate::sim::disk::SimDisk;
     use crate::sim::instance::SimInstance;
@@ -411,37 +391,25 @@ mod test {
     use omicron_common::api::external::DiskState;
     use omicron_common::api::external::Error;
     use omicron_common::api::external::Generation;
-    use omicron_common::api::external::InstanceState;
     use omicron_common::api::internal::nexus::DiskRuntimeState;
-    use omicron_common::api::internal::nexus::InstanceRuntimeState;
-    use omicron_common::api::internal::nexus::SledInstanceState;
+    use omicron_common::api::internal::nexus::SledVmmState;
     use omicron_common::api::internal::nexus::VmmRuntimeState;
+    use omicron_common::api::internal::nexus::VmmState;
     use omicron_test_utils::dev::test_setup_log;
-    use uuid::Uuid;
+    use sled_agent_types::disk::DiskStateRequested;
+    use sled_agent_types::instance::VmmStateRequested;
 
     fn make_instance(
         logctx: &LogContext,
     ) -> (SimObject<SimInstance>, Receiver<()>) {
-        let propolis_id = Uuid::new_v4();
-        let instance_vmm = InstanceRuntimeState {
-            propolis_id: Some(propolis_id),
-            dst_propolis_id: None,
-            migration_id: None,
-            gen: Generation::new(),
-            time_updated: Utc::now(),
-        };
-
         let vmm_state = VmmRuntimeState {
-            state: InstanceState::Starting,
+            state: VmmState::Starting,
             gen: Generation::new(),
             time_updated: Utc::now(),
         };
 
-        let state = SledInstanceState {
-            instance_state: instance_vmm,
-            vmm_state,
-            propolis_id,
-        };
+        let state =
+            SledVmmState { vmm_state, migration_in: None, migration_out: None };
 
         SimObject::new_simulated_auto(&state, logctx.log.new(o!()))
     }
@@ -468,7 +436,7 @@ mod test {
         let r1 = instance.object.current();
 
         info!(logctx.log, "new instance"; "state" => ?r1);
-        assert_eq!(r1.vmm_state.state, InstanceState::Starting);
+        assert_eq!(r1.vmm_state.state, VmmState::Starting);
         assert_eq!(r1.vmm_state.gen, Generation::new());
 
         // There's no asynchronous transition going on yet so a
@@ -485,20 +453,13 @@ mod test {
         // Stopping an instance that was never started synchronously destroys
         // its VMM.
         let rprev = r1;
-        let dropped =
-            instance.transition(InstanceStateRequested::Stopped).unwrap();
+        let dropped = instance.transition(VmmStateRequested::Stopped).unwrap();
         assert!(dropped.is_none());
         assert!(instance.object.desired().is_none());
         let rnext = instance.object.current();
-        assert!(rnext.instance_state.gen > rprev.instance_state.gen);
         assert!(rnext.vmm_state.gen > rprev.vmm_state.gen);
-        assert!(
-            rnext.instance_state.time_updated
-                >= rprev.instance_state.time_updated
-        );
         assert!(rnext.vmm_state.time_updated >= rprev.vmm_state.time_updated);
-        assert!(rnext.instance_state.propolis_id.is_none());
-        assert_eq!(rnext.vmm_state.state, InstanceState::Destroyed);
+        assert_eq!(rnext.vmm_state.state, VmmState::Destroyed);
         assert!(rx.try_next().is_err());
 
         logctx.cleanup_successful();
@@ -514,7 +475,7 @@ mod test {
         let r1 = instance.object.current();
 
         info!(logctx.log, "new instance"; "state" => ?r1);
-        assert_eq!(r1.vmm_state.state, InstanceState::Starting);
+        assert_eq!(r1.vmm_state.state, VmmState::Starting);
         assert_eq!(r1.vmm_state.gen, Generation::new());
 
         // There's no asynchronous transition going on yet so a
@@ -532,8 +493,7 @@ mod test {
         // simulated instance's state, but it does queue up a transition.
         let mut rprev = r1;
         assert!(rx.try_next().is_err());
-        let dropped =
-            instance.transition(InstanceStateRequested::Running).unwrap();
+        let dropped = instance.transition(VmmStateRequested::Running).unwrap();
         assert!(dropped.is_none());
         assert!(instance.object.desired().is_some());
         assert!(rx.try_next().is_err());
@@ -543,7 +503,7 @@ mod test {
         let rnext = instance.object.current();
         assert_eq!(rnext.vmm_state.gen, rprev.vmm_state.gen);
         assert_eq!(rnext.vmm_state.time_updated, rprev.vmm_state.time_updated);
-        assert_eq!(rnext.vmm_state.state, InstanceState::Starting);
+        assert_eq!(rnext.vmm_state.state, VmmState::Starting);
         rprev = rnext;
 
         // Now poke the instance. It should transition to Running.
@@ -553,8 +513,8 @@ mod test {
         assert!(rnext.vmm_state.time_updated >= rprev.vmm_state.time_updated);
         assert!(instance.object.desired().is_none());
         assert!(rx.try_next().is_err());
-        assert_eq!(rprev.vmm_state.state, InstanceState::Starting);
-        assert_eq!(rnext.vmm_state.state, InstanceState::Running);
+        assert_eq!(rprev.vmm_state.state, VmmState::Starting);
+        assert_eq!(rnext.vmm_state.state, VmmState::Running);
         assert!(rnext.vmm_state.gen > rprev.vmm_state.gen);
         rprev = rnext;
 
@@ -565,8 +525,7 @@ mod test {
 
         // If we transition again to "Running", the process should complete
         // immediately.
-        let dropped =
-            instance.transition(InstanceStateRequested::Running).unwrap();
+        let dropped = instance.transition(VmmStateRequested::Running).unwrap();
         assert!(dropped.is_none());
         assert!(instance.object.desired().is_none());
         assert!(rx.try_next().is_err());
@@ -579,14 +538,13 @@ mod test {
         // If we go back to any stopped state, we go through the async process
         // again.
         assert!(rx.try_next().is_err());
-        let dropped =
-            instance.transition(InstanceStateRequested::Stopped).unwrap();
+        let dropped = instance.transition(VmmStateRequested::Stopped).unwrap();
         assert!(dropped.is_none());
         assert!(instance.object.desired().is_some());
         let rnext = instance.object.current();
         assert!(rnext.vmm_state.gen > rprev.vmm_state.gen);
         assert!(rnext.vmm_state.time_updated >= rprev.vmm_state.time_updated);
-        assert_eq!(rnext.vmm_state.state, InstanceState::Stopping);
+        assert_eq!(rnext.vmm_state.state, VmmState::Stopping);
         rprev = rnext;
 
         // Propolis publishes its own transition to Stopping before it publishes
@@ -596,8 +554,8 @@ mod test {
         assert!(rnext.vmm_state.gen > rprev.vmm_state.gen);
         assert!(rnext.vmm_state.time_updated >= rprev.vmm_state.time_updated);
         assert!(instance.object.desired().is_some());
-        assert_eq!(rprev.vmm_state.state, InstanceState::Stopping);
-        assert_eq!(rnext.vmm_state.state, InstanceState::Stopping);
+        assert_eq!(rprev.vmm_state.state, VmmState::Stopping);
+        assert_eq!(rnext.vmm_state.state, VmmState::Stopping);
         rprev = rnext;
 
         // The Stopping-to-Stopped transition is masked from external viewers of
@@ -608,8 +566,8 @@ mod test {
         assert!(rnext.vmm_state.gen > rprev.vmm_state.gen);
         assert!(rnext.vmm_state.time_updated >= rprev.vmm_state.time_updated);
         assert!(instance.object.desired().is_some());
-        assert_eq!(rprev.vmm_state.state, InstanceState::Stopping);
-        assert_eq!(rnext.vmm_state.state, InstanceState::Stopping);
+        assert_eq!(rprev.vmm_state.state, VmmState::Stopping);
+        assert_eq!(rnext.vmm_state.state, VmmState::Stopping);
         rprev = rnext;
 
         // ...and Stopped (internally) goes to Destroyed. This transition is
@@ -619,9 +577,8 @@ mod test {
         let rnext = instance.object.current();
         assert!(rnext.vmm_state.gen > rprev.vmm_state.gen);
         assert!(rnext.vmm_state.time_updated >= rprev.vmm_state.time_updated);
-        assert_eq!(rprev.vmm_state.state, InstanceState::Stopping);
-        assert_eq!(rnext.vmm_state.state, InstanceState::Destroyed);
-        assert!(rnext.instance_state.gen > rprev.instance_state.gen);
+        assert_eq!(rprev.vmm_state.state, VmmState::Stopping);
+        assert_eq!(rnext.vmm_state.state, VmmState::Destroyed);
         logctx.cleanup_successful();
     }
 
@@ -635,10 +592,10 @@ mod test {
         let r1 = instance.object.current();
 
         info!(logctx.log, "new instance"; "state" => ?r1);
-        assert_eq!(r1.vmm_state.state, InstanceState::Starting);
+        assert_eq!(r1.vmm_state.state, VmmState::Starting);
         assert_eq!(r1.vmm_state.gen, Generation::new());
         assert!(instance
-            .transition(InstanceStateRequested::Running)
+            .transition(VmmStateRequested::Running)
             .unwrap()
             .is_none());
         instance.transition_finish();
@@ -654,13 +611,13 @@ mod test {
         // Now reboot the instance. This is dispatched to Propolis, which will
         // move to the Rebooting state and then back to Running.
         assert!(instance
-            .transition(InstanceStateRequested::Reboot)
+            .transition(VmmStateRequested::Reboot)
             .unwrap()
             .is_none());
         let (rprev, rnext) = (rnext, instance.object.current());
         assert!(rnext.vmm_state.gen > rprev.vmm_state.gen);
         assert!(rnext.vmm_state.time_updated > rprev.vmm_state.time_updated);
-        assert_eq!(rnext.vmm_state.state, InstanceState::Rebooting);
+        assert_eq!(rnext.vmm_state.state, VmmState::Rebooting);
         instance.transition_finish();
         let (rprev, rnext) = (rnext, instance.object.current());
 
@@ -671,7 +628,7 @@ mod test {
 
         assert!(rnext.vmm_state.gen > rprev.vmm_state.gen);
         assert!(rnext.vmm_state.time_updated > rprev.vmm_state.time_updated);
-        assert_eq!(rnext.vmm_state.state, InstanceState::Rebooting);
+        assert_eq!(rnext.vmm_state.state, VmmState::Rebooting);
         assert!(instance.object.desired().is_some());
         instance.transition_finish();
         let (rprev, rnext) = (rnext, instance.object.current());
@@ -683,7 +640,7 @@ mod test {
 
         assert!(rnext.vmm_state.gen > rprev.vmm_state.gen);
         assert!(rnext.vmm_state.time_updated > rprev.vmm_state.time_updated);
-        assert_eq!(rnext.vmm_state.state, InstanceState::Running);
+        assert_eq!(rnext.vmm_state.state, VmmState::Running);
         logctx.cleanup_successful();
     }
 
@@ -777,7 +734,7 @@ mod test {
         let error =
             disk.transition(DiskStateRequested::Attached(id2)).unwrap_err();
         if let Error::InvalidRequest { message } = error {
-            assert_eq!("disk is already attached", message);
+            assert_eq!("disk is already attached", message.external_message());
         } else {
             panic!("unexpected error type");
         }
@@ -829,7 +786,10 @@ mod test {
         let error =
             disk.transition(DiskStateRequested::Attached(id)).unwrap_err();
         if let Error::InvalidRequest { message } = error {
-            assert_eq!("cannot attach from detaching", message);
+            assert_eq!(
+                "cannot attach from detaching",
+                message.external_message()
+            );
         } else {
             panic!("unexpected error type");
         }

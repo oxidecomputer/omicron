@@ -10,6 +10,155 @@
     "version": "0.0.1"
   },
   "paths": {
+    "/boot-disk/{boot_disk}/os/write": {
+      "post": {
+        "summary": "Write a new host OS image to the specified boot disk",
+        "operationId": "host_os_write_start",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "boot_disk",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/M2Slot"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sha3_256_digest",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "hex string (32 bytes)"
+            }
+          },
+          {
+            "in": "query",
+            "name": "update_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/boot-disk/{boot_disk}/os/write/status": {
+      "get": {
+        "operationId": "host_os_write_status_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "boot_disk",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/M2Slot"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BootDiskOsWriteStatus"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/boot-disk/{boot_disk}/os/write/status/{update_id}": {
+      "delete": {
+        "summary": "Clear the status of a completed write of a new host OS",
+        "operationId": "host_os_write_status_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "boot_disk",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/M2Slot"
+            }
+          },
+          {
+            "in": "path",
+            "name": "update_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/bootstore/status": {
+      "get": {
+        "summary": "Get the internal state of the local bootstore node",
+        "operationId": "bootstore_status",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BootstoreStatus"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/cockroachdb": {
       "post": {
         "summary": "Initializes a CockroachDB cluster",
@@ -17,6 +166,62 @@
         "responses": {
           "204": {
             "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/datasets": {
+      "get": {
+        "summary": "Lists the datasets that this sled is configured to use",
+        "operationId": "datasets_get",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetsConfig"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "summary": "Configures datasets to be used on this sled",
+        "operationId": "datasets_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DatasetsConfig"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetsManagementResult"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -71,211 +276,17 @@
         }
       }
     },
-    "/instances/{instance_id}": {
-      "put": {
-        "operationId": "instance_register",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "instance_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/InstanceEnsureBody"
-              }
-            }
-          },
-          "required": true
-        },
+    "/inventory": {
+      "get": {
+        "summary": "Fetch basic information about this sled",
+        "operationId": "inventory",
         "responses": {
           "200": {
             "description": "successful operation",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SledInstanceState"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
-      "delete": {
-        "operationId": "instance_unregister",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "instance_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InstanceUnregisterResponse"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/instances/{instance_id}/disks/{disk_id}/snapshot": {
-      "post": {
-        "summary": "Take a snapshot of a disk that is attached to an instance",
-        "operationId": "instance_issue_disk_snapshot_request",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "disk_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "in": "path",
-            "name": "instance_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/InstanceIssueDiskSnapshotRequestBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InstanceIssueDiskSnapshotRequestResponse"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/instances/{instance_id}/migration-ids": {
-      "put": {
-        "operationId": "instance_put_migration_ids",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "instance_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/InstancePutMigrationIdsBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SledInstanceState"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/instances/{instance_id}/state": {
-      "put": {
-        "operationId": "instance_put_state",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "instance_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/InstancePutStateBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InstancePutStateResponse"
+                  "$ref": "#/components/schemas/Inventory"
                 }
               }
             }
@@ -338,14 +349,89 @@
         }
       }
     },
-    "/services": {
+    "/omicron-physical-disks": {
+      "get": {
+        "operationId": "omicron_physical_disks_get",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OmicronPhysicalDisksConfig"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
       "put": {
-        "operationId": "services_put",
+        "operationId": "omicron_physical_disks_put",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ServiceEnsureBody"
+                "$ref": "#/components/schemas/OmicronPhysicalDisksConfig"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DisksManagementResult"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/omicron-zones": {
+      "get": {
+        "operationId": "omicron_zones_get",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OmicronZonesConfig"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "operationId": "omicron_zones_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OmicronZonesConfig"
               }
             }
           },
@@ -354,6 +440,30 @@
         "responses": {
           "204": {
             "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/sled-identifiers": {
+      "get": {
+        "summary": "Fetch sled identifiers",
+        "operationId": "sled_identifiers",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SledIdentifiers"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -377,6 +487,33 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/sleds": {
+      "put": {
+        "summary": "Add a sled to a rack that was already initialized via RSS",
+        "operationId": "sled_add",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddSledRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -462,26 +599,41 @@
         }
       }
     },
-    "/v2p/{interface_id}": {
+    "/v2p": {
+      "get": {
+        "summary": "List v2p mappings present on sled",
+        "operationId": "list_v2p",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_VirtualNetworkInterfaceHost",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/VirtualNetworkInterfaceHost"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
       "put": {
         "summary": "Create a mapping from a virtual NIC to a physical host",
         "operationId": "set_v2p",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "interface_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SetVirtualNetworkInterfaceHost"
+                "$ref": "#/components/schemas/VirtualNetworkInterfaceHost"
               }
             }
           },
@@ -502,22 +654,11 @@
       "delete": {
         "summary": "Delete a mapping from a virtual NIC to a physical host",
         "operationId": "del_v2p",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "interface_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/DeleteVirtualNetworkInterfaceHost"
+                "$ref": "#/components/schemas/VirtualNetworkInterfaceHost"
               }
             }
           },
@@ -526,6 +667,277 @@
         "responses": {
           "204": {
             "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/vmms/{propolis_id}": {
+      "put": {
+        "operationId": "vmm_register",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "propolis_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstanceEnsureBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SledVmmState"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "vmm_unregister",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "propolis_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VmmUnregisterResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/vmms/{propolis_id}/disks/{disk_id}/snapshot": {
+      "post": {
+        "summary": "Take a snapshot of a disk that is attached to an instance",
+        "operationId": "vmm_issue_disk_snapshot_request",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "disk_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "propolis_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VmmIssueDiskSnapshotRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VmmIssueDiskSnapshotRequestResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/vmms/{propolis_id}/external-ip": {
+      "put": {
+        "operationId": "vmm_put_external_ip",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "propolis_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstanceExternalIpBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "vmm_delete_external_ip",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "propolis_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstanceExternalIpBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/vmms/{propolis_id}/state": {
+      "get": {
+        "operationId": "vmm_get_state",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "propolis_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SledVmmState"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "operationId": "vmm_put_state",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "propolis_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VmmPutStateBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VmmPutStateResponse"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -555,6 +967,63 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/VpcFirewallRulesEnsureBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/vpc-routes": {
+      "get": {
+        "summary": "Get the current versions of VPC routing rules.",
+        "operationId": "list_vpc_routes",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_ResolvedVpcRouteState",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ResolvedVpcRouteState"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "summary": "Update VPC routing rules.",
+        "operationId": "set_vpc_routes",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "title": "Array_of_ResolvedVpcRouteSet",
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ResolvedVpcRouteSet"
+                }
               }
             }
           },
@@ -925,19 +1394,155 @@
     }
   },
   "components": {
-    "responses": {
-      "Error": {
-        "description": "Error",
-        "content": {
-          "application/json": {
-            "schema": {
-              "$ref": "#/components/schemas/Error"
-            }
-          }
-        }
-      }
-    },
     "schemas": {
+      "AddSledRequest": {
+        "description": "A request to Add a given sled after rack initialization has occurred",
+        "type": "object",
+        "properties": {
+          "sled_id": {
+            "$ref": "#/components/schemas/BaseboardId"
+          },
+          "start_request": {
+            "$ref": "#/components/schemas/StartSledAgentRequest"
+          }
+        },
+        "required": [
+          "sled_id",
+          "start_request"
+        ]
+      },
+      "Baseboard": {
+        "description": "Describes properties that should uniquely identify a Gimlet.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "identifier": {
+                "type": "string"
+              },
+              "model": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "gimlet"
+                ]
+              }
+            },
+            "required": [
+              "identifier",
+              "model",
+              "revision",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "unknown"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "identifier": {
+                "type": "string"
+              },
+              "model": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "pc"
+                ]
+              }
+            },
+            "required": [
+              "identifier",
+              "model",
+              "type"
+            ]
+          }
+        ]
+      },
+      "BaseboardId": {
+        "description": "A representation of a Baseboard ID as used in the inventory subsystem This type is essentially the same as a `Baseboard` except it doesn't have a revision or HW type (Gimlet, PC, Unknown).",
+        "type": "object",
+        "properties": {
+          "part_number": {
+            "description": "Oxide Part Number",
+            "type": "string"
+          },
+          "serial_number": {
+            "description": "Serial number (unique for a given part number)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "part_number",
+          "serial_number"
+        ]
+      },
+      "BfdMode": {
+        "description": "BFD connection mode.",
+        "type": "string",
+        "enum": [
+          "single_hop",
+          "multi_hop"
+        ]
+      },
+      "BfdPeerConfig": {
+        "type": "object",
+        "properties": {
+          "detection_threshold": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "local": {
+            "nullable": true,
+            "type": "string",
+            "format": "ip"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/BfdMode"
+          },
+          "remote": {
+            "type": "string",
+            "format": "ip"
+          },
+          "required_rx": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "switch": {
+            "$ref": "#/components/schemas/SwitchLocation"
+          }
+        },
+        "required": [
+          "detection_threshold",
+          "mode",
+          "remote",
+          "required_rx",
+          "switch"
+        ]
+      },
       "BgpConfig": {
         "type": "object",
         "properties": {
@@ -947,12 +1552,24 @@
             "format": "uint32",
             "minimum": 0
           },
+          "checker": {
+            "nullable": true,
+            "description": "Checker to apply to incoming messages.",
+            "default": null,
+            "type": "string"
+          },
           "originate": {
             "description": "The set of prefixes for the BGP router to originate.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/Ipv4Network"
+              "$ref": "#/components/schemas/Ipv4Net"
             }
+          },
+          "shaper": {
+            "nullable": true,
+            "description": "Shaper to apply to outgoing messages.",
+            "default": null,
+            "type": "string"
           }
         },
         "required": [
@@ -968,8 +1585,110 @@
             "type": "string",
             "format": "ipv4"
           },
+          "allowed_export": {
+            "description": "Define export policy for a peer.",
+            "default": {
+              "type": "no_filtering"
+            },
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ImportExportPolicy"
+              }
+            ]
+          },
+          "allowed_import": {
+            "description": "Define import policy for a peer.",
+            "default": {
+              "type": "no_filtering"
+            },
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ImportExportPolicy"
+              }
+            ]
+          },
           "asn": {
-            "description": "The autonomous sysetm number of the router the peer belongs to.",
+            "description": "The autonomous system number of the router the peer belongs to.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "communities": {
+            "description": "Include the provided communities in updates sent to the peer.",
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0
+            }
+          },
+          "connect_retry": {
+            "nullable": true,
+            "description": "The interval in seconds between peer connection retry attempts.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "delay_open": {
+            "nullable": true,
+            "description": "How long to delay sending open messages to a peer. In seconds.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "enforce_first_as": {
+            "description": "Enforce that the first AS in paths received from this peer is the peer's AS.",
+            "default": false,
+            "type": "boolean"
+          },
+          "hold_time": {
+            "nullable": true,
+            "description": "How long to keep a session alive without a keepalive in seconds. Defaults to 6.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "idle_hold_time": {
+            "nullable": true,
+            "description": "How long to keep a peer in idle after a state machine reset in seconds.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "keepalive": {
+            "nullable": true,
+            "description": "The interval to send keepalive messages at.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "local_pref": {
+            "nullable": true,
+            "description": "Apply a local preference to routes received from this peer.",
+            "default": null,
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "md5_auth_key": {
+            "nullable": true,
+            "description": "Use the given key for TCP-MD5 authentication with the peer.",
+            "default": null,
+            "type": "string"
+          },
+          "min_ttl": {
+            "nullable": true,
+            "description": "Require messages from a peer have a minimum IP time to live field.",
+            "default": null,
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "multi_exit_discriminator": {
+            "nullable": true,
+            "description": "Apply the provided multi-exit discriminator (MED) updates sent to the peer.",
+            "default": null,
             "type": "integer",
             "format": "uint32",
             "minimum": 0
@@ -977,12 +1696,238 @@
           "port": {
             "description": "Switch port the peer is reachable on.",
             "type": "string"
+          },
+          "remote_asn": {
+            "nullable": true,
+            "description": "Require that a peer has a specified ASN.",
+            "default": null,
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "Associate a VLAN ID with a BGP peer session.",
+            "default": null,
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
           }
         },
         "required": [
           "addr",
           "asn",
           "port"
+        ]
+      },
+      "BootDiskOsWriteProgress": {
+        "description": "Current progress of an OS image being written to disk.",
+        "oneOf": [
+          {
+            "description": "The image is still being uploaded.",
+            "type": "object",
+            "properties": {
+              "bytes_received": {
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "receiving_uploaded_image"
+                ]
+              }
+            },
+            "required": [
+              "bytes_received",
+              "state"
+            ]
+          },
+          {
+            "description": "The image is being written to disk.",
+            "type": "object",
+            "properties": {
+              "bytes_written": {
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "writing_image_to_disk"
+                ]
+              }
+            },
+            "required": [
+              "bytes_written",
+              "state"
+            ]
+          },
+          {
+            "description": "The image is being read back from disk for validation.",
+            "type": "object",
+            "properties": {
+              "bytes_read": {
+                "type": "integer",
+                "format": "uint",
+                "minimum": 0
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "validating_written_image"
+                ]
+              }
+            },
+            "required": [
+              "bytes_read",
+              "state"
+            ]
+          }
+        ]
+      },
+      "BootDiskOsWriteStatus": {
+        "description": "Status of an update to a boot disk OS.",
+        "oneOf": [
+          {
+            "description": "No update has been started for this disk, or any previously-started update has completed and had its status cleared.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "no_update_started"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "description": "An update is currently running.",
+            "type": "object",
+            "properties": {
+              "progress": {
+                "$ref": "#/components/schemas/BootDiskOsWriteProgress"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "in_progress"
+                ]
+              },
+              "update_id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "progress",
+              "status",
+              "update_id"
+            ]
+          },
+          {
+            "description": "The most recent update completed successfully.",
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "update_id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "status",
+              "update_id"
+            ]
+          },
+          {
+            "description": "The most recent update failed.",
+            "type": "object",
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "failed"
+                ]
+              },
+              "update_id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "required": [
+              "message",
+              "status",
+              "update_id"
+            ]
+          }
+        ]
+      },
+      "BootstoreStatus": {
+        "type": "object",
+        "properties": {
+          "accepted_connections": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "uniqueItems": true
+          },
+          "established_connections": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EstablishedConnection"
+            }
+          },
+          "fsm_ledger_generation": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "fsm_state": {
+            "type": "string"
+          },
+          "negotiating_connections": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "uniqueItems": true
+          },
+          "network_config_ledger_generation": {
+            "nullable": true,
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "peers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "accepted_connections",
+          "established_connections",
+          "fsm_ledger_generation",
+          "fsm_state",
+          "negotiating_connections",
+          "peers"
         ]
       },
       "BundleUtilization": {
@@ -1116,7 +2061,114 @@
           }
         ]
       },
+      "CompressionAlgorithm": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "on"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "off"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "gzip"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "level": {
+                "$ref": "#/components/schemas/GzipLevel"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "gzip_n"
+                ]
+              }
+            },
+            "required": [
+              "level",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "lz4"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "lzjb"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "zle"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
       "CrucibleOpts": {
+        "description": "CrucibleOpts\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"id\", \"lossy\", \"read_only\", \"target\" ], \"properties\": { \"cert_pem\": { \"type\": [ \"string\", \"null\" ] }, \"control\": { \"type\": [ \"string\", \"null\" ] }, \"flush_timeout\": { \"type\": [ \"number\", \"null\" ], \"format\": \"float\" }, \"id\": { \"type\": \"string\", \"format\": \"uuid\" }, \"key\": { \"type\": [ \"string\", \"null\" ] }, \"key_pem\": { \"type\": [ \"string\", \"null\" ] }, \"lossy\": { \"type\": \"boolean\" }, \"read_only\": { \"type\": \"boolean\" }, \"root_cert_pem\": { \"type\": [ \"string\", \"null\" ] }, \"target\": { \"type\": \"array\", \"items\": { \"type\": \"string\" } } } } ``` </details>",
         "type": "object",
         "properties": {
           "cert_pem": {
@@ -1168,93 +2220,77 @@
           "target"
         ]
       },
-      "DatasetKind": {
-        "description": "The type of a dataset, and an auxiliary information necessary to successfully launch a zone managing the associated data.",
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "cockroach_db"
-                ]
+      "DatasetConfig": {
+        "description": "Configuration information necessary to request a single dataset",
+        "type": "object",
+        "properties": {
+          "compression": {
+            "description": "The compression mode to be used by the dataset",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CompressionAlgorithm"
               }
-            },
-            "required": [
-              "type"
             ]
           },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "crucible"
-                ]
+          "id": {
+            "description": "The UUID of the dataset being requested",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForDatasetKind"
               }
-            },
-            "required": [
-              "type"
             ]
           },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "clickhouse"
-                ]
+          "name": {
+            "description": "The dataset's name",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DatasetName"
               }
-            },
-            "required": [
-              "type"
             ]
           },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "clickhouse_keeper"
-                ]
+          "quota": {
+            "nullable": true,
+            "description": "The upper bound on the amount of storage used by this dataset",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
               }
-            },
-            "required": [
-              "type"
             ]
           },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "external_dns"
-                ]
+          "reservation": {
+            "nullable": true,
+            "description": "The lower bound on the amount of storage usable by this dataset",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
               }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "internal_dns"
-                ]
-              }
-            },
-            "required": [
-              "type"
             ]
           }
+        },
+        "required": [
+          "compression",
+          "id",
+          "name"
+        ]
+      },
+      "DatasetKind": {
+        "description": "The kind of dataset. See the `DatasetKind` enum in omicron-common for possible values.",
+        "type": "string"
+      },
+      "DatasetManagementStatus": {
+        "description": "Identifies how a single dataset management operation may have succeeded or failed.",
+        "type": "object",
+        "properties": {
+          "dataset_name": {
+            "$ref": "#/components/schemas/DatasetName"
+          },
+          "err": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "dataset_name"
         ]
       },
       "DatasetName": {
@@ -1272,48 +2308,42 @@
           "pool_name"
         ]
       },
-      "DatasetRequest": {
-        "description": "Describes a request to provision a specific dataset",
+      "DatasetsConfig": {
         "type": "object",
         "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
+          "datasets": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/DatasetConfig"
+            }
           },
-          "name": {
-            "$ref": "#/components/schemas/DatasetName"
-          },
-          "service_address": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "service_address"
-        ]
-      },
-      "DeleteVirtualNetworkInterfaceHost": {
-        "description": "The data needed to identify a virtual IP for which a sled maintains an OPTE virtual-to-physical mapping such that that mapping can be deleted.",
-        "type": "object",
-        "properties": {
-          "virtual_ip": {
-            "description": "The virtual IP whose mapping should be deleted.",
-            "type": "string",
-            "format": "ip"
-          },
-          "vni": {
-            "description": "The VNI for the network containing the virtual IP whose mapping should be deleted.",
+          "generation": {
+            "description": "generation number of this configuration\n\nThis generation number is owned by the control plane (i.e., RSS or Nexus, depending on whether RSS-to-Nexus handoff has happened).  It should not be bumped within Sled Agent.\n\nSled Agent rejects attempts to set the configuration to a generation older than the one it's currently running.\n\nNote that \"Generation::new()\", AKA, the first generation number, is reserved for \"no datasets\". This is the default configuration for a sled before any requests have been made.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/Vni"
+                "$ref": "#/components/schemas/Generation"
               }
             ]
           }
         },
         "required": [
-          "virtual_ip",
-          "vni"
+          "datasets",
+          "generation"
+        ]
+      },
+      "DatasetsManagementResult": {
+        "description": "The result from attempting to manage datasets.",
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DatasetManagementStatus"
+            }
+          }
+        },
+        "required": [
+          "status"
         ]
       },
       "DhcpConfig": {
@@ -1372,7 +2402,132 @@
           "target"
         ]
       },
+      "DiskIdentity": {
+        "description": "Uniquely identifies a disk.",
+        "type": "object",
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "serial": {
+            "type": "string"
+          },
+          "vendor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "serial",
+          "vendor"
+        ]
+      },
+      "DiskManagementError": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "not_found"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "zpool_uuid_mismatch"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "expected": {
+                    "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+                  },
+                  "observed": {
+                    "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+                  }
+                },
+                "required": [
+                  "expected",
+                  "observed"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "key_manager"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "other"
+                ]
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
+        ]
+      },
+      "DiskManagementStatus": {
+        "description": "Identifies how a single disk management operation may have succeeded or failed.",
+        "type": "object",
+        "properties": {
+          "err": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DiskManagementError"
+              }
+            ]
+          },
+          "identity": {
+            "$ref": "#/components/schemas/DiskIdentity"
+          }
+        },
+        "required": [
+          "identity"
+        ]
+      },
       "DiskRequest": {
+        "description": "DiskRequest\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"device\", \"name\", \"read_only\", \"slot\", \"volume_construction_request\" ], \"properties\": { \"device\": { \"type\": \"string\" }, \"name\": { \"type\": \"string\" }, \"read_only\": { \"type\": \"boolean\" }, \"slot\": { \"$ref\": \"#/components/schemas/Slot\" }, \"volume_construction_request\": { \"$ref\": \"#/components/schemas/VolumeConstructionRequest\" } } } ``` </details>",
         "type": "object",
         "properties": {
           "device": {
@@ -1704,6 +2859,28 @@
           "M2"
         ]
       },
+      "DiskVariant": {
+        "type": "string",
+        "enum": [
+          "U2",
+          "M2"
+        ]
+      },
+      "DisksManagementResult": {
+        "description": "The result from attempting to manage underlying disks.\n\nThis is more complex than a simple \"Error\" type because it's possible for some disks to be initialized correctly, while others can fail.\n\nThis structure provides a mechanism for callers to learn about partial failures, and handle them appropriately on a per-disk basis.",
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DiskManagementStatus"
+            }
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
       "Duration": {
         "type": "object",
         "properties": {
@@ -1724,7 +2901,7 @@
         ]
       },
       "EarlyNetworkConfig": {
-        "description": "Network configuration required to bring up the control plane\n\nThe fields in this structure are those from [`super::params::RackInitializeRequest`] necessary for use beyond RSS. This is just for the initial rack configuration and cold boot purposes. Updates come from Nexus.",
+        "description": "Network configuration required to bring up the control plane\n\nThe fields in this structure are those from [`crate::rack_init::RackInitializeRequest`] necessary for use beyond RSS. This is just for the initial rack configuration and cold boot purposes. Updates come from Nexus.",
         "type": "object",
         "properties": {
           "body": {
@@ -1762,7 +2939,7 @@
             "nullable": true,
             "allOf": [
               {
-                "$ref": "#/components/schemas/RackNetworkConfigV1"
+                "$ref": "#/components/schemas/RackNetworkConfigV2"
               }
             ]
           }
@@ -1790,10 +2967,30 @@
           "request_id"
         ]
       },
+      "EstablishedConnection": {
+        "type": "object",
+        "properties": {
+          "addr": {
+            "type": "string"
+          },
+          "baseboard": {
+            "$ref": "#/components/schemas/Baseboard"
+          }
+        },
+        "required": [
+          "addr",
+          "baseboard"
+        ]
+      },
       "Generation": {
         "description": "Generation numbers stored in the database, used for optimistic concurrency control",
         "type": "integer",
         "format": "uint64",
+        "minimum": 0
+      },
+      "GzipLevel": {
+        "type": "integer",
+        "format": "uint8",
         "minimum": 0
       },
       "HostIdentifier": {
@@ -1841,11 +3038,19 @@
         "type": "object",
         "properties": {
           "addrs": {
-            "description": "IP Address and prefix (e.g., `192.168.0.1/16`) to apply to switchport (must be in infra_ip pool)",
+            "description": "IP Address and prefix (e.g., `192.168.0.1/16`) to apply to switchport (must be in infra_ip pool).  May also include an optional VLAN ID.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/IpNetwork"
+              "$ref": "#/components/schemas/UplinkAddressConfig"
             }
+          },
+          "lldp": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LldpPortConfig"
+              }
+            ]
           },
           "port": {
             "description": "Switchport to use for external connectivity",
@@ -1855,6 +3060,55 @@
         "required": [
           "addrs",
           "port"
+        ]
+      },
+      "Hostname": {
+        "title": "An RFC-1035-compliant hostname",
+        "description": "A hostname identifies a host on a network, and is usually a dot-delimited sequence of labels, where each label contains only letters, digits, or the hyphen. See RFCs 1035 and 952 for more details.",
+        "type": "string",
+        "pattern": "^([a-zA-Z0-9]+[a-zA-Z0-9\\-]*(?<!-))(\\.[a-zA-Z0-9]+[a-zA-Z0-9\\-]*(?<!-))*$",
+        "minLength": 1,
+        "maxLength": 253
+      },
+      "ImportExportPolicy": {
+        "description": "Define policy relating to the import and export of prefixes from a BGP peer.",
+        "oneOf": [
+          {
+            "description": "Do not perform any filtering.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "no_filtering"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "allow"
+                ]
+              },
+              "value": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/IpNet"
+                }
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
         ]
       },
       "InstanceCpuCount": {
@@ -1875,6 +3129,14 @@
               }
             ]
           },
+          "instance_id": {
+            "description": "The ID of the instance for which this VMM is being created.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForInstanceKind"
+              }
+            ]
+          },
           "instance_runtime": {
             "description": "The instance runtime state for the instance being registered.",
             "allOf": [
@@ -1883,14 +3145,17 @@
               }
             ]
           },
+          "metadata": {
+            "description": "Metadata used to track instance statistics.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceMetadata"
+              }
+            ]
+          },
           "propolis_addr": {
             "description": "The address at which this VMM should serve a Propolis server API.",
             "type": "string"
-          },
-          "propolis_id": {
-            "description": "The ID of the VMM being registered. This may not be the active VMM ID in the instance runtime state (e.g. if the new VMM is going to be a migration target).",
-            "type": "string",
-            "format": "uuid"
           },
           "vmm_runtime": {
             "description": "The initial VMM runtime state for the VMM being registered.",
@@ -1903,10 +3168,54 @@
         },
         "required": [
           "hardware",
+          "instance_id",
           "instance_runtime",
+          "metadata",
           "propolis_addr",
-          "propolis_id",
           "vmm_runtime"
+        ]
+      },
+      "InstanceExternalIpBody": {
+        "description": "Used to dynamically update external IPs attached to an instance.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ephemeral"
+                ]
+              },
+              "value": {
+                "type": "string",
+                "format": "ip"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "floating"
+                ]
+              },
+              "value": {
+                "type": "string",
+                "format": "ip"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
         ]
       },
       "InstanceHardware": {
@@ -1926,18 +3235,23 @@
               "$ref": "#/components/schemas/DiskRequest"
             }
           },
-          "external_ips": {
+          "ephemeral_ip": {
+            "nullable": true,
             "description": "Zero or more external IP addresses (either floating or ephemeral), provided to an instance to allow inbound connectivity.",
-            "type": "array",
-            "items": {
-              "type": "string",
-              "format": "ip"
-            }
+            "type": "string",
+            "format": "ip"
           },
           "firewall_rules": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/VpcFirewallRule"
+              "$ref": "#/components/schemas/ResolvedVpcFirewallRule"
+            }
+          },
+          "floating_ips": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ip"
             }
           },
           "nics": {
@@ -1956,53 +3270,29 @@
         "required": [
           "dhcp_config",
           "disks",
-          "external_ips",
           "firewall_rules",
+          "floating_ips",
           "nics",
           "properties",
           "source_nat"
         ]
       },
-      "InstanceIssueDiskSnapshotRequestBody": {
+      "InstanceMetadata": {
+        "description": "Metadata used to track statistics about an instance.",
         "type": "object",
         "properties": {
-          "snapshot_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "snapshot_id"
-        ]
-      },
-      "InstanceIssueDiskSnapshotRequestResponse": {
-        "type": "object",
-        "properties": {
-          "snapshot_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "snapshot_id"
-        ]
-      },
-      "InstanceMigrationSourceParams": {
-        "description": "Instance runtime state to update for a migration.",
-        "type": "object",
-        "properties": {
-          "dst_propolis_id": {
+          "project_id": {
             "type": "string",
             "format": "uuid"
           },
-          "migration_id": {
+          "silo_id": {
             "type": "string",
             "format": "uuid"
           }
         },
         "required": [
-          "dst_propolis_id",
-          "migration_id"
+          "project_id",
+          "silo_id"
         ]
       },
       "InstanceMigrationTargetParams": {
@@ -2030,7 +3320,11 @@
         "properties": {
           "hostname": {
             "description": "RFC1035-compliant hostname for the instance.",
-            "type": "string"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Hostname"
+              }
+            ]
           },
           "memory": {
             "$ref": "#/components/schemas/ByteCount"
@@ -2045,64 +3339,6 @@
           "ncpus"
         ]
       },
-      "InstancePutMigrationIdsBody": {
-        "description": "The body of a request to set or clear the migration identifiers from a sled agent's instance state records.",
-        "type": "object",
-        "properties": {
-          "migration_params": {
-            "nullable": true,
-            "description": "The migration identifiers to set. If `None`, this operation clears the migration IDs.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/InstanceMigrationSourceParams"
-              }
-            ]
-          },
-          "old_runtime": {
-            "description": "The last instance runtime state known to this requestor. This request will succeed if either (a) the state generation in the sled agent's runtime state matches the generation in this record, or (b) the sled agent's runtime state matches what would result from applying this request to the caller's runtime state. This latter condition provides idempotency.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/InstanceRuntimeState"
-              }
-            ]
-          }
-        },
-        "required": [
-          "old_runtime"
-        ]
-      },
-      "InstancePutStateBody": {
-        "description": "The body of a request to move a previously-ensured instance into a specific runtime state.",
-        "type": "object",
-        "properties": {
-          "state": {
-            "description": "The state into which the instance should be driven.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/InstanceStateRequested"
-              }
-            ]
-          }
-        },
-        "required": [
-          "state"
-        ]
-      },
-      "InstancePutStateResponse": {
-        "description": "The response sent from a request to move an instance into a specific runtime state.",
-        "type": "object",
-        "properties": {
-          "updated_runtime": {
-            "nullable": true,
-            "description": "The current runtime state of the instance after handling the request to change its state. If the instance's state did not change, this field is `None`.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SledInstanceState"
-              }
-            ]
-          }
-        }
-      },
       "InstanceRuntimeState": {
         "description": "The dynamic runtime properties of an instance: its current VMM ID (if any), migration information (if any), and the instance state to report if there is no active VMM.",
         "type": "object",
@@ -2110,8 +3346,11 @@
           "dst_propolis_id": {
             "nullable": true,
             "description": "If a migration is active, the ID of the target VMM.",
-            "type": "string",
-            "format": "uuid"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+              }
+            ]
           },
           "gen": {
             "description": "Generation number for this state.",
@@ -2130,8 +3369,11 @@
           "propolis_id": {
             "nullable": true,
             "description": "The instance's currently active VMM ID.",
-            "type": "string",
-            "format": "uuid"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+              }
+            ]
           },
           "time_updated": {
             "description": "Timestamp for this information.",
@@ -2144,166 +3386,172 @@
           "time_updated"
         ]
       },
-      "InstanceState": {
-        "description": "Running state of an Instance (primarily: booted or stopped)\n\nThis typically reflects whether it's starting, running, stopping, or stopped, but also includes states related to the Instance's lifecycle",
-        "oneOf": [
-          {
-            "description": "The instance is being created.",
-            "type": "string",
-            "enum": [
-              "creating"
-            ]
-          },
-          {
-            "description": "The instance is currently starting up.",
-            "type": "string",
-            "enum": [
-              "starting"
-            ]
-          },
-          {
-            "description": "The instance is currently running.",
-            "type": "string",
-            "enum": [
-              "running"
-            ]
-          },
-          {
-            "description": "The instance has been requested to stop and a transition to \"Stopped\" is imminent.",
-            "type": "string",
-            "enum": [
-              "stopping"
-            ]
-          },
-          {
-            "description": "The instance is currently stopped.",
-            "type": "string",
-            "enum": [
-              "stopped"
-            ]
-          },
-          {
-            "description": "The instance is in the process of rebooting - it will remain in the \"rebooting\" state until the VM is starting once more.",
-            "type": "string",
-            "enum": [
-              "rebooting"
-            ]
-          },
-          {
-            "description": "The instance is in the process of migrating - it will remain in the \"migrating\" state until the migration process is complete and the destination propolis is ready to continue execution.",
-            "type": "string",
-            "enum": [
-              "migrating"
-            ]
-          },
-          {
-            "description": "The instance is attempting to recover from a failure.",
-            "type": "string",
-            "enum": [
-              "repairing"
-            ]
-          },
-          {
-            "description": "The instance has encountered a failure.",
-            "type": "string",
-            "enum": [
-              "failed"
-            ]
-          },
-          {
-            "description": "The instance has been deleted.",
-            "type": "string",
-            "enum": [
-              "destroyed"
-            ]
-          }
-        ]
-      },
-      "InstanceStateRequested": {
-        "description": "Requestable running state of an Instance.\n\nA subset of [`omicron_common::api::external::InstanceState`].",
-        "oneOf": [
-          {
-            "description": "Run this instance by migrating in from a previous running incarnation of the instance.",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "migration_target"
-                ]
-              },
-              "value": {
-                "$ref": "#/components/schemas/InstanceMigrationTargetParams"
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          },
-          {
-            "description": "Start the instance if it is not already running.",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "running"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "description": "Stop the instance.",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "stopped"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "description": "Immediately reset the instance, as though it had stopped and immediately began to run again.",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "reboot"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          }
-        ]
-      },
-      "InstanceUnregisterResponse": {
-        "description": "The response sent from a request to unregister an instance.",
+      "Inventory": {
+        "description": "Identity and basic status information about this sled agent",
         "type": "object",
         "properties": {
-          "updated_runtime": {
-            "nullable": true,
-            "description": "The current state of the instance after handling the request to unregister it. If the instance's state did not change, this field is `None`.",
+          "baseboard": {
+            "$ref": "#/components/schemas/Baseboard"
+          },
+          "datasets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InventoryDataset"
+            }
+          },
+          "disks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InventoryDisk"
+            }
+          },
+          "reservoir_size": {
+            "$ref": "#/components/schemas/ByteCount"
+          },
+          "sled_agent_address": {
+            "type": "string"
+          },
+          "sled_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "sled_role": {
+            "$ref": "#/components/schemas/SledRole"
+          },
+          "usable_hardware_threads": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "usable_physical_ram": {
+            "$ref": "#/components/schemas/ByteCount"
+          },
+          "zpools": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InventoryZpool"
+            }
+          }
+        },
+        "required": [
+          "baseboard",
+          "datasets",
+          "disks",
+          "reservoir_size",
+          "sled_agent_address",
+          "sled_id",
+          "sled_role",
+          "usable_hardware_threads",
+          "usable_physical_ram",
+          "zpools"
+        ]
+      },
+      "InventoryDataset": {
+        "description": "Identifies information about datasets within Oxide-managed zpools",
+        "type": "object",
+        "properties": {
+          "available": {
+            "description": "The amount of remaining space usable by the dataset (and children) assuming there is no other activity within the pool.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/SledInstanceState"
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          },
+          "compression": {
+            "description": "The compression algorithm used for this dataset, if any.",
+            "type": "string"
+          },
+          "id": {
+            "nullable": true,
+            "description": "Although datasets mandated by the control plane will have UUIDs, datasets can be created (and have been created) without UUIDs.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+              }
+            ]
+          },
+          "name": {
+            "description": "This name is the full path of the dataset.",
+            "type": "string"
+          },
+          "quota": {
+            "nullable": true,
+            "description": "The maximum amount of space usable by a dataset and all descendents.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          },
+          "reservation": {
+            "nullable": true,
+            "description": "The minimum amount of space guaranteed to a dataset and descendents.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          },
+          "used": {
+            "description": "The amount of space consumed by this dataset and descendents.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
               }
             ]
           }
-        }
+        },
+        "required": [
+          "available",
+          "compression",
+          "name",
+          "used"
+        ]
+      },
+      "InventoryDisk": {
+        "description": "Identifies information about disks which may be attached to Sleds.",
+        "type": "object",
+        "properties": {
+          "identity": {
+            "$ref": "#/components/schemas/DiskIdentity"
+          },
+          "slot": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "variant": {
+            "$ref": "#/components/schemas/DiskVariant"
+          }
+        },
+        "required": [
+          "identity",
+          "slot",
+          "variant"
+        ]
+      },
+      "InventoryZpool": {
+        "description": "Identifies information about zpools managed by the control plane",
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+          },
+          "total_size": {
+            "$ref": "#/components/schemas/ByteCount"
+          }
+        },
+        "required": [
+          "id",
+          "total_size"
+        ]
       },
       "IpNet": {
+        "x-rust-type": {
+          "crate": "oxnet",
+          "path": "oxnet::IpNet",
+          "version": "0.1.0"
+        },
         "oneOf": [
           {
             "title": "v4",
@@ -2323,47 +3571,41 @@
           }
         ]
       },
-      "IpNetwork": {
-        "oneOf": [
-          {
-            "title": "v4",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Ipv4Network"
-              }
-            ]
-          },
-          {
-            "title": "v6",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Ipv6Network"
-              }
-            ]
-          }
-        ]
-      },
       "Ipv4Net": {
         "example": "192.168.1.0/24",
         "title": "An IPv4 subnet",
-        "description": "An IPv4 subnet, including prefix and subnet mask",
+        "description": "An IPv4 subnet, including prefix and prefix length",
+        "x-rust-type": {
+          "crate": "oxnet",
+          "path": "oxnet::Ipv4Net",
+          "version": "0.1.0"
+        },
         "type": "string",
         "pattern": "^(([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])/([0-9]|1[0-9]|2[0-9]|3[0-2])$"
-      },
-      "Ipv4Network": {
-        "type": "string",
-        "pattern": "^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\/(3[0-2]|[0-2]?[0-9])$"
       },
       "Ipv6Net": {
         "example": "fd12:3456::/64",
         "title": "An IPv6 subnet",
         "description": "An IPv6 subnet, including prefix and subnet mask",
+        "x-rust-type": {
+          "crate": "oxnet",
+          "path": "oxnet::Ipv6Net",
+          "version": "0.1.0"
+        },
         "type": "string",
-        "pattern": "^([fF][dD])[0-9a-fA-F]{2}:(([0-9a-fA-F]{1,4}:){6}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,6}:)([0-9a-fA-F]{1,4})?\\/([0-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$"
+        "pattern": "^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))\\/([0-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$"
       },
-      "Ipv6Network": {
-        "type": "string",
-        "pattern": "^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\")[/](12[0-8]|1[0-1][0-9]|[0-9]?[0-9])$"
+      "Ipv6Subnet": {
+        "description": "Wraps an [`Ipv6Net`] with a compile-time prefix length.",
+        "type": "object",
+        "properties": {
+          "net": {
+            "$ref": "#/components/schemas/Ipv6Net"
+          }
+        },
+        "required": [
+          "net"
+        ]
       },
       "KnownArtifactKind": {
         "description": "Kinds of update artifacts, as used by Nexus to determine what updates are available and by sled-agent to determine how to apply an update when asked.",
@@ -2371,23 +3613,87 @@
         "enum": [
           "gimlet_sp",
           "gimlet_rot",
+          "gimlet_rot_bootloader",
           "host",
           "trampoline",
           "control_plane",
           "psc_sp",
           "psc_rot",
+          "psc_rot_bootloader",
           "switch_sp",
-          "switch_rot"
+          "switch_rot",
+          "switch_rot_bootloader"
         ]
       },
       "L4PortRange": {
         "example": "22",
         "title": "A range of IP ports",
-        "description": "An inclusive-inclusive range of IP ports. The second port may be omitted to represent a single port",
+        "description": "An inclusive-inclusive range of IP ports. The second port may be omitted to represent a single port.",
         "type": "string",
         "pattern": "^[0-9]{1,5}(-[0-9]{1,5})?$",
         "minLength": 1,
         "maxLength": 11
+      },
+      "LldpAdminStatus": {
+        "description": "To what extent should this port participate in LLDP",
+        "type": "string",
+        "enum": [
+          "enabled",
+          "disabled",
+          "rx_only",
+          "tx_only"
+        ]
+      },
+      "LldpPortConfig": {
+        "description": "Per-port LLDP configuration settings.  Only the \"status\" setting is mandatory.  All other fields have natural defaults or may be inherited from the switch.",
+        "type": "object",
+        "properties": {
+          "chassis_id": {
+            "nullable": true,
+            "description": "Chassis ID to advertise.  If this is set, it will be advertised as a LocallyAssigned ID type.  If this is not set, it will be inherited from the switch-level settings.",
+            "type": "string"
+          },
+          "management_addrs": {
+            "nullable": true,
+            "description": "Management IP addresses to advertise.  If this is not set, it will be inherited from the switch-level settings.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ip"
+            }
+          },
+          "port_description": {
+            "nullable": true,
+            "description": "Port description to advertise.  If this is not set, no description will be advertised.",
+            "type": "string"
+          },
+          "port_id": {
+            "nullable": true,
+            "description": "Port ID to advertise.  If this is set, it will be advertised as a LocallyAssigned ID type.  If this is not set, it will be set to the port name. e.g., qsfp0/0.",
+            "type": "string"
+          },
+          "status": {
+            "description": "To what extent should this port participate in LLDP",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LldpAdminStatus"
+              }
+            ]
+          },
+          "system_description": {
+            "nullable": true,
+            "description": "System description to advertise.  If this is not set, it will be inherited from the switch-level settings.",
+            "type": "string"
+          },
+          "system_name": {
+            "nullable": true,
+            "description": "System name to advertise.  If this is not set, it will be inherited from the switch-level settings.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ]
       },
       "MacAddr": {
         "example": "ff:ff:ff:ff:ff:ff",
@@ -2398,11 +3704,71 @@
         "minLength": 5,
         "maxLength": 17
       },
+      "MigrationRuntimeState": {
+        "description": "An update from a sled regarding the state of a migration, indicating the role of the VMM whose migration state was updated.",
+        "type": "object",
+        "properties": {
+          "gen": {
+            "$ref": "#/components/schemas/Generation"
+          },
+          "migration_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "state": {
+            "$ref": "#/components/schemas/MigrationState"
+          },
+          "time_updated": {
+            "description": "Timestamp for the migration state update.",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "gen",
+          "migration_id",
+          "state",
+          "time_updated"
+        ]
+      },
+      "MigrationState": {
+        "description": "The state of an instance's live migration.",
+        "oneOf": [
+          {
+            "description": "The migration has not started for this VMM.",
+            "type": "string",
+            "enum": [
+              "pending"
+            ]
+          },
+          {
+            "description": "The migration is in progress.",
+            "type": "string",
+            "enum": [
+              "in_progress"
+            ]
+          },
+          {
+            "description": "The migration has failed.",
+            "type": "string",
+            "enum": [
+              "failed"
+            ]
+          },
+          {
+            "description": "The migration has completed.",
+            "type": "string",
+            "enum": [
+              "completed"
+            ]
+          }
+        ]
+      },
       "Name": {
         "title": "A name unique within the parent collection",
-        "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID though they may contain a UUID.",
+        "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID, but they may contain a UUID. They can be at most 63 characters long.",
         "type": "string",
-        "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z][a-z0-9-]*[a-zA-Z0-9]*$",
+        "pattern": "^(?![0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$)^[a-z]([a-zA-Z0-9-]*[a-zA-Z0-9]+)?$",
         "minLength": 1,
         "maxLength": 63
       },
@@ -2437,6 +3803,13 @@
           },
           "subnet": {
             "$ref": "#/components/schemas/IpNet"
+          },
+          "transit_ips": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IpNet"
+            }
           },
           "vni": {
             "$ref": "#/components/schemas/Vni"
@@ -2496,18 +3869,524 @@
               "id",
               "type"
             ]
+          },
+          {
+            "description": "A vNIC associated with a probe",
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "probe"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "type"
+            ]
           }
         ]
       },
-      "PortConfigV1": {
+      "OmicronPhysicalDiskConfig": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "identity": {
+            "$ref": "#/components/schemas/DiskIdentity"
+          },
+          "pool_id": {
+            "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+          }
+        },
+        "required": [
+          "id",
+          "identity",
+          "pool_id"
+        ]
+      },
+      "OmicronPhysicalDisksConfig": {
+        "type": "object",
+        "properties": {
+          "disks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OmicronPhysicalDiskConfig"
+            }
+          },
+          "generation": {
+            "description": "generation number of this configuration\n\nThis generation number is owned by the control plane (i.e., RSS or Nexus, depending on whether RSS-to-Nexus handoff has happened).  It should not be bumped within Sled Agent.\n\nSled Agent rejects attempts to set the configuration to a generation older than the one it's currently running.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          }
+        },
+        "required": [
+          "disks",
+          "generation"
+        ]
+      },
+      "OmicronZoneConfig": {
+        "description": "Describes one Omicron-managed zone running on a sled",
+        "type": "object",
+        "properties": {
+          "filesystem_pool": {
+            "nullable": true,
+            "description": "The pool on which we'll place this zone's filesystem.\n\nNote that this is transient -- the sled agent is permitted to destroy the zone's dataset on this pool each time the zone is initialized.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ZpoolName"
+              }
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "underlay_address": {
+            "type": "string",
+            "format": "ipv6"
+          },
+          "zone_type": {
+            "$ref": "#/components/schemas/OmicronZoneType"
+          }
+        },
+        "required": [
+          "id",
+          "underlay_address",
+          "zone_type"
+        ]
+      },
+      "OmicronZoneDataset": {
+        "description": "Describes a persistent ZFS dataset associated with an Omicron zone",
+        "type": "object",
+        "properties": {
+          "pool_name": {
+            "$ref": "#/components/schemas/ZpoolName"
+          }
+        },
+        "required": [
+          "pool_name"
+        ]
+      },
+      "OmicronZoneType": {
+        "description": "Describes what kind of zone this is (i.e., what component is running in it) as well as any type-specific configuration",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "dns_servers": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "ip"
+                }
+              },
+              "domain": {
+                "nullable": true,
+                "type": "string"
+              },
+              "nic": {
+                "description": "The service vNIC providing outbound connectivity using OPTE.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/NetworkInterface"
+                  }
+                ]
+              },
+              "ntp_servers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "snat_cfg": {
+                "description": "The SNAT configuration for outbound connections.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/SourceNatConfig"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "boundary_ntp"
+                ]
+              }
+            },
+            "required": [
+              "address",
+              "dns_servers",
+              "nic",
+              "ntp_servers",
+              "snat_cfg",
+              "type"
+            ]
+          },
+          {
+            "description": "Type of clickhouse zone used for a single node clickhouse deployment",
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "dataset": {
+                "$ref": "#/components/schemas/OmicronZoneDataset"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "clickhouse"
+                ]
+              }
+            },
+            "required": [
+              "address",
+              "dataset",
+              "type"
+            ]
+          },
+          {
+            "description": "A zone used to run a Clickhouse Keeper node\n\nKeepers are only used in replicated clickhouse setups",
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "dataset": {
+                "$ref": "#/components/schemas/OmicronZoneDataset"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "clickhouse_keeper"
+                ]
+              }
+            },
+            "required": [
+              "address",
+              "dataset",
+              "type"
+            ]
+          },
+          {
+            "description": "A zone used to run a Clickhouse Server in a replicated deployment",
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "dataset": {
+                "$ref": "#/components/schemas/OmicronZoneDataset"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "clickhouse_server"
+                ]
+              }
+            },
+            "required": [
+              "address",
+              "dataset",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "dataset": {
+                "$ref": "#/components/schemas/OmicronZoneDataset"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "cockroach_db"
+                ]
+              }
+            },
+            "required": [
+              "address",
+              "dataset",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "dataset": {
+                "$ref": "#/components/schemas/OmicronZoneDataset"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "crucible"
+                ]
+              }
+            },
+            "required": [
+              "address",
+              "dataset",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "crucible_pantry"
+                ]
+              }
+            },
+            "required": [
+              "address",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "dataset": {
+                "$ref": "#/components/schemas/OmicronZoneDataset"
+              },
+              "dns_address": {
+                "description": "The address at which the external DNS server is reachable.",
+                "type": "string"
+              },
+              "http_address": {
+                "description": "The address at which the external DNS server API is reachable.",
+                "type": "string"
+              },
+              "nic": {
+                "description": "The service vNIC providing external connectivity using OPTE.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/NetworkInterface"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "external_dns"
+                ]
+              }
+            },
+            "required": [
+              "dataset",
+              "dns_address",
+              "http_address",
+              "nic",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "dataset": {
+                "$ref": "#/components/schemas/OmicronZoneDataset"
+              },
+              "dns_address": {
+                "type": "string"
+              },
+              "gz_address": {
+                "description": "The addresses in the global zone which should be created\n\nFor the DNS service, which exists outside the sleds's typical subnet - adding an address in the GZ is necessary to allow inter-zone traffic routing.",
+                "type": "string",
+                "format": "ipv6"
+              },
+              "gz_address_index": {
+                "description": "The address is also identified with an auxiliary bit of information to ensure that the created global zone address can have a unique name.",
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
+              },
+              "http_address": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "internal_dns"
+                ]
+              }
+            },
+            "required": [
+              "dataset",
+              "dns_address",
+              "gz_address",
+              "gz_address_index",
+              "http_address",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "dns_servers": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "ip"
+                }
+              },
+              "domain": {
+                "nullable": true,
+                "type": "string"
+              },
+              "ntp_servers": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "internal_ntp"
+                ]
+              }
+            },
+            "required": [
+              "address",
+              "dns_servers",
+              "ntp_servers",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "external_dns_servers": {
+                "description": "External DNS servers Nexus can use to resolve external hosts.",
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "ip"
+                }
+              },
+              "external_ip": {
+                "description": "The address at which the external nexus server is reachable.",
+                "type": "string",
+                "format": "ip"
+              },
+              "external_tls": {
+                "description": "Whether Nexus's external endpoint should use TLS",
+                "type": "boolean"
+              },
+              "internal_address": {
+                "description": "The address at which the internal nexus server is reachable.",
+                "type": "string"
+              },
+              "nic": {
+                "description": "The service vNIC providing external connectivity using OPTE.",
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/NetworkInterface"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "nexus"
+                ]
+              }
+            },
+            "required": [
+              "external_dns_servers",
+              "external_ip",
+              "external_tls",
+              "internal_address",
+              "nic",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "address": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "oximeter"
+                ]
+              }
+            },
+            "required": [
+              "address",
+              "type"
+            ]
+          }
+        ]
+      },
+      "OmicronZonesConfig": {
+        "description": "Describes the set of Omicron-managed zones running on a sled",
+        "type": "object",
+        "properties": {
+          "generation": {
+            "description": "generation number of this configuration\n\nThis generation number is owned by the control plane (i.e., RSS or Nexus, depending on whether RSS-to-Nexus handoff has happened).  It should not be bumped within Sled Agent.\n\nSled Agent rejects attempts to set the configuration to a generation older than the one it's currently running.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          },
+          "zones": {
+            "description": "list of running zones",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OmicronZoneConfig"
+            }
+          }
+        },
+        "required": [
+          "generation",
+          "zones"
+        ]
+      },
+      "PortConfigV2": {
         "type": "object",
         "properties": {
           "addresses": {
-            "description": "This port's addresses.",
+            "description": "This port's addresses and optional vlan IDs",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/IpNetwork"
+              "$ref": "#/components/schemas/UplinkAddressConfig"
             }
+          },
+          "autoneg": {
+            "description": "Whether or not to set autonegotiation",
+            "default": false,
+            "type": "boolean"
           },
           "bgp_peers": {
             "description": "BGP peers on this port",
@@ -2515,6 +4394,15 @@
             "items": {
               "$ref": "#/components/schemas/BgpPeerConfig"
             }
+          },
+          "lldp": {
+            "nullable": true,
+            "description": "LLDP configuration for this port",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LldpPortConfig"
+              }
+            ]
           },
           "port": {
             "description": "Nmae of the port this config applies to.",
@@ -2614,10 +4502,18 @@
         "minItems": 2,
         "maxItems": 2
       },
-      "RackNetworkConfigV1": {
+      "RackNetworkConfigV2": {
         "description": "Initial network configuration",
         "type": "object",
         "properties": {
+          "bfd": {
+            "description": "BFD configuration for connecting the rack to external networks",
+            "default": [],
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BfdPeerConfig"
+            }
+          },
           "bgp": {
             "description": "BGP configurations for connecting the rack to external networks",
             "type": "array",
@@ -2639,11 +4535,11 @@
             "description": "Uplinks for connecting the rack to external networks",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/PortConfigV1"
+              "$ref": "#/components/schemas/PortConfigV2"
             }
           },
           "rack_subnet": {
-            "$ref": "#/components/schemas/Ipv6Network"
+            "$ref": "#/components/schemas/Ipv6Net"
           }
         },
         "required": [
@@ -2654,6 +4550,124 @@
           "rack_subnet"
         ]
       },
+      "ResolvedVpcFirewallRule": {
+        "description": "VPC firewall rule after object name resolution has been performed by Nexus",
+        "type": "object",
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/VpcFirewallRuleAction"
+          },
+          "direction": {
+            "$ref": "#/components/schemas/VpcFirewallRuleDirection"
+          },
+          "filter_hosts": {
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HostIdentifier"
+            }
+          },
+          "filter_ports": {
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/L4PortRange"
+            }
+          },
+          "filter_protocols": {
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VpcFirewallRuleProtocol"
+            }
+          },
+          "priority": {
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "status": {
+            "$ref": "#/components/schemas/VpcFirewallRuleStatus"
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NetworkInterface"
+            }
+          }
+        },
+        "required": [
+          "action",
+          "direction",
+          "priority",
+          "status",
+          "targets"
+        ]
+      },
+      "ResolvedVpcRoute": {
+        "description": "A VPC route resolved into a concrete target.",
+        "type": "object",
+        "properties": {
+          "dest": {
+            "$ref": "#/components/schemas/IpNet"
+          },
+          "target": {
+            "$ref": "#/components/schemas/RouterTarget"
+          }
+        },
+        "required": [
+          "dest",
+          "target"
+        ]
+      },
+      "ResolvedVpcRouteSet": {
+        "description": "An updated set of routes for a given VPC and/or subnet.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/RouterId"
+          },
+          "routes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ResolvedVpcRoute"
+            },
+            "uniqueItems": true
+          },
+          "version": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RouterVersion"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "routes"
+        ]
+      },
+      "ResolvedVpcRouteState": {
+        "description": "Version information for routes on a given VPC subnet.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/RouterId"
+          },
+          "version": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/RouterVersion"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
       "RouteConfig": {
         "type": "object",
         "properties": {
@@ -2661,14 +4675,30 @@
             "description": "The destination of the route.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/IpNetwork"
+                "$ref": "#/components/schemas/IpNet"
               }
             ]
+          },
+          "local_pref": {
+            "nullable": true,
+            "description": "The local preference associated with this route.",
+            "default": null,
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
           },
           "nexthop": {
             "description": "The nexthop/gateway address.",
             "type": "string",
             "format": "ip"
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "The VLAN id associated with this route.",
+            "default": null,
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
           }
         },
         "required": [
@@ -2676,463 +4706,191 @@
           "nexthop"
         ]
       },
-      "SemverVersion": {
-        "type": "string",
-        "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
-      },
-      "ServiceEnsureBody": {
-        "description": "Used to request that the Sled initialize multiple services.",
+      "RouterId": {
+        "description": "Identifier for a VPC and/or subnet.",
         "type": "object",
         "properties": {
-          "services": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ServiceZoneRequest"
-            }
-          }
-        },
-        "required": [
-          "services"
-        ]
-      },
-      "ServiceType": {
-        "description": "Describes service-specific parameters.",
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "external_dns_servers": {
-                "description": "External DNS servers Nexus can use to resolve external hosts.",
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "format": "ip"
-                }
-              },
-              "external_ip": {
-                "description": "The address at which the external nexus server is reachable.",
-                "type": "string",
-                "format": "ip"
-              },
-              "external_tls": {
-                "description": "Whether Nexus's external endpoint should use TLS",
-                "type": "boolean"
-              },
-              "internal_address": {
-                "description": "The address at which the internal nexus server is reachable.",
-                "type": "string"
-              },
-              "nic": {
-                "description": "The service vNIC providing external connectivity using OPTE.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/NetworkInterface"
-                  }
-                ]
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "nexus"
-                ]
-              }
-            },
-            "required": [
-              "external_dns_servers",
-              "external_ip",
-              "external_tls",
-              "internal_address",
-              "nic",
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "dns_address": {
-                "description": "The address at which the external DNS server is reachable.",
-                "type": "string"
-              },
-              "http_address": {
-                "description": "The address at which the external DNS server API is reachable.",
-                "type": "string"
-              },
-              "nic": {
-                "description": "The service vNIC providing external connectivity using OPTE.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/NetworkInterface"
-                  }
-                ]
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "external_dns"
-                ]
-              }
-            },
-            "required": [
-              "dns_address",
-              "http_address",
-              "nic",
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "dns_address": {
-                "type": "string"
-              },
-              "gz_address": {
-                "description": "The addresses in the global zone which should be created\n\nFor the DNS service, which exists outside the sleds's typical subnet - adding an address in the GZ is necessary to allow inter-zone traffic routing.",
-                "type": "string",
-                "format": "ipv6"
-              },
-              "gz_address_index": {
-                "description": "The address is also identified with an auxiliary bit of information to ensure that the created global zone address can have a unique name.",
-                "type": "integer",
-                "format": "uint32",
-                "minimum": 0
-              },
-              "http_address": {
-                "type": "string"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "internal_dns"
-                ]
-              }
-            },
-            "required": [
-              "dns_address",
-              "gz_address",
-              "gz_address_index",
-              "http_address",
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "address": {
-                "type": "string"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "oximeter"
-                ]
-              }
-            },
-            "required": [
-              "address",
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "address": {
-                "type": "string"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "crucible_pantry"
-                ]
-              }
-            },
-            "required": [
-              "address",
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "address": {
-                "type": "string"
-              },
-              "dns_servers": {
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "format": "ip"
-                }
-              },
-              "domain": {
-                "nullable": true,
-                "type": "string"
-              },
-              "nic": {
-                "description": "The service vNIC providing outbound connectivity using OPTE.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/NetworkInterface"
-                  }
-                ]
-              },
-              "ntp_servers": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "snat_cfg": {
-                "description": "The SNAT configuration for outbound connections.",
-                "allOf": [
-                  {
-                    "$ref": "#/components/schemas/SourceNatConfig"
-                  }
-                ]
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "boundary_ntp"
-                ]
-              }
-            },
-            "required": [
-              "address",
-              "dns_servers",
-              "nic",
-              "ntp_servers",
-              "snat_cfg",
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "address": {
-                "type": "string"
-              },
-              "dns_servers": {
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "format": "ip"
-                }
-              },
-              "domain": {
-                "nullable": true,
-                "type": "string"
-              },
-              "ntp_servers": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "internal_ntp"
-                ]
-              }
-            },
-            "required": [
-              "address",
-              "dns_servers",
-              "ntp_servers",
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "address": {
-                "type": "string"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "clickhouse"
-                ]
-              }
-            },
-            "required": [
-              "address",
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "address": {
-                "type": "string"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "clickhouse_keeper"
-                ]
-              }
-            },
-            "required": [
-              "address",
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "address": {
-                "type": "string"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "cockroach_db"
-                ]
-              }
-            },
-            "required": [
-              "address",
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "address": {
-                "type": "string"
-              },
-              "type": {
-                "type": "string",
-                "enum": [
-                  "crucible"
-                ]
-              }
-            },
-            "required": [
-              "address",
-              "type"
-            ]
-          }
-        ]
-      },
-      "ServiceZoneRequest": {
-        "description": "Describes a request to create a zone running one or more services.",
-        "type": "object",
-        "properties": {
-          "addresses": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "format": "ipv6"
-            }
-          },
-          "dataset": {
-            "nullable": true,
-            "default": null,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/DatasetRequest"
-              }
-            ]
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "services": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ServiceZoneService"
-            }
-          },
-          "zone_type": {
-            "$ref": "#/components/schemas/ZoneType"
-          }
-        },
-        "required": [
-          "addresses",
-          "id",
-          "services",
-          "zone_type"
-        ]
-      },
-      "ServiceZoneService": {
-        "description": "Used to request that the Sled initialize a single service.",
-        "type": "object",
-        "properties": {
-          "details": {
-            "$ref": "#/components/schemas/ServiceType"
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "details",
-          "id"
-        ]
-      },
-      "SetVirtualNetworkInterfaceHost": {
-        "description": "A mapping from a virtual NIC to a physical host",
-        "type": "object",
-        "properties": {
-          "physical_host_ip": {
-            "type": "string",
-            "format": "ipv6"
-          },
-          "virtual_ip": {
-            "type": "string",
-            "format": "ip"
-          },
-          "virtual_mac": {
-            "$ref": "#/components/schemas/MacAddr"
+          "kind": {
+            "$ref": "#/components/schemas/RouterKind"
           },
           "vni": {
             "$ref": "#/components/schemas/Vni"
           }
         },
         "required": [
-          "physical_host_ip",
-          "virtual_ip",
-          "virtual_mac",
+          "kind",
           "vni"
         ]
       },
-      "SledInstanceState": {
-        "description": "A wrapper type containing a sled's total knowledge of the state of a specific VMM and the instance it incarnates.",
-        "type": "object",
-        "properties": {
-          "instance_state": {
-            "description": "The sled's conception of the state of the instance.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/InstanceRuntimeState"
+      "RouterKind": {
+        "description": "The scope of a set of VPC router rules.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "system"
+                ]
               }
+            },
+            "required": [
+              "type"
             ]
           },
-          "propolis_id": {
-            "description": "The ID of the VMM whose state is being reported.",
+          {
+            "type": "object",
+            "properties": {
+              "subnet": {
+                "$ref": "#/components/schemas/IpNet"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "custom"
+                ]
+              }
+            },
+            "required": [
+              "subnet",
+              "type"
+            ]
+          }
+        ]
+      },
+      "RouterTarget": {
+        "description": "The target for a given router entry.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "drop"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "internet_gateway"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ip"
+                ]
+              },
+              "value": {
+                "type": "string",
+                "format": "ip"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "vpc_subnet"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/IpNet"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
+        ]
+      },
+      "RouterVersion": {
+        "description": "Information on the current parent router (and version) of a route set according to the control plane.",
+        "type": "object",
+        "properties": {
+          "router_id": {
             "type": "string",
             "format": "uuid"
           },
-          "vmm_state": {
-            "description": "The most recent state of the sled's VMM process.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/VmmRuntimeState"
-              }
-            ]
+          "version": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
           }
         },
         "required": [
-          "instance_state",
-          "propolis_id",
-          "vmm_state"
+          "router_id",
+          "version"
+        ]
+      },
+      "SemverVersion": {
+        "type": "string",
+        "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+      },
+      "SledIdentifiers": {
+        "description": "Identifiers for a single sled.\n\nThis is intended primarily to be used in timeseries, to identify sled from which metric data originates.",
+        "type": "object",
+        "properties": {
+          "model": {
+            "description": "Model name of the sled",
+            "type": "string"
+          },
+          "rack_id": {
+            "description": "Control plane ID of the rack this sled is a member of",
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "description": "Revision number of the sled",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "serial": {
+            "description": "Serial number of the sled",
+            "type": "string"
+          },
+          "sled_id": {
+            "description": "Control plane ID for the sled itself",
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "model",
+          "rack_id",
+          "revision",
+          "serial",
+          "sled_id"
         ]
       },
       "SledRole": {
+        "description": "Describes the role of the sled within the rack.\n\nNote that this may change if the sled is physically moved within the rack.",
         "oneOf": [
           {
             "description": "The sled is a general compute sled.",
@@ -3150,8 +4908,43 @@
           }
         ]
       },
+      "SledVmmState": {
+        "description": "A wrapper type containing a sled's total knowledge of the state of a VMM.",
+        "type": "object",
+        "properties": {
+          "migration_in": {
+            "nullable": true,
+            "description": "The current state of any inbound migration to this VMM.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MigrationRuntimeState"
+              }
+            ]
+          },
+          "migration_out": {
+            "nullable": true,
+            "description": "The state of any outbound migration from this VMM.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MigrationRuntimeState"
+              }
+            ]
+          },
+          "vmm_state": {
+            "description": "The most recent state of the sled's VMM process.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VmmRuntimeState"
+              }
+            ]
+          }
+        },
+        "required": [
+          "vmm_state"
+        ]
+      },
       "Slot": {
-        "description": "A stable index which is translated by Propolis into a PCI BDF, visible to the guest.",
+        "description": "A stable index which is translated by Propolis into a PCI BDF, visible to the guest.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"A stable index which is translated by Propolis into a PCI BDF, visible to the guest.\", \"type\": \"integer\", \"format\": \"uint8\", \"minimum\": 0.0 } ``` </details>",
         "type": "integer",
         "format": "uint8",
         "minimum": 0
@@ -3182,6 +4975,70 @@
           "first_port",
           "ip",
           "last_port"
+        ]
+      },
+      "StartSledAgentRequest": {
+        "description": "Configuration information for launching a Sled Agent.",
+        "type": "object",
+        "properties": {
+          "body": {
+            "$ref": "#/components/schemas/StartSledAgentRequestBody"
+          },
+          "generation": {
+            "description": "The current generation number of data as stored in CRDB.\n\nThe initial generation is set during RSS time and then only mutated by Nexus. For now, we don't actually anticipate mutating this data, but we leave open the possiblity.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "schema_version": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "body",
+          "generation",
+          "schema_version"
+        ]
+      },
+      "StartSledAgentRequestBody": {
+        "description": "This is the actual app level data of `StartSledAgentRequest`\n\nWe nest it below the \"header\" of `generation` and `schema_version` so that we can perform partial deserialization of `EarlyNetworkConfig` to only read the header and defer deserialization of the body once we know the schema version. This is possible via the use of [`serde_json::value::RawValue`] in future (post-v1) deserialization paths.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "description": "Uuid of the Sled Agent to be created.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "is_lrtq_learner": {
+            "description": "Is this node an LRTQ learner node?\n\nWe only put the node into learner mode if `use_trust_quorum` is also true.",
+            "type": "boolean"
+          },
+          "rack_id": {
+            "description": "Uuid of the rack to which this sled agent belongs.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "subnet": {
+            "description": "Portion of the IP space to be managed by the Sled Agent.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Ipv6Subnet"
+              }
+            ]
+          },
+          "use_trust_quorum": {
+            "description": "Use trust quorum for key generation",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "is_lrtq_learner",
+          "rack_id",
+          "subnet",
+          "use_trust_quorum"
         ]
       },
       "StorageLimit": {
@@ -3268,6 +5125,22 @@
           "sync"
         ]
       },
+      "TypedUuidForDatasetKind": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "TypedUuidForInstanceKind": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "TypedUuidForPropolisKind": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "TypedUuidForZpoolKind": {
+        "type": "string",
+        "format": "uuid"
+      },
       "UpdateArtifactId": {
         "description": "An identifier for a single update artifact.",
         "type": "object",
@@ -3299,6 +5172,107 @@
           "version"
         ]
       },
+      "UplinkAddressConfig": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "$ref": "#/components/schemas/IpNet"
+          },
+          "vlan_id": {
+            "nullable": true,
+            "description": "The VLAN id (if any) associated with this address.",
+            "default": null,
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "address"
+        ]
+      },
+      "VirtualNetworkInterfaceHost": {
+        "description": "A mapping from a virtual NIC to a physical host",
+        "type": "object",
+        "properties": {
+          "physical_host_ip": {
+            "type": "string",
+            "format": "ipv6"
+          },
+          "virtual_ip": {
+            "type": "string",
+            "format": "ip"
+          },
+          "virtual_mac": {
+            "$ref": "#/components/schemas/MacAddr"
+          },
+          "vni": {
+            "$ref": "#/components/schemas/Vni"
+          }
+        },
+        "required": [
+          "physical_host_ip",
+          "virtual_ip",
+          "virtual_mac",
+          "vni"
+        ]
+      },
+      "VmmIssueDiskSnapshotRequestBody": {
+        "type": "object",
+        "properties": {
+          "snapshot_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "snapshot_id"
+        ]
+      },
+      "VmmIssueDiskSnapshotRequestResponse": {
+        "type": "object",
+        "properties": {
+          "snapshot_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "snapshot_id"
+        ]
+      },
+      "VmmPutStateBody": {
+        "description": "The body of a request to move a previously-ensured instance into a specific runtime state.",
+        "type": "object",
+        "properties": {
+          "state": {
+            "description": "The state into which the instance should be driven.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VmmStateRequested"
+              }
+            ]
+          }
+        },
+        "required": [
+          "state"
+        ]
+      },
+      "VmmPutStateResponse": {
+        "description": "The response sent from a request to move an instance into a specific runtime state.",
+        "type": "object",
+        "properties": {
+          "updated_runtime": {
+            "nullable": true,
+            "description": "The current runtime state of the instance after handling the request to change its state. If the instance's state did not change, this field is `None`.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SledVmmState"
+              }
+            ]
+          }
+        }
+      },
       "VmmRuntimeState": {
         "description": "The dynamic runtime properties of an individual VMM process.",
         "type": "object",
@@ -3315,7 +5289,7 @@
             "description": "The last state reported by this VMM.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/InstanceState"
+                "$ref": "#/components/schemas/VmmState"
               }
             ]
           },
@@ -3331,6 +5305,151 @@
           "time_updated"
         ]
       },
+      "VmmState": {
+        "description": "One of the states that a VMM can be in.",
+        "oneOf": [
+          {
+            "description": "The VMM is initializing and has not started running guest CPUs yet.",
+            "type": "string",
+            "enum": [
+              "starting"
+            ]
+          },
+          {
+            "description": "The VMM has finished initializing and may be running guest CPUs.",
+            "type": "string",
+            "enum": [
+              "running"
+            ]
+          },
+          {
+            "description": "The VMM is shutting down.",
+            "type": "string",
+            "enum": [
+              "stopping"
+            ]
+          },
+          {
+            "description": "The VMM's guest has stopped, and the guest will not run again, but the VMM process may not have released all of its resources yet.",
+            "type": "string",
+            "enum": [
+              "stopped"
+            ]
+          },
+          {
+            "description": "The VMM is being restarted or its guest OS is rebooting.",
+            "type": "string",
+            "enum": [
+              "rebooting"
+            ]
+          },
+          {
+            "description": "The VMM is part of a live migration.",
+            "type": "string",
+            "enum": [
+              "migrating"
+            ]
+          },
+          {
+            "description": "The VMM process reported an internal failure.",
+            "type": "string",
+            "enum": [
+              "failed"
+            ]
+          },
+          {
+            "description": "The VMM process has been destroyed and its resources have been released.",
+            "type": "string",
+            "enum": [
+              "destroyed"
+            ]
+          }
+        ]
+      },
+      "VmmStateRequested": {
+        "description": "Requestable running state of an Instance.\n\nA subset of [`omicron_common::api::external::InstanceState`].",
+        "oneOf": [
+          {
+            "description": "Run this instance by migrating in from a previous running incarnation of the instance.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "migration_target"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/InstanceMigrationTargetParams"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "Start the instance if it is not already running.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "running"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Stop the instance.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "stopped"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Immediately reset the instance, as though it had stopped and immediately began to run again.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "reboot"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
+      "VmmUnregisterResponse": {
+        "description": "The response sent from a request to unregister an instance.",
+        "type": "object",
+        "properties": {
+          "updated_runtime": {
+            "nullable": true,
+            "description": "The current state of the instance after handling the request to unregister it. If the instance's state did not change, this field is `None`.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SledVmmState"
+              }
+            ]
+          }
+        }
+      },
       "Vni": {
         "description": "A Geneve Virtual Network Identifier",
         "type": "integer",
@@ -3338,6 +5457,7 @@
         "minimum": 0
       },
       "VolumeConstructionRequest": {
+        "description": "VolumeConstructionRequest\n\n<details><summary>JSON schema</summary>\n\n```json { \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"block_size\", \"id\", \"sub_volumes\", \"type\" ], \"properties\": { \"block_size\": { \"type\": \"integer\", \"format\": \"uint64\", \"minimum\": 0.0 }, \"id\": { \"type\": \"string\", \"format\": \"uuid\" }, \"read_only_parent\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/VolumeConstructionRequest\" } ] }, \"sub_volumes\": { \"type\": \"array\", \"items\": { \"$ref\": \"#/components/schemas/VolumeConstructionRequest\" } }, \"type\": { \"type\": \"string\", \"enum\": [ \"volume\" ] } } }, { \"type\": \"object\", \"required\": [ \"block_size\", \"id\", \"type\", \"url\" ], \"properties\": { \"block_size\": { \"type\": \"integer\", \"format\": \"uint64\", \"minimum\": 0.0 }, \"id\": { \"type\": \"string\", \"format\": \"uuid\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"url\" ] }, \"url\": { \"type\": \"string\" } } }, { \"type\": \"object\", \"required\": [ \"block_size\", \"blocks_per_extent\", \"extent_count\", \"gen\", \"opts\", \"type\" ], \"properties\": { \"block_size\": { \"type\": \"integer\", \"format\": \"uint64\", \"minimum\": 0.0 }, \"blocks_per_extent\": { \"type\": \"integer\", \"format\": \"uint64\", \"minimum\": 0.0 }, \"extent_count\": { \"type\": \"integer\", \"format\": \"uint32\", \"minimum\": 0.0 }, \"gen\": { \"type\": \"integer\", \"format\": \"uint64\", \"minimum\": 0.0 }, \"opts\": { \"$ref\": \"#/components/schemas/CrucibleOpts\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"region\" ] } } }, { \"type\": \"object\", \"required\": [ \"block_size\", \"id\", \"path\", \"type\" ], \"properties\": { \"block_size\": { \"type\": \"integer\", \"format\": \"uint64\", \"minimum\": 0.0 }, \"id\": { \"type\": \"string\", \"format\": \"uuid\" }, \"path\": { \"type\": \"string\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"file\" ] } } } ] } ``` </details>",
         "oneOf": [
           {
             "type": "object",
@@ -3481,60 +5601,6 @@
           }
         ]
       },
-      "VpcFirewallRule": {
-        "description": "VPC firewall rule after object name resolution has been performed by Nexus",
-        "type": "object",
-        "properties": {
-          "action": {
-            "$ref": "#/components/schemas/VpcFirewallRuleAction"
-          },
-          "direction": {
-            "$ref": "#/components/schemas/VpcFirewallRuleDirection"
-          },
-          "filter_hosts": {
-            "nullable": true,
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/HostIdentifier"
-            }
-          },
-          "filter_ports": {
-            "nullable": true,
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/L4PortRange"
-            }
-          },
-          "filter_protocols": {
-            "nullable": true,
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/VpcFirewallRuleProtocol"
-            }
-          },
-          "priority": {
-            "type": "integer",
-            "format": "uint16",
-            "minimum": 0
-          },
-          "status": {
-            "$ref": "#/components/schemas/VpcFirewallRuleStatus"
-          },
-          "targets": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/NetworkInterface"
-            }
-          }
-        },
-        "required": [
-          "action",
-          "direction",
-          "priority",
-          "status",
-          "targets"
-        ]
-      },
       "VpcFirewallRuleAction": {
         "type": "string",
         "enum": [
@@ -3572,7 +5638,7 @@
           "rules": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/VpcFirewallRule"
+              "$ref": "#/components/schemas/ResolvedVpcFirewallRule"
             }
           },
           "vni": {
@@ -3675,23 +5741,6 @@
           "version"
         ]
       },
-      "ZoneType": {
-        "description": "The type of zone which may be requested from Sled Agent",
-        "type": "string",
-        "enum": [
-          "clickhouse",
-          "clickhouse_keeper",
-          "cockroach_db",
-          "crucible_pantry",
-          "crucible",
-          "external_dns",
-          "internal_dns",
-          "nexus",
-          "ntp",
-          "oximeter",
-          "switch"
-        ]
-      },
       "Zpool": {
         "type": "object",
         "properties": {
@@ -3699,8 +5748,7 @@
             "$ref": "#/components/schemas/DiskType"
           },
           "id": {
-            "type": "string",
-            "format": "uuid"
+            "$ref": "#/components/schemas/TypedUuidForZpoolKind"
           }
         },
         "required": [
@@ -3713,6 +5761,26 @@
         "description": "Zpool names are of the format ox{i,p}_<UUID>. They are either Internal or External, and should be unique",
         "type": "string",
         "pattern": "^ox[ip]_[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+      },
+      "M2Slot": {
+        "description": "Describes an M.2 slot, often in the context of writing a system image to it.",
+        "type": "string",
+        "enum": [
+          "A",
+          "B"
+        ]
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Error",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
       }
     }
   }

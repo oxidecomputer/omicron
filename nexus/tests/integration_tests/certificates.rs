@@ -19,8 +19,8 @@ use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::views::Certificate;
-use nexus_types::internal_api::params as internal_params;
 use omicron_common::api::external::IdentityMetadataCreateParams;
+use omicron_common::api::internal::nexus::Certificate as InternalCertificate;
 use omicron_test_utils::certificates::CertificateChain;
 use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_test_utils::dev::poll::CondCheckError;
@@ -394,6 +394,11 @@ async fn test_silo_certificates() {
                 .name(silo2.silo_name.clone())
                 .description("")
                 .discoverable(false)
+                .quotas(oxide_client::types::SiloQuotasCreate {
+                    cpus: 0,
+                    memory: oxide_client::types::ByteCount(0),
+                    storage: oxide_client::types::ByteCount(0),
+                })
                 .identity_mode(oxide_client::types::SiloIdentityMode::LocalOnly)
                 .tls_certificates(vec![silo2_cert.try_into().unwrap()]),
         )
@@ -454,6 +459,11 @@ async fn test_silo_certificates() {
                 .name(silo3.silo_name.clone())
                 .description("")
                 .discoverable(false)
+                .quotas(oxide_client::types::SiloQuotasCreate {
+                    cpus: 0,
+                    memory: oxide_client::types::ByteCount(0),
+                    storage: oxide_client::types::ByteCount(0),
+                })
                 .identity_mode(oxide_client::types::SiloIdentityMode::LocalOnly)
                 .tls_certificates(vec![silo3_cert.try_into().unwrap()]),
         )
@@ -635,7 +645,7 @@ struct SiloCert {
     silo_name: oxide_client::types::Name,
     dns_name: String,
     cert_name: oxide_client::types::Name,
-    cert: internal_params::Certificate,
+    cert: InternalCertificate,
 }
 
 impl SiloCert {
@@ -649,7 +659,7 @@ impl SiloCert {
                 dns_name.clone(),
             ]));
         let cert_name = format!("cert-{}", silo_name.as_str()).parse().unwrap();
-        let cert = internal_params::Certificate {
+        let cert = InternalCertificate {
             cert: chain.cert_chain_as_pem(),
             key: chain.end_cert_private_key_as_pem(),
         };

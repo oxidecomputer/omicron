@@ -1,0 +1,94 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "StartSledAgentRequest",
+  "description": "Configuration information for launching a Sled Agent.",
+  "type": "object",
+  "required": [
+    "body",
+    "generation",
+    "schema_version"
+  ],
+  "properties": {
+    "body": {
+      "$ref": "#/definitions/StartSledAgentRequestBody"
+    },
+    "generation": {
+      "description": "The current generation number of data as stored in CRDB.\n\nThe initial generation is set during RSS time and then only mutated by Nexus. For now, we don't actually anticipate mutating this data, but we leave open the possiblity.",
+      "type": "integer",
+      "format": "uint64",
+      "minimum": 0.0
+    },
+    "schema_version": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0.0
+    }
+  },
+  "definitions": {
+    "Ipv6Net": {
+      "title": "An IPv6 subnet",
+      "description": "An IPv6 subnet, including prefix and subnet mask",
+      "examples": [
+        "fd12:3456::/64"
+      ],
+      "type": "string",
+      "pattern": "^(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))\\/([0-9]|[1-9][0-9]|1[0-1][0-9]|12[0-8])$",
+      "x-rust-type": {
+        "crate": "oxnet",
+        "path": "oxnet::Ipv6Net",
+        "version": "0.1.0"
+      }
+    },
+    "Ipv6Subnet": {
+      "description": "Wraps an [`Ipv6Net`] with a compile-time prefix length.",
+      "type": "object",
+      "required": [
+        "net"
+      ],
+      "properties": {
+        "net": {
+          "$ref": "#/definitions/Ipv6Net"
+        }
+      }
+    },
+    "StartSledAgentRequestBody": {
+      "description": "This is the actual app level data of `StartSledAgentRequest`\n\nWe nest it below the \"header\" of `generation` and `schema_version` so that we can perform partial deserialization of `EarlyNetworkConfig` to only read the header and defer deserialization of the body once we know the schema version. This is possible via the use of [`serde_json::value::RawValue`] in future (post-v1) deserialization paths.",
+      "type": "object",
+      "required": [
+        "id",
+        "is_lrtq_learner",
+        "rack_id",
+        "subnet",
+        "use_trust_quorum"
+      ],
+      "properties": {
+        "id": {
+          "description": "Uuid of the Sled Agent to be created.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "is_lrtq_learner": {
+          "description": "Is this node an LRTQ learner node?\n\nWe only put the node into learner mode if `use_trust_quorum` is also true.",
+          "type": "boolean"
+        },
+        "rack_id": {
+          "description": "Uuid of the rack to which this sled agent belongs.",
+          "type": "string",
+          "format": "uuid"
+        },
+        "subnet": {
+          "description": "Portion of the IP space to be managed by the Sled Agent.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Ipv6Subnet"
+            }
+          ]
+        },
+        "use_trust_quorum": {
+          "description": "Use trust quorum for key generation",
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

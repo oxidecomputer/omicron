@@ -10,9 +10,10 @@ use super::defaults::colors::*;
 use super::defaults::dimensions::RectExt;
 use super::defaults::style;
 use super::widgets::{Logo, LogoState, LOGO_HEIGHT, LOGO_WIDTH};
-use crate::{Cmd, Frame, Term};
+use crate::{Cmd, Term};
 use ratatui::style::Style;
 use ratatui::widgets::Block;
+use ratatui::Frame;
 
 const TOTAL_FRAMES: usize = 100;
 
@@ -32,7 +33,7 @@ impl SplashScreen {
 
     fn draw_background(&self, f: &mut Frame) {
         let block = Block::default().style(style::background());
-        f.render_widget(block, f.size());
+        f.render_widget(block, f.area());
     }
 
     // Sweep left to right, painting the banner white, with
@@ -40,7 +41,7 @@ impl SplashScreen {
     fn animate_logo(&self, f: &mut Frame) {
         // Center the banner
         let rect = f
-            .size()
+            .area()
             .center_horizontally(LOGO_WIDTH)
             .center_vertically(LOGO_HEIGHT);
 

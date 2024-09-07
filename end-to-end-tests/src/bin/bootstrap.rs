@@ -1,18 +1,24 @@
 use anyhow::Result;
-use end_to_end_tests::helpers::ctx::{build_client, Context};
+use end_to_end_tests::helpers::ctx::{ClientParams, Context};
 use end_to_end_tests::helpers::{generate_name, get_system_ip_pool};
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use oxide_client::types::{
-    ByteCount, DiskCreate, DiskSource, IpRange, Ipv4Range,
+    ByteCount, DeviceAccessTokenRequest, DeviceAuthRequest, DeviceAuthVerify,
+    DiskCreate, DiskSource, IpPoolCreate, IpPoolLinkSilo, IpRange, Ipv4Range,
+    NameOrId, SiloQuotasUpdate,
 };
 use oxide_client::{
-    ClientDisksExt, ClientProjectsExt, ClientSystemNetworkingExt,
+    ClientDisksExt, ClientHiddenExt, ClientProjectsExt, ClientSystemIpPoolsExt,
+    ClientSystemSilosExt,
 };
+use serde::{de::DeserializeOwned, Deserialize};
 use std::time::Duration;
+use uuid::Uuid;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let client = build_client().await?;
+    let params = ClientParams::new()?;
+    let client = params.build_client().await?;
 
     // ===== ENSURE NEXUS IS UP ===== //
     eprintln!("waiting for nexus to come up...");
@@ -33,10 +39,41 @@ async fn main() -> Result<()> {
 
     // ===== CREATE IP POOL ===== //
     eprintln!("creating IP pool... {:?} - {:?}", first, last);
+    let pool_name = "default";
+    client
+        .ip_pool_create()
+        .body(IpPoolCreate {
+            name: pool_name.parse().unwrap(),
+            description: "Default IP pool".to_string(),
+        })
+        .send()
+        .await?;
+    client
+        .ip_pool_silo_link()
+        .pool(pool_name)
+        .body(IpPoolLinkSilo {
+            silo: NameOrId::Name(params.silo_name().parse().unwrap()),
+            is_default: true,
+        })
+        .send()
+        .await?;
     client
         .ip_pool_range_add()
-        .pool("default")
+        .pool(pool_name)
         .body(IpRange::V4(Ipv4Range { first, last }))
+        .send()
+        .await?;
+
+    // ===== SET UP QUOTAS ===== //
+    eprintln!("setting up quotas...");
+    client
+        .silo_quotas_update()
+        .silo("recovery")
+        .body(SiloQuotasUpdate {
+            cpus: Some(16),
+            memory: Some(ByteCount(1024 * 1024 * 1024 * 10)),
+            storage: Some(ByteCount(1024 * 1024 * 1024 * 1024)),
+        })
         .send()
         .await?;
 
@@ -71,8 +108,61 @@ async fn main() -> Result<()> {
         .disk(disk_name)
         .send()
         .await?;
-    ctx.cleanup().await?;
 
+    // ===== PRINT CLI ENVIRONMENT ===== //
+    let client_id = Uuid::new_v4();
+    let DeviceAuthResponse { device_code, user_code } =
+        deserialize_byte_stream(
+            ctx.client
+                .device_auth_request()
+                .body(DeviceAuthRequest { client_id })
+                .send()
+                .await?,
+        )
+        .await?;
+    ctx.client
+        .device_auth_confirm()
+        .body(DeviceAuthVerify { user_code })
+        .send()
+        .await?;
+    let DeviceAccessTokenGrant { access_token } = deserialize_byte_stream(
+        ctx.client
+            .device_access_token()
+            .body(DeviceAccessTokenRequest {
+                client_id,
+                device_code,
+                grant_type: "urn:ietf:params:oauth:grant-type:device_code"
+                    .to_string(),
+            })
+            .send()
+            .await?,
+    )
+    .await?;
+
+    println!("OXIDE_HOST={}", params.base_url());
+    println!("OXIDE_RESOLVE={}", params.resolve_nexus().await?);
+    println!("OXIDE_TOKEN={}", access_token);
+
+    ctx.cleanup().await?;
     eprintln!("let's roll.");
     Ok(())
+}
+
+async fn deserialize_byte_stream<T: DeserializeOwned>(
+    response: oxide_client::ResponseValue<oxide_client::ByteStream>,
+) -> Result<T> {
+    let body = hyper::Body::wrap_stream(response.into_inner_stream());
+    let bytes = hyper::body::to_bytes(body).await?;
+    Ok(serde_json::from_slice(&bytes)?)
+}
+
+#[derive(Deserialize)]
+struct DeviceAuthResponse {
+    device_code: String,
+    user_code: String,
+}
+
+#[derive(Deserialize)]
+struct DeviceAccessTokenGrant {
+    access_token: String,
 }

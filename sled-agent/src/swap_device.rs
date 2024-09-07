@@ -62,7 +62,7 @@ pub(crate) fn ensure_swap_device(
     assert!(size_gb > 0);
 
     let devs = swapctl::list_swap_devices()?;
-    if devs.len() > 0 {
+    if !devs.is_empty() {
         if devs.len() > 1 {
             // This should really never happen unless we've made a mistake, but it's
             // probably fine to have more than one swap device. Thus, don't panic
@@ -450,7 +450,7 @@ mod swapctl {
             let path = String::from_utf8_lossy(p.to_bytes()).to_string();
 
             devices.push(SwapDevice {
-                path: path,
+                path,
                 start: e.ste_start as u64,
                 length: e.ste_length as u64,
                 total_pages: e.ste_pages as u64,
@@ -473,8 +473,8 @@ mod swapctl {
             SwapDeviceError::AddDevice {
                 msg: format!("could not convert path to CString: {}", e,),
                 path: path_cp.clone(),
-                start: start,
-                length: length,
+                start,
+                length,
             }
         })?;
 
@@ -490,8 +490,8 @@ mod swapctl {
                 SwapDeviceError::AddDevice {
                     msg: e.to_string(),
                     path: path_cp,
-                    start: start,
-                    length: length,
+                    start,
+                    length,
                 }
             })?
         };

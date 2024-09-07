@@ -6,20 +6,23 @@
 
 use camino::Utf8Path;
 use dropshot::test_util::ClientTestContext;
+use nexus_db_model::PhysicalDisk as DbPhysicalDisk;
+use nexus_db_model::PhysicalDiskKind as DbPhysicalDiskKind;
+use nexus_db_queries::context::OpContext;
 use nexus_test_interface::NexusServer;
+use nexus_test_utils::resource_helpers::create_default_ip_pool;
 use nexus_test_utils::resource_helpers::create_instance;
-use nexus_test_utils::resource_helpers::create_physical_disk;
 use nexus_test_utils::resource_helpers::create_project;
-use nexus_test_utils::resource_helpers::delete_physical_disk;
 use nexus_test_utils::resource_helpers::objects_list_page_authz;
-use nexus_test_utils::resource_helpers::populate_ip_pool;
 use nexus_test_utils::start_sled_agent;
 use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils_macros::nexus_test;
-use nexus_types::external_api::params::PhysicalDiskKind;
 use nexus_types::external_api::views::SledInstance;
 use nexus_types::external_api::views::{PhysicalDisk, Sled};
 use omicron_sled_agent::sim;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::PhysicalDiskUuid;
+use omicron_uuid_kinds::SledUuid;
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -48,15 +51,15 @@ async fn sled_instance_list(
 async fn test_sleds_list(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
 
-    // Verify that there is one sled to begin with.
+    // Verify that there are two sleds to begin with.
     let sleds_url = "/v1/system/hardware/sleds";
-    assert_eq!(sleds_list(&client, &sleds_url).await.len(), 1);
+    assert_eq!(sleds_list(&client, &sleds_url).await.len(), 2);
 
     // Now start a few more sled agents.
     let nsleds = 3;
     let mut sas = Vec::with_capacity(nsleds);
     for _ in 0..nsleds {
-        let sa_id = Uuid::new_v4();
+        let sa_id = SledUuid::new_v4();
         let log =
             cptestctx.logctx.log.new(o!( "sled_id" => sa_id.to_string() ));
         let addr = cptestctx.server.get_http_server_internal_address().await;
@@ -76,7 +79,7 @@ async fn test_sleds_list(cptestctx: &ControlPlaneTestContext) {
 
     // List sleds again.
     let sleds_found = sleds_list(&client, &sleds_url).await;
-    assert_eq!(sleds_found.len(), nsleds + 1);
+    assert_eq!(sleds_found.len(), nsleds + 2);
 
     let sledids_found =
         sleds_found.iter().map(|sv| sv.identity.id).collect::<Vec<Uuid>>();
@@ -95,46 +98,67 @@ async fn test_physical_disk_create_list_delete(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let external_client = &cptestctx.external_client;
-    let internal_client = &cptestctx.internal_client;
 
-    // Verify that there is one sled to begin with.
+    // Verify that there are two sleds to begin with.
     let sleds_url = "/v1/system/hardware/sleds";
-    assert_eq!(sleds_list(&external_client, &sleds_url).await.len(), 1);
+    assert_eq!(sleds_list(&external_client, &sleds_url).await.len(), 2);
 
-    // Verify that there are no disks.
+    // The test framework may set up some disks initially.
     let disks_url =
         format!("/v1/system/hardware/sleds/{SLED_AGENT_UUID}/disks");
-    assert!(physical_disks_list(&external_client, &disks_url).await.is_empty());
+    let disks_initial = physical_disks_list(&external_client, &disks_url).await;
 
-    // Insert a new disk using the internal API, observe it in the external API
+    // Inject a disk into the database, observe it in the external API
+    let nexus = &cptestctx.server.server_context().nexus;
+    let datastore = nexus.datastore();
     let sled_id = Uuid::from_str(&SLED_AGENT_UUID).unwrap();
-    create_physical_disk(
-        &internal_client,
-        "v",
-        "s",
-        "m",
-        PhysicalDiskKind::U2,
+    let physical_disk = DbPhysicalDisk::new(
+        Uuid::new_v4(),
+        "v".into(),
+        "s".into(),
+        "m".into(),
+        DbPhysicalDiskKind::U2,
         sled_id,
-    )
-    .await;
+    );
+
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+    let _disk_id = datastore
+        .physical_disk_insert(&opctx, physical_disk.clone())
+        .await
+        .expect("Failed to upsert physical disk");
+
     let disks = physical_disks_list(&external_client, &disks_url).await;
-    assert_eq!(disks.len(), 1);
-    assert_eq!(disks[0].vendor, "v");
-    assert_eq!(disks[0].serial, "s");
-    assert_eq!(disks[0].model, "m");
+    assert_eq!(disks.len(), disks_initial.len() + 1);
+    let new_disk = disks
+        .iter()
+        .find(|found_disk| {
+            found_disk.vendor == "v"
+                && found_disk.serial == "s"
+                && found_disk.model == "m"
+        })
+        .expect("did not find the new disk");
 
     // Delete that disk using the internal API, observe it in the external API
-    delete_physical_disk(&internal_client, "v", "s", "m", sled_id).await;
-    assert!(physical_disks_list(&external_client, &disks_url).await.is_empty());
+    datastore
+        .physical_disk_delete(
+            &opctx,
+            PhysicalDiskUuid::from_untyped_uuid(new_disk.identity.id),
+        )
+        .await
+        .expect("Failed to upsert physical disk");
+
+    let list = physical_disks_list(&external_client, &disks_url).await;
+    assert_eq!(list, disks_initial, "{:#?}", list,);
 }
 
 #[nexus_test]
 async fn test_sled_instance_list(cptestctx: &ControlPlaneTestContext) {
     let external_client = &cptestctx.external_client;
 
-    // Verify that there is one sled to begin with.
+    // Verify that there are two sleds to begin with.
     let sleds_url = "/v1/system/hardware/sleds";
-    assert_eq!(sleds_list(&external_client, &sleds_url).await.len(), 1);
+    assert_eq!(sleds_list(&external_client, &sleds_url).await.len(), 2);
 
     // Verify that there are no instances.
     let instances_url =
@@ -144,7 +168,7 @@ async fn test_sled_instance_list(cptestctx: &ControlPlaneTestContext) {
         .is_empty());
 
     // Create an IP pool and project that we'll use for testing.
-    populate_ip_pool(&external_client, "default", None).await;
+    create_default_ip_pool(&external_client).await;
     let project = create_project(&external_client, "test-project").await;
     let instance =
         create_instance(&external_client, "test-project", "test-instance")

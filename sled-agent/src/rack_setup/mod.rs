@@ -4,8 +4,13 @@
 
 //! Rack Setup Service
 
-/// Configuration files which automate input to RSS.
-pub mod config;
 mod plan;
 /// The main implementation of the RSS service.
 pub mod service;
+
+pub use plan::service::SledConfig;
+pub use plan::service::{
+    from_ipaddr_to_external_floating_ip,
+    from_sockaddr_to_external_floating_addr,
+    from_source_nat_config_to_external_snat_ip,
+};

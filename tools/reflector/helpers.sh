@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 set -o pipefail
 set -o errexit
@@ -19,7 +19,7 @@ function merge {
   local TARGET_BRANCH="$1"
   local INTEGRATION_BRANCH="$2"
   local BOT_ID="$3"
-  local -n CHECKOUT_PATHS=$4
+  local CHECKOUT_PATHS=$4
 
   set_reflector_bot "$BOT_ID"
 

@@ -6,6 +6,9 @@ edition = "2021"
 license = "MPL-2.0"
 default-run = "wicket"
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow.workspace = true
 buf-list.workspace = true
@@ -14,7 +17,6 @@ ciborium.workspace = true
 clap.workspace = true
 crossterm.workspace = true
 futures.workspace = true
-hex = { workspace = true, features = ["serde"] }
 humantime.workspace = true
 indexmap.workspace = true
 indicatif.workspace = true
@@ -25,20 +27,21 @@ owo-colors.workspace = true
 ratatui.workspace = true
 reqwest.workspace = true
 rpassword.workspace = true
-semver.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 shell-words.workspace = true
+sled-hardware-types.workspace = true
 slog.workspace = true
 slog-async.workspace = true
 slog-envlogger.workspace = true
 slog-term.workspace = true
+supports-color.workspace = true
 textwrap.workspace = true
 tokio = { workspace = true, features = ["full"] }
 tokio-util.workspace = true
 toml.workspace = true
 toml_edit.workspace = true
-tui-tree-widget = "0.13.0"
+tui-tree-widget.workspace = true
 unicode-width.workspace = true
 zeroize.workspace = true
 
@@ -50,6 +53,8 @@ omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
 assert_cmd.workspace = true
+expectorate.workspace = true
+maplit.workspace = true
 tempfile.workspace = true
 proptest.workspace = true
 

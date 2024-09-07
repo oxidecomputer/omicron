@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 use nexus_types::internal_api;
 use uuid::Uuid;
 
-/// Message used to notify Nexus that this oximeter instance is up and running.
+/// A record representing a registered `oximeter` collector.
 #[derive(Queryable, Insertable, Debug, Clone, Copy)]
 #[diesel(table_name = oximeter)]
 pub struct OximeterInfo {
@@ -18,8 +18,9 @@ pub struct OximeterInfo {
     pub time_created: DateTime<Utc>,
     /// When this resource was last modified.
     pub time_modified: DateTime<Utc>,
-    /// The address on which this oximeter instance listens for requests
+    /// The address on which this `oximeter` instance listens for requests.
     pub ip: ipnetwork::IpNetwork,
+    /// The port on which this `oximeter` instance listens for requests.
     pub port: SqlU16,
 }
 

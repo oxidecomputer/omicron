@@ -18,7 +18,8 @@ This doc is aimed at the public API.  For consistency, we should use the same er
 ** "403 Forbidden" is used when the user provided valid credentials (they were authenticated), but they're not authorized to access the resource, _and_ we don't mind telling them that the resource exists (e.g., accessing "/sleds").
 ** "404 Not Found" is used when the user provided valid credentials (they were authenticated), but they're not authorized to access the resource, and they're not even allowed to know whether it exists (e.g., accessing a particular Project).
 * "500 Internal Server Error" is used for any kind of _bug_ or unhandled server-side condition.
-* "503 Service unavailable" is used when the service (or an internal service on which the service depends) is overloaded or actually unavailable.
+* "503 Service Unavailable" is used when the service (or an internal service on which the service depends) is overloaded or actually unavailable.
+* "507 Insufficient Storage" is used if there isn't sufficient capacity available for a particular operation (for example, if there isn't enough disk space available to allocate a new virtual disk).
 
 There's more discussion about the 400-level and 500-level codes below.
 

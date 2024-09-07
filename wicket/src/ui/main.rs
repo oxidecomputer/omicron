@@ -8,11 +8,12 @@ use super::{Control, OverviewPane, RackSetupPane, StatefulList, UpdatePane};
 use crate::ui::defaults::colors::*;
 use crate::ui::defaults::style;
 use crate::ui::widgets::Fade;
-use crate::{Action, Cmd, Frame, State, Term};
+use crate::{Action, Cmd, State, Term};
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Borders, List, ListItem, Paragraph};
+use ratatui::Frame;
 use slog::{o, Logger};
 use wicketd_client::types::GetLocationResponse;
 
@@ -63,7 +64,7 @@ impl MainScreen {
         terminal: &mut Term,
     ) -> anyhow::Result<()> {
         terminal.draw(|frame| {
-            let mut rect = frame.size();
+            let mut rect = frame.area();
 
             rect.height -= 1;
             let statusbar_rect = Rect {
@@ -84,7 +85,7 @@ impl MainScreen {
 
             // Draw all the components, starting with the background
             let background = Block::default().style(style::background());
-            frame.render_widget(background, frame.size());
+            frame.render_widget(background, frame.area());
             self.sidebar.draw(state, frame, chunks[0], self.sidebar.active);
             self.draw_pane(state, frame, chunks[1]);
             self.draw_statusbar(state, frame, statusbar_rect);

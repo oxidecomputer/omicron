@@ -7,15 +7,14 @@
 
 use std::time::Duration;
 
+mod cli;
 mod dispatch;
 mod events;
+mod helpers;
 mod keymap;
-mod preflight;
-mod rack_setup;
 mod runner;
 mod state;
 mod ui;
-mod upload;
 mod wicketd;
 
 pub const TICK_INTERVAL: Duration = Duration::from_millis(30);

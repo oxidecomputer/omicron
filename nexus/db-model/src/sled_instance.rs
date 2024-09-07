@@ -1,6 +1,6 @@
 use crate::schema::sled_instance;
-use crate::InstanceState;
 use crate::Name;
+use crate::VmmState;
 use db_macros::Asset;
 use nexus_types::external_api::views;
 use nexus_types::identity::Asset;
@@ -21,7 +21,7 @@ pub struct SledInstance {
     pub silo_name: Name,
     pub project_name: Name,
 
-    pub state: InstanceState,
+    pub state: VmmState,
     pub ncpus: i64,
     pub memory: i64,
 }
@@ -34,10 +34,16 @@ impl From<SledInstance> for views::SledInstance {
             active_sled_id: sled_instance.active_sled_id,
             silo_name: sled_instance.silo_name.into(),
             project_name: sled_instance.project_name.into(),
-            state: *sled_instance.state.state(),
+            state: sled_instance.state.into(),
             migration_id: sled_instance.migration_id,
             ncpus: sled_instance.ncpus,
             memory: sled_instance.memory,
         }
+    }
+}
+
+impl SledInstance {
+    pub fn instance_id(&self) -> Uuid {
+        self.identity.id
     }
 }

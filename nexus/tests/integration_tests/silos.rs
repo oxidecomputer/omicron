@@ -3,30 +3,33 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::integration_tests::saml::SAML_IDP_DESCRIPTOR;
-use nexus_db_queries::authn::silos::{
-    AuthenticatedSubject, IdentityProviderType,
-};
+use dropshot::ResultsPage;
+use nexus_db_queries::authn::silos::AuthenticatedSubject;
 use nexus_db_queries::authn::{USER_TEST_PRIVILEGED, USER_TEST_UNPRIVILEGED};
 use nexus_db_queries::authz::{self};
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
-use nexus_db_queries::db::fixed_data::silo::{DEFAULT_SILO, SILO_ID};
+use nexus_db_queries::db::fixed_data::silo::{DEFAULT_SILO, DEFAULT_SILO_ID};
 use nexus_db_queries::db::identity::Asset;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
-    create_local_user, create_project, create_silo, grant_iam, object_create,
-    objects_list_page_authz, projects_list,
+    create_ip_pool, create_local_user, create_project, create_silo, grant_iam,
+    link_ip_pool, object_create, object_delete, objects_list_page_authz,
+    projects_list,
 };
 use nexus_test_utils_macros::nexus_test;
+use nexus_types::external_api::views::Certificate;
 use nexus_types::external_api::views::{
     self, IdentityProvider, Project, SamlIdentityProvider, Silo,
 };
 use nexus_types::external_api::{params, shared};
-use omicron_common::api::external::ObjectIdentity;
+use omicron_common::address::{IpRange, Ipv4Range};
 use omicron_common::api::external::{
     IdentityMetadataCreateParams, LookupType, Name,
 };
+use omicron_common::api::external::{ObjectIdentity, UserId};
+use omicron_test_utils::certificates::CertificateChain;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
@@ -34,6 +37,7 @@ use std::fmt::Write;
 use std::str::FromStr;
 
 use base64::Engine;
+use hickory_resolver::error::ResolveErrorKind;
 use http::method::Method;
 use http::StatusCode;
 use httptest::{matchers::*, responders::*, Expectation, Server};
@@ -41,7 +45,6 @@ use nexus_types::external_api::shared::{FleetRole, SiloRole};
 use std::convert::Infallible;
 use std::net::Ipv4Addr;
 use std::time::Duration;
-use trust_dns_resolver::error::ResolveErrorKind;
 use uuid::Uuid;
 
 type ControlPlaneTestContext =
@@ -50,7 +53,7 @@ type ControlPlaneTestContext =
 #[nexus_test]
 async fn test_silos(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
 
     // Verify that we cannot create a name with the same name as the recovery
     // Silo that was created during rack initialization.
@@ -65,6 +68,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
                     name: cptestctx.silo_name.clone(),
                     description: "a silo".to_string(),
                 },
+                quotas: params::SiloQuotasCreate::empty(),
                 discoverable: false,
                 identity_mode: shared::SiloIdentityMode::LocalOnly,
                 admin_group_name: None,
@@ -271,7 +275,7 @@ async fn test_silos(cptestctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_silo_admin_group(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
 
     let silo: Silo = object_create(
         client,
@@ -281,6 +285,7 @@ async fn test_silo_admin_group(cptestctx: &ControlPlaneTestContext) {
                 name: "silo-name".parse().unwrap(),
                 description: "a silo".to_string(),
             },
+            quotas: params::SiloQuotasCreate::empty(),
             discoverable: false,
             identity_mode: shared::SiloIdentityMode::SamlJit,
             admin_group_name: Some("administrator".into()),
@@ -516,21 +521,24 @@ async fn test_deleting_a_silo_deletes_the_idp(
     .expect("failed to make request");
 
     // Expect that the silo is gone
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
 
-    let response = IdentityProviderType::lookup(
-        &nexus.datastore(),
-        &nexus.opctx_external_authn(),
-        &omicron_common::api::external::Name::try_from(SILO_NAME.to_string())
+    let response = nexus
+        .datastore()
+        .identity_provider_lookup(
+            &nexus.opctx_external_authn(),
+            &omicron_common::api::external::Name::try_from(
+                SILO_NAME.to_string(),
+            )
             .unwrap()
             .into(),
-        &omicron_common::api::external::Name::try_from(
-            "some-totally-real-saml-provider".to_string(),
+            &omicron_common::api::external::Name::try_from(
+                "some-totally-real-saml-provider".to_string(),
+            )
+            .unwrap()
+            .into(),
         )
-        .unwrap()
-        .into(),
-    )
-    .await;
+        .await;
 
     assert!(response.is_err());
     match response.err().unwrap() {
@@ -740,7 +748,7 @@ struct TestSiloUserProvisionTypes {
 #[nexus_test]
 async fn test_silo_user_provision_types(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
 
     let test_cases: Vec<TestSiloUserProvisionTypes> = vec![
@@ -837,7 +845,7 @@ async fn test_silo_user_fetch_by_external_id(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
 
     let silo = create_silo(
         &client,
@@ -911,12 +919,12 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
             views::User {
                 id: USER_TEST_PRIVILEGED.id(),
                 display_name: USER_TEST_PRIVILEGED.external_id.clone(),
-                silo_id: *SILO_ID,
+                silo_id: *DEFAULT_SILO_ID,
             },
             views::User {
                 id: USER_TEST_UNPRIVILEGED.id(),
                 display_name: USER_TEST_UNPRIVILEGED.external_id.clone(),
-                silo_id: *SILO_ID,
+                silo_id: *DEFAULT_SILO_ID,
             },
         ]
     );
@@ -945,17 +953,17 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
             views::User {
                 id: new_silo_user_id,
                 display_name: new_silo_user_external_id.into(),
-                silo_id: *SILO_ID,
+                silo_id: *DEFAULT_SILO_ID,
             },
             views::User {
                 id: USER_TEST_PRIVILEGED.id(),
                 display_name: USER_TEST_PRIVILEGED.external_id.clone(),
-                silo_id: *SILO_ID,
+                silo_id: *DEFAULT_SILO_ID,
             },
             views::User {
                 id: USER_TEST_UNPRIVILEGED.id(),
                 display_name: USER_TEST_UNPRIVILEGED.external_id.clone(),
-                silo_id: *SILO_ID,
+                silo_id: *DEFAULT_SILO_ID,
             },
         ]
     );
@@ -1019,7 +1027,7 @@ async fn test_silo_users_list(cptestctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_silo_groups_jit(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
 
     let silo = create_silo(
@@ -1088,7 +1096,7 @@ async fn test_silo_groups_jit(cptestctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_silo_groups_fixed(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
 
     let silo = create_silo(
         &client,
@@ -1149,7 +1157,7 @@ async fn test_silo_groups_remove_from_one_group(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
 
     let silo = create_silo(
@@ -1262,7 +1270,7 @@ async fn test_silo_groups_remove_from_both_groups(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
 
     let silo = create_silo(
@@ -1374,7 +1382,7 @@ async fn test_silo_groups_remove_from_both_groups(
 #[nexus_test]
 async fn test_silo_delete_clean_up_groups(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
 
     // Create a silo
     let silo = create_silo(
@@ -1456,7 +1464,7 @@ async fn test_silo_delete_clean_up_groups(cptestctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_ensure_same_silo_group(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
 
     // Create a silo
     let silo = create_silo(
@@ -1518,7 +1526,7 @@ async fn test_ensure_same_silo_group(cptestctx: &ControlPlaneTestContext) {
 #[nexus_test]
 async fn test_silo_user_views(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let datastore = cptestctx.server.apictx().nexus.datastore();
+    let datastore = cptestctx.server.server_context().nexus.datastore();
 
     // Create the two Silos.
     let silo1 =
@@ -1734,7 +1742,7 @@ async fn create_jit_user(
 #[nexus_test]
 async fn test_jit_silo_constraints(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
-    let nexus = &cptestctx.server.apictx().nexus;
+    let nexus = &cptestctx.server.server_context().nexus;
     let datastore = nexus.datastore();
     let silo =
         create_silo(&client, "jit", true, shared::SiloIdentityMode::SamlJit)
@@ -1768,7 +1776,7 @@ async fn test_jit_silo_constraints(cptestctx: &ControlPlaneTestContext) {
                 Method::POST,
                 "/v1/system/identity-providers/local/users?silo=jit",
                 &params::UserCreate {
-                    external_id: params::UserId::from_str("dummy").unwrap(),
+                    external_id: UserId::from_str("dummy").unwrap(),
                     password: params::UserPassword::LoginDisallowed,
                 },
             )
@@ -1828,7 +1836,7 @@ async fn test_jit_silo_constraints(cptestctx: &ControlPlaneTestContext) {
         Method::POST,
         "/v1/login/jit/local",
         &params::UsernamePasswordCredentials {
-            username: params::UserId::from_str(admin_username).unwrap(),
+            username: UserId::from_str(admin_username).unwrap(),
             password: password.clone(),
         },
     ))
@@ -1841,7 +1849,7 @@ async fn test_jit_silo_constraints(cptestctx: &ControlPlaneTestContext) {
         Method::POST,
         "/v1/login/jit/local",
         &params::UsernamePasswordCredentials {
-            username: params::UserId::from_str("bogus").unwrap(),
+            username: UserId::from_str("bogus").unwrap(),
             password: password.clone(),
         },
     ))
@@ -2039,7 +2047,7 @@ async fn run_user_tests(
         client,
         &url_user_create,
         &params::UserCreate {
-            external_id: params::UserId::from_str("a-test-user").unwrap(),
+            external_id: UserId::from_str("a-test-user").unwrap(),
             password: params::UserPassword::LoginDisallowed,
         },
     )
@@ -2156,7 +2164,7 @@ pub async fn verify_silo_dns_name(
                 .await
             {
                 Ok(result) => {
-                    let addrs: Vec<_> = result.iter().collect();
+                    let addrs: Vec<_> = result.iter().map(|a| &a.0).collect();
                     if addrs.is_empty() {
                         false
                     } else {
@@ -2253,6 +2261,7 @@ async fn test_silo_authn_policy(cptestctx: &ControlPlaneTestContext) {
                     name: silo_name,
                     description: String::new(),
                 },
+                quotas: params::SiloQuotasCreate::empty(),
                 discoverable: false,
                 identity_mode: shared::SiloIdentityMode::LocalOnly,
                 admin_group_name: None,
@@ -2329,6 +2338,7 @@ async fn check_fleet_privileges(
             name: SILO_NAME.parse().unwrap(),
             description: String::new(),
         },
+        quotas: params::SiloQuotasCreate::empty(),
         discoverable: false,
         identity_mode: shared::SiloIdentityMode::LocalOnly,
         admin_group_name: None,
@@ -2357,6 +2367,7 @@ async fn check_fleet_privileges(
                         name: SILO_NAME.parse().unwrap(),
                         description: String::new(),
                     },
+                    quotas: params::SiloQuotasCreate::empty(),
                     discoverable: false,
                     identity_mode: shared::SiloIdentityMode::LocalOnly,
                     admin_group_name: None,
@@ -2384,6 +2395,7 @@ async fn check_fleet_privileges(
             name: SILO_NAME.parse().unwrap(),
             description: String::new(),
         },
+        quotas: params::SiloQuotasCreate::empty(),
         discoverable: false,
         identity_mode: shared::SiloIdentityMode::LocalOnly,
         admin_group_name: None,
@@ -2416,6 +2428,7 @@ async fn check_fleet_privileges(
                         name: SILO_NAME.parse().unwrap(),
                         description: String::new(),
                     },
+                    quotas: params::SiloQuotasCreate::empty(),
                     discoverable: false,
                     identity_mode: shared::SiloIdentityMode::LocalOnly,
                     admin_group_name: None,
@@ -2436,4 +2449,182 @@ async fn check_fleet_privileges(
             .await
             .unwrap();
     }
+}
+
+// Test that a silo admin can create new certificates for their silo
+//
+// Internally, the certificate validation check requires the `authz::DNS_CONFIG`
+// resource (to check that the certificate is valid for
+// `{silo_name}.{external_dns_zone_name}`), which silo admins may not have. We
+// have to use an alternate, elevated context to perform that check, and this
+// test confirms we do so.
+#[nexus_test]
+async fn test_silo_admin_can_create_certs(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let certs_url = "/v1/certificates";
+
+    // Create a silo with an admin user
+    let silo = create_silo(
+        client,
+        "silo-name",
+        true,
+        shared::SiloIdentityMode::LocalOnly,
+    )
+    .await;
+
+    let new_silo_user_id = create_local_user(
+        client,
+        &silo,
+        &"admin".parse().unwrap(),
+        params::UserPassword::LoginDisallowed,
+    )
+    .await
+    .id;
+
+    grant_iam(
+        client,
+        "/v1/system/silos/silo-name",
+        SiloRole::Admin,
+        new_silo_user_id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    // The user should be able to create certs for this silo
+    let chain = CertificateChain::new(cptestctx.wildcard_silo_dns_name());
+    let (cert, key) =
+        (chain.cert_chain_as_pem(), chain.end_cert_private_key_as_pem());
+
+    let cert: Certificate = NexusRequest::objects_post(
+        client,
+        certs_url,
+        &params::CertificateCreate {
+            identity: IdentityMetadataCreateParams {
+                name: "test-cert".parse().unwrap(),
+                description: "the test cert".to_string(),
+            },
+            cert,
+            key,
+            service: shared::ServiceUsingCertificate::ExternalApi,
+        },
+    )
+    .authn_as(AuthnMode::SiloUser(new_silo_user_id))
+    .execute()
+    .await
+    .expect("failed to create certificate")
+    .parsed_body()
+    .unwrap();
+
+    // The cert should exist when listing the silo's certs as the silo admin
+    let silo_certs =
+        NexusRequest::object_get(client, &format!("{certs_url}?limit=10"))
+            .authn_as(AuthnMode::SiloUser(new_silo_user_id))
+            .execute()
+            .await
+            .expect("failed to list certificates")
+            .parsed_body::<ResultsPage<Certificate>>()
+            .expect("failed to parse body as ResultsPage<Certificate>")
+            .items;
+
+    assert_eq!(silo_certs.len(), 1);
+    assert_eq!(silo_certs[0].identity.id, cert.identity.id);
+}
+
+// Test that silo delete cleans up associated groups
+#[nexus_test]
+async fn test_silo_delete_cleans_up_ip_pool_links(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    // Create a silo
+    let silo1 =
+        create_silo(&client, "silo1", true, shared::SiloIdentityMode::SamlJit)
+            .await;
+    let silo2 =
+        create_silo(&client, "silo2", true, shared::SiloIdentityMode::SamlJit)
+            .await;
+
+    // link pool1 to both, link pool2 to silo1 only
+    let range1 = IpRange::V4(
+        Ipv4Range::new(
+            std::net::Ipv4Addr::new(10, 0, 0, 51),
+            std::net::Ipv4Addr::new(10, 0, 0, 52),
+        )
+        .unwrap(),
+    );
+    create_ip_pool(client, "pool1", Some(range1)).await;
+    link_ip_pool(client, "pool1", &silo1.identity.id, true).await;
+    link_ip_pool(client, "pool1", &silo2.identity.id, true).await;
+
+    let range2 = IpRange::V4(
+        Ipv4Range::new(
+            std::net::Ipv4Addr::new(10, 0, 0, 53),
+            std::net::Ipv4Addr::new(10, 0, 0, 54),
+        )
+        .unwrap(),
+    );
+    create_ip_pool(client, "pool2", Some(range2)).await;
+    link_ip_pool(client, "pool2", &silo1.identity.id, false).await;
+
+    // we want to make sure the links are there before we make sure they're gone
+    let url = "/v1/system/ip-pools/pool1/silos";
+    let links =
+        objects_list_page_authz::<views::IpPoolSiloLink>(client, &url).await;
+    assert_eq!(links.items.len(), 2);
+
+    let url = "/v1/system/ip-pools/pool2/silos";
+    let links =
+        objects_list_page_authz::<views::IpPoolSiloLink>(client, &url).await;
+    assert_eq!(links.items.len(), 1);
+
+    // Delete the silo
+    let url = format!("/v1/system/silos/{}", silo1.identity.id);
+    object_delete(client, &url).await;
+
+    // Now make sure the links are gone
+    let url = "/v1/system/ip-pools/pool1/silos";
+    let links =
+        objects_list_page_authz::<views::IpPoolSiloLink>(client, &url).await;
+    assert_eq!(links.items.len(), 1);
+
+    let url = "/v1/system/ip-pools/pool2/silos";
+    let links =
+        objects_list_page_authz::<views::IpPoolSiloLink>(client, &url).await;
+    assert_eq!(links.items.len(), 0);
+
+    // but the pools are of course still there
+    let url = "/v1/system/ip-pools";
+    let pools = objects_list_page_authz::<views::IpPool>(client, &url).await;
+    assert_eq!(pools.items.len(), 2);
+    assert_eq!(pools.items[0].identity.name, "pool1");
+    assert_eq!(pools.items[1].identity.name, "pool2");
+
+    // nothing prevents us from deleting the pools (except the child ranges --
+    // we do have to remove those)
+
+    let url = "/v1/system/ip-pools/pool1/ranges/remove";
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, url)
+            .body(Some(&range1))
+            .expect_status(Some(StatusCode::NO_CONTENT)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Failed to delete IP range from a pool");
+
+    let url = "/v1/system/ip-pools/pool2/ranges/remove";
+    NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, url)
+            .body(Some(&range2))
+            .expect_status(Some(StatusCode::NO_CONTENT)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("Failed to delete IP range from a pool");
+
+    object_delete(client, "/v1/system/ip-pools/pool1").await;
+    object_delete(client, "/v1/system/ip-pools/pool2").await;
 }

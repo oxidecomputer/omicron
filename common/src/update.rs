@@ -95,6 +95,13 @@ pub struct ArtifactId {
     pub kind: ArtifactKind,
 }
 
+/// Used for user-friendly messages.
+impl fmt::Display for ArtifactId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} v{} ({})", self.name, self.version, self.kind)
+    }
+}
+
 /// A hash-based identifier for an artifact.
 ///
 /// Some places, e.g. the installinator, request artifacts by hash rather than
@@ -170,6 +177,12 @@ impl ArtifactKind {
 /// These artifact kinds are not stored anywhere, but are derived from stored
 /// kinds and used as internal identifiers.
 impl ArtifactKind {
+    /// Gimlet root of trust bootloader slot image identifier.
+    ///
+    /// Derived from [`KnownArtifactKind::GimletRotBootloader`].
+    pub const GIMLET_ROT_STAGE0: Self =
+        Self::from_static("gimlet_rot_bootloader");
+
     /// Gimlet root of trust A slot image identifier.
     ///
     /// Derived from [`KnownArtifactKind::GimletRot`].
@@ -182,6 +195,11 @@ impl ArtifactKind {
     pub const GIMLET_ROT_IMAGE_B: Self =
         Self::from_static("gimlet_rot_image_b");
 
+    /// PSC root of trust stage0 image identifier.
+    ///
+    /// Derived from [`KnownArtifactKind::PscRotBootloader`].
+    pub const PSC_ROT_STAGE0: Self = Self::from_static("psc_rot_bootloader");
+
     /// PSC root of trust A slot image identifier.
     ///
     /// Derived from [`KnownArtifactKind::PscRot`].
@@ -191,6 +209,12 @@ impl ArtifactKind {
     ///
     /// Derived from [`KnownArtifactKind::PscRot`].
     pub const PSC_ROT_IMAGE_B: Self = Self::from_static("psc_rot_image_b");
+
+    /// Switch root of trust A slot image identifier.
+    ///
+    /// Derived from [`KnownArtifactKind::SwitchRotBootloader`].
+    pub const SWITCH_ROT_STAGE0: Self =
+        Self::from_static("switch_rot_bootloader");
 
     /// Switch root of trust A slot image identifier.
     ///
@@ -296,7 +320,9 @@ impl FromStr for ArtifactHash {
     }
 }
 
-fn hex_schema<const N: usize>(gen: &mut SchemaGenerator) -> Schema {
+/// Produce an OpenAPI schema describing a hex array of a specific length (e.g.,
+/// a hash digest).
+pub fn hex_schema<const N: usize>(gen: &mut SchemaGenerator) -> Schema {
     let mut schema: SchemaObject = <String>::json_schema(gen).into();
     schema.format = Some(format!("hex string ({N} bytes)"));
     schema.into()

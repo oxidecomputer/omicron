@@ -9,8 +9,10 @@
 use crate::api::external::Name;
 use crate::api::external::ResourceType;
 use dropshot::HttpError;
+use omicron_uuid_kinds::GenericUuid;
 use serde::Deserialize;
 use serde::Serialize;
+use slog_error_chain::SlogInlineError;
 use std::fmt::Display;
 use uuid::Uuid;
 
@@ -25,7 +27,15 @@ use uuid::Uuid;
 /// General best practices for error design apply here.  Where possible, we want
 /// to reuse existing variants rather than inventing new ones to distinguish
 /// cases that no programmatic consumer needs to distinguish.
-#[derive(Clone, Debug, Deserialize, thiserror::Error, PartialEq, Serialize)]
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    thiserror::Error,
+    PartialEq,
+    Serialize,
+    SlogInlineError,
+)]
 pub enum Error {
     /// An object needed as part of this operation was not found.
     #[error("Object (of type {lookup_type:?}) not found: {type_name}")]
@@ -35,16 +45,16 @@ pub enum Error {
     ObjectAlreadyExists { type_name: ResourceType, object_name: String },
     /// The request was well-formed, but the operation cannot be completed given
     /// the current state of the system.
-    #[error("Invalid Request: {message}")]
-    InvalidRequest { message: String },
+    #[error("Invalid Request: {}", .message.display_internal())]
+    InvalidRequest { message: MessagePair },
     /// Authentication credentials were required but either missing or invalid.
     /// The HTTP status code is called "Unauthorized", but it's more accurate to
     /// call it "Unauthenticated".
     #[error("Missing or invalid credentials")]
     Unauthenticated { internal_message: String },
     /// The specified input field is not valid.
-    #[error("Invalid Value: {label}, {message}")]
-    InvalidValue { label: String, message: String },
+    #[error("Invalid Value: {label}, {}", .message.display_internal())]
+    InvalidValue { label: String, message: MessagePair },
     /// The request is not authorized to perform the requested operation.
     #[error("Forbidden")]
     Forbidden,
@@ -55,15 +65,96 @@ pub enum Error {
     /// The system (or part of it) is unavailable.
     #[error("Service Unavailable: {internal_message}")]
     ServiceUnavailable { internal_message: String },
-    /// Method Not Allowed
-    #[error("Method Not Allowed: {internal_message}")]
-    MethodNotAllowed { internal_message: String },
+
+    /// There is insufficient capacity to perform the requested operation.
+    ///
+    /// This variant is translated to 507 Insufficient Storage, and it carries
+    /// both an external and an internal message. The external message is
+    /// intended for operator consumption and is intended to not leak any
+    /// implementation details.
+    #[error("Insufficient Capacity: {}", .message.display_internal())]
+    InsufficientCapacity { message: MessagePair },
 
     #[error("Type version mismatch! {internal_message}")]
     TypeVersionMismatch { internal_message: String },
 
-    #[error("Conflict: {internal_message}")]
-    Conflict { internal_message: String },
+    #[error("Conflict: {}", .message.display_internal())]
+    Conflict { message: MessagePair },
+
+    /// A generic 404 response. If there is an applicable ResourceType, use
+    /// ObjectNotFound instead.
+    #[error("Not found: {}", .message.display_internal())]
+    NotFound { message: MessagePair },
+
+    /// Access to the target resource is no longer available, and this condition
+    /// is likely to be permanent.
+    #[error("Gone")]
+    Gone,
+}
+
+/// Represents an error message which has an external component, along with
+/// some internal context possibly attached to it.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+pub struct MessagePair {
+    external_message: String,
+    internal_context: String,
+}
+
+impl MessagePair {
+    pub fn new(external_message: String) -> Self {
+        Self { external_message, internal_context: String::new() }
+    }
+
+    pub fn new_full(
+        external_message: String,
+        internal_context: String,
+    ) -> Self {
+        Self { external_message, internal_context }
+    }
+
+    pub fn external_message(&self) -> &str {
+        &self.external_message
+    }
+
+    pub fn internal_context(&self) -> &str {
+        &self.internal_context
+    }
+
+    fn with_internal_context<C>(self, context: C) -> Self
+    where
+        C: Display + Send + Sync + 'static,
+    {
+        let internal_context = if self.internal_context.is_empty() {
+            context.to_string()
+        } else {
+            format!("{}: {}", context, self.internal_context)
+        };
+        Self { external_message: self.external_message, internal_context }
+    }
+
+    pub fn into_internal_external(self) -> (String, String) {
+        let internal = self.display_internal().to_string();
+        (internal, self.external_message)
+    }
+
+    // Do not implement `fmt::Display` for this enum because we don't want users to
+    // accidentally display the internal message to the client. Instead, use a
+    // private formatter.
+    fn display_internal(&self) -> MessagePairDisplayInternal<'_> {
+        MessagePairDisplayInternal(self)
+    }
+}
+
+struct MessagePairDisplayInternal<'a>(&'a MessagePair);
+
+impl<'a> Display for MessagePairDisplayInternal<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0.external_message)?;
+        if !self.0.internal_context.is_empty() {
+            write!(f, " (with internal context: {})", self.0.internal_context)?;
+        }
+        Ok(())
+    }
 }
 
 /// Indicates how an object was looked up (for an `ObjectNotFound` error)
@@ -73,14 +164,19 @@ pub enum LookupType {
     ByName(String),
     /// a specific id was requested
     ById(Uuid),
-    /// a session token was requested
-    BySessionToken(String),
     /// a specific id was requested with some composite type
     /// (caller summarizes it)
     ByCompositeId(String),
+    /// object selected by criteria that would be confusing to call an ID
+    ByOther(String),
 }
 
 impl LookupType {
+    /// Constructs a `ById` lookup type from a typed or untyped UUID.
+    pub fn by_id<T: GenericUuid>(id: T) -> Self {
+        LookupType::ById(id.into_untyped_uuid())
+    }
+
     /// Returns an ObjectNotFound error appropriate for the case where this
     /// lookup failed
     pub fn into_not_found(self, type_name: ResourceType) -> Error {
@@ -119,10 +215,12 @@ impl Error {
             | Error::InvalidRequest { .. }
             | Error::InvalidValue { .. }
             | Error::Forbidden
-            | Error::MethodNotAllowed { .. }
+            | Error::InsufficientCapacity { .. }
             | Error::InternalError { .. }
             | Error::TypeVersionMismatch { .. }
-            | Error::Conflict { .. } => false,
+            | Error::NotFound { .. }
+            | Error::Conflict { .. }
+            | Error::Gone => false,
         }
     }
 
@@ -151,8 +249,20 @@ impl Error {
     ///
     /// This should be used for failures due possibly to invalid client input
     /// or malformed requests.
-    pub fn invalid_request(message: &str) -> Error {
-        Error::InvalidRequest { message: message.to_owned() }
+    pub fn invalid_request(message: impl Into<String>) -> Error {
+        Error::InvalidRequest { message: MessagePair::new(message.into()) }
+    }
+
+    /// Generates an [`Error::InvalidValue`] error with the specific label and
+    /// message.
+    pub fn invalid_value(
+        label: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Error {
+        Error::InvalidValue {
+            label: label.into(),
+            message: MessagePair::new(message.into()),
+        }
     }
 
     /// Generates an [`Error::ServiceUnavailable`] error with the specific
@@ -164,6 +274,27 @@ impl Error {
     /// server problem) or InvalidRequest (if it's a client problem) instead.
     pub fn unavail(message: &str) -> Error {
         Error::ServiceUnavailable { internal_message: message.to_owned() }
+    }
+
+    /// Generates an [`Error::InsufficientCapacity`] error with external and
+    /// and internal messages.
+    ///
+    /// This should be used for failures where there is insufficient capacity,
+    /// and where the caller must either take action or wait until capacity is
+    /// freed.
+    ///
+    /// In the future, we may want to provide more help here: e.g. a link to a
+    /// status or support page.
+    pub fn insufficient_capacity(
+        external_message: impl Into<String>,
+        internal_message: impl Into<String>,
+    ) -> Error {
+        Error::InsufficientCapacity {
+            message: MessagePair::new_full(
+                external_message.into(),
+                internal_message.into(),
+            ),
+        }
     }
 
     /// Generates an [`Error::TypeVersionMismatch`] with a specific message.
@@ -186,8 +317,17 @@ impl Error {
     /// retried. The internal message should provide more information about the
     /// source of the conflict and possible actions the caller can take to
     /// resolve it (if any).
-    pub fn conflict(message: &str) -> Error {
-        Error::Conflict { internal_message: message.to_owned() }
+    pub fn conflict(message: impl Into<String>) -> Error {
+        Error::Conflict { message: MessagePair::new(message.into()) }
+    }
+
+    /// Generates an [`Error::NotFound`] with a specific message.
+    ///
+    /// This is used in cases where a generic 404 is required. For cases where
+    /// there is a ResourceType, use a function that produces
+    /// [`Error::ObjectNotFound`] instead.
+    pub fn non_resourcetype_not_found(message: impl Into<String>) -> Error {
+        Error::NotFound { message: MessagePair::new(message.into()) }
     }
 
     /// Given an [`Error`] with an internal message, return the same error with
@@ -201,9 +341,15 @@ impl Error {
         match self {
             Error::ObjectNotFound { .. }
             | Error::ObjectAlreadyExists { .. }
-            | Error::InvalidRequest { .. }
-            | Error::InvalidValue { .. }
-            | Error::Forbidden => self,
+            | Error::Forbidden
+            | Error::Gone => self,
+            Error::InvalidRequest { message } => Error::InvalidRequest {
+                message: message.with_internal_context(context),
+            },
+            Error::InvalidValue { label, message } => Error::InvalidValue {
+                label,
+                message: message.with_internal_context(context),
+            },
             Error::Unauthenticated { internal_message } => {
                 Error::Unauthenticated {
                     internal_message: format!(
@@ -223,12 +369,9 @@ impl Error {
                     ),
                 }
             }
-            Error::MethodNotAllowed { internal_message } => {
-                Error::MethodNotAllowed {
-                    internal_message: format!(
-                        "{}: {}",
-                        context, internal_message
-                    ),
+            Error::InsufficientCapacity { message } => {
+                Error::InsufficientCapacity {
+                    message: message.with_internal_context(context),
                 }
             }
             Error::TypeVersionMismatch { internal_message } => {
@@ -239,8 +382,11 @@ impl Error {
                     ),
                 }
             }
-            Error::Conflict { internal_message } => Error::Conflict {
-                internal_message: format!("{}: {}", context, internal_message),
+            Error::Conflict { message } => Error::Conflict {
+                message: message.with_internal_context(context),
+            },
+            Error::NotFound { message } => Error::NotFound {
+                message: message.with_internal_context(context),
             },
         }
     }
@@ -253,23 +399,22 @@ impl From<Error> for HttpError {
     fn from(error: Error) -> HttpError {
         match error {
             Error::ObjectNotFound { type_name: t, lookup_type: lt } => {
-                // TODO-cleanup is there a better way to express this?
-                let (lookup_field, lookup_value) = match lt {
-                    LookupType::ByName(name) => ("name", name),
-                    LookupType::ById(id) => ("id", id.to_string()),
-                    LookupType::ByCompositeId(label) => ("id", label),
-                    LookupType::BySessionToken(token) => {
-                        ("session token", token)
+                let message = match lt {
+                    LookupType::ByName(name) => {
+                        format!("{} with name \"{}\"", t, name)
                     }
+                    LookupType::ById(id) => {
+                        format!("{} with id \"{}\"", t, id)
+                    }
+                    LookupType::ByCompositeId(label) => {
+                        format!("{} with id \"{}\"", t, label)
+                    }
+                    LookupType::ByOther(msg) => msg,
                 };
-                let message = format!(
-                    "not found: {} with {} \"{}\"",
-                    t, lookup_field, lookup_value
-                );
                 HttpError::for_client_error(
                     Some(String::from("ObjectNotFound")),
                     http::StatusCode::NOT_FOUND,
-                    message,
+                    format!("not found: {}", message),
                 )
             }
 
@@ -292,28 +437,29 @@ impl From<Error> for HttpError {
                 internal_message,
             },
 
-            Error::InvalidRequest { message } => HttpError::for_bad_request(
-                Some(String::from("InvalidRequest")),
-                message,
-            ),
-
-            Error::InvalidValue { label, message } => {
-                let message =
-                    format!("unsupported value for \"{}\": {}", label, message);
-                HttpError::for_bad_request(
-                    Some(String::from("InvalidValue")),
-                    message,
-                )
+            Error::InvalidRequest { message } => {
+                let (internal_message, external_message) =
+                    message.into_internal_external();
+                HttpError {
+                    status_code: http::StatusCode::BAD_REQUEST,
+                    error_code: Some(String::from("InvalidRequest")),
+                    external_message,
+                    internal_message,
+                }
             }
 
-            // TODO: RFC-7231 requires that 405s generate an Accept header to describe
-            // what methods are available in the response
-            Error::MethodNotAllowed { internal_message } => {
-                HttpError::for_client_error(
-                    Some(String::from("MethodNotAllowed")),
-                    http::StatusCode::METHOD_NOT_ALLOWED,
+            Error::InvalidValue { label, message } => {
+                let (internal_message, external_message) =
+                    message.into_internal_external();
+                HttpError {
+                    status_code: http::StatusCode::BAD_REQUEST,
+                    error_code: Some(String::from("InvalidValue")),
+                    external_message: format!(
+                        "unsupported value for \"{}\": {}",
+                        label, external_message
+                    ),
                     internal_message,
-                )
+                }
             }
 
             Error::Forbidden => HttpError::for_client_error(
@@ -333,17 +479,53 @@ impl From<Error> for HttpError {
                 )
             }
 
+            Error::InsufficientCapacity { message } => {
+                let (internal_message, external_message) =
+                    message.into_internal_external();
+                // Need to construct an `HttpError` explicitly to present both
+                // an internal and an external message.
+                HttpError {
+                    status_code: http::StatusCode::INSUFFICIENT_STORAGE,
+                    error_code: Some(String::from("InsufficientCapacity")),
+                    external_message: format!(
+                        "Insufficient capacity: {}",
+                        external_message
+                    ),
+                    internal_message,
+                }
+            }
+
             Error::TypeVersionMismatch { internal_message } => {
                 HttpError::for_internal_error(internal_message)
             }
 
-            Error::Conflict { internal_message } => {
-                HttpError::for_client_error(
-                    Some(String::from("Conflict")),
-                    http::StatusCode::CONFLICT,
+            Error::Conflict { message } => {
+                let (internal_message, external_message) =
+                    message.into_internal_external();
+                HttpError {
+                    status_code: http::StatusCode::CONFLICT,
+                    error_code: Some(String::from("Conflict")),
+                    external_message,
                     internal_message,
-                )
+                }
             }
+
+            Error::NotFound { message } => {
+                let (internal_message, external_message) =
+                    message.into_internal_external();
+                HttpError {
+                    status_code: http::StatusCode::NOT_FOUND,
+                    error_code: Some(String::from("Not Found")),
+                    external_message,
+                    internal_message,
+                }
+            }
+
+            Error::Gone => HttpError::for_client_error(
+                Some(String::from("Gone")),
+                http::StatusCode::GONE,
+                String::from("Gone"),
+            ),
         }
     }
 }
@@ -361,20 +543,20 @@ pub trait ClientError: std::fmt::Debug {
 impl<T: ClientError> From<progenitor::progenitor_client::Error<T>> for Error {
     fn from(e: progenitor::progenitor_client::Error<T>) -> Self {
         match e {
-            // This error indicates that the inputs were not valid for this API
-            // call. It's reflective of either a client-side programming error.
-            progenitor::progenitor_client::Error::InvalidRequest(msg) => {
-                Error::internal_error(&format!("InvalidRequest: {}", msg))
+            // For most error variants, we delegate to the display impl for the
+            // Progenitor error type, but we pick apart an error response more
+            // carefully.
+            progenitor::progenitor_client::Error::InvalidRequest(_)
+            | progenitor::progenitor_client::Error::CommunicationError(_)
+            | progenitor::progenitor_client::Error::InvalidResponsePayload(
+                ..,
+            )
+            | progenitor::progenitor_client::Error::UnexpectedResponse(_)
+            | progenitor::progenitor_client::Error::InvalidUpgrade(_)
+            | progenitor::progenitor_client::Error::ResponseBodyError(_)
+            | progenitor::progenitor_client::Error::PreHookError(_) => {
+                Error::internal_error(&e.to_string())
             }
-
-            // This error indicates a problem with the request to the remote
-            // service that did not result in an HTTP response code, but rather
-            // pertained to local (i.e. client-side) encoding or network
-            // communication.
-            progenitor::progenitor_client::Error::CommunicationError(ee) => {
-                Error::internal_error(&format!("CommunicationError: {}", ee))
-            }
-
             // This error represents an expected error from the remote service.
             progenitor::progenitor_client::Error::ErrorResponse(rv) => {
                 let message = rv.message();
@@ -388,30 +570,6 @@ impl<T: ClientError> From<progenitor::progenitor_client::Error<T>> for Error {
                     }
                     _ => Error::internal_error(&message),
                 }
-            }
-
-            // This error indicates that the body returned by the client didn't
-            // match what was documented in the OpenAPI description for the
-            // service. This could only happen for us in the case of a severe
-            // logic/encoding bug in the remote service or due to a failure of
-            // our version constraints (i.e. that the call was to a newer
-            // service with an incompatible response).
-            progenitor::progenitor_client::Error::InvalidResponsePayload(
-                ee,
-            ) => Error::internal_error(&format!(
-                "InvalidResponsePayload: {}",
-                ee,
-            )),
-
-            // This error indicates that the client generated a response code
-            // that was not described in the OpenAPI description for the
-            // service; this could be a success or failure response, but either
-            // way it indicates a logic or version error as above.
-            progenitor::progenitor_client::Error::UnexpectedResponse(r) => {
-                Error::internal_error(&format!(
-                    "UnexpectedResponse: status code {}",
-                    r.status(),
-                ))
             }
         }
     }

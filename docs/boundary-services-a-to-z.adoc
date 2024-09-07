@@ -1,115 +1,16 @@
 = Boundary Services A-Z
 
-NOTE: The instructions for _deploying_ SoftNPU with Omicron have been folded into xref:how-to-run.adoc[the main how-to-run docs].
+NOTE: The instructions for _deploying_ SoftNPU with Omicron have been folded
+into xref:how-to-run.adoc[the main how-to-run docs].
 
-The virtual hardware making up SoftNPU is a bit different than what was previously used. What we now have looks like this.
+The virtual hardware making up SoftNPU is depicted in the diagram below.
 
 image::plumbing.png[]
 
-The `softnpu` zone will be configured and launched during the `create_virtual_hardware.sh` script.
+The `softnpu` zone will be configured and launched during
+`cargo xtask virtual-hardware create`.
 
 Once the control plane is running, `softnpu` can be configured via `dendrite`
-using the `swadm` binary located in the `oxz_switch` zone.
-An example script is provided in `tools/scrimlet/softnpu-init.sh`.
-This script should work without modification for basic development setups,
-but feel free to tweak it as needed.
-
-----
-$ ./tools/scrimlet/softnpu-init.sh
-++ netstat -rn -f inet
-++ grep default
-++ awk -F ' ' '{print $2}'
-+ GATEWAY_IP=10.85.0.1
-+ echo 'Using 10.85.0.1 as gateway ip'
-Using 10.85.0.1 as gateway ip
-++ arp 10.85.0.1
-++ awk -F ' ' '{print $4}'
-+ GATEWAY_MAC=68:d7:9a:1f:77:a1
-+ echo 'Using 68:d7:9a:1f:77:a1 as gateway mac'
-Using 68:d7:9a:1f:77:a1 as gateway mac
-+ z_swadm link create rear0 --speed 100G --fec RS
-+ pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm link create rear0 --speed 100G --fec RS
-+ z_swadm link create qsfp0 --speed 100G --fec RS
-+ pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm link create qsfp0 --speed 100G --fec RS
-+ z_swadm addr add rear0/0 fe80::aae1:deff:fe01:701c
-+ pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm addr add rear0/0 fe80::aae1:deff:fe01:701c
-+ z_swadm addr add qsfp0/0 fe80::aae1:deff:fe01:701d
-+ pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm addr add qsfp0/0 fe80::aae1:deff:fe01:701d
-+ z_swadm addr add rear0/0 fd00:99::1
-+ pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm addr add rear0/0 fd00:99::1
-+ z_swadm route add fd00:1122:3344:0101::/64 rear0/0 fe80::aae1:deff:fe00:1
-+ pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm route add fd00:1122:3344:0101::/64 rear0/0 fe80::aae1:deff:fe00:1
-+ z_swadm arp add fe80::aae1:deff:fe00:1 a8:e1:de:00:00:01
-+ pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm arp add fe80::aae1:deff:fe00:1 a8:e1:de:00:00:01
-+ z_swadm arp add 10.85.0.1 68:d7:9a:1f:77:a1
-+ pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm arp add 10.85.0.1 68:d7:9a:1f:77:a1
-+ z_swadm route add 0.0.0.0/0 qsfp0/0 10.85.0.1
-+ pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm route add 0.0.0.0/0 qsfp0/0 10.85.0.1
-+ z_swadm link ls
-+ pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm link ls
-Port/Link  Media    Speed  FEC   Enabled  Link  MAC
-rear0/0    Copper   100G   RS    true     Up    a8:40:25:46:55:e3
-qsfp0/0    Copper   100G   RS    true     Up    a8:40:25:46:55:e4
-+ z_swadm addr list
-+ pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm addr list
-Link      IPv4  IPv6
-rear0/0         fe80::aae1:deff:fe01:701c
-                fd00:99::1
-qsfp0/0         fe80::aae1:deff:fe01:701d
-+ z_swadm route list
-+ pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm route list
-Subnet                                      Port   Link Gateway
-0.0.0.0/0                                   qsfp0  0    10.85.0.1
-fd00:1122:3344:101::/64                     rear0  0    fe80::aae1:deff:fe00:1
-+ z_swadm arp list
-+ pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm arp list
-host                            mac                age
-10.85.0.1                       68:d7:9a:1f:77:a1  0s
-fe80::aae1:deff:fe00:1          a8:e1:de:00:00:01  0s
-----
-
-While following
-https://github.com/oxidecomputer/omicron/blob/main/docs/how-to-run.adoc[how-to-run.adoc]
-to set up IPs, images, disks, instances etc, pay particular attention to the
-following.
-
-- The address range in the IP pool should be on a subnet in your local network that
-  can NAT out to the Internet.
-- Be sure to set up an external IP for the instance you create.
-
-You will need to set up `proxy-arp` if your VM external IP addresses are on the
-same L2 network as the router or other non-oxide hosts:
-----
-pfexec /opt/oxide/softnpu/stuff/scadm \
-  --server /opt/oxide/softnpu/stuff/server \
-  --client /opt/oxide/softnpu/stuff/client \
-  standalone \
-  add-proxy-arp \
-  $ip_pool_start \
-  $ip_pool_end \
-  $softnpu_mac
-----
-
-By the end, we have an instance up and running with external connectivity
-configured via boundary services:
-----
-ry@korgano:~/omicron$ ~/propolis/target/release/propolis-cli --server fd00:1122:3344:101::c serial
-
-debian login: root
-Linux debian 5.10.0-9-amd64 #1 SMP Debian 5.10.70-1 (2021-09-30) x86_64
-
-The programs included with the Debian GNU/Linux system are free software;
-the exact distribution terms for each program are described in the
-individual files in /usr/share/doc/*/copyright.
-
-Debian GNU/Linux comes with ABSOLUTELY NO WARRANTY, to the extent
-permitted by applicable law.
-root@debian:~# host oxide.computer
-oxide.computer has address 76.76.21.61
-oxide.computer has address 76.76.21.22
-oxide.computer mail is handled by 5 alt2.aspmx.l.google.com.
-oxide.computer mail is handled by 1 aspmx.l.google.com.
-oxide.computer mail is handled by 10 aspmx3.googlemail.com.
-oxide.computer mail is handled by 5 alt1.aspmx.l.google.com.
-oxide.computer mail is handled by 10 aspmx2.googlemail.com.
-----
+using the `swadm` binary located in the `oxz_switch` zone. This is not necessary
+under normal operation, as the switch state will be managed automatically by the
+control plane and networking daemons.

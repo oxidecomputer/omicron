@@ -7,9 +7,9 @@ use std::net::SocketAddr;
 use anyhow::{Context, Result};
 use clap::Args;
 use futures::StreamExt;
-use installinator_artifact_client::ClientError;
+use installinator_client::ClientError;
 use installinator_common::EventReport;
-use ipcc_key_value::{InstallinatorImageId, Ipcc};
+use ipcc::{InstallinatorImageId, Ipcc};
 use omicron_common::update::{ArtifactHash, ArtifactHashId};
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -47,7 +47,7 @@ pub(crate) struct ArtifactIdOpts {
 impl ArtifactIdOpts {
     pub(crate) fn resolve(&self) -> Result<InstallinatorImageId> {
         if self.from_ipcc {
-            let ipcc = Ipcc::open().context("error opening IPCC")?;
+            let ipcc = Ipcc::new().context("error opening IPCC")?;
             ipcc.installinator_image_id()
                 .context("error retrieving installinator image ID")
         } else {
@@ -63,7 +63,7 @@ impl ArtifactIdOpts {
 #[derive(Debug)]
 pub(crate) struct ArtifactClient {
     log: slog::Logger,
-    client: installinator_artifact_client::Client,
+    client: installinator_client::Client,
 }
 
 impl ArtifactClient {
@@ -81,8 +81,7 @@ impl ArtifactClient {
         let log = log.new(
             slog::o!("component" => "ArtifactClient", "peer" => addr.to_string()),
         );
-        let client =
-            installinator_artifact_client::Client::new(&endpoint, log.clone());
+        let client = installinator_client::Client::new(&endpoint, log.clone());
         Self { log, client }
     }
 

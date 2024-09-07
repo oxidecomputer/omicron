@@ -26,10 +26,13 @@ pub mod backoff;
 pub mod cmd;
 pub mod disk;
 pub mod ledger;
-pub mod nexus_config;
-pub mod postgres_config;
+pub mod policy;
+pub mod progenitor_operation_retry;
 pub mod update;
 pub mod vlan;
+pub mod zpool_name;
+
+pub use update::hex_schema;
 
 #[macro_export]
 macro_rules! generate_logging_api {
@@ -73,5 +76,69 @@ impl slog::KV for FileKv {
             "file".into(),
             &format_args!("{}:{}", record.file(), record.line()),
         )
+    }
+}
+
+pub const OMICRON_DPD_TAG: &str = "omicron";
+
+use crate::api::external::Error;
+use crate::progenitor_operation_retry::ProgenitorOperationRetry;
+use crate::progenitor_operation_retry::ProgenitorOperationRetryError;
+use std::future::Future;
+
+/// Retry a progenitor client operation until a known result is returned.
+///
+/// See [`ProgenitorOperationRetry`] for more information.
+// TODO mark this deprecated, `never_bail` is a bad idea
+pub async fn retry_until_known_result<F, T, E, Fut>(
+    log: &slog::Logger,
+    f: F,
+) -> Result<T, progenitor_client::Error<E>>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<T, progenitor_client::Error<E>>>,
+    E: std::fmt::Debug,
+{
+    match ProgenitorOperationRetry::new(f, never_bail).run(log).await {
+        Ok(v) => Ok(v),
+
+        Err(e) => match e {
+            ProgenitorOperationRetryError::ProgenitorError(e) => Err(e),
+
+            ProgenitorOperationRetryError::Gone
+            | ProgenitorOperationRetryError::GoneCheckError(_) => {
+                // ProgenitorOperationRetry::new called with `never_bail` as the
+                // bail check should never return these variants!
+                unreachable!();
+            }
+        },
+    }
+}
+
+async fn never_bail() -> Result<bool, Error> {
+    Ok(false)
+}
+
+/// A wrapper struct that does nothing other than elide the inner value from
+/// [`std::fmt::Debug`] output.
+///
+/// We define this within Omicron instead of using one of the many available
+/// crates that do the same thing because it's trivial to do so, and we want the
+/// flexibility to add traits to this type without needing to wait on upstream
+/// to add an optional dependency.
+///
+/// If you want to use this for secrets, consider that it might not do
+/// everything you expect (it does not zeroize memory on drop, nor get in the
+/// way of you removing the inner value from this wrapper struct).
+#[derive(
+    Clone, Copy, serde::Deserialize, serde::Serialize, schemars::JsonSchema,
+)]
+#[repr(transparent)]
+#[serde(transparent)]
+pub struct NoDebug<T>(pub T);
+
+impl<T> std::fmt::Debug for NoDebug<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "..")
     }
 }

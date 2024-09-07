@@ -4,22 +4,30 @@ version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
 
+[lints]
+workspace = true
+
 [dependencies]
 anyhow.workspace = true
 cancel-safe-futures.workspace = true
+chrono.workspace = true
 debug-ignore.workspace = true
 derive-where.workspace = true
 either.workspace = true
 futures.workspace = true
 indexmap.workspace = true
+libsw.workspace = true
 linear-map.workspace = true
+owo-colors.workspace = true
 petgraph.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_with.workspace = true
 schemars = { workspace = true, features = ["uuid1"] }
 slog.workspace = true
+swrite.workspace = true
 tokio = { workspace = true, features = ["macros", "sync", "time", "rt-multi-thread"] }
+unicode-width.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
 
@@ -28,8 +36,10 @@ buf-list.workspace = true
 bytes.workspace = true
 camino.workspace = true
 camino-tempfile.workspace = true
+clap.workspace = true
 indicatif.workspace = true
 omicron-test-utils.workspace = true
 owo-colors.workspace = true
+supports-color.workspace = true
 tokio = { workspace = true, features = ["io-util"] }
 tokio-stream.workspace = true

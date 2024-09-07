@@ -6,9 +6,8 @@ use ratatui::{
     layout::{Alignment, Rect},
     text::Text,
     widgets::{Block, Borders, List, Paragraph, StatefulWidget, Widget},
+    Frame,
 };
-
-use crate::Frame;
 
 use super::{BoxConnector, BoxConnectorKind};
 

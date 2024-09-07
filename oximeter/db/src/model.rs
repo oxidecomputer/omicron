@@ -4,20 +4,20 @@
 
 //! Models for timeseries data in ClickHouse
 
-// Copyright 2023 Oxide Computer Company
+// Copyright 2024 Oxide Computer Company
 
 use crate::DbFieldSource;
 use crate::FieldSchema;
 use crate::FieldSource;
 use crate::Metric;
 use crate::Target;
-use crate::TimeseriesKey;
-use crate::TimeseriesName;
 use crate::TimeseriesSchema;
 use bytes::Bytes;
 use chrono::DateTime;
 use chrono::Utc;
+use num::traits::Zero;
 use oximeter::histogram::Histogram;
+use oximeter::schema::TimeseriesKey;
 use oximeter::traits;
 use oximeter::types::Cumulative;
 use oximeter::types::Datum;
@@ -26,7 +26,9 @@ use oximeter::types::Field;
 use oximeter::types::FieldType;
 use oximeter::types::FieldValue;
 use oximeter::types::Measurement;
+use oximeter::types::MissingDatum;
 use oximeter::types::Sample;
+use oximeter::Quantile;
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -38,11 +40,12 @@ use uuid::Uuid;
 
 /// Describes the version of the Oximeter database.
 ///
-/// See: [crate::Client::initialize_db_with_version] for usage.
+/// For usage and details see:
 ///
-/// TODO(#4271): The current implementation of versioning will wipe the metrics
-/// database if this number is incremented.
-pub const OXIMETER_VERSION: u64 = 2;
+/// - [`crate::Client::initialize_db_with_version`]
+/// - [`crate::Client::ensure_schema`]
+/// - The `clickhouse-schema-updater` binary in this crate
+pub const OXIMETER_VERSION: u64 = 12;
 
 // Wrapper type to represent a boolean in the database.
 //
@@ -63,7 +66,7 @@ impl From<u64> for DbBool {
 
 impl From<bool> for DbBool {
     fn from(b: bool) -> Self {
-        DbBool { inner: b as _ }
+        DbBool { inner: u8::from(b) }
     }
 }
 
@@ -106,6 +109,10 @@ pub(crate) struct DbFieldList {
     pub types: Vec<DbFieldType>,
     #[serde(rename = "fields.source")]
     pub sources: Vec<DbFieldSource>,
+    // TODO-completeness: Populate the description from the database here. See
+    // https://github.com/oxidecomputer/omicron/issues/5942 for more details.
+    //#[serde(rename = "fields.description")]
+    //pub descriptions: Vec<String>,
 }
 
 impl From<DbFieldList> for BTreeSet<FieldSchema> {
@@ -116,8 +123,9 @@ impl From<DbFieldList> for BTreeSet<FieldSchema> {
             .zip(list.sources)
             .map(|((name, ty), source)| FieldSchema {
                 name,
-                ty: ty.into(),
+                field_type: ty.into(),
                 source: source.into(),
+                description: String::new(),
             })
             .collect()
     }
@@ -129,8 +137,8 @@ impl From<BTreeSet<FieldSchema>> for DbFieldList {
         let mut types = Vec::with_capacity(list.len());
         let mut sources = Vec::with_capacity(list.len());
         for field in list.into_iter() {
-            names.push(field.name);
-            types.push(field.ty.into());
+            names.push(field.name.to_string());
+            types.push(field.field_type.into());
             sources.push(field.source.into());
         }
         DbFieldList { names, types, sources }
@@ -146,6 +154,9 @@ pub(crate) struct DbTimeseriesSchema {
     pub datum_type: DbDatumType,
     #[serde(with = "serde_timestamp")]
     pub created: DateTime<Utc>,
+    // TODO-completeness: Add the authorization scope, version, and units once
+    // they are tracked in the database. See
+    // https://github.com/oxidecomputer/omicron/issues/5942 for more details.
 }
 
 impl From<TimeseriesSchema> for DbTimeseriesSchema {
@@ -211,6 +222,7 @@ impl From<FieldType> for DbFieldType {
         }
     }
 }
+
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
 pub enum DbDatumType {
     Bool,
@@ -389,7 +401,7 @@ declare_field_row! {I32FieldRow, i32, "i32"}
 declare_field_row! {U32FieldRow, u32, "u32"}
 declare_field_row! {I64FieldRow, i64, "i64"}
 declare_field_row! {U64FieldRow, u64, "u64"}
-declare_field_row! {StringFieldRow, String, "string"}
+declare_field_row! {StringFieldRow, std::borrow::Cow<'static, str>, "string"}
 declare_field_row! {IpAddrFieldRow, Ipv6Addr, "ipaddr"}
 declare_field_row! {UuidFieldRow, Uuid, "uuid"}
 
@@ -401,7 +413,7 @@ macro_rules! declare_measurement_row {
             timeseries_key: TimeseriesKey,
             #[serde(with = "serde_timestamp")]
             timestamp: DateTime<Utc>,
-            datum: $datum_type,
+            datum: Option<$datum_type>,
         }
 
         impl_table_name!{$name, "measurements", $data_type}
@@ -432,7 +444,7 @@ macro_rules! declare_cumulative_measurement_row {
             start_time: DateTime<Utc>,
             #[serde(with = "serde_timestamp")]
             timestamp: DateTime<Utc>,
-            datum: $datum_type,
+            datum: Option<$datum_type>,
         }
 
         impl_table_name!{$name, "measurements", $data_type}
@@ -444,15 +456,114 @@ declare_cumulative_measurement_row! { CumulativeU64MeasurementRow, u64, "cumulat
 declare_cumulative_measurement_row! { CumulativeF32MeasurementRow, f32, "cumulativef32" }
 declare_cumulative_measurement_row! { CumulativeF64MeasurementRow, f64, "cumulativef64" }
 
+/// A representation of all quantiles for a histogram.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq)]
+struct AllQuantiles {
+    p50_marker_heights: [f64; 5],
+    p50_marker_positions: [u64; 5],
+    p50_desired_marker_positions: [f64; 5],
+
+    p90_marker_heights: [f64; 5],
+    p90_marker_positions: [u64; 5],
+    p90_desired_marker_positions: [f64; 5],
+
+    p99_marker_heights: [f64; 5],
+    p99_marker_positions: [u64; 5],
+    p99_desired_marker_positions: [f64; 5],
+}
+
+impl AllQuantiles {
+    /// Create a flat `AllQuantiles` struct from the given quantiles.
+    fn flatten(q50: Quantile, q90: Quantile, q99: Quantile) -> Self {
+        Self {
+            p50_marker_heights: q50.marker_heights(),
+            p50_marker_positions: q50.marker_positions(),
+            p50_desired_marker_positions: q50.desired_marker_positions(),
+
+            p90_marker_heights: q90.marker_heights(),
+            p90_marker_positions: q90.marker_positions(),
+            p90_desired_marker_positions: q90.desired_marker_positions(),
+
+            p99_marker_heights: q99.marker_heights(),
+            p99_marker_positions: q99.marker_positions(),
+            p99_desired_marker_positions: q99.desired_marker_positions(),
+        }
+    }
+
+    /// Split the quantiles into separate `Quantile` structs in order of P.
+    fn split(&self) -> (Quantile, Quantile, Quantile) {
+        (
+            Quantile::from_parts(
+                0.5,
+                self.p50_marker_heights,
+                self.p50_marker_positions,
+                self.p50_desired_marker_positions,
+            ),
+            Quantile::from_parts(
+                0.9,
+                self.p90_marker_heights,
+                self.p90_marker_positions,
+                self.p90_desired_marker_positions,
+            ),
+            Quantile::from_parts(
+                0.99,
+                self.p99_marker_heights,
+                self.p99_marker_positions,
+                self.p99_desired_marker_positions,
+            ),
+        )
+    }
+}
+
 // Representation of a histogram in ClickHouse.
 //
-// The tables storing measurements of a histogram metric use a pair of arrays to represent them,
-// for the bins and counts, respectively. This handles conversion between the type used to
-// represent histograms in Rust, [`Histogram`], and this in-database representation.
+// The tables storing measurements of a histogram metric use a set of arrays to
+// represent them.  This handles conversion between the type used to represent
+// histograms in Rust, [`Histogram`], and this in-database representation.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
-struct DbHistogram<T> {
+struct DbHistogram<T>
+where
+    T: traits::HistogramSupport,
+{
     pub bins: Vec<T>,
     pub counts: Vec<u64>,
+    pub min: T,
+    pub max: T,
+    pub sum_of_samples: T::Width,
+    pub squared_mean: f64,
+    #[serde(flatten)]
+    pub quantiles: AllQuantiles,
+}
+
+// We use an empty histogram to indicate a missing sample.
+//
+// While ClickHouse supports nullable types, the inner type can't be a
+// "composite", which includes arrays. I.e., `Nullable(Array(UInt8))` can't be
+// used. This is unfortunate, but we are aided by the fact that it's not
+// possible to have an `oximeter` histogram that contains zero bins right now.
+// This is checked by a test in `oximeter::histogram`.
+//
+// That means we can currently use an empty array from the database as a
+// sentinel for a missing sample.
+impl<T> DbHistogram<T>
+where
+    T: traits::HistogramSupport,
+{
+    fn null() -> Self {
+        let p50 = Quantile::p50();
+        let p90 = Quantile::p90();
+        let p99 = Quantile::p99();
+
+        Self {
+            bins: vec![],
+            counts: vec![],
+            min: T::zero(),
+            max: T::zero(),
+            sum_of_samples: T::Width::zero(),
+            squared_mean: 0.0,
+            quantiles: AllQuantiles::flatten(p50, p90, p99),
+        }
+    }
 }
 
 impl<T> From<&Histogram<T>> for DbHistogram<T>
@@ -460,8 +571,20 @@ where
     T: traits::HistogramSupport,
 {
     fn from(hist: &Histogram<T>) -> Self {
-        let (bins, counts) = hist.to_arrays();
-        Self { bins, counts }
+        let (bins, counts) = hist.bins_and_counts();
+        Self {
+            bins,
+            counts,
+            min: hist.min(),
+            max: hist.max(),
+            sum_of_samples: hist.sum_of_samples(),
+            squared_mean: hist.squared_mean(),
+            quantiles: AllQuantiles::flatten(
+                hist.p50q(),
+                hist.p90q(),
+                hist.p99q(),
+            ),
+        }
     }
 }
 
@@ -498,7 +621,7 @@ declare_histogram_measurement_row! { HistogramF64MeasurementRow, DbHistogram<f64
 fn unroll_from_source(sample: &Sample) -> BTreeMap<String, Vec<String>> {
     let mut out = BTreeMap::new();
     for field in sample.fields() {
-        let timeseries_name = sample.timeseries_name.clone();
+        let timeseries_name = sample.timeseries_name.to_string();
         let timeseries_key = crate::timeseries_key(sample);
         let field_name = field.name.clone();
         let (table_name, row_string) = match &field.value {
@@ -646,334 +769,575 @@ pub(crate) fn unroll_measurement_row(sample: &Sample) -> (String, String) {
     let timeseries_name = sample.timeseries_name.clone();
     let timeseries_key = crate::timeseries_key(sample);
     let measurement = &sample.measurement;
+    unroll_measurement_row_impl(
+        timeseries_name.to_string(),
+        timeseries_key,
+        measurement,
+    )
+}
+
+/// Given a sample's measurement, return a table name and row to insert.
+///
+/// This returns a tuple giving the name of the table, and the JSON
+/// representation for the serialized row to be inserted into that table,
+/// written out as a string.
+pub(crate) fn unroll_measurement_row_impl(
+    timeseries_name: String,
+    timeseries_key: TimeseriesKey,
+    measurement: &Measurement,
+) -> (String, String) {
     let timestamp = measurement.timestamp();
     let extract_start_time = |measurement: &Measurement| {
         measurement
             .start_time()
             .expect("Cumulative measurements must have a start time")
     };
+
     match measurement.datum() {
         Datum::Bool(inner) => {
+            let datum = Some(DbBool::from(*inner));
             let row = BoolMeasurementRow {
                 timeseries_name,
                 timeseries_key,
                 timestamp,
-                datum: DbBool::from(*inner),
+                datum,
             };
             (row.table_name(), serde_json::to_string(&row).unwrap())
         }
         Datum::I8(inner) => {
+            let datum = Some(*inner);
             let row = I8MeasurementRow {
                 timeseries_name,
                 timeseries_key,
                 timestamp,
-                datum: *inner,
+                datum,
             };
             (row.table_name(), serde_json::to_string(&row).unwrap())
         }
         Datum::U8(inner) => {
+            let datum = Some(*inner);
             let row = U8MeasurementRow {
                 timeseries_name,
                 timeseries_key,
                 timestamp,
-                datum: *inner,
+                datum,
             };
             (row.table_name(), serde_json::to_string(&row).unwrap())
         }
         Datum::I16(inner) => {
+            let datum = Some(*inner);
             let row = I16MeasurementRow {
                 timeseries_name,
                 timeseries_key,
                 timestamp,
-                datum: *inner,
+                datum,
             };
             (row.table_name(), serde_json::to_string(&row).unwrap())
         }
         Datum::U16(inner) => {
+            let datum = Some(*inner);
             let row = U16MeasurementRow {
                 timeseries_name,
                 timeseries_key,
                 timestamp,
-                datum: *inner,
+                datum,
             };
             (row.table_name(), serde_json::to_string(&row).unwrap())
         }
         Datum::I32(inner) => {
+            let datum = Some(*inner);
             let row = I32MeasurementRow {
                 timeseries_name,
                 timeseries_key,
                 timestamp,
-                datum: *inner,
+                datum,
             };
             (row.table_name(), serde_json::to_string(&row).unwrap())
         }
         Datum::U32(inner) => {
+            let datum = Some(*inner);
             let row = U32MeasurementRow {
                 timeseries_name,
                 timeseries_key,
                 timestamp,
-                datum: *inner,
+                datum,
             };
             (row.table_name(), serde_json::to_string(&row).unwrap())
         }
         Datum::I64(inner) => {
+            let datum = Some(*inner);
             let row = I64MeasurementRow {
                 timeseries_name,
                 timeseries_key,
                 timestamp,
-                datum: *inner,
+                datum,
             };
             (row.table_name(), serde_json::to_string(&row).unwrap())
         }
         Datum::U64(inner) => {
+            let datum = Some(*inner);
             let row = U64MeasurementRow {
                 timeseries_name,
                 timeseries_key,
                 timestamp,
-                datum: *inner,
+                datum,
             };
             (row.table_name(), serde_json::to_string(&row).unwrap())
         }
         Datum::F32(inner) => {
+            let datum = Some(*inner);
             let row = F32MeasurementRow {
                 timeseries_name,
                 timeseries_key,
                 timestamp,
-                datum: *inner,
+                datum,
             };
             (row.table_name(), serde_json::to_string(&row).unwrap())
         }
         Datum::F64(inner) => {
+            let datum = Some(*inner);
             let row = F64MeasurementRow {
                 timeseries_name,
                 timeseries_key,
                 timestamp,
-                datum: *inner,
+                datum,
             };
             (row.table_name(), serde_json::to_string(&row).unwrap())
         }
-        Datum::String(ref inner) => {
+        Datum::String(inner) => {
+            let datum = Some(inner.clone());
             let row = StringMeasurementRow {
                 timeseries_name,
                 timeseries_key,
                 timestamp,
-                datum: inner.clone(),
+                datum,
             };
             (row.table_name(), serde_json::to_string(&row).unwrap())
         }
-        Datum::Bytes(ref inner) => {
+        Datum::Bytes(inner) => {
+            let datum = Some(inner.clone());
             let row = BytesMeasurementRow {
                 timeseries_name,
                 timeseries_key,
                 timestamp,
-                datum: inner.clone(),
+                datum,
             };
             (row.table_name(), serde_json::to_string(&row).unwrap())
         }
         Datum::CumulativeI64(inner) => {
+            let datum = Some(inner.value());
             let row = CumulativeI64MeasurementRow {
                 timeseries_name,
                 timeseries_key,
                 start_time: extract_start_time(measurement),
                 timestamp,
-                datum: inner.value(),
+                datum,
             };
             (row.table_name(), serde_json::to_string(&row).unwrap())
         }
         Datum::CumulativeU64(inner) => {
+            let datum = Some(inner.value());
             let row = CumulativeU64MeasurementRow {
                 timeseries_name,
                 timeseries_key,
                 start_time: extract_start_time(measurement),
                 timestamp,
-                datum: inner.value(),
+                datum,
             };
             (row.table_name(), serde_json::to_string(&row).unwrap())
         }
         Datum::CumulativeF32(inner) => {
+            let datum = Some(inner.value());
             let row = CumulativeF32MeasurementRow {
                 timeseries_name,
                 timeseries_key,
                 start_time: extract_start_time(measurement),
                 timestamp,
-                datum: inner.value(),
+                datum,
             };
             (row.table_name(), serde_json::to_string(&row).unwrap())
         }
         Datum::CumulativeF64(inner) => {
+            let datum = Some(inner.value());
             let row = CumulativeF64MeasurementRow {
                 timeseries_name,
                 timeseries_key,
                 start_time: extract_start_time(measurement),
                 timestamp,
-                datum: inner.value(),
+                datum,
             };
             (row.table_name(), serde_json::to_string(&row).unwrap())
         }
-        Datum::HistogramI8(ref inner) => {
+        Datum::HistogramI8(inner) => {
+            let datum = DbHistogram::from(inner);
             let row = HistogramI8MeasurementRow {
                 timeseries_name,
                 timeseries_key,
                 start_time: extract_start_time(measurement),
                 timestamp,
-                datum: DbHistogram::from(inner),
+                datum,
             };
             (row.table_name(), serde_json::to_string(&row).unwrap())
         }
-        Datum::HistogramU8(ref inner) => {
+        Datum::HistogramU8(inner) => {
+            let datum = DbHistogram::from(inner);
             let row = HistogramU8MeasurementRow {
                 timeseries_name,
                 timeseries_key,
                 start_time: extract_start_time(measurement),
                 timestamp,
-                datum: DbHistogram::from(inner),
+                datum,
             };
             (row.table_name(), serde_json::to_string(&row).unwrap())
         }
-        Datum::HistogramI16(ref inner) => {
+        Datum::HistogramI16(inner) => {
+            let datum = DbHistogram::from(inner);
             let row = HistogramI16MeasurementRow {
                 timeseries_name,
                 timeseries_key,
                 start_time: extract_start_time(measurement),
                 timestamp,
-                datum: DbHistogram::from(inner),
+                datum,
             };
             (row.table_name(), serde_json::to_string(&row).unwrap())
         }
-        Datum::HistogramU16(ref inner) => {
+        Datum::HistogramU16(inner) => {
+            let datum = DbHistogram::from(inner);
             let row = HistogramU16MeasurementRow {
                 timeseries_name,
                 timeseries_key,
                 start_time: extract_start_time(measurement),
                 timestamp,
-                datum: DbHistogram::from(inner),
+                datum,
             };
             (row.table_name(), serde_json::to_string(&row).unwrap())
         }
-        Datum::HistogramI32(ref inner) => {
+        Datum::HistogramI32(inner) => {
+            let datum = DbHistogram::from(inner);
             let row = HistogramI32MeasurementRow {
                 timeseries_name,
                 timeseries_key,
                 start_time: extract_start_time(measurement),
                 timestamp,
-                datum: DbHistogram::from(inner),
+                datum,
             };
             (row.table_name(), serde_json::to_string(&row).unwrap())
         }
-        Datum::HistogramU32(ref inner) => {
+        Datum::HistogramU32(inner) => {
+            let datum = DbHistogram::from(inner);
             let row = HistogramU32MeasurementRow {
                 timeseries_name,
                 timeseries_key,
                 start_time: extract_start_time(measurement),
                 timestamp,
-                datum: DbHistogram::from(inner),
+                datum,
             };
             (row.table_name(), serde_json::to_string(&row).unwrap())
         }
-        Datum::HistogramI64(ref inner) => {
+        Datum::HistogramI64(inner) => {
+            let datum = DbHistogram::from(inner);
             let row = HistogramI64MeasurementRow {
                 timeseries_name,
                 timeseries_key,
                 start_time: extract_start_time(measurement),
                 timestamp,
-                datum: DbHistogram::from(inner),
+                datum,
             };
             (row.table_name(), serde_json::to_string(&row).unwrap())
         }
-        Datum::HistogramU64(ref inner) => {
+        Datum::HistogramU64(inner) => {
+            let datum = DbHistogram::from(inner);
             let row = HistogramU64MeasurementRow {
                 timeseries_name,
                 timeseries_key,
                 start_time: extract_start_time(measurement),
                 timestamp,
-                datum: DbHistogram::from(inner),
+                datum,
             };
             (row.table_name(), serde_json::to_string(&row).unwrap())
         }
-        Datum::HistogramF32(ref inner) => {
+        Datum::HistogramF32(inner) => {
+            let datum = DbHistogram::from(inner);
             let row = HistogramF32MeasurementRow {
                 timeseries_name,
                 timeseries_key,
                 start_time: extract_start_time(measurement),
                 timestamp,
-                datum: DbHistogram::from(inner),
+                datum,
             };
             (row.table_name(), serde_json::to_string(&row).unwrap())
         }
-        Datum::HistogramF64(ref inner) => {
+        Datum::HistogramF64(inner) => {
+            let datum = DbHistogram::from(inner);
             let row = HistogramF64MeasurementRow {
                 timeseries_name,
                 timeseries_key,
                 start_time: extract_start_time(measurement),
                 timestamp,
-                datum: DbHistogram::from(inner),
+                datum,
             };
             (row.table_name(), serde_json::to_string(&row).unwrap())
         }
-    }
-}
-
-/// Return the schema for a `Sample`.
-pub(crate) fn schema_for(sample: &Sample) -> TimeseriesSchema {
-    // The fields are iterated through whatever order the `Target` or `Metric`
-    // impl chooses. We'll store in a set ordered by field name, to ignore the
-    // declaration order.
-    let created = Utc::now();
-    let field_schema = sample
-        .target_fields()
-        .map(|field| FieldSchema {
-            name: field.name.clone(),
-            ty: field.value.field_type(),
-            source: FieldSource::Target,
-        })
-        .chain(sample.metric_fields().map(|field| FieldSchema {
-            name: field.name.clone(),
-            ty: field.value.field_type(),
-            source: FieldSource::Metric,
-        }))
-        .collect();
-    TimeseriesSchema {
-        timeseries_name: TimeseriesName::try_from(
-            sample.timeseries_name.as_str(),
-        )
-        .expect("Failed to parse timeseries name"),
-        field_schema,
-        datum_type: sample.measurement.datum_type(),
-        created,
-    }
-}
-
-/// Return the schema for a `Target` and `Metric`
-pub(crate) fn schema_for_parts<T, M>(target: &T, metric: &M) -> TimeseriesSchema
-where
-    T: traits::Target,
-    M: traits::Metric,
-{
-    let make_field_schema = |name: &str,
-                             value: FieldValue,
-                             source: FieldSource| {
-        FieldSchema { name: name.to_string(), ty: value.field_type(), source }
-    };
-    let target_field_schema =
-        target.field_names().iter().zip(target.field_values());
-    let metric_field_schema =
-        metric.field_names().iter().zip(metric.field_values());
-    let field_schema = target_field_schema
-        .map(|(name, value)| {
-            make_field_schema(name, value, FieldSource::Target)
-        })
-        .chain(metric_field_schema.map(|(name, value)| {
-            make_field_schema(name, value, FieldSource::Metric)
-        }))
-        .collect();
-    TimeseriesSchema {
-        timeseries_name: TimeseriesName::try_from(oximeter::timeseries_name(
-            target, metric,
-        ))
-        .expect("Failed to parse timeseries name"),
-        field_schema,
-        datum_type: metric.datum_type(),
-        created: Utc::now(),
+        Datum::Missing(missing) => {
+            match missing.datum_type() {
+                DatumType::Bool => {
+                    let row = BoolMeasurementRow {
+                        timeseries_name,
+                        timeseries_key,
+                        timestamp,
+                        datum: None,
+                    };
+                    (row.table_name(), serde_json::to_string(&row).unwrap())
+                }
+                DatumType::I8 => {
+                    let row = I8MeasurementRow {
+                        timeseries_name,
+                        timeseries_key,
+                        timestamp,
+                        datum: None,
+                    };
+                    (row.table_name(), serde_json::to_string(&row).unwrap())
+                }
+                DatumType::U8 => {
+                    let row = U8MeasurementRow {
+                        timeseries_name,
+                        timeseries_key,
+                        timestamp,
+                        datum: None,
+                    };
+                    (row.table_name(), serde_json::to_string(&row).unwrap())
+                }
+                DatumType::I16 => {
+                    let row = I16MeasurementRow {
+                        timeseries_name,
+                        timeseries_key,
+                        timestamp,
+                        datum: None,
+                    };
+                    (row.table_name(), serde_json::to_string(&row).unwrap())
+                }
+                DatumType::U16 => {
+                    let row = U16MeasurementRow {
+                        timeseries_name,
+                        timeseries_key,
+                        timestamp,
+                        datum: None,
+                    };
+                    (row.table_name(), serde_json::to_string(&row).unwrap())
+                }
+                DatumType::I32 => {
+                    let row = I32MeasurementRow {
+                        timeseries_name,
+                        timeseries_key,
+                        timestamp,
+                        datum: None,
+                    };
+                    (row.table_name(), serde_json::to_string(&row).unwrap())
+                }
+                DatumType::U32 => {
+                    let row = U32MeasurementRow {
+                        timeseries_name,
+                        timeseries_key,
+                        timestamp,
+                        datum: None,
+                    };
+                    (row.table_name(), serde_json::to_string(&row).unwrap())
+                }
+                DatumType::I64 => {
+                    let row = I64MeasurementRow {
+                        timeseries_name,
+                        timeseries_key,
+                        timestamp,
+                        datum: None,
+                    };
+                    (row.table_name(), serde_json::to_string(&row).unwrap())
+                }
+                DatumType::U64 => {
+                    let row = U64MeasurementRow {
+                        timeseries_name,
+                        timeseries_key,
+                        timestamp,
+                        datum: None,
+                    };
+                    (row.table_name(), serde_json::to_string(&row).unwrap())
+                }
+                DatumType::F32 => {
+                    let row = F32MeasurementRow {
+                        timeseries_name,
+                        timeseries_key,
+                        timestamp,
+                        datum: None,
+                    };
+                    (row.table_name(), serde_json::to_string(&row).unwrap())
+                }
+                DatumType::F64 => {
+                    let row = F64MeasurementRow {
+                        timeseries_name,
+                        timeseries_key,
+                        timestamp,
+                        datum: None,
+                    };
+                    (row.table_name(), serde_json::to_string(&row).unwrap())
+                }
+                DatumType::String => {
+                    let row = StringMeasurementRow {
+                        timeseries_name,
+                        timeseries_key,
+                        timestamp,
+                        datum: None,
+                    };
+                    (row.table_name(), serde_json::to_string(&row).unwrap())
+                }
+                DatumType::Bytes => {
+                    // See https://github.com/oxidecomputer/omicron/issues/4551.
+                    //
+                    // This is actually unreachable today because the constuctor
+                    // for `oximeter::types::MissingDatum` fails when using a
+                    // `DatumType::Bytes`.
+                    unreachable!();
+                }
+                DatumType::CumulativeI64 => {
+                    let row = CumulativeI64MeasurementRow {
+                        timeseries_name,
+                        timeseries_key,
+                        start_time: extract_start_time(measurement),
+                        timestamp,
+                        datum: None,
+                    };
+                    (row.table_name(), serde_json::to_string(&row).unwrap())
+                }
+                DatumType::CumulativeU64 => {
+                    let row = CumulativeU64MeasurementRow {
+                        timeseries_name,
+                        timeseries_key,
+                        start_time: extract_start_time(measurement),
+                        timestamp,
+                        datum: None,
+                    };
+                    (row.table_name(), serde_json::to_string(&row).unwrap())
+                }
+                DatumType::CumulativeF32 => {
+                    let row = CumulativeF32MeasurementRow {
+                        timeseries_name,
+                        timeseries_key,
+                        start_time: extract_start_time(measurement),
+                        timestamp,
+                        datum: None,
+                    };
+                    (row.table_name(), serde_json::to_string(&row).unwrap())
+                }
+                DatumType::CumulativeF64 => {
+                    let row = CumulativeF64MeasurementRow {
+                        timeseries_name,
+                        timeseries_key,
+                        start_time: extract_start_time(measurement),
+                        timestamp,
+                        datum: None,
+                    };
+                    (row.table_name(), serde_json::to_string(&row).unwrap())
+                }
+                DatumType::HistogramI8 => {
+                    let row = HistogramI8MeasurementRow {
+                        timeseries_name,
+                        timeseries_key,
+                        start_time: extract_start_time(measurement),
+                        timestamp,
+                        datum: DbHistogram::null(),
+                    };
+                    (row.table_name(), serde_json::to_string(&row).unwrap())
+                }
+                DatumType::HistogramU8 => {
+                    let row = HistogramU8MeasurementRow {
+                        timeseries_name,
+                        timeseries_key,
+                        start_time: extract_start_time(measurement),
+                        timestamp,
+                        datum: DbHistogram::null(),
+                    };
+                    (row.table_name(), serde_json::to_string(&row).unwrap())
+                }
+                DatumType::HistogramI16 => {
+                    let row = HistogramI16MeasurementRow {
+                        timeseries_name,
+                        timeseries_key,
+                        start_time: extract_start_time(measurement),
+                        timestamp,
+                        datum: DbHistogram::null(),
+                    };
+                    (row.table_name(), serde_json::to_string(&row).unwrap())
+                }
+                DatumType::HistogramU16 => {
+                    let row = HistogramU16MeasurementRow {
+                        timeseries_name,
+                        timeseries_key,
+                        start_time: extract_start_time(measurement),
+                        timestamp,
+                        datum: DbHistogram::null(),
+                    };
+                    (row.table_name(), serde_json::to_string(&row).unwrap())
+                }
+                DatumType::HistogramI32 => {
+                    let row = HistogramI32MeasurementRow {
+                        timeseries_name,
+                        timeseries_key,
+                        start_time: extract_start_time(measurement),
+                        timestamp,
+                        datum: DbHistogram::null(),
+                    };
+                    (row.table_name(), serde_json::to_string(&row).unwrap())
+                }
+                DatumType::HistogramU32 => {
+                    let row = HistogramU32MeasurementRow {
+                        timeseries_name,
+                        timeseries_key,
+                        start_time: extract_start_time(measurement),
+                        timestamp,
+                        datum: DbHistogram::null(),
+                    };
+                    (row.table_name(), serde_json::to_string(&row).unwrap())
+                }
+                DatumType::HistogramI64 => {
+                    let row = HistogramI64MeasurementRow {
+                        timeseries_name,
+                        timeseries_key,
+                        start_time: extract_start_time(measurement),
+                        timestamp,
+                        datum: DbHistogram::null(),
+                    };
+                    (row.table_name(), serde_json::to_string(&row).unwrap())
+                }
+                DatumType::HistogramU64 => {
+                    let row = HistogramU64MeasurementRow {
+                        timeseries_name,
+                        timeseries_key,
+                        start_time: extract_start_time(measurement),
+                        timestamp,
+                        datum: DbHistogram::null(),
+                    };
+                    (row.table_name(), serde_json::to_string(&row).unwrap())
+                }
+                DatumType::HistogramF32 => {
+                    let row = HistogramF32MeasurementRow {
+                        timeseries_name,
+                        timeseries_key,
+                        start_time: extract_start_time(measurement),
+                        timestamp,
+                        datum: DbHistogram::null(),
+                    };
+                    (row.table_name(), serde_json::to_string(&row).unwrap())
+                }
+                DatumType::HistogramF64 => {
+                    let row = HistogramF64MeasurementRow {
+                        timeseries_name,
+                        timeseries_key,
+                        start_time: extract_start_time(measurement),
+                        timestamp,
+                        datum: DbHistogram::null(),
+                    };
+                    (row.table_name(), serde_json::to_string(&row).unwrap())
+                }
+            }
+        }
     }
 }
 
@@ -983,7 +1347,7 @@ struct DbTimeseriesScalarGaugeSample<T> {
     timeseries_key: TimeseriesKey,
     #[serde(with = "serde_timestamp")]
     timestamp: DateTime<Utc>,
-    datum: T,
+    datum: Option<T>,
 }
 
 // A scalar timestamped sample from a cumulative timeseries, as extracted from a query to the
@@ -995,12 +1359,15 @@ struct DbTimeseriesScalarCumulativeSample<T> {
     start_time: DateTime<Utc>,
     #[serde(with = "serde_timestamp")]
     timestamp: DateTime<Utc>,
-    datum: T,
+    datum: Option<T>,
 }
 
 // A histogram timestamped sample from a timeseries, as extracted from a query to the database.
 #[derive(Debug, Clone, Deserialize)]
-struct DbTimeseriesHistogramSample<T> {
+struct DbTimeseriesHistogramSample<T>
+where
+    T: traits::HistogramSupport,
+{
     timeseries_key: TimeseriesKey,
     #[serde(with = "serde_timestamp")]
     start_time: DateTime<Utc>,
@@ -1008,14 +1375,26 @@ struct DbTimeseriesHistogramSample<T> {
     timestamp: DateTime<Utc>,
     bins: Vec<T>,
     counts: Vec<u64>,
+    min: T,
+    max: T,
+    sum_of_samples: T::Width,
+    squared_mean: f64,
+    #[serde(flatten)]
+    quantiles: AllQuantiles,
 }
 
 impl<T> From<DbTimeseriesScalarGaugeSample<T>> for Measurement
 where
     Datum: From<T>,
+    T: FromDbScalar,
 {
     fn from(sample: DbTimeseriesScalarGaugeSample<T>) -> Measurement {
-        let datum = Datum::from(sample.datum);
+        let datum = match sample.datum {
+            Some(datum) => Datum::from(datum),
+            None => {
+                Datum::Missing(MissingDatum::new(T::DATUM_TYPE, None).unwrap())
+            }
+        };
         Measurement::new(sample.timestamp, datum)
     }
 }
@@ -1023,12 +1402,19 @@ where
 impl<T> From<DbTimeseriesScalarCumulativeSample<T>> for Measurement
 where
     Datum: From<Cumulative<T>>,
-    T: traits::Cumulative,
+    T: traits::Cumulative + FromDbCumulative,
 {
     fn from(sample: DbTimeseriesScalarCumulativeSample<T>) -> Measurement {
-        let cumulative =
-            Cumulative::with_start_time(sample.start_time, sample.datum);
-        let datum = Datum::from(cumulative);
+        let datum = match sample.datum {
+            Some(datum) => Datum::from(Cumulative::with_start_time(
+                sample.start_time,
+                datum,
+            )),
+            None => Datum::Missing(
+                MissingDatum::new(T::DATUM_TYPE, Some(sample.start_time))
+                    .unwrap(),
+            ),
+        };
         Measurement::new(sample.timestamp, datum)
     }
 }
@@ -1036,26 +1422,173 @@ where
 impl<T> From<DbTimeseriesHistogramSample<T>> for Measurement
 where
     Datum: From<Histogram<T>>,
-    T: traits::HistogramSupport,
+    T: traits::HistogramSupport + FromDbHistogram,
 {
     fn from(sample: DbTimeseriesHistogramSample<T>) -> Measurement {
-        let datum = Datum::from(
-            Histogram::from_arrays(
+        let datum = if sample.bins.is_empty() {
+            assert!(sample.counts.is_empty());
+            Datum::Missing(
+                MissingDatum::new(T::DATUM_TYPE, Some(sample.start_time))
+                    .unwrap(),
+            )
+        } else {
+            if sample.bins.len() != sample.counts.len() {
+                panic!(
+                    "Array size mismatch: bins: {}, counts: {}",
+                    sample.bins.len(),
+                    sample.counts.len()
+                );
+            }
+
+            let (p50, p90, p99) = sample.quantiles.split();
+            let hist = Histogram::from_parts(
                 sample.start_time,
                 sample.bins,
                 sample.counts,
+                sample.min,
+                sample.max,
+                sample.sum_of_samples,
+                sample.squared_mean,
+                p50,
+                p90,
+                p99,
             )
-            .unwrap(),
-        );
+            .unwrap();
+
+            Datum::from(hist)
+        };
         Measurement::new(sample.timestamp, datum)
     }
+}
+
+// Helper trait providing the DatumType for a corresponding scalar DB value.
+//
+// This is used in `parse_timeseries_scalar_gauge_measurement`.
+trait FromDbScalar {
+    const DATUM_TYPE: DatumType;
+}
+
+impl FromDbScalar for DbBool {
+    const DATUM_TYPE: DatumType = DatumType::Bool;
+}
+
+impl FromDbScalar for i8 {
+    const DATUM_TYPE: DatumType = DatumType::I8;
+}
+
+impl FromDbScalar for u8 {
+    const DATUM_TYPE: DatumType = DatumType::U8;
+}
+
+impl FromDbScalar for i16 {
+    const DATUM_TYPE: DatumType = DatumType::I16;
+}
+
+impl FromDbScalar for u16 {
+    const DATUM_TYPE: DatumType = DatumType::U16;
+}
+
+impl FromDbScalar for i32 {
+    const DATUM_TYPE: DatumType = DatumType::I32;
+}
+
+impl FromDbScalar for u32 {
+    const DATUM_TYPE: DatumType = DatumType::U32;
+}
+
+impl FromDbScalar for i64 {
+    const DATUM_TYPE: DatumType = DatumType::I64;
+}
+
+impl FromDbScalar for u64 {
+    const DATUM_TYPE: DatumType = DatumType::U64;
+}
+
+impl FromDbScalar for f32 {
+    const DATUM_TYPE: DatumType = DatumType::F32;
+}
+
+impl FromDbScalar for f64 {
+    const DATUM_TYPE: DatumType = DatumType::F64;
+}
+
+impl FromDbScalar for String {
+    const DATUM_TYPE: DatumType = DatumType::String;
+}
+
+impl FromDbScalar for Bytes {
+    const DATUM_TYPE: DatumType = DatumType::Bytes;
+}
+
+trait FromDbCumulative {
+    const DATUM_TYPE: DatumType;
+}
+
+impl FromDbCumulative for i64 {
+    const DATUM_TYPE: DatumType = DatumType::CumulativeI64;
+}
+
+impl FromDbCumulative for u64 {
+    const DATUM_TYPE: DatumType = DatumType::CumulativeU64;
+}
+
+impl FromDbCumulative for f32 {
+    const DATUM_TYPE: DatumType = DatumType::CumulativeF32;
+}
+
+impl FromDbCumulative for f64 {
+    const DATUM_TYPE: DatumType = DatumType::CumulativeF64;
+}
+
+trait FromDbHistogram {
+    const DATUM_TYPE: DatumType;
+}
+
+impl FromDbHistogram for i8 {
+    const DATUM_TYPE: DatumType = DatumType::HistogramI8;
+}
+
+impl FromDbHistogram for u8 {
+    const DATUM_TYPE: DatumType = DatumType::HistogramU8;
+}
+
+impl FromDbHistogram for i16 {
+    const DATUM_TYPE: DatumType = DatumType::HistogramI16;
+}
+
+impl FromDbHistogram for u16 {
+    const DATUM_TYPE: DatumType = DatumType::HistogramU16;
+}
+
+impl FromDbHistogram for i32 {
+    const DATUM_TYPE: DatumType = DatumType::HistogramI32;
+}
+
+impl FromDbHistogram for u32 {
+    const DATUM_TYPE: DatumType = DatumType::HistogramU32;
+}
+
+impl FromDbHistogram for i64 {
+    const DATUM_TYPE: DatumType = DatumType::HistogramI64;
+}
+
+impl FromDbHistogram for u64 {
+    const DATUM_TYPE: DatumType = DatumType::HistogramU64;
+}
+
+impl FromDbHistogram for f32 {
+    const DATUM_TYPE: DatumType = DatumType::HistogramF32;
+}
+
+impl FromDbHistogram for f64 {
+    const DATUM_TYPE: DatumType = DatumType::HistogramF64;
 }
 
 fn parse_timeseries_scalar_gauge_measurement<'a, T>(
     line: &'a str,
 ) -> (TimeseriesKey, Measurement)
 where
-    T: Deserialize<'a> + Into<Datum>,
+    T: Deserialize<'a> + Into<Datum> + FromDbScalar,
     Datum: From<T>,
 {
     let sample =
@@ -1067,7 +1600,7 @@ fn parse_timeseries_scalar_cumulative_measurement<'a, T>(
     line: &'a str,
 ) -> (TimeseriesKey, Measurement)
 where
-    T: Deserialize<'a> + traits::Cumulative,
+    T: Deserialize<'a> + traits::Cumulative + FromDbCumulative,
     Datum: From<Cumulative<T>>,
 {
     let sample =
@@ -1076,12 +1609,16 @@ where
     (sample.timeseries_key, sample.into())
 }
 
-fn parse_timeseries_histogram_measurement<T>(
-    line: &str,
+fn parse_timeseries_histogram_measurement<'a, T>(
+    line: &'a str,
 ) -> (TimeseriesKey, Measurement)
 where
-    T: Into<Datum> + traits::HistogramSupport,
+    T: Into<Datum>
+        + traits::HistogramSupport
+        + FromDbHistogram
+        + Deserialize<'a>,
     Datum: From<Histogram<T>>,
+    <T as traits::HistogramSupport>::Width: Deserialize<'a>,
 {
     let sample =
         serde_json::from_str::<DbTimeseriesHistogramSample<T>>(line).unwrap();
@@ -1201,32 +1738,24 @@ pub(crate) fn parse_field_select_row(
 ) -> (TimeseriesKey, Target, Metric) {
     assert_eq!(
         row.fields.len(),
-        2 * schema.field_schema.len(),
-        "Expected pairs of (field_name, field_value) from the field query"
+        schema.field_schema.len(),
+        "Expected the same number of fields in each row as the schema itself",
     );
     let (target_name, metric_name) = schema.component_names();
-    let mut n_fields = 0;
     let mut target_fields = Vec::new();
     let mut metric_fields = Vec::new();
-    let mut actual_fields = row.fields.values();
-    while n_fields < schema.field_schema.len() {
+    let mut actual_fields = row.fields.iter();
+    for _ in 0..schema.field_schema.len() {
         // Extract the field name from the row and find a matching expected field.
-        let actual_field_name = actual_fields
+        let (actual_field_name, actual_field_value) = actual_fields
             .next()
             .expect("Missing a field name from a field select query");
-        let name = actual_field_name
-            .as_str()
-            .expect("Expected a string field name")
-            .to_string();
-        let expected_field = schema.field_schema(&name).expect(
+        let expected_field = schema.schema_for_field(actual_field_name).expect(
             "Found field with name that is not part of the timeseries schema",
         );
 
         // Parse the field value as the expected type
-        let actual_field_value = actual_fields
-            .next()
-            .expect("Missing a field value from a field select query");
-        let value = match expected_field.ty {
+        let value = match expected_field.field_type {
             FieldType::Bool => {
                 FieldValue::Bool(bool::from(DbBool::from(
                     actual_field_value
@@ -1325,15 +1854,15 @@ pub(crate) fn parse_field_select_row(
                         .as_str()
                         .expect("Expected a UUID string for a Uuid field from the database")
                         .to_string()
+                        .into()
                     )
             }
         };
-        let field = Field { name, value };
+        let field = Field { name: actual_field_name.to_string(), value };
         match expected_field.source {
             FieldSource::Target => target_fields.push(field),
             FieldSource::Metric => metric_fields.push(field),
         }
-        n_fields += 1;
     }
     (
         row.timeseries_key,
@@ -1350,7 +1879,7 @@ pub(crate) fn parse_field_select_row(
 mod tests {
     use super::*;
     use chrono::Timelike;
-    use oximeter::test_util;
+    use oximeter::histogram::Record;
     use oximeter::Datum;
 
     #[test]
@@ -1410,13 +1939,15 @@ mod tests {
         let list: BTreeSet<_> = [
             FieldSchema {
                 name: String::from("field0"),
-                ty: FieldType::I64,
+                field_type: FieldType::I64,
                 source: FieldSource::Target,
+                description: String::new(),
             },
             FieldSchema {
                 name: String::from("field1"),
-                ty: FieldType::IpAddr,
+                field_type: FieldType::IpAddr,
                 source: FieldSource::Metric,
+                description: String::new(),
             },
         ]
         .into_iter()
@@ -1435,20 +1966,29 @@ mod tests {
         hist.sample(1).unwrap();
         hist.sample(10).unwrap();
         let dbhist = DbHistogram::from(&hist);
-        let (bins, counts) = hist.to_arrays();
+        let (bins, counts) = hist.bins_and_counts();
         assert_eq!(dbhist.bins, bins);
         assert_eq!(dbhist.counts, counts);
+        assert_eq!(dbhist.min, hist.min());
+        assert_eq!(dbhist.max, hist.max());
+        assert_eq!(dbhist.sum_of_samples, hist.sum_of_samples());
+        assert_eq!(dbhist.squared_mean, hist.squared_mean());
+
+        let (p50, p90, p99) = dbhist.quantiles.split();
+        assert_eq!(p50, hist.p50q());
+        assert_eq!(p90, hist.p90q());
+        assert_eq!(p99, hist.p99q());
     }
 
     #[test]
     fn test_unroll_from_source() {
-        let sample = test_util::make_sample();
+        let sample = oximeter_test_utils::make_sample();
         let out = unroll_from_source(&sample);
         assert_eq!(out["oximeter.fields_string"].len(), 2);
         assert_eq!(out["oximeter.fields_i64"].len(), 1);
         let unpacked: StringFieldRow =
             serde_json::from_str(&out["oximeter.fields_string"][0]).unwrap();
-        assert_eq!(unpacked.timeseries_name, sample.timeseries_name);
+        assert_eq!(sample.timeseries_name, unpacked.timeseries_name);
         let field = sample.target_fields().next().unwrap();
         assert_eq!(unpacked.field_name, field.name);
         if let FieldValue::String(v) = &field.value {
@@ -1458,28 +1998,58 @@ mod tests {
         }
     }
 
+    // Test that we correctly unroll a row when the measurement is missing its
+    // datum.
+    #[test]
+    fn test_unroll_missing_measurement_row() {
+        let sample = oximeter_test_utils::make_sample();
+        let missing_sample = oximeter_test_utils::make_missing_sample();
+        let (table_name, row) = unroll_measurement_row(&sample);
+        let (missing_table_name, missing_row) =
+            unroll_measurement_row(&missing_sample);
+        let row = serde_json::from_str::<I64MeasurementRow>(&row).unwrap();
+        let missing_row =
+            serde_json::from_str::<I64MeasurementRow>(&missing_row).unwrap();
+        println!("{row:#?}");
+        println!("{missing_row:#?}");
+        assert_eq!(table_name, missing_table_name);
+        assert_eq!(row.timeseries_name, missing_row.timeseries_name);
+        assert_eq!(row.timeseries_key, missing_row.timeseries_key);
+        assert!(row.datum.is_some());
+        assert!(missing_row.datum.is_none());
+    }
+
     #[test]
     fn test_unroll_measurement_row() {
-        let sample = test_util::make_hist_sample();
+        let sample = oximeter_test_utils::make_hist_sample();
         let (table_name, row) = unroll_measurement_row(&sample);
         assert_eq!(table_name, "oximeter.measurements_histogramf64");
         let unpacked: HistogramF64MeasurementRow =
             serde_json::from_str(&row).unwrap();
-        let unpacked_hist = Histogram::from_arrays(
+        let (unpacked_p50, unpacked_p90, unpacked_p99) =
+            unpacked.datum.quantiles.split();
+
+        let unpacked_hist = Histogram::from_parts(
             unpacked.start_time,
             unpacked.datum.bins,
             unpacked.datum.counts,
+            unpacked.datum.min,
+            unpacked.datum.max,
+            unpacked.datum.sum_of_samples,
+            unpacked.datum.squared_mean,
+            unpacked_p50,
+            unpacked_p90,
+            unpacked_p99,
         )
         .unwrap();
         let measurement = &sample.measurement;
-        if let Datum::HistogramF64(hist) = measurement.datum() {
-            assert_eq!(
-                hist, &unpacked_hist,
-                "Unpacking histogram from database representation failed"
-            );
-        } else {
+        let Datum::HistogramF64(hist) = measurement.datum() else {
             panic!("Expected a histogram measurement");
-        }
+        };
+        assert_eq!(
+            hist, &unpacked_hist,
+            "Unpacking histogram from database representation failed"
+        );
         assert_eq!(unpacked.start_time, measurement.start_time().unwrap());
     }
 
@@ -1575,18 +2145,69 @@ mod tests {
             .with_nanosecond(123_456_789)
             .unwrap();
 
-        let line = r#"{"timeseries_key": 12, "start_time": "2021-01-01 00:00:00.123456789", "timestamp": "2021-01-01 01:00:00.123456789", "bins": [0, 1], "counts": [1, 1] }"#;
+        let line = r#"
+        {
+            "timeseries_key": 12,
+            "start_time": "2021-01-01 00:00:00.123456789",
+            "timestamp": "2021-01-01 01:00:00.123456789",
+            "bins": [0, 1],
+            "counts": [1, 1],
+            "min": 0,
+            "max": 1,
+            "sum_of_samples": 2,
+            "squared_mean": 2.0,
+            "p50_marker_heights": [0.0, 0.0, 0.0, 0.0, 1.0],
+            "p50_marker_positions": [1, 2, 3, 4, 2],
+            "p50_desired_marker_positions": [1.0, 3.0, 5.0, 5.0, 5.0],
+            "p90_marker_heights": [0.0, 0.0, 0.0, 0.0, 1.0],
+            "p90_marker_positions": [1, 2, 3, 4, 2],
+            "p90_desired_marker_positions": [1.0, 3.0, 5.0, 5.0, 5.0],
+            "p99_marker_heights": [0.0, 0.0, 0.0, 0.0, 1.0],
+            "p99_marker_positions": [1, 2, 3, 4, 2],
+            "p99_desired_marker_positions": [1.0, 3.0, 5.0, 5.0, 5.0]
+        }"#;
         let (key, measurement) =
             parse_measurement_from_row(line, DatumType::HistogramI64);
         assert_eq!(key, 12);
         assert_eq!(measurement.start_time().unwrap(), start_time);
         assert_eq!(measurement.timestamp(), timestamp);
-        if let Datum::HistogramI64(hist) = measurement.datum() {
-            assert_eq!(hist.n_bins(), 3);
-            assert_eq!(hist.n_samples(), 2);
-        } else {
+        let Datum::HistogramI64(hist) = measurement.datum() else {
             panic!("Expected a histogram sample");
-        }
+        };
+        assert_eq!(hist.n_bins(), 3);
+        assert_eq!(hist.n_samples(), 2);
+        assert_eq!(hist.min(), 0);
+        assert_eq!(hist.max(), 1);
+        assert_eq!(hist.sum_of_samples(), 2);
+        assert_eq!(hist.squared_mean(), 2.);
+        assert_eq!(
+            hist.p50q(),
+            Quantile::from_parts(
+                0.5,
+                [0.0, 0.0, 0.0, 0.0, 1.0],
+                [1, 2, 3, 4, 2],
+                [1.0, 3.0, 5.0, 5.0, 5.0],
+            )
+        );
+        assert_eq!(
+            hist.p90q(),
+            Quantile::from_parts(
+                0.9,
+                [0.0, 0.0, 0.0, 0.0, 1.0],
+                [1, 2, 3, 4, 2],
+                [1.0, 3.0, 5.0, 5.0, 5.0],
+            )
+        );
+
+        assert_eq!(
+            hist.p99q(),
+            Quantile::from_parts(
+                0.99,
+                [0.0, 0.0, 0.0, 0.0, 1.0],
+                [1, 2, 3, 4, 2],
+                [1.0, 3.0, 5.0, 5.0, 5.0],
+            )
+        );
     }
 
     #[test]
@@ -1598,29 +2219,13 @@ mod tests {
     }
 
     #[test]
-    fn test_histogram_to_arrays() {
-        let mut hist = Histogram::new(&[0, 10, 20]).unwrap();
-        hist.sample(1).unwrap();
-        hist.sample(11).unwrap();
-
-        let (bins, counts) = hist.to_arrays();
-        assert_eq!(
-            bins.len(),
-            counts.len(),
-            "Bins and counts should have the same size"
-        );
-        assert_eq!(
-            bins.len(),
-            hist.n_bins(),
-            "Paired-array bins should be of the same length as the histogram"
-        );
-        assert_eq!(counts, &[0, 1, 1, 0], "Paired-array counts are incorrect");
-
-        let rebuilt =
-            Histogram::from_arrays(hist.start_time(), bins, counts).unwrap();
-        assert_eq!(
-            hist, rebuilt,
-            "Histogram reconstructed from paired arrays is not correct"
-        );
+    fn test_parse_bytes_measurement() {
+        let s = r#"{"timeseries_key": 101, "timestamp": "2023-11-21 18:25:21.963714255", "datum": "\u0001\u0002\u0003"}"#;
+        let (_, meas) = parse_timeseries_scalar_gauge_measurement::<Bytes>(&s);
+        println!("{meas:?}");
+        let Datum::Bytes(b) = meas.datum() else {
+            unreachable!();
+        };
+        assert_eq!(b.to_vec(), vec![1, 2, 3]);
     }
 }

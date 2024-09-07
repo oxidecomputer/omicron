@@ -10,18 +10,20 @@ use crate::app::{
     MAX_NICS_PER_INSTANCE,
 };
 use crate::external_api::params;
-use nexus_db_model::NetworkInterfaceKind;
+use nexus_db_model::{ExternalIp, NetworkInterfaceKind};
 use nexus_db_queries::db::identity::Resource;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::queries::network_interface::InsertError as InsertNicError;
 use nexus_db_queries::{authn, authz, db};
 use nexus_defaults::DEFAULT_PRIMARY_NIC_NAME;
 use nexus_types::external_api::params::InstanceDiskAttachment;
-use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
-use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Name;
+use omicron_common::api::external::NameOrId;
+use omicron_common::api::external::{Error, InternalContext};
 use omicron_common::api::internal::shared::SwitchLocation;
+use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
+use ref_cast::RefCast;
 use serde::Deserialize;
 use serde::Serialize;
 use slog::warn;
@@ -50,14 +52,14 @@ pub(crate) struct Params {
 struct NetParams {
     saga_params: Params,
     which: usize,
-    instance_id: Uuid,
+    instance_id: InstanceUuid,
     new_id: Uuid,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 struct NetworkConfigParams {
     saga_params: Params,
-    instance_id: Uuid,
+    instance_id: InstanceUuid,
     which: usize,
     switch_location: SwitchLocation,
 }
@@ -66,7 +68,7 @@ struct NetworkConfigParams {
 struct DiskAttachParams {
     serialized_authn: authn::saga::Serialized,
     project_id: Uuid,
-    instance_id: Uuid,
+    instance_id: InstanceUuid,
     attach_params: InstanceDiskAttachment,
 }
 
@@ -77,6 +79,10 @@ declare_saga_actions! {
     CREATE_INSTANCE_RECORD -> "instance_record" {
         + sic_create_instance_record
         - sic_delete_instance_record
+    }
+    ASSOCIATE_SSH_KEYS -> "output" {
+        + sic_associate_ssh_keys
+        - sic_associate_ssh_keys_undo
     }
     CREATE_NETWORK_INTERFACE -> "output" {
         + sic_create_network_interface
@@ -117,7 +123,7 @@ impl NexusSaga for SagaInstanceCreate {
     ) -> Result<steno::Dag, SagaInitError> {
         // Pre-create the instance ID so that it can be supplied as a constant
         // parameter to the subsagas that create and attach devices.
-        let instance_id = Uuid::new_v4();
+        let instance_id = InstanceUuid::new_v4();
 
         builder.append(Node::constant(
             "instance_id",
@@ -127,6 +133,8 @@ impl NexusSaga for SagaInstanceCreate {
         ));
 
         builder.append(create_instance_record_action());
+
+        builder.append(associate_ssh_keys_action());
 
         // Helper function for appending subsagas to our parent saga.
         fn subsaga_append<S: Serialize>(
@@ -223,7 +231,7 @@ impl NexusSaga for SagaInstanceCreate {
                 SagaName::new(&format!("instance-create-external-ip{i}"));
             let mut subsaga_builder = DagBuilder::new(subsaga_name);
             subsaga_builder.append(Node::action(
-                "output",
+                format!("external-ip-{i}").as_str(),
                 format!("CreateExternalIp{i}").as_str(),
                 CREATE_EXTERNAL_IP.as_ref(),
             ));
@@ -289,6 +297,77 @@ impl NexusSaga for SagaInstanceCreate {
     }
 }
 
+async fn sic_associate_ssh_keys(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let datastore = osagactx.datastore();
+    let saga_params = sagactx.saga_params::<Params>()?;
+
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &saga_params.serialized_authn,
+    );
+    let instance_id = sagactx.lookup::<InstanceUuid>("instance_id")?;
+
+    // Gather the SSH public keys of the actor making the request so
+    // that they may be injected into the new image via cloud-init.
+    // TODO-security: this should be replaced with a lookup based on
+    // on `SiloUser` role assignments once those are in place.
+    let actor = opctx
+        .authn
+        .actor_required()
+        .internal_context("loading current user's ssh keys for new Instance")
+        .map_err(ActionError::action_failed)?;
+
+    let (.., authz_user) = LookupPath::new(&opctx, &datastore)
+        .silo_user_id(actor.actor_id())
+        .lookup_for(authz::Action::ListChildren)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    datastore
+        .ssh_keys_batch_assign(
+            &opctx,
+            &authz_user,
+            instance_id,
+            &saga_params.create_params.ssh_public_keys.map(|k| {
+                // Before the instance_create saga is kicked off all entries
+                // in `ssh_keys` are validated and converted to `Uuids`.
+                k.iter()
+                    .filter_map(|n| match n {
+                        omicron_common::api::external::NameOrId::Id(id) => {
+                            Some(*id)
+                        }
+                        _ => None,
+                    })
+                    .collect()
+            }),
+        )
+        .await
+        .map_err(ActionError::action_failed)?;
+    Ok(())
+}
+
+async fn sic_associate_ssh_keys_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let datastore = osagactx.datastore();
+    let saga_params = sagactx.saga_params::<Params>()?;
+
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &saga_params.serialized_authn,
+    );
+    let instance_id = sagactx.lookup::<InstanceUuid>("instance_id")?;
+    datastore
+        .instance_ssh_keys_delete(&opctx, instance_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+    Ok(())
+}
+
 /// Create a network interface for an instance, using the parameters at index
 /// `nic_index`, returning the UUID for the NIC (or None).
 async fn sic_create_network_interface(
@@ -345,16 +424,19 @@ async fn sic_create_network_interface_undo(
     );
     let interface_id = repeat_saga_params.new_id;
     let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
-        .instance_id(instance_id)
+        .instance_id(instance_id.into_untyped_uuid())
         .lookup_for(authz::Action::Modify)
         .await
         .map_err(ActionError::action_failed)?;
-    match LookupPath::new(&opctx, &datastore)
+
+    let interface_deleted = match LookupPath::new(&opctx, &datastore)
         .instance_network_interface_id(interface_id)
         .lookup_for(authz::Action::Delete)
         .await
     {
         Ok((.., authz_interface)) => {
+            // The lookup succeeded, but we could still fail to delete the
+            // interface if we're racing another deleter.
             datastore
                 .instance_delete_network_interface(
                     &opctx,
@@ -362,32 +444,33 @@ async fn sic_create_network_interface_undo(
                     &authz_interface,
                 )
                 .await
-                .map_err(|e| e.into_external())?;
-            Ok(())
+                .map_err(|e| e.into_external())?
         }
-        Err(Error::ObjectNotFound { .. }) => {
-            // The saga is attempting to delete the NIC by the ID cached
-            // in the saga log. If we're running this, the NIC already
-            // appears to be gone, which is odd, but not exactly an
-            // error. Swallowing the error allows the saga to continue,
-            // but this is another place we might want to consider
-            // bumping a counter or otherwise tracking things.
-            warn!(
-                osagactx.log(),
-                "During saga unwind, NIC already appears deleted";
-                "interface_id" => %interface_id,
-            );
-            Ok(())
-        }
-        Err(e) => Err(e.into()),
+        Err(Error::ObjectNotFound { .. }) => false,
+        Err(e) => return Err(e.into()),
+    };
+
+    if !interface_deleted {
+        // The saga is attempting to delete the NIC by the ID cached
+        // in the saga log. If we're running this, the NIC already
+        // appears to be gone, which is odd, but not exactly an
+        // error. Swallowing the error allows the saga to continue,
+        // but this is another place we might want to consider
+        // bumping a counter or otherwise tracking things.
+        warn!(
+            osagactx.log(),
+            "During saga unwind, NIC already appears deleted";
+            "interface_id" => %interface_id,
+        );
     }
+    Ok(())
 }
 
 /// Create one custom (non-default) network interface for the provided instance.
 async fn create_custom_network_interface(
     sagactx: &NexusActionContext,
     saga_params: &Params,
-    instance_id: Uuid,
+    instance_id: InstanceUuid,
     interface_id: Uuid,
     interface_params: &params::InstanceNetworkInterfaceCreate,
 ) -> Result<(), ActionError> {
@@ -400,7 +483,7 @@ async fn create_custom_network_interface(
 
     // Lookup authz objects, used in the call to create the NIC itself.
     let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
-        .instance_id(instance_id)
+        .instance_id(instance_id.into_untyped_uuid())
         .lookup_for(authz::Action::CreateChild)
         .await
         .map_err(ActionError::action_failed)?;
@@ -462,7 +545,7 @@ async fn create_default_primary_network_interface(
     sagactx: &NexusActionContext,
     saga_params: &Params,
     nic_index: usize,
-    instance_id: Uuid,
+    instance_id: InstanceUuid,
     interface_id: Uuid,
 ) -> Result<(), ActionError> {
     // We're statically creating up to MAX_NICS_PER_INSTANCE saga nodes, but
@@ -506,7 +589,7 @@ async fn create_default_primary_network_interface(
 
     // Lookup authz objects, used in the call to actually create the NIC.
     let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
-        .instance_id(instance_id)
+        .instance_id(instance_id.into_untyped_uuid())
         .lookup_for(authz::Action::CreateChild)
         .await
         .map_err(ActionError::action_failed)?;
@@ -561,10 +644,10 @@ async fn sic_allocate_instance_snat_ip(
         &sagactx,
         &saga_params.serialized_authn,
     );
-    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+    let instance_id = sagactx.lookup::<InstanceUuid>("instance_id")?;
     let ip_id = sagactx.lookup::<Uuid>("snat_ip_id")?;
 
-    let pool = datastore
+    let (.., pool) = datastore
         .ip_pools_fetch_default(&opctx)
         .await
         .map_err(ActionError::action_failed)?;
@@ -597,37 +680,104 @@ async fn sic_allocate_instance_snat_ip_undo(
 /// index `ip_index`, and return its ID if one is created (or None).
 async fn sic_allocate_instance_external_ip(
     sagactx: NexusActionContext,
-) -> Result<(), ActionError> {
+) -> Result<Option<ExternalIp>, ActionError> {
+    // XXX: may wish to restructure partially: we have at most one ephemeral
+    //      and then at most $n$ floating.
     let osagactx = sagactx.user_data();
     let datastore = osagactx.datastore();
     let repeat_saga_params = sagactx.saga_params::<NetParams>()?;
     let saga_params = repeat_saga_params.saga_params;
     let ip_index = repeat_saga_params.which;
-    let ip_params = saga_params.create_params.external_ips.get(ip_index);
-    let ip_params = match ip_params {
-        None => {
-            return Ok(());
-        }
-        Some(ref prs) => prs,
+    let Some(ip_params) = saga_params.create_params.external_ips.get(ip_index)
+    else {
+        return Ok(None);
     };
     let opctx = crate::context::op_context_for_saga_action(
         &sagactx,
         &saga_params.serialized_authn,
     );
     let instance_id = repeat_saga_params.instance_id;
-    let ip_id = repeat_saga_params.new_id;
 
-    // Collect the possible pool name for this IP address
-    let pool_name = match ip_params {
-        params::ExternalIpCreate::Ephemeral { ref pool_name } => {
-            pool_name.as_ref().map(|name| db::model::Name(name.clone()))
+    // We perform the 'complete_op' in this saga stage because our IPs are
+    // created in the attaching state, and we need to move them to attached.
+    // We *can* do so because the `creating` state will block the IP attach/detach
+    // sagas from running, so we can safely undo in event of later error in this saga
+    // without worrying they have been detached by another API call.
+    // Runtime state should never be able to make 'complete_op' fallible.
+    let ip = match ip_params {
+        // Allocate a new IP address from the target, possibly default, pool
+        params::ExternalIpCreate::Ephemeral { pool } => {
+            let pool = if let Some(name_or_id) = pool {
+                Some(
+                    osagactx
+                        .nexus()
+                        .ip_pool_lookup(&opctx, name_or_id)
+                        .map_err(ActionError::action_failed)?
+                        .lookup_for(authz::Action::CreateChild)
+                        .await
+                        .map_err(ActionError::action_failed)?
+                        .0,
+                )
+            } else {
+                None
+            };
+
+            let ip_id = repeat_saga_params.new_id;
+            datastore
+                .allocate_instance_ephemeral_ip(
+                    &opctx,
+                    ip_id,
+                    instance_id,
+                    pool,
+                    true,
+                )
+                .await
+                .map_err(ActionError::action_failed)?
+                .0
+        }
+        // Set the parent of an existing floating IP to the new instance's ID.
+        params::ExternalIpCreate::Floating { floating_ip } => {
+            let (.., authz_project, authz_fip) = match floating_ip {
+                NameOrId::Name(name) => LookupPath::new(&opctx, datastore)
+                    .project_id(saga_params.project_id)
+                    .floating_ip_name(db::model::Name::ref_cast(name)),
+                NameOrId::Id(id) => {
+                    LookupPath::new(&opctx, datastore).floating_ip_id(*id)
+                }
+            }
+            .lookup_for(authz::Action::Modify)
+            .await
+            .map_err(ActionError::action_failed)?;
+
+            if authz_project.id() != saga_params.project_id {
+                return Err(ActionError::action_failed(Error::invalid_request(
+                    "floating IP must be in the same project as the instance"
+                )));
+            }
+
+            datastore
+                .floating_ip_begin_attach(&opctx, &authz_fip, instance_id, true)
+                .await
+                .map_err(ActionError::action_failed)?
+                .0
         }
     };
-    datastore
-        .allocate_instance_ephemeral_ip(&opctx, ip_id, instance_id, pool_name)
+
+    // Ignore row count here, this is infallible with correct
+    // (state, state', kind) but may be zero on repeat call for
+    // idempotency.
+    _ = datastore
+        .external_ip_complete_op(
+            &opctx,
+            ip.id,
+            ip.kind,
+            nexus_db_model::IpAttachState::Attaching,
+            nexus_db_model::IpAttachState::Attached,
+        )
         .await
         .map_err(ActionError::action_failed)?;
-    Ok(())
+
+    Ok(Some(ip))
 }
 
 async fn sic_allocate_instance_external_ip_undo(
@@ -638,16 +788,65 @@ async fn sic_allocate_instance_external_ip_undo(
     let repeat_saga_params = sagactx.saga_params::<NetParams>()?;
     let saga_params = repeat_saga_params.saga_params;
     let ip_index = repeat_saga_params.which;
-    if ip_index >= saga_params.create_params.external_ips.len() {
-        return Ok(());
-    }
-
     let opctx = crate::context::op_context_for_saga_action(
         &sagactx,
         &saga_params.serialized_authn,
     );
-    let ip_id = repeat_saga_params.new_id;
-    datastore.deallocate_external_ip(&opctx, ip_id).await?;
+
+    // We store and lookup `ExternalIp` so that we can detach
+    // and/or deallocate without double name resolution.
+    let new_ip = sagactx
+        .lookup::<Option<ExternalIp>>(&format!("external-ip-{ip_index}"))?;
+
+    let Some(ip) = new_ip else {
+        return Ok(());
+    };
+
+    let Some(ip_params) = saga_params.create_params.external_ips.get(ip_index)
+    else {
+        return Ok(());
+    };
+
+    match ip_params {
+        params::ExternalIpCreate::Ephemeral { .. } => {
+            datastore.deallocate_external_ip(&opctx, ip.id).await?;
+        }
+        params::ExternalIpCreate::Floating { .. } => {
+            let (.., authz_fip) = LookupPath::new(&opctx, &datastore)
+                .floating_ip_id(ip.id)
+                .lookup_for(authz::Action::Modify)
+                .await?;
+
+            datastore
+                .floating_ip_begin_detach(
+                    &opctx,
+                    &authz_fip,
+                    repeat_saga_params.instance_id,
+                    true,
+                )
+                .await?;
+
+            let n_rows = datastore
+                .external_ip_complete_op(
+                    &opctx,
+                    ip.id,
+                    ip.kind,
+                    nexus_db_model::IpAttachState::Detaching,
+                    nexus_db_model::IpAttachState::Detached,
+                )
+                .await
+                .map_err(ActionError::action_failed)?;
+
+            if n_rows != 1 {
+                error!(
+                    osagactx.log(),
+                    "sic_allocate_instance_external_ip_undo: failed to \
+                     completely detach ip {}",
+                    ip.id
+                );
+            }
+        }
+    }
     Ok(())
 }
 
@@ -688,7 +887,7 @@ async fn ensure_instance_disk_attach_state(
 
     let (.., authz_instance, _db_instance) =
         LookupPath::new(&opctx, &datastore)
-            .instance_id(instance_id)
+            .instance_id(instance_id.into_untyped_uuid())
             .fetch()
             .await
             .map_err(ActionError::action_failed)?;
@@ -731,7 +930,7 @@ async fn sic_create_instance_record(
         &sagactx,
         &params.serialized_authn,
     );
-    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+    let instance_id = sagactx.lookup::<InstanceUuid>("instance_id")?;
 
     let new_instance = db::model::Instance::new(
         instance_id,
@@ -764,7 +963,7 @@ async fn sic_delete_instance_record(
         &sagactx,
         &params.serialized_authn,
     );
-    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+    let instance_id = sagactx.lookup::<InstanceUuid>("instance_id")?;
     let instance_name = sagactx
         .lookup::<db::model::Instance>("instance_record")?
         .name()
@@ -795,7 +994,7 @@ async fn sic_delete_instance_record(
     };
 
     let runtime_state = db::model::InstanceRuntimeState {
-        nexus_state: db::model::InstanceState::new(InstanceState::Failed),
+        nexus_state: db::model::InstanceState::Failed,
         // Must update the generation, or the database query will fail.
         //
         // The runtime state of the instance record is only changed as a result
@@ -826,17 +1025,17 @@ async fn sic_move_to_stopped(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
-    let instance_id = sagactx.lookup::<Uuid>("instance_id")?;
+    let instance_id = sagactx.lookup::<InstanceUuid>("instance_id")?;
     let instance_record =
         sagactx.lookup::<db::model::Instance>("instance_record")?;
 
-    // Create a new generation of the isntance record with the Stopped state and
+    // Create a new generation of the instance record with the no-VMM state and
     // try to write it back to the database. If this node is replayed, or the
     // instance has already changed state by the time this step is reached, this
     // update will (correctly) be ignored because its generation number is out
     // of date.
     let new_state = db::model::InstanceRuntimeState {
-        nexus_state: db::model::InstanceState::new(InstanceState::Stopped),
+        nexus_state: db::model::InstanceState::NoVmm,
         gen: db::model::Generation::from(
             instance_record.runtime_state.gen.next(),
         ),
@@ -866,20 +1065,17 @@ pub mod test {
         app::sagas::instance_create::SagaInstanceCreate,
         app::sagas::test_helpers, external_api::params,
     };
-    use async_bb8_diesel::{
-        AsyncConnection, AsyncRunQueryDsl, AsyncSimpleConnection,
-    };
+    use async_bb8_diesel::AsyncRunQueryDsl;
     use diesel::{
-        BoolExpressionMethods, ExpressionMethods, OptionalExtension, QueryDsl,
-        SelectableHelper,
+        ExpressionMethods, OptionalExtension, QueryDsl, SelectableHelper,
     };
     use dropshot::test_util::ClientTestContext;
     use nexus_db_queries::authn::saga::Serialized;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::datastore::DataStore;
+    use nexus_test_utils::resource_helpers::create_default_ip_pool;
     use nexus_test_utils::resource_helpers::create_disk;
     use nexus_test_utils::resource_helpers::create_project;
-    use nexus_test_utils::resource_helpers::populate_ip_pool;
     use nexus_test_utils::resource_helpers::DiskTest;
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external::{
@@ -898,7 +1094,7 @@ pub mod test {
     const DISK_NAME: &str = "my-disk";
 
     async fn create_org_project_and_disk(client: &ClientTestContext) -> Uuid {
-        populate_ip_pool(&client, "default", None).await;
+        create_default_ip_pool(&client).await;
         let project = create_project(client, PROJECT_NAME).await;
         create_disk(&client, PROJECT_NAME, DISK_NAME).await;
         project.identity.id
@@ -916,12 +1112,13 @@ pub mod test {
                 },
                 ncpus: InstanceCpuCount::try_from(2).unwrap(),
                 memory: ByteCount::from_gibibytes_u32(4),
-                hostname: String::from("inst"),
+                hostname: "inst".parse().unwrap(),
                 user_data: vec![],
+                ssh_public_keys: None,
                 network_interfaces:
                     params::InstanceNetworkInterfaceAttachment::Default,
                 external_ips: vec![params::ExternalIpCreate::Ephemeral {
-                    pool_name: None,
+                    pool: None,
                 }],
                 disks: vec![params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
@@ -940,18 +1137,15 @@ pub mod test {
     ) {
         DiskTest::new(cptestctx).await;
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let project_id = create_org_project_and_disk(&client).await;
 
-        // Build the saga DAG with the provided test parameters
+        // Build the saga DAG with the provided test parameters and run it
         let opctx = test_helpers::test_opctx(&cptestctx);
         let params = new_test_params(&opctx, project_id);
-        let dag = create_saga_dag::<SagaInstanceCreate>(params).unwrap();
-        let runnable_saga = nexus.create_runnable_saga(dag).await.unwrap();
-
-        // Actually run the saga
         nexus
-            .run_saga(runnable_saga)
+            .sagas
+            .saga_execute::<SagaInstanceCreate>(params)
             .await
             .expect("Saga should have succeeded");
     }
@@ -1007,104 +1201,6 @@ pub mod test {
             .is_none()
     }
 
-    async fn no_sled_resource_instance_records_exist(
-        datastore: &DataStore,
-    ) -> bool {
-        use nexus_db_queries::db::model::SledResource;
-        use nexus_db_queries::db::schema::sled_resource::dsl;
-
-        datastore
-            .pool_connection_for_tests()
-            .await
-            .unwrap()
-            .transaction_async(|conn| async move {
-                conn.batch_execute_async(
-                    nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL,
-                )
-                .await
-                .unwrap();
-
-                Ok::<_, nexus_db_queries::db::TransactionError<()>>(
-                    dsl::sled_resource
-                        .filter(
-                            dsl::kind.eq(
-                                nexus_db_queries::db::model::SledResourceKind::Instance,
-                            ),
-                        )
-                        .select(SledResource::as_select())
-                        .get_results_async::<SledResource>(&conn)
-                        .await
-                        .unwrap()
-                        .is_empty(),
-                )
-            })
-            .await
-            .unwrap()
-    }
-
-    async fn no_virtual_provisioning_resource_records_exist(
-        datastore: &DataStore,
-    ) -> bool {
-        use nexus_db_queries::db::model::VirtualProvisioningResource;
-        use nexus_db_queries::db::schema::virtual_provisioning_resource::dsl;
-
-        datastore.pool_connection_for_tests()
-            .await
-            .unwrap()
-            .transaction_async(|conn| async move {
-                conn
-                    .batch_execute_async(nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL)
-                    .await
-                    .unwrap();
-
-                Ok::<_, nexus_db_queries::db::TransactionError<()>>(
-                    dsl::virtual_provisioning_resource
-                        .filter(dsl::resource_type.eq(nexus_db_queries::db::model::ResourceTypeProvisioned::Instance.to_string()))
-                        .select(VirtualProvisioningResource::as_select())
-                        .get_results_async::<VirtualProvisioningResource>(&conn)
-                        .await
-                        .unwrap()
-                        .is_empty()
-                )
-            }).await.unwrap()
-    }
-
-    async fn no_virtual_provisioning_collection_records_using_instances(
-        datastore: &DataStore,
-    ) -> bool {
-        use nexus_db_queries::db::model::VirtualProvisioningCollection;
-        use nexus_db_queries::db::schema::virtual_provisioning_collection::dsl;
-
-        datastore
-            .pool_connection_for_tests()
-            .await
-            .unwrap()
-            .transaction_async(|conn| async move {
-                conn.batch_execute_async(
-                    nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL,
-                )
-                .await
-                .unwrap();
-                Ok::<_, nexus_db_queries::db::TransactionError<()>>(
-                    dsl::virtual_provisioning_collection
-                        .filter(
-                            dsl::cpus_provisioned
-                                .ne(0)
-                                .or(dsl::ram_provisioned.ne(0)),
-                        )
-                        .select(VirtualProvisioningCollection::as_select())
-                        .get_results_async::<VirtualProvisioningCollection>(
-                            &conn,
-                        )
-                        .await
-                        .unwrap()
-                        .is_empty(),
-                )
-            })
-            .await
-            .unwrap()
-    }
-
     async fn disk_is_detached(datastore: &DataStore) -> bool {
         use nexus_db_queries::db::model::Disk;
         use nexus_db_queries::db::schema::disk::dsl;
@@ -1124,27 +1220,32 @@ pub mod test {
     }
 
     async fn no_instances_or_disks_on_sled(sled_agent: &SledAgent) -> bool {
-        sled_agent.instance_count().await == 0
-            && sled_agent.disk_count().await == 0
+        sled_agent.vmm_count().await == 0 && sled_agent.disk_count().await == 0
     }
 
     pub(crate) async fn verify_clean_slate(
         cptestctx: &ControlPlaneTestContext,
     ) {
         let sled_agent = &cptestctx.sled_agent.sled_agent;
-        let datastore = cptestctx.server.apictx().nexus.datastore();
+        let datastore = cptestctx.server.server_context().nexus.datastore();
 
         // Check that no partial artifacts of instance creation exist
         assert!(no_instance_records_exist(datastore).await);
         assert!(no_network_interface_records_exist(datastore).await);
         assert!(no_external_ip_records_exist(datastore).await);
-        assert!(no_sled_resource_instance_records_exist(datastore).await);
         assert!(
-            no_virtual_provisioning_resource_records_exist(datastore).await
+            test_helpers::no_sled_resource_instance_records_exist(cptestctx)
+                .await
         );
         assert!(
-            no_virtual_provisioning_collection_records_using_instances(
-                datastore
+            test_helpers::no_virtual_provisioning_resource_records_exist(
+                cptestctx
+            )
+            .await
+        );
+        assert!(
+            test_helpers::no_virtual_provisioning_collection_records_using_instances(
+                cptestctx
             )
             .await
         );
@@ -1152,9 +1253,7 @@ pub mod test {
         assert!(no_instances_or_disks_on_sled(&sled_agent).await);
 
         let v2p_mappings = &*sled_agent.v2p_mappings.lock().await;
-        for (_nic_id, mappings) in v2p_mappings {
-            assert!(mappings.is_empty());
-        }
+        assert!(v2p_mappings.is_empty());
     }
 
     #[nexus_test(server = crate::Server)]
@@ -1165,7 +1264,7 @@ pub mod test {
         let log = &cptestctx.logctx.log;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let project_id = create_org_project_and_disk(&client).await;
 
         // Build the saga DAG with the provided test parameters
@@ -1194,7 +1293,7 @@ pub mod test {
         let log = &cptestctx.logctx.log;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let project_id = create_org_project_and_disk(&client).await;
         let opctx = test_helpers::test_opctx(&cptestctx);
 
@@ -1218,7 +1317,7 @@ pub mod test {
         DiskTest::new(cptestctx).await;
 
         let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.apictx().nexus;
+        let nexus = &cptestctx.server.server_context().nexus;
         let project_id = create_org_project_and_disk(&client).await;
 
         // Build the saga DAG with the provided test parameters

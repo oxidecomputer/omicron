@@ -4,18 +4,21 @@
 
 //! Plan generation for "how should sleds be initialized".
 
-use crate::bootstrap::{
-    config::BOOTSTRAP_AGENT_RACK_INIT_PORT, params::StartSledAgentRequest,
-};
-use crate::rack_setup::config::SetupServiceConfig as Config;
-use crate::storage_manager::StorageResources;
+use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use camino::Utf8PathBuf;
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use sled_agent_types::rack_init::back_compat::RackInitializeRequestV1 as ConfigV1;
+use sled_agent_types::rack_init::RackInitializeRequest as Config;
+use sled_agent_types::sled::StartSledAgentRequest;
+use sled_agent_types::sled::StartSledAgentRequestBody;
+use sled_storage::dataset::CONFIG_DATASET;
+use sled_storage::manager::StorageHandle;
 use slog::Logger;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet};
 use std::net::{Ipv6Addr, SocketAddrV6};
+use std::str::FromStr;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -41,24 +44,61 @@ impl Ledgerable for Plan {
 }
 const RSS_SLED_PLAN_FILENAME: &str = "rss-sled-plan.json";
 
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct Plan {
     pub rack_id: Uuid,
-    pub sleds: HashMap<SocketAddrV6, StartSledAgentRequest>,
+    pub sleds: BTreeMap<SocketAddrV6, StartSledAgentRequest>,
 
     // Store the provided RSS configuration as part of the sled plan; if it
     // changes after reboot, we need to know.
     pub config: Config,
 }
 
+impl FromStr for Plan {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        #[derive(Deserialize)]
+        struct ShadowPlan {
+            pub rack_id: Uuid,
+            pub sleds: BTreeMap<SocketAddrV6, StartSledAgentRequest>,
+            pub config: Config,
+        }
+        #[derive(Deserialize)]
+        struct ShadowPlanV1 {
+            pub rack_id: Uuid,
+            pub sleds: BTreeMap<SocketAddrV6, StartSledAgentRequest>,
+            pub config: ConfigV1,
+        }
+        let v2_err = match serde_json::from_str::<ShadowPlan>(&value) {
+            Ok(plan) => {
+                return Ok(Plan {
+                    rack_id: plan.rack_id,
+                    sleds: plan.sleds,
+                    config: plan.config,
+                })
+            }
+            Err(e) => format!("unable to parse Plan: {e:?}"),
+        };
+        serde_json::from_str::<ShadowPlanV1>(&value)
+            .map(|v1| Plan {
+                rack_id: v1.rack_id,
+                sleds: v1.sleds,
+                config: v1.config.into(),
+            })
+            .map_err(|_| v2_err)
+    }
+}
+
 impl Plan {
     pub async fn load(
         log: &Logger,
-        storage: &StorageResources,
+        storage: &StorageHandle,
     ) -> Result<Option<Self>, PlanError> {
         let paths: Vec<Utf8PathBuf> = storage
-            .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
+            .get_latest_disks()
             .await
+            .all_m2_mountpoints(CONFIG_DATASET)
             .into_iter()
             .map(|p| p.join(RSS_SLED_PLAN_FILENAME))
             .collect();
@@ -77,8 +117,8 @@ impl Plan {
     pub async fn create(
         log: &Logger,
         config: &Config,
-        storage: &StorageResources,
-        bootstrap_addrs: HashSet<Ipv6Addr>,
+        storage_manager: &StorageHandle,
+        bootstrap_addrs: BTreeSet<Ipv6Addr>,
         use_trust_quorum: bool,
     ) -> Result<Self, PlanError> {
         let rack_id = Uuid::new_v4();
@@ -99,19 +139,22 @@ impl Plan {
             (
                 bootstrap_addr,
                 StartSledAgentRequest {
-                    id: Uuid::new_v4(),
-                    subnet,
-                    ntp_servers: config.ntp_servers.clone(),
-                    dns_servers: config.dns_servers.clone(),
-                    use_trust_quorum,
-                    rack_id,
+                    generation: 0,
+                    schema_version: 1,
+                    body: StartSledAgentRequestBody {
+                        id: Uuid::new_v4(),
+                        subnet,
+                        use_trust_quorum,
+                        is_lrtq_learner: false,
+                        rack_id,
+                    },
                 },
             )
         });
 
         info!(log, "Serializing plan");
 
-        let mut sleds = std::collections::HashMap::new();
+        let mut sleds = BTreeMap::new();
         for (addr, allocation) in allocations {
             sleds.insert(addr, allocation);
         }
@@ -119,16 +162,17 @@ impl Plan {
         let plan = Self { rack_id, sleds, config: config.clone() };
 
         // Once we've constructed a plan, write it down to durable storage.
-        let paths: Vec<Utf8PathBuf> = storage
-            .all_m2_mountpoints(sled_hardware::disk::CONFIG_DATASET)
+        let paths: Vec<Utf8PathBuf> = storage_manager
+            .get_latest_disks()
             .await
+            .all_m2_mountpoints(CONFIG_DATASET)
             .into_iter()
             .map(|p| p.join(RSS_SLED_PLAN_FILENAME))
             .collect();
 
         let mut ledger = Ledger::<Self>::new_with(log, paths, plan.clone());
         ledger.commit().await?;
-        info!(log, "Sled plan written to storage");
+        info!(log, "Sled plan written to storage: {plan:#?}");
         Ok(plan)
     }
 }
@@ -144,5 +188,25 @@ mod tests {
             "../schema/rss-sled-plan.json",
             &serde_json::to_string_pretty(&schema).unwrap(),
         );
+    }
+
+    #[test]
+    fn test_read_known_rss_sled_plans() {
+        let known_rss_sled_plans = &["madrid-rss-sled-plan.json"];
+
+        let path = Utf8PathBuf::from("tests/old-rss-sled-plans");
+        let out_path = Utf8PathBuf::from("tests/output/new-rss-sled-plans");
+        for sled_plan_basename in known_rss_sled_plans {
+            println!("checking {:?}", sled_plan_basename);
+            let contents =
+                std::fs::read_to_string(path.join(sled_plan_basename))
+                    .expect("failed to read file");
+            let parsed =
+                Plan::from_str(&contents).expect("failed to parse file");
+            expectorate::assert_contents(
+                out_path.join(sled_plan_basename),
+                &serde_json::to_string_pretty(&parsed).unwrap(),
+            );
+        }
     }
 }

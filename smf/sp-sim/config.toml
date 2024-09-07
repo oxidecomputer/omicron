@@ -21,7 +21,7 @@ device_id_cert_seed = "01de00000000000000000000000000000000000000000000000000000
 id = "sp3-host-cpu"
 device = "sp3-host-cpu"
 description = "FAKE host cpu"
-capabilities.bits = 0
+capabilities = 0
 presence = "Present"
 serial_console = "[::1]:33312"
 
@@ -36,7 +36,7 @@ device_id_cert_seed = "01de00000000000000000000000000000000000000000000000000000
 id = "sp3-host-cpu"
 device = "sp3-host-cpu"
 description = "FAKE host cpu"
-capabilities.bits = 0
+capabilities = 0
 presence = "Present"
 serial_console = "[::1]:33322"
 

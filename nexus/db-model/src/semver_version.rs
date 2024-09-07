@@ -24,6 +24,8 @@ use serde::{Deserialize, Serialize};
     Serialize,
     Deserialize,
     PartialEq,
+    Eq,
+    Hash,
     Display,
 )]
 #[diesel(sql_type = sql_types::Text)]
@@ -68,12 +70,10 @@ fn to_sortable_string(v: semver::Version) -> Result<String, external::Error> {
     let max = u64::pow(10, u32::from(PADDED_WIDTH)) - 1;
 
     if v.major > max || v.minor > max || v.patch > max {
-        return Err(external::Error::InvalidValue {
-            label: "version".to_string(),
-            message: format!(
-                "Major, minor, and patch version must be less than {max}"
-            ),
-        });
+        return Err(external::Error::invalid_value(
+            "version",
+            format!("Major, minor, and patch version must be less than {max}"),
+        ));
     }
 
     let mut result = format!(
