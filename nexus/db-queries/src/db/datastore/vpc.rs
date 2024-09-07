@@ -13,6 +13,7 @@ use crate::db::collection_attach::AttachError;
 use crate::db::collection_attach::DatastoreAttachTarget;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
+use crate::db::datastore::InstanceAndActiveVmm;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Resource;
@@ -2614,7 +2615,12 @@ impl DataStore {
             //    destination -> target rule where the target is the
             //    internet gateway parameterized by the external ip.
             if let RouteTarget::InternetGateway(name) = &rule.target.0 {
-                info!(opctx.log, "Internet gateway '{name}' resolving targets");
+                info!(
+                    opctx.log,
+                    "Internet gateway resolving targets";
+                    "name" => name.to_string(),
+                    "vpc" => authz_vpc.id().to_string(),
+                );
                 let conn = self.pool_connection_authorized(opctx).await?;
                 let igw = db::lookup::LookupPath::new(opctx, self)
                     .vpc_id(authz_vpc.id())
@@ -2627,8 +2633,11 @@ impl DataStore {
                     Err(e) => {
                         warn!(
                             opctx.log,
-                            "Internet gateway '{name}' lookup failed \
-                            when resolving vpc router rules: {e}",
+                            "Internet gateway lookup failed \
+                            when resolving vpc router rules:";
+                            "error" => e.to_string(),
+                            "name" => name.to_string(),
+                            "vpc" => authz_vpc.id().to_string(),
                         );
                         continue;
                     }
@@ -2647,35 +2656,58 @@ impl DataStore {
                     Err(e) => {
                         warn!(
                             opctx.log,
-                            "Internet gateway '{name}' pool lookup failed \
-                            when resolving vpc router rules: {e}"
+                            "Internet gateway pool lookup failed \
+                            when resolving vpc router rules:";
+                            "error" => e.to_string(),
+                            "name" => name.to_string(),
+                            "vpc" => authz_vpc.id().to_string(),
+                            "igw" => authz_igw.id().to_string(),
                         );
                         continue;
                     }
                 };
                 info!(
                     opctx.log,
-                    "Internet gateway '{name}' found {} pools",
-                    igw_pools.len()
+                    "Internet gateway found {} pools",
+                    igw_pools.len();
+                    "name" => name.to_string(),
+                    "vpc" => authz_vpc.id().to_string(),
+                    "igw" => authz_igw.id().to_string(),
                 );
 
-                let mut parents: Vec<Uuid> =
-                    match opctx.authn.silo_or_builtin()? {
-                        None => self
-                            .service_network_interfaces_all_list_batched(opctx)
-                            .await?
-                            .iter()
-                            .map(|x| x.service_id)
-                            .collect(),
-                        Some(_) => Vec::new(),
-                    };
-
-                parents.extend(instances.values().map(|x| x.1.instance_id));
+                let parents: Vec<Uuid> = if authz_vpc.id() == *SERVICES_VPC_ID {
+                    self.service_network_interfaces_all_list_batched(opctx)
+                        .await?
+                        .iter()
+                        .map(|x| x.service_id)
+                        .collect()
+                } else {
+                    let mut instances = Vec::new();
+                    let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+                    while let Some(p) = paginator.next() {
+                        let batch = self
+                            .instance_list(
+                                opctx,
+                                &authz_project,
+                                &PaginatedBy::Id(p.current_pagparams()),
+                            )
+                            .await?;
+                        paginator = p.found_batch(
+                            &batch,
+                            &|s: &InstanceAndActiveVmm| s.instance.id(),
+                        );
+                        instances
+                            .extend(batch.into_iter().map(|x| x.instance.id()));
+                    }
+                    instances
+                };
 
                 info!(
                     opctx.log,
-                    "Internet gateway '{name}' found {} parents",
-                    parents.len()
+                    "Internet gateway found {} parents",
+                    parents.len();
+                    "name" => name.to_string(),
+                    "vpc" => authz_vpc.id().to_string(),
                 );
 
                 for igw_pool in &igw_pools {
@@ -2691,13 +2723,25 @@ impl DataStore {
                         Err(e) => {
                             warn!(
                                 opctx.log,
-                                "Internet gateway '{name}' pool range lookup failed \
-                                for pool id {} when resolving vpc router rules: {e}",
-                                igw_pool.ip_pool_id,
+                                "Internet gateway pool range lookup failed \
+                                when resolving vpc router rules";
+                                "name" => name.to_string(),
+                                "vpc" => authz_vpc.id().to_string(),
+                                "ip_pool" => igw_pool.ip_pool_id.to_string(),
+                                "error" => e.to_string(),
                             );
                             continue;
                         }
                     };
+
+                    info!(
+                        opctx.log,
+                        "Internet gateway found {} ip pool ranges",
+                        instances.len();
+                        "name" => name.to_string(),
+                        "vpc" => authz_vpc.id().to_string(),
+                        "ip_pool" => igw_pool.ip_pool_id.to_string(),
+                    );
 
                     for parent_id in &parents {
                         use db::schema::external_ip::dsl as xip;
@@ -2713,8 +2757,12 @@ impl DataStore {
                             Err(e) => {
                                 warn!(
                                     opctx.log,
-                                    "Internet gateway '{name}' external ip look \
-                                    up failed when resolving vpc router rules: {e}",
+                                    "Internet gateway external ip look \
+                                    up failed when resolving vpc router rules";
+                                    "name" => name.to_string(),
+                                    "vpc" => authz_vpc.id().to_string(),
+                                    "parent" => parent_id.to_string(),
+                                    "error" => e.to_string(),
                                 );
                                 continue;
                             }
@@ -2722,16 +2770,22 @@ impl DataStore {
 
                         info!(
                             opctx.log,
-                            "Internet gateway '{name}' found {} external_ips",
-                            ext_ips.len()
+                            "Internet gateway found {} external_ips for parent",
+                            ext_ips.len();
+                            "name" => name.to_string(),
+                            "vpc" => authz_vpc.id().to_string(),
+                            "parent" => parent_id.to_string(),
                         );
 
                         for ext_ip in &ext_ips {
                             info!(
                                 opctx.log,
-                                "Internet gateway '{name}' \
+                                "Internet gateway \
                                 v4_dest: {v4_dest:?}, v6_dest: {v6_dest:?}, ext_ip: {}",
-                                ext_ip.ip.ip(),
+                                ext_ip.ip.ip();
+                                "name" => name.to_string(),
+                                "vpc" => authz_vpc.id().to_string(),
+                                "parent" => parent_id.to_string(),
                             );
 
                             match ext_ip.ip.ip() {
@@ -2755,8 +2809,11 @@ impl DataStore {
                                                     Err(e) => {
                                                         warn!(
                                                             opctx.log,
-                                                            "Internet gateway '{name}' find sled id for ip {}: {e}",
-                                                            ext_ip.ip.ip(),
+                                                            "Internet gateway find sled id for ip {}: {e}",
+                                                            ext_ip.ip.ip();
+                                                            "name" => name.to_string(),
+                                                            "vpc" => authz_vpc.id().to_string(),
+                                                            "parent" => parent_id.to_string(),
                                                         );
                                                         continue;
                                                     }
@@ -2772,8 +2829,11 @@ impl DataStore {
                                                 }
                                                 info!(
                                                     opctx.log,
-                                                    "Internet gateway '{name}' adding route \
-                                                    {dest} -> {v4}"
+                                                    "Internet gateway adding route \
+                                                    {dest} -> {v4}";
+                                                    "name" => name.to_string(),
+                                                    "vpc" => authz_vpc.id().to_string(),
+                                                    "parent" => parent_id.to_string(),
                                                 );
                                                 found = true;
                                                 break;
@@ -2782,9 +2842,13 @@ impl DataStore {
                                         if !found {
                                             warn!(
                                                 opctx.log,
-                                                "Internet gateway '{name}' no suitable \
-                                                ipv4 range found for {} in pool {}",
-                                                ext_ip.ip.ip(), igw_pool.ip_pool_id,
+                                                "Internet gateway no suitable \
+                                                ipv4 range found for {} in pool",
+                                                ext_ip.ip.ip();
+                                                "name" => name.to_string(),
+                                                "vpc" => authz_vpc.id().to_string(),
+                                                "parent" => parent_id.to_string(),
+                                                "pool" => igw_pool.ip_pool_id.to_string(),
                                             );
                                         }
                                     }
@@ -2809,8 +2873,11 @@ impl DataStore {
                                                     Err(e) => {
                                                         warn!(
                                                             opctx.log,
-                                                            "Internet gateway '{name}' find sled id for ip {}: {e}",
-                                                            ext_ip.ip.ip(),
+                                                            "Internet gateway find sled id for ip {}: {e}",
+                                                            ext_ip.ip.ip();
+                                                            "name" => name.to_string(),
+                                                            "vpc" => authz_vpc.id().to_string(),
+                                                            "parent" => parent_id.to_string(),
                                                         );
                                                         continue;
                                                     }
@@ -2826,8 +2893,11 @@ impl DataStore {
                                                 }
                                                 info!(
                                                     opctx.log,
-                                                    "Internet gateway '{name}' adding route \
-                                                    {dest} -> {v6}"
+                                                    "Internet gateway adding route \
+                                                    {dest} -> {v6}";
+                                                    "name" => name.to_string(),
+                                                    "vpc" => authz_vpc.id().to_string(),
+                                                    "parent" => parent_id.to_string(),
                                                 );
                                                 found = true;
                                                 break;
@@ -2836,9 +2906,13 @@ impl DataStore {
                                         if !found {
                                             warn!(
                                                 opctx.log,
-                                                "Internet gateway '{name}' no suitable \
-                                                ipv6 range found for {} in pool {}",
-                                                ext_ip.ip.ip(), igw_pool.ip_pool_id,
+                                                "Internet gateway no suitable \
+                                                ipv4 range found for {} in pool",
+                                                ext_ip.ip.ip();
+                                                "name" => name.to_string(),
+                                                "vpc" => authz_vpc.id().to_string(),
+                                                "parent" => parent_id.to_string(),
+                                                "pool" => igw_pool.ip_pool_id.to_string(),
                                             );
                                         }
                                     }

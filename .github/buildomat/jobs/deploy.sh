@@ -134,7 +134,6 @@ z_swadm () {
 	pfexec zlogin oxz_switch /opt/oxide/dendrite/bin/swadm $@
 }
 
-set +x
 # only set this if you want to override the version of opte/xde installed by the
 # install_opte.sh script
 OPTE_COMMIT="d2acf326ae1216b3bd78e5bfd677aea813176314"
@@ -148,7 +147,6 @@ if [[ "x$OPTE_COMMIT" != "x" ]]; then
 	cp opteadm /tmp/opteadm
 	pfexec mv opteadm /opt/oxide/opte/bin/opteadm
 fi
-set -x
 
 #
 # XXX work around 14537 (UFS should not allow directories to be unlinked) which
