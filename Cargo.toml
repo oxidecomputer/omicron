@@ -289,7 +289,7 @@ approx = "0.5.1"
 assert_matches = "1.5.0"
 assert_cmd = "2.0.16"
 async-bb8-diesel = "0.2"
-async-trait = "0.1.81"
+async-trait = "0.1.82"
 atomicwrites = "0.4.3"
 authz-macros = { path = "nexus/authz-macros" }
 backoff = { version = "0.4.0", features = [ "tokio" ] }
