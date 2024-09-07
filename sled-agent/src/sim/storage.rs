@@ -398,7 +398,7 @@ mod test {
     #[test]
     fn crucible_ports_get_reused() {
         let logctx = test_setup_log("crucible_ports_get_reused");
-        let mut agent = CrucibleDataInner::new(logctx.log, 1000, 2000);
+        let mut agent = CrucibleDataInner::new(logctx.log.clone(), 1000, 2000);
 
         // Create a region, then delete it.
 
@@ -483,13 +483,15 @@ mod test {
             .unwrap();
 
         assert_eq!(running_snapshot.port_number, third_region_port,);
+
+        logctx.cleanup_successful();
     }
 
     /// Validate that users must delete snapshots before deleting the region
     #[test]
     fn must_delete_snapshots_first() {
         let logctx = test_setup_log("must_delete_snapshots_first");
-        let mut agent = CrucibleDataInner::new(logctx.log, 1000, 2000);
+        let mut agent = CrucibleDataInner::new(logctx.log.clone(), 1000, 2000);
 
         let region_id = Uuid::new_v4();
         let snapshot_id = Uuid::new_v4();
@@ -509,6 +511,8 @@ mod test {
         agent.create_snapshot(region_id, snapshot_id).unwrap();
 
         agent.delete(RegionId(region_id.to_string())).unwrap_err();
+
+        logctx.cleanup_successful();
     }
 
     /// Validate that users cannot delete snapshots before deleting the "running
@@ -516,7 +520,7 @@ mod test {
     #[test]
     fn must_delete_read_only_downstairs_first() {
         let logctx = test_setup_log("must_delete_read_only_downstairs_first");
-        let mut agent = CrucibleDataInner::new(logctx.log, 1000, 2000);
+        let mut agent = CrucibleDataInner::new(logctx.log.clone(), 1000, 2000);
 
         let region_id = Uuid::new_v4();
         let snapshot_id = Uuid::new_v4();
@@ -548,6 +552,8 @@ mod test {
                 &snapshot_id.to_string(),
             )
             .unwrap_err();
+
+        logctx.cleanup_successful();
     }
 
     /// Validate that users cannot boot a read-only downstairs for a snapshot
@@ -556,7 +562,7 @@ mod test {
     fn cannot_boot_read_only_downstairs_with_no_snapshot() {
         let logctx =
             test_setup_log("cannot_boot_read_only_downstairs_with_no_snapshot");
-        let mut agent = CrucibleDataInner::new(logctx.log, 1000, 2000);
+        let mut agent = CrucibleDataInner::new(logctx.log.clone(), 1000, 2000);
 
         let region_id = Uuid::new_v4();
         let snapshot_id = Uuid::new_v4();
@@ -579,18 +585,22 @@ mod test {
                 &snapshot_id.to_string(),
             )
             .unwrap_err();
+
+        logctx.cleanup_successful();
     }
 
     /// Validate that users cannot create a snapshot from a non-existent region
     #[test]
     fn snapshot_needs_region() {
         let logctx = test_setup_log("snapshot_needs_region");
-        let mut agent = CrucibleDataInner::new(logctx.log, 1000, 2000);
+        let mut agent = CrucibleDataInner::new(logctx.log.clone(), 1000, 2000);
 
         let region_id = Uuid::new_v4();
         let snapshot_id = Uuid::new_v4();
 
         agent.create_snapshot(region_id, snapshot_id).unwrap_err();
+
+        logctx.cleanup_successful();
     }
 
     /// Validate that users cannot create a "running" snapshot from a
@@ -598,7 +608,7 @@ mod test {
     #[test]
     fn running_snapshot_needs_region() {
         let logctx = test_setup_log("snapshot_needs_region");
-        let mut agent = CrucibleDataInner::new(logctx.log, 1000, 2000);
+        let mut agent = CrucibleDataInner::new(logctx.log.clone(), 1000, 2000);
 
         let region_id = Uuid::new_v4();
         let snapshot_id = Uuid::new_v4();
@@ -609,6 +619,8 @@ mod test {
                 &snapshot_id.to_string(),
             )
             .unwrap_err();
+
+        logctx.cleanup_successful();
     }
 
     /// Validate that users cannot create snapshots for destroyed regions
@@ -616,7 +628,7 @@ mod test {
     fn cannot_create_snapshot_for_destroyed_region() {
         let logctx =
             test_setup_log("cannot_create_snapshot_for_destroyed_region");
-        let mut agent = CrucibleDataInner::new(logctx.log, 1000, 2000);
+        let mut agent = CrucibleDataInner::new(logctx.log.clone(), 1000, 2000);
 
         let region_id = Uuid::new_v4();
         let snapshot_id = Uuid::new_v4();
@@ -636,6 +648,8 @@ mod test {
         agent.delete(RegionId(region_id.to_string())).unwrap();
 
         agent.create_snapshot(region_id, snapshot_id).unwrap_err();
+
+        logctx.cleanup_successful();
     }
 }
 
