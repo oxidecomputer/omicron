@@ -7,6 +7,7 @@ edition = "2021"
 workspace = true
 
 [dependencies]
+illumos-utils.workspace = true
 omicron-common.workspace = true
 omicron-passwords.workspace = true
 omicron-uuid-kinds.workspace = true

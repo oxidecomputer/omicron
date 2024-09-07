@@ -18,7 +18,8 @@ use anyhow::Context;
 use dropshot::{HttpError, HttpServer};
 use futures::lock::Mutex;
 use nexus_sled_agent_shared::inventory::{
-    Inventory, InventoryDisk, InventoryZpool, OmicronZonesConfig, SledRole,
+    Inventory, InventoryDataset, InventoryDisk, InventoryZpool,
+    OmicronZonesConfig, SledRole,
 };
 use omicron_common::api::external::{
     ByteCount, DiskState, Error, Generation, ResourceType,
@@ -855,6 +856,30 @@ impl SledAgent {
                     })
                 })
                 .collect::<Result<Vec<_>, anyhow::Error>>()?,
+            // NOTE: We report the "configured" datasets as the "real" datasets
+            // unconditionally here. No real datasets exist, so we're free
+            // to lie here, but this information should be taken with a
+            // particularly careful grain-of-salt -- it's supposed to
+            // represent the "real" datasets the sled agent can observe.
+            datasets: storage
+                .datasets_config_list()
+                .await
+                .map(|config| {
+                    config
+                        .datasets
+                        .into_iter()
+                        .map(|(id, config)| InventoryDataset {
+                            id: Some(id),
+                            name: config.name.full_name(),
+                            available: ByteCount::from_kibibytes_u32(0),
+                            used: ByteCount::from_kibibytes_u32(0),
+                            quota: config.quota,
+                            reservation: config.reservation,
+                            compression: config.compression.to_string(),
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_else(|_| vec![]),
         })
     }
 

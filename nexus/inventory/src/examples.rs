@@ -13,6 +13,7 @@ use gateway_client::types::SpState;
 use gateway_client::types::SpType;
 use nexus_sled_agent_shared::inventory::Baseboard;
 use nexus_sled_agent_shared::inventory::Inventory;
+use nexus_sled_agent_shared::inventory::InventoryDataset;
 use nexus_sled_agent_shared::inventory::InventoryDisk;
 use nexus_sled_agent_shared::inventory::InventoryZpool;
 use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
@@ -321,6 +322,7 @@ pub fn representative() -> Representative {
         },
     ];
     let zpools = vec![];
+    let datasets = vec![];
 
     builder
         .found_sled_inventory(
@@ -335,6 +337,7 @@ pub fn representative() -> Representative {
                 SledRole::Gimlet,
                 disks,
                 zpools,
+                datasets,
             ),
         )
         .unwrap();
@@ -361,6 +364,7 @@ pub fn representative() -> Representative {
                 SledRole::Scrimlet,
                 vec![],
                 vec![],
+                vec![],
             ),
         )
         .unwrap();
@@ -382,6 +386,7 @@ pub fn representative() -> Representative {
                 SledRole::Gimlet,
                 vec![],
                 vec![],
+                vec![],
             ),
         )
         .unwrap();
@@ -399,6 +404,7 @@ pub fn representative() -> Representative {
                 sled_agent_id_unknown,
                 Baseboard::Unknown,
                 SledRole::Gimlet,
+                vec![],
                 vec![],
                 vec![],
             ),
@@ -511,6 +517,7 @@ pub fn sled_agent(
     sled_role: SledRole,
     disks: Vec<InventoryDisk>,
     zpools: Vec<InventoryZpool>,
+    datasets: Vec<InventoryDataset>,
 ) -> Inventory {
     Inventory {
         baseboard,
@@ -522,5 +529,6 @@ pub fn sled_agent(
         usable_physical_ram: ByteCount::from(1024 * 1024),
         disks,
         zpools,
+        datasets,
     }
 }

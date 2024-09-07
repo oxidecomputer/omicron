@@ -1442,6 +1442,21 @@ table! {
 }
 
 table! {
+    inv_dataset (inv_collection_id, sled_id, name) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+
+        id -> Nullable<Uuid>,
+        name -> Text,
+        available -> Int8,
+        used -> Int8,
+        quota -> Nullable<Int8>,
+        reservation -> Nullable<Int8>,
+        compression -> Text,
+    }
+}
+
+table! {
     inv_sled_omicron_zones (inv_collection_id, sled_id) {
         inv_collection_id -> Uuid,
         time_collected -> Timestamptz,
