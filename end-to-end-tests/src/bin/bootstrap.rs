@@ -8,8 +8,8 @@ use oxide_client::types::{
     NameOrId, SiloQuotasUpdate,
 };
 use oxide_client::{
-    ClientDisksExt, ClientHiddenExt, ClientProjectsExt,
-    ClientSystemNetworkingExt, ClientSystemSilosExt,
+    ClientDisksExt, ClientHiddenExt, ClientProjectsExt, ClientSystemIpPoolsExt,
+    ClientSystemSilosExt,
 };
 use serde::{de::DeserializeOwned, Deserialize};
 use std::time::Duration;

@@ -42,6 +42,7 @@ use uuid::Uuid;
 
 mod blueprint_diff;
 mod blueprint_display;
+pub mod execution;
 mod network_resources;
 mod planning_input;
 mod tri_map;
@@ -543,7 +544,7 @@ impl BlueprintZonesConfig {
     }
 
     /// Returns true if all zones in the blueprint have a disposition of
-    // `Expunged`, false otherwise.
+    /// `Expunged`, false otherwise.
     pub fn are_all_zones_expunged(&self) -> bool {
         self.zones
             .iter()

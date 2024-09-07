@@ -7,7 +7,7 @@
 use crate::omicron_zone_config::{self, OmicronZoneNic};
 use crate::schema::{
     hw_baseboard_id, inv_caboose, inv_collection, inv_collection_error,
-    inv_omicron_zone, inv_omicron_zone_nic, inv_physical_disk,
+    inv_dataset, inv_omicron_zone, inv_omicron_zone_nic, inv_physical_disk,
     inv_root_of_trust, inv_root_of_trust_page, inv_service_processor,
     inv_sled_agent, inv_sled_omicron_zones, inv_zpool, sw_caboose,
     sw_root_of_trust_page,
@@ -39,6 +39,7 @@ use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::CollectionKind;
 use omicron_uuid_kinds::CollectionUuid;
+use omicron_uuid_kinds::DatasetKind;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::SledUuid;
@@ -931,6 +932,56 @@ impl From<InvZpool> for nexus_types::inventory::Zpool {
             time_collected: pool.time_collected,
             id: ZpoolUuid::from_untyped_uuid(pool.id),
             total_size: *pool.total_size,
+        }
+    }
+}
+
+/// See [`nexus_types::inventory::Dataset`].
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_dataset)]
+pub struct InvDataset {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub sled_id: DbTypedUuid<SledKind>,
+    pub id: Option<DbTypedUuid<DatasetKind>>,
+    pub name: String,
+    pub available: ByteCount,
+    pub used: ByteCount,
+    pub quota: Option<ByteCount>,
+    pub reservation: Option<ByteCount>,
+    pub compression: String,
+}
+
+impl InvDataset {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        sled_id: SledUuid,
+        dataset: &nexus_types::inventory::Dataset,
+    ) -> Self {
+        Self {
+            inv_collection_id: inv_collection_id.into(),
+            sled_id: sled_id.into(),
+
+            id: dataset.id.map(|id| id.into()),
+            name: dataset.name.clone(),
+            available: dataset.available.into(),
+            used: dataset.used.into(),
+            quota: dataset.quota.map(|q| q.into()),
+            reservation: dataset.reservation.map(|r| r.into()),
+            compression: dataset.compression.clone(),
+        }
+    }
+}
+
+impl From<InvDataset> for nexus_types::inventory::Dataset {
+    fn from(dataset: InvDataset) -> Self {
+        Self {
+            id: dataset.id.map(|id| id.0),
+            name: dataset.name,
+            available: *dataset.available,
+            used: *dataset.used,
+            quota: dataset.quota.map(|q| *q),
+            reservation: dataset.reservation.map(|r| *r),
+            compression: dataset.compression,
         }
     }
 }

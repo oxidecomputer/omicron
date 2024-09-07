@@ -12,17 +12,21 @@ NOTE: This guide is not intended to be exhaustive, or even particularly
 detailed. For that, refer to the documentation which exists in the codebase --
 this document should act as a jumping-off point.
 
-=== **HTTP**
-* Add endpoints for either the internal or external API
-** xref:../nexus/src/external_api/http_entrypoints.rs[The External API] is customer-facing, and provides interfaces for both developers and operators
-** xref:../nexus/src/internal_api/http_entrypoints.rs[The Internal API] is internal, and provides interfaces for services on the Oxide rack (such as the Sled Agent) to call
-** Register endpoints in the `register_endpoints` method (https://github.com/oxidecomputer/omicron/blob/1dfe47c1b3122bc4f32a9c517cb31b1600581ea2/nexus/src/external_api/http_entrypoints.rs#L84[Example])
+== **HTTP**
+
+* Add endpoint _definitions_ for either the internal or external API
+** xref:../nexus/external-api/src/lib.rs[The External API] is customer-facing, and provides interfaces for both developers and operators
+** xref:../nexus/internal-api/src/lib.rs[The Internal API] is internal, and provides interfaces for services on the Oxide rack (such as the Sled Agent) to call
+* Add the corresponding _implementations_ to the respective `http_entrypoints.rs` files:
+** xref:../nexus/src/external_api/http_entrypoints.rs[The External API's `http_entrypoints.rs`]
+** xref:../nexus/src/internal_api/http_entrypoints.rs[The Internal API's `http_entrypoints.rs`]
 ** These endpoints typically call into the *Application* layer, and do not access the database directly
 * Inputs and Outputs
 ** Input parameters are defined in https://github.com/oxidecomputer/omicron/blob/main/nexus/types/src/external_api/params.rs[params.rs] (https://github.com/oxidecomputer/omicron/blob/1dfe47c1b3122bc4f32a9c517cb31b1600581ea2/nexus/types/src/external_api/params.rs#L587-L601[Example])
 ** Output views are defined in https://github.com/oxidecomputer/omicron/blob/main/nexus/types/src/external_api/views.rs[views.rs] (https://github.com/oxidecomputer/omicron/blob/1dfe47c1b3122bc4f32a9c517cb31b1600581ea2/nexus/types/src/external_api/views.rs#L270-L274[Example])
 
-=== **Lookup & Authorization**
+== **Lookup & Authorization**
+
 * Declare a new resource-to-be-looked-up via `lookup_resource!` in xref:../nexus/src/db/lookup.rs[lookup.rs] (https://github.com/oxidecomputer/omicron/blob/1dfe47c1b3122bc4f32a9c517cb31b1600581ea2/nexus/src/db/lookup.rs#L557-L564[Example])
 ** This defines a new struct named after your resource, with some https://github.com/oxidecomputer/omicron/blob/1dfe47c1b3122bc4f32a9c517cb31b1600581ea2/nexus/db-macros/src/lookup.rs#L521-L628[auto-generated methods], including `lookup_for` (look up the authz object), `fetch_for` (look up and return the object), and more
 * Add helper functions to `LookupPath` to make it possible to fetch the resource by either UUID or name (https://github.com/oxidecomputer/omicron/blob/1dfe47c1b3122bc4f32a9c517cb31b1600581ea2/nexus/src/db/lookup.rs#L225-L237[Example])
@@ -32,12 +36,14 @@ this document should act as a jumping-off point.
 ** If you define `polar_snippet = Custom`, you should edit the omicron.polar file to describe the authorization policy for your object (https://github.com/oxidecomputer/omicron/blob/1dfe47c1b3122bc4f32a9c517cb31b1600581ea2/nexus/src/authz/omicron.polar#L376-L393[Example])
 * Either way, you should add reference the new resource when https://github.com/oxidecomputer/omicron/blob/1dfe47c1b3122bc4f32a9c517cb31b1600581ea2/nexus/src/authz/oso_generic.rs#L119-L148[constructing the Oso structure]
 
-=== **Application**
+== **Application**
+
 * Add any "business logic" for the resource to xref:../nexus/src/app[the app directory]
 * This layer bridges the gap between the database and external services.
 * If your application logic involes any multi-step operations which would be interrupted by Nexus stopping mid-execution (due to reboot, crash, failure, etc), it is recommended to use a https://github.com/oxidecomputer/omicron/tree/1dfe47c1b3122bc4f32a9c517cb31b1600581ea2/nexus/src/app/sagas[saga] to define the operations durably.
 
-=== **Database**
+== **Database**
+
 * `CREATE TABLE` for the resource in xref:../schema/crdb/dbinit.sql[dbinit.sql] (https://github.com/oxidecomputer/omicron/blob/1dfe47c1b3122bc4f32a9c517cb31b1600581ea2/common/src/sql/dbinit.sql#L1103-L1129[Example])
 * Add an equivalent schema for the resource in xref:../nexus/db-model/src/schema.rs[schema.rs], which allows https://docs.diesel.rs/master/diesel/index.html[Diesel] to translate raw SQL to rust queries (https://github.com/oxidecomputer/omicron/blob/1dfe47c1b3122bc4f32a9c517cb31b1600581ea2/nexus/db-model/src/schema.rs#L144-L155[Example])
 * Add a Rust representation of the database object to xref:../nexus/db-model/src[the DB model] (https://github.com/oxidecomputer/omicron/blob/1dfe47c1b3122bc4f32a9c517cb31b1600581ea2/nexus/db-model/src/ip_pool.rs#L24-L40[Example])
@@ -48,22 +54,10 @@ this document should act as a jumping-off point.
 
 * Authorization
 ** There exists a https://github.com/oxidecomputer/omicron/blob/main/nexus/src/authz/policy_test[policy test] which compares all Oso objects against an expected policy. New resources are usually added to https://github.com/oxidecomputer/omicron/blob/main/nexus/src/authz/policy_test/resources.rs[resources.rs] to get coverage.
-* openapi
-** Nexus generates a new openapi spec from the dropshot endpoints. If you modify endpoints, you'll need to update openapi JSON files.
-*** The following commands may be used to update APIs:
-+
-[source, rust]
-----
-$ cargo run -p omicron-nexus --bin nexus -- -I nexus/examples/config.toml > openapi/nexus-internal.json
-$ cargo run -p omicron-nexus --bin nexus -- -O nexus/examples/config.toml > openapi/nexus.json
-$ cargo run -p omicron-sled-agent --bin sled-agent -- openapi > openapi/sled-agent.json
-----
-*** Alternative, you can run:
-+
-[source, rust]
-----
-$ EXPECTORATE=overwrite cargo test_nexus_openapi test_nexus_openapi_internal test_sled_agent_openapi_sled
-----
+* OpenAPI
+** Once you've added or changed endpoint definitions in `nexus-external-api` or `nexus-internal-api`, you'll need to update the corresponding OpenAPI documents (the JSON files in `openapi/`).
+** To update all OpenAPI documents, run `cargo xtask openapi generate`.
+** This does not require you to provide an implementation, or to get either omicron-nexus or omicron-sled-agent to compile: just the definition in the API crate is sufficient.
 * Integration Tests
 ** Nexus' https://github.com/oxidecomputer/omicron/tree/main/nexus/tests/integration_tests[integration tests] are used to cross the HTTP interface for testing. Typically, one file is used "per-resource".
 *** These tests use a simulated Sled Agent, and keep the "Nexus" object in-process, so it can still be accessed and modified for invasive testing.

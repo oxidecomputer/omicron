@@ -18,7 +18,8 @@ use anyhow::Context;
 use dropshot::{HttpError, HttpServer};
 use futures::lock::Mutex;
 use nexus_sled_agent_shared::inventory::{
-    Inventory, InventoryDisk, InventoryZpool, OmicronZonesConfig, SledRole,
+    Inventory, InventoryDataset, InventoryDisk, InventoryZpool,
+    OmicronZonesConfig, SledRole,
 };
 use omicron_common::api::external::{
     ByteCount, DiskState, Error, Generation, ResourceType,
@@ -439,30 +440,14 @@ impl SledAgent {
         self: &Arc<Self>,
         propolis_id: PropolisUuid,
         state: VmmStateRequested,
-    ) -> Result<VmmPutStateResponse, Error> {
+    ) -> Result<VmmPutStateResponse, HttpError> {
         if let Some(e) = self.instance_ensure_state_error.lock().await.as_ref()
         {
-            return Err(e.clone());
+            return Err(e.clone().into());
         }
 
-        let current = match self
-            .vmms
-            .sim_get_cloned_object(&propolis_id.into_untyped_uuid())
-            .await
-        {
-            Ok(i) => i.current().clone(),
-            Err(_) => match state {
-                VmmStateRequested::Stopped => {
-                    return Ok(VmmPutStateResponse { updated_runtime: None });
-                }
-                _ => {
-                    return Err(Error::invalid_request(&format!(
-                        "Propolis {} not registered on sled",
-                        propolis_id,
-                    )));
-                }
-            },
-        };
+        let current =
+            self.get_sim_instance(propolis_id).await?.current().clone();
 
         let mock_lock = self.mock_propolis.lock().await;
         if let Some((_srv, client)) = mock_lock.as_ref() {
@@ -470,7 +455,8 @@ impl SledAgent {
                 VmmStateRequested::MigrationTarget(_) => {
                     return Err(Error::internal_error(
                         "migration not implemented for mock Propolis",
-                    ));
+                    )
+                    .into());
                 }
                 VmmStateRequested::Running => {
                     let vmms = self.vmms.clone();
@@ -506,7 +492,13 @@ impl SledAgent {
                 }
             };
             client.instance_state_put().body(body).send().await.map_err(
-                |e| Error::internal_error(&format!("propolis-client: {}", e)),
+                |e| {
+                    crate::sled_agent::Error::Instance(
+                        crate::instance_manager::Error::Instance(
+                            crate::instance::Error::Propolis(e), // whew!
+                        ),
+                    )
+                },
             )?;
         }
 
@@ -518,20 +510,27 @@ impl SledAgent {
         Ok(VmmPutStateResponse { updated_runtime: Some(new_state) })
     }
 
-    pub async fn instance_get_state(
+    /// Wrapper around `sim_get_cloned_object` that returns the same error as
+    /// the real sled-agent on an unknown VMM.
+    async fn get_sim_instance(
         &self,
         propolis_id: PropolisUuid,
-    ) -> Result<SledVmmState, HttpError> {
-        let instance = self
-            .vmms
+    ) -> Result<SimInstance, crate::sled_agent::Error> {
+        self.vmms
             .sim_get_cloned_object(&propolis_id.into_untyped_uuid())
             .await
             .map_err(|_| {
                 crate::sled_agent::Error::Instance(
                     crate::instance_manager::Error::NoSuchVmm(propolis_id),
                 )
-            })?;
-        Ok(instance.current())
+            })
+    }
+
+    pub async fn instance_get_state(
+        &self,
+        propolis_id: PropolisUuid,
+    ) -> Result<SledVmmState, HttpError> {
+        Ok(self.get_sim_instance(propolis_id).await?.current())
     }
 
     pub async fn instance_simulate_migration_source(
@@ -539,15 +538,7 @@ impl SledAgent {
         propolis_id: PropolisUuid,
         migration: instance::SimulateMigrationSource,
     ) -> Result<(), HttpError> {
-        let instance = self
-            .vmms
-            .sim_get_cloned_object(&propolis_id.into_untyped_uuid())
-            .await
-            .map_err(|_| {
-                crate::sled_agent::Error::Instance(
-                    crate::instance_manager::Error::NoSuchVmm(propolis_id),
-                )
-            })?;
+        let instance = self.get_sim_instance(propolis_id).await?;
         instance.set_simulated_migration_source(migration);
         Ok(())
     }
@@ -865,6 +856,30 @@ impl SledAgent {
                     })
                 })
                 .collect::<Result<Vec<_>, anyhow::Error>>()?,
+            // NOTE: We report the "configured" datasets as the "real" datasets
+            // unconditionally here. No real datasets exist, so we're free
+            // to lie here, but this information should be taken with a
+            // particularly careful grain-of-salt -- it's supposed to
+            // represent the "real" datasets the sled agent can observe.
+            datasets: storage
+                .datasets_config_list()
+                .await
+                .map(|config| {
+                    config
+                        .datasets
+                        .into_iter()
+                        .map(|(id, config)| InventoryDataset {
+                            id: Some(id),
+                            name: config.name.full_name(),
+                            available: ByteCount::from_kibibytes_u32(0),
+                            used: ByteCount::from_kibibytes_u32(0),
+                            quota: config.quota,
+                            reservation: config.reservation,
+                            compression: config.compression.to_string(),
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_else(|_| vec![]),
         })
     }
 

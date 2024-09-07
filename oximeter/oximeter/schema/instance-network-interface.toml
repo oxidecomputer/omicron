@@ -1,0 +1,88 @@
+format_version = 1
+
+[target]
+name = "instance_network_interface"
+description = "A network interface attached to a virtual machine instance"
+authz_scope = "project"
+versions = [
+    { version = 1, fields = [ "interface_id", "instance_id", "project_id", "silo_id" ] },
+]
+
+[fields.interface_id]
+type = "uuid"
+description = "The ID of the network interface"
+
+[fields.instance_id]
+type = "uuid"
+description = "The ID of the virtual machine instance this network interface is attached to"
+
+[fields.project_id]
+type = "uuid"
+description = "The ID of the project containing the virtual machine instance this network interface is attached to"
+
+[fields.silo_id]
+type = "uuid"
+description = "The ID of the silo containing the virtual machine instance this network interface is attached to"
+
+[[metrics]]
+name = "bytes_sent"
+description = "Total number of bytes sent on the network interface"
+units = "bytes"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "bytes_received"
+description = "Total number of bytes received on the network interface"
+units = "bytes"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "packets_sent"
+description = "Total number of packets sent on the network interface"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "packets_received"
+description = "Total number of packets received on the network interface"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "packets_dropped"
+description = "Number of packets dropped on the RX queue of the network interface"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "errors_sent"
+description = "Number of errors encountered when sending on the network interface"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [] }
+]
+
+[[metrics]]
+name = "errors_received"
+description = "Number of errors encountered when receiving on the network interface"
+units = "count"
+datum_type = "cumulative_u64"
+versions = [
+    { added_in = 1, fields = [] }
+]

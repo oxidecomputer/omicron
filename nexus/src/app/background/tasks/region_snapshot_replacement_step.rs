@@ -413,12 +413,6 @@ impl BackgroundTask for RegionSnapshotReplacementFindAffected {
         opctx: &'a OpContext,
     ) -> BoxFuture<'a, serde_json::Value> {
         async move {
-            let log = &opctx.log;
-            info!(
-                &log,
-                "region snapshot replacement find affected volumes task started"
-            );
-
             let mut status = RegionSnapshotReplacementStepStatus::default();
 
             // Importantly, clean old steps up before finding affected volumes!
@@ -435,11 +429,6 @@ impl BackgroundTask for RegionSnapshotReplacementFindAffected {
 
             self.invoke_step_saga_for_affected_volumes(opctx, &mut status)
                 .await;
-
-            info!(
-                &log,
-                "region snapshot replacement find affected volumes task done"
-            );
 
             json!(status)
         }

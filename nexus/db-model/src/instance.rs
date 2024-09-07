@@ -3,7 +3,8 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{
-    ByteCount, Disk, ExternalIp, Generation, InstanceCpuCount, InstanceState,
+    ByteCount, Disk, ExternalIp, Generation, InstanceAutoRestart,
+    InstanceCpuCount, InstanceState,
 };
 use crate::collection::DatastoreAttachTargetConfig;
 use crate::schema::{disk, external_ip, instance};
@@ -54,8 +55,13 @@ pub struct Instance {
     #[diesel(column_name = hostname)]
     pub hostname: String,
 
-    #[diesel(column_name = boot_on_fault)]
-    pub boot_on_fault: bool,
+    /// The auto-restart policy for this instance.
+    ///
+    /// This indicates whether the instance should be automatically restarted by
+    /// the control plane on failure. If this is `NULL`, no auto-restart policy
+    /// has been configured for this instance by the user.
+    #[diesel(column_name = auto_restart_policy)]
+    pub auto_restart_policy: Option<InstanceAutoRestart>,
 
     #[diesel(embed)]
     pub runtime_state: InstanceRuntimeState,
@@ -104,7 +110,9 @@ impl Instance {
             ncpus: params.ncpus.into(),
             memory: params.memory.into(),
             hostname: params.hostname.to_string(),
-            boot_on_fault: false,
+            // TODO(eliza): allow this to be configured via the instance-create
+            // params...
+            auto_restart_policy: None,
             runtime_state,
 
             updater_gen: Generation::new(),
