@@ -317,15 +317,12 @@ pub(crate) async fn login_saml(
                 }
             };
 
-        let relay_state = if let Some(value) = relay_state_string {
-            // We used to return an internal server error if we failed to parse
-            // the relay state from the IDP. Since an IDP can technically put
-            // anything it wants here it's better to ignore the parse error and
-            // continue on with the login flow.
-            RelayState::from_encoded(value).ok()
-        } else {
-            None
-        };
+        // We used to return an internal server error if we failed to parse the
+        // relay state from the IDP. Since an IDP can technically put anything
+        // it wants here it's better to ignore the parse error and continue on
+        // with the login flow.
+        let relay_state =
+            relay_state_string.and_then(|v| RelayState::from_encoded(v).ok());
 
         let user = nexus
             .silo_user_from_authenticated_subject(
