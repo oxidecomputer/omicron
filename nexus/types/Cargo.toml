@@ -37,6 +37,7 @@ steno.workspace = true
 strum.workspace = true
 thiserror.workspace = true
 newtype-uuid.workspace = true
+update-engine.workspace = true
 uuid.workspace = true
 
 api_identity.workspace = true

@@ -3988,6 +3988,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bfa799dd5ed20a7e349f3b4639aa80d74549c81716d9ec4f994c9b5815598306"
 
 [[package]]
+name = "indoc"
+version = "2.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b248f5224d1d606005e02c97f5aa4e88eeb230488bcc03bc9ca4d7991399f2b5"
+
+[[package]]
 name = "inout"
 version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5395,6 +5401,7 @@ dependencies = [
  "slog",
  "slog-error-chain",
  "tokio",
+ "update-engine",
  "uuid",
 ]
 
@@ -5607,6 +5614,7 @@ dependencies = [
  "strum",
  "test-strategy",
  "thiserror",
+ "update-engine",
  "uuid",
 ]
 
@@ -6307,6 +6315,7 @@ dependencies = [
  "tufaceous",
  "tufaceous-lib",
  "update-common",
+ "update-engine",
  "uuid",
 ]
 
@@ -6369,6 +6378,7 @@ dependencies = [
  "textwrap",
  "tokio",
  "unicode-width",
+ "update-engine",
  "url",
  "uuid",
 ]
@@ -7789,7 +7799,7 @@ version = "0.27.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b3aa6f61d235de56ccffbca8627377ebe6ff0052a419f67b098f319a5f32e06d"
 dependencies = [
- "indoc",
+ "indoc 1.0.9",
  "js-sys",
  "lalrpop",
  "lalrpop-util",
@@ -11552,8 +11562,10 @@ dependencies = [
  "derive-where",
  "either",
  "futures",
+ "indent_write",
  "indexmap 2.4.0",
  "indicatif",
+ "indoc 2.0.5",
  "libsw",
  "linear-map",
  "omicron-test-utils",
