@@ -21,9 +21,6 @@
 // - Take a pass through everything: document, and rethink abstractions a little
 //
 // Some specific notes:
-// - crucible-pantry has an erroneous dependency on sled-agent-client
-//   because it's pinned to a relatively old nexus-types that did depend on
-//   sled-agent-client
 // - clickhouse-admin has no client yet
 
 use anyhow::{Context, Result};

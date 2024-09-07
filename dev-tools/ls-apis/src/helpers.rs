@@ -236,7 +236,7 @@ impl Apis {
                         {
                             eprintln!(
                                 "warning: ignoring legit dependency from \
-                         oximeter-producer -> nexus_client"
+                                 oximeter-producer -> nexus_client"
                             );
                             return;
                         }
