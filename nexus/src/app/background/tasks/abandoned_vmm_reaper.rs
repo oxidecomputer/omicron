@@ -37,10 +37,10 @@ use futures::future::BoxFuture;
 use futures::FutureExt;
 use nexus_db_model::Vmm;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
 use omicron_uuid_kinds::{GenericUuid, PropolisUuid};
-use std::num::NonZeroU32;
 use std::sync::Arc;
 
 /// Background task that searches for abandoned VMM records and deletes them.
@@ -57,11 +57,6 @@ struct ActivationResults {
     error_count: usize,
 }
 
-const MAX_BATCH: NonZeroU32 = unsafe {
-    // Safety: last time I checked, 100 was greater than zero.
-    NonZeroU32::new_unchecked(100)
-};
-
 impl AbandonedVmmReaper {
     pub fn new(datastore: Arc<DataStore>) -> Self {
         Self { datastore }
@@ -75,7 +70,7 @@ impl AbandonedVmmReaper {
     ) -> Result<(), anyhow::Error> {
         slog::info!(opctx.log, "Abandoned VMM reaper running");
 
-        let mut paginator = Paginator::new(MAX_BATCH);
+        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
         let mut last_err = Ok(());
         while let Some(p) = paginator.next() {
             let vmms = self
