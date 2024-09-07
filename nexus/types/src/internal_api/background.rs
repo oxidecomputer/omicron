@@ -4,6 +4,7 @@
 
 use serde::Deserialize;
 use serde::Serialize;
+use uuid::Uuid;
 
 /// The status of a `region_replacement_drive` background task activation
 #[derive(Serialize, Deserialize, Default)]
@@ -62,4 +63,46 @@ pub struct AbandonedVmmReaperStatus {
     pub vmms_deleted: usize,
     pub vmms_already_deleted: usize,
     pub errors: Vec<String>,
+}
+
+/// The status of an `instance_updater` background task activation.
+#[derive(Serialize, Deserialize, Default, Debug, PartialEq, Eq)]
+pub struct InstanceUpdaterStatus {
+    /// if `true`, background instance updates have been explicitly disabled.
+    pub disabled: bool,
+
+    /// number of instances found with destroyed active VMMs
+    pub destroyed_active_vmms: usize,
+
+    /// number of instances found with failed active VMMs
+    pub failed_active_vmms: usize,
+
+    /// number of instances found with terminated active migrations
+    pub terminated_active_migrations: usize,
+
+    /// number of update sagas started.
+    pub sagas_started: usize,
+
+    /// number of sagas completed successfully
+    pub sagas_completed: usize,
+
+    /// errors returned by instance update sagas which failed, and the UUID of
+    /// the instance which could not be updated.
+    pub saga_errors: Vec<(Uuid, String)>,
+
+    /// errors which occurred while querying the database for instances in need
+    /// of updates.
+    pub query_errors: Vec<String>,
+}
+
+impl InstanceUpdaterStatus {
+    pub fn errors(&self) -> usize {
+        self.saga_errors.len() + self.query_errors.len()
+    }
+
+    pub fn total_instances_found(&self) -> usize {
+        self.destroyed_active_vmms
+            + self.failed_active_vmms
+            + self.terminated_active_migrations
+    }
 }
