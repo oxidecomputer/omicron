@@ -516,7 +516,11 @@ impl BackgroundTask for InstanceWatcher {
                         CheckOutcome::Failure(reason) => {
                             *check_failures.entry(reason.as_str().into_owned()).or_default() += 1;
                         }
-                        CheckOutcome::Unknown => {}
+                        CheckOutcome::Unknown => {
+                            if let Err(reason) = check.result {
+                                *check_errors.entry(reason.as_str().into_owned()).or_default() += 1;
+                            }
+                        }
                     }
                     if check.update_saga_queued {
                         update_sagas_queued += 1;
