@@ -5,6 +5,7 @@
 //! Low-level facility for generating Blueprints
 
 mod builder;
+mod clickhouse;
 mod external_networking;
 mod zones;
 
