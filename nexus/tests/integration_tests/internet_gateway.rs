@@ -299,6 +299,7 @@ async fn test_setup(c: &ClientTestContext) {
             floating_ip: NameOrId::Name(FLOATING_IP_NAME.parse().unwrap()),
         }],
         true,
+        None,
     )
     .await;
 

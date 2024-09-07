@@ -532,6 +532,8 @@ impl super::Nexus {
             }
         }
 
+        self.background_tasks.task_vpc_route_manager.activate();
+
         // TODO: This operation should return the instance as it was created.
         // Refetching the instance state here won't return that version of the
         // instance if its state changed between the time the saga finished and
@@ -594,6 +596,8 @@ impl super::Nexus {
                 saga_params,
             )
             .await?;
+
+        self.background_tasks.task_vpc_route_manager.activate();
         Ok(())
     }
 
@@ -645,6 +649,8 @@ impl super::Nexus {
                 saga_params,
             )
             .await?;
+
+        self.background_tasks.task_vpc_route_manager.activate();
 
         // TODO correctness TODO robustness TODO design
         // Should we lookup the instance again here?

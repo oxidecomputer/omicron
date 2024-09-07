@@ -511,6 +511,7 @@ impl DataStore {
             })?;
 
         self.link_default_gateway(
+            opctx,
             ip_pool_resource.resource_id,
             ip_pool_resource.ip_pool_id,
             &conn,
@@ -522,6 +523,7 @@ impl DataStore {
 
     async fn link_default_gateway(
         &self,
+        opctx: &OpContext,
         silo_id: Uuid,
         ip_pool_id: Uuid,
         conn: &async_bb8_diesel::Connection<crate::db::DbConnection>,
@@ -606,12 +608,14 @@ impl DataStore {
                             }
                         };
                 }
+                self.vpc_increment_rpw_version(opctx, vpc.id()).await?;
             }
         }
         Ok(())
     }
     async fn unlink_default_gateway(
         &self,
+        opctx: &OpContext,
         silo_id: Uuid,
         ip_pool_id: Uuid,
         conn: &async_bb8_diesel::Connection<crate::db::DbConnection>,
@@ -666,6 +670,7 @@ impl DataStore {
                             public_error_from_diesel(e, ErrorHandler::Server)
                         })?;
                 }
+                self.vpc_increment_rpw_version(opctx, vpc.id()).await?;
             }
         }
         Ok(())
@@ -907,8 +912,13 @@ impl DataStore {
                 ))
             })?;
 
-        self.unlink_default_gateway(authz_silo.id(), authz_pool.id(), &conn)
-            .await?;
+        self.unlink_default_gateway(
+            opctx,
+            authz_silo.id(),
+            authz_pool.id(),
+            &conn,
+        )
+        .await?;
 
         Ok(())
     }

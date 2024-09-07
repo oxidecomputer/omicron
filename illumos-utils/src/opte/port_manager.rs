@@ -343,28 +343,7 @@ impl PortManager {
                 system_routes_v6(ipv6, is_service, &mut routes, &port)
             }
         };
-        /*
-        let system_routes =
-            routes.entry(port.system_router_key()).or_insert_with(|| {
-                let mut routes = HashSet::new();
 
-                // Services do not talk to one another via OPTE, but do need
-                // to reach out over the Internet *before* nexus is up to give
-                // us real rules. The easiest bet is to instantiate these here.
-                if is_service {
-                    routes.insert(ResolvedVpcRoute {
-                        dest: "0.0.0.0/0".parse().unwrap(),
-                        target: ApiRouterTarget::InternetGateway,
-                    });
-                    routes.insert(ResolvedVpcRoute {
-                        dest: "::/0".parse().unwrap(),
-                        target: ApiRouterTarget::InternetGateway,
-                    });
-                }
-
-                RouteSet { version: None, routes, active_ports: 0 }
-            });
-        */
         system_routes.active_ports += 1;
         // Clone is needed to get borrowck on our side, sadly.
         let system_routes = system_routes.clone();

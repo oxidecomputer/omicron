@@ -235,6 +235,27 @@ impl BackgroundTask for VpcRouteManager {
                                 sled.id()
                             );
                             //TODO(ry) continue;
+                            // Currently, this version is bumped in response to
+                            // events that change the routes. This has to be
+                            // done explicitly by the programmer in response to
+                            // any event that may result in a difference in
+                            // route resolution calculation. With the
+                            // introduction of internet gateway targets that
+                            // are parameterized on source IP, route resolution
+                            // computations can change based on events that are
+                            // not directly modifying VPC routes - like the
+                            // linkiage of an IP pool to a silo, or the
+                            // allocation of an external IP address and
+                            // attachment of that IP address to a service or
+                            // instance. This broadened context for changes
+                            // influencing route resolution makes manual
+                            // tracking of a router version easy to get wrong
+                            // and I feel like it will be a bug magnet.
+                            //
+                            // I think we should move decisions around change
+                            // propagation to be based on actual delta
+                            // calculation, rather than trying to manually
+                            // maintain a signal.
                         }
                         _ => {}
                     }
