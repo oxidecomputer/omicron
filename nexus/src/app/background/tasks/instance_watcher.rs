@@ -388,7 +388,7 @@ impl BackgroundTask for InstanceWatcher {
             let mut check_errors: BTreeMap<String, usize> = BTreeMap::new();
 
             // A `reqwest` client is a reference-counted handle to a connection
-            // poll that can be reused by multiple requests. Making a new client
+            // pool that can be reused by multiple requests. Making a new client
             // is fairly expensive, but cloning one is cheap, and cloning it
             // allows reusing pooled TCP connections. Therefore, we will order
             // the database query by sled ID, and reuse the same sled-agent
