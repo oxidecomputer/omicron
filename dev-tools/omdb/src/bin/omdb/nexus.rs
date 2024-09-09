@@ -1829,7 +1829,7 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 );
                 println!("    {COOLING_DOWN:<WIDTH$} {n_chilling_out:>3}");
                 println!("    {ERRORS:<WIDTH$} {n_restart_errors:>3}");
-                println!("    {COOLDOWN_PERIOD:<WIDTH$} {default_cooldown}");
+                println!("    {COOLDOWN_PERIOD:<WIDTH$} {default_cooldown:?}");
 
                 if let Some(e) = query_error {
                     println!(

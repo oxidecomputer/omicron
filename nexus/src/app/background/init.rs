@@ -680,6 +680,7 @@ impl BackgroundTasksInitializer {
                 instance_reincarnation::InstanceReincarnation::new(
                     datastore.clone(),
                     sagas.clone(),
+                    config.instance_reincarnation.default_cooldown_secs,
                 );
             driver.register(TaskDefinition {
                 name: "instance_reincarnation",

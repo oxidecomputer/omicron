@@ -270,6 +270,7 @@ mod test {
     use crate::app::background::init::test::NoopStartSaga;
     use crate::external_api::params;
     use chrono::Utc;
+    use nexus_db_model::Generation;
     use nexus_db_model::Instance;
     use nexus_db_model::InstanceAutoRestart;
     use nexus_db_model::InstanceRuntimeState;
@@ -558,7 +559,7 @@ mod test {
             &opctx,
             &authz_project,
             InstanceAutoRestart::AllFailures,
-            InstanceState::Running,
+            InstanceState::Vmm,
         )
         .await;
 
@@ -573,7 +574,7 @@ mod test {
         assert_eq!(status.instances_found, 1);
         assert_eq!(
             status.instances_reincarnated,
-            vec![instance1_id.into_untyped_uuid()]
+            &[instance1_id.into_untyped_uuid()]
         );
         assert_eq!(status.already_reincarnated, Vec::new());
         assert_eq!(status.instances_cooling_down, Vec::new());
@@ -587,10 +588,94 @@ mod test {
             .lookup_for(authz::Action::Modify)
             .await
             .expect("instance 1 must exist");
-        let instance1 = datastore
+        let instance1_state = datastore
             .instance_refetch(&opctx, &authz_instance1)
             .await
-            .expect("instance 1 must exist");
-        // datastore.instance_update_runtime()
+            .expect("instance 1 must exist")
+            .runtime_state;
+        datastore
+            .instance_update_runtime(
+                &instance1_id,
+                &InstanceRuntimeState {
+                    time_last_auto_restarted: Some(Utc::now()),
+                    nexus_state: InstanceState::Failed,
+                    time_updated: Utc::now(),
+                    r#gen: Generation(instance1_state.r#gen.next()),
+                    ..instance1_state
+                },
+            )
+            .await
+            .expect("instance 1 state should be updated");
+
+        // Move instance 2 to failed.
+        let (_, _, authz_instance2) = LookupPath::new(&opctx, datastore)
+            .instance_id(instance1_id.into_untyped_uuid())
+            .lookup_for(authz::Action::Modify)
+            .await
+            .expect("instance 2 must exist");
+        let instance2_state = datastore
+            .instance_refetch(&opctx, &authz_instance2)
+            .await
+            .expect("instance 2 must exist")
+            .runtime_state;
+        datastore
+            .instance_update_runtime(
+                &instance2_id,
+                &InstanceRuntimeState {
+                    nexus_state: InstanceState::Failed,
+                    time_updated: Utc::now(),
+                    r#gen: Generation(instance2_state.r#gen.next()),
+                    ..instance1_state
+                },
+            )
+            .await
+            .expect("instance 2 state should be updated");
+
+        // Activate the background task again. Now, only instance 2 should be
+        // restarted.
+        let result = task.activate(&opctx).await;
+        let status =
+            serde_json::from_value::<InstanceReincarnationStatus>(result)
+                .expect("JSON must be correctly shaped");
+        eprintln!("activation: {status:#?}");
+
+        assert_eq!(starter.count_reset(), 1);
+        assert_eq!(status.instances_found, 1);
+        assert_eq!(
+            status.instances_reincarnated,
+            &[instance2_id.into_untyped_uuid()]
+        );
+        assert_eq!(status.already_reincarnated, Vec::new());
+        assert_eq!(
+            status
+                .instances_cooling_down
+                .into_iter()
+                .map(|(id, _)| id)
+                .collect::<Vec<_>>(),
+            &[instance1_id.into_untyped_uuid()]
+        );
+        assert_eq!(status.query_error, None);
+        assert_eq!(status.restart_errors, Vec::new());
+
+        // Wait out the cooldown period, and give it another shot. Now, instance
+        // 1 should be restarted again.
+        tokio::time::sleep(COOLDOWN + Duration::from_secs(1)).await;
+
+        let result = task.activate(&opctx).await;
+        let status =
+            serde_json::from_value::<InstanceReincarnationStatus>(result)
+                .expect("JSON must be correctly shaped");
+        eprintln!("activation: {status:#?}");
+
+        assert_eq!(starter.count_reset(), 1);
+        assert_eq!(status.instances_found, 1);
+        assert_eq!(
+            status.instances_reincarnated,
+            &[instance1_id.into_untyped_uuid()]
+        );
+        assert_eq!(status.already_reincarnated, Vec::new());
+        assert_eq!(status.instances_cooling_down, Vec::new());
+        assert_eq!(status.query_error, None);
+        assert_eq!(status.restart_errors, Vec::new());
     }
 }

@@ -927,6 +927,7 @@ mod test {
             instance_updater.period_secs = 30
             instance_updater.disable = false
             instance_reincarnation.period_secs = 60
+            instance_reincarnation.default_cooldown_secs = 60
             service_firewall_propagation.period_secs = 300
             v2p_mapping_propagation.period_secs = 30
             abandoned_vmm_reaper.period_secs = 60
