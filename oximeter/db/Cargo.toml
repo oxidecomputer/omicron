@@ -19,7 +19,9 @@ clap.workspace = true
 clickward.workspace = true
 dropshot.workspace = true
 futures.workspace = true
+gethostname.workspace = true
 highway.workspace = true
+libc.workspace = true
 num.workspace = true
 omicron-common.workspace = true
 omicron-workspace-hack.workspace = true
@@ -33,6 +35,7 @@ slog-async.workspace = true
 slog-dtrace.workspace = true
 slog-term.workspace = true
 thiserror.workspace = true
+tokio-util.workspace = true
 usdt.workspace = true
 uuid.workspace = true
 
@@ -41,6 +44,10 @@ workspace = true
 features = [ "serde" ]
 
 [dependencies.crossterm]
+workspace = true
+optional = true
+
+[dependencies.display-error-chain]
 workspace = true
 optional = true
 
@@ -98,7 +105,7 @@ strum.workspace = true
 tempfile.workspace = true
 
 [features]
-default = [ "oxql", "sql" ]
+default = [ "native-sql", "oxql", "sql" ]
 sql = [
     "dep:indexmap",
     "dep:reedline",
@@ -112,6 +119,16 @@ oxql = [
     "dep:peg",
     "dep:reedline",
     "dep:tabled",
+]
+native-sql = [
+    "dep:crossterm",
+    "dep:display-error-chain",
+    "dep:indexmap",
+    "dep:reedline",
+    "dep:rustyline",
+    "dep:sqlformat",
+    "dep:sqlparser",
+    "dep:tabled"
 ]
 
 [[bin]]
