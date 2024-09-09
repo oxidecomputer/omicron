@@ -1278,13 +1278,6 @@ async fn test_instance_failed_when_on_expunged_sled(
         .await
         .unwrap();
 
-    // Activate the instance-watcher task.
-    nexus_test_utils::background::activate_background_task(
-        &cptestctx.internal_client,
-        "instance_watcher",
-    )
-    .await;
-
     // Wait for both instances to transition to Failed.
     instance_wait_for_state(client, instance1_id, InstanceState::Failed).await;
     instance_wait_for_state(client, instance2_id, InstanceState::Failed).await;
