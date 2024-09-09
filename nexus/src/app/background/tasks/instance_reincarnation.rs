@@ -27,11 +27,6 @@ pub struct InstanceReincarnation {
     sagas: Arc<dyn StartSaga>,
 }
 
-const BATCH_SIZE: NonZeroU32 = unsafe {
-    // Safety: last time I checked, 100 was greater than zero.
-    NonZeroU32::new_unchecked(100)
-};
-
 // Do not auto-restart instances that have been auto-restarted within the last
 // 1 minute, to try and reduce the impact of tight crash loops.
 //
@@ -99,7 +94,8 @@ impl InstanceReincarnation {
         status: &mut InstanceReincarnationStatus,
     ) {
         let mut tasks = JoinSet::new();
-        let mut paginator = Paginator::new(BATCH_SIZE);
+        let mut paginator =
+            Paginator::new(nexus_db_queries::db::datastore::SQL_BATCH_SIZE);
 
         while let Some(p) = paginator.next() {
             let maybe_batch = self
