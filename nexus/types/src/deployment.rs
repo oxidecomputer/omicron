@@ -438,6 +438,16 @@ impl<'a> fmt::Display for BlueprintDisplay<'a> {
                 disks.rows(BpDiffState::Unchanged).collect(),
             );
 
+            // Look up the sled state
+            let sled_state = self
+                .blueprint
+                .sled_state
+                .get(sled_id)
+                .map(|state| state.to_string())
+                .unwrap_or_else(|| {
+                    "blueprint error: unknown sled state".to_string()
+                });
+
             // Construct the zones subtable
             match self.blueprint.blueprint_zones.get(sled_id) {
                 Some(zones) => {
@@ -450,10 +460,13 @@ impl<'a> fmt::Display for BlueprintDisplay<'a> {
                     );
                     writeln!(
                         f,
-                        "\n  sled: {sled_id}\n\n{disks_table}\n\n{zones_tab}\n"
+                        "\n  sled: {sled_id} ({sled_state})\n\n{disks_table}\n\n{zones_tab}\n"
                     )?;
                 }
-                None => writeln!(f, "\n  sled: {sled_id}\n\n{disks_table}\n")?,
+                None => writeln!(
+                    f,
+                    "\n  sled: {sled_id} ({sled_state})\n\n{disks_table}\n"
+                )?,
             }
             seen_sleds.insert(sled_id);
         }
