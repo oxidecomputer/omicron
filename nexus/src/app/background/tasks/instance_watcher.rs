@@ -44,7 +44,24 @@ pub(crate) struct InstanceWatcher {
     id: WatcherIdentity,
 }
 
-// Chosen arbitrarily. Perhaps this should be configurable in the config file?
+/// Determines how many instance checks and their subsequent update sagas (if
+/// the instance's state has changed) can execute concurrently.  If this
+/// numberis too high, there's risk that this task could starve other Nexus
+/// activities or overload the database or overload one or more sled agents.
+///
+/// The only consequence of the number being too low is that it may take longer
+/// for the system to notice an instance's VMM state requires an instance state
+/// transition, which translates to increased latency between when events (like
+/// a VMM crash or a completed migration) occur, and when the necessary actions
+/// are (like releasing unused resource allocations or allowing an instance to
+/// be restarted or deleted) are performed.  However, in the happy path, instance
+/// update sagas execute immediately upon receipt of a VMM state update pushed
+/// by a sled-agent in `cpapi_instances_put`.  Therefore, discovering a needed
+/// state transition a health check only occurs if the pushed state update was
+/// not handled correctly, or if the sled-agent itself has restarted and
+/// forgotten about the instances it was supposed to know about.  For now, we
+/// tune this pretty low, choosing safety over low recovery latency for these
+/// relatively rare events.
 const MAX_CONCURRENT_CHECKS: NonZeroU32 = unsafe {
     // Safety: last time I checked, 16 was greater than zero.
     NonZeroU32::new_unchecked(16)
