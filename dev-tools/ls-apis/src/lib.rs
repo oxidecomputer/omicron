@@ -4,16 +4,19 @@
 
 //! Compile information about Progenitor-based APIs
 
-use serde::Deserialize;
-
 mod api_metadata;
 mod cargo;
-mod helpers;
+mod system_apis;
 mod workspaces;
 
 pub use api_metadata::AllApiMetadata;
-pub use helpers::LoadArgs;
-pub use helpers::SystemApis;
+pub use system_apis::SystemApis;
+
+use anyhow::{Context, Result};
+use camino::Utf8Path;
+use camino::Utf8PathBuf;
+use serde::de::DeserializeOwned;
+use serde::Deserialize;
 use std::borrow::Borrow;
 
 #[macro_use]
@@ -58,4 +61,18 @@ impl Borrow<String> for ServerPackageName {
     fn borrow(&self) -> &String {
         &self.0
     }
+}
+
+/// Parameters for loading information about system APIs
+pub struct LoadArgs {
+    /// path to developer-maintained API metadata
+    pub api_manifest_path: Utf8PathBuf,
+    /// path to a directory containing clones of repos that may contain APIs
+    pub extra_repos_path: Utf8PathBuf,
+}
+
+fn parse_toml_file<T: DeserializeOwned>(path: &Utf8Path) -> Result<T> {
+    let s = std::fs::read_to_string(path)
+        .with_context(|| format!("read {:?}", path))?;
+    toml::from_str(&s).with_context(|| format!("parse {:?}", path))
 }

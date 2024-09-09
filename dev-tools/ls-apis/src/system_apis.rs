@@ -2,32 +2,25 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Higher-level helpers for working with compiled API information
+//! Query information about the Dropshot/OpenAPI/Progenitor-based APIs within
+//! the Oxide system
 
 use crate::api_metadata::AllApiMetadata;
 use crate::api_metadata::ApiMetadata;
 use crate::cargo::DepPath;
+use crate::parse_toml_file;
 use crate::workspaces::Workspaces;
 use crate::ClientPackageName;
 use crate::DeploymentUnitName;
+use crate::LoadArgs;
 use crate::ServerComponentName;
 use crate::ServerPackageName;
 use anyhow::{anyhow, bail, Context, Result};
-use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use cargo_metadata::Package;
 use petgraph::dot::Dot;
-use serde::de::DeserializeOwned;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-
-/// Parameters for loading information about system APIs
-pub struct LoadArgs {
-    /// path to developer-maintained API metadata
-    pub api_manifest_path: Utf8PathBuf,
-    /// path to a directory containing clones of repos that may contain APIs
-    pub extra_repos_path: Utf8PathBuf,
-}
 
 /// Query information about the Dropshot/OpenAPI/Progenitor-based APIs within
 /// the Oxide system
@@ -450,10 +443,4 @@ impl SystemApis {
 
         Dot::new(&graph).to_string()
     }
-}
-
-fn parse_toml_file<T: DeserializeOwned>(path: &Utf8Path) -> Result<T> {
-    let s = std::fs::read_to_string(path)
-        .with_context(|| format!("read {:?}", path))?;
-    toml::from_str(&s).with_context(|| format!("parse {:?}", path))
 }
