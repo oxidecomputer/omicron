@@ -9,6 +9,7 @@ use serde::Deserialize;
 mod api_metadata;
 mod cargo;
 mod helpers;
+mod workspaces;
 
 pub use api_metadata::AllApiMetadata;
 pub use helpers::LoadArgs;
