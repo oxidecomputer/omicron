@@ -126,7 +126,7 @@ fn run_apis(apis: &Apis, args: ShowDepsArgs) -> Result<()> {
             let (repo_name, package_path) = apis.package_label(s)?;
             println!("    consumed by: {} ({}/{})", s, repo_name, package_path);
             if args.show_deps {
-                for p in path {
+                for p in path.nodes() {
                     println!("        via {}", p);
                 }
             }
@@ -168,9 +168,10 @@ fn print_server_components<'a>(
     for s in server_components.into_iter() {
         let (repo_name, pkg_path) = apis.package_label(s)?;
         println!("{}{} ({}/{})", prefix, s, repo_name, pkg_path);
-        for api in metadata.apis().filter(|a| {
-            apis.api_producer(&a.client_package_name).unwrap() == s
-        }) {
+        for api in metadata
+            .apis()
+            .filter(|a| apis.api_producer(&a.client_package_name).unwrap() == s)
+        {
             println!(
                 "{}    exposes: {} (client = {})",
                 prefix, api.label, api.client_package_name
@@ -179,7 +180,7 @@ fn print_server_components<'a>(
         for (c, path) in apis.component_apis_consumed(s) {
             println!("{}    consumes: {}", prefix, c);
             if show_deps {
-                for p in path {
+                for p in path.nodes() {
                     println!("{}        via: {}", prefix, p);
                 }
             }

@@ -6509,6 +6509,7 @@ dependencies = [
  "crucible-agent-client",
  "derive_more",
  "display-error-chain",
+ "dns-server",
  "dns-service-client",
  "dpd-client",
  "dropshot 0.10.2-dev",

@@ -21,7 +21,6 @@ use petgraph::dot::Dot;
 use serde::de::DeserializeOwned;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use std::collections::VecDeque;
 
 pub struct LoadArgs {
     pub api_manifest_path: Utf8PathBuf,
@@ -77,6 +76,22 @@ impl Apis {
                 |api: &ApiMetadata,
                  server_pkgname: ServerComponent,
                  dep_path: &DepPath| {
+                    // TODO
+                    // Also debatable: dns-server is used by both the
+                    // dns-server component *and* omicron-sled-agent's
+                    // simulated sled agent.  This program does not support
+                    // that.  But we don't care about the simulated sled
+                    // agent, either, so just ignore it.
+                    if *server_pkgname == "omicron-sled-agent"
+                        && *api.client_package_name == "dns-service-client"
+                    {
+                        eprintln!(
+                            "warning: ignoring legit dependency from \
+                             omicron-sled-agent -> dns-server",
+                        );
+                        return;
+                    }
+
                     if let Some((previous, _)) = api_producers.insert(
                         api.client_package_name.clone(),
                         (server_pkgname.clone(), dep_path.clone()),
@@ -98,8 +113,7 @@ impl Apis {
                     helper.find_package_workspace(dunit_pkg)?;
                 let server_component_name =
                     ServerComponent::from(dunit_pkg.to_string());
-                // XXX-dap could use newtype and a constructor here
-                let self_dep_path = VecDeque::from([server_pkg.id.clone()]);
+                let self_dep_path = DepPath::for_pkg(server_pkg.id.clone());
                 if let Some(previous) = servers_found.insert(
                     server_component_name.clone(),
                     self_dep_path.clone(),
@@ -178,7 +192,7 @@ impl Apis {
                     &mut |p: &Package, dep_path: &DepPath| {
                         // unwrap(): the workspace must know about each of these
                         // packages.
-                        let parent_id = &dep_path[0];
+                        let parent_id = dep_path.leaf();
                         let parent =
                             workspace.find_pkg_by_id(parent_id).unwrap();
 

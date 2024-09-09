@@ -14,17 +14,6 @@ use cargo_metadata::{DependencyKind, PackageId};
 use std::collections::BTreeSet;
 use std::collections::{BTreeMap, VecDeque};
 
-pub type DepPath = VecDeque<PackageId>;
-
-pub struct Workspace {
-    name: String,
-    workspace_root: Utf8PathBuf,
-    packages_by_id: BTreeMap<PackageId, Package>,
-    nodes_by_id: BTreeMap<PackageId, cargo_metadata::Node>,
-    progenitor_clients: BTreeSet<ClientPackageName>,
-    workspace_packages_by_name: BTreeMap<String, PackageId>,
-}
-
 // Packages that may be flagged as clients because they directly depend on
 // Progenitor, but which are not really clients.
 const IGNORED_NON_CLIENTS: &[&str] = &[
@@ -37,6 +26,15 @@ const IGNORED_NON_CLIENTS: &[&str] = &[
     // client and we don't really care about it for these purposes anyway.
     "propolis-mock-server",
 ];
+
+pub struct Workspace {
+    name: String,
+    workspace_root: Utf8PathBuf,
+    packages_by_id: BTreeMap<PackageId, Package>,
+    nodes_by_id: BTreeMap<PackageId, cargo_metadata::Node>,
+    progenitor_clients: BTreeSet<ClientPackageName>,
+    workspace_packages_by_name: BTreeMap<String, PackageId>,
+}
 
 impl Workspace {
     pub fn load(name: &str, extra_repos: Option<&Utf8Path>) -> Result<Self> {
@@ -208,7 +206,7 @@ impl Workspace {
     ) -> Result<()> {
         struct Remaining<'a> {
             node: &'a cargo_metadata::Node,
-            path: VecDeque<PackageId>,
+            path: DepPath,
         }
 
         let root_node = self.nodes_by_id.get(&root.id).ok_or_else(|| {
@@ -222,7 +220,7 @@ impl Workspace {
 
         let mut remaining = vec![Remaining {
             node: root_node,
-            path: VecDeque::from([root.id.clone()]),
+            path: DepPath::for_pkg(root.id.clone()),
         }];
         let mut seen: BTreeSet<PackageId> = BTreeSet::new();
 
@@ -251,8 +249,7 @@ impl Workspace {
                 let dep_pkg = self.packages_by_id.get(did).unwrap();
                 let dep_node = self.nodes_by_id.get(did).unwrap();
                 func(dep_pkg, &path);
-                let mut dep_path = path.clone();
-                dep_path.push_front(did.clone());
+                let dep_path = path.with_dependency_on(did.clone());
                 remaining.push(Remaining { node: dep_node, path: dep_path })
             }
         }
@@ -275,4 +272,27 @@ fn cargo_toml_parent(
         .ok_or_else(|| anyhow!("unexpected manifest path: {:?}", label_path))?
         .to_owned();
     Ok(path)
+}
+
+#[derive(Debug, Clone)]
+pub struct DepPath(VecDeque<PackageId>);
+
+impl DepPath {
+    pub fn for_pkg(pkgid: PackageId) -> DepPath {
+        DepPath(VecDeque::from([pkgid]))
+    }
+
+    pub fn leaf(&self) -> &PackageId {
+        &self.0[0]
+    }
+
+    pub fn nodes(&self) -> impl Iterator<Item = &PackageId> {
+        self.0.iter()
+    }
+
+    pub fn with_dependency_on(&self, pkgid: PackageId) -> DepPath {
+        let mut rv = self.clone();
+        rv.0.push_front(pkgid);
+        rv
+    }
 }
