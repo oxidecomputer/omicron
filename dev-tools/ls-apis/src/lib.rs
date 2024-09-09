@@ -30,12 +30,12 @@ NewtypeFrom! { () pub struct ClientPackageName(String); }
 
 #[derive(Clone, Deserialize, Ord, PartialOrd, Eq, PartialEq)]
 #[serde(transparent)]
-pub struct DeploymentUnit(String);
-NewtypeDebug! { () pub struct DeploymentUnit(String); }
-NewtypeDeref! { () pub struct DeploymentUnit(String); }
-NewtypeDerefMut! { () pub struct DeploymentUnit(String); }
-NewtypeDisplay! { () pub struct DeploymentUnit(String); }
-NewtypeFrom! { () pub struct DeploymentUnit(String); }
+pub struct DeploymentUnitName(String);
+NewtypeDebug! { () pub struct DeploymentUnitName(String); }
+NewtypeDeref! { () pub struct DeploymentUnitName(String); }
+NewtypeDerefMut! { () pub struct DeploymentUnitName(String); }
+NewtypeDisplay! { () pub struct DeploymentUnitName(String); }
+NewtypeFrom! { () pub struct DeploymentUnitName(String); }
 
 #[derive(Clone, Deserialize, Ord, PartialOrd, Eq, PartialEq)]
 #[serde(transparent)]
@@ -48,12 +48,12 @@ NewtypeFrom! { () pub struct ServerPackageName(String); }
 
 #[derive(Clone, Deserialize, Ord, PartialOrd, Eq, PartialEq)]
 #[serde(transparent)]
-pub struct ServerComponent(String);
-NewtypeDebug! { () pub struct ServerComponent(String); }
-NewtypeDeref! { () pub struct ServerComponent(String); }
-NewtypeDerefMut! { () pub struct ServerComponent(String); }
-NewtypeDisplay! { () pub struct ServerComponent(String); }
-NewtypeFrom! { () pub struct ServerComponent(String); }
+pub struct ServerComponentName(String);
+NewtypeDebug! { () pub struct ServerComponentName(String); }
+NewtypeDeref! { () pub struct ServerComponentName(String); }
+NewtypeDerefMut! { () pub struct ServerComponentName(String); }
+NewtypeDisplay! { () pub struct ServerComponentName(String); }
+NewtypeFrom! { () pub struct ServerComponentName(String); }
 impl Borrow<String> for ServerPackageName {
     fn borrow(&self) -> &String {
         &self.0

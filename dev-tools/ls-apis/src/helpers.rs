@@ -9,8 +9,8 @@ use crate::api_metadata::ApiMetadata;
 use crate::cargo::DepPath;
 use crate::cargo::Workspace;
 use crate::ClientPackageName;
-use crate::DeploymentUnit;
-use crate::ServerComponent;
+use crate::DeploymentUnitName;
+use crate::ServerComponentName;
 use crate::ServerPackageName;
 use anyhow::bail;
 use anyhow::{anyhow, ensure, Context, Result};
@@ -28,15 +28,15 @@ pub struct LoadArgs {
 }
 
 pub struct Apis {
-    server_component_units: BTreeMap<ServerComponent, DeploymentUnit>,
+    server_component_units: BTreeMap<ServerComponentName, DeploymentUnitName>,
     unit_server_components:
-        BTreeMap<DeploymentUnit, BTreeMap<ServerComponent, DepPath>>,
-    deployment_units: BTreeSet<DeploymentUnit>,
+        BTreeMap<DeploymentUnitName, BTreeMap<ServerComponentName, DepPath>>,
+    deployment_units: BTreeSet<DeploymentUnitName>,
     apis_consumed:
-        BTreeMap<ServerComponent, BTreeMap<ClientPackageName, DepPath>>,
+        BTreeMap<ServerComponentName, BTreeMap<ClientPackageName, DepPath>>,
     api_consumers:
-        BTreeMap<ClientPackageName, BTreeMap<ServerComponent, DepPath>>,
-    api_producers: BTreeMap<ClientPackageName, (ServerComponent, DepPath)>,
+        BTreeMap<ClientPackageName, BTreeMap<ServerComponentName, DepPath>>,
+    api_producers: BTreeMap<ClientPackageName, (ServerComponentName, DepPath)>,
     helper: ApisHelper,
 }
 
@@ -74,7 +74,7 @@ impl Apis {
 
             let mut found_api_producer =
                 |api: &ApiMetadata,
-                 server_pkgname: ServerComponent,
+                 server_pkgname: ServerComponentName,
                  dep_path: &DepPath| {
                     // TODO
                     // Also debatable: dns-server is used by both the
@@ -112,7 +112,7 @@ impl Apis {
                 let (workspace, server_pkg) =
                     helper.find_package_workspace(dunit_pkg)?;
                 let server_component_name =
-                    ServerComponent::from(dunit_pkg.to_string());
+                    ServerComponentName::from(dunit_pkg.to_string());
                 let self_dep_path = DepPath::for_pkg(server_pkg.id.clone());
                 if let Some(previous) = servers_found.insert(
                     server_component_name.clone(),
@@ -298,14 +298,16 @@ impl Apis {
         })
     }
 
-    pub fn deployment_units(&self) -> impl Iterator<Item = &DeploymentUnit> {
+    pub fn deployment_units(
+        &self,
+    ) -> impl Iterator<Item = &DeploymentUnitName> {
         self.unit_server_components.keys()
     }
 
     pub fn deployment_unit_servers(
         &self,
-        unit: &DeploymentUnit,
-    ) -> Result<impl Iterator<Item = &ServerComponent>> {
+        unit: &DeploymentUnitName,
+    ) -> Result<impl Iterator<Item = &ServerComponentName>> {
         Ok(self
             .unit_server_components
             .get(unit)
@@ -319,7 +321,7 @@ impl Apis {
 
     pub fn component_apis_consumed(
         &self,
-        server_component: &ServerComponent,
+        server_component: &ServerComponentName,
     ) -> Box<dyn Iterator<Item = (&ClientPackageName, &DepPath)> + '_> {
         match self.apis_consumed.get(server_component) {
             Some(l) => Box::new(l.iter()),
@@ -330,7 +332,7 @@ impl Apis {
     pub fn api_producer(
         &self,
         client: &ClientPackageName,
-    ) -> Result<&ServerComponent> {
+    ) -> Result<&ServerComponentName> {
         self.api_producers
             .get(client)
             .ok_or_else(|| anyhow!("unknown client API: {:?}", client))
@@ -340,7 +342,7 @@ impl Apis {
     pub fn api_consumers(
         &self,
         client: &ClientPackageName,
-    ) -> Box<dyn Iterator<Item = (&ServerComponent, &DepPath)> + '_> {
+    ) -> Box<dyn Iterator<Item = (&ServerComponentName, &DepPath)> + '_> {
         match self.api_consumers.get(client) {
             Some(l) => Box::new(l.iter()),
             None => Box::new(std::iter::empty()),

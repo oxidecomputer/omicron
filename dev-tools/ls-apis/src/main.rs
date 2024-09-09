@@ -26,7 +26,7 @@
 use anyhow::{Context, Result};
 use camino::Utf8PathBuf;
 use clap::{Args, Parser, Subcommand};
-use omicron_ls_apis::{AllApiMetadata, Apis, LoadArgs, ServerComponent};
+use omicron_ls_apis::{AllApiMetadata, Apis, LoadArgs, ServerComponentName};
 
 #[derive(Parser)]
 #[command(
@@ -161,7 +161,7 @@ fn run_deployment_units(apis: &Apis, args: DotArgs) -> Result<()> {
 fn print_server_components<'a>(
     apis: &Apis,
     metadata: &AllApiMetadata,
-    server_components: impl IntoIterator<Item = &'a ServerComponent>,
+    server_components: impl IntoIterator<Item = &'a ServerComponentName>,
     prefix: &str,
     show_deps: bool,
 ) -> Result<()> {
