@@ -70,7 +70,6 @@ else
     exit "$SMF_EXIT_ERR_CONFIG"
 fi
 
-# TODO: Perhaps the file can go in keeper.d? test it out
 curl -X put http://[${LISTEN_ADDR}]:8888/keeper/config \
 -H "Content-Type: application/json" \
 -d '{

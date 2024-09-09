@@ -69,22 +69,21 @@ const OXIMETER_COUNT: usize = 1;
 // omicron_common::policy::CLICKHOUSE_SERVER_REDUNDANCY once we enable
 // replicated ClickHouse.
 // Set to 0 when testing replicated ClickHouse.
-// TODO: Set these constants back to original values
-const CLICKHOUSE_COUNT: usize = 0;
+const CLICKHOUSE_COUNT: usize = 1;
 // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
 // when Nexus provisions Clickhouse keeper.
 // TODO(https://github.com/oxidecomputer/omicron/issues/4000): Use
 // omicron_common::policy::CLICKHOUSE_KEEPER_REDUNDANCY once we enable
 // replicated ClickHouse
 // Set to 3 when testing replicated ClickHouse.
-const CLICKHOUSE_KEEPER_COUNT: usize = 3;
+const CLICKHOUSE_KEEPER_COUNT: usize = 0;
 // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
 // when Nexus provisions Clickhouse server.
 // TODO(https://github.com/oxidecomputer/omicron/issues/4000): Use
 // omicron_common::policy::CLICKHOUSE_SERVER_REDUNDANCY once we enable
 // replicated ClickHouse.
 // Set to 2 when testing replicated ClickHouse
-const CLICKHOUSE_SERVER_COUNT: usize = 2;
+const CLICKHOUSE_SERVER_COUNT: usize = 0;
 // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove.
 // when Nexus provisions Crucible.
 const MINIMUM_U2_COUNT: usize = 3;
@@ -701,7 +700,6 @@ impl Plan {
 
         // Provision Clickhouse zones, continuing to stripe across sleds.
         // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
-        #[allow(clippy::reversed_empty_ranges)]
         for _ in 0..CLICKHOUSE_COUNT {
             let sled = {
                 let which_sled =
