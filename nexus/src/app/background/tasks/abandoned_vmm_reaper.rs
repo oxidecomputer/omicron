@@ -37,30 +37,17 @@ use futures::future::BoxFuture;
 use futures::FutureExt;
 use nexus_db_model::Vmm;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
+use nexus_types::internal_api::background::AbandonedVmmReaperStatus;
 use omicron_uuid_kinds::{GenericUuid, PropolisUuid};
-use std::num::NonZeroU32;
 use std::sync::Arc;
 
 /// Background task that searches for abandoned VMM records and deletes them.
 pub struct AbandonedVmmReaper {
     datastore: Arc<DataStore>,
 }
-
-#[derive(Debug, Default)]
-struct ActivationResults {
-    found: usize,
-    sled_reservations_deleted: usize,
-    vmms_deleted: usize,
-    vmms_already_deleted: usize,
-    error_count: usize,
-}
-
-const MAX_BATCH: NonZeroU32 = unsafe {
-    // Safety: last time I checked, 100 was greater than zero.
-    NonZeroU32::new_unchecked(100)
-};
 
 impl AbandonedVmmReaper {
     pub fn new(datastore: Arc<DataStore>) -> Self {
@@ -70,13 +57,10 @@ impl AbandonedVmmReaper {
     /// List abandoned VMMs and clean up all of their database records.
     async fn reap_all(
         &mut self,
-        results: &mut ActivationResults,
+        status: &mut AbandonedVmmReaperStatus,
         opctx: &OpContext,
     ) -> Result<(), anyhow::Error> {
-        slog::info!(opctx.log, "Abandoned VMM reaper running");
-
-        let mut paginator = Paginator::new(MAX_BATCH);
-        let mut last_err = Ok(());
+        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
         while let Some(p) = paginator.next() {
             let vmms = self
                 .datastore
@@ -84,10 +68,10 @@ impl AbandonedVmmReaper {
                 .await
                 .context("failed to list abandoned VMMs")?;
             paginator = p.found_batch(&vmms, &|vmm| vmm.id);
-            self.reap_batch(results, &mut last_err, opctx, &vmms).await;
+            self.reap_batch(status, opctx, &vmms).await;
         }
 
-        last_err
+        Ok(())
     }
 
     /// Clean up a batch of abandoned VMMs.
@@ -100,13 +84,17 @@ impl AbandonedVmmReaper {
     /// than doing it all in one go. Thus, this is factored out.
     async fn reap_batch(
         &mut self,
-        results: &mut ActivationResults,
-        last_err: &mut Result<(), anyhow::Error>,
+        status: &mut AbandonedVmmReaperStatus,
         opctx: &OpContext,
         vmms: &[Vmm],
     ) {
-        results.found += vmms.len();
-        slog::debug!(opctx.log, "Found abandoned VMMs"; "count" => vmms.len());
+        status.vmms_found += vmms.len();
+        slog::debug!(
+            opctx.log,
+            "Found abandoned VMMs";
+            "count" => vmms.len(),
+            "total" => status.vmms_found,
+        );
 
         for vmm in vmms {
             let vmm_id = PropolisUuid::from_untyped_uuid(vmm.id);
@@ -123,22 +111,18 @@ impl AbandonedVmmReaper {
                         "Deleted abandoned VMM's sled reservation";
                         "vmm" => %vmm_id,
                     );
-                    results.sled_reservations_deleted += 1;
+                    status.sled_reservations_deleted += 1;
                 }
                 Err(e) => {
+                    const ERR_MSG: &'static str =
+                        "Failed to delete sled reservation";
                     slog::warn!(
                         opctx.log,
-                        "Failed to delete sled reservation for abandoned VMM";
+                        "{ERR_MSG} for abandoned VMM";
                         "vmm" => %vmm_id,
                         "error" => %e,
                     );
-                    results.error_count += 1;
-                    *last_err = Err(e).with_context(|| {
-                        format!(
-                            "failed to delete sled reservation for VMM \
-                             {vmm_id}"
-                        )
-                    });
+                    status.errors.push(format!("{ERR_MSG} for {vmm_id}: {e}"));
                 }
             }
 
@@ -150,7 +134,7 @@ impl AbandonedVmmReaper {
                         "Deleted abandoned VMM";
                         "vmm" => %vmm_id,
                     );
-                    results.vmms_deleted += 1;
+                    status.vmms_deleted += 1;
                 }
                 Ok(false) => {
                     slog::trace!(
@@ -158,19 +142,17 @@ impl AbandonedVmmReaper {
                         "Abandoned VMM was already deleted";
                         "vmm" => %vmm_id,
                     );
-                    results.vmms_already_deleted += 1;
+                    status.vmms_already_deleted += 1;
                 }
                 Err(e) => {
+                    const ERR_MSG: &'static str = "Failed to delete";
                     slog::warn!(
                         opctx.log,
-                        "Failed to mark abandoned VMM as deleted";
+                        "{ERR_MSG} abandoned VMM";
                         "vmm" => %vmm_id,
                         "error" => %e,
                     );
-                    results.error_count += 1;
-                    *last_err = Err(e).with_context(|| {
-                        format!("failed to mark VMM {vmm_id} as deleted")
-                    });
+                    status.errors.push(format!("{ERR_MSG} {vmm_id}: {e}"))
                 }
             }
         }
@@ -183,36 +165,28 @@ impl BackgroundTask for AbandonedVmmReaper {
         opctx: &'a OpContext,
     ) -> BoxFuture<'a, serde_json::Value> {
         async move {
-            let mut results = ActivationResults::default();
-            let error = match self.reap_all(&mut results, opctx).await {
+            let mut status = AbandonedVmmReaperStatus::default();
+            match self.reap_all(&mut status, opctx).await {
                 Ok(_) => {
                     slog::info!(opctx.log, "Abandoned VMMs reaped";
-                        "found" => results.found,
-                        "sled_reservations_deleted" => results.sled_reservations_deleted,
-                        "vmms_deleted" => results.vmms_deleted,
-                        "vmms_already_deleted" => results.vmms_already_deleted,
+                        "vmms_found" => status.vmms_found,
+                        "sled_reservations_deleted" => status.sled_reservations_deleted,
+                        "vmms_deleted" => status.vmms_deleted,
+                        "vmms_already_deleted" => status.vmms_already_deleted,
                     );
-                    None
                 }
                 Err(err) => {
                     slog::error!(opctx.log, "Abandoned VMM reaper activation failed";
                         "error" => %err,
-                        "found" => results.found,
-                        "sled_reservations_deleted" => results.sled_reservations_deleted,
-                        "vmms_deleted" => results.vmms_deleted,
-                        "vmms_already_deleted" => results.vmms_already_deleted,
+                        "vmms_found" => status.vmms_found,
+                        "sled_reservations_deleted" => status.sled_reservations_deleted,
+                        "vmms_deleted" => status.vmms_deleted,
+                        "vmms_already_deleted" => status.vmms_already_deleted,
                     );
-                    Some(err.to_string())
+                    status.errors.push(err.to_string());
                 }
             };
-            serde_json::json!({
-                "found": results.found,
-                "vmms_deleted": results.vmms_deleted,
-                "vmms_already_deleted": results.vmms_already_deleted,
-                "sled_reservations_deleted": results.sled_reservations_deleted,
-                "error_count": results.error_count,
-                "error": error,
-            })
+            serde_json::json!(status)
         }
         .boxed()
     }
@@ -361,15 +335,16 @@ mod tests {
 
         let mut task = AbandonedVmmReaper::new(datastore.clone());
 
-        let mut results = ActivationResults::default();
-        dbg!(task.reap_all(&mut results, &opctx,).await)
+        let mut status = AbandonedVmmReaperStatus::default();
+        dbg!(task.reap_all(&mut status, &opctx,).await)
             .expect("activation completes successfully");
-        dbg!(&results);
+        dbg!(&status);
 
-        assert_eq!(results.vmms_deleted, 1);
-        assert_eq!(results.sled_reservations_deleted, 1);
-        assert_eq!(results.vmms_already_deleted, 0);
-        assert_eq!(results.error_count, 0);
+        assert_eq!(status.vmms_found, 1);
+        assert_eq!(status.vmms_deleted, 1);
+        assert_eq!(status.sled_reservations_deleted, 1);
+        assert_eq!(status.vmms_already_deleted, 0);
+        assert_eq!(status.errors, Vec::<String>::new());
         fixture.assert_reaped(datastore).await;
     }
 
@@ -390,7 +365,7 @@ mod tests {
         // order to simulate a condition where the VMM record was deleted
         // between when the listing query was run and when the bg task attempted
         // to delete the VMM record.
-        let paginator = Paginator::new(MAX_BATCH);
+        let paginator = Paginator::new(SQL_BATCH_SIZE);
         let p = paginator.next().unwrap();
         let abandoned_vmms = datastore
             .vmm_list_abandoned(&opctx, &p.current_pagparams())
@@ -404,19 +379,16 @@ mod tests {
             .await
             .expect("simulate another nexus marking the VMM deleted");
 
-        let mut results = ActivationResults::default();
-        let mut last_err = Ok(());
+        let mut status = AbandonedVmmReaperStatus::default();
         let mut task = AbandonedVmmReaper::new(datastore.clone());
-        task.reap_batch(&mut results, &mut last_err, &opctx, &abandoned_vmms)
-            .await;
-        dbg!(last_err).expect("should not have errored");
-        dbg!(&results);
+        task.reap_batch(&mut status, &opctx, &abandoned_vmms).await;
+        dbg!(&status);
 
-        assert_eq!(results.found, 1);
-        assert_eq!(results.vmms_deleted, 0);
-        assert_eq!(results.sled_reservations_deleted, 1);
-        assert_eq!(results.vmms_already_deleted, 1);
-        assert_eq!(results.error_count, 0);
+        assert_eq!(status.vmms_found, 1);
+        assert_eq!(status.vmms_deleted, 0);
+        assert_eq!(status.sled_reservations_deleted, 1);
+        assert_eq!(status.vmms_already_deleted, 1);
+        assert_eq!(status.errors, Vec::<String>::new());
 
         fixture.assert_reaped(datastore).await
     }
@@ -440,7 +412,7 @@ mod tests {
         // order to simulate a condition where the sled reservation record was
         // deleted between when the listing query was run and when the bg task
         // attempted to delete the sled reservation..
-        let paginator = Paginator::new(MAX_BATCH);
+        let paginator = Paginator::new(SQL_BATCH_SIZE);
         let p = paginator.next().unwrap();
         let abandoned_vmms = datastore
             .vmm_list_abandoned(&opctx, &p.current_pagparams())
@@ -459,19 +431,16 @@ mod tests {
                 "simulate another nexus marking the sled reservation deleted",
             );
 
-        let mut results = ActivationResults::default();
-        let mut last_err = Ok(());
+        let mut status = AbandonedVmmReaperStatus::default();
         let mut task = AbandonedVmmReaper::new(datastore.clone());
-        task.reap_batch(&mut results, &mut last_err, &opctx, &abandoned_vmms)
-            .await;
-        dbg!(last_err).expect("should not have errored");
-        dbg!(&results);
+        task.reap_batch(&mut status, &opctx, &abandoned_vmms).await;
+        dbg!(&status);
 
-        assert_eq!(results.found, 1);
-        assert_eq!(results.vmms_deleted, 1);
-        assert_eq!(results.sled_reservations_deleted, 1);
-        assert_eq!(results.vmms_already_deleted, 0);
-        assert_eq!(results.error_count, 0);
+        assert_eq!(status.vmms_found, 1);
+        assert_eq!(status.vmms_deleted, 1);
+        assert_eq!(status.sled_reservations_deleted, 1);
+        assert_eq!(status.vmms_already_deleted, 0);
+        assert_eq!(status.errors, Vec::<String>::new());
 
         fixture.assert_reaped(datastore).await
     }
