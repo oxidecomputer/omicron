@@ -403,7 +403,7 @@ mod test {
         .await;
 
         // Activate the task again, and check that our instance had an
-        // instance-start saga  started.
+        // instance-start saga started.
         let result = task.activate(&opctx).await;
         let status =
             serde_json::from_value::<InstanceReincarnationStatus>(result)
@@ -417,6 +417,7 @@ mod test {
             vec![instance_id.into_untyped_uuid()]
         );
         assert_eq!(status.already_reincarnated, Vec::new());
+        assert_eq!(status.instances_cooling_down, Vec::new());
         assert_eq!(status.query_error, None);
         assert_eq!(status.restart_errors, Vec::new());
     }
@@ -518,5 +519,78 @@ mod test {
                 status.instances_reincarnated
             )
         }
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_cooldown_on_subsequent_reincarnations(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        // Don't make the test run for a long time just waiting for the cooldown
+        // to elapse.
+        const COOLDOWN: Duration = Duration::from_secs(10);
+
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+
+        let authz_project = setup_test_project(&cptestctx, &opctx).await;
+
+        let starter = Arc::new(NoopStartSaga::new());
+        let mut task = InstanceReincarnation::new(
+            datastore.clone(),
+            starter.clone(),
+            Duration::from_secs(60),
+        );
+
+        let instance1_id = create_instance(
+            &cptestctx,
+            &opctx,
+            &authz_project,
+            InstanceAutoRestart::AllFailures,
+            InstanceState::Failed,
+        )
+        .await;
+        let instance2_id = create_instance(
+            &cptestctx,
+            &opctx,
+            &authz_project,
+            InstanceAutoRestart::AllFailures,
+            InstanceState::Running,
+        )
+        .await;
+
+        // On the first activation, instance 1 should be restarted.
+        let result = task.activate(&opctx).await;
+        let status =
+            serde_json::from_value::<InstanceReincarnationStatus>(result)
+                .expect("JSON must be correctly shaped");
+        eprintln!("activation: {status:#?}");
+
+        assert_eq!(starter.count_reset(), 1);
+        assert_eq!(status.instances_found, 1);
+        assert_eq!(
+            status.instances_reincarnated,
+            vec![instance1_id.into_untyped_uuid()]
+        );
+        assert_eq!(status.already_reincarnated, Vec::new());
+        assert_eq!(status.instances_cooling_down, Vec::new());
+        assert_eq!(status.query_error, None);
+        assert_eq!(status.restart_errors, Vec::new());
+
+        // Now, let's do some state changes:
+        // Pretend instance 1 restarted, and then failed again.
+        let (_, _, authz_instance1) = LookupPath::new(&opctx, datastore)
+            .instance_id(instance1_id.into_untyped_uuid())
+            .lookup_for(authz::Action::Modify)
+            .await
+            .expect("instance 1 must exist");
+        let instance1 = datastore
+            .instance_refetch(&opctx, &authz_instance1)
+            .await
+            .expect("instance 1 must exist");
+        // datastore.instance_update_runtime()
     }
 }
