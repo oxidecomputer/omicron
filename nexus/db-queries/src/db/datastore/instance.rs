@@ -847,7 +847,7 @@ impl DataStore {
             (sled_dsl::id, vmm_dsl::id),
             pagparams,
         );
-        // Filter out sleds that aren't in service, and VMMs that aren't
+        // Filter out sleds that aren't in service and VMMs that aren't
         // incarnated on a sled.
         let query = query
             .filter(sled_dsl::time_deleted.is_null())
