@@ -234,18 +234,20 @@ impl Blueprint {
     pub fn diff_since_blueprint(&self, before: &Blueprint) -> BlueprintDiff {
         BlueprintDiff::new(
             DiffBeforeMetadata::Blueprint(Box::new(before.metadata())),
+            before.sled_state.clone(),
             before
                 .blueprint_zones
                 .iter()
                 .map(|(sled_id, zones)| (*sled_id, zones.clone().into()))
                 .collect(),
-            self.metadata(),
-            self.blueprint_zones.clone(),
             before
                 .blueprint_disks
                 .iter()
                 .map(|(sled_id, disks)| (*sled_id, disks.clone().into()))
                 .collect(),
+            self.metadata(),
+            self.sled_state.clone(),
+            self.blueprint_zones.clone(),
             self.blueprint_disks.clone(),
         )
     }
@@ -260,6 +262,14 @@ impl Blueprint {
     /// disposition, so it is assumed that all zones in the collection have the
     /// [`InService`](BlueprintZoneDisposition::InService) disposition.
     pub fn diff_since_collection(&self, before: &Collection) -> BlueprintDiff {
+        // We'll assume any sleds present in a collection were active; if they
+        // were decommissioned they wouldn't be present.
+        let before_state = before
+            .sled_agents
+            .keys()
+            .map(|sled_id| (*sled_id, SledState::Active))
+            .collect();
+
         let before_zones = before
             .omicron_zones
             .iter()
@@ -288,10 +298,12 @@ impl Blueprint {
 
         BlueprintDiff::new(
             DiffBeforeMetadata::Collection { id: before.id },
+            before_state,
             before_zones,
-            self.metadata(),
-            self.blueprint_zones.clone(),
             before_disks,
+            self.metadata(),
+            self.sled_state.clone(),
+            self.blueprint_zones.clone(),
             self.blueprint_disks.clone(),
         )
     }
