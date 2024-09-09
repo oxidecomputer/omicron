@@ -394,6 +394,19 @@ impl BackgroundTask for InstanceWatcher {
     ) -> BoxFuture<'a, serde_json::Value> {
         async {
             let mut tasks = tokio::task::JoinSet::new();
+            // We're using the size of the database query page as a simple
+            // mechanism for limiting the number of concurrent health checks: if
+            // we only query for `MAX_CONCURRENT_CHECKS` records at a time, and
+            // we wait until all spawned health checks have completed before
+            // reading the next batch, it follows that there are only ever
+            // `MAX_CONCURRENT_CHECKS` checks in flight at a time.
+            //
+            // This does mean that, unlike using a counting semaphore or
+            // similar, we may have fewer than the limit health checks running
+            // in parallel as we will not query for a new batch until *all*
+            // checks for the current batch have completed.  If that becomes an
+            // issue, we could implement a more sophisticated
+            // concurrency-limiting scheme later.
             let mut paginator = Paginator::new(MAX_CONCURRENT_CHECKS);
 
             let mut total: usize = 0;
