@@ -26,7 +26,9 @@
 use anyhow::{Context, Result};
 use camino::Utf8PathBuf;
 use clap::{Args, Parser, Subcommand};
-use omicron_ls_apis::{AllApiMetadata, Apis, LoadArgs, ServerComponentName};
+use omicron_ls_apis::{
+    AllApiMetadata, LoadArgs, ServerComponentName, SystemApis,
+};
 
 #[derive(Parser)]
 #[command(
@@ -79,7 +81,7 @@ pub struct DotArgs {
 fn main() -> Result<()> {
     let cli_args = LsApis::parse();
     let load_args = LoadArgs::try_from(&cli_args)?;
-    let apis = Apis::load(load_args)?;
+    let apis = SystemApis::load(load_args)?;
 
     match cli_args.cmd {
         Cmds::Adoc => run_adoc(&apis),
@@ -89,7 +91,7 @@ fn main() -> Result<()> {
     }
 }
 
-fn run_adoc(apis: &Apis) -> Result<()> {
+fn run_adoc(apis: &SystemApis) -> Result<()> {
     println!(r#"[cols="1h,2,2,2a,2", options="header"]"#);
     println!("|===");
     println!("|API");
@@ -118,7 +120,7 @@ fn run_adoc(apis: &Apis) -> Result<()> {
     Ok(())
 }
 
-fn run_apis(apis: &Apis, args: ShowDepsArgs) -> Result<()> {
+fn run_apis(apis: &SystemApis, args: ShowDepsArgs) -> Result<()> {
     let metadata = apis.api_metadata();
     for api in metadata.apis() {
         println!("{} (client: {})", api.label, api.client_package_name);
@@ -136,7 +138,7 @@ fn run_apis(apis: &Apis, args: ShowDepsArgs) -> Result<()> {
     Ok(())
 }
 
-fn run_deployment_units(apis: &Apis, args: DotArgs) -> Result<()> {
+fn run_deployment_units(apis: &SystemApis, args: DotArgs) -> Result<()> {
     if args.dot {
         println!("{}", apis.dot_by_unit());
     } else {
@@ -159,7 +161,7 @@ fn run_deployment_units(apis: &Apis, args: DotArgs) -> Result<()> {
 }
 
 fn print_server_components<'a>(
-    apis: &Apis,
+    apis: &SystemApis,
     metadata: &AllApiMetadata,
     server_components: impl IntoIterator<Item = &'a ServerComponentName>,
     prefix: &str,
@@ -191,7 +193,7 @@ fn print_server_components<'a>(
     Ok(())
 }
 
-fn run_servers(apis: &Apis, args: DotArgs) -> Result<()> {
+fn run_servers(apis: &SystemApis, args: DotArgs) -> Result<()> {
     if args.dot {
         println!("{}", apis.dot_by_server_component())
     } else {

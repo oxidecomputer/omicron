@@ -22,12 +22,17 @@ use serde::de::DeserializeOwned;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
+/// Parameters for loading information about system APIs
 pub struct LoadArgs {
+    /// path to developer-maintained API metadata
     pub api_manifest_path: Utf8PathBuf,
+    /// path to a directory containing clones of repos that may contain APIs
     pub extra_repos_path: Utf8PathBuf,
 }
 
-pub struct Apis {
+/// Query information about the Dropshot/OpenAPI/Progenitor-based APIs within
+/// the Oxide system
+pub struct SystemApis {
     server_component_units: BTreeMap<ServerComponentName, DeploymentUnitName>,
     unit_server_components:
         BTreeMap<DeploymentUnitName, BTreeMap<ServerComponentName, DepPath>>,
@@ -37,27 +42,34 @@ pub struct Apis {
     api_consumers:
         BTreeMap<ClientPackageName, BTreeMap<ServerComponentName, DepPath>>,
     api_producers: BTreeMap<ClientPackageName, (ServerComponentName, DepPath)>,
-    helper: ApisHelper,
+    api_metadata: AllApiMetadata,
+    workspaces: Workspaces,
 }
 
-impl Apis {
-    pub fn load(args: LoadArgs) -> Result<Apis> {
-        let helper = ApisHelper::load(args)?;
-        if !helper.warnings.is_empty() {
-            for e in &helper.warnings {
+impl SystemApis {
+    /// Load information about APIs in the system based on both
+    /// developer-maintained metadata and Cargo-provided metadata
+    pub fn load(args: LoadArgs) -> Result<SystemApis> {
+        // Load the API manifest.
+        let api_metadata: AllApiMetadata =
+            parse_toml_file(&args.api_manifest_path)?;
+        // Load Cargo metadata and validate it against the manifest.
+        let (workspaces, warnings) =
+            Workspaces::load(&args.extra_repos_path, &api_metadata)?;
+        if !warnings.is_empty() {
+            for e in warnings {
                 eprintln!("warning: {:#}", e);
             }
         }
 
-        // First, create an index of server package names, mapping each one to
-        // the API it corresponds to.
-        let server_packages: BTreeMap<_, _> = helper
-            .api_metadata
+        // Create an index of server package names, mapping each one to the API
+        // that it corresponds to.
+        let server_packages: BTreeMap<_, _> = api_metadata
             .apis()
             .map(|api| (api.server_package_name.clone(), api))
             .collect();
 
-        // Compute the mapping from deployment unit to the set of API server
+        // Compute the mapping from deployment units to the set of API server
         // packages that are inside each unit.  We do this by walking the
         // dependencies of each of the deployment units' packages.
         let mut deployment_units = BTreeSet::new();
@@ -66,9 +78,7 @@ impl Apis {
         let mut api_producers = BTreeMap::new();
         let mut errors = Vec::new();
 
-        for (deployment_unit, dunit_info) in
-            helper.api_metadata.deployment_units()
-        {
+        for (deployment_unit, dunit_info) in api_metadata.deployment_units() {
             deployment_units.insert(deployment_unit.clone());
             let mut servers_found = BTreeMap::new();
 
@@ -110,7 +120,7 @@ impl Apis {
 
             for dunit_pkg in &dunit_info.packages {
                 let (workspace, server_pkg) =
-                    helper.find_package_workspace(dunit_pkg)?;
+                    workspaces.find_package_workspace(dunit_pkg)?;
                 let server_component_name =
                     ServerComponentName::from(dunit_pkg.to_string());
                 let self_dep_path = DepPath::for_pkg(server_pkg.id.clone());
@@ -183,7 +193,7 @@ impl Apis {
         let mut api_consumers = BTreeMap::new();
         for server_pkgname in server_component_units.keys() {
             let (workspace, pkg) =
-                helper.find_package_workspace(server_pkgname)?;
+                workspaces.find_package_workspace(server_pkgname)?;
             let mut clients_used: BTreeMap<ClientPackageName, DepPath> =
                 BTreeMap::new();
             workspace
@@ -255,8 +265,7 @@ impl Apis {
                             return;
                         }
 
-                        if helper
-                            .api_metadata
+                        if api_metadata
                             .client_pkgname_lookup(&ClientPackageName::from(
                                 p.name.to_owned(),
                             ))
@@ -287,23 +296,26 @@ impl Apis {
             apis_consumed.insert(server_pkgname.clone(), clients_used);
         }
 
-        Ok(Apis {
+        Ok(SystemApis {
             server_component_units,
             deployment_units,
             unit_server_components,
             apis_consumed,
             api_consumers,
             api_producers,
-            helper,
+            api_metadata,
+            workspaces,
         })
     }
 
+    /// Iterate over the deployment units
     pub fn deployment_units(
         &self,
     ) -> impl Iterator<Item = &DeploymentUnitName> {
         self.unit_server_components.keys()
     }
 
+    /// For one deployment unit, iterate over the servers contained in it
     pub fn deployment_unit_servers(
         &self,
         unit: &DeploymentUnitName,
@@ -315,10 +327,12 @@ impl Apis {
             .keys())
     }
 
+    /// Returns the developer-maintained API metadata
     pub fn api_metadata(&self) -> &AllApiMetadata {
-        &self.helper.api_metadata
+        &self.api_metadata
     }
 
+    /// Given a server component, return the APIs consumed by this component
     pub fn component_apis_consumed(
         &self,
         server_component: &ServerComponentName,
@@ -329,6 +343,8 @@ impl Apis {
         }
     }
 
+    /// Given the client package name for an API, return the name of the server
+    /// component that provides it
     pub fn api_producer(
         &self,
         client: &ClientPackageName,
@@ -339,6 +355,9 @@ impl Apis {
             .map(|s| &s.0)
     }
 
+    /// Given the client package name for an API, return the list of server
+    /// components that consume it, along with the Cargo dependency path that
+    /// connects each server to the client package
     pub fn api_consumers(
         &self,
         client: &ClientPackageName,
@@ -349,18 +368,30 @@ impl Apis {
         }
     }
 
+    /// Given the name of any package defined in one of our workspaces, return
+    /// information used to construct a label
+    ///
+    /// Returns `(name, rel_path)`, where `name` is the name of the workspace
+    /// containing the package and `rel_path` is the relative path of the
+    /// package within that workspace.
     pub fn package_label(&self, pkgname: &str) -> Result<(&str, Utf8PathBuf)> {
-        let (workspace, _) = self.helper.find_package_workspace(pkgname)?;
+        let (workspace, _) = self.workspaces.find_package_workspace(pkgname)?;
         let pkgpath = workspace.find_workspace_package_path(pkgname)?;
         Ok((workspace.name(), pkgpath))
     }
 
+    /// Given the name of any package defined in one of our workspaces, return
+    /// an Asciidoc snippet that's usable to render the name of the package.
+    /// This just uses `package_label()` but may in the future create links,
+    /// too.
     pub fn adoc_label(&self, pkgname: &str) -> Result<String> {
-        let (workspace, _) = self.helper.find_package_workspace(pkgname)?;
+        let (workspace, _) = self.workspaces.find_package_workspace(pkgname)?;
         let pkgpath = workspace.find_workspace_package_path(pkgname)?;
         Ok(format!("{}:{}", workspace.name(), pkgpath))
     }
 
+    /// Returns a string that can be passed to `dot(1)` to render a graph of
+    /// API dependencies among deployment units
     pub fn dot_by_unit(&self) -> String {
         let mut graph = petgraph::graph::Graph::new();
         let nodes: BTreeMap<_, _> = self
@@ -394,6 +425,8 @@ impl Apis {
         Dot::new(&graph).to_string()
     }
 
+    /// Returns a string that can be passed to `dot(1)` to render a graph of
+    /// API dependencies among server components
     pub fn dot_by_server_component(&self) -> String {
         let mut graph = petgraph::graph::Graph::new();
         let nodes: BTreeMap<_, _> = self
@@ -420,19 +453,25 @@ impl Apis {
     }
 }
 
-pub struct ApisHelper {
-    api_metadata: AllApiMetadata,
+/// Thin wrapper around a list of workspaces that makes it easy to query which
+/// workspace has which package
+struct Workspaces {
     workspaces: BTreeMap<String, Workspace>,
-    warnings: Vec<anyhow::Error>,
 }
 
-impl ApisHelper {
-    pub fn load(args: LoadArgs) -> Result<ApisHelper> {
-        // Load the API manifest.
-        let api_metadata: AllApiMetadata =
-            parse_toml_file(&args.api_manifest_path)?;
-
-        // Load information about each of the workspaces.
+impl Workspaces {
+    /// Given repository checkouts at `extra_repos_path`, use `cargo metadata`
+    /// to load workspace metadata for all the workspaces that we care about
+    ///
+    /// The data found is validated against `api_metadata`.
+    ///
+    /// On success, returns `(workspaces, warnings)`, where `warnings` is a list
+    /// of potential inconsistencies between API metadata and Cargo metadata.
+    pub fn load(
+        extra_repos_path: &Utf8Path,
+        api_metadata: &AllApiMetadata,
+    ) -> Result<(Workspaces, Vec<anyhow::Error>)> {
+        // Load information about each of the known workspaces.
         //
         // Each of these involves running `cargo metadata`, which is pretty I/O
         // intensive.  Overall latency benefits significantly from
@@ -447,7 +486,7 @@ impl ApisHelper {
                     let extra_arg = if repo_name == "omicron" {
                         None
                     } else {
-                        Some(args.extra_repos_path.clone())
+                        Some(extra_repos_path.to_owned())
                     };
                     std::thread::spawn(move || {
                         let arg = extra_arg.as_ref().map(|s| s.as_path());
@@ -470,7 +509,7 @@ impl ApisHelper {
         // Validate the metadata against what we found in the workspaces.
         let mut client_pkgnames_unused: BTreeSet<_> =
             api_metadata.client_pkgnames().collect();
-        let mut errors = Vec::new();
+        let mut warnings = Vec::new();
         for (_, workspace) in &workspaces {
             for client_pkgname in workspace.client_packages() {
                 if api_metadata.client_pkgname_lookup(client_pkgname).is_some()
@@ -479,7 +518,7 @@ impl ApisHelper {
                     // to the same client package name.  That's okay.
                     client_pkgnames_unused.remove(client_pkgname);
                 } else {
-                    errors.push(anyhow!(
+                    warnings.push(anyhow!(
                         "found client package missing from API manifest: {}",
                         client_pkgname
                     ));
@@ -488,15 +527,23 @@ impl ApisHelper {
         }
 
         for c in client_pkgnames_unused {
-            errors.push(anyhow!(
+            warnings.push(anyhow!(
                 "API manifest refers to unknown client package: {}",
                 c
             ));
         }
 
-        Ok(ApisHelper { api_metadata, workspaces, warnings: errors })
+        Ok((Workspaces { workspaces }, warnings))
     }
 
+    /// Given the name of a workspace package from one of our workspaces, return
+    /// the corresponding `Workspace` and `Package`
+    ///
+    /// This is only for finding packages defined *in* one of these workspaces.
+    /// For any other kind of package (e.g., transitive dependencies, which
+    /// might come from crates.io or other Git repositories), the name is not
+    /// unique and you'd need to use some other mechanism to get information
+    /// about it.
     pub fn find_package_workspace(
         &self,
         server_pkgname: &str,
@@ -511,7 +558,7 @@ impl ApisHelper {
             .collect();
         // XXX-dap there are actually two separate packages called "dpd-client".
         // One is in the Omicron workspace.  The other is in the Dendrite
-        // workspace.  I don't know how we know which one gets used!
+        // workspace.  I don't know how we ever know which one gets used!
         if server_pkgname == "dpd-client" && found_in_workspaces.len() == 2 {
             if found_in_workspaces[0].0.name() == "omicron" {
                 return Ok(found_in_workspaces[0]);
