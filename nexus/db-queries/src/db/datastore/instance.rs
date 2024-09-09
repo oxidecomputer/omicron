@@ -2697,6 +2697,7 @@ mod tests {
                             propolis_id: Some(vmm_id),
                             dst_propolis_id: None,
                             migration_id: None,
+                            time_last_auto_restarted: None,
                         },
                     )
                     .await
