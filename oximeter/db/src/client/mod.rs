@@ -1035,15 +1035,16 @@ impl Client {
                     _ => backoff::BackoffError::permanent(err),
                 })
         };
-        let notify = |error, delay| {
+        let notify = |error, count, delay| {
             warn!(
                 self.log,
                 "failed to delete some timeseries";
                 "error" => ?error,
+                "call_count" => count,
                 "retry_after" => ?delay,
             );
         };
-        backoff::retry_notify(
+        backoff::retry_notify_ext(
             backoff::retry_policy_internal_service(),
             op,
             notify,
