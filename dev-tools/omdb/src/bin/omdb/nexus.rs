@@ -1790,9 +1790,10 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 error, details
             ),
             Ok(InstanceReincarnationStatus {
+                default_cooldown,
                 instances_found,
                 instances_reincarnated,
-                instances_in_chill_out_time,
+                instances_cooling_down,
                 already_reincarnated,
                 query_error,
                 restart_errors,
@@ -1804,27 +1805,31 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                     "  instances already reincarnated:";
                 const ERRORS: &'static str =
                     "  instances which failed to be reincarnated:";
-                const CHILLING_OUT: &'static str =
-                    "  instances still in chill-out time:";
+                const COOLING_DOWN: &'static str =
+                    "  instances still in cooldown:";
+                const COOLDOWN_PERIOD: &'static str =
+                    "default cooldown period:";
                 const WIDTH: usize = const_max_len(&[
                     FOUND,
                     REINCARNATED,
                     ALREADY_REINCARNATED,
                     ERRORS,
-                    CHILLING_OUT,
+                    COOLING_DOWN,
+                    COOLDOWN_PERIOD,
                 ]);
                 let n_restart_errors = restart_errors.len();
                 let n_restarted = instances_reincarnated.len();
                 let n_already_restarted = already_reincarnated.len();
-                let n_chilling_out = instances_in_chill_out_time.len();
+                let n_chilling_out = instances_cooling_down.len();
                 println!("    {FOUND:<WIDTH$} {instances_found:>3}");
                 println!("    {REINCARNATED:<WIDTH$} {n_restarted:>3}");
                 println!(
                     "    {ALREADY_REINCARNATED:<WIDTH$} {:>3}",
                     n_already_restarted
                 );
-                println!("    {CHILLING_OUT:<WIDTH$} {n_chilling_out:>3}",);
+                println!("    {COOLING_DOWN:<WIDTH$} {n_chilling_out:>3}");
                 println!("    {ERRORS:<WIDTH$} {n_restart_errors:>3}");
+                println!("    {COOLDOWN_PERIOD:<WIDTH$} {default_cooldown}");
 
                 if let Some(e) = query_error {
                     println!(
@@ -1866,7 +1871,7 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                         time to chill out before\n    they can be reincarnated:",
                     );
                 }
-                for (id, last_reincarnated) in instances_in_chill_out_time {
+                for (id, last_reincarnated) in instances_cooling_down {
                     println!(
                         "    > {id} (reincarnated at {last_reincarnated:?})",
                     );

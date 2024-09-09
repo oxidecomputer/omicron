@@ -18,26 +18,24 @@ use nexus_db_queries::db::DataStore;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::background::InstanceReincarnationStatus;
 use omicron_common::api::external::Error;
-use std::num::NonZeroU32;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::task::JoinSet;
 
 pub struct InstanceReincarnation {
     datastore: Arc<DataStore>,
     sagas: Arc<dyn StartSaga>,
+    /// The default cooldown period between automatic restarts.
+    ///
+    /// If an instance's last automatic restart occurred less than this duration
+    /// from now, it may not be automatically restarted until it's had some time
+    /// to calm down. This is intended to try and reduce the impact of tight
+    /// crash loops.
+    //
+    // TODO(eliza): this default should be overridden by a project-level default
+    // when https://github.com/oxidecomputer/omicron/issues/1015 is implemented.
+    default_cooldown: TimeDelta,
 }
-
-// Do not auto-restart instances that have been auto-restarted within the last
-// 1 minute, to try and reduce the impact of tight crash loops.
-//
-// TODO(eliza): eventually, perhaps this should be a project-level configuration?
-const CHILL_OUT_TIME: TimeDelta = match TimeDelta::new(60, 0) {
-    Some(d) => d,
-    // `Option::unwrap()` isn't const fn.
-    None => panic!(
-        "60 seconds definitely ought to be in range for a `TimeDelta`..."
-    ),
-};
 
 impl BackgroundTask for InstanceReincarnation {
     fn activate<'a>(
@@ -46,6 +44,10 @@ impl BackgroundTask for InstanceReincarnation {
     ) -> BoxFuture<'a, serde_json::Value> {
         Box::pin(async move {
             let mut status = InstanceReincarnationStatus::default();
+            status.default_cooldown = self.default_cooldown.to_std().expect(
+                "cooldown came from a `std::time::Duration` which was \
+                 non-negative, so it should remain non-negative",
+            );
             self.actually_activate(opctx, &mut status).await;
             if !status.restart_errors.is_empty() || status.query_error.is_some()
             {
@@ -84,8 +86,11 @@ impl InstanceReincarnation {
     pub(crate) fn new(
         datastore: Arc<DataStore>,
         sagas: Arc<dyn StartSaga>,
+        default_cooldown: Duration,
     ) -> Self {
-        Self { datastore, sagas }
+        let default_cooldown = TimeDelta::from_std(default_cooldown)
+            .expect("duration should be in range");
+        Self { datastore, sagas, default_cooldown }
     }
 
     async fn actually_activate(
@@ -143,15 +148,18 @@ impl InstanceReincarnation {
                 if let Some(last_reincarnation) =
                     db_instance.runtime().time_last_auto_restarted
                 {
+                    // TODO(eliza): allow overriding the cooldown at the project
+                    // level, once we implement
+                    // https://github.com/oxidecomputer/omicron/issues/1015
                     if Utc::now().signed_duration_since(last_reincarnation)
-                        < CHILL_OUT_TIME
+                        < self.default_cooldown
                     {
                         status
-                            .instances_in_chill_out_time
+                            .instances_cooling_down
                             .push((instance_id, last_reincarnation));
                         debug!(
                             opctx.log,
-                            "instance still needs to take some time to settle \
+                            "instance still needs to take some time to cool \
                              down before its next reincarnation";
                             "instance_id" => %instance_id,
                             "last_reincarnated_at" => %last_reincarnation,
@@ -369,8 +377,11 @@ mod test {
         let authz_project = setup_test_project(&cptestctx, &opctx).await;
 
         let starter = Arc::new(NoopStartSaga::new());
-        let mut task =
-            InstanceReincarnation::new(datastore.clone(), starter.clone());
+        let mut task = InstanceReincarnation::new(
+            datastore.clone(),
+            starter.clone(),
+            Duration::from_secs(60),
+        );
 
         // Noop test
         let result = task.activate(&opctx).await;
@@ -424,8 +435,11 @@ mod test {
         let authz_project = setup_test_project(&cptestctx, &opctx).await;
 
         let starter = Arc::new(NoopStartSaga::new());
-        let mut task =
-            InstanceReincarnation::new(datastore.clone(), starter.clone());
+        let mut task = InstanceReincarnation::new(
+            datastore.clone(),
+            starter.clone(),
+            Duration::from_secs(60),
+        );
 
         // Create instances in the `Failed` state that are eligible to be
         // restarted.

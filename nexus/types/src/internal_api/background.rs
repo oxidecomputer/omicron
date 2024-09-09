@@ -6,6 +6,7 @@ use chrono::DateTime;
 use chrono::Utc;
 use serde::Deserialize;
 use serde::Serialize;
+use std::time::Duration;
 use uuid::Uuid;
 
 /// The status of a `region_replacement` background task activation
@@ -120,13 +121,15 @@ impl InstanceUpdaterStatus {
 /// The status of an `instance_reincarnation` background task activation.
 #[derive(Default, Serialize, Deserialize, Debug)]
 pub struct InstanceReincarnationStatus {
+    /// Default cooldown period between reincarnations.
+    pub default_cooldown: Duration,
     /// Total number of instances in need of reincarnation on this activation.
     pub instances_found: usize,
     /// UUIDs of instances reincarnated successfully by this activation.
     pub instances_reincarnated: Vec<Uuid>,
     /// Instances which reincarnated too recently and still need to take some
     /// time out to settle down a bit.
-    pub instances_in_chill_out_time: Vec<(Uuid, DateTime<Utc>)>,
+    pub instances_cooling_down: Vec<(Uuid, DateTime<Utc>)>,
     /// UUIDs of instances which were reincarnated by a different Nexus'
     /// instance-reincarnation task, or by a user-triggered restart saga.
     pub already_reincarnated: Vec<Uuid>,

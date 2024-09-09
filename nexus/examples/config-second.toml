@@ -136,6 +136,8 @@ instance_watcher.period_secs = 30
 instance_updater.period_secs = 30
 # How frequently to attempt to restart Failed instances?
 instance_reincarnation.period_secs = 60
+# Default cooldown period between automatic restarts for Failed instances.
+instance_reincarnation.default_cooldown_secs = 60
 service_firewall_propagation.period_secs = 300
 v2p_mapping_propagation.period_secs = 30
 abandoned_vmm_reaper.period_secs = 60
