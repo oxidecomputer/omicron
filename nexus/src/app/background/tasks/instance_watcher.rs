@@ -46,14 +46,14 @@ pub(crate) struct InstanceWatcher {
 
 /// Determines how many instance checks and their subsequent update sagas (if
 /// the instance's state has changed) can execute concurrently.  If this
-/// numberis too high, there's risk that this task could starve other Nexus
+/// number is too high, there's risk that this task could starve other Nexus
 /// activities or overload the database or overload one or more sled agents.
 ///
 /// The only consequence of the number being too low is that it may take longer
 /// for the system to notice an instance's VMM state requires an instance state
 /// transition, which translates to increased latency between when events (like
 /// a VMM crash or a completed migration) occur, and when the necessary actions
-/// are (like releasing unused resource allocations or allowing an instance to
+/// (like releasing unused resource allocations or allowing an instance to
 /// be restarted or deleted) are performed.  However, in the happy path, instance
 /// update sagas execute immediately upon receipt of a VMM state update pushed
 /// by a sled-agent in `cpapi_instances_put`.  Therefore, discovering a needed
