@@ -2,27 +2,52 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use dropshot::{HttpError, HttpResponseOk, RequestContext};
+use clickhouse_admin_types::config::{KeeperConfig, ReplicaConfig};
+use clickhouse_admin_types::{KeeperSettings, ServerSettings};
+use dropshot::{HttpError, HttpResponseCreated, RequestContext, TypedBody};
+use omicron_common::api::external::Generation;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use std::net::SocketAddrV6;
+use serde::Deserialize;
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ServerConfigurableSettings {
+    /// A unique identifier for the configuration generation.
+    pub generation: Generation,
+    /// Configurable settings for a ClickHouse replica server node.
+    pub settings: ServerSettings,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct KeeperConfigurableSettings {
+    /// A unique identifier for the configuration generation.
+    pub generation: Generation,
+    /// Configurable settings for a ClickHouse keeper node.
+    pub settings: KeeperSettings,
+}
 
 #[dropshot::api_description]
 pub trait ClickhouseAdminApi {
     type Context;
 
-    /// Retrieve the address the ClickHouse server or keeper node is listening on
+    /// Generate a ClickHouse configuration file for a server node on a specified
+    /// directory.
     #[endpoint {
-        method = GET,
-        path = "/node/address",
+        method = PUT,
+        path = "/server/config",
     }]
-    async fn clickhouse_address(
+    async fn generate_server_config(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<ClickhouseAddress>, HttpError>;
-}
+        body: TypedBody<ServerConfigurableSettings>,
+    ) -> Result<HttpResponseCreated<ReplicaConfig>, HttpError>;
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub struct ClickhouseAddress {
-    pub clickhouse_address: SocketAddrV6,
+    /// Generate a ClickHouse configuration file for a keeper node on a specified
+    /// directory.
+    #[endpoint {
+        method = PUT,
+        path = "/keeper/config",
+    }]
+    async fn generate_keeper_config(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<KeeperConfigurableSettings>,
+    ) -> Result<HttpResponseCreated<KeeperConfig>, HttpError>;
 }

@@ -3,7 +3,12 @@
 #
 name: Rust
 
-on: [ push, pull_request ]
+on:
+  push:
+    branches:
+      - main
+      - 'rel/**'
+  pull_request: {}
 
 jobs:
   check-style:

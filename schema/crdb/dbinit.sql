@@ -1001,6 +1001,14 @@ CREATE TYPE IF NOT EXISTS omicron.public.instance_state_v2 AS ENUM (
 );
 
 CREATE TYPE IF NOT EXISTS omicron.public.vmm_state AS ENUM (
+    /*
+     * The VMM is known to Nexus, but may not yet exist on a sled.
+     *
+     * VMM records are always inserted into the database in this state, and
+     * then transition to 'starting' or 'migrating' once a sled-agent reports
+     * that the VMM has been registered.
+     */
+    'creating',
     'starting',
     'running',
     'stopping',
@@ -1011,6 +1019,27 @@ CREATE TYPE IF NOT EXISTS omicron.public.vmm_state AS ENUM (
     'destroyed',
     'saga_unwound'
 );
+
+CREATE TYPE IF NOT EXISTS omicron.public.instance_auto_restart AS ENUM (
+    /*
+     * The instance should not, under any circumstances, be automatically
+     * rebooted by the control plane.
+     */
+    'never',
+    /*
+     * The instance should be automatically restarted if, and only if, the sled
+     * it was running on has restarted or become unavailable. If the individual
+     * Propolis VMM process for this instance crashes, it should *not* be
+     * restarted automatically.
+     */
+     'sled_failures_only',
+    /*
+     * The instance should be automatically restarted any time a fault is
+     * detected
+     */
+    'all_failures'
+);
+
 
 /*
  * TODO consider how we want to manage multiple sagas operating on the same
@@ -1051,7 +1080,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
     ncpus INT NOT NULL,
     memory INT NOT NULL,
     hostname STRING(63) NOT NULL,
-    boot_on_fault BOOL NOT NULL DEFAULT false,
 
     /* ID of the instance update saga that has locked this instance for
      * updating, if one exists. */
@@ -1068,6 +1096,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
      * `separate-instance-and-vmm-states` schema change for details.
      */
     state omicron.public.instance_state_v2 NOT NULL,
+
+    /*
+     * What failures should result in an instance being automatically restarted
+     * by the control plane.
+     */
+    auto_restart_policy omicron.public.instance_auto_restart,
 
     CONSTRAINT vmm_iff_active_propolis CHECK (
         ((state = 'vmm') AND (active_propolis_id IS NOT NULL)) OR
@@ -3196,6 +3230,31 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_zpool (
 -- Allow looking up the most recent Zpool by ID
 CREATE INDEX IF NOT EXISTS inv_zpool_by_id_and_time ON omicron.public.inv_zpool (id, time_collected DESC);
 
+CREATE TABLE IF NOT EXISTS omicron.public.inv_dataset (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+    sled_id UUID NOT NULL,
+
+    -- The control plane ID of the zpool.
+    -- This is nullable because datasets have been historically
+    -- self-managed by the Sled Agent, and some don't have explicit UUIDs.
+    id UUID,
+
+    name TEXT NOT NULL,
+    available INT8 NOT NULL,
+    used INT8 NOT NULL,
+    quota INT8,
+    reservation INT8,
+    compression TEXT NOT NULL,
+
+    -- PK consisting of:
+    -- - Which collection this was
+    -- - The sled reporting the disk
+    -- - The name of this dataset
+    PRIMARY KEY (inv_collection_id, sled_id, name)
+);
+
 CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_omicron_zones (
     -- where this observation came from
     -- (foreign key into `inv_collection` table)
@@ -4225,7 +4284,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '93.0.0', NULL)
+    (TRUE, NOW(), NOW(), '96.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

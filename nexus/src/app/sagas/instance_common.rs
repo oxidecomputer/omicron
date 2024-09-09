@@ -7,7 +7,6 @@
 use std::net::{IpAddr, Ipv6Addr};
 
 use crate::Nexus;
-use chrono::Utc;
 use nexus_db_model::{
     ByteCount, ExternalIp, InstanceState, IpAttachState, Ipv4NatEntry,
     SledReservationConstraints, SledResource, VmmState,
@@ -98,7 +97,6 @@ pub async fn create_and_insert_vmm_record(
     propolis_id: PropolisUuid,
     sled_id: SledUuid,
     propolis_ip: Ipv6Addr,
-    initial_state: nexus_db_model::VmmInitialState,
 ) -> Result<db::model::Vmm, ActionError> {
     let vmm = db::model::Vmm::new(
         propolis_id,
@@ -106,7 +104,6 @@ pub async fn create_and_insert_vmm_record(
         sled_id,
         IpAddr::V6(propolis_ip).into(),
         DEFAULT_PROPOLIS_PORT,
-        initial_state,
     );
 
     let vmm = datastore
@@ -115,32 +112,6 @@ pub async fn create_and_insert_vmm_record(
         .map_err(ActionError::action_failed)?;
 
     Ok(vmm)
-}
-
-/// Given a previously-inserted VMM record, set its state to `SagaUnwound` and
-/// then delete it.
-///
-/// This function succeeds idempotently if called with the same parameters,
-/// provided that the VMM record was not changed by some other actor after the
-/// calling saga inserted it.
-///
-/// This function is intended to be called when a saga which created a VMM
-/// record unwinds.
-pub async fn unwind_vmm_record(
-    datastore: &DataStore,
-    opctx: &OpContext,
-    prev_record: &db::model::Vmm,
-) -> Result<(), anyhow::Error> {
-    let new_runtime = db::model::VmmRuntimeState {
-        state: db::model::VmmState::SagaUnwound,
-        time_state_updated: Utc::now(),
-        gen: prev_record.runtime.gen.next().into(),
-    };
-
-    let prev_id = PropolisUuid::from_untyped_uuid(prev_record.id);
-    datastore.vmm_update_runtime(&prev_id, &new_runtime).await?;
-    datastore.vmm_mark_deleted(&opctx, &prev_id).await?;
-    Ok(())
 }
 
 /// Allocates a new IPv6 address for a propolis instance that will run on the
@@ -277,14 +248,14 @@ pub(super) async fn instance_ip_get_instance_state(
             Some(VmmState::Running) | Some(VmmState::Rebooting),
         ) => {}
 
-        // If the VMM is in the Stopping, Migrating, or Starting states, its
-        // sled assignment is in doubt, so report a transient state error and
-        // ask the caller to retry.
+        // If the VMM is in the Creating, Stopping, Migrating, or Starting
+        // states, its  sled assignment is in doubt, so report a transient state
+        // error and ask the caller to retry.
         //
-        // Although an instance with a Starting VMM has a sled assignment,
-        // there's no way to tell at this point whether or not there's a
-        // concurrent instance-start saga that has passed the point where it
-        // sends IP assignments to the instance's new sled:
+        // Although an instance with a Starting (or Creating) VMM has a sled
+        // assignment, there's no way to tell at this point whether or not
+        // there's a  concurrent instance-start saga that has passed the point
+        // where it sends IP assignments to the instance's new sled:
         //
         // - If the start saga is still in progress and hasn't pushed any IP
         //   information to the instance's new sled yet, then either of two
@@ -306,7 +277,8 @@ pub(super) async fn instance_ip_get_instance_state(
             Some(state @ VmmState::Starting)
             | Some(state @ VmmState::Migrating)
             | Some(state @ VmmState::Stopping)
-            | Some(state @ VmmState::Stopped),
+            | Some(state @ VmmState::Stopped)
+            | Some(state @ VmmState::Creating),
         ) => {
             return Err(ActionError::action_failed(Error::unavail(&format!(
                 "can't {verb} in transient state {state}"

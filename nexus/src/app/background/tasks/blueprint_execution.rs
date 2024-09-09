@@ -16,7 +16,7 @@ use nexus_types::deployment::{
 };
 use serde_json::json;
 use std::sync::Arc;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::watch;
 use update_engine::NestedError;
 use uuid::Uuid;
 
@@ -90,9 +90,7 @@ impl BlueprintExecutor {
             });
         }
 
-        // Pick a large-ish buffer for reconfigurator execution to avoid
-        // blocking it.
-        let (sender, mut receiver) = mpsc::channel(256);
+        let (sender, mut receiver) = update_engine::channel();
 
         let receiver_task = tokio::spawn(async move {
             // TODO: report progress
@@ -355,6 +353,7 @@ mod test {
             value,
             json!({
                 "target_id": blueprint_id,
+                "execution_error": null,
                 "enabled": true,
                 "needs_saga_recovery": false,
             })
@@ -454,6 +453,7 @@ mod test {
             value,
             json!({
                 "target_id": blueprint.1.id.to_string(),
+                "execution_error": null,
                 "enabled": true,
                 "needs_saga_recovery": false,
             })
@@ -502,7 +502,7 @@ mod test {
 
         #[derive(Deserialize)]
         struct ErrorResult {
-            error: NestedError,
+            execution_error: NestedError,
         }
 
         let mut value = task.activate(&opctx).await;
@@ -510,7 +510,10 @@ mod test {
 
         println!("after failure: {:?}", value);
         let result: ErrorResult = serde_json::from_value(value).unwrap();
-        assert_eq!(result.error.message(), "step failed: Deploy Omicron zones");
+        assert_eq!(
+            result.execution_error.message(),
+            "step failed: Deploy Omicron zones"
+        );
 
         assert_event_buffer_failed_at(
             &event_buffer,

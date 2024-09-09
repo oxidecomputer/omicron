@@ -582,6 +582,11 @@ pub enum BundleError {
 
     #[error("Instance is terminating")]
     InstanceTerminating,
+
+    /// The `walkdir` crate's errors already include the path which could not be
+    /// read (if one exists), so we can just wrap them directly.
+    #[error(transparent)]
+    WalkDir(#[from] walkdir::Error),
 }
 
 // Helper function to write an array of bytes into the tar archive, with
@@ -1533,7 +1538,7 @@ async fn compute_bundle_utilization(
         // TODO-correctness: This takes into account the directories themselves,
         // and may be not quite what we want. But it is very easy and pretty
         // close.
-        let bytes_used = disk_usage(dir).await?;
+        let bytes_used = dir_size(dir).await?;
         debug!(log, "computed bytes used"; "bytes_used" => bytes_used);
         out.insert(
             dir.clone(),
@@ -1545,61 +1550,27 @@ async fn compute_bundle_utilization(
 
 // Return the number of bytes occupied by the provided directory.
 //
-// This returns an error if:
-//
-// - The "du" command fails
-// - Parsing stdout fails
-// - Parsing the actual size as a u64 fails
-async fn disk_usage(path: &Utf8PathBuf) -> Result<u64, BundleError> {
-    // Each OS implements slightly different `du` options.
-    //
-    // Linux and illumos support the "apparent" size in bytes, though using
-    // different options. macOS doesn't support bytes at all, and has a minimum
-    // block size of 512.
-    //
-    // We'll suffer the lower resolution on macOS, and get higher resolution on
-    // the others.
-    cfg_if::cfg_if! {
-        if #[cfg(target_os = "illumos")] {
-            const BLOCK_SIZE: u64 = 1;
-            const DU_ARG: &str = "-A";
-        } else if #[cfg(target_os = "linux")] {
-            const BLOCK_SIZE: u64 = 1;
-            const DU_ARG: &str = "-b";
-        } else if #[cfg(target_os = "macos")] {
-            const BLOCK_SIZE: u64 = 512;
-            const DU_ARG: &str = "-k";
-        } else {
-            compile_error!("unsupported target OS");
+// This returns an error if reading any file or directory within the provided
+// directory fails.
+async fn dir_size(path: &Utf8PathBuf) -> Result<u64, BundleError> {
+    let path = path.clone();
+    // We could, alternatively, just implement this using `tokio::fs` to read
+    // the directory and so on. However, the `tokio::fs` APIs are basically just
+    // a wrapper around `spawn_blocking`-ing code that does the `std::fs`
+    // functions. So, putting the whole thing in one big `spawn_blocking`
+    // closure that just does all the blocking fs ops lets us spend less time
+    // creating and destroying tiny blocking tasks.
+    tokio::task::spawn_blocking(move || {
+        let mut sum = 0;
+        for entry in walkdir::WalkDir::new(&path).into_iter() {
+            let entry = entry?;
+            sum += entry.metadata()?.len()
         }
-    }
-    const DU: &str = "/usr/bin/du";
-    let args = &[DU_ARG, "-s", path.as_str()];
-    let output = Command::new(DU).args(args).output().await.map_err(|err| {
-        BundleError::Command { cmd: format!("{DU} {}", args.join(" ")), err }
-    })?;
-    let err = |msg: &str| {
-        BundleError::Cleanup(anyhow!(
-            "failed to fetch disk usage for {}: {}",
-            path,
-            msg,
-        ))
-    };
-    if !output.status.success() {
-        return Err(err("du command failed"));
-    }
-    let Ok(s) = std::str::from_utf8(&output.stdout) else {
-        return Err(err("non-UTF8 stdout"));
-    };
-    let Some(line) = s.lines().next() else {
-        return Err(err("no lines in du output"));
-    };
-    let Some(part) = line.trim().split_ascii_whitespace().next() else {
-        return Err(err("no disk usage size computed in output"));
-    };
-    part.parse()
-        .map(|x: u64| x.saturating_mul(BLOCK_SIZE))
-        .map_err(|_| err("failed to parse du output"))
+
+        Ok(sum)
+    })
+    .await
+    .expect("spawned blocking task should not be cancelled or panic")
 }
 
 // Return the quota for a ZFS dataset, or the available size.
@@ -1659,22 +1630,86 @@ async fn zfs_quota(path: &Utf8PathBuf) -> Result<u64, BundleError> {
 
 #[cfg(test)]
 mod tests {
-    use super::disk_usage;
-    use super::Utf8PathBuf;
+    use super::*;
 
     #[tokio::test]
-    async fn test_disk_usage() {
+    async fn test_dir_size() {
         let path =
             Utf8PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/src"));
-        let usage = disk_usage(&path).await.unwrap();
-        // Run `du -As /path/to/omicron/sled-agent/src`, which currently shows this
-        // directory is ~450 KiB.
+        let usage = dir_size(&path).await.unwrap();
         assert!(
             usage >= 1024 * 400,
             "sled-agent manifest directory disk usage not correct?"
         );
         let path = Utf8PathBuf::from("/some/nonexistent/path");
-        assert!(disk_usage(&path).await.is_err());
+        assert!(dir_size(&path).await.is_err());
+    }
+
+    #[tokio::test]
+    // Different operating systems ship slightly different versions of `du(1)`,
+    // with differing behaviors. We really only care that the `dir_size`
+    // function behaves the same as the illumos `du(1)`, so skip this test on
+    // other systems.
+    #[cfg_attr(not(target_os = "illumos"), ignore)]
+    async fn test_dir_size_matches_du() {
+        const DU: &str = "du";
+        async fn dir_size_du(path: &Utf8PathBuf) -> Result<u64, BundleError> {
+            let args = &["-A", "-s", path.as_str()];
+            let output =
+                Command::new(DU).args(args).output().await.map_err(|err| {
+                    BundleError::Command {
+                        cmd: format!("{DU} {}", args.join(" ")),
+                        err,
+                    }
+                })?;
+            let err = |msg: &str| {
+                BundleError::Cleanup(anyhow!(
+                    "failed to fetch disk usage for {}: {}",
+                    path,
+                    msg,
+                ))
+            };
+            if !output.status.success() {
+                return Err(err("du command failed"));
+            }
+            let Ok(s) = std::str::from_utf8(&output.stdout) else {
+                return Err(err("non-UTF8 stdout"));
+            };
+            let Some(line) = s.lines().next() else {
+                return Err(err("no lines in du output"));
+            };
+            let Some(part) = line.trim().split_ascii_whitespace().next() else {
+                return Err(err("no disk usage size computed in output"));
+            };
+            part.parse().map_err(|_| err("failed to parse du output"))
+        }
+
+        let du_output =
+            Command::new(DU).arg("--version").output().await.unwrap();
+        eprintln!(
+            "du --version:\n{}\n",
+            String::from_utf8_lossy(&du_output.stdout)
+        );
+
+        let path =
+            Utf8PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/src"));
+        let t0 = std::time::Instant::now();
+        let usage =
+            dbg!(dir_size(&path).await).expect("disk usage for src dir failed");
+        eprintln!("dir_size({path}) took {:?}", t0.elapsed());
+
+        let t0 = std::time::Instant::now();
+        // Run `du -As /path/to/omicron/sled-agent/src`, which currently shows this
+        // directory is ~450 KiB.
+        let du_usage =
+            dbg!(dir_size_du(&path).await).expect("running du failed!");
+        eprintln!("du -s {path} took {:?}", t0.elapsed());
+
+        assert_eq!(
+            usage, du_usage,
+            "expected `dir_size({path})` to == `du -s {path}`\n\
+             {usage}B (`dir_size`) != {du_usage}B (`du`)",
+        );
     }
 }
 
@@ -1698,6 +1733,8 @@ mod illumos_tests {
     use chrono::TimeZone;
     use chrono::Timelike;
     use chrono::Utc;
+    use omicron_common::api::external::ByteCount;
+    use once_cell::sync::Lazy;
     use rand::RngCore;
     use sled_storage::manager_test_harness::StorageManagerTestHarness;
     use slog::Drain;
@@ -1884,7 +1921,9 @@ mod illumos_tests {
     // i.e., the "ashift" value.  An empty dataset is unlikely to contain more
     // than one megabyte of overhead, so use that as a conservative test size to
     // avoid issues.
-    const TEST_QUOTA: usize = sled_storage::dataset::DEBUG_DATASET_QUOTA;
+    static TEST_QUOTA: Lazy<ByteCount> = Lazy::new(|| {
+        sled_storage::dataset::DEBUG_DATASET_QUOTA.try_into().unwrap()
+    });
 
     async fn run_test_with_zfs_dataset<T, Fut>(test: T)
     where
@@ -1932,18 +1971,17 @@ mod illumos_tests {
         // If this needs to change, go modify the "add_vdevs" call in
         // "setup_storage".
         assert!(
-            TEST_QUOTA
+            *TEST_QUOTA
                 < StorageManagerTestHarness::DEFAULT_VDEV_SIZE
                     .try_into()
                     .unwrap(),
-            "Quota larger than underlying device (quota: {}, device size: {})",
+            "Quota larger than underlying device (quota: {:?}, device size: {})",
             TEST_QUOTA,
             StorageManagerTestHarness::DEFAULT_VDEV_SIZE,
         );
 
         anyhow::ensure!(
-            bundle_utilization.dataset_quota
-                == u64::try_from(TEST_QUOTA).unwrap(),
+            bundle_utilization.dataset_quota == TEST_QUOTA.to_bytes(),
             "computed incorrect dataset quota"
         );
 
