@@ -810,9 +810,6 @@ impl DataStore {
     pub async fn instance_and_vmm_list_by_sled_agent(
         &self,
         opctx: &OpContext,
-        // XXX(eliza): I don't love that the type for the `DataPageParams` is
-        // `(Uuid, Uuid)` rather than `(SledUuid, PropolisUuid)`; it would be
-        // nice if these could be typed UUIDs eventually.
         pagparams: &DataPageParams<'_, (Uuid, Uuid)>,
     ) -> ListResultVec<(Sled, Instance, Vmm, Project)> {
         use crate::db::schema::{
@@ -847,8 +844,8 @@ impl DataStore {
             (sled_dsl::id, vmm_dsl::id),
             pagparams,
         );
-        // Filter out sleds that aren't in service and VMMs that aren't
-        // incarnated on a sled.
+        // Filter out sleds that aren't in service, and VMM states in which the
+        // VMM isn't incarnated on a sled.
         let query = query
             .filter(sled_dsl::time_deleted.is_null())
             .sled_filter(SledFilter::InService)
@@ -860,16 +857,14 @@ impl DataStore {
             .filter(vmm_dsl::state.ne_all(VmmState::NONEXISTENT_STATES));
         // Now, join with the `instance` table on the instance's VMM ID.
         let query = query.inner_join(
-            instance_dsl::instance.on(instance_dsl::id
-                .eq(vmm_dsl::instance_id)
-                .and(instance_dsl::time_deleted.is_null())),
+            instance_dsl::instance
+                .on(instance_dsl::id.eq(vmm_dsl::instance_id)),
         );
         // Finally, join with the `project` table on the instance's project ID,
         // to return the project that each instance belongs to.
         let query = query.inner_join(
-            project_dsl::project.on(project_dsl::id
-                .eq(instance_dsl::project_id)
-                .and(project_dsl::time_deleted.is_null())),
+            project_dsl::project
+                .on(project_dsl::id.eq(instance_dsl::project_id)),
         );
 
         let result = query
