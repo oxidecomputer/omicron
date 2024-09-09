@@ -5386,6 +5386,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "clickhouse-admin-types",
  "debug-ignore",
  "expectorate",
  "gateway-client",

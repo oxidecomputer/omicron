@@ -9,6 +9,7 @@ workspace = true
 [dependencies]
 anyhow.workspace = true
 chrono.workspace = true
+clickhouse-admin-types.workspace = true
 debug-ignore.workspace = true
 gateway-client.workspace = true
 indexmap.workspace = true
