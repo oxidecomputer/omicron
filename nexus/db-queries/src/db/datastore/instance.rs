@@ -36,9 +36,7 @@ use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
-use nexus_db_model::ApplySledFilterExt;
 use nexus_db_model::Disk;
-use nexus_types::deployment::SledFilter;
 use omicron_common::api;
 use omicron_common::api::external;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -801,12 +799,12 @@ impl DataStore {
         Ok(updated)
     }
 
-    /// Lists all instances on in-service sleds with active Propolis VMM
-    /// processes, returning the instance along with the VMM on which it's
-    /// running, the sled on which the VMM is running, and the project that owns
-    /// the instance.
+    /// Lists all instances with active Propolis VMM processes, returning the
+    /// instance along with the VMM on which it's running, the sled on which the
+    /// VMM is running, and the project that owns the instance.
     ///
-    /// The query performed by this function is paginated by the sled's UUID.
+    /// The query performed by this function is paginated by the sled and
+    /// instance UUIDs, in that order.
     pub async fn instance_and_vmm_list_by_sled_agent(
         &self,
         opctx: &OpContext,
@@ -821,9 +819,9 @@ impl DataStore {
 
         // We're going to build the query in stages.
         //
-        // First, select all active sleds, and join the `sled` table with the
-        // `vmm` table on the VMM's sled_id`, filtering out VMMs which are not
-        // actually incarnated on a sled.
+        // First, select all non-deleted sled records, and join the `sled` table
+        // with the `vmm` table on the VMM's `sled_id`, filtering out VMMs which
+        // are not actually incarnated on a sled.
         let query = sled_dsl::sled
             .inner_join(vmm_dsl::vmm.on(vmm_dsl::sled_id.eq(sled_dsl::id)));
         // Next, paginate the results, ordering by the sled ID first, so that we
@@ -844,11 +842,10 @@ impl DataStore {
             (sled_dsl::id, vmm_dsl::id),
             pagparams,
         );
-        // Filter out sleds that aren't in service, and VMM states in which the
-        // VMM isn't incarnated on a sled.
+
         let query = query
+            // Filter out sled and VMM records which have been deleted.
             .filter(sled_dsl::time_deleted.is_null())
-            .sled_filter(SledFilter::InService)
             .filter(vmm_dsl::time_deleted.is_null())
             // Ignore VMMs which are in states that are not known to exist on a
             // sled. Since this query drives instance-watcher health checking,
