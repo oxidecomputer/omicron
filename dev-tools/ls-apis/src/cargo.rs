@@ -27,16 +27,39 @@ const IGNORED_NON_CLIENTS: &[&str] = &[
     "propolis-mock-server",
 ];
 
+/// Query package and dependency-related information about a Cargo workspace
 pub struct Workspace {
+    /// human-readable label for the workspace
+    /// (generally the basename of the repo's URL)
     name: String,
+
+    /// local path to the root of the workspace
     workspace_root: Utf8PathBuf,
+
+    /// list of all package metadata, by package id
+    ///
+    /// The dependency information in `Package` should not be used.  It
+    /// describes what's written in the Cargo files.  `nodes_by_id` reflects
+    /// precisely what Cargo actually resolved instead.
     packages_by_id: BTreeMap<PackageId, Package>,
+
+    /// list of all packages' dependency information, by package id
     nodes_by_id: BTreeMap<PackageId, cargo_metadata::Node>,
-    progenitor_clients: BTreeSet<ClientPackageName>,
+
+    /// list of all workspace-level packages, by name
     workspace_packages_by_name: BTreeMap<String, PackageId>,
+
+    /// list of all packages that appear to be Progenitor-based clients
+    /// (having a direct dependency on `progenitor`)
+    progenitor_clients: BTreeSet<ClientPackageName>,
 }
 
 impl Workspace {
+    /// Use `cargo metadata` to load information about a workspace called `name`
+    ///
+    /// If `extra_repos` is `None`, then information is loaded about the current
+    /// workspace.  Otherwise, the workspace root is assumed to be at the path
+    /// `extra_repos/name`.
     pub fn load(name: &str, extra_repos: Option<&Utf8Path>) -> Result<Self> {
         eprintln!("loading metadata for workspace {name}");
 
@@ -48,8 +71,8 @@ impl Workspace {
         let workspace_root = metadata.workspace_root;
 
         // Build an index of all packages by id.  Identify duplicates because we
-        // assume this isn't possible and we want to know if our assumptions are
-        // wrong.
+        // assume there shouldn't be any but we want to know if that assumption
+        // is wrong.
         //
         // Also build an index of workspaces packages by name so that we can
         // quickly find their id.
@@ -155,24 +178,39 @@ impl Workspace {
         })
     }
 
-    pub fn all_package_ids(&self) -> impl Iterator<Item = &PackageId> {
-        self.packages_by_id.keys()
+    /// Return the name of this workspace
+    pub fn name(&self) -> &str {
+        &self.name
     }
 
+    /// Returns a list of workspace packages that appear to be Progenitor
+    /// clients
     pub fn client_packages(&self) -> impl Iterator<Item = &ClientPackageName> {
         self.progenitor_clients.iter()
     }
 
+    /// Returns information about package `pkgname` in the workspace
+    ///
+    /// Note that this only returns information about workspace packages (i.e.,
+    /// packages that are defined in the workspace itself).  To find information
+    /// about transitive dependencies, you need to be more specific about which
+    /// version you want.  Use `find_pkg_by_id()` for that.
     pub fn find_workspace_package(&self, pkgname: &str) -> Option<&Package> {
         self.workspace_packages_by_name
             .get(pkgname)
             .and_then(|pkgid| self.packages_by_id.get(pkgid))
     }
 
+    /// Returns information about package with id `pkgid` referenced in this
+    /// workspace
+    ///
+    /// This can be either a workspace package or a dependency.
     pub fn find_pkg_by_id(&self, pkgid: &PackageId) -> Option<&Package> {
         self.packages_by_id.get(pkgid)
     }
 
+    /// Given a workspace package, return the relative path frmo the root of the
+    /// workspace to that package.
     pub fn find_workspace_package_path(
         &self,
         pkgname: &str,
@@ -195,10 +233,14 @@ impl Workspace {
         Ok(path)
     }
 
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
+    /// Iterate over the required dependencies of package `root`, invoking
+    /// `func` for each one as:
+    ///
+    ///     func(package: &Package, dep_path: &DepPath)
+    ///
+    /// where `package` is the package that is (directly or indirectly) a
+    /// dependency of `root` and `dep_path` describes the dependency path from
+    /// `root` to `package`.
     pub fn walk_required_deps_recursively(
         &self,
         root: &Package,
@@ -258,6 +300,8 @@ impl Workspace {
     }
 }
 
+/// Given a path to a `Cargo.toml` file for a package, return the parent
+/// directory
 fn cargo_toml_parent(
     path: &Utf8Path,
     label_path: &Utf8Path,
@@ -274,22 +318,33 @@ fn cargo_toml_parent(
     Ok(path)
 }
 
+/// Describes a "dependency path": a path through the Cargo dependency graph
+/// from one package to another, which describes how one package depends on
+/// another
 #[derive(Debug, Clone)]
 pub struct DepPath(VecDeque<PackageId>);
 
 impl DepPath {
+    /// Creates a new `DepPath` for package `pkgid`
     pub fn for_pkg(pkgid: PackageId) -> DepPath {
         DepPath(VecDeque::from([pkgid]))
     }
 
-    pub fn leaf(&self) -> &PackageId {
+    /// Returns the bottom-most node in this path
+    ///
+    /// In a dependency chain from root package `p1` to its dependency `p2` that
+    /// depends on `p3`, the bottom-most node would be `p3`.
+    pub fn bottom(&self) -> &PackageId {
         &self.0[0]
     }
 
+    /// Iterates over the nodes in this path, from the bottom to the root
     pub fn nodes(&self) -> impl Iterator<Item = &PackageId> {
         self.0.iter()
     }
 
+    /// Creates a new dependency path based on this one, but where the bottom of
+    /// this path depends on package `pkgid`
     pub fn with_dependency_on(&self, pkgid: PackageId) -> DepPath {
         let mut rv = self.clone();
         rv.0.push_front(pkgid);

@@ -192,7 +192,7 @@ impl Apis {
                     &mut |p: &Package, dep_path: &DepPath| {
                         // unwrap(): the workspace must know about each of these
                         // packages.
-                        let parent_id = dep_path.leaf();
+                        let parent_id = dep_path.bottom();
                         let parent =
                             workspace.find_pkg_by_id(parent_id).unwrap();
 
