@@ -1145,6 +1145,7 @@ name = "clickhouse-admin-types"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "atomicwrites",
  "camino",
  "camino-tempfile",
  "derive_more",

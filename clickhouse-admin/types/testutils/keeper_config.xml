@@ -10,6 +10,7 @@
     </logger>
 
     <listen_host>ff::8</listen_host>
+    <path>./</path>
     <keeper_server>
         <enable_reconfiguration>false</enable_reconfiguration>
         <tcp_port>9181</tcp_port>

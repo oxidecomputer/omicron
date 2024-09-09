@@ -2,14 +2,14 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
+use atomicwrites::AtomicFile;
 use camino::Utf8PathBuf;
-use camino_tempfile::NamedUtf8TempFile;
 use derive_more::{Add, AddAssign, Display, From};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::fs::rename;
-use std::io::Write;
+use std::fs::create_dir;
+use std::io::{ErrorKind, Write};
 use std::net::Ipv6Addr;
 
 pub mod config;
@@ -121,12 +121,20 @@ impl ServerSettings {
             self.datastore_path.clone(),
         );
 
-        // Writing to a temporary file and then renaming it will ensure we
-        // don't end up with a partially written file after a crash
-        let mut f = NamedUtf8TempFile::new()?;
-        f.write_all(config.to_xml().as_bytes())?;
-        f.flush()?;
-        rename(f.path(), self.config_dir.join("replica-server-config.xml"))?;
+        match create_dir(self.config_dir.clone()) {
+            Ok(_) => (),
+            Err(e) if e.kind() == ErrorKind::AlreadyExists => (),
+            Err(e) => return Err(e.into()),
+        };
+
+        let path = self.config_dir.join("replica-server-config.xml");
+        AtomicFile::new(
+            path.clone(),
+            atomicwrites::OverwriteBehavior::AllowOverwrite,
+        )
+        .write(|f| f.write_all(config.to_xml().as_bytes()))
+        .with_context(|| format!("failed to write to `{}`", path))?;
+
         Ok(config)
     }
 }
@@ -180,12 +188,20 @@ impl KeeperSettings {
             raft_config,
         );
 
-        // Writing to a temporary file and then renaming it will ensure we
-        // don't end up with a partially written file after a crash
-        let mut f = NamedUtf8TempFile::new()?;
-        f.write_all(config.to_xml().as_bytes())?;
-        f.flush()?;
-        rename(f.path(), self.config_dir.join("keeper-config.xml"))?;
+        match create_dir(self.config_dir.clone()) {
+            Ok(_) => (),
+            Err(e) if e.kind() == ErrorKind::AlreadyExists => (),
+            Err(e) => return Err(e.into()),
+        };
+
+        let path = self.config_dir.join("keeper_config.xml");
+        AtomicFile::new(
+            path.clone(),
+            atomicwrites::OverwriteBehavior::AllowOverwrite,
+        )
+        .write(|f| f.write_all(config.to_xml().as_bytes()))
+        .with_context(|| format!("failed to write to `{}`", path))?;
+
         Ok(config)
     }
 }
@@ -244,9 +260,9 @@ mod tests {
 
         let expected_file = Utf8PathBuf::from_str("./testutils")
             .unwrap()
-            .join("keeper-config.xml");
+            .join("keeper_config.xml");
         let generated_file =
-            Utf8PathBuf::from(config_dir.path()).join("keeper-config.xml");
+            Utf8PathBuf::from(config_dir.path()).join("keeper_config.xml");
         let generated_content = std::fs::read_to_string(generated_file)
             .expect("Failed to read from generated ClickHouse keeper file");
 
