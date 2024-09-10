@@ -394,7 +394,8 @@ mod test {
     use super::*;
     use omicron_test_utils::dev::test_setup_log;
 
-    /// Validate that the Crucible agent reuses ports
+    /// Validate that the simulated Crucible agent reuses ports when regions are
+    /// deleted.
     #[test]
     fn crucible_ports_get_reused() {
         let logctx = test_setup_log("crucible_ports_get_reused");
