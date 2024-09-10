@@ -72,6 +72,7 @@ progenitor::generate_api!(
         SwitchLocation = omicron_common::api::external::SwitchLocation,
         TypedUuidForDatasetKind = omicron_uuid_kinds::DatasetUuid,
         TypedUuidForInstanceKind = omicron_uuid_kinds::InstanceUuid,
+        TypedUuidForOmicronZoneKind = omicron_uuid_kinds::OmicronZoneUuid,
         TypedUuidForPropolisKind = omicron_uuid_kinds::PropolisUuid,
         TypedUuidForZpoolKind = omicron_uuid_kinds::ZpoolUuid,
         Vni = omicron_common::api::external::Vni,
