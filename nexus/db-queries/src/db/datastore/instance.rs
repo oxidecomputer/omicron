@@ -29,15 +29,14 @@ use crate::db::model::Sled;
 use crate::db::model::Vmm;
 use crate::db::model::VmmState;
 use crate::db::pagination::paginated;
+use crate::db::pagination::paginated_multicolumn;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateAndQueryResult;
 use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
-use nexus_db_model::ApplySledFilterExt;
 use nexus_db_model::Disk;
-use nexus_types::deployment::SledFilter;
 use omicron_common::api;
 use omicron_common::api::external;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -800,16 +799,16 @@ impl DataStore {
         Ok(updated)
     }
 
-    /// Lists all instances on in-service sleds with active Propolis VMM
-    /// processes, returning the instance along with the VMM on which it's
-    /// running, the sled on which the VMM is running, and the project that owns
-    /// the instance.
+    /// Lists all instances with active Propolis VMM processes, returning the
+    /// instance along with the VMM on which it's running, the sled on which the
+    /// VMM is running, and the project that owns the instance.
     ///
-    /// The query performed by this function is paginated by the sled's UUID.
+    /// The query performed by this function is paginated by the sled and
+    /// instance UUIDs, in that order.
     pub async fn instance_and_vmm_list_by_sled_agent(
         &self,
         opctx: &OpContext,
-        pagparams: &DataPageParams<'_, Uuid>,
+        pagparams: &DataPageParams<'_, (Uuid, Uuid)>,
     ) -> ListResultVec<(Sled, Instance, Vmm, Project)> {
         use crate::db::schema::{
             instance::dsl as instance_dsl, project::dsl as project_dsl,
@@ -818,35 +817,54 @@ impl DataStore {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        let result = paginated(sled_dsl::sled, sled_dsl::id, pagparams)
+        // We're going to build the query in stages.
+        //
+        // First, select all non-deleted sled records, and join the `sled` table
+        // with the `vmm` table on the VMM's `sled_id`, filtering out VMMs which
+        // are not actually incarnated on a sled.
+        let query = sled_dsl::sled
+            .inner_join(vmm_dsl::vmm.on(vmm_dsl::sled_id.eq(sled_dsl::id)));
+        // Next, paginate the results, ordering by the sled ID first, so that we
+        // list all VMMs on a sled before moving on to the next one, and then by
+        // the VMM ID.
+        //
+        // Note that we must add the `paginated_multicolumn` wrapper
+        // at this point in query construction, because here, the selection
+        // contains both `sled_dsl::id` and `vmm_dsl::id` columns, but it does
+        // *not* have anything that makes it no longer implement
+        // `diesel::QuerySource`, which the `paginated_multicolumn` function
+        // requires. This ordering doesn't actually matter when it comes to the
+        // generated SQL, which should be equivalent no matter how we construct
+        // the query, but it *does* matter for satisfying Diesel's trait
+        // constraints.
+        let query = paginated_multicolumn(
+            query,
+            (sled_dsl::id, vmm_dsl::id),
+            pagparams,
+        );
+
+        let query = query
+            // Filter out sled and VMM records which have been deleted.
             .filter(sled_dsl::time_deleted.is_null())
-            .sled_filter(SledFilter::InService)
-            .inner_join(
-                vmm_dsl::vmm
-                    .on(vmm_dsl::sled_id
-                        .eq(sled_dsl::id)
-                        .and(vmm_dsl::time_deleted.is_null())
-                        // Ignore instances which are in states that are not
-                        // known to exist on a sled. Since this query drives
-                        // instance-watcher health checking, it is not necessary
-                        // to perform health checks for VMMs that don't actually
-                        // exist in real life.
-                        .and(
-                            vmm_dsl::state.ne_all(VmmState::NONEXISTENT_STATES),
-                        ))
-                    .inner_join(
-                        instance_dsl::instance
-                            .on(instance_dsl::id
-                                .eq(vmm_dsl::instance_id)
-                                .and(instance_dsl::time_deleted.is_null()))
-                            .inner_join(
-                                project_dsl::project.on(project_dsl::id
-                                    .eq(instance_dsl::project_id)
-                                    .and(project_dsl::time_deleted.is_null())),
-                            ),
-                    ),
-            )
-            .sled_filter(SledFilter::InService)
+            .filter(vmm_dsl::time_deleted.is_null())
+            // Ignore VMMs which are in states that are not known to exist on a
+            // sled. Since this query drives instance-watcher health checking,
+            // it is not necessary to perform health checks for VMMs that don't
+            // actually exist in real life.
+            .filter(vmm_dsl::state.ne_all(VmmState::NONEXISTENT_STATES));
+        // Now, join with the `instance` table on the instance's VMM ID.
+        let query = query.inner_join(
+            instance_dsl::instance
+                .on(instance_dsl::id.eq(vmm_dsl::instance_id)),
+        );
+        // Finally, join with the `project` table on the instance's project ID,
+        // to return the project that each instance belongs to.
+        let query = query.inner_join(
+            project_dsl::project
+                .on(project_dsl::id.eq(instance_dsl::project_id)),
+        );
+
+        let result = query
             .select((
                 Sled::as_select(),
                 Instance::as_select(),
@@ -1544,28 +1562,29 @@ impl DataStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::datastore::sled;
     use crate::db::datastore::test_utils::datastore_test;
     use crate::db::lookup::LookupPath;
+    use crate::db::pagination::Paginator;
     use nexus_db_model::InstanceState;
     use nexus_db_model::Project;
     use nexus_db_model::VmmRuntimeState;
     use nexus_db_model::VmmState;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::params;
+    use nexus_types::identity::Asset;
     use omicron_common::api::external;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev;
 
-    async fn create_test_instance(
+    async fn create_test_project(
         datastore: &DataStore,
         opctx: &OpContext,
-    ) -> authz::Instance {
+    ) -> (authz::Project, Project) {
         let silo_id = *nexus_db_fixed_data::silo::DEFAULT_SILO_ID;
         let project_id = Uuid::new_v4();
-        let instance_id = InstanceUuid::new_v4();
-
-        let (authz_project, _project) = datastore
+        datastore
             .project_create(
                 &opctx,
                 Project::new_with_id(
@@ -1580,17 +1599,27 @@ mod tests {
                 ),
             )
             .await
-            .expect("project must be created successfully");
+            .expect("project must be created successfully")
+    }
+
+    async fn create_test_instance(
+        datastore: &DataStore,
+        opctx: &OpContext,
+        authz_project: &authz::Project,
+        name: &str,
+    ) -> authz::Instance {
+        let instance_id = InstanceUuid::new_v4();
+
         let _ = datastore
             .project_create_instance(
                 &opctx,
                 &authz_project,
                 Instance::new(
                     instance_id,
-                    project_id,
+                    authz_project.id(),
                     &params::InstanceCreate {
                         identity: IdentityMetadataCreateParams {
-                            name: "myinstance".parse().unwrap(),
+                            name: name.parse().unwrap(),
                             description: "It's an instance".into(),
                         },
                         ncpus: 2i64.try_into().unwrap(),
@@ -1625,7 +1654,14 @@ mod tests {
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
         let saga1 = Uuid::new_v4();
         let saga2 = Uuid::new_v4();
-        let authz_instance = create_test_instance(&datastore, &opctx).await;
+        let (authz_project, _) = create_test_project(&datastore, &opctx).await;
+        let authz_instance = create_test_instance(
+            &datastore,
+            &opctx,
+            &authz_project,
+            "my-great-instance",
+        )
+        .await;
 
         macro_rules! assert_locked {
             ($id:expr) => {{
@@ -1699,7 +1735,14 @@ mod tests {
             dev::test_setup_log("test_instance_updater_lock_is_idempotent");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
-        let authz_instance = create_test_instance(&datastore, &opctx).await;
+        let (authz_project, _) = create_test_project(&datastore, &opctx).await;
+        let authz_instance = create_test_instance(
+            &datastore,
+            &opctx,
+            &authz_project,
+            "my-great-instance",
+        )
+        .await;
         let saga1 = Uuid::new_v4();
 
         // attempt to lock the instance once.
@@ -1757,7 +1800,14 @@ mod tests {
         );
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
-        let authz_instance = create_test_instance(&datastore, &opctx).await;
+        let (authz_project, _) = create_test_project(&datastore, &opctx).await;
+        let authz_instance = create_test_instance(
+            &datastore,
+            &opctx,
+            &authz_project,
+            "my-great-instance",
+        )
+        .await;
         let saga1 = Uuid::new_v4();
         let saga2 = Uuid::new_v4();
 
@@ -1842,7 +1892,14 @@ mod tests {
             dev::test_setup_log("test_unlocking_a_deleted_instance_is_okay");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
-        let authz_instance = create_test_instance(&datastore, &opctx).await;
+        let (authz_project, _) = create_test_project(&datastore, &opctx).await;
+        let authz_instance = create_test_instance(
+            &datastore,
+            &opctx,
+            &authz_project,
+            "my-great-instance",
+        )
+        .await;
         let saga1 = Uuid::new_v4();
 
         // put the instance in a state where it will be okay to delete later...
@@ -1893,7 +1950,14 @@ mod tests {
             dev::test_setup_log("test_instance_commit_update_is_idempotent");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
-        let authz_instance = create_test_instance(&datastore, &opctx).await;
+        let (authz_project, _) = create_test_project(&datastore, &opctx).await;
+        let authz_instance = create_test_instance(
+            &datastore,
+            &opctx,
+            &authz_project,
+            "my-great-instance",
+        )
+        .await;
         let saga1 = Uuid::new_v4();
 
         // lock the instance once.
@@ -1984,7 +2048,14 @@ mod tests {
         );
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
-        let authz_instance = create_test_instance(&datastore, &opctx).await;
+        let (authz_project, _) = create_test_project(&datastore, &opctx).await;
+        let authz_instance = create_test_instance(
+            &datastore,
+            &opctx,
+            &authz_project,
+            "my-great-instance",
+        )
+        .await;
         let saga1 = Uuid::new_v4();
 
         // Lock the instance
@@ -2063,7 +2134,14 @@ mod tests {
         let logctx = dev::test_setup_log("test_instance_fetch_all");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
-        let authz_instance = create_test_instance(&datastore, &opctx).await;
+        let (authz_project, _) = create_test_project(&datastore, &opctx).await;
+        let authz_instance = create_test_instance(
+            &datastore,
+            &opctx,
+            &authz_project,
+            "my-great-instance",
+        )
+        .await;
         let snapshot =
             dbg!(datastore.instance_fetch_all(&opctx, &authz_instance).await)
                 .expect("instance fetch must succeed");
@@ -2235,7 +2313,14 @@ mod tests {
         let logctx = dev::test_setup_log("test_instance_set_migration_ids");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
-        let authz_instance = create_test_instance(&datastore, &opctx).await;
+        let (authz_project, _) = create_test_project(&datastore, &opctx).await;
+        let authz_instance = create_test_instance(
+            &datastore,
+            &opctx,
+            &authz_project,
+            "my-great-instance",
+        )
+        .await;
 
         // Create the first VMM in a state where `set_migration_ids` should
         // *fail* (Stopped). We will assert that we cannot set the migration
@@ -2483,6 +2568,142 @@ mod tests {
         .expect("replacing SagaUnwound VMM should work");
         assert_eq!(instance.runtime().migration_id, Some(migration2.id));
         assert_eq!(instance.runtime().dst_propolis_id, Some(vmm3.id));
+
+        // Clean up.
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_instance_and_vmm_list_by_sled_agent() {
+        use std::collections::BTreeSet;
+        // Setup
+        let logctx =
+            dev::test_setup_log("test_instance_and_vmm_list_by_sled_agent");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let (authz_project, _) = create_test_project(&datastore, &opctx).await;
+
+        let mut expected_instances = BTreeSet::new();
+        const INSTANCES_PER_SLED: usize = 6;
+
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+        struct Ids {
+            sled_id: Uuid,
+            vmm_id: Uuid,
+            instance_id: Uuid,
+        }
+        // Make some sleds, and put some instances and VMMs on those sleds.
+        for s in 0..2 {
+            let (sled, updated) = datastore
+                .sled_upsert(sled::test::test_new_sled_update())
+                .await
+                .unwrap();
+            assert!(updated);
+            let sled_id = sled.id();
+            for i in 0..INSTANCES_PER_SLED {
+                // Make sure the instance has a unique name.
+                let instance_name = format!("s{s}i{i}");
+                let authz_instance = create_test_instance(
+                    &datastore,
+                    &opctx,
+                    &authz_project,
+                    &instance_name,
+                )
+                .await;
+                let instance_id = authz_instance.id();
+                let vmm = datastore
+                    .vmm_insert(
+                        &opctx,
+                        Vmm {
+                            id: Uuid::new_v4(),
+                            time_created: Utc::now(),
+                            time_deleted: None,
+                            instance_id,
+                            sled_id,
+                            propolis_ip: "10.1.9.42".parse().unwrap(),
+                            propolis_port: 420.into(),
+                            runtime: VmmRuntimeState {
+                                time_state_updated: Utc::now(),
+                                r#gen: Generation::new(),
+                                state: VmmState::Running,
+                            },
+                        },
+                    )
+                    .await
+                    .expect("test VMM should insert");
+                let vmm_id = vmm.id;
+                let updated = datastore
+                    .instance_update_runtime(
+                        &InstanceUuid::from_untyped_uuid(instance_id),
+                        &InstanceRuntimeState {
+                            time_updated: Utc::now(),
+                            gen: Generation(Generation::new().next()),
+                            nexus_state: InstanceState::Vmm,
+                            propolis_id: Some(vmm_id),
+                            dst_propolis_id: None,
+                            migration_id: None,
+                        },
+                    )
+                    .await
+                    .expect("instance should be updated");
+                assert!(updated, "instance should be updated");
+                expected_instances.insert(Ids { sled_id, vmm_id, instance_id });
+            }
+        }
+
+        // Let's also make some instances that are not on sleds.
+        for i in 0..INSTANCES_PER_SLED {
+            let instance_name = format!("i{i}");
+            let _ = create_test_instance(
+                &datastore,
+                &opctx,
+                &authz_project,
+                &instance_name,
+            )
+            .await;
+        }
+
+        // Okay, now list instances by sled.
+        let mut found_instances = BTreeSet::new();
+        let mut paginator = Paginator::new(
+            // Make sure the batch size is small enough that we will require two
+            // batches to list all the instances on a sled.
+            std::num::NonZeroU32::new(INSTANCES_PER_SLED as u32 / 2).unwrap(),
+        );
+        let mut i = 0;
+        while let Some(p) = paginator.next() {
+            let batch = datastore
+                .instance_and_vmm_list_by_sled_agent(
+                    &opctx,
+                    &p.current_pagparams(),
+                )
+                .await
+                .expect("query should not fail");
+            eprintln!("\nBATCH {i}:");
+            for (sled, instance, vmm, project) in &batch {
+                assert_eq!(project.id(), authz_project.id());
+                let ids = Ids {
+                    sled_id: sled.id(),
+                    vmm_id: vmm.id,
+                    instance_id: instance.id(),
+                };
+                eprintln!("-> {ids:?}");
+                let unseen = found_instances.insert(ids);
+                assert!(unseen, "found {ids:?} twice!")
+            }
+
+            i += 1;
+            paginator =
+                p.found_batch(&batch, &|(sled, _, vmm, _): &(
+                    Sled,
+                    Instance,
+                    Vmm,
+                    Project,
+                )| (sled.id(), vmm.id));
+        }
+
+        assert_eq!(expected_instances, found_instances);
 
         // Clean up.
         db.cleanup().await.unwrap();

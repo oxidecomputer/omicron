@@ -34,6 +34,7 @@ use nexus_client::types::UninitializedSledId;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_saga_recovery::LastPass;
 use nexus_types::deployment::Blueprint;
+use nexus_types::internal_api::background::AbandonedVmmReaperStatus;
 use nexus_types::internal_api::background::LookupRegionPortStatus;
 use nexus_types::internal_api::background::RegionReplacementDriverStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementFinishStatus;
@@ -1231,54 +1232,61 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
             }
         };
     } else if name == "abandoned_vmm_reaper" {
-        #[derive(Deserialize)]
-        struct TaskSuccess {
-            /// total number of abandoned VMMs found
-            found: usize,
-
-            /// number of abandoned VMM records that were deleted
-            vmms_deleted: usize,
-
-            /// number of abandoned VMM records that were already deleted when
-            /// we tried to delete them.
-            vmms_already_deleted: usize,
-
-            /// sled resource reservations that were released
-            sled_reservations_deleted: usize,
-
-            /// number of errors that occurred during the activation
-            error_count: usize,
-
-            /// the last error that occurred during execution.
-            error: Option<String>,
-        }
-        match serde_json::from_value::<TaskSuccess>(details.clone()) {
+        match serde_json::from_value::<AbandonedVmmReaperStatus>(
+            details.clone(),
+        ) {
             Err(error) => eprintln!(
                 "warning: failed to interpret task details: {:?}: {:?}",
                 error, details
             ),
-            Ok(TaskSuccess {
-                found,
+            Ok(AbandonedVmmReaperStatus {
+                vmms_found,
                 vmms_deleted,
                 vmms_already_deleted,
                 sled_reservations_deleted,
-                error_count,
-                error,
+                errors,
             }) => {
-                if let Some(error) = error {
-                    println!("    task did not complete successfully!");
-                    println!("      total errors: {error_count}");
-                    println!("      most recent error: {error}");
+                if !errors.is_empty() {
+                    println!(
+                        "    task did not complete successfully! ({} errors)",
+                        errors.len()
+                    );
+                    for error in errors {
+                        println!("    > {error}");
+                    }
                 }
 
-                println!("    total abandoned VMMs found: {found}");
-                println!("      VMM records deleted: {vmms_deleted}");
+                const VMMS_FOUND: &'static str = "total abandoned VMMs found:";
+                const VMMS_DELETED: &'static str = "  VMM records deleted:";
+                const VMMS_ALREADY_DELETED: &'static str =
+                    "  VMMs already deleted by another Nexus:";
+                const SLED_RESERVATIONS_DELETED: &'static str =
+                    "sled resource reservations deleted:";
+                // To align the number column, figure out the length of the
+                // longest line of text and add one (so that there's a space).
+                //
+                // Yes, I *could* just count the number of characters in each
+                // line myself, but why do something by hand when you could make
+                // the computer do it for you? And, this way, if we change the
+                // text, we won't need to figure it out again.
+                const WIDTH: usize = const_max_len(&[
+                    VMMS_FOUND,
+                    VMMS_DELETED,
+                    VMMS_ALREADY_DELETED,
+                    SLED_RESERVATIONS_DELETED,
+                ]) + 1;
+                const NUM_WIDTH: usize = 3;
+
+                println!("    {VMMS_FOUND:<WIDTH$}{vmms_found:>NUM_WIDTH$}");
                 println!(
-                    "      VMM records already deleted by another Nexus: {}",
-                    vmms_already_deleted,
+                    "    {VMMS_DELETED:<WIDTH$}{vmms_deleted:>NUM_WIDTH$}"
                 );
                 println!(
-                    "    sled resource reservations deleted: {}",
+                    "    {VMMS_ALREADY_DELETED:<WIDTH$}{:>NUM_WIDTH$}",
+                    vmms_already_deleted
+                );
+                println!(
+                    "    {SLED_RESERVATIONS_DELETED:<WIDTH$}{:>NUM_WIDTH$}",
                     sled_reservations_deleted,
                 );
             }
@@ -2643,4 +2651,17 @@ async fn cmd_nexus_sled_expunge_disk(
         .context("expunging disk")?;
     eprintln!("expunged disk {}", args.physical_disk_id);
     Ok(())
+}
+
+const fn const_max_len(strs: &[&str]) -> usize {
+    let mut max = 0;
+    let mut i = 0;
+    while i < strs.len() {
+        let len = strs[i].len();
+        if len > max {
+            max = len;
+        }
+        i += 1;
+    }
+    max
 }

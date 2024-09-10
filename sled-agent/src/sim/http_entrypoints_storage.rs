@@ -282,13 +282,6 @@ async fn region_delete_running_snapshot(
         ));
     }
 
-    if crucible.get_snapshot_for_region(&p.id, &p.name).await.is_none() {
-        return Err(HttpError::for_not_found(
-            None,
-            format!("snapshot {:?} not found", p.name),
-        ));
-    }
-
     crucible.delete_running_snapshot(&p.id, &p.name).await.map_err(|e| {
         HttpError::for_internal_error(format!(
             "running snapshot create failure: {:?}",

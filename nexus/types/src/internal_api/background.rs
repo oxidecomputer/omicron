@@ -53,3 +53,13 @@ pub struct RegionSnapshotReplacementFinishStatus {
     pub records_set_to_done: Vec<String>,
     pub errors: Vec<String>,
 }
+
+/// The status of an `abandoned_vmm_reaper` background task activation.
+#[derive(Serialize, Deserialize, Default, Debug, PartialEq, Eq)]
+pub struct AbandonedVmmReaperStatus {
+    pub vmms_found: usize,
+    pub sled_reservations_deleted: usize,
+    pub vmms_deleted: usize,
+    pub vmms_already_deleted: usize,
+    pub errors: Vec<String>,
+}
