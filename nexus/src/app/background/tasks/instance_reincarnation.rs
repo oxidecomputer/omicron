@@ -662,7 +662,7 @@ mod test {
         assert_eq!(status.query_error, None);
         assert_eq!(status.restart_errors, Vec::new());
 
-        // Advance instance 1 to `Starting` since we are pretending that a start
+        // Advance instance 1 to `Vmm` since we are pretending that a start
         // saga has been started.
         let instance1_state = datastore
             .instance_refetch(&opctx, &authz_instance1)
@@ -673,7 +673,7 @@ mod test {
             .instance_update_runtime(
                 &instance1_id,
                 &InstanceRuntimeState {
-                    nexus_state: InstanceState::Starting,
+                    nexus_state: InstanceState::Vmm,
                     time_updated: Utc::now(),
                     r#gen: Generation(instance1_state.r#gen.next()),
                     ..instance1_state
