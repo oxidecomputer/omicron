@@ -645,7 +645,7 @@ mod test {
         eprintln!("activation: {status:#?}");
 
         assert_eq!(starter.count_reset(), 1);
-        assert_eq!(status.instances_found, 1);
+        assert_eq!(status.instances_found, 2);
         assert_eq!(
             status.instances_reincarnated,
             &[instance2_id.into_untyped_uuid()]
