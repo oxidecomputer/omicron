@@ -3139,9 +3139,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn networking_bgp_announce_set_list(
         rqctx: RequestContext<ApiContext>,
-        query_params: Query<
-            PaginatedByNameOrId<params::OptionalBgpAnnounceSetSelector>,
-        >,
+        query_params: Query<PaginatedByNameOrId>,
     ) -> Result<HttpResponseOk<Vec<BgpAnnounceSet>>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
