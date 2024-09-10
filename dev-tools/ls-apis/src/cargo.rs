@@ -363,4 +363,10 @@ impl DepPath {
         rv.0.push_front(pkgid);
         rv
     }
+
+    /// Returns whether any component of the path contains any of the given
+    /// pkgids
+    pub fn contains_any(&self, pkgids: &BTreeSet<&PackageId>) -> bool {
+        self.0.iter().any(|p| pkgids.contains(p))
+    }
 }

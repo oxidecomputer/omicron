@@ -132,7 +132,7 @@ fn run_adoc(apis: &SystemApis) -> Result<()> {
         for (c, _) in apis.api_consumers(
             &api.client_package_name,
             ApiDependencyFilter::default(),
-        ) {
+        )? {
             println!("* {}", apis.adoc_label(c)?);
         }
 
@@ -148,7 +148,7 @@ fn run_apis(apis: &SystemApis, args: ShowDepsArgs) -> Result<()> {
     for api in metadata.apis() {
         println!("{} (client: {})", api.label, api.client_package_name);
         for (s, path) in
-            apis.api_consumers(&api.client_package_name, args.filter)
+            apis.api_consumers(&api.client_package_name, args.filter)?
         {
             let (repo_name, package_path) = apis.package_label(s)?;
             println!("    consumed by: {} ({}/{})", s, repo_name, package_path);
@@ -165,7 +165,7 @@ fn run_apis(apis: &SystemApis, args: ShowDepsArgs) -> Result<()> {
 
 fn run_deployment_units(apis: &SystemApis, args: DotArgs) -> Result<()> {
     if args.dot {
-        println!("{}", apis.dot_by_unit(args.filter));
+        println!("{}", apis.dot_by_unit(args.filter)?);
     } else {
         let metadata = apis.api_metadata();
         for unit in apis.deployment_units() {
@@ -206,7 +206,7 @@ fn print_server_components<'a>(
                 prefix, api.label, api.client_package_name
             );
         }
-        for (c, path) in apis.component_apis_consumed(s, filter) {
+        for (c, path) in apis.component_apis_consumed(s, filter)? {
             println!("{}    consumes: {}", prefix, c);
             if show_deps {
                 for p in path.nodes() {
@@ -222,7 +222,7 @@ fn print_server_components<'a>(
 
 fn run_servers(apis: &SystemApis, args: DotArgs) -> Result<()> {
     if args.dot {
-        println!("{}", apis.dot_by_server_component(args.filter))
+        println!("{}", apis.dot_by_server_component(args.filter)?)
     } else {
         let metadata = apis.api_metadata();
         print_server_components(

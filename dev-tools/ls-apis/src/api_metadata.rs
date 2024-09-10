@@ -4,11 +4,13 @@
 
 //! Developer-maintained API metadata
 
+use crate::cargo::DepPath;
+use crate::workspaces::Workspaces;
 use crate::ClientPackageName;
 use crate::DeploymentUnitName;
 use crate::ServerComponentName;
 use crate::ServerPackageName;
-use anyhow::bail;
+use anyhow::{bail, Result};
 use serde::Deserialize;
 use std::borrow::Borrow;
 use std::collections::BTreeMap;
@@ -22,6 +24,7 @@ use std::collections::BTreeMap;
 pub struct AllApiMetadata {
     apis: BTreeMap<ClientPackageName, ApiMetadata>,
     deployment_units: BTreeMap<DeploymentUnitName, DeploymentUnitInfo>,
+    dependency_rules: BTreeMap<ClientPackageName, Vec<DependencyFilterRule>>,
 }
 
 impl AllApiMetadata {
@@ -58,6 +61,45 @@ impl AllApiMetadata {
     {
         self.apis.get(pkgname)
     }
+
+    /// Returns how we should filter the given dependency
+    pub(crate) fn evaluate_dependency(
+        &self,
+        workspaces: &Workspaces,
+        client_pkgname: &ClientPackageName,
+        dep_path: &DepPath,
+    ) -> Result<Evaluation> {
+        let Some(rules) = self.dependency_rules.get(client_pkgname) else {
+            return Ok(Evaluation::default());
+        };
+
+        let which_rules: Vec<_> = rules
+            .iter()
+            .filter(|r| {
+                assert_eq!(r.client, *client_pkgname);
+                let pkgids = workspaces.workspace_pkgids(&r.ancestor);
+                dep_path.contains_any(&pkgids)
+            })
+            .collect();
+
+        if which_rules.is_empty() {
+            return Ok(Evaluation::default());
+        }
+
+        if which_rules.len() > 1 {
+            bail!(
+                "client package {:?}: dependency matched multiple filters: {}",
+                client_pkgname,
+                which_rules
+                    .into_iter()
+                    .map(|r| r.ancestor.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
+
+        Ok(which_rules[0].evaluation)
+    }
 }
 
 /// Format of the `api-manifest.toml` file
@@ -69,6 +111,7 @@ impl AllApiMetadata {
 struct RawApiMetadata {
     apis: Vec<ApiMetadata>,
     deployment_units: Vec<DeploymentUnitInfo>,
+    dependency_filter_rules: Vec<DependencyFilterRule>,
 }
 
 impl TryFrom<RawApiMetadata> for AllApiMetadata {
@@ -100,7 +143,22 @@ impl TryFrom<RawApiMetadata> for AllApiMetadata {
             }
         }
 
-        Ok(AllApiMetadata { apis, deployment_units })
+        let mut dependency_rules = BTreeMap::new();
+        for rule in raw.dependency_filter_rules {
+            if !apis.contains_key(&rule.client) {
+                bail!(
+                    "dependency rule references unknown client: {:?}",
+                    rule.client
+                );
+            }
+
+            dependency_rules
+                .entry(rule.client.clone())
+                .or_insert_with(Vec::new)
+                .push(rule);
+        }
+
+        Ok(AllApiMetadata { apis, deployment_units, dependency_rules })
     }
 }
 
@@ -128,4 +186,34 @@ pub struct DeploymentUnitInfo {
     pub label: DeploymentUnitName,
     /// list of Rust packages that are shipped in this unit
     pub packages: Vec<ServerComponentName>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DependencyFilterRule {
+    pub ancestor: String,
+    pub client: ClientPackageName,
+    #[serde(default)]
+    pub evaluation: Evaluation,
+    // XXX-dap should these just be comments?
+    #[allow(dead_code)]
+    pub note: String,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub enum Evaluation {
+    /// This dependency has not been evaluated
+    #[default]
+    Unknown,
+    /// This dependency should be ignored because it's not a real dependency --
+    /// i.e., it's a false positive resulting from our methodology
+    Bogus,
+    /// This dependency should be ignored because it's not used in deployed
+    /// systems
+    NotDeployed,
+    /// This dependency should not be part of the update DAG
+    NonDag,
+    /// This dependency should be part of the update DAG
+    Dag,
 }

@@ -203,3 +203,69 @@ server_package_name = "wicketd-api"
 notes = """
 wicketd-client is only used by wicket, which is deployed in a unit with wicketd.
 """
+
+#############################################################
+# Notes on specific dependencies
+#############################################################
+
+# TODO-dap consider whether the other special cases that are currently hardcoded
+# belong here, too?
+
+# XXX-dap It would be nice to fix this to avoid accidental false negative in the
+# future.
+[[dependency_filter_rules]]
+ancestor = "dns-server"
+client = "dns-service-client"
+evaluation = "bogus"
+note = """
+DNS server depends on itself to provide TransientServer.  Not a true dependency.
+"""
+
+# XXX-dap It would be nice to fix this to avoid accidental false negative in the
+# future.
+[[dependency_filter_rules]]
+ancestor = "wicketd"
+client = "wicketd-client"
+evaluation = "not-deployed"
+note = """
+Wicketd provides a function to refresh the server's config.  This could probably
+move into the client package instead.
+"""
+
+[[dependency_filter_rules]]
+ancestor = "sled-agent-types"
+client = "propolis-client"
+evaluation = "bogus"
+note = """
+sled-agent-types uses propolis-client for types only.
+"""
+
+# XXX-dap It would be nice to fix this to avoid accidental false negative in the
+# future.
+[[dependency_filter_rules]]
+ancestor = "oximeter-collector"
+client = "oximeter-client"
+evaluation = "not-deployed"
+note = """
+Oximeter provides a standalone collector that is not used in deployed systems.
+"""
+
+# XXX-dap It would be nice to fix this to avoid accidental false negative in the
+# future.
+[[dependency_filter_rules]]
+ancestor = "omicron-sled-agent"
+client = "crucible-agent-client"
+evaluation = "bogus"
+note = """
+Sled Agent uses the Crucible Agent client types only in the simulated sled agent.
+"""
+
+[[dependency_filter_rules]]
+ancestor = "oximeter-producer"
+client = "nexus-client"
+evaluation = "non-dag"
+note = """
+All Oximeter producers are Nexus clients.  This is a good candidate for a
+non-DAG dependency because the API is small and stable and the reverse
+directions are often not.
+"""
