@@ -662,6 +662,26 @@ mod test {
         assert_eq!(status.query_error, None);
         assert_eq!(status.restart_errors, Vec::new());
 
+        // Advance instance 1 to `Starting` since we are pretending that a start
+        // saga has been started.
+        let instance1_state = datastore
+            .instance_refetch(&opctx, &authz_instance1)
+            .await
+            .expect("instance 1 must exist")
+            .runtime_state;
+        datastore
+            .instance_update_runtime(
+                &instance1_id,
+                &InstanceRuntimeState {
+                    nexus_state: InstanceState::Starting,
+                    time_updated: Utc::now(),
+                    r#gen: Generation(instance1_state.r#gen.next()),
+                    ..instance1_state
+                },
+            )
+            .await
+            .expect("instance 1 state should be updated");
+
         // Wait out the cooldown period, and give it another shot. Now, instance
         // 1 should be restarted again.
         tokio::time::sleep(COOLDOWN + Duration::from_secs(1)).await;
