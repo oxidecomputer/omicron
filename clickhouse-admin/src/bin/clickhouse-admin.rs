@@ -7,7 +7,7 @@
 use anyhow::anyhow;
 use camino::Utf8PathBuf;
 use clap::Parser;
-use omicron_clickhouse_admin::{Clickward, Config};
+use omicron_clickhouse_admin::{ClickhouseCli, Clickward, Config};
 use omicron_common::cmd::fatal;
 use omicron_common::cmd::CmdError;
 use std::net::{SocketAddr, SocketAddrV6};
@@ -27,6 +27,14 @@ enum Args {
         /// Path to the server configuration file
         #[clap(long, short, action)]
         config: Utf8PathBuf,
+
+        /// Address on which the clickhouse server or keeper is listening on
+        #[clap(long, short = 'l', action)]
+        listen_address: SocketAddrV6,
+
+        /// Path to the clickhouse binary
+        #[clap(long, short, action)]
+        binary_path: Utf8PathBuf,
     },
 }
 
@@ -41,17 +49,20 @@ async fn main_impl() -> Result<(), CmdError> {
     let args = Args::parse();
 
     match args {
-        Args::Run { http_address, config } => {
+        Args::Run { http_address, config, listen_address, binary_path } => {
             let mut config = Config::from_file(&config)
                 .map_err(|err| CmdError::Failure(anyhow!(err)))?;
             config.dropshot.bind_address = SocketAddr::V6(http_address);
-
             let clickward = Clickward::new();
+            let keeper_client = ClickhouseCli::new(binary_path, listen_address);
 
-            let server =
-                omicron_clickhouse_admin::start_server(clickward, config)
-                    .await
-                    .map_err(|err| CmdError::Failure(anyhow!(err)))?;
+            let server = omicron_clickhouse_admin::start_server(
+                clickward,
+                keeper_client,
+                config,
+            )
+            .await
+            .map_err(|err| CmdError::Failure(anyhow!(err)))?;
             server.await.map_err(|err| {
                 CmdError::Failure(anyhow!(
                     "server failed after starting: {err}"

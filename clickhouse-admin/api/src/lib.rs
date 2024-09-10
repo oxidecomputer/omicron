@@ -4,7 +4,7 @@
 
 use clickhouse_admin_types::config::{KeeperConfig, ReplicaConfig};
 use clickhouse_admin_types::{KeeperSettings, ServerSettings};
-use dropshot::{HttpError, HttpResponseCreated, RequestContext, TypedBody};
+use dropshot::{HttpError, HttpResponseCreated, HttpResponseOk, RequestContext, TypedBody};
 use omicron_common::api::external::Generation;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -50,4 +50,16 @@ pub trait ClickhouseAdminApi {
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<KeeperConfigurableSettings>,
     ) -> Result<HttpResponseCreated<KeeperConfig>, HttpError>;
+
+    /// Retrieve a logically grouped information file from a keeper node.
+    /// This information is used internally by ZooKeeper to manage snapshots
+    /// and logs for consistency and recovery.
+    #[endpoint {
+        method = GET,
+        path = "/keeper/lgif",
+    }]
+    async fn lgif(
+        rqctx: RequestContext<Self::Context>,
+        // TODO: Actually return something useful
+    ) -> Result<HttpResponseOk<String>, HttpError>;
 }

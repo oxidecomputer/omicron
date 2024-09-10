@@ -11,11 +11,13 @@ use std::error::Error;
 use std::io;
 use std::sync::Arc;
 
+mod clickhouse_cli;
 mod clickward;
 mod config;
 mod context;
 mod http_entrypoints;
 
+pub use clickhouse_cli::ClickhouseCli;
 pub use clickward::Clickward;
 pub use config::Config;
 
@@ -34,6 +36,7 @@ pub type Server = dropshot::HttpServer<Arc<ServerContext>>;
 /// Start the dropshot server
 pub async fn start_server(
     clickward: Clickward,
+    keeper_client: ClickhouseCli,
     server_config: Config,
 ) -> Result<Server, StartError> {
     let (drain, registration) = slog_dtrace::with_drain(
@@ -56,6 +59,7 @@ pub async fn start_server(
 
     let context = ServerContext::new(
         clickward,
+        keeper_client,
         log.new(slog::o!("component" => "ServerContext")),
     );
     let http_server_starter = dropshot::HttpServerStarter::new(

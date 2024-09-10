@@ -128,6 +128,12 @@ const IPV6_UNSPECIFIED: IpAddr = IpAddr::V6(Ipv6Addr::UNSPECIFIED);
 
 const COCKROACH: &str = "/opt/oxide/cockroachdb/bin/cockroach";
 
+const CLICKHOUSE_SERVER_BINARY: &str =
+    "/opt/oxide//opt/oxide/clickhouse_server/clickhouse";
+const CLICKHOUSE_KEEPER_BINARY: &str =
+    "/opt/oxide//opt/oxide/clickhouse_keeper/clickhouse";
+const CLICKHOUSE_BINARY: &str = "/opt/oxide//opt/oxide/clickhouse/clickhouse";
+
 pub const SWITCH_ZONE_BASEBOARD_FILE: &str = "/opt/oxide/baseboard.json";
 
 #[derive(thiserror::Error, Debug, slog_error_chain::SlogInlineError)]
@@ -1579,12 +1585,21 @@ impl ServiceManager {
                 )
                 .to_string();
 
+                let ch_address = SocketAddr::new(
+                    IpAddr::V6(listen_addr),
+                    CLICKHOUSE_HTTP_PORT,
+                )
+                .to_string();
+
                 let clickhouse_admin_config =
-                    PropertyGroupBuilder::new("config").add_property(
-                        "http_address",
-                        "astring",
-                        admin_address,
-                    );
+                    PropertyGroupBuilder::new("config")
+                        .add_property("http_address", "astring", admin_address)
+                        .add_property("ch_address", "astring", ch_address)
+                        .add_property(
+                            "ch_binary",
+                            "astring",
+                            CLICKHOUSE_BINARY,
+                        );
                 let clickhouse_admin_service =
                     ServiceBuilder::new("oxide/clickhouse-admin").add_instance(
                         ServiceInstanceBuilder::new("default")
@@ -1652,12 +1667,21 @@ impl ServiceManager {
                 )
                 .to_string();
 
+                let ch_address = SocketAddr::new(
+                    IpAddr::V6(listen_addr),
+                    CLICKHOUSE_HTTP_PORT,
+                )
+                .to_string();
+
                 let clickhouse_admin_config =
-                    PropertyGroupBuilder::new("config").add_property(
-                        "http_address",
-                        "astring",
-                        admin_address,
-                    );
+                    PropertyGroupBuilder::new("config")
+                        .add_property("http_address", "astring", admin_address)
+                        .add_property("ch_address", "astring", ch_address)
+                        .add_property(
+                            "ch_binary",
+                            "astring",
+                            CLICKHOUSE_SERVER_BINARY,
+                        );
                 let clickhouse_admin_service =
                     ServiceBuilder::new("oxide/clickhouse-admin").add_instance(
                         ServiceInstanceBuilder::new("default")
@@ -1728,12 +1752,21 @@ impl ServiceManager {
                 )
                 .to_string();
 
+                let ch_address = SocketAddr::new(
+                    IpAddr::V6(listen_addr),
+                    CLICKHOUSE_KEEPER_TCP_PORT,
+                )
+                .to_string();
+
                 let clickhouse_admin_config =
-                    PropertyGroupBuilder::new("config").add_property(
-                        "http_address",
-                        "astring",
-                        admin_address,
-                    );
+                    PropertyGroupBuilder::new("config")
+                        .add_property("http_address", "astring", admin_address)
+                        .add_property("ch_address", "astring", ch_address)
+                        .add_property(
+                            "ch_binary",
+                            "astring",
+                            CLICKHOUSE_KEEPER_BINARY,
+                        );
                 let clickhouse_admin_service =
                     ServiceBuilder::new("oxide/clickhouse-admin").add_instance(
                         ServiceInstanceBuilder::new("default")
