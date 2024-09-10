@@ -292,7 +292,13 @@ impl SystemApis {
     pub fn adoc_label(&self, pkgname: &str) -> Result<String> {
         let (workspace, _) = self.workspaces.find_package_workspace(pkgname)?;
         let pkgpath = workspace.find_workspace_package_path(pkgname)?;
-        Ok(format!("{}:{}", workspace.name(), pkgpath))
+        Ok(format!(
+            "https://github.com/oxidecomputer/{}/tree/main/{}[{}:{}]",
+            workspace.name(),
+            pkgpath,
+            workspace.name(),
+            pkgpath
+        ))
     }
 
     /// Returns a string that can be passed to `dot(1)` to render a graph of
