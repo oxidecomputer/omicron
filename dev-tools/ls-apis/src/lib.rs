@@ -10,6 +10,7 @@ mod system_apis;
 mod workspaces;
 
 pub use api_metadata::AllApiMetadata;
+pub use system_apis::ApiDependencyFilter;
 pub use system_apis::SystemApis;
 
 use anyhow::{Context, Result};

@@ -298,6 +298,19 @@ impl Workspace {
 
         Ok(())
     }
+
+    pub fn pkgids<'a>(
+        &'a self,
+        pkgname: &'a str,
+    ) -> impl Iterator<Item = &'a PackageId> + 'a {
+        self.packages_by_id.iter().filter_map(move |(pkgid, pkg)| {
+            if pkg.name == pkgname {
+                Some(pkgid)
+            } else {
+                None
+            }
+        })
+    }
 }
 
 /// Given a path to a `Cargo.toml` file for a package, return the parent

@@ -19,6 +19,7 @@ use crate::ServerPackageName;
 use anyhow::{anyhow, bail, Context, Result};
 use camino::Utf8PathBuf;
 use cargo_metadata::Package;
+use parse_display::{Display, FromStr};
 use petgraph::dot::Dot;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -35,13 +36,17 @@ pub struct SystemApis {
 
     /// maps a server component to the list of APIs it uses (using the client
     /// package name as a primary key for the API)
-    apis_consumed:
-        BTreeMap<ServerComponentName, BTreeMap<ClientPackageName, DepPath>>,
+    apis_consumed: BTreeMap<
+        ServerComponentName,
+        BTreeMap<ClientPackageName, Vec<DepPath>>,
+    >,
     /// maps an API name (using the client package name as primary key) to the
     /// list of server components that use it
     /// (reverse of `apis_consumed`)
-    api_consumers:
-        BTreeMap<ClientPackageName, BTreeMap<ServerComponentName, DepPath>>,
+    api_consumers: BTreeMap<
+        ClientPackageName,
+        BTreeMap<ServerComponentName, Vec<DepPath>>,
+    >,
 
     /// maps an API name to the server component that exposes that API
     api_producers: BTreeMap<ClientPackageName, (ServerComponentName, DepPath)>,
@@ -189,11 +194,27 @@ impl SystemApis {
     pub fn component_apis_consumed(
         &self,
         server_component: &ServerComponentName,
+        filter: ApiDependencyFilter,
     ) -> Box<dyn Iterator<Item = (&ClientPackageName, &DepPath)> + '_> {
-        match self.apis_consumed.get(server_component) {
-            Some(l) => Box::new(l.iter()),
-            None => Box::new(std::iter::empty()),
-        }
+        let Some(apis_consumed) = self.apis_consumed.get(server_component)
+        else {
+            return Box::new(std::iter::empty());
+        };
+
+        Box::new(apis_consumed.iter().filter_map(
+            move |(client_pkgname, dep_paths)| {
+                dep_paths
+                    .iter()
+                    .find(|dep_path| {
+                        filter.should_include(
+                            &self.workspaces,
+                            client_pkgname,
+                            dep_path,
+                        )
+                    })
+                    .map(|dep_path| ((client_pkgname, dep_path)))
+            },
+        ))
     }
 
     /// Given the client package name for an API, return the name of the server
@@ -214,11 +235,27 @@ impl SystemApis {
     pub fn api_consumers(
         &self,
         client: &ClientPackageName,
+        filter: ApiDependencyFilter,
     ) -> Box<dyn Iterator<Item = (&ServerComponentName, &DepPath)> + '_> {
-        match self.api_consumers.get(client) {
-            Some(l) => Box::new(l.iter()),
-            None => Box::new(std::iter::empty()),
-        }
+        let Some(api_consumers) = self.api_consumers.get(client) else {
+            return Box::new(std::iter::empty());
+        };
+
+        let client = client.clone();
+        Box::new(api_consumers.iter().filter_map(
+            move |(server_pkgname, dep_paths)| {
+                dep_paths
+                    .iter()
+                    .find(|dep_path| {
+                        filter.should_include(
+                            &self.workspaces,
+                            &client,
+                            dep_path,
+                        )
+                    })
+                    .map(|dep_path| ((server_pkgname, dep_path)))
+            },
+        ))
     }
 
     /// Given the name of any package defined in one of our workspaces, return
@@ -245,7 +282,7 @@ impl SystemApis {
 
     /// Returns a string that can be passed to `dot(1)` to render a graph of
     /// API dependencies among deployment units
-    pub fn dot_by_unit(&self) -> String {
+    pub fn dot_by_unit(&self, filter: ApiDependencyFilter) -> String {
         let mut graph = petgraph::graph::Graph::new();
         let nodes: BTreeMap<_, _> = self
             .deployment_units()
@@ -260,7 +297,8 @@ impl SystemApis {
                 self.deployment_unit_servers(deployment_unit).unwrap();
             let my_node = nodes.get(deployment_unit).unwrap();
             for server_pkg in server_components {
-                for (client_pkg, _) in self.component_apis_consumed(server_pkg)
+                for (client_pkg, _) in
+                    self.component_apis_consumed(server_pkg, filter)
                 {
                     let other_component =
                         self.api_producer(client_pkg).unwrap();
@@ -279,7 +317,10 @@ impl SystemApis {
 
     /// Returns a string that can be passed to `dot(1)` to render a graph of
     /// API dependencies among server components
-    pub fn dot_by_server_component(&self) -> String {
+    pub fn dot_by_server_component(
+        &self,
+        filter: ApiDependencyFilter,
+    ) -> String {
         let mut graph = petgraph::graph::Graph::new();
         let nodes: BTreeMap<_, _> = self
             .server_component_units
@@ -291,10 +332,12 @@ impl SystemApis {
 
         // Now walk through the server components, walk through each one of the
         // clients used by those, and create a corresponding edge.
-        for (server_component, consumed_apis) in &self.apis_consumed {
+        for server_component in self.apis_consumed.keys() {
             // unwrap(): we created a node for each server component above.
             let my_node = nodes.get(server_component).unwrap();
-            for client_pkg in consumed_apis.keys() {
+            let consumed_apis =
+                self.component_apis_consumed(server_component, filter);
+            for (client_pkg, _) in consumed_apis {
                 let other_component = self.api_producer(client_pkg).unwrap();
                 let other_node = nodes.get(other_component).unwrap();
                 graph.add_edge(*my_node, *other_node, client_pkg.clone());
@@ -428,10 +471,14 @@ struct ClientDependenciesTracker<'a> {
     api_metadata: &'a AllApiMetadata,
 
     // outputs (structures that we're building up)
-    apis_consumed:
-        BTreeMap<ServerComponentName, BTreeMap<ClientPackageName, DepPath>>,
-    api_consumers:
-        BTreeMap<ClientPackageName, BTreeMap<ServerComponentName, DepPath>>,
+    apis_consumed: BTreeMap<
+        ServerComponentName,
+        BTreeMap<ClientPackageName, Vec<DepPath>>,
+    >,
+    api_consumers: BTreeMap<
+        ClientPackageName,
+        BTreeMap<ServerComponentName, Vec<DepPath>>,
+    >,
 }
 
 impl<'a> ClientDependenciesTracker<'a> {
@@ -464,11 +511,15 @@ impl<'a> ClientDependenciesTracker<'a> {
         self.api_consumers
             .entry(client_pkgname.clone())
             .or_insert_with(BTreeMap::new)
-            .insert(server_pkgname.clone(), dep_path.clone());
+            .entry(server_pkgname.clone())
+            .or_insert_with(Vec::new)
+            .push(dep_path.clone());
         self.apis_consumed
             .entry(server_pkgname.clone())
             .or_insert_with(BTreeMap::new)
-            .insert(client_pkgname, dep_path.clone());
+            .entry(client_pkgname)
+            .or_insert_with(Vec::new)
+            .push(dep_path.clone());
     }
 }
 
@@ -519,17 +570,43 @@ fn ignore_dependency(
         return true;
     }
 
-    // TODO
-    // This one's debatable.  Everything with an Oximeter producer talks to
-    // Nexus.  But let's ignore those for now.  Maybe we could improve this by
-    // creating a separate API inside Nexus for this?
-    if parent_name == "oximeter-producer" && package_name == "nexus-client" {
-        eprintln!(
-            "warning: ignoring legit dependency from
-             oximeter-producer -> nexus_client"
-        );
-        return true;
-    }
-
     false
+}
+
+/// Specifies which API dependencies to include vs. ignore when iterating
+/// dependencies
+#[derive(Clone, Copy, Debug, Default, Display, FromStr)]
+#[display(style = "kebab-case")]
+pub enum ApiDependencyFilter {
+    /// Include all dependencies found from Cargo package metadata
+    All,
+
+    /// Exclude dependencies on the Nexus internal API that only come in by
+    /// virtue of a component being an Oximeter producer
+    #[default]
+    IgnoreOximeterProducer,
+}
+
+impl ApiDependencyFilter {
+    fn should_include(
+        &self,
+        workspaces: &Workspaces,
+        client_pkgname: &ClientPackageName,
+        dep_path: &DepPath,
+    ) -> bool {
+        match self {
+            ApiDependencyFilter::All => true,
+            ApiDependencyFilter::IgnoreOximeterProducer => {
+                let oximeter_pkgids =
+                    workspaces.workspace_pkgids("oximeter-producer");
+                assert!(
+                    !oximeter_pkgids.is_empty(),
+                    "expected at least one workspace to contain \
+                     'oximeter-producer'"
+                );
+                **client_pkgname != "nexus-client"
+                    || !oximeter_pkgids.contains(dep_path.bottom())
+            }
+        }
+    }
 }

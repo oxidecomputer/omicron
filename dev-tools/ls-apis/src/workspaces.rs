@@ -9,6 +9,7 @@ use crate::cargo::Workspace;
 use anyhow::{anyhow, ensure, Result};
 use camino::Utf8Path;
 use cargo_metadata::Package;
+use cargo_metadata::PackageId;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
@@ -142,5 +143,14 @@ impl Workspaces {
                 .join(", ")
         );
         Ok(found_in_workspaces[0])
+    }
+
+    /// Returns the set of distinct pkgids for package "pkg" among all
+    /// workspaces.
+    pub fn workspace_pkgids<'a>(
+        &'a self,
+        pkgname: &'a str,
+    ) -> BTreeSet<&'a PackageId> {
+        self.workspaces.values().flat_map(move |w| w.pkgids(pkgname)).collect()
     }
 }

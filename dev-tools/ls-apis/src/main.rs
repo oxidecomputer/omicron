@@ -19,6 +19,7 @@
 //     names into links
 // - Find The DAG
 // - Take a pass through everything: document, and rethink abstractions a little
+// - Have the tool manage the git checkouts
 //
 // Some specific notes:
 // - clickhouse-admin has no client yet
@@ -27,7 +28,8 @@ use anyhow::{Context, Result};
 use camino::Utf8PathBuf;
 use clap::{Args, Parser, Subcommand};
 use omicron_ls_apis::{
-    AllApiMetadata, LoadArgs, ServerComponentName, SystemApis,
+    AllApiMetadata, ApiDependencyFilter, LoadArgs, ServerComponentName,
+    SystemApis,
 };
 
 #[derive(Parser)]
@@ -66,6 +68,15 @@ pub struct ShowDepsArgs {
     /// Show the Rust dependency path resulting in the API dependency
     #[arg(long)]
     show_deps: bool,
+
+    /// Show only API dependencies matching the filter:
+    ///
+    /// - `all`: all dependencies
+    ///
+    /// - `ignore-oximeter-producer`: ignore dependencies on nexus-internal-api
+    ///    that arise only because something is an Oximeter producer
+    #[arg(long, default_value_t)]
+    filter: ApiDependencyFilter,
 }
 
 #[derive(Args)]
@@ -76,6 +87,15 @@ pub struct DotArgs {
     /// Show the Rust dependency path resulting in the API dependency
     #[arg(long)]
     show_deps: bool,
+
+    /// Show only API dependencies matching the filter:
+    ///
+    /// - `all`: all dependencies
+    /// - `ignore-oximeter-producer` (default): ignore dependencies on
+    ///    nexus-internal-api that arise only because something is an Oximeter
+    ///    producer
+    #[arg(long, default_value_t)]
+    filter: ApiDependencyFilter,
 }
 
 fn main() -> Result<()> {
@@ -109,7 +129,10 @@ fn run_adoc(apis: &SystemApis) -> Result<()> {
         println!("|{}", apis.adoc_label(&api.client_package_name)?);
         println!("|");
 
-        for (c, _) in apis.api_consumers(&api.client_package_name) {
+        for (c, _) in apis.api_consumers(
+            &api.client_package_name,
+            ApiDependencyFilter::default(),
+        ) {
             println!("* {}", apis.adoc_label(c)?);
         }
 
@@ -124,7 +147,9 @@ fn run_apis(apis: &SystemApis, args: ShowDepsArgs) -> Result<()> {
     let metadata = apis.api_metadata();
     for api in metadata.apis() {
         println!("{} (client: {})", api.label, api.client_package_name);
-        for (s, path) in apis.api_consumers(&api.client_package_name) {
+        for (s, path) in
+            apis.api_consumers(&api.client_package_name, args.filter)
+        {
             let (repo_name, package_path) = apis.package_label(s)?;
             println!("    consumed by: {} ({}/{})", s, repo_name, package_path);
             if args.show_deps {
@@ -140,7 +165,7 @@ fn run_apis(apis: &SystemApis, args: ShowDepsArgs) -> Result<()> {
 
 fn run_deployment_units(apis: &SystemApis, args: DotArgs) -> Result<()> {
     if args.dot {
-        println!("{}", apis.dot_by_unit());
+        println!("{}", apis.dot_by_unit(args.filter));
     } else {
         let metadata = apis.api_metadata();
         for unit in apis.deployment_units() {
@@ -152,6 +177,7 @@ fn run_deployment_units(apis: &SystemApis, args: DotArgs) -> Result<()> {
                 server_components,
                 "    ",
                 args.show_deps,
+                args.filter,
             )?;
             println!("");
         }
@@ -166,6 +192,7 @@ fn print_server_components<'a>(
     server_components: impl IntoIterator<Item = &'a ServerComponentName>,
     prefix: &str,
     show_deps: bool,
+    filter: ApiDependencyFilter,
 ) -> Result<()> {
     for s in server_components.into_iter() {
         let (repo_name, pkg_path) = apis.package_label(s)?;
@@ -179,7 +206,7 @@ fn print_server_components<'a>(
                 prefix, api.label, api.client_package_name
             );
         }
-        for (c, path) in apis.component_apis_consumed(s) {
+        for (c, path) in apis.component_apis_consumed(s, filter) {
             println!("{}    consumes: {}", prefix, c);
             if show_deps {
                 for p in path.nodes() {
@@ -195,7 +222,7 @@ fn print_server_components<'a>(
 
 fn run_servers(apis: &SystemApis, args: DotArgs) -> Result<()> {
     if args.dot {
-        println!("{}", apis.dot_by_server_component())
+        println!("{}", apis.dot_by_server_component(args.filter))
     } else {
         let metadata = apis.api_metadata();
         print_server_components(
@@ -204,6 +231,7 @@ fn run_servers(apis: &SystemApis, args: DotArgs) -> Result<()> {
             metadata.server_components(),
             "",
             args.show_deps,
+            args.filter,
         )?;
     }
     Ok(())
