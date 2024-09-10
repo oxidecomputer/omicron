@@ -26,6 +26,7 @@ packages = [
     "dpd",
     "mgd",
     "omicron-gateway",
+    "tfportd",
     "wicketd",
 ]
 
