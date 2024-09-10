@@ -8,6 +8,7 @@
 use crate::api_metadata::AllApiMetadata;
 use crate::api_metadata::ApiMetadata;
 use crate::cargo::DepPath;
+use crate::cargo::Workspace;
 use crate::parse_toml_file;
 use crate::workspaces::Workspaces;
 use crate::ClientPackageName;
@@ -25,22 +26,35 @@ use std::collections::BTreeSet;
 /// Query information about the Dropshot/OpenAPI/Progenitor-based APIs within
 /// the Oxide system
 pub struct SystemApis {
-    server_component_units: BTreeMap<ServerComponentName, DeploymentUnitName>,
+    /// maps a deployment unit to its list of service components
     unit_server_components:
-        BTreeMap<DeploymentUnitName, BTreeMap<ServerComponentName, DepPath>>,
-    deployment_units: BTreeSet<DeploymentUnitName>,
+        BTreeMap<DeploymentUnitName, BTreeSet<ServerComponentName>>,
+    /// maps a server component to the deployment unit that it's part of
+    /// (reverse of `unit_server_components`)
+    server_component_units: BTreeMap<ServerComponentName, DeploymentUnitName>,
+
+    /// maps a server component to the list of APIs it uses (using the client
+    /// package name as a primary key for the API)
     apis_consumed:
         BTreeMap<ServerComponentName, BTreeMap<ClientPackageName, DepPath>>,
+    /// maps an API name (using the client package name as primary key) to the
+    /// list of server components that use it
+    /// (reverse of `apis_consumed`)
     api_consumers:
         BTreeMap<ClientPackageName, BTreeMap<ServerComponentName, DepPath>>,
+
+    /// maps an API name to the server component that exposes that API
     api_producers: BTreeMap<ClientPackageName, (ServerComponentName, DepPath)>,
+
+    /// source of developer-maintained API metadata
     api_metadata: AllApiMetadata,
+    /// source of Cargo package metadata
     workspaces: Workspaces,
 }
 
 impl SystemApis {
-    /// Load information about APIs in the system based on both
-    /// developer-maintained metadata and Cargo-provided metadata
+    /// Load information about APIs in the system based on both developer-
+    /// maintained metadata and Cargo-provided metadata
     pub fn load(args: LoadArgs) -> Result<SystemApis> {
         // Load the API manifest.
         let api_metadata: AllApiMetadata =
@@ -61,211 +75,65 @@ impl SystemApis {
             .map(|api| (api.server_package_name.clone(), api))
             .collect();
 
-        // Compute the mapping from deployment units to the set of API server
-        // packages that are inside each unit.  We do this by walking the
-        // dependencies of each of the deployment units' packages.
-        let mut deployment_units = BTreeSet::new();
-        let mut server_component_units = BTreeMap::new();
-        let mut unit_server_components = BTreeMap::new();
-        let mut api_producers = BTreeMap::new();
-        let mut errors = Vec::new();
-
+        // Walk the deployment units, then walk each one's list of packages, and
+        // then walk all of its dependencies.  Along the way, record whenever we
+        // find a package whose name matches a known server package.  If we find
+        // this, we've found which deployment unit (and which top-level package)
+        // contains that server.  The result of this process is a set of data
+        // structures that allow us to look up the components in a deployment
+        // unit, the deployment unit for any component, the servers in each
+        // component, etc.
+        let mut tracker = ServerComponentsTracker::new(&server_packages);
         for (deployment_unit, dunit_info) in api_metadata.deployment_units() {
-            deployment_units.insert(deployment_unit.clone());
-            let mut servers_found = BTreeMap::new();
-
-            let mut found_api_producer =
-                |api: &ApiMetadata,
-                 server_pkgname: ServerComponentName,
-                 dep_path: &DepPath| {
-                    // TODO
-                    // Also debatable: dns-server is used by both the
-                    // dns-server component *and* omicron-sled-agent's
-                    // simulated sled agent.  This program does not support
-                    // that.  But we don't care about the simulated sled
-                    // agent, either, so just ignore it.
-                    if *server_pkgname == "omicron-sled-agent"
-                        && *api.client_package_name == "dns-service-client"
-                    {
-                        eprintln!(
-                            "warning: ignoring legit dependency from \
-                             omicron-sled-agent -> dns-server",
-                        );
-                        return;
-                    }
-
-                    if let Some((previous, _)) = api_producers.insert(
-                        api.client_package_name.clone(),
-                        (server_pkgname.clone(), dep_path.clone()),
-                    ) {
-                        errors.push(anyhow!(
-                            "API for client {} appears to be \
-                                 exported by multiple components: at \
-                                 least {} and {} ({:?})",
-                            api.client_package_name,
-                            previous,
-                            server_pkgname,
-                            dep_path
-                        ));
-                    }
-                };
-
             for dunit_pkg in &dunit_info.packages {
+                tracker.found_deployment_unit_package(
+                    deployment_unit,
+                    dunit_pkg,
+                )?;
                 let (workspace, server_pkg) =
                     workspaces.find_package_workspace(dunit_pkg)?;
-                let server_component_name =
-                    ServerComponentName::from(dunit_pkg.to_string());
-                let self_dep_path = DepPath::for_pkg(server_pkg.id.clone());
-                if let Some(previous) = servers_found.insert(
-                    server_component_name.clone(),
-                    self_dep_path.clone(),
-                ) {
-                    bail!(
-                        "deployment unit {}: package {} appears twice \
-                         in this deployment unit (at least: {:?} and {:?})",
-                        deployment_unit,
-                        dunit_pkg,
-                        self_dep_path,
-                        previous,
-                    );
-                }
+                let dep_path = DepPath::for_pkg(server_pkg.id.clone());
+                tracker.found_package(dunit_pkg, dunit_pkg, &dep_path);
 
-                // In some cases, the server API package is exactly the same as
-                // one of the deployment unit packages.
-                let server_pkgname =
-                    ServerPackageName::from(server_pkg.name.clone());
-                if let Some(api) = server_packages.get(&server_pkgname) {
-                    found_api_producer(api, dunit_pkg.clone(), &self_dep_path);
-                }
-
-                // In other cases, the deployment unit package depends (possibly
-                // indirectly) on the API package.
                 workspace.walk_required_deps_recursively(
                     server_pkg,
                     &mut |p: &Package, dep_path: &DepPath| {
-                        let Some(api) = server_packages.get(&p.name) else {
-                            return;
-                        };
-
-                        found_api_producer(api, dunit_pkg.clone(), dep_path);
+                        tracker.found_package(dunit_pkg, &p.name, dep_path);
                     },
                 )?;
             }
-
-            if !errors.is_empty() {
-                for e in errors {
-                    eprintln!("error: {:#}", e);
-                }
-
-                bail!("found at least one API exported by multiple servers");
-            }
-
-            for (server_component, _) in &servers_found {
-                if let Some(previous) = server_component_units
-                    .insert(server_component.clone(), deployment_unit.clone())
-                {
-                    bail!(
-                        "server component {:?} found in multiple deployment \
-                        units (at least {} and {})",
-                        server_component,
-                        deployment_unit,
-                        previous
-                    );
-                }
-            }
-
-            assert!(unit_server_components
-                .insert(deployment_unit.clone(), servers_found)
-                .is_none());
         }
 
-        // For each server component, determine which client APIs it depends on
-        // by walking its dependencies.
-        let mut apis_consumed = BTreeMap::new();
-        let mut api_consumers = BTreeMap::new();
+        if !tracker.errors.is_empty() {
+            for e in tracker.errors {
+                eprintln!("error: {:#}", e);
+            }
+
+            bail!("found at least one API exported by multiple servers");
+        }
+
+        let (server_component_units, unit_server_components, api_producers) = (
+            tracker.server_component_units,
+            tracker.unit_server_components,
+            tracker.api_producers,
+        );
+
+        // Now that we've figured out what servers are where, walk dependencies
+        // of each server component and assemble structures to find which APIs
+        // are produced and consumed by which components.
+        let mut deps_tracker = ClientDependenciesTracker::new(&api_metadata);
         for server_pkgname in server_component_units.keys() {
             let (workspace, pkg) =
                 workspaces.find_package_workspace(server_pkgname)?;
-            let mut clients_used: BTreeMap<ClientPackageName, DepPath> =
-                BTreeMap::new();
             workspace
                 .walk_required_deps_recursively(
                     pkg,
                     &mut |p: &Package, dep_path: &DepPath| {
-                        // unwrap(): the workspace must know about each of these
-                        // packages.
-                        let parent_id = dep_path.bottom();
-                        let parent =
-                            workspace.find_pkg_by_id(parent_id).unwrap();
-
-                        // TODO
-                        // omicron_common depends on mg-admin-client solely to
-                        // impl some `From` conversions.  That makes it look
-                        // like just about everything depends on
-                        // mg-admin-client, which isn't true.  We should
-                        // consider reversing this, since most clients put those
-                        // conversions into the client rather than
-                        // omicron_common.  But for now, let's just ignore this
-                        // particular dependency.
-                        if p.name == "mg-admin-client"
-                            && parent.name == "omicron-common"
-                        {
-                            return;
-                        }
-
-                        // TODO internal-dns depends on dns-service-client to use
-                        // its types.  They're only used when *configuring* DNS,
-                        // which is only done in a couple of components.  But
-                        // many components use internal-dns to *read* DNS.  So
-                        // like above, this makes it look like everything uses
-                        // the DNS server API, but that's not true.  We should
-                        // consider splitting this crate in two.  But for now,
-                        // just ignore the specific dependency from internal-dns
-                        // to dns-service-client.  If a consumer actually calls
-                        // the DNS server, it will have a separate dependency.
-                        if p.name == "dns-service-client"
-                            && (parent.name == "internal-dns")
-                        {
-                            return;
-                        }
-
-                        // TODO nexus-types depends on dns-service-client and
-                        // gateway-client for defining some types, but again,
-                        // this doesn't mean that somebody using nexus-types is
-                        // actually calling out to these services.  If they
-                        // were, they'd need to have some other dependency on
-                        // them.
-                        if parent.name == "nexus-types"
-                            && (p.name == "dns-service-client"
-                                || p.name == "gateway-client")
-                        {
-                            return;
-                        }
-
-                        // TODO
-                        // This one's debatable.  Everything with an Oximeter
-                        // producer talks to Nexus.  But let's ignore those for
-                        // now.  Maybe we could improve this by creating a
-                        // separate API inside Nexus for this?
-                        if parent.name == "oximeter-producer"
-                            && p.name == "nexus-client"
-                        {
-                            eprintln!(
-                                "warning: ignoring legit dependency from \
-                                 oximeter-producer -> nexus_client"
-                            );
-                            return;
-                        }
-
-                        if api_metadata
-                            .client_pkgname_lookup(&ClientPackageName::from(
-                                p.name.to_owned(),
-                            ))
-                            .is_some()
-                        {
-                            clients_used.insert(
-                                p.name.clone().into(),
-                                dep_path.clone(),
+                        if !ignore_dependency(workspace, p, dep_path) {
+                            deps_tracker.found_dependency(
+                                server_pkgname,
+                                &p.name,
+                                dep_path,
                             );
                         }
                     },
@@ -277,20 +145,13 @@ impl SystemApis {
                         server_pkgname
                     )
                 })?;
-
-            for (client_name, dep_path) in &clients_used {
-                api_consumers
-                    .entry(client_name.clone())
-                    .or_insert_with(BTreeMap::new)
-                    .insert(server_pkgname.clone(), dep_path.clone());
-            }
-
-            apis_consumed.insert(server_pkgname.clone(), clients_used);
         }
+
+        let (apis_consumed, api_consumers) =
+            (deps_tracker.apis_consumed, deps_tracker.api_consumers);
 
         Ok(SystemApis {
             server_component_units,
-            deployment_units,
             unit_server_components,
             apis_consumed,
             api_consumers,
@@ -316,7 +177,7 @@ impl SystemApis {
             .unit_server_components
             .get(unit)
             .ok_or_else(|| anyhow!("unknown deployment unit: {}", unit))?
-            .keys())
+            .iter())
     }
 
     /// Returns the developer-maintained API metadata
@@ -387,8 +248,7 @@ impl SystemApis {
     pub fn dot_by_unit(&self) -> String {
         let mut graph = petgraph::graph::Graph::new();
         let nodes: BTreeMap<_, _> = self
-            .deployment_units
-            .iter()
+            .deployment_units()
             .map(|name| (name, graph.add_node(name)))
             .collect();
 
@@ -443,4 +303,233 @@ impl SystemApis {
 
         Dot::new(&graph).to_string()
     }
+}
+
+/// Helper for building structures to index which deployment units contain which
+/// server components and what APIs those components expose
+///
+/// See `SystemApis::load()` for how this is used.
+struct ServerComponentsTracker<'a> {
+    // inputs
+    known_server_packages: &'a BTreeMap<ServerPackageName, &'a ApiMetadata>,
+
+    // outputs (structures that we're building up)
+    errors: Vec<anyhow::Error>,
+    server_component_units: BTreeMap<ServerComponentName, DeploymentUnitName>,
+    unit_server_components:
+        BTreeMap<DeploymentUnitName, BTreeSet<ServerComponentName>>,
+    api_producers: BTreeMap<ClientPackageName, (ServerComponentName, DepPath)>,
+}
+
+impl<'a> ServerComponentsTracker<'a> {
+    pub fn new(
+        known_server_packages: &'a BTreeMap<ServerPackageName, &'a ApiMetadata>,
+    ) -> ServerComponentsTracker<'a> {
+        ServerComponentsTracker {
+            known_server_packages,
+            errors: Vec::new(),
+            server_component_units: BTreeMap::new(),
+            unit_server_components: BTreeMap::new(),
+            api_producers: BTreeMap::new(),
+        }
+    }
+
+    /// Record that `server_pkgname` exposes API `api` by virtue of the
+    /// dependency chain `dep_path`
+    pub fn found_api_producer(
+        &mut self,
+        api: &ApiMetadata,
+        server_pkgname: &ServerComponentName,
+        dep_path: &DepPath,
+    ) {
+        // TODO
+        // Also debatable: dns-server is used by both the
+        // dns-server component *and* omicron-sled-agent's
+        // simulated sled agent.  This program does not support
+        // that.  But we don't care about the simulated sled
+        // agent, either, so just ignore it.
+        if **server_pkgname == "omicron-sled-agent"
+            && *api.client_package_name == "dns-service-client"
+        {
+            eprintln!(
+                "warning: ignoring legit dependency from \
+                 omicron-sled-agent -> dns-server",
+            );
+            return;
+        }
+
+        if let Some((previous, _)) = self.api_producers.insert(
+            api.client_package_name.clone(),
+            (server_pkgname.clone(), dep_path.clone()),
+        ) {
+            self.errors.push(anyhow!(
+                "API for client {} appears to be exported by multiple \
+                 components: at least {} and {} ({:?})",
+                api.client_package_name,
+                previous,
+                server_pkgname,
+                dep_path
+            ));
+        }
+    }
+
+    /// Record that deployment unit package `dunit_pkgname` depends on package
+    /// `pkgname` via dependency chain `dep_path`
+    ///
+    /// This only records anything if `pkgname` turns out to be a known API
+    /// client package name, in which case this records that the server
+    /// component consumes the corresponding API.
+    pub fn found_package(
+        &mut self,
+        dunit_pkgname: &ServerComponentName,
+        pkgname: &str,
+        dep_path: &DepPath,
+    ) {
+        let Some(api) = self.known_server_packages.get(pkgname) else {
+            return;
+        };
+
+        self.found_api_producer(api, dunit_pkgname, dep_path);
+    }
+
+    /// Record that the given package is one of the deployment unit's top-level
+    /// packages (server components)
+    pub fn found_deployment_unit_package(
+        &mut self,
+        deployment_unit: &DeploymentUnitName,
+        server_component: &ServerComponentName,
+    ) -> Result<()> {
+        if let Some(previous) = self
+            .server_component_units
+            .insert(server_component.clone(), deployment_unit.clone())
+        {
+            bail!(
+                "server component {:?} found in multiple deployment \
+                 units (at least {} and {})",
+                server_component,
+                deployment_unit,
+                previous
+            );
+        }
+
+        assert!(self
+            .unit_server_components
+            .entry(deployment_unit.clone())
+            .or_default()
+            .insert(server_component.clone()));
+        Ok(())
+    }
+}
+
+/// Helper for building structures to track which APIs are consumed by which
+/// server components
+struct ClientDependenciesTracker<'a> {
+    // inputs
+    api_metadata: &'a AllApiMetadata,
+
+    // outputs (structures that we're building up)
+    apis_consumed:
+        BTreeMap<ServerComponentName, BTreeMap<ClientPackageName, DepPath>>,
+    api_consumers:
+        BTreeMap<ClientPackageName, BTreeMap<ServerComponentName, DepPath>>,
+}
+
+impl<'a> ClientDependenciesTracker<'a> {
+    fn new(api_metadata: &'a AllApiMetadata) -> ClientDependenciesTracker<'a> {
+        ClientDependenciesTracker {
+            api_metadata,
+            apis_consumed: BTreeMap::new(),
+            api_consumers: BTreeMap::new(),
+        }
+    }
+
+    /// Record that comopnent `server_pkgname` consumes package `pkgname` via
+    /// dependency chain `dep_path`
+    ///
+    /// This only records cases where `pkgname` is a known client package for
+    /// one of our APIs, in which case it records that this server component
+    /// consumes the corresponding API.
+    fn found_dependency(
+        &mut self,
+        server_pkgname: &ServerComponentName,
+        pkgname: &str,
+        dep_path: &DepPath,
+    ) {
+        if self.api_metadata.client_pkgname_lookup(pkgname).is_none() {
+            return;
+        }
+
+        // This is the name of a known client package.  Record it.
+        let client_pkgname = ClientPackageName::from(pkgname.to_owned());
+        self.api_consumers
+            .entry(client_pkgname.clone())
+            .or_insert_with(BTreeMap::new)
+            .insert(server_pkgname.clone(), dep_path.clone());
+        self.apis_consumed
+            .entry(server_pkgname.clone())
+            .or_insert_with(BTreeMap::new)
+            .insert(client_pkgname, dep_path.clone());
+    }
+}
+
+/// Returns whether a particular Rust package dependency should be ignored when
+/// trying to infer which of our packages depend on APIs.
+fn ignore_dependency(
+    workspace: &Workspace,
+    package: &Package,
+    dep_path: &DepPath,
+) -> bool {
+    // unwrap(): the workspace must know about each of these packages.
+    let parent_id = dep_path.bottom();
+    let parent = workspace.find_pkg_by_id(parent_id).unwrap();
+    let parent_name = &parent.name;
+    let package_name = &package.name;
+
+    // TODO
+    // omicron_common depends on mg-admin-client solely to impl some `From`
+    // conversions.  That makes it look like just about everything depends on
+    // mg-admin-client, which isn't true.  We should consider reversing this,
+    // since most clients put those conversions into the client rather than
+    // omicron_common.  But for now, let's just ignore this particular
+    // dependency.
+    if package_name == "mg-admin-client" && parent_name == "omicron-common" {
+        return true;
+    }
+
+    // TODO internal-dns depends on dns-service-client to use its types.
+    // They're only used when *configuring* DNS, which is only done in a couple
+    // of components.  But many components use internal-dns to *read* DNS.  So
+    // like above, this makes it look like everything uses the DNS server API,
+    // but that's not true.  We should consider splitting this crate in two.
+    // But for now, just ignore the specific dependency from internal-dns to
+    // dns-service-client.  If a consumer actually calls the DNS server, it will
+    // have a separate dependency.
+    if package_name == "dns-service-client" && parent_name == "internal-dns" {
+        return true;
+    }
+
+    // TODO nexus-types depends on dns-service-client and gateway-client for
+    // defining some types, but again, this doesn't mean that somebody using
+    // nexus-types is actually calling out to these services.  If they were,
+    // they'd need to have some other dependency on them.
+    if parent_name == "nexus-types"
+        && (package_name == "dns-service-client"
+            || package_name == "gateway-client")
+    {
+        return true;
+    }
+
+    // TODO
+    // This one's debatable.  Everything with an Oximeter producer talks to
+    // Nexus.  But let's ignore those for now.  Maybe we could improve this by
+    // creating a separate API inside Nexus for this?
+    if parent_name == "oximeter-producer" && package_name == "nexus-client" {
+        eprintln!(
+            "warning: ignoring legit dependency from
+             oximeter-producer -> nexus_client"
+        );
+        return true;
+    }
+
+    false
 }

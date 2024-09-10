@@ -30,6 +30,11 @@ NewtypeDeref! { () pub struct ClientPackageName(String); }
 NewtypeDerefMut! { () pub struct ClientPackageName(String); }
 NewtypeDisplay! { () pub struct ClientPackageName(String); }
 NewtypeFrom! { () pub struct ClientPackageName(String); }
+impl Borrow<str> for ClientPackageName {
+    fn borrow(&self) -> &str {
+        self.0.as_str()
+    }
+}
 
 #[derive(Clone, Deserialize, Ord, PartialOrd, Eq, PartialEq)]
 #[serde(transparent)]
@@ -48,6 +53,11 @@ NewtypeDeref! { () pub struct ServerPackageName(String); }
 NewtypeDerefMut! { () pub struct ServerPackageName(String); }
 NewtypeDisplay! { () pub struct ServerPackageName(String); }
 NewtypeFrom! { () pub struct ServerPackageName(String); }
+impl Borrow<str> for ServerPackageName {
+    fn borrow(&self) -> &str {
+        self.0.as_str()
+    }
+}
 
 #[derive(Clone, Deserialize, Ord, PartialOrd, Eq, PartialEq)]
 #[serde(transparent)]

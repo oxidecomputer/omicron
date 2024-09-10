@@ -10,6 +10,7 @@ use crate::ServerComponentName;
 use crate::ServerPackageName;
 use anyhow::bail;
 use serde::Deserialize;
+use std::borrow::Borrow;
 use std::collections::BTreeMap;
 
 /// Describes the APIs in the system
@@ -49,10 +50,12 @@ impl AllApiMetadata {
     }
 
     /// Look up details about an API based on its client package name
-    pub fn client_pkgname_lookup(
-        &self,
-        pkgname: &ClientPackageName,
-    ) -> Option<&ApiMetadata> {
+    pub fn client_pkgname_lookup<P>(&self, pkgname: &P) -> Option<&ApiMetadata>
+    where
+        ClientPackageName: Borrow<P>,
+        P: Ord,
+        P: ?Sized,
+    {
         self.apis.get(pkgname)
     }
 }
