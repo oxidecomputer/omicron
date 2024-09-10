@@ -564,7 +564,7 @@ mod test {
             &opctx,
             &authz_project,
             InstanceAutoRestart::AllFailures,
-            InstanceState::Vmm,
+            InstanceState::NoVmm,
         )
         .await;
 
