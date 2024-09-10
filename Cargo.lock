@@ -5412,6 +5412,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "clickhouse-admin-types",
  "debug-ignore",
  "expectorate",
  "gateway-client",
@@ -5583,6 +5584,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "clap",
+ "clickhouse-admin-types",
  "cookie 0.18.1",
  "derive-where",
  "derive_more",

@@ -147,6 +147,8 @@ impl CollectionBuilder {
             rot_pages_found: self.rot_pages_found,
             sled_agents: self.sleds,
             omicron_zones: self.omicron_zones,
+            // Currently unused
+            clickhouse_keeper_cluster_membership: BTreeMap::new(),
         }
     }
 
