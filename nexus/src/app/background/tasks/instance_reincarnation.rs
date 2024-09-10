@@ -268,24 +268,22 @@ impl InstanceReincarnation {
 mod test {
     use super::*;
     use crate::app::background::init::test::NoopStartSaga;
+    use crate::app::sagas::test_helpers;
     use crate::external_api::params;
     use chrono::Utc;
-    use nexus_db_model::Generation;
-    use nexus_db_model::Instance;
     use nexus_db_model::InstanceAutoRestart;
     use nexus_db_model::InstanceRuntimeState;
     use nexus_db_model::InstanceState;
     use nexus_db_queries::authz;
     use nexus_db_queries::db::lookup::LookupPath;
     use nexus_test_utils::resource_helpers::{
-        create_default_ip_pool, create_project,
+        create_default_ip_pool, create_project, object_create,
     };
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::InstanceUuid;
-    use uuid::Uuid;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
@@ -312,56 +310,87 @@ mod test {
     async fn create_instance(
         cptestctx: &ControlPlaneTestContext,
         opctx: &OpContext,
-        authz_project: &authz::Project,
+        name: &str,
         restart_policy: InstanceAutoRestart,
         state: InstanceState,
     ) -> InstanceUuid {
-        let id = InstanceUuid::from_untyped_uuid(Uuid::new_v4());
+        let instances_url = format!("/v1/instances?project={}", PROJECT_NAME);
         // Use the first chunk of the UUID as the name, to avoid conflicts.
         // Start with a lower ascii character to satisfy the name constraints.
-        let name = format!("instance-{id}").parse().unwrap();
-        let instance = Instance::new(
-            id,
-            authz_project.id(),
-            &params::InstanceCreate {
-                identity: IdentityMetadataCreateParams {
-                    name,
-                    description: "It's an instance".into(),
+        let name = name.parse().unwrap();
+        let instance =
+            object_create::<_, omicron_common::api::external::Instance>(
+                &cptestctx.external_client,
+                &instances_url,
+                &params::InstanceCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name,
+                        description: "It's an instance".into(),
+                    },
+                    ncpus: 2i64.try_into().unwrap(),
+                    memory: ByteCount::from_gibibytes_u32(16),
+                    hostname: "myhostname".try_into().unwrap(),
+                    user_data: Vec::new(),
+                    network_interfaces:
+                        params::InstanceNetworkInterfaceAttachment::None,
+                    external_ips: Vec::new(),
+                    disks: Vec::new(),
+                    ssh_public_keys: None,
+                    start: state == InstanceState::Vmm,
+                    auto_restart_policy: Some(restart_policy.into()),
                 },
-                ncpus: 2i64.try_into().unwrap(),
-                memory: ByteCount::from_gibibytes_u32(16),
-                hostname: "myhostname".try_into().unwrap(),
-                user_data: Vec::new(),
-                network_interfaces:
-                    params::InstanceNetworkInterfaceAttachment::None,
-                external_ips: Vec::new(),
-                disks: Vec::new(),
-                ssh_public_keys: None,
-                start: false,
-                auto_restart_policy: Some(restart_policy.into()),
-            },
-        );
-        let datastore = cptestctx.server.server_context().nexus.datastore();
+            )
+            .await;
 
-        let instance = datastore
-            .project_create_instance(opctx, authz_project, instance)
+        let id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+        if state != InstanceState::Vmm {
+            put_instance_in_state(cptestctx, opctx, id, state).await;
+        }
+
+        eprintln!("instance {id}: policy={restart_policy:?}; state={state:?}");
+        id
+    }
+
+    async fn put_instance_in_state(
+        cptestctx: &ControlPlaneTestContext,
+        opctx: &OpContext,
+        id: InstanceUuid,
+        state: InstanceState,
+    ) {
+        info!(
+            &cptestctx.logctx.log,
+            "putting instance {id} in state {state:?}"
+        );
+
+        let datastore = cptestctx.server.server_context().nexus.datastore();
+        let (_, _, authz_instance) = LookupPath::new(&opctx, datastore)
+            .instance_id(id.into_untyped_uuid())
+            .lookup_for(authz::Action::Modify)
             .await
-            .expect("test instance should be created successfully");
-        let prev_state = instance.runtime_state;
+            .expect("instance 2 must exist");
+        let prev_state = datastore
+            .instance_refetch(&opctx, &authz_instance)
+            .await
+            .expect("instance 2 must exist")
+            .runtime_state;
+        let propolis_id = if state == InstanceState::Vmm {
+            prev_state.propolis_id
+        } else {
+            None
+        };
         datastore
             .instance_update_runtime(
                 &id,
                 &InstanceRuntimeState {
                     time_updated: Utc::now(),
                     nexus_state: state,
+                    propolis_id,
                     r#gen: nexus_db_model::Generation(prev_state.r#gen.next()),
                     ..prev_state
                 },
             )
             .await
             .expect("instance runtime state should update");
-        eprintln!("instance {id}: policy={restart_policy:?}; state={state:?}");
-        id
     }
 
     #[nexus_test(server = crate::Server)]
@@ -375,7 +404,7 @@ mod test {
             datastore.clone(),
         );
 
-        let authz_project = setup_test_project(&cptestctx, &opctx).await;
+        setup_test_project(&cptestctx, &opctx).await;
 
         let starter = Arc::new(NoopStartSaga::new());
         let mut task = InstanceReincarnation::new(
@@ -402,7 +431,7 @@ mod test {
         let instance_id = create_instance(
             &cptestctx,
             &opctx,
-            &authz_project,
+            "my-cool-instance",
             InstanceAutoRestart::AllFailures,
             InstanceState::Failed,
         )
@@ -439,7 +468,7 @@ mod test {
             datastore.clone(),
         );
 
-        let authz_project = setup_test_project(&cptestctx, &opctx).await;
+        setup_test_project(&cptestctx, &opctx).await;
 
         let starter = Arc::new(NoopStartSaga::new());
         let mut task = InstanceReincarnation::new(
@@ -451,11 +480,11 @@ mod test {
         // Create instances in the `Failed` state that are eligible to be
         // restarted.
         let mut will_reincarnate = std::collections::BTreeSet::new();
-        for _ in 0..3 {
+        for i in 0..3 {
             let id = create_instance(
                 &cptestctx,
                 &opctx,
-                &authz_project,
+                &format!("sotapanna-{i}"),
                 InstanceAutoRestart::AllFailures,
                 InstanceState::Failed,
             )
@@ -465,15 +494,18 @@ mod test {
 
         // Create some instances that will not reicnarnate.
         let mut will_not_reincarnate = std::collections::BTreeSet::new();
-        // Some instances which are `Failed`` but don't have policies permitting
+        // Some instances which are `Failed` but don't have policies permitting
         // them to be reincarnated.
-        for policy in
+        for (i, &policy) in
             [InstanceAutoRestart::Never, InstanceAutoRestart::SledFailuresOnly]
+                .iter()
+                // Just so we can generate unique names...
+                .enumerate()
         {
             let id = create_instance(
                 &cptestctx,
                 &opctx,
-                &authz_project,
+                &format!("arahant-{i}"),
                 policy,
                 InstanceState::Failed,
             )
@@ -483,13 +515,17 @@ mod test {
 
         // Some instances with policies permitting them to be reincarnated, but
         // which are not `Failed`.
-        for _ in 0..2 {
+        for (i, &state) in
+            [InstanceState::Vmm, InstanceState::NoVmm, InstanceState::Destroyed]
+                .iter()
+                .enumerate()
+        {
             let id = create_instance(
                 &cptestctx,
                 &opctx,
-                &authz_project,
+                &format!("anagami-{i}"),
                 InstanceAutoRestart::AllFailures,
-                InstanceState::NoVmm,
+                state,
             )
             .await;
             will_not_reincarnate.insert(id.into_untyped_uuid());
@@ -542,19 +578,18 @@ mod test {
             datastore.clone(),
         );
 
-        let authz_project = setup_test_project(&cptestctx, &opctx).await;
+        setup_test_project(&cptestctx, &opctx).await;
 
-        let starter = Arc::new(NoopStartSaga::new());
         let mut task = InstanceReincarnation::new(
             datastore.clone(),
-            starter.clone(),
+            nexus.sagas.clone(),
             COOLDOWN,
         );
 
         let instance1_id = create_instance(
             &cptestctx,
             &opctx,
-            &authz_project,
+            "victor",
             InstanceAutoRestart::AllFailures,
             InstanceState::Failed,
         )
@@ -562,9 +597,9 @@ mod test {
         let instance2_id = create_instance(
             &cptestctx,
             &opctx,
-            &authz_project,
+            "frankenstein",
             InstanceAutoRestart::AllFailures,
-            InstanceState::NoVmm,
+            InstanceState::Vmm,
         )
         .await;
 
@@ -575,7 +610,6 @@ mod test {
                 .expect("JSON must be correctly shaped");
         eprintln!("activation: {status:#?}");
 
-        assert_eq!(starter.count_reset(), 1);
         assert_eq!(status.instances_found, 1);
         assert_eq!(
             status.instances_reincarnated,
@@ -588,53 +622,28 @@ mod test {
 
         // Now, let's do some state changes:
         // Pretend instance 1 restarted, and then failed again.
-        let (_, _, authz_instance1) = LookupPath::new(&opctx, datastore)
-            .instance_id(instance1_id.into_untyped_uuid())
-            .lookup_for(authz::Action::Modify)
-            .await
-            .expect("instance 1 must exist");
-        let instance1_state = datastore
-            .instance_refetch(&opctx, &authz_instance1)
-            .await
-            .expect("instance 1 must exist")
-            .runtime_state;
-        datastore
-            .instance_update_runtime(
-                &instance1_id,
-                &InstanceRuntimeState {
-                    time_last_auto_restarted: Some(Utc::now()),
-                    nexus_state: InstanceState::Failed,
-                    time_updated: Utc::now(),
-                    r#gen: Generation(instance1_state.r#gen.next()),
-                    ..instance1_state
-                },
-            )
-            .await
-            .expect("instance 1 state should be updated");
+        test_helpers::instance_wait_for_state(
+            &cptestctx,
+            instance1_id,
+            InstanceState::Vmm,
+        )
+        .await;
+        put_instance_in_state(
+            &cptestctx,
+            &opctx,
+            instance1_id,
+            InstanceState::Failed,
+        )
+        .await;
 
         // Move instance 2 to failed.
-        let (_, _, authz_instance2) = LookupPath::new(&opctx, datastore)
-            .instance_id(instance1_id.into_untyped_uuid())
-            .lookup_for(authz::Action::Modify)
-            .await
-            .expect("instance 2 must exist");
-        let instance2_state = datastore
-            .instance_refetch(&opctx, &authz_instance2)
-            .await
-            .expect("instance 2 must exist")
-            .runtime_state;
-        datastore
-            .instance_update_runtime(
-                &instance2_id,
-                &InstanceRuntimeState {
-                    nexus_state: InstanceState::Failed,
-                    time_updated: Utc::now(),
-                    r#gen: Generation(instance2_state.r#gen.next()),
-                    ..instance1_state
-                },
-            )
-            .await
-            .expect("instance 2 state should be updated");
+        put_instance_in_state(
+            &cptestctx,
+            &opctx,
+            instance2_id,
+            InstanceState::Failed,
+        )
+        .await;
 
         // Activate the background task again. Now, only instance 2 should be
         // restarted.
@@ -644,7 +653,6 @@ mod test {
                 .expect("JSON must be correctly shaped");
         eprintln!("activation: {status:#?}");
 
-        assert_eq!(starter.count_reset(), 1);
         assert_eq!(status.instances_found, 2);
         assert_eq!(
             status.instances_reincarnated,
@@ -662,25 +670,13 @@ mod test {
         assert_eq!(status.query_error, None);
         assert_eq!(status.restart_errors, Vec::new());
 
-        // Advance instance 1 to `Vmm` since we are pretending that a start
-        // saga has been started.
-        let instance1_state = datastore
-            .instance_refetch(&opctx, &authz_instance1)
-            .await
-            .expect("instance 1 must exist")
-            .runtime_state;
-        datastore
-            .instance_update_runtime(
-                &instance1_id,
-                &InstanceRuntimeState {
-                    nexus_state: InstanceState::Vmm,
-                    time_updated: Utc::now(),
-                    r#gen: Generation(instance1_state.r#gen.next()),
-                    ..instance1_state
-                },
-            )
-            .await
-            .expect("instance 1 state should be updated");
+        // Instance 2 should be started
+        test_helpers::instance_wait_for_state(
+            &cptestctx,
+            instance2_id,
+            InstanceState::Vmm,
+        )
+        .await;
 
         // Wait out the cooldown period, and give it another shot. Now, instance
         // 1 should be restarted again.
@@ -692,7 +688,6 @@ mod test {
                 .expect("JSON must be correctly shaped");
         eprintln!("activation: {status:#?}");
 
-        assert_eq!(starter.count_reset(), 1);
         assert_eq!(status.instances_found, 1);
         assert_eq!(
             status.instances_reincarnated,
@@ -702,5 +697,13 @@ mod test {
         assert_eq!(status.instances_cooling_down, Vec::new());
         assert_eq!(status.query_error, None);
         assert_eq!(status.restart_errors, Vec::new());
+
+        // Instance 1 should be started.
+        test_helpers::instance_wait_for_state(
+            &cptestctx,
+            instance1_id,
+            InstanceState::Vmm,
+        )
+        .await;
     }
 }
