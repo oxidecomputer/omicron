@@ -1571,7 +1571,7 @@ pub trait NexusExternalApi {
     /// Delete BGP announce set
     #[endpoint {
         method = DELETE,
-        path = "/v1/system/networking/bgp-announce-set/{name_or_id}",
+        path = "/v1/system/networking/bgp-announce-set/{announce_set}",
         tags = ["system/networking"],
     }]
     async fn networking_bgp_announce_set_delete(
@@ -1584,7 +1584,7 @@ pub trait NexusExternalApi {
     /// Get originated routes for a specified BGP announce set
     #[endpoint {
         method = GET,
-        path = "/v1/system/networking/bgp-announce-set/{name_or_id}/announcement",
+        path = "/v1/system/networking/bgp-announce-set/{announce_set}/announcement",
         tags = ["system/networking"],
     }]
     async fn networking_bgp_announcement_list(
