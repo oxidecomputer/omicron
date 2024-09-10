@@ -318,7 +318,7 @@ cockroach-admin-api = { path = "cockroach-admin/api" }
 cockroach-admin-client = { path = "clients/cockroach-admin-client" }
 cockroach-admin-types = { path = "cockroach-admin/types" }
 colored = "2.1"
-const_format = "0.2.32"
+const_format = "0.2.33"
 cookie = "0.18"
 criterion = { version = "0.5.1", features = [ "async_tokio" ] }
 crossbeam = "0.8"
