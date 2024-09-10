@@ -185,7 +185,7 @@ impl CrucibleDataInner {
             match region.state {
                 State::Failed | State::Destroyed | State::Tombstoned => {
                     bail!(
-                        "cannot create snapshot of region in state {:?}",
+                        "cannot create snapshot of region {id:?} in state {:?}",
                         region.state
                     );
                 }
@@ -195,7 +195,7 @@ impl CrucibleDataInner {
                 }
             }
         } else {
-            bail!("cannot create snapshot of non-existent region!");
+            bail!("cannot create snapshot of non-existent region {id:?}!");
         }
 
         Ok(self
