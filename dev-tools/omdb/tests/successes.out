@@ -1259,9 +1259,9 @@ to:   blueprint ......<REDACTED_BLUEPRINT_ID>.......
 
  UNCHANGED SLEDS:
 
-  sled ..........<REDACTED_UUID>...........:
+  sled ..........<REDACTED_UUID>........... (active):
 
-  sled ..........<REDACTED_UUID>...........:
+  sled ..........<REDACTED_UUID>........... (active):
 
     omicron zones at generation 2:
     ---------------------------------------------------------------------------------------
