@@ -173,12 +173,25 @@ impl DataStore {
 
         port_settings_dsl::switch_port_settings
             .filter(switch_port_settings::time_deleted.is_null())
-            .filter(switch_port_settings::name.eq(name))
+            .filter(switch_port_settings::name.eq(name.clone()))
             .select(switch_port_settings::id)
             .limit(1)
             .first_async::<Uuid>(&*pool)
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .map_err(|e| {
+                let msg = "failed to lookup switch port settings by name";
+                error!(opctx.log, "{msg}"; "error" => ?e);
+
+                match e {
+                    diesel::result::Error::NotFound => {
+                        Error::not_found_by_name(
+                            ResourceType::SwitchPortSettings,
+                            &name,
+                        )
+                    }
+                    _ => Error::internal_error(msg),
+                }
+            })
     }
 
     pub async fn switch_ports_using_settings(
