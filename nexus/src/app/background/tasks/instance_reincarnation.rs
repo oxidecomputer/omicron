@@ -548,7 +548,7 @@ mod test {
         let mut task = InstanceReincarnation::new(
             datastore.clone(),
             starter.clone(),
-            Duration::from_secs(60),
+            COOLDOWN,
         );
 
         let instance1_id = create_instance(
