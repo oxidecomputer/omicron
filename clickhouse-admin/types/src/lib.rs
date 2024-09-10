@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::fs::create_dir;
 use std::io::{ErrorKind, Write};
 use std::net::Ipv6Addr;
+use std::str::FromStr;
 
 pub mod config;
 use config::*;
@@ -203,6 +204,39 @@ impl KeeperSettings {
         .with_context(|| format!("failed to write to `{}`", path))?;
 
         Ok(config)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct Lgif {
+    first_log_idx: u64,
+    first_log_term: u64,
+    last_log_idx: u64,
+    last_log_term: u64,
+    last_committed_log_idx: u64,
+    leader_committed_log_idx: u64,
+    target_committed_log_idx: u64,
+    last_snapshot_idx: u64,
+}
+
+impl Lgif {
+    pub fn parse(data: &[u8]) -> Result<Self> {
+        let binding = String::from_utf8_lossy(data);
+        let output = binding.as_ref();
+        let p: Vec<&str> = output.split(|c| c == '\t' || c == '\n').collect();
+
+        // TODO: Make this not suck
+        Ok(Self {
+            first_log_idx: u64::from_str(p[1]).unwrap(),
+            first_log_term: u64::from_str(p[3]).unwrap(),
+            last_log_idx: u64::from_str(p[5]).unwrap(),
+            last_log_term: u64::from_str(p[7]).unwrap(),
+            last_committed_log_idx: u64::from_str(p[9]).unwrap(),
+            leader_committed_log_idx: u64::from_str(p[11]).unwrap(),
+            target_committed_log_idx: u64::from_str(p[13]).unwrap(),
+            last_snapshot_idx: u64::from_str(p[15]).unwrap(),
+        })
     }
 }
 

@@ -5,7 +5,10 @@
 use crate::context::ServerContext;
 use clickhouse_admin_api::*;
 use clickhouse_admin_types::config::{KeeperConfig, ReplicaConfig};
-use dropshot::{HttpError, HttpResponseCreated, HttpResponseOk, RequestContext, TypedBody};
+use clickhouse_admin_types::Lgif;
+use dropshot::{
+    HttpError, HttpResponseCreated, HttpResponseOk, RequestContext, TypedBody,
+};
 use std::sync::Arc;
 
 type ClickhouseApiDescription = dropshot::ApiDescription<Arc<ServerContext>>;
@@ -47,7 +50,7 @@ impl ClickhouseAdminApi for ClickhouseAdminImpl {
 
     async fn lgif(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<String>, HttpError> {
+    ) -> Result<HttpResponseOk<Lgif>, HttpError> {
         let ctx = rqctx.context();
         let output = ctx.clickhouse_cli().lgif().await?;
         Ok(HttpResponseOk(output))

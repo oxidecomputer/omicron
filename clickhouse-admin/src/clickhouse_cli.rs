@@ -4,8 +4,9 @@
 
 use anyhow::Result;
 use camino::Utf8PathBuf;
+use clickhouse_admin_types::Lgif;
 use dropshot::HttpError;
-use illumos_utils::{ExecutionError, output_to_exec_error};
+use illumos_utils::{output_to_exec_error, ExecutionError};
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use std::ffi::OsStr;
 use std::io;
@@ -23,12 +24,22 @@ pub enum ClickhouseCliError {
     },
     #[error(transparent)]
     ExecutionError(#[from] ExecutionError),
+    #[error("failed to parse command output")]
+    Parse {
+        description: &'static str,
+        stdout: String,
+        stderr: String,
+        #[source]
+        err: anyhow::Error,
+    },
 }
 
 impl From<ClickhouseCliError> for HttpError {
     fn from(err: ClickhouseCliError) -> Self {
         match err {
             ClickhouseCliError::Run { .. }
+            // TODO: Can I make this message better?
+            | ClickhouseCliError::Parse { .. }
             | ClickhouseCliError::ExecutionError(_) => {
                 let message = InlineErrorChain::new(&err).to_string();
                 HttpError {
@@ -51,25 +62,28 @@ pub struct ClickhouseCli {
 }
 
 impl ClickhouseCli {
-    pub fn new (binary_path: Utf8PathBuf, listen_address: SocketAddrV6) -> Self {
-        Self {binary_path, listen_address}
+    pub fn new(binary_path: Utf8PathBuf, listen_address: SocketAddrV6) -> Self {
+        Self { binary_path, listen_address }
     }
 
-    pub async fn lgif(&self) -> Result<String, ClickhouseCliError> {
+    pub async fn lgif(&self) -> Result<Lgif, ClickhouseCliError> {
         self.keeper_client_non_interactive(
             ["lgif"].into_iter(),
             "Retrieve logically grouped information file",
+            Lgif::parse,
         )
         .await
     }
 
-    async fn keeper_client_non_interactive<'a, I>(
+    async fn keeper_client_non_interactive<'a, I, F, T>(
         &self,
         subcommand_args: I,
         subcommand_description: &'static str,
-    ) -> Result<String, ClickhouseCliError>
+        parse: F,
+    ) -> Result<T, ClickhouseCliError>
     where
         I: Iterator<Item = &'a str>,
+        F: FnOnce(&[u8]) -> Result<T>,
     {
         let mut command = Command::new(&self.binary_path);
         command
@@ -102,7 +116,11 @@ impl ClickhouseCli {
             return Err(output_to_exec_error(command.as_std(), &output).into());
         }
 
-        // TODO: Actually parse this
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+        parse(&output.stdout).map_err(|err| ClickhouseCliError::Parse {
+            description: subcommand_description,
+            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+            stderr: String::from_utf8_lossy(&output.stdout).to_string(),
+            err,
+        })
     }
 }

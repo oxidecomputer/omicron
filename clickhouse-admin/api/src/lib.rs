@@ -3,8 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use clickhouse_admin_types::config::{KeeperConfig, ReplicaConfig};
-use clickhouse_admin_types::{KeeperSettings, ServerSettings};
-use dropshot::{HttpError, HttpResponseCreated, HttpResponseOk, RequestContext, TypedBody};
+use clickhouse_admin_types::{KeeperSettings, Lgif, ServerSettings};
+use dropshot::{
+    HttpError, HttpResponseCreated, HttpResponseOk, RequestContext, TypedBody,
+};
 use omicron_common::api::external::Generation;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -60,6 +62,5 @@ pub trait ClickhouseAdminApi {
     }]
     async fn lgif(
         rqctx: RequestContext<Self::Context>,
-        // TODO: Actually return something useful
-    ) -> Result<HttpResponseOk<String>, HttpError>;
+    ) -> Result<HttpResponseOk<Lgif>, HttpError>;
 }
