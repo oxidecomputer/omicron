@@ -7,6 +7,7 @@
 
 use crate::api_metadata::AllApiMetadata;
 use crate::api_metadata::ApiMetadata;
+use crate::api_metadata::Evaluation;
 use crate::cargo::DepPath;
 use crate::cargo::Workspace;
 use crate::parse_toml_file;
@@ -23,7 +24,6 @@ use parse_display::{Display, FromStr};
 use petgraph::dot::Dot;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use crate::api_metadata::Evaluation;
 
 /// Query information about the Dropshot/OpenAPI/Progenitor-based APIs within
 /// the Oxide system
@@ -599,7 +599,7 @@ pub enum ApiDependencyFilter {
     /// Exclude dependencies that are explicitly marked as outside the update
     /// DAG
     #[default]
-    NotNonDag,
+    NotBogusOrNonDag,
 }
 
 impl ApiDependencyFilter {
@@ -616,7 +616,9 @@ impl ApiDependencyFilter {
 
         Ok(match self {
             ApiDependencyFilter::All => true,
-            ApiDependencyFilter::NotNonDag => evaluation != Evaluation::NonDag,
+            ApiDependencyFilter::NotBogusOrNonDag => {
+                !matches!(evaluation, Evaluation::NonDag | Evaluation::Bogus)
+            }
         })
     }
 }

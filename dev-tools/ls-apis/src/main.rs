@@ -5,6 +5,7 @@
 //! Show information about Progenitor-based APIs
 
 // XXX-dap wishlist:
+// - Rename command?
 // - Fix warnings:
 //   - missing client: crucible-control-client
 //   - missing client: dsc-client
@@ -69,12 +70,7 @@ pub struct ShowDepsArgs {
     #[arg(long)]
     show_deps: bool,
 
-    /// Show only API dependencies matching the filter:
-    ///
-    /// - `all`: all dependencies
-    ///
-    /// - `ignore-oximeter-producer`: ignore dependencies on nexus-internal-api
-    ///    that arise only because something is an Oximeter producer
+    /// Show only API dependencies matching the filter
     #[arg(long, default_value_t)]
     filter: ApiDependencyFilter,
 }
@@ -88,12 +84,7 @@ pub struct DotArgs {
     #[arg(long)]
     show_deps: bool,
 
-    /// Show only API dependencies matching the filter:
-    ///
-    /// - `all`: all dependencies
-    /// - `ignore-oximeter-producer` (default): ignore dependencies on
-    ///    nexus-internal-api that arise only because something is an Oximeter
-    ///    producer
+    /// Show only API dependencies matching the filter
     #[arg(long, default_value_t)]
     filter: ApiDependencyFilter,
 }
@@ -112,6 +103,9 @@ fn main() -> Result<()> {
 }
 
 fn run_adoc(apis: &SystemApis) -> Result<()> {
+    println!("// DO NOT EDIT.  This table is auto-generated from `cargo xtask`");
+    println!("// in the Omicron repo.");
+    println!(".List of OpenAPI/Progenitor-based interfaces for online upgrade.");
     println!(r#"[cols="1h,2,2,2a,2", options="header"]"#);
     println!("|===");
     println!("|API");
@@ -124,6 +118,7 @@ fn run_adoc(apis: &SystemApis) -> Result<()> {
     let metadata = apis.api_metadata();
     for api in metadata.apis() {
         let server_component = apis.api_producer(&api.client_package_name)?;
+        println!("// DO NOT EDIT.  This table is auto-generated. See above.");
         println!("|{}", api.label);
         println!("|{}", apis.adoc_label(server_component)?);
         println!("|{}", apis.adoc_label(&api.client_package_name)?);
@@ -139,6 +134,8 @@ fn run_adoc(apis: &SystemApis) -> Result<()> {
         print!("|{}", api.notes.as_deref().unwrap_or("-\n"));
         println!("");
     }
+
+    println!("|===");
 
     Ok(())
 }
