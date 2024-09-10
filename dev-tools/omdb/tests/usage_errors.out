@@ -20,6 +20,7 @@ Commands:
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
   -h, --help                   Print help (see more with '--help')
 
 Connection Options:
@@ -55,6 +56,12 @@ Options:
           
           [env: LOG_LEVEL=]
           [default: warn]
+
+      --color <COLOR>
+          Color output
+          
+          [default: auto]
+          [possible values: auto, always, never]
 
   -h, --help
           Print help (see a summary with '-h')
@@ -126,6 +133,7 @@ Commands:
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
   -h, --help                   Print help
 
 Connection Options:
@@ -172,6 +180,7 @@ Commands:
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
   -h, --help                   Print help
 
 Connection Options:
@@ -207,6 +216,7 @@ Commands:
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
   -h, --help                   Print help
 
 Connection Options:
@@ -240,6 +250,7 @@ Commands:
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
   -h, --help                   Print help
 
 Connection Options:
@@ -313,6 +324,12 @@ Options:
           [env: LOG_LEVEL=]
           [default: warn]
 
+      --color <COLOR>
+          Color output
+          
+          [default: auto]
+          [possible values: auto, always, never]
+
   -h, --help
           Print help (see a summary with '-h')
 
@@ -358,6 +375,7 @@ Commands:
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
   -h, --help                   Print help
 
 Connection Options:
@@ -391,6 +409,7 @@ Commands:
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
       --verbose                Print out raw data structures from the data store
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
   -h, --help                   Print help
 
 Connection Options:
@@ -424,6 +443,7 @@ Commands:
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
   -h, --help                   Print help
 
 Connection Options:
@@ -452,6 +472,7 @@ Commands:
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
   -h, --help                   Print help
 
 Connection Options:
@@ -473,14 +494,16 @@ print information about background tasks
 Usage: omdb nexus background-tasks [OPTIONS] <COMMAND>
 
 Commands:
-  doc       Show documentation about background tasks
-  list      Print a summary of the status of all background tasks
-  show      Print human-readable summary of the status of each background task
-  activate  Activate one or more background tasks
-  help      Print this message or the help of the given subcommand(s)
+  doc           Show documentation about background tasks
+  list          Print a summary of the status of all background tasks
+  show          Print human-readable summary of the status of each background task
+  print-report  Print an event report for a background task if available
+  activate      Activate one or more background tasks
+  help          Print this message or the help of the given subcommand(s)
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
   -h, --help                   Print help
 
 Connection Options:
@@ -512,6 +535,12 @@ Options:
           
           [env: LOG_LEVEL=]
           [default: warn]
+
+      --color <COLOR>
+          Color output
+          
+          [default: auto]
+          [possible values: auto, always, never]
 
   -h, --help
           Print help (see a summary with '-h')
@@ -553,6 +582,7 @@ Commands:
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
   -h, --help                   Print help
 
 Connection Options:
@@ -581,6 +611,7 @@ Commands:
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
   -h, --help                   Print help
 
 Connection Options:
@@ -619,6 +650,7 @@ Commands:
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
   -h, --help                   Print help
 
 Connection Options:
@@ -648,6 +680,7 @@ Commands:
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
   -h, --help                   Print help
 
 Connection Options:
@@ -673,6 +706,7 @@ Commands:
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
   -h, --help                   Print help
 
 Connection Options:
@@ -698,6 +732,7 @@ Commands:
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
   -h, --help                   Print help
 
 Connection Options:
@@ -721,6 +756,7 @@ Commands:
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
   -h, --help                   Print help
 
 Connection Options:
@@ -745,6 +781,7 @@ Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
       --summaries              Print summaries of each SQL query run against the database
       --elapsed                Print the total elapsed query duration
+      --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
   -h, --help                   Print help
 
 Connection Options:

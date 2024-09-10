@@ -6,6 +6,7 @@
 
 use crate::check_allow_destructive::DestructiveOperationToken;
 use crate::db::DbUrlOptions;
+use crate::helpers::should_colorize;
 use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::Omdb;
 use anyhow::bail;
@@ -15,6 +16,7 @@ use chrono::DateTime;
 use chrono::SecondsFormat;
 use chrono::Utc;
 use clap::Args;
+use clap::ColorChoice;
 use clap::Subcommand;
 use clap::ValueEnum;
 use futures::future::try_join;
@@ -57,6 +59,8 @@ use tabled::settings::object::Columns;
 use tabled::settings::Padding;
 use tabled::Tabled;
 use tokio::sync::OnceCell;
+use update_engine::display::LineDisplay;
+use update_engine::display::LineDisplayStyles;
 use update_engine::display::ProgressRatioDisplay;
 use update_engine::events::EventReport;
 use update_engine::events::StepOutcome;
@@ -112,6 +116,8 @@ enum BackgroundTasksCommands {
     List,
     /// Print human-readable summary of the status of each background task
     Show(BackgroundTasksShowArgs),
+    /// Print an event report for a background task if available.
+    PrintReport(BackgroundTasksPrintReportArgs),
     /// Activate one or more background tasks
     Activate(BackgroundTasksActivateArgs),
 }
@@ -124,6 +130,13 @@ struct BackgroundTasksShowArgs {
     /// "all", "dns_external", or "dns_internal".
     #[clap(value_name = "TASK_NAME")]
     tasks: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+struct BackgroundTasksPrintReportArgs {
+    /// The name of the background task to print a report for.
+    #[clap(value_name = "TASK_NAME")]
+    task: String,
 }
 
 #[derive(Debug, Args)]
@@ -396,6 +409,16 @@ impl NexusArgs {
                 command: BackgroundTasksCommands::Show(args),
             }) => cmd_nexus_background_tasks_show(&client, args).await,
             NexusCommands::BackgroundTasks(BackgroundTasksArgs {
+                command: BackgroundTasksCommands::PrintReport(args),
+            }) => {
+                cmd_nexus_background_tasks_print_report(
+                    &client,
+                    args,
+                    omdb.output.color,
+                )
+                .await
+            }
+            NexusCommands::BackgroundTasks(BackgroundTasksArgs {
                 command: BackgroundTasksCommands::Activate(args),
             }) => {
                 let token = omdb.check_allow_destructive()?;
@@ -643,6 +666,49 @@ async fn cmd_nexus_background_tasks_show(
 
     for (_, bgtask) in &tasks {
         print_task(bgtask);
+    }
+
+    Ok(())
+}
+
+/// Runs `omdb nexus background-tasks print-report`
+async fn cmd_nexus_background_tasks_print_report(
+    client: &nexus_client::Client,
+    args: &BackgroundTasksPrintReportArgs,
+    color: ColorChoice,
+) -> Result<(), anyhow::Error> {
+    let response = client
+        .bgtask_view(&args.task)
+        .await
+        .context("fetching background task")?;
+    let task = response.into_inner();
+    match task.last {
+        LastResult::NeverCompleted => {
+            bail!("task {:?} has never completed", args.task);
+        }
+        LastResult::Completed(last) => {
+            // Clone the details so the original details are preserved for the
+            // error below.
+            let event_buffer = extract_event_buffer(&mut last.details.clone())
+                .with_context(|| {
+                    format!(
+                        "error extracting `event_report` from task details \
+                         -- found {:?}",
+                        last.details
+                    )
+                })?;
+            let Some(event_buffer) = event_buffer else {
+                bail!("task {:?} has no event report", args.task);
+            };
+
+            let mut line_display = LineDisplay::new(std::io::stdout());
+            line_display.set_start_time(last.start_time);
+            if should_colorize(color, supports_color::Stream::Stdout) {
+                line_display.set_styles(LineDisplayStyles::colorized());
+            }
+
+            line_display.write_event_buffer(&event_buffer)?;
+        }
     }
 
     Ok(())
