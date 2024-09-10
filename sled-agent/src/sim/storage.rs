@@ -304,7 +304,6 @@ impl CrucibleDataInner {
         }
 
         let id = Uuid::from_str(&id.0).unwrap();
-        let port_number = self.get_free_port();
 
         let map =
             self.running_snapshots.entry(id).or_insert_with(|| HashMap::new());
@@ -312,9 +311,10 @@ impl CrucibleDataInner {
         // If a running snapshot exists already, return it - this endpoint must
         // be idempotent.
         if let Some(running_snapshot) = map.get(&name.to_string()) {
-            self.used_ports.remove(&port_number);
             return Ok(running_snapshot.clone());
         }
+
+        let port_number = self.get_free_port();
 
         let running_snapshot = RunningSnapshot {
             id: RegionId(Uuid::new_v4().to_string()),
