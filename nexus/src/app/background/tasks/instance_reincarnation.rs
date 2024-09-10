@@ -386,10 +386,15 @@ mod test {
 
         // Noop test
         let result = task.activate(&opctx).await;
-        assert_eq!(
-            result,
-            serde_json::json!(InstanceReincarnationStatus::default())
-        );
+        let status =
+            serde_json::from_value::<InstanceReincarnationStatus>(result)
+                .expect("JSON must be correctly shaped");
+        assert_eq!(status.instances_found, 0);
+        assert_eq!(status.instances_reincarnated, Vec::new());
+        assert_eq!(status.already_reincarnated, Vec::new());
+        assert_eq!(status.instances_cooling_down, Vec::new());
+        assert_eq!(status.query_error, None);
+        assert_eq!(status.restart_errors, Vec::new());
         assert_eq!(starter.count_reset(), 0);
 
         // Create an instance in the `Failed` state that's eligible to be
