@@ -327,8 +327,14 @@ mod test {
                         name,
                         description: "It's an instance".into(),
                     },
-                    ncpus: 2i64.try_into().unwrap(),
-                    memory: ByteCount::from_gibibytes_u32(16),
+                    // In this test, we will "leak" sled resources, since we
+                    // munge the database records for the instance without
+                    // deleting its VMM (as we want to explicitly activate the
+                    // reincarnation task, rather than letting the
+                    // `instance-update` saga do so). Therefore, make our
+                    // resource requests as small as possible.
+                    ncpus: 1i64.try_into().unwrap(),
+                    memory: ByteCount::from_gibibytes_u32(2),
                     hostname: "myhostname".try_into().unwrap(),
                     user_data: Vec::new(),
                     network_interfaces:
