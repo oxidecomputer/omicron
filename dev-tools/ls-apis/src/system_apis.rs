@@ -596,10 +596,13 @@ pub enum ApiDependencyFilter {
     /// Include all dependencies found from Cargo package metadata
     All,
 
-    /// Exclude dependencies that are explicitly marked as outside the update
-    /// DAG
+    /// Exclude found dependencies that are:
+    ///
+    /// - explicitly marked as outside the update DAG
+    /// - bogus (do not reflect real dependencies)
+    /// - not part of production deployments
     #[default]
-    NotBogusOrNonDag,
+    Default,
 }
 
 impl ApiDependencyFilter {
@@ -616,9 +619,12 @@ impl ApiDependencyFilter {
 
         Ok(match self {
             ApiDependencyFilter::All => true,
-            ApiDependencyFilter::NotBogusOrNonDag => {
-                !matches!(evaluation, Evaluation::NonDag | Evaluation::Bogus)
-            }
+            ApiDependencyFilter::Default => !matches!(
+                evaluation,
+                Evaluation::NonDag
+                    | Evaluation::Bogus
+                    | Evaluation::NotDeployed
+            ),
         })
     }
 }
