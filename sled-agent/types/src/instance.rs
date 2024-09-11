@@ -36,7 +36,7 @@ pub struct InstanceEnsureBody {
     pub instance_id: InstanceUuid,
 
     /// The ID of the migration in to this VMM, if this VMM is being
-    /// ensured s part of a migration in. If this is `None`, the VMM is not
+    /// ensured is part of a migration in. If this is `None`, the VMM is not
     /// being created due to a migration.
     pub migration_id: Option<Uuid>,
 
