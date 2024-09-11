@@ -61,11 +61,20 @@ impl Workspace {
     /// workspace.  Otherwise, the workspace root is assumed to be at the path
     /// `extra_repos/name`.
     pub fn load(name: &str, extra_repos: Option<&Utf8Path>) -> Result<Self> {
-        eprintln!("loading metadata for workspace {name}");
+        let manifest_path =
+            extra_repos.map(|p| p.join(name).join("Cargo.toml"));
+        eprintln!(
+            "loading metadata for workspace {name} from {}",
+            manifest_path
+                .as_ref()
+                .map(|p| p.to_string())
+                .as_deref()
+                .unwrap_or("current workspace")
+        );
 
         let mut cmd = cargo_metadata::MetadataCommand::new();
-        if let Some(extra_repos) = extra_repos {
-            cmd.manifest_path(extra_repos.join(name).join("Cargo.toml"));
+        if let Some(manifest_path) = manifest_path {
+            cmd.manifest_path(manifest_path);
         }
         let metadata = cmd.exec().context("loading metadata")?;
         let workspace_root = metadata.workspace_root;

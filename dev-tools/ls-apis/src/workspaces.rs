@@ -79,7 +79,9 @@ impl Workspaces {
                     client_pkgnames_unused.remove(client_pkgname);
                 } else {
                     warnings.push(anyhow!(
-                        "found client package missing from API manifest: {}",
+                        "workspace {}: found client package missing from API \
+                         manifest: {}",
+                        workspace.name(),
                         client_pkgname
                     ));
                 }
