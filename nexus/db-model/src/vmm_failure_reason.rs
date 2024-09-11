@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::impl_enum_type;
+use omicron_common::api::internal::nexus::VmmFailureReason as ApiFailureReason;
 use serde::Deserialize;
 use serde::Serialize;
 use std::fmt;
@@ -32,6 +33,23 @@ impl fmt::Display for VmmFailureReason {
         write!(f, "{}", self.label())
     }
 }
+
+impl From<ApiFailureReason> for VmmFailureReason {
+    fn from(reason: ApiFailureReason) -> Self {
+        match reason {
+            ApiFailureReason::SledExpunged => Self::SledExpunged,
+        }
+    }
+}
+
+impl From<VmmFailureReason> for ApiFailureReason {
+    fn from(reason: VmmFailureReason) -> Self {
+        match reason {
+            VmmFailureReason::SledExpunged => Self::SledExpunged,
+        }
+    }
+}
+
 impl diesel::query_builder::QueryId for VmmFailureReason {
     type QueryId = ();
     const HAS_STATIC_QUERY_ID: bool = false;
