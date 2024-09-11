@@ -9,7 +9,6 @@ use crate::api_metadata::AllApiMetadata;
 use crate::api_metadata::ApiMetadata;
 use crate::api_metadata::Evaluation;
 use crate::cargo::DepPath;
-use crate::cargo::Workspace;
 use crate::parse_toml_file;
 use crate::workspaces::Workspaces;
 use crate::ClientPackageName;
@@ -135,13 +134,11 @@ impl SystemApis {
                 .walk_required_deps_recursively(
                     pkg,
                     &mut |p: &Package, dep_path: &DepPath| {
-                        if !ignore_dependency(workspace, p, dep_path) {
-                            deps_tracker.found_dependency(
-                                server_pkgname,
-                                &p.name,
-                                dep_path,
-                            );
-                        }
+                        deps_tracker.found_dependency(
+                            server_pkgname,
+                            &p.name,
+                            dep_path,
+                        );
                     },
                 )
                 .with_context(|| {
@@ -563,56 +560,6 @@ impl<'a> ClientDependenciesTracker<'a> {
             .or_insert_with(Vec::new)
             .push(dep_path.clone());
     }
-}
-
-/// Returns whether a particular Rust package dependency should be ignored when
-/// trying to infer which of our packages depend on APIs.
-fn ignore_dependency(
-    workspace: &Workspace,
-    package: &Package,
-    dep_path: &DepPath,
-) -> bool {
-    // unwrap(): the workspace must know about each of these packages.
-    let parent_id = dep_path.bottom();
-    let parent = workspace.find_pkg_by_id(parent_id).unwrap();
-    let parent_name = &parent.name;
-    let package_name = &package.name;
-
-    // TODO
-    // omicron_common depends on mg-admin-client solely to impl some `From`
-    // conversions.  That makes it look like just about everything depends on
-    // mg-admin-client, which isn't true.  We should consider reversing this,
-    // since most clients put those conversions into the client rather than
-    // omicron_common.  But for now, let's just ignore this particular
-    // dependency.
-    if package_name == "mg-admin-client" && parent_name == "omicron-common" {
-        return true;
-    }
-
-    // TODO internal-dns depends on dns-service-client to use its types.
-    // They're only used when *configuring* DNS, which is only done in a couple
-    // of components.  But many components use internal-dns to *read* DNS.  So
-    // like above, this makes it look like everything uses the DNS server API,
-    // but that's not true.  We should consider splitting this crate in two.
-    // But for now, just ignore the specific dependency from internal-dns to
-    // dns-service-client.  If a consumer actually calls the DNS server, it will
-    // have a separate dependency.
-    if package_name == "dns-service-client" && parent_name == "internal-dns" {
-        return true;
-    }
-
-    // TODO nexus-types depends on dns-service-client and gateway-client for
-    // defining some types, but again, this doesn't mean that somebody using
-    // nexus-types is actually calling out to these services.  If they were,
-    // they'd need to have some other dependency on them.
-    if parent_name == "nexus-types"
-        && (package_name == "dns-service-client"
-            || package_name == "gateway-client")
-    {
-        return true;
-    }
-
-    false
 }
 
 /// Specifies which API dependencies to include vs. ignore when iterating

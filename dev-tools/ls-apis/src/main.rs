@@ -4,13 +4,6 @@
 
 //! Show information about Progenitor-based APIs
 
-// XXX-dap wishlist:
-// - Fix warnings:
-//   - Inspect all the edges to make sure I understand them and that we're
-//     handling them well
-// - Find The DAG
-// - Have the tool manage the git checkouts
-
 use anyhow::{Context, Result};
 use camino::Utf8PathBuf;
 use clap::{Args, Parser, Subcommand};

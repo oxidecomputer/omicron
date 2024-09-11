@@ -210,14 +210,6 @@ impl Workspace {
             .and_then(|pkgid| self.packages_by_id.get(pkgid))
     }
 
-    /// Returns information about package with id `pkgid` referenced in this
-    /// workspace
-    ///
-    /// This can be either a workspace package or a dependency.
-    pub fn find_pkg_by_id(&self, pkgid: &PackageId) -> Option<&Package> {
-        self.packages_by_id.get(pkgid)
-    }
-
     /// Given a workspace package, return the relative path frmo the root of the
     /// workspace to that package.
     pub fn find_workspace_package_path(

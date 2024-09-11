@@ -227,11 +227,7 @@ instance.  It's also used by `crutest` for testing.
 # Notes on specific dependencies
 #############################################################
 
-# TODO-dap consider whether the other special cases that are currently hardcoded
-# belong here, too?
-
-# XXX-dap It would be nice to fix this to avoid accidental false negative in the
-# future.
+# TODO It'd be nice to fix this to avoid accidental future false negatives.
 [[dependency_filter_rules]]
 ancestor = "dns-server"
 client = "dns-service-client"
@@ -240,8 +236,7 @@ note = """
 DNS server depends on itself to provide TransientServer.  Not a true dependency.
 """
 
-# XXX-dap It would be nice to fix this to avoid accidental false negative in the
-# future.
+# TODO It'd be nice to fix this to avoid accidental future false negatives.
 [[dependency_filter_rules]]
 ancestor = "wicketd"
 client = "wicketd-client"
@@ -259,8 +254,7 @@ note = """
 sled-agent-types uses propolis-client for types only.
 """
 
-# XXX-dap It would be nice to fix this to avoid accidental false negative in the
-# future.
+# TODO It'd be nice to fix this to avoid accidental future false negatives.
 [[dependency_filter_rules]]
 ancestor = "oximeter-collector"
 client = "oximeter-client"
@@ -269,8 +263,7 @@ note = """
 Oximeter provides a standalone collector that is not used in deployed systems.
 """
 
-# XXX-dap It would be nice to fix this to avoid accidental false negative in the
-# future.
+# TODO It'd be nice to fix this to avoid accidental future false negatives.
 [[dependency_filter_rules]]
 ancestor = "omicron-sled-agent"
 client = "crucible-agent-client"
@@ -287,4 +280,53 @@ note = """
 All Oximeter producers are Nexus clients.  This is a good candidate for a
 non-DAG dependency because the API is small and stable and the reverse
 directions are often not.
+"""
+
+# TODO It'd be nice to fix this to avoid accidental future false negatives.
+[[dependency_filter_rules]]
+ancestor = "omicron-common"
+client = "mg-admin-client"
+evaluation = "bogus"
+note = """
+omicron_common depends on mg-admin-client solely to impl some `From`
+conversions.  That makes it look like just about everything depends on
+mg-admin-client, which isn't true.  It'd be nice to remove this.  Most clients
+put those conversions into the client rather than omicron_common.
+"""
+
+# TODO It'd be nice to fix this to avoid accidental future false negatives.
+[[dependency_filter_rules]]
+ancestor = "internal-dns"
+client = "dns-service-client"
+evaluation = "bogus"
+note = """
+internal-dns depends on dns-service-client to use its types.  They're only used
+when configuring DNS, which is only done in a couple of components.  But many
+other components use internal-dns to read DNS.  This dependency makes it look
+like everything uses the DNS server API, but that's not true.  We should
+consider splitting this crate in two.  But for now, just ignore the specific
+dependency from internal-dns to dns-service-client.  If a consumer actually
+calls the DNS server, it will have a separate dependency.
+"""
+
+# TODO It'd be nice to fix this to avoid accidental future false negatives.
+[[dependency_filter_rules]]
+ancestor = "nexus-types"
+client = "gateway-client"
+evaluation = "bogus"
+note = """
+nexus-types depends on gateway-client for defining some types, but this doesn't
+mean that somebody using nexus-types is actually calling out to these services.
+If they were, they'd need to have some other dependency on them.
+"""
+
+# TODO It'd be nice to fix this to avoid accidental future false negatives.
+[[dependency_filter_rules]]
+ancestor = "nexus-types"
+client = "dns-service-client"
+evaluation = "bogus"
+note = """
+nexus-types depends on dns-service-client for defining some types, but this
+doesn't mean that somebody using nexus-types is actually calling out to these
+services.  If they were, they'd need to have some other dependency on them.
 """
