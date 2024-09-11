@@ -1594,9 +1594,7 @@ mod tests {
     use omicron_common::api::external::{
         ByteCount, Generation, Hostname, InstanceCpuCount,
     };
-    use omicron_common::api::internal::nexus::{
-        InstanceProperties, InstanceRuntimeState, VmmState,
-    };
+    use omicron_common::api::internal::nexus::{InstanceProperties, VmmState};
     use omicron_common::api::internal::shared::{DhcpConfig, SledIdentifiers};
     use omicron_common::FileKv;
     use sled_agent_types::zone_bundle::CleanupContext;
@@ -2251,21 +2249,16 @@ mod tests {
             serial: "fake-serial".into(),
         };
 
-        let instance_runtime = InstanceRuntimeState {
-            propolis_id: Some(propolis_id),
-            dst_propolis_id: None,
-            migration_id: None,
-            gen: Generation::new(),
-            time_updated: Default::default(),
-        };
-
         mgr.ensure_registered(
-            instance_id,
             propolis_id,
-            hardware,
-            instance_runtime,
-            vmm_runtime,
-            propolis_addr,
+            InstanceEnsureBody {
+                instance_id,
+                migration_id: None,
+                hardware,
+                vmm_runtime,
+                propolis_addr,
+                metadata,
+            },
             sled_identifiers,
             metadata,
         )
