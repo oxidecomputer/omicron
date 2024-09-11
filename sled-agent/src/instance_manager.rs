@@ -19,7 +19,6 @@ use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::PortManager;
 use illumos_utils::running_zone::ZoneBuilderFactory;
 use omicron_common::api::external::Generation;
-use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_common::api::internal::nexus::VmmRuntimeState;
 use omicron_common::api::internal::shared::SledIdentifiers;
@@ -144,8 +143,8 @@ impl InstanceManager {
         &self,
         instance_id: InstanceUuid,
         propolis_id: PropolisUuid,
+        migration_id: Option<Uuid>,
         hardware: InstanceHardware,
-        instance_runtime: InstanceRuntimeState,
         vmm_runtime: VmmRuntimeState,
         propolis_addr: SocketAddr,
         sled_identifiers: SledIdentifiers,
@@ -157,8 +156,8 @@ impl InstanceManager {
             .send(InstanceManagerRequest::EnsureRegistered {
                 instance_id,
                 propolis_id,
+                migration_id,
                 hardware,
-                instance_runtime,
                 vmm_runtime,
                 propolis_addr,
                 sled_identifiers: Box::new(sled_identifiers),
@@ -341,8 +340,8 @@ enum InstanceManagerRequest {
     EnsureRegistered {
         instance_id: InstanceUuid,
         propolis_id: PropolisUuid,
+        migration_id: Option<Uuid>,
         hardware: InstanceHardware,
-        instance_runtime: InstanceRuntimeState,
         vmm_runtime: VmmRuntimeState,
         propolis_addr: SocketAddr,
         // These are boxed because they are, apparently, quite large, and Clippy
@@ -466,8 +465,8 @@ impl InstanceManagerRunner {
                         Some(EnsureRegistered {
                             instance_id,
                             propolis_id,
+                            migration_id,
                             hardware,
-                            instance_runtime,
                             vmm_runtime,
                             propolis_addr,
                             sled_identifiers,
@@ -477,8 +476,8 @@ impl InstanceManagerRunner {
                             tx.send(self.ensure_registered(
                                 instance_id,
                                 propolis_id,
+                                migration_id,
                                 hardware,
-                                instance_runtime,
                                 vmm_runtime,
                                 propolis_addr,
                                 *sled_identifiers,
@@ -560,8 +559,8 @@ impl InstanceManagerRunner {
         &mut self,
         instance_id: InstanceUuid,
         propolis_id: PropolisUuid,
+        migration_id: Option<Uuid>,
         hardware: InstanceHardware,
-        instance_runtime: InstanceRuntimeState,
         vmm_runtime: VmmRuntimeState,
         propolis_addr: SocketAddr,
         sled_identifiers: SledIdentifiers,
@@ -572,8 +571,8 @@ impl InstanceManagerRunner {
             "ensuring instance is registered";
             "instance_id" => %instance_id,
             "propolis_id" => %propolis_id,
+            "migration_id" => ?migration_id,
             "hardware" => ?hardware,
-            "instance_runtime" => ?instance_runtime,
             "vmm_runtime" => ?vmm_runtime,
             "propolis_addr" => ?propolis_addr,
             "metadata" => ?metadata,
@@ -603,7 +602,8 @@ impl InstanceManagerRunner {
                 info!(&self.log,
                       "registering new instance";
                       "instance_id" => %instance_id,
-                      "propolis_id" => %propolis_id);
+                      "propolis_id" => %propolis_id,
+                    "migration_id" => ?migration_id);
 
                 let instance_log = self.log.new(o!(
                     "instance_id" => instance_id.to_string(),
@@ -627,7 +627,7 @@ impl InstanceManagerRunner {
                     hardware,
                     vmm_runtime,
                     propolis_addr,
-                    migration_id: instance_runtime.migration_id,
+                    migration_id,
                 };
 
                 let instance = Instance::new(

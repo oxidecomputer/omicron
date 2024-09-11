@@ -46,8 +46,7 @@ use omicron_common::api::internal::shared::{
     VirtualNetworkInterfaceHost,
 };
 use omicron_common::api::{
-    internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
-    internal::nexus::UpdateArtifactId,
+    internal::nexus::DiskRuntimeState, internal::nexus::UpdateArtifactId,
 };
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
@@ -986,8 +985,8 @@ impl SledAgent {
         &self,
         instance_id: InstanceUuid,
         propolis_id: PropolisUuid,
+        migration_id: Option<Uuid>,
         hardware: InstanceHardware,
-        instance_runtime: InstanceRuntimeState,
         vmm_runtime: VmmRuntimeState,
         propolis_addr: SocketAddr,
         metadata: InstanceMetadata,
@@ -997,8 +996,8 @@ impl SledAgent {
             .ensure_registered(
                 instance_id,
                 propolis_id,
+                migration_id,
                 hardware,
-                instance_runtime,
                 vmm_runtime,
                 propolis_addr,
                 self.sled_identifiers(),

@@ -96,8 +96,8 @@ impl SledAgentApi for SledAgentSimImpl {
             sa.instance_register(
                 body_args.instance_id,
                 propolis_id,
+                body_args.migration_id,
                 body_args.hardware,
-                body_args.instance_runtime,
                 body_args.vmm_runtime,
                 body_args.metadata,
             )

@@ -24,11 +24,9 @@ use nexus_sled_agent_shared::inventory::{
 use omicron_common::api::external::{
     ByteCount, DiskState, Error, Generation, ResourceType,
 };
+use omicron_common::api::internal::nexus::VmmRuntimeState;
 use omicron_common::api::internal::nexus::{
     DiskRuntimeState, MigrationRuntimeState, MigrationState, SledVmmState,
-};
-use omicron_common::api::internal::nexus::{
-    InstanceRuntimeState, VmmRuntimeState,
 };
 use omicron_common::api::internal::shared::{
     RackNetworkConfig, ResolvedVpcRoute, ResolvedVpcRouteSet,
@@ -262,8 +260,8 @@ impl SledAgent {
         self: &Arc<Self>,
         instance_id: InstanceUuid,
         propolis_id: PropolisUuid,
+        migration_id: Option<Uuid>,
         hardware: InstanceHardware,
-        instance_runtime: InstanceRuntimeState,
         vmm_runtime: VmmRuntimeState,
         metadata: InstanceMetadata,
     ) -> Result<SledVmmState, Error> {
@@ -362,14 +360,13 @@ impl SledAgent {
             }
         }
 
-        let migration_in = instance_runtime.migration_id.map(|migration_id| {
-            MigrationRuntimeState {
+        let migration_in =
+            migration_id.map(|migration_id| MigrationRuntimeState {
                 migration_id,
                 state: MigrationState::Pending,
                 gen: Generation::new(),
                 time_updated: chrono::Utc::now(),
-            }
-        });
+            });
 
         let instance_run_time_state = self
             .vmms

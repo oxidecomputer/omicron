@@ -11,7 +11,7 @@ use crate::schema::{disk, external_ip, instance};
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
 use nexus_types::external_api::params;
-use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid};
+use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use serde::Deserialize;
 use serde::Serialize;
 use uuid::Uuid;
@@ -245,22 +245,6 @@ impl From<omicron_common::api::internal::nexus::InstanceRuntimeState>
                 .dst_propolis_id
                 .map(|id| id.into_untyped_uuid()),
             migration_id: state.migration_id,
-        }
-    }
-}
-
-impl From<InstanceRuntimeState>
-    for sled_agent_client::types::InstanceRuntimeState
-{
-    fn from(state: InstanceRuntimeState) -> Self {
-        Self {
-            dst_propolis_id: state
-                .dst_propolis_id
-                .map(PropolisUuid::from_untyped_uuid),
-            gen: state.gen.into(),
-            migration_id: state.migration_id,
-            propolis_id: state.propolis_id.map(PropolisUuid::from_untyped_uuid),
-            time_updated: state.time_updated,
         }
     }
 }
