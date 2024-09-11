@@ -1,14 +1,34 @@
 # Describes all the Dropshot/OpenAPI/Progenitor APIs in the system
-# XXX-dap there's similar metadata in the openapi manager
-# XXX-dap it'd be nice to get some of this from package-manifest.toml
-
-# XXX-dap stuff I'm ignoring from package-manifest.toml:
+#
+# TODO It would be nice to collect a bunch of this information from the same
+# sources that drive the actual build process (e.g., package-manifest.toml).
+# For non-Omicron components, the deployment units (zone images and tarballs
+# that get unpacked into the switch zone or global zone) come from buildomat
+# jobs on other repositories.  In at least some components those come from those
+# components' package-manifest.toml files, which we probably have available, so
+# we could still incorporate that information.
+#
+# TODO The following items from package-manifest.toml are currently ignored
+# because they are assumed not to contain servers or clients that we care about:
+#
 # - faux_mgs
 # - crucible_dtrace
-# - mg-ddm (XXX-dap)
-# - lldp (XXX-dap)
-# - pumpkind (XXX-dap)
-# - thundermuffin (XXX-dap)
+# - mg-ddm
+#
+# The following were at one point included here, but do not appear to contain
+# Progenitor clients or APIs, so they're left out to avoid needing to create and
+# process clones of these repos:
+#
+# - lldp
+# - pumpkind
+# - thundermuffin
+#
+# If we do wind up processing package-manifest.toml, we may want to maintain an
+# explicit list of items that we ignore so that we can fail when something is
+# neither included nor ignored so that we can be sure we're not missing
+# anything.
+#
+# TODO The metadata here overlaps with metadata hardcoded in `openapi-manager`.
 
 #############################################################
 # Deployment Units
