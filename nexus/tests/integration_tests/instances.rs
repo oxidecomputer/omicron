@@ -52,6 +52,7 @@ use nexus_types::internal_api::params::InstanceMigrateRequest;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskState;
+use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Instance;
@@ -1294,6 +1295,12 @@ async fn test_instance_failed_when_on_expunged_sled(
     expect_instance_delete_ok(&client, instance1_name).await;
     // ...or restartable.
     expect_instance_start_ok(client, instance2_name).await;
+
+    // The restarted instance shoild now transition back to `Running`, on its
+    // new sled.
+    instance_wait_for_vmm_registration(cptestctx, &instance2_id).await;
+    instance_simulate(nexus, &instance2_id).await;
+    instance_wait_for_state(client, instance2_id, InstanceState::Running).await;
 }
 
 // Verifies that the instance-watcher background task transitions an instance
@@ -1333,6 +1340,10 @@ async fn test_instance_failed_by_instance_watcher_automatically_reincarnates(
         instance_wait_for_state(client, instance_id, InstanceState::Starting)
             .await
     );
+    // Wait for the VMM to be registered with the sim sled-agent before poking
+    // it.
+    dbg!(instance_wait_for_vmm_registration(cptestctx, &instance_id).await);
+    // Now, we can actually poke the instance.
     dbg!(instance_simulate(nexus, &instance_id).await);
     dbg!(
         instance_wait_for_state(client, instance_id, InstanceState::Running)
@@ -5315,6 +5326,85 @@ pub async fn instance_wait_for_state_as(
             "instance {instance_id} did not transition to {state:?} \
              after {MAX_WAIT:?}: {e}"
         ),
+    }
+}
+
+/// Waits for an instance's VMM to be registered with the simulated sled-agent.
+///
+/// This is necessary when *restarting* an instance, as the instance's external
+/// API state will be `Starting` as soon as a VMM record is created in the
+/// database, even if that VMM's internal state is `VmmState::Creating` (which
+/// means it has not yet been registered with the sled-agent). If we attempt to
+/// simulate an instance before the simulated sled-agent has registered its VMM,
+/// the simulated sled-agent will panic.
+pub async fn instance_wait_for_vmm_registration(
+    cptestctx: &ControlPlaneTestContext,
+    instance_id: &InstanceUuid,
+) {
+    let datastore = cptestctx.server.server_context().nexus.datastore();
+    let log = &cptestctx.logctx.log;
+    let opctx = OpContext::for_tests(log.clone(), datastore.clone());
+    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+        .instance_id(instance_id.into_untyped_uuid())
+        .lookup_for(nexus_db_queries::authz::Action::Read)
+        .await
+        .expect("instance must exist to wait for its VMM to be registered");
+
+    info!(
+        log,
+        "waiting for instance's VMM to be registered with sled-agent...";
+        "instance_id" => %instance_id,
+    );
+
+    let result = wait_for_condition(
+        || async {
+            debug!(
+                log,
+                "checking if instance's active VMM has been registered with sled-agent";
+                "instance_id" => %instance_id,
+            );
+            let gestalt = datastore
+                .instance_fetch_all(&opctx, &authz_instance)
+                .await
+                .map_err(poll::CondCheckError::Failed)?;
+            let vmm = match gestalt.active_vmm {
+                Some(v) => v,
+                None => {
+                    warn!(
+                        log,
+                        "instance does not have an active VMM, hopefully \
+                            it will soon...";
+                        "instance_id" => %instance_id,
+                    );
+                    return Err(CondCheckError::<Error>::NotYet);
+                }
+            };
+
+            if vmm.runtime.state == nexus_db_model::VmmState::Creating {
+                debug!(
+                    log,
+                    "instance's active VMM is still Creating";
+                    "isntance_id" => %instance_id,
+                );
+                Err(poll::CondCheckError::<Error>::NotYet)
+            } else {
+                info!(
+                    log,
+                    "instance's active VMM is no longer Creating";
+                    "instance_id" => %instance_id,
+                    "vmm_id" => %vmm.id,
+                    "vmm_state" => ?vmm.runtime.state,
+                );
+                Ok(())
+            }
+        },
+        &Duration::from_secs(1),
+        &Duration::from_secs(60),
+    )
+    .await;
+
+    if let Err(err) = result {
+        panic!("instance {instance_id}'s VMM was not registered: {err:?}")
     }
 }
 
