@@ -70,7 +70,9 @@ impl InstanceUpdater {
                         "{ERR_MSG} {what}";
                         "error" => &error,
                     );
-                    status.errors.push(format!("{ERR_MSG} {what}: {error}"));
+                    status
+                        .query_errors
+                        .push(format!("{ERR_MSG} {what}: {error}"));
                     Vec::new()
                 }
             }
