@@ -92,17 +92,7 @@ impl SledAgentApi for SledAgentSimImpl {
         let sa = rqctx.context();
         let propolis_id = path_params.into_inner().propolis_id;
         let body_args = body.into_inner();
-        Ok(HttpResponseOk(
-            sa.instance_register(
-                body_args.instance_id,
-                propolis_id,
-                body_args.hardware,
-                body_args.instance_runtime,
-                body_args.vmm_runtime,
-                body_args.metadata,
-            )
-            .await?,
-        ))
+        Ok(HttpResponseOk(sa.instance_register(propolis_id, body_args).await?))
     }
 
     async fn vmm_unregister(

@@ -10,7 +10,6 @@ use crate::api::external::{
 };
 use chrono::{DateTime, Utc};
 use omicron_uuid_kinds::DownstairsRegionKind;
-use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::TypedUuid;
 use omicron_uuid_kinds::UpstairsRepairKind;
 use omicron_uuid_kinds::UpstairsSessionKind;
@@ -58,23 +57,6 @@ pub struct InstanceProperties {
     pub memory: ByteCount,
     /// RFC1035-compliant hostname for the instance.
     pub hostname: Hostname,
-}
-
-/// The dynamic runtime properties of an instance: its current VMM ID (if any),
-/// migration information (if any), and the instance state to report if there is
-/// no active VMM.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct InstanceRuntimeState {
-    /// The instance's currently active VMM ID.
-    pub propolis_id: Option<PropolisUuid>,
-    /// If a migration is active, the ID of the target VMM.
-    pub dst_propolis_id: Option<PropolisUuid>,
-    /// If a migration is active, the ID of that migration.
-    pub migration_id: Option<Uuid>,
-    /// Generation number for this state.
-    pub gen: Generation,
-    /// Timestamp for this information.
-    pub time_updated: DateTime<Utc>,
 }
 
 /// One of the states that a VMM can be in.
