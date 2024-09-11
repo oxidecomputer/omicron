@@ -1039,6 +1039,10 @@ CREATE TYPE IF NOT EXISTS omicron.public.instance_auto_restart AS ENUM (
      'best_effort'
 );
 
+CREATE TYPE IF NOT EXISTS omicron.public.vmm_failure_reason AS ENUM (
+    /* The VMM's sled was expunged. */
+    'sled_expunged'
+);
 
 /*
  * TODO consider how we want to manage multiple sagas operating on the same
@@ -1102,23 +1106,17 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
      */
     time_last_auto_restarted TIMESTAMPTZ,
 
-    /*
-     * What failures should result in an instance being automatically restarted
-     * by the control plane.
-     */
-    auto_restart_policy omicron.public.instance_auto_restart,
-
-    /*
-     * The cooldown period that must elapse between consecutive auto restart
-     * attempts. If this is NULL, no cooldown period is explicitly configured
-     * for this instance, and the default cooldown period should be used.
-     */
-     auto_restart_cooldown INTERVAL,
-
+    last_failure_reason omicron.public.vmm_failure_reason,
 
     CONSTRAINT vmm_iff_active_propolis CHECK (
         ((state = 'vmm') AND (active_propolis_id IS NOT NULL)) OR
         ((state != 'vmm') AND (active_propolis_id IS NULL))
+    ),
+
+    /* If an instance has a failure reason, it must be in the failed state. */
+    CONSTRAINT failure_reason_only_if_failed CHECK (
+        ((state != 'failed') AND (last_failure_reason IS NULL)) OR
+        (state = 'failed')
     )
 );
 
@@ -3748,7 +3746,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.vmm (
     sled_id UUID NOT NULL,
     propolis_ip INET NOT NULL,
     propolis_port INT4 NOT NULL CHECK (propolis_port BETWEEN 0 AND 65535) DEFAULT 12400,
-    state omicron.public.vmm_state NOT NULL
+    state omicron.public.vmm_state NOT NULL,
+    failure_reason omicron.public.vmm_failure_reason,
+
+    /* If a VMM has a failure reason, it must be in the failed state. */
+    CONSTRAINT failure_reason_only_if_failed CHECK (
+        ((state != 'failed') AND (failure_reason IS NULL)) OR
+        (state = 'failed')
+    )
+
 );
 
 CREATE INDEX IF NOT EXISTS lookup_vmms_by_sled_id ON omicron.public.vmm (
@@ -4372,7 +4378,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '103.0.0', NULL)
+    (TRUE, NOW(), NOW(), '104.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

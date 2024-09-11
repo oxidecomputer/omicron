@@ -416,6 +416,7 @@ table! {
         migration_id -> Nullable<Uuid>,
         state -> crate::InstanceStateEnum,
         time_last_auto_restarted -> Nullable<Timestamptz>,
+        last_failure_reason -> Nullable<crate::VmmFailureReasonEnum>,
         updater_id -> Nullable<Uuid>,
         updater_gen-> Int8,
     }
@@ -435,6 +436,7 @@ table! {
         time_state_updated -> Timestamptz,
         state_generation -> Int8,
         state -> crate::VmmStateEnum,
+        failure_reason -> Nullable<crate::VmmFailureReasonEnum>,
     }
 }
 joinable!(vmm -> sled (sled_id));

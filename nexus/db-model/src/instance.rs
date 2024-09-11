@@ -4,7 +4,7 @@
 
 use super::{
     ByteCount, Disk, ExternalIp, Generation, InstanceAutoRestartPolicy,
-    InstanceCpuCount, InstanceState,
+    InstanceCpuCount, InstanceState, VmmFailureReason,
 };
 use crate::collection::DatastoreAttachTargetConfig;
 use crate::schema::{disk, external_ip, instance};
@@ -218,6 +218,9 @@ pub struct InstanceRuntimeState {
     /// This field is guarded by the instance's `gen`.
     #[diesel(column_name = time_last_auto_restarted)]
     pub time_last_auto_restarted: Option<DateTime<Utc>>,
+
+    #[diesel(column_name = last_failure_reason)]
+    pub last_failure_reason: Option<VmmFailureReason>,
 }
 
 impl InstanceRuntimeState {
@@ -230,6 +233,7 @@ impl InstanceRuntimeState {
             migration_id: None,
             gen: Generation::new(),
             time_last_auto_restarted: None,
+            last_failure_reason: None,
         }
     }
 }
