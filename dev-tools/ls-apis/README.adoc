@@ -216,3 +216,14 @@ In summary:
 * What remains is to evaluate the rest of the edges and determine if they're going to be `dag` or `non-dag`.
 
 It is a runtime error for two filter rules to match any dependency chain.  This makes the evaluation unambiguous.  i.e., you can't have one rule match a dependency chain and say it's `bogus` while another says it's `dag`.
+
+==== Applying different filters at runtime
+
+By default, this command shows dependencies that might be in the final graph.  This includes those labeled `dag` and `unknown`.  It excludes `bogus`, `non-dag`, and `not-deployed` dependencies.
+
+You can select different subsets using the `--filter` option, which accepts:
+
+* `include-non-dag`: show non-`bogus`, non-`not-deployed` dependencies (i.e., all dependencies that do exist in the deployed system).
+* `non-bogus`: show everything _except_ bogus dependencies
+* `bogus`: show only the bogus dependencies (useful for seeing all the false positives)
+* `all`: show everything, even bogus dependencies
