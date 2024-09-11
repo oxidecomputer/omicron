@@ -210,18 +210,26 @@ impl KeeperSettings {
 
 macro_rules! define_struct_and_set_values {
     (
+        #[$doc_struct:meta]
         struct $name:ident {
-            $($field_name:ident: $field_type:ty),* $(,)?
+            $(
+                #[$doc_field:meta]
+                $field_name:ident: $field_type:ty
+            ),* $(,)?
         }
     ) => {
         #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
         #[serde(rename_all = "snake_case")]
+        #[$doc_struct]
         pub struct $name {
-            $($field_name: $field_type),*
+            $(
+                #[$doc_field]
+                $field_name: $field_type
+            ),*
         }
 
         impl $name {
-            // Check if a field name matches a given string, and set its value
+            // Check if a field name matches a given key and set its value
             pub fn set_field_value(&mut self, key: &str, value: Option<u128>) -> Result<()> {
                 match key {
                     $(
@@ -238,14 +246,23 @@ macro_rules! define_struct_and_set_values {
 }
 
 define_struct_and_set_values! {
+    /// Logically grouped information file from a keeper node
     struct Lgif {
+        /// Index of the first log entry in the current log segment
         first_log_idx: Option<u128>,
+        /// Term of the leader when the first log entry was created
         first_log_term: Option<u128>,
+        /// Index of the last log entry in the current log segment
         last_log_idx: Option<u128>,
+        /// Term of the leader when the last log entry was created
         last_log_term: Option<u128>,
+        /// Index of the last committed log entry
         last_committed_log_idx: Option<u128>,
+        /// Index of the last committed log entry from the leader's perspective
         leader_committed_log_idx: Option<u128>,
+        /// Target index for log commitment during replication or recovery
         target_committed_log_idx: Option<u128>,
+        /// Index of the most recent snapshot taken
         last_snapshot_idx: Option<u128>,
     }
 }
@@ -456,6 +473,24 @@ mod tests {
 
         assert!(lgif.first_log_idx == None);
         assert!(lgif.first_log_term == Some(1));
+        assert!(lgif.last_log_idx == Some(4386));
+        assert!(lgif.last_log_term == Some(1));
+        assert!(lgif.last_committed_log_idx == Some(4386));
+        assert!(lgif.leader_committed_log_idx == Some(4386));
+        assert!(lgif.target_committed_log_idx == Some(4386));
+        assert!(lgif.last_snapshot_idx == Some(0));
+    }
+
+    #[test]
+    fn test_non_u128_value_lgif_parse_success() {
+        let data =
+            "first_log_idx\t1\nfirst_log_term\tBOB\nlast_log_idx\t4386\nlast_log_term\t1\nlast_committed_log_idx\t4386
+            \nleader_committed_log_idx\t4386\ntarget_committed_log_idx\t4386\nlast_snapshot_idx\t0\n\n"
+            .as_bytes();
+        let lgif = Lgif::parse(data).unwrap();
+
+        assert!(lgif.first_log_idx == Some(1));
+        assert!(lgif.first_log_term == None);
         assert!(lgif.last_log_idx == Some(4386));
         assert!(lgif.last_log_term == Some(1));
         assert!(lgif.last_committed_log_idx == Some(4386));
