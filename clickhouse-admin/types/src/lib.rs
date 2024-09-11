@@ -224,31 +224,40 @@ pub struct Lgif {
 impl Lgif {
     pub fn parse(data: &[u8]) -> Result<Self> {
         let binding = String::from_utf8_lossy(data);
-        let output = binding.as_ref();
-        let mut p: Vec<&str> = output.split(|c| c == '\t' || c == '\n').collect();
+        let lines = binding.lines();
+        let mut lgif: HashMap<String, u64> = HashMap::new();
 
-        let mut lgif: HashMap<&str, &str> = HashMap::new();
+        for line in lines {
+            let line = line.trim();
+            if !line.is_empty() {
+                let l: Vec<&str> = line.split('\t').collect();
 
-        // TODO: First I need to make sure it's an even number?
-        let items_to_add = p.len()/2;
-        // Create a hashmap with the vec
-        for _ in 0..items_to_add {
-            let key = p.remove(0);
-            let value = p.remove(0);
+                if l.len() != 2 {
+                    // TODO: Log that there was an empty line
+                    continue;
+                }
 
-            lgif.insert(key, value);
-        }
+                // println!("Vec: {:#?}", l);
+                let key = l[0].to_string();
+                let value = match u64::from_str(l[1]) {
+                    Ok(v) => v,
+                    // TODO: Log error
+                    Err(_) => continue,
+                };
 
-        // TODO: Make this not suck
+                lgif.insert(key, value);
+            }
+        }; 
+
         Ok(Self {
-            first_log_idx: u64::from_str(lgif.get("first_log_idx").unwrap()).unwrap(),
-            first_log_term: u64::from_str(lgif.get("first_log_term").unwrap()).unwrap(),
-            last_log_idx: u64::from_str(lgif.get("last_log_idx").unwrap()).unwrap(),
-            last_log_term: u64::from_str(lgif.get("last_log_term").unwrap()).unwrap(),
-            last_committed_log_idx: u64::from_str(lgif.get("last_committed_log_idx").unwrap()).unwrap(),
-            leader_committed_log_idx: u64::from_str(lgif.get("leader_committed_log_idx").unwrap()).unwrap(),
-            target_committed_log_idx: u64::from_str(lgif.get("target_committed_log_idx").unwrap()).unwrap(),
-            last_snapshot_idx: u64::from_str(lgif.get("last_snapshot_idx").unwrap()).unwrap(),
+            first_log_idx: lgif.remove("first_log_idx").unwrap(),
+            first_log_term: lgif.remove("first_log_term").unwrap(),
+            last_log_idx: lgif.remove("last_log_idx").unwrap(),
+            last_log_term: lgif.remove("last_log_term").unwrap(),
+            last_committed_log_idx: lgif.remove("last_committed_log_idx").unwrap(),
+            leader_committed_log_idx: lgif.remove("leader_committed_log_idx").unwrap(),
+            target_committed_log_idx: lgif.remove("target_committed_log_idx").unwrap(),
+            last_snapshot_idx: lgif.remove("last_snapshot_idx").unwrap(),
         })
     }
 }
