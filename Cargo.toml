@@ -528,7 +528,7 @@ rustfmt-wrapper = "0.2"
 rustls = "0.22.2"
 rustls-pemfile = "2.1.3"
 rustyline = "14.0.0"
-samael = { version = "0.0.15", features = ["xmlsec"] }
+samael = { version = "0.0.17", features = ["xmlsec"] }
 schemars = "0.8.21"
 secrecy = "0.8.0"
 semver = { version = "1.0.23", features = ["std", "serde"] }
