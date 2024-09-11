@@ -118,9 +118,38 @@ impl Workspaces {
                 w.find_workspace_package(&server_pkgname).map(|p| (w, p))
             })
             .collect();
-        // XXX-dap there are actually two separate packages called "dpd-client".
-        // One is in the Omicron workspace.  The other is in the Dendrite
-        // workspace.  I don't know how we ever know which one gets used!
+
+        // TODO As of this writing, we have two distinct packages called
+        // "dpd-client":
+        //
+        // - There's one in the "dendrite" repo.  This is used by:
+        //   - `swadm` (in Dendrite)
+        //   - `tfportd` (in Dendrite)`
+        //   - `ddm` (in Maghemite)
+        //   - `ddmd` (in Maghemite)
+        //   - `mgd` (via `mg-lower`) (in Maghemite)
+        // - There's one in the "omicron" repo.  This is used by:
+        //   - `wicketd` (in Omicron)
+        //   - `omicron-sled-agent` (in Omicron)
+        //   - `omicron-nexus` (in Omicron)
+        //
+        // This is problematic for two reasons:
+        //
+        // 1. This tool assumes that every API has exactly one client and it
+        //    uses the client as the primary key to identify the API.
+        //
+        // 2. The Rust package name is supposed to be unique.  This happens to
+        //    work, probably in part because the packages in the above two
+        //    groups are never built in the same workspace.  This tool _does_
+        //    merge information from all these workspaces, and it's likely
+        //    conflating the two packages.  That happens to be a good thing
+        //    because it keeps (1) from being an actual problem.  That is: if
+        //    this tool actually realized they were separate Rust packages, then
+        //    it would be upset that we had two different clients for the same
+        //    API.
+        //
+        // To keep things working, we just have this function always report the
+        // one in the Omicron repo.
         if server_pkgname == "dpd-client" && found_in_workspaces.len() == 2 {
             if found_in_workspaces[0].0.name() == "omicron" {
                 return Ok(found_in_workspaces[0]);

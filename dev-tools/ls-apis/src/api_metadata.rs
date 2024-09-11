@@ -195,7 +195,10 @@ pub struct DependencyFilterRule {
     pub client: ClientPackageName,
     #[serde(default)]
     pub evaluation: Evaluation,
-    // XXX-dap should these just be comments?
+    // These notes are not currently used, but they are required.  They could as
+    // well just be TOML comments.  But it seems nice to enforce that they're
+    // present.  And this would let us include this explanation in output in the
+    // future (e.g., to explain why some dependency was filtered out).
     #[allow(dead_code)]
     pub note: String,
 }
