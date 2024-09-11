@@ -320,16 +320,7 @@ impl SledAgentApi for SledAgentImpl {
         let propolis_id = path_params.into_inner().propolis_id;
         let body_args = body.into_inner();
         Ok(HttpResponseOk(
-            sa.instance_ensure_registered(
-                body_args.instance_id,
-                propolis_id,
-                body_args.migration_id,
-                body_args.hardware,
-                body_args.vmm_runtime,
-                body_args.propolis_addr,
-                body_args.metadata,
-            )
-            .await?,
+            sa.instance_ensure_registered(propolis_id, body_args).await?,
         ))
     }
 

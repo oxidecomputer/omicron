@@ -24,7 +24,6 @@ use nexus_sled_agent_shared::inventory::{
 use omicron_common::api::external::{
     ByteCount, DiskState, Error, Generation, ResourceType,
 };
-use omicron_common::api::internal::nexus::VmmRuntimeState;
 use omicron_common::api::internal::nexus::{
     DiskRuntimeState, MigrationRuntimeState, MigrationState, SledVmmState,
 };
@@ -37,7 +36,7 @@ use omicron_common::disk::{
     DatasetsConfig, DatasetsManagementResult, DiskIdentity, DiskVariant,
     DisksManagementResult, OmicronPhysicalDisksConfig,
 };
-use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, ZpoolUuid};
+use omicron_uuid_kinds::{GenericUuid, PropolisUuid, ZpoolUuid};
 use oxnet::Ipv6Net;
 use propolis_client::{
     types::VolumeConstructionRequest, Client as PropolisClient,
@@ -48,8 +47,8 @@ use sled_agent_types::early_networking::{
     EarlyNetworkConfig, EarlyNetworkConfigBody,
 };
 use sled_agent_types::instance::{
-    InstanceExternalIpBody, InstanceHardware, InstanceMetadata,
-    VmmPutStateResponse, VmmStateRequested, VmmUnregisterResponse,
+    InstanceEnsureBody, InstanceExternalIpBody, VmmPutStateResponse,
+    VmmStateRequested, VmmUnregisterResponse,
 };
 use slog::Logger;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -258,13 +257,17 @@ impl SledAgent {
     /// (described by `target`).
     pub async fn instance_register(
         self: &Arc<Self>,
-        instance_id: InstanceUuid,
         propolis_id: PropolisUuid,
-        migration_id: Option<Uuid>,
-        hardware: InstanceHardware,
-        vmm_runtime: VmmRuntimeState,
-        metadata: InstanceMetadata,
+        instance: InstanceEnsureBody,
     ) -> Result<SledVmmState, Error> {
+        let InstanceEnsureBody {
+            instance_id,
+            migration_id,
+            hardware,
+            vmm_runtime,
+            metadata,
+            ..
+        } = instance;
         // respond with a fake 500 level failure if asked to ensure an instance
         // with more than 16 CPUs.
         let ncpus: i64 = (&hardware.properties.ncpus).into();
