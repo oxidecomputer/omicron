@@ -208,17 +208,59 @@ impl KeeperSettings {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub struct Lgif {
-    first_log_idx: u64,
-    first_log_term: u64,
-    last_log_idx: u64,
-    last_log_term: u64,
-    last_committed_log_idx: u64,
-    leader_committed_log_idx: u64,
-    target_committed_log_idx: u64,
-    last_snapshot_idx: u64,
+macro_rules! define_struct_and_get_field_names {
+    (
+        struct $name:ident {
+            $($field_name:ident: $field_type:ty),* $(,)?
+        }
+    ) => {
+        #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+        #[serde(rename_all = "snake_case")]
+        pub struct $name {
+            $($field_name: $field_type),*
+        }
+
+        // Implement a method to check if a field name matches a given string
+        impl $name {
+            pub fn field_exists(field_name: &str) -> bool {
+                match field_name {
+                    $(
+                        stringify!($field_name) => true,
+                    )*
+                    _ => false,
+                }
+            }
+
+            // Method to set a field's value based on the field name
+            // TODO: Improve on the result
+            pub fn set_field_value(&mut self, field_name: &str, value: Option<u64>) -> Result<(), &'static str> {
+                match field_name {
+                    $(
+                        stringify!($field_name) => {
+                            self.$field_name = value;
+                            Ok(())
+                        },
+                    )*
+                    _ => Err("Field name not found."),
+                }
+            }
+        }
+    };
+}
+
+//#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+//#[serde(rename_all = "snake_case")]
+define_struct_and_get_field_names! {
+  struct Lgif {
+    first_log_idx: Option<u64>,
+    first_log_term: Option<u64>,
+    last_log_idx: Option<u64>,
+    last_log_term: Option<u64>,
+    last_committed_log_idx: Option<u64>,
+    leader_committed_log_idx: Option<u64>,
+    target_committed_log_idx: Option<u64>,
+    last_snapshot_idx: Option<u64>,
+}
 }
 
 impl Lgif {
@@ -237,7 +279,6 @@ impl Lgif {
                     continue;
                 }
 
-                // println!("Vec: {:#?}", l);
                 let key = l[0].to_string();
                 let value = match u64::from_str(l[1]) {
                     Ok(v) => v,
@@ -247,18 +288,39 @@ impl Lgif {
 
                 lgif.insert(key, value);
             }
-        }; 
+        };
 
-        Ok(Self {
-            first_log_idx: lgif.remove("first_log_idx").unwrap(),
-            first_log_term: lgif.remove("first_log_term").unwrap(),
-            last_log_idx: lgif.remove("last_log_idx").unwrap(),
-            last_log_term: lgif.remove("last_log_term").unwrap(),
-            last_committed_log_idx: lgif.remove("last_committed_log_idx").unwrap(),
-            leader_committed_log_idx: lgif.remove("leader_committed_log_idx").unwrap(),
-            target_committed_log_idx: lgif.remove("target_committed_log_idx").unwrap(),
-            last_snapshot_idx: lgif.remove("last_snapshot_idx").unwrap(),
-        })
+        let mut parsed_data = Self {
+            first_log_idx: None,
+            first_log_term: None,
+            last_log_idx: None,
+            last_log_term: None,
+            last_committed_log_idx: None,
+            leader_committed_log_idx: None,
+            target_committed_log_idx: None,
+            last_snapshot_idx: None,
+        };
+
+        for (key, value) in lgif {
+            if Lgif::field_exists(&key) {
+                let _ = parsed_data.set_field_value(&key, Some(value));
+            } else {
+                continue;
+            };
+        }
+
+
+        Ok(parsed_data)
+       // Ok(Self {
+       //     first_log_idx: lgif.remove("first_log_idx"),
+       //     first_log_term: lgif.remove("first_log_term"),
+       //     last_log_idx: lgif.remove("last_log_idx"),
+       //     last_log_term: lgif.remove("last_log_term"),
+       //     last_committed_log_idx: lgif.remove("last_committed_log_idx"),
+       //     leader_committed_log_idx: lgif.remove("leader_committed_log_idx"),
+       //     target_committed_log_idx: lgif.remove("target_committed_log_idx"),
+       //     last_snapshot_idx: lgif.remove("last_snapshot_idx"),
+       // })
     }
 }
 
