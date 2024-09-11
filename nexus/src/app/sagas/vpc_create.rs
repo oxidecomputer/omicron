@@ -200,7 +200,7 @@ async fn svc_create_router(
             identity: IdentityMetadataCreateParams {
                 name: "system".parse().unwrap(),
                 description: "Routes are automatically added to this \
-                    router as vpc subnets are created"
+                    router as VPC subnets are created"
                     .into(),
             },
         },
