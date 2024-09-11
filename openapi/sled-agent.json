@@ -3147,7 +3147,7 @@
           },
           "migration_id": {
             "nullable": true,
-            "description": "The ID of the migration in to this VMM, if this VMM is being ensured s part of a migration in. If this is `None`, the VMM is not being created due to a migration.",
+            "description": "The ID of the migration in to this VMM, if this VMM is being ensured is part of a migration in. If this is `None`, the VMM is not being created due to a migration.",
             "type": "string",
             "format": "uuid"
           },
