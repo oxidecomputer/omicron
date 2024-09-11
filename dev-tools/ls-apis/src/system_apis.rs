@@ -227,9 +227,7 @@ impl SystemApis {
         &self,
         client: &ClientPackageName,
     ) -> Option<&ServerComponentName> {
-        self.api_producers
-            .get(client)
-            .map(|s| &s.0)
+        self.api_producers.get(client).map(|s| &s.0)
     }
 
     /// Given the client package name for an API, return the list of server
@@ -569,6 +567,23 @@ pub enum ApiDependencyFilter {
     /// Include all dependencies found from Cargo package metadata
     All,
 
+    /// Include _only_ bogus dependencies (mainly useful for seeing what's
+    /// normally being excluded)
+    Bogus,
+
+    /// Include all dependencies found from Cargo package metadata that have not
+    /// been explicitly marked as bogus (false positives)
+    ///
+    /// Relative to the default, this includes dependencies that have been
+    /// explicitly excluded from the online update DAG as well as dependencies
+    /// from programs that are not deployed (but within packages that are
+    /// deployed).
+    NonBogus,
+
+    /// Include dependencies that have been explicitly excluded from the online
+    /// update DAG
+    IncludeNonDag,
+
     /// Exclude found dependencies that are:
     ///
     /// - explicitly marked as outside the update DAG
@@ -592,6 +607,16 @@ impl ApiDependencyFilter {
 
         Ok(match self {
             ApiDependencyFilter::All => true,
+            ApiDependencyFilter::Bogus => {
+                matches!(evaluation, Evaluation::Bogus)
+            }
+            ApiDependencyFilter::NonBogus => {
+                !matches!(evaluation, Evaluation::Bogus)
+            }
+            ApiDependencyFilter::IncludeNonDag => !matches!(
+                evaluation,
+                Evaluation::Bogus | Evaluation::NotDeployed
+            ),
             ApiDependencyFilter::Default => !matches!(
                 evaluation,
                 Evaluation::NonDag
