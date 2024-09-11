@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use atomicwrites::AtomicFile;
 use camino::Utf8PathBuf;
 use derive_more::{Add, AddAssign, Display, From};
@@ -208,7 +208,7 @@ impl KeeperSettings {
     }
 }
 
-macro_rules! define_struct_and_get_field_names {
+macro_rules! define_struct_and_set_values {
     (
         struct $name:ident {
             $($field_name:ident: $field_type:ty),* $(,)?
@@ -220,54 +220,54 @@ macro_rules! define_struct_and_get_field_names {
             $($field_name: $field_type),*
         }
 
-        // Implement a method to check if a field name matches a given string
         impl $name {
-            pub fn field_exists(field_name: &str) -> bool {
-                match field_name {
-                    $(
-                        stringify!($field_name) => true,
-                    )*
-                    _ => false,
-                }
-            }
-
-            // Method to set a field's value based on the field name
-            // TODO: Improve on the result
-            pub fn set_field_value(&mut self, field_name: &str, value: Option<u64>) -> Result<(), &'static str> {
-                match field_name {
+            // Check if a field name matches a given string, and set its value
+            pub fn set_field_value(&mut self, key: &str, value: Option<u128>) -> Result<()> {
+                match key {
                     $(
                         stringify!($field_name) => {
                             self.$field_name = value;
                             Ok(())
                         },
                     )*
-                    _ => Err("Field name not found."),
+                    _ => bail!("Field name '{}' not found.", key),
                 }
             }
         }
     };
 }
 
-//#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-//#[serde(rename_all = "snake_case")]
-define_struct_and_get_field_names! {
-  struct Lgif {
-    first_log_idx: Option<u64>,
-    first_log_term: Option<u64>,
-    last_log_idx: Option<u64>,
-    last_log_term: Option<u64>,
-    last_committed_log_idx: Option<u64>,
-    leader_committed_log_idx: Option<u64>,
-    target_committed_log_idx: Option<u64>,
-    last_snapshot_idx: Option<u64>,
-}
+define_struct_and_set_values! {
+    struct Lgif {
+        first_log_idx: Option<u128>,
+        first_log_term: Option<u128>,
+        last_log_idx: Option<u128>,
+        last_log_term: Option<u128>,
+        last_committed_log_idx: Option<u128>,
+        leader_committed_log_idx: Option<u128>,
+        target_committed_log_idx: Option<u128>,
+        last_snapshot_idx: Option<u128>,
+    }
 }
 
 impl Lgif {
+    pub fn new() -> Self {
+        Self {
+            first_log_idx: None,
+            first_log_term: None,
+            last_log_idx: None,
+            last_log_term: None,
+            last_committed_log_idx: None,
+            leader_committed_log_idx: None,
+            target_committed_log_idx: None,
+            last_snapshot_idx: None,
+        }
+    }
+
     pub fn parse(data: &[u8]) -> Result<Self> {
         let binding = String::from_utf8_lossy(data);
         let lines = binding.lines();
-        let mut lgif: HashMap<String, u64> = HashMap::new();
+        let mut lgif: HashMap<String, u128> = HashMap::new();
 
         for line in lines {
             let line = line.trim();
@@ -280,7 +280,7 @@ impl Lgif {
                 }
 
                 let key = l[0].to_string();
-                let value = match u64::from_str(l[1]) {
+                let value = match u128::from_str(l[1]) {
                     Ok(v) => v,
                     // TODO: Log error
                     Err(_) => continue,
@@ -290,37 +290,19 @@ impl Lgif {
             }
         };
 
-        let mut parsed_data = Self {
-            first_log_idx: None,
-            first_log_term: None,
-            last_log_idx: None,
-            last_log_term: None,
-            last_committed_log_idx: None,
-            leader_committed_log_idx: None,
-            target_committed_log_idx: None,
-            last_snapshot_idx: None,
-        };
-
+        let mut parsed_data = Lgif::new();
         for (key, value) in lgif {
-            if Lgif::field_exists(&key) {
-                let _ = parsed_data.set_field_value(&key, Some(value));
-            } else {
-                continue;
+            match parsed_data.set_field_value(&key, Some(value)) {
+                Ok(()) => (),
+                Err(e) => {
+                    // TODO: Log the error
+                    println!("{e}");
+                    ();
+                }
             };
         }
 
-
         Ok(parsed_data)
-       // Ok(Self {
-       //     first_log_idx: lgif.remove("first_log_idx"),
-       //     first_log_term: lgif.remove("first_log_term"),
-       //     last_log_idx: lgif.remove("last_log_idx"),
-       //     last_log_term: lgif.remove("last_log_term"),
-       //     last_committed_log_idx: lgif.remove("last_committed_log_idx"),
-       //     leader_committed_log_idx: lgif.remove("leader_committed_log_idx"),
-       //     target_committed_log_idx: lgif.remove("target_committed_log_idx"),
-       //     last_snapshot_idx: lgif.remove("last_snapshot_idx"),
-       // })
     }
 }
 
