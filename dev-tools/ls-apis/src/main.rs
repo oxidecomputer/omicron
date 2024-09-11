@@ -228,8 +228,7 @@ impl TryFrom<&LsApis> for LoadArgs {
         let api_manifest_path =
             args.api_manifest.clone().unwrap_or_else(|| {
                 self_manifest_dir
-                    .join("..")
-                    .join("..")
+                    .join("src")
                     .join("api-manifest.toml")
             });
         let extra_repos_path = args.extra_repos.clone().unwrap_or_else(|| {
