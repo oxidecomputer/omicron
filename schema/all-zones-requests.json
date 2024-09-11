@@ -252,8 +252,7 @@
           ]
         },
         "id": {
-          "type": "string",
-          "format": "uuid"
+          "$ref": "#/definitions/TypedUuidForOmicronZoneKind"
         },
         "underlay_address": {
           "type": "string",
@@ -693,6 +692,10 @@
           "minimum": 0.0
         }
       }
+    },
+    "TypedUuidForOmicronZoneKind": {
+      "type": "string",
+      "format": "uuid"
     },
     "Vni": {
       "description": "A Geneve Virtual Network Identifier",
