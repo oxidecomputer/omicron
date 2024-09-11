@@ -6,18 +6,10 @@
 
 // XXX-dap wishlist:
 // - Fix warnings:
-//   - missing client: crucible-control-client
-//   - missing client: dsc-client
-//   - missing that "Maghemite DDM Admin" has another client in
-//     "omicron:clients/ddm-admin-client"
-//   - missing that "Maghemite DDM Admin" is consumed by sled-agent
 //   - Inspect all the edges to make sure I understand them and that we're
 //     handling them well
 // - Find The DAG
 // - Have the tool manage the git checkouts
-//
-// Some specific notes:
-// - clickhouse-admin has no client yet
 
 use anyhow::{Context, Result};
 use camino::Utf8PathBuf;

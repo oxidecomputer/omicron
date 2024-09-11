@@ -406,18 +406,39 @@ impl<'a> ServerComponentsTracker<'a> {
         server_pkgname: &ServerComponentName,
         dep_path: &DepPath,
     ) {
-        // TODO
-        // Also debatable: dns-server is used by both the
-        // dns-server component *and* omicron-sled-agent's
-        // simulated sled agent.  This program does not support
-        // that.  But we don't care about the simulated sled
-        // agent, either, so just ignore it.
+        // TODO dns-server is used by both the dns-server component *and*
+        // omicron-sled-agent's simulated sled agent.  This program does not
+        // support that.  But we don't care about the simulated sled agent,
+        // either, so just ignore it.
+        //
+        // This exception cannot currently be encoded in the
+        // "dependency_filter_rules" metadata because that metadata is applied
+        // as a postprocessing step.  But we can't even build up our data model
+        // in the first place unless we ignore this here.
         if **server_pkgname == "omicron-sled-agent"
             && *api.client_package_name == "dns-service-client"
         {
             eprintln!(
-                "warning: ignoring legit dependency from \
-                 omicron-sled-agent -> dns-server",
+                "note: ignoring Cargo dependency from omicron-sled-agent -> \
+                 dns-server",
+            );
+            return;
+        }
+
+        // TODO Crucible Pantry depends on Crucible (Upstairs).  But Crucible
+        // Upstairs exposes an API (the Crucible Control API).  That makes it
+        // look (from tracking Cargo dependencies) like Crucible Pantry exposes
+        // that API.  But it doesn't.
+        //
+        // Like the above dns-server dependency, we can't build up our data
+        // model without ignoring this, so it can't currently be encoded in the
+        // "dependency_filter_rules" metadata.
+        if **server_pkgname == "crucible-pantry"
+            && *api.client_package_name == "crucible-control-client"
+        {
+            eprintln!(
+                "note: ignoring Cargo dependency from crucible-pantry -> \
+                 ... -> crucible-control-client",
             );
             return;
         }

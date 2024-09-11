@@ -205,6 +205,24 @@ notes = """
 wicketd-client is only used by wicket, which is deployed in a unit with wicketd.
 """
 
+[[apis]]
+client_package_name = "crucible-control-client"
+label = "Crucible Control (for testing only)"
+server_package_name = "crucible"
+notes = """
+Exposed by Crucible upstairs for debugging via the `cmon` debugging tool.
+"""
+
+[[apis]]
+client_package_name = "dsc-client"
+label = "Downstairs Controller (debugging only)"
+server_package_name = "dsc"
+notes = """
+`dsc` is a control program for spinning up and controlling instances of Crucible
+downstairs for testing.  You can use the same program to control a running `dsc`
+instance.  It's also used by `crutest` for testing.
+"""
+
 #############################################################
 # Notes on specific dependencies
 #############################################################
