@@ -6556,14 +6556,6 @@
           },
           {
             "in": "query",
-            "name": "name_or_id",
-            "description": "A name or id to use when s electing BGP port settings",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
             "name": "page_token",
             "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
@@ -6642,7 +6634,7 @@
         }
       }
     },
-    "/v1/system/networking/bgp-announce-set/{name_or_id}": {
+    "/v1/system/networking/bgp-announce-set/{announce_set}": {
       "delete": {
         "tags": [
           "system/networking"
@@ -6652,8 +6644,8 @@
         "parameters": [
           {
             "in": "path",
-            "name": "name_or_id",
-            "description": "A name or id to use when selecting BGP port settings",
+            "name": "announce_set",
+            "description": "Name or ID of the announce set",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -6673,7 +6665,7 @@
         }
       }
     },
-    "/v1/system/networking/bgp-announce-set/{name_or_id}/announcement": {
+    "/v1/system/networking/bgp-announce-set/{announce_set}/announcement": {
       "get": {
         "tags": [
           "system/networking"
@@ -6683,8 +6675,8 @@
         "parameters": [
           {
             "in": "path",
-            "name": "name_or_id",
-            "description": "A name or id to use when selecting BGP port settings",
+            "name": "announce_set",
+            "description": "Name or ID of the announce set",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"

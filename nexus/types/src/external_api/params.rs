@@ -1675,25 +1675,18 @@ pub struct BgpAnnounceSetCreate {
     pub announcement: Vec<BgpAnnouncementCreate>,
 }
 
-/// Optionally select a BGP announce set by a name or id.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-pub struct OptionalBgpAnnounceSetSelector {
-    /// A name or id to use when s electing BGP port settings
-    pub name_or_id: Option<NameOrId>,
-}
-
 /// Select a BGP announce set by a name or id.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct BgpAnnounceSetSelector {
-    /// A name or id to use when selecting BGP port settings
-    pub name_or_id: NameOrId,
+    /// Name or ID of the announce set
+    pub announce_set: NameOrId,
 }
 
 /// List BGP announce set with an optional name or id.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct BgpAnnounceListSelector {
-    /// A name or id to use when selecting BGP config.
-    pub name_or_id: Option<NameOrId>,
+    /// Name or ID of the announce set
+    pub announce_set: Option<NameOrId>,
 }
 
 /// Selector used for querying imported BGP routes.
