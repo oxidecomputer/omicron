@@ -223,28 +223,3 @@ impl InstanceRuntimeState {
         }
     }
 }
-
-impl From<omicron_common::api::internal::nexus::InstanceRuntimeState>
-    for InstanceRuntimeState
-{
-    fn from(
-        state: omicron_common::api::internal::nexus::InstanceRuntimeState,
-    ) -> Self {
-        let nexus_state = if state.propolis_id.is_some() {
-            InstanceState::Vmm
-        } else {
-            InstanceState::NoVmm
-        };
-
-        Self {
-            nexus_state,
-            time_updated: state.time_updated,
-            gen: state.gen.into(),
-            propolis_id: state.propolis_id.map(|id| id.into_untyped_uuid()),
-            dst_propolis_id: state
-                .dst_propolis_id
-                .map(|id| id.into_untyped_uuid()),
-            migration_id: state.migration_id,
-        }
-    }
-}
