@@ -1305,26 +1305,39 @@ async fn test_instance_failed_by_instance_watcher_automatically_reincarnates(
 ) {
     let client = &cptestctx.external_client;
     let nexus = &cptestctx.server.server_context().nexus;
-    let instance_id = make_forgotten_instance(
-        &cptestctx,
-        "resurgam",
-        Some(params::InstanceAutoRestart::AllFailures),
-    )
-    .await;
+    let instance_id = dbg!(
+        make_forgotten_instance(
+            &cptestctx,
+            "resurgam",
+            Some(params::InstanceAutoRestart::AllFailures),
+        )
+        .await
+    );
 
-    nexus_test_utils::background::activate_background_task(
-        &cptestctx.internal_client,
-        "instance_watcher",
-    )
-    .await;
+    dbg!(
+        nexus_test_utils::background::activate_background_task(
+            &cptestctx.internal_client,
+            "instance_watcher",
+        )
+        .await
+    );
 
     // Wait for the instance to transition to Failed.
-    instance_wait_for_state(client, instance_id, InstanceState::Failed).await;
+    dbg!(
+        instance_wait_for_state(client, instance_id, InstanceState::Failed)
+            .await
+    );
 
     // Now, it should be automatically restarted!
-    instance_wait_for_state(client, instance_id, InstanceState::Starting).await;
-    instance_simulate(nexus, &instance_id).await;
-    instance_wait_for_state(client, instance_id, InstanceState::Running).await;
+    dbg!(
+        instance_wait_for_state(client, instance_id, InstanceState::Starting)
+            .await
+    );
+    dbg!(instance_simulate(nexus, &instance_id).await);
+    dbg!(
+        instance_wait_for_state(client, instance_id, InstanceState::Running)
+            .await
+    );
 }
 
 #[nexus_test]
