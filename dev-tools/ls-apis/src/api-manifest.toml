@@ -1,5 +1,7 @@
 # Describes all the Dropshot/OpenAPI/Progenitor APIs in the system
 #
+# See README.adoc in this package for details.
+#
 # TODO It would be nice to collect a bunch of this information from the same
 # sources that drive the actual build process (e.g., package-manifest.toml).
 # For non-Omicron components, the deployment units (zone images and tarballs

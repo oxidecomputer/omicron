@@ -226,10 +226,9 @@ impl SystemApis {
     pub fn api_producer(
         &self,
         client: &ClientPackageName,
-    ) -> Result<&ServerComponentName> {
+    ) -> Option<&ServerComponentName> {
         self.api_producers
             .get(client)
-            .ok_or_else(|| anyhow!("unknown client API: {:?}", client))
             .map(|s| &s.0)
     }
 

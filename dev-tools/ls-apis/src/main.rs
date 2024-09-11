@@ -99,7 +99,11 @@ fn run_adoc(apis: &SystemApis) -> Result<()> {
 
     let metadata = apis.api_metadata();
     for api in metadata.apis() {
-        let server_component = apis.api_producer(&api.client_package_name)?;
+        let Some(server_component) =
+            apis.api_producer(&api.client_package_name)
+        else {
+            continue;
+        };
         println!("// DO NOT EDIT.  This table is auto-generated. See above.");
         println!("|{}", api.label);
         println!("|{}", apis.adoc_label(server_component)?);
@@ -177,10 +181,12 @@ fn print_server_components<'a>(
     for s in server_components.into_iter() {
         let (repo_name, pkg_path) = apis.package_label(s)?;
         println!("{}{} ({}/{})", prefix, s, repo_name, pkg_path);
-        for api in metadata
-            .apis()
-            .filter(|a| apis.api_producer(&a.client_package_name).unwrap() == s)
-        {
+        for api in metadata.apis().filter(|a| {
+            matches!(
+                apis.api_producer(&a.client_package_name),
+                Some (name) if name == s
+            )
+        }) {
             println!(
                 "{}    exposes: {} (client = {})",
                 prefix, api.label, api.client_package_name
@@ -227,9 +233,7 @@ impl TryFrom<&LsApis> for LoadArgs {
 
         let api_manifest_path =
             args.api_manifest.clone().unwrap_or_else(|| {
-                self_manifest_dir
-                    .join("src")
-                    .join("api-manifest.toml")
+                self_manifest_dir.join("src").join("api-manifest.toml")
             });
         let extra_repos_path = args.extra_repos.clone().unwrap_or_else(|| {
             self_manifest_dir
