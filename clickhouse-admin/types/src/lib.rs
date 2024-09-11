@@ -288,7 +288,7 @@ impl Lgif {
 
                 lgif.insert(key, value);
             }
-        };
+        }
 
         let mut parsed_data = Lgif::new();
         for (key, value) in lgif {
@@ -297,7 +297,6 @@ impl Lgif {
                 Err(e) => {
                     // TODO: Log the error
                     println!("{e}");
-                    ();
                 }
             };
         }
