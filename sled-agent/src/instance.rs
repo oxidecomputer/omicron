@@ -2260,7 +2260,6 @@ mod tests {
                 metadata,
             },
             sled_identifiers,
-            metadata,
         )
         .await
         .unwrap();
