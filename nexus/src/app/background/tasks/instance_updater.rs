@@ -70,9 +70,7 @@ impl InstanceUpdater {
                         "{ERR_MSG} {what}";
                         "error" => &error,
                     );
-                    status
-                        .query_errors
-                        .push(format!("{ERR_MSG} {what}: {error}"));
+                    status.errors.push(format!("{ERR_MSG} {what}: {error}"));
                     Vec::new()
                 }
             }
@@ -134,6 +132,9 @@ impl InstanceUpdater {
                      `JoinSet`, a `JoinError` should never be observed!";
                     debug_assert!(false, "{MSG}");
                     error!(opctx.log, "{MSG}"; "error" => ?err);
+                    status
+                        .saga_errors
+                        .push((None, format!("unexpected JoinError: {err}")));
                 }
                 Ok(Err((instance_id, err))) => {
                     const MSG: &'static str = "update saga failed";
@@ -143,7 +144,9 @@ impl InstanceUpdater {
                         "instance_id" => %instance_id,
                         "error" => &err,
                     );
-                    status.saga_errors.push((instance_id, err.to_string()));
+                    status
+                        .saga_errors
+                        .push((Some(instance_id), err.to_string()));
                 }
                 Ok(Ok(())) => status.sagas_completed += 1,
             }
@@ -195,7 +198,7 @@ impl InstanceUpdater {
                     );
                     status
                         .saga_errors
-                        .push((instance_id, format!("{ERR_MSG}: {err}")));
+                        .push((Some(instance_id), format!("{ERR_MSG}: {err}")));
                 }
             }
         }

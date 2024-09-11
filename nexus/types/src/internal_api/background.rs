@@ -88,7 +88,7 @@ pub struct InstanceUpdaterStatus {
 
     /// errors returned by instance update sagas which failed, and the UUID of
     /// the instance which could not be updated.
-    pub saga_errors: Vec<(Uuid, String)>,
+    pub saga_errors: Vec<(Option<Uuid>, String)>,
 
     /// errors which occurred while querying the database for instances in need
     /// of updates.

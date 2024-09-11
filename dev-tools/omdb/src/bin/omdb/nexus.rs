@@ -1476,7 +1476,10 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 saga_errors.len()
             );
             for (instance_id, error) in &saga_errors {
-                println!("      > {instance_id}: {error}");
+                match instance_id {
+                    Some(id) => println!("      > {id}: {error}"),
+                    None => println!("      > {error}"),
+                }
             }
         }
 
