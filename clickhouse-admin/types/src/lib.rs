@@ -316,8 +316,8 @@ mod tests {
     use camino_tempfile::Builder;
 
     use crate::{
-        ClickhouseHost, KeeperId, KeeperSettings, RaftServerSettings, ServerId,
-        ServerSettings,
+        ClickhouseHost, KeeperId, KeeperSettings, Lgif, RaftServerSettings,
+        ServerId, ServerSettings,
     };
 
     #[test]
@@ -408,5 +408,78 @@ mod tests {
         );
 
         expectorate::assert_contents(expected_file, &generated_content);
+    }
+
+    #[test]
+    fn test_full_lgif_parse_success() {
+        let data =
+            "first_log_idx\t1\nfirst_log_term\t1\nlast_log_idx\t4386\nlast_log_term\t1\nlast_committed_log_idx\t4386
+            \nleader_committed_log_idx\t4386\ntarget_committed_log_idx\t4386\nlast_snapshot_idx\t0\n\n"
+            .as_bytes();
+        let lgif = Lgif::parse(data).unwrap();
+
+        assert!(lgif.first_log_idx == Some(1));
+        assert!(lgif.first_log_term == Some(1));
+        assert!(lgif.last_log_idx == Some(4386));
+        assert!(lgif.last_log_term == Some(1));
+        assert!(lgif.last_committed_log_idx == Some(4386));
+        assert!(lgif.leader_committed_log_idx == Some(4386));
+        assert!(lgif.target_committed_log_idx == Some(4386));
+        assert!(lgif.last_snapshot_idx == Some(0));
+    }
+
+    #[test]
+    fn test_partial_lgif_parse_success() {
+        let data =
+            "first_log_idx\t1\nlast_log_idx\t4386\nlast_log_term\t1\nlast_committed_log_idx\t4386
+            \nleader_committed_log_idx\t4386\ntarget_committed_log_idx\t4386\nlast_snapshot_idx\t0\n\n"
+            .as_bytes();
+        let lgif = Lgif::parse(data).unwrap();
+
+        assert!(lgif.first_log_idx == Some(1));
+        assert!(lgif.first_log_term == None);
+        assert!(lgif.last_log_idx == Some(4386));
+        assert!(lgif.last_log_term == Some(1));
+        assert!(lgif.last_committed_log_idx == Some(4386));
+        assert!(lgif.leader_committed_log_idx == Some(4386));
+        assert!(lgif.target_committed_log_idx == Some(4386));
+        assert!(lgif.last_snapshot_idx == Some(0));
+    }
+
+    #[test]
+    fn test_empty_value_lgif_parse_success() {
+        let data =
+            "first_log_idx\nfirst_log_term\t1\nlast_log_idx\t4386\nlast_log_term\t1\nlast_committed_log_idx\t4386
+            \nleader_committed_log_idx\t4386\ntarget_committed_log_idx\t4386\nlast_snapshot_idx\t0\n\n"
+            .as_bytes();
+        let lgif = Lgif::parse(data).unwrap();
+
+        assert!(lgif.first_log_idx == None);
+        assert!(lgif.first_log_term == Some(1));
+        assert!(lgif.last_log_idx == Some(4386));
+        assert!(lgif.last_log_term == Some(1));
+        assert!(lgif.last_committed_log_idx == Some(4386));
+        assert!(lgif.leader_committed_log_idx == Some(4386));
+        assert!(lgif.target_committed_log_idx == Some(4386));
+        assert!(lgif.last_snapshot_idx == Some(0));
+    }
+
+    #[test]
+    fn test_nonsense_lgif_parse_success() {
+        let data =
+            "Mmmbop,\tba\tduba\tdop\tba\nDu\tbop,\tba\tduba\tdop\tba\nDu\tbop,\tba\tduba\tdop\tba\tdu
+            \nYeah, yeah\nMmmbop, ba duba dop ba\nDu bop, ba du dop ba\nDu bop, ba du dop ba du
+            \nYeah, yeah"
+            .as_bytes();
+        let lgif = Lgif::parse(data).unwrap();
+
+        assert!(lgif.first_log_idx == None);
+        assert!(lgif.first_log_term == None);
+        assert!(lgif.last_log_idx == None);
+        assert!(lgif.last_log_term == None);
+        assert!(lgif.last_committed_log_idx == None);
+        assert!(lgif.leader_committed_log_idx == None);
+        assert!(lgif.target_committed_log_idx == None);
+        assert!(lgif.last_snapshot_idx == None);
     }
 }
