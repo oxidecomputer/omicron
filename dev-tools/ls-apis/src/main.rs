@@ -8,7 +8,6 @@
 // - Fix warnings:
 //   - missing client: crucible-control-client
 //   - missing client: dsc-client
-//   - missing client: omicron-ddm-admin-client
 //   - missing that "Maghemite DDM Admin" has another client in
 //     "omicron:clients/ddm-admin-client"
 //   - missing that "Maghemite DDM Admin" is consumed by sled-agent
