@@ -39,7 +39,6 @@ impl From<ClickhouseCliError> for HttpError {
     fn from(err: ClickhouseCliError) -> Self {
         match err {
             ClickhouseCliError::Run { .. }
-            // TODO: Can I make this message better?
             | ClickhouseCliError::Parse { .. }
             | ClickhouseCliError::ExecutionError(_) => {
                 let message = InlineErrorChain::new(&err).to_string();

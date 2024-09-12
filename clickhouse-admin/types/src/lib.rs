@@ -242,6 +242,13 @@ macro_rules! define_struct_and_set_values {
                     _ => bail!("Field name '{}' not found.", key),
                 }
             }
+
+            fn are_all_fields_none(&self) -> bool {
+                $(
+                    self.$field_name.is_none() &&
+                )*
+                true
+            }
         }
     };
 }
@@ -283,6 +290,35 @@ impl Lgif {
     }
 
     pub fn parse(log: &Logger, data: &[u8]) -> Result<Self> {
+        // The reponse we get from running `clickhouse keeper-client -h {HOST} --q lgif`
+        // isn't in any known format (e.g. JSON), but rather a series of lines with key-value
+        // pairs separated by a tab:
+        //
+        // ```console
+        // $ clickhouse keeper-client -h localhost -p 20001 --q lgif
+        // first_log_idx	1
+        // first_log_term	1
+        // last_log_idx	10889
+        // last_log_term	20
+        // last_committed_log_idx	10889
+        // leader_committed_log_idx	10889
+        // target_committed_log_idx	10889
+        // last_snapshot_idx	9465
+        // ```
+        //
+        // To parse the data we follow these steps:
+        //
+        // 1. Create an iterator over the lines of a string. These are split at newlines.
+        // 2. Each line is split by the tab, and we make sure that the key and value are
+        //    valid. If a value is not valid, we ignore it and mode on. We want to keep
+        //    other key-value pairs if they are valid.
+        // 3. Once we have a HashMap of valid key-value pairs, we set the fields of the
+        //    Lgif struct with the retrieved data. To do this we make sure that the name
+        //    of each HasMap key matches one of the field names and then we set the
+        //    corresponding value. If a key does not match any of the struct's fields we
+        //    log an error, but continue populating all valid key-value pairs.
+        // 4. We return an error only if the response had no valid key-value pairs.
+        //
         let binding = String::from_utf8_lossy(data);
         let lines = binding.lines();
         let mut lgif: HashMap<String, u128> = HashMap::new();
@@ -336,21 +372,22 @@ impl Lgif {
             };
         }
 
+        if parsed_data.are_all_fields_none() {
+            bail!("Unable to parse `clickhouse keeper-client -q lgif` response: {}", binding);
+        }
+
         Ok(parsed_data)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        net::{Ipv4Addr, Ipv6Addr},
-        str::FromStr,
-    };
-
     use camino::Utf8PathBuf;
     use camino_tempfile::Builder;
     use slog::{o, Drain};
     use slog_term::{FullFormat, PlainDecorator, TestStdoutWriter};
+    use std::net::{Ipv4Addr, Ipv6Addr};
+    use std::str::FromStr;
 
     use crate::{
         ClickhouseHost, KeeperId, KeeperSettings, Lgif, RaftServerSettings,
@@ -554,8 +591,7 @@ mod tests {
         let log = log();
         let data =
             "Mmmbop,\tba\tduba\tdop\tba\nDu\tbop,\tba\tduba\tdop\tba\nDu\tbop,\tba\tduba\tdop\tba\tdu
-            \nYeah, yeah\nMmmbop, ba duba dop ba\nDu bop, ba du dop ba\nDu bop, ba du dop ba du
-            \nYeah, yeah"
+            \ntarget_committed_log_idx\t4386\n\n"
             .as_bytes();
         let lgif = Lgif::parse(&log, data).unwrap();
 
@@ -565,7 +601,22 @@ mod tests {
         assert!(lgif.last_log_term == None);
         assert!(lgif.last_committed_log_idx == None);
         assert!(lgif.leader_committed_log_idx == None);
-        assert!(lgif.target_committed_log_idx == None);
+        assert!(lgif.target_committed_log_idx == Some(4386));
         assert!(lgif.last_snapshot_idx == None);
+    }
+
+    #[test]
+    fn test_all_nonsense_lgif_parse_fail() {
+        let log = log();
+        let data = "Mmmbop, ba duba dop ba\nDu bop, ba du dop ba\nYeah, yeah"
+            .as_bytes();
+        let result = Lgif::parse(&log, data);
+        let error = result.unwrap_err();
+        let root_cause = error.root_cause();
+
+        assert_eq!(
+            format!("{}", root_cause),
+            "Unable to parse `clickhouse keeper-client -q lgif` response: Mmmbop, ba duba dop ba\nDu bop, ba du dop ba\nYeah, yeah",
+        );
     }
 }
