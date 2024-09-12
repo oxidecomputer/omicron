@@ -284,24 +284,7 @@ instance.  It's also used by `crutest` for testing.
 # rule with `client = mg-admin-client` and `ancestor = omicron-common` would
 # filter this out.
 #
-# The `evaluation` may be one of:
-#
-# `bogus`: This is not a real API dependency at all.
-#
-# `not-deployed`: This is a real API dependency, but only in parts of a
-# *deployed* Rust package that are not themselves deployed (e.g., test
-# programs).  We can ignore these for purposes of upgrade but they're still
-# useful to track for, e.g., documentation.
-#
-# `dag`: This dependency should be part of the DAG we're hoping to build for
-# online upgrade.
-#
-# `non-dag`: This dependency should NOT be part of the DAG we're hoping to build
-# for online upgrade, generally because if it were, the graph would have cycles,
-# and this API was chosen as the more stable one.
-#
-# If no rules match a dependency, its evaluation is `unknown`.  The tool
-# includes these unless otherwise directed.
+# See the README for more details, including what the different evaluations mean.
 ################################################################################
 
 #
