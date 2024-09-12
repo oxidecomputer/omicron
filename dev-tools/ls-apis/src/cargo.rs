@@ -14,8 +14,8 @@ use cargo_metadata::{DependencyKind, PackageId};
 use std::collections::BTreeSet;
 use std::collections::{BTreeMap, VecDeque};
 
-// Packages that may be flagged as clients because they directly depend on
-// Progenitor, but which are not really clients.
+/// Packages that may be flagged as clients because they directly depend on
+/// Progenitor, but which are not really clients.
 const IGNORED_NON_CLIENTS: &[&str] = &[
     // omicron-common depends on progenitor so that it can define some generic
     // error handling and a generic macro for defining clients.  omicron-common
@@ -201,14 +201,14 @@ impl Workspace {
     /// Note that this only returns information about workspace packages (i.e.,
     /// packages that are defined in the workspace itself).  To find information
     /// about transitive dependencies, you need to be more specific about which
-    /// version you want.  Use `find_pkg_by_id()` for that.
+    /// version you want.  Use `pkgids()` for that.
     pub fn find_workspace_package(&self, pkgname: &str) -> Option<&Package> {
         self.workspace_packages_by_name
             .get(pkgname)
             .and_then(|pkgid| self.packages_by_id.get(pkgid))
     }
 
-    /// Given a workspace package, return the relative path frmo the root of the
+    /// Given a workspace package, return the relative path from the root of the
     /// workspace to that package.
     pub fn find_workspace_package_path(
         &self,
@@ -222,7 +222,7 @@ impl Workspace {
             manifest_path.strip_prefix(&self.workspace_root).map_err(|_| {
                 anyhow!(
                     "workspace {:?} package {:?} manifest is not under \
-                         the workspace root ({:?})",
+                     the workspace root ({:?})",
                     self.name,
                     pkgname,
                     &self.workspace_root,
@@ -298,6 +298,10 @@ impl Workspace {
         Ok(())
     }
 
+    /// Return all package ids for the given `pkgname`
+    ///
+    /// `pkgname` does not need to be a workspace package.  There may be many
+    /// packages with this name, generally at different versions.
     pub fn pkgids<'a>(
         &'a self,
         pkgname: &'a str,
@@ -311,6 +315,9 @@ impl Workspace {
         })
     }
 
+    /// Return information about a package by id
+    ///
+    /// This does not need to be a workspace package.
     pub fn pkg_by_id(&self, pkgid: &PackageId) -> Option<&Package> {
         self.packages_by_id.get(pkgid)
     }
@@ -318,6 +325,8 @@ impl Workspace {
 
 /// Given a path to a `Cargo.toml` file for a package, return the parent
 /// directory
+///
+/// Fails explicitly if the path doesn't match what we'd expect.
 fn cargo_toml_parent(
     path: &Utf8Path,
     label_path: &Utf8Path,

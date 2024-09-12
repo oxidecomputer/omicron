@@ -593,6 +593,8 @@ pub enum ApiDependencyFilter {
 }
 
 impl ApiDependencyFilter {
+    /// Return whether this filter should include a dependency on
+    /// `client_pkgname` that goes through dependency path `dep_path`
     fn should_include(
         &self,
         api_metadata: &AllApiMetadata,

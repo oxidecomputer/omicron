@@ -21,8 +21,8 @@ pub(crate) struct Workspaces {
 }
 
 impl Workspaces {
-    /// Given repository checkouts at `extra_repos_path`, use `cargo metadata`
-    /// to load workspace metadata for all the workspaces that we care about
+    /// Use `cargo metadata` to load workspace metadata for all the workspaces
+    /// that we care about
     ///
     /// The data found is validated against `api_metadata`.
     ///
@@ -39,18 +39,20 @@ impl Workspaces {
         // of the other workspaces that we care about.  We'll use those clones
         // rather than manage our own.
         //
-        // To find each of these other repos, we'll need to look up a package in
-        // each of these workspaces and parse the source property.  (This is
-        // technically unstable and may break in future Cargo revisions.)
+        // To find each of these other repos, we'll need to look up a package
+        // that comes from each of these workspaces and look at where its local
+        // manifest file is.
         //
         // Loading each workspace involves running `cargo metaata`, which is
         // pretty I/O intensive.  Latency benefits significantly from
-        // parallelizing, though we have to respect the dependencies (we can't
-        // look up a package in "maghemite" before we've loaded Maghemite).
+        // parallelizing, though we have to respect the dependencies.  We can't
+        // look up a package in "maghemite" before we've loaded Maghemite.
         //
         // If we had many more repos than this, we'd probably want to limit the
         // concurrency.
         let handles: Vec<_> = [
+            // To find this repo ... look up this package in Omicron
+            //   v                       v
             ("crucible", "crucible-agent-client"),
             ("propolis", "propolis-client"),
             ("maghemite", "mg-admin-client"),
@@ -79,6 +81,8 @@ impl Workspaces {
             Arc::into_inner(omicron).expect("no more Omicron Arc references"),
         );
 
+        // To load Dendrite, we need to look something up in Maghemite (loaded
+        // above).
         let maghemite = workspaces
             .get("maghemite")
             .ok_or_else(|| anyhow!("missing maghemite workspaces"))?;
