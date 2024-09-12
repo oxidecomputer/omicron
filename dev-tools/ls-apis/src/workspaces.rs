@@ -7,7 +7,6 @@
 use crate::api_metadata::AllApiMetadata;
 use crate::cargo::Workspace;
 use anyhow::{anyhow, ensure, Context, Result};
-use camino::Utf8Path;
 use camino::Utf8PathBuf;
 use cargo_metadata::Package;
 use cargo_metadata::PackageId;
