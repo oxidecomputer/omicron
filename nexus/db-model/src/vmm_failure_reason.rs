@@ -50,6 +50,24 @@ impl From<VmmFailureReason> for ApiFailureReason {
     }
 }
 
+impl From<sled_agent_client::types::VmmFailureReason> for VmmFailureReason {
+    fn from(reason: sled_agent_client::types::VmmFailureReason) -> Self {
+        match reason {
+            sled_agent_client::types::VmmFailureReason::SledExpunged => {
+                Self::SledExpunged
+            }
+        }
+    }
+}
+
+impl From<VmmFailureReason> for sled_agent_client::types::VmmFailureReason {
+    fn from(reason: VmmFailureReason) -> Self {
+        match reason {
+            VmmFailureReason::SledExpunged => Self::SledExpunged,
+        }
+    }
+}
+
 impl diesel::query_builder::QueryId for VmmFailureReason {
     type QueryId = ();
     const HAS_STATIC_QUERY_ID: bool = false;

@@ -132,7 +132,7 @@ impl From<omicron_common::api::internal::nexus::VmmRuntimeState>
             state: value.state.into(),
             time_state_updated: value.time_updated,
             gen: value.gen.into(),
-            failure_reason: None,
+            failure_reason: value.failure_reason.map(Into::into),
         }
     }
 }
@@ -143,6 +143,7 @@ impl From<Vmm> for sled_agent_client::types::VmmRuntimeState {
             gen: s.runtime.gen.into(),
             state: s.runtime.state.into(),
             time_updated: s.runtime.time_state_updated,
+            failure_reason: s.runtime.failure_reason.map(Into::into),
         }
     }
 }
