@@ -382,7 +382,7 @@ pub struct BackgroundTaskConfig {
     /// configuration for instance updater task
     pub instance_updater: InstanceUpdaterConfig,
     /// configuration for instance reincarnation task
-    pub instance_reincarnation: InstancereincarnationConfig,
+    pub instance_reincarnation: InstanceReincarnationConfig,
     /// configuration for service VPC firewall propagation task
     pub service_firewall_propagation: ServiceFirewallPropagationConfig,
     /// configuration for v2p mapping propagation task
@@ -593,7 +593,7 @@ pub struct InstanceUpdaterConfig {
 
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct InstancereincarnationConfig {
+pub struct InstanceReincarnationConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
@@ -1083,7 +1083,7 @@ mod test {
                             period_secs: Duration::from_secs(30),
                             disable: false,
                         },
-                        instance_reincarnation: InstancereincarnationConfig {
+                        instance_reincarnation: InstanceReincarnationConfig {
                             period_secs: Duration::from_secs(60),
                             default_cooldown_secs: Duration::from_secs(60),
                         },
