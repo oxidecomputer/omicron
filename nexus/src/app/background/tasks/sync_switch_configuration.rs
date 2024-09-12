@@ -568,7 +568,7 @@ impl BackgroundTask for SwitchPortSettingsManager {
                                 .bgp_announcement_list(
                                     opctx,
                                     &params::BgpAnnounceSetSelector {
-                                        name_or_id: bgp_config
+                                        announce_set: bgp_config
                                             .bgp_announce_set_id
                                             .into(),
                                     },

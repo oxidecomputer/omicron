@@ -6046,24 +6046,17 @@ dependencies = [
 name = "omicron-ddm-admin-client"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "ddm-admin-client",
  "either",
  "omicron-common",
  "omicron-workspace-hack",
- "omicron-zone-package",
- "progenitor",
  "progenitor-client",
- "quote",
  "reqwest",
- "rustfmt-wrapper",
  "serde",
- "serde_json",
  "sled-hardware-types",
  "slog",
  "thiserror",
  "tokio",
- "toml 0.8.19",
  "uuid",
 ]
 
