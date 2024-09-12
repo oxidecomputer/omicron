@@ -1,0 +1,24 @@
+[package]
+name = "omicron-ls-apis"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+camino.workspace = true
+cargo_metadata.workspace = true
+clap.workspace = true
+newtype_derive.workspace = true
+parse-display.workspace = true
+petgraph.workspace = true
+serde.workspace = true
+toml.workspace = true
+omicron-workspace-hack.workspace = true
+
+[[bin]]
+name = "ls-apis"
+path = "src/main.rs"

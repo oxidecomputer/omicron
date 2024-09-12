@@ -33,6 +33,13 @@
 # This file defines all of the packages that make up Omicron and how to build
 # each one.  `omicron-package` and `thing-flinger` process this file to build
 # and deploy these packages.
+#
+# **For a visual of how all this works, run:**
+#
+#     $ cargo run --bin=omicron-package -- dot > packages.dot
+#     $ dot -Tpng -o packages.png packages.dot
+#
+# and open up `packages.png`.
 
 [package.omicron-sled-agent]
 service_name = "sled-agent"

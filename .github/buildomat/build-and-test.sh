@@ -98,6 +98,11 @@ if [[ $target_os == "illumos" ]]; then
     ptime -m cargo xtask live-tests
 fi
 
+# Do a test run of the `ls-apis` command.
+ptime -m cargo xtask ls-apis apis
+ptime -m cargo xtask ls-apis deployment-units
+ptime -m cargo xtask ls-apis servers
+
 # We expect the seed CRDB to be placed here, so we explicitly remove it so the
 # rmdir check below doesn't get triggered. Nextest doesn't have support for
 # teardown scripts so this is the best we've got.
