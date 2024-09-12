@@ -15171,47 +15171,23 @@
         "oneOf": [
           {
             "description": "The instance should not be automatically restarted by the control plane if it failures.",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "never"
-                ]
-              }
-            },
-            "required": [
-              "type"
+            "type": "string",
+            "enum": [
+              "never"
             ]
           },
           {
             "description": "The instance should be automatically restarted by the control plane if the sled that it's running on reboots or fails, but it should not be restarted automatically if the individual instance fails. This policy will only automatically restart an instance if the control plane is able to definitively determine that the instance failed due to a sled reboot or fault.\n\nThis is the default policy for instances that don't specify an auto-restart policy.",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "sled_failures_only"
-                ]
-              }
-            },
-            "required": [
-              "type"
+            "type": "string",
+            "enum": [
+              "sled_failures_only"
             ]
           },
           {
             "description": "The instance should be automatically restarted by the control plane in the event of any failure. If the instance crashes, or if the sled it's running on reboots, the control plane will always attempt to automatically restart this instance.",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "all_failures"
-                ]
-              }
-            },
-            "required": [
-              "type"
+            "type": "string",
+            "enum": [
+              "all_failures"
             ]
           }
         ]

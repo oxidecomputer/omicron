@@ -985,7 +985,7 @@ pub enum ExternalIpDetach {
 /// A policy determining when an instance should be automatically restarted by
 /// the control plane.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
 pub enum InstanceAutoRestart {
     /// The instance should not be automatically restarted by the control plane
     /// if it failures.
