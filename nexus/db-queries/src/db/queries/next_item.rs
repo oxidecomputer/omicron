@@ -631,6 +631,7 @@ impl<Item> ShiftGenerator<Item> for DefaultShiftGenerator<Item> {
 ///         FROM
 ///             <table>
 ///         WHERE
+///             <scope_column> = <scope_key> AND
 ///             time_deleted IS NULL
 ///         LIMIT 1
 ///     ),
@@ -713,6 +714,8 @@ where
         + HasSqlType<<ItemColumn as Expression>::SqlType>,
 {
     /// Create a new `NextItemSelfJoined` query, scoped to a particular key.
+    ///
+    /// Both `item_min` and `item_max` are _inclusive_.
     pub(super) fn new_scoped(
         scope_key: ScopeKey,
         item_min: Item,
@@ -737,10 +740,8 @@ where
     Pg: HasSqlType<<ItemColumn as Expression>::SqlType>,
 {
     /// Create a new `NextItemSelfJoined` query, with a global scope.
-    //
-    // NOTE: This is currently used only in tests.
-    #[allow(dead_code)]
-    pub(super) fn new_unscoped(item_min: Item, item_max: Item) -> Self {
+    #[cfg(test)]
+    fn new_unscoped(item_min: Item, item_max: Item) -> Self {
         Self {
             table: Table::table(),
             _d: PhantomData,
@@ -1042,8 +1043,8 @@ mod tests {
     // These implementations are needed to actually allow inserting the results
     // of the `NextItemSelfJoinedQuery` itself.
     impl NextItemSelfJoinedQuery {
-        fn new() -> Self {
-            let inner = NextItemSelfJoined::new_unscoped(0, 9);
+        fn new(min: i32, max: i32) -> Self {
+            let inner = NextItemSelfJoined::new_unscoped(min, max);
             Self { inner }
         }
     }
@@ -1292,7 +1293,7 @@ mod tests {
         setup_test_schema(&pool).await;
 
         for i in 0..10 {
-            let query = NextItemSelfJoinedQuery::new();
+            let query = NextItemSelfJoinedQuery::new(0, 9);
             let it = diesel::insert_into(item::dsl::item)
                 .values(query)
                 .returning(Item::as_returning())
@@ -1302,7 +1303,7 @@ mod tests {
             assert_eq!(it.value, i, "Should insert values in order");
         }
 
-        let query = NextItemSelfJoinedQuery::new();
+        let query = NextItemSelfJoinedQuery::new(0, 9);
         diesel::insert_into(item::dsl::item)
             .values(query)
             .returning(Item::as_returning())
@@ -1351,7 +1352,7 @@ mod tests {
 
         // Next, let's ensure we get the items we skipped in the last round.
         for i in TO_SKIP.iter() {
-            let query = NextItemSelfJoinedQuery::new();
+            let query = NextItemSelfJoinedQuery::new(0, 9);
             let it = diesel::insert_into(item::dsl::item)
                 .values(query)
                 .returning(Item::as_returning())
