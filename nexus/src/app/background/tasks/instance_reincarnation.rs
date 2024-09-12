@@ -155,36 +155,6 @@ impl InstanceReincarnation {
             let serialized_authn = authn::saga::Serialized::for_opctx(opctx);
             for db_instance in batch {
                 let instance_id = db_instance.id();
-
-                // Don't reincarnate instances that were restarted too recently.
-                //
-                // Note that we *could* filter out instances that reincarnated
-                // too recently in the `find_reincarnatable_instances` database
-                // query, but I thought it was nice to be able to include them
-                // in this background task's OMDB status.
-                if let Some(last_reincarnation) =
-                    db_instance.runtime().time_last_auto_restarted
-                {
-                    // TODO(eliza): allow overriding the cooldown at the project
-                    // level, once we implement
-                    // https://github.com/oxidecomputer/omicron/issues/1015
-                    if Utc::now().signed_duration_since(last_reincarnation)
-                        < self.default_cooldown
-                    {
-                        status
-                            .instances_cooling_down
-                            .push((instance_id, last_reincarnation));
-                        debug!(
-                            opctx.log,
-                            "instance still needs to take some time to cool \
-                             down before its next reincarnation";
-                            "instance_id" => %instance_id,
-                            "last_reincarnated_at" => %last_reincarnation,
-                        );
-                        continue;
-                    }
-                }
-
                 let prepared_saga = instance_start::SagaInstanceStart::prepare(
                     &instance_start::Params {
                         db_instance,
