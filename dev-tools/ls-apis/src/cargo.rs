@@ -57,12 +57,10 @@ pub struct Workspace {
 impl Workspace {
     /// Use `cargo metadata` to load information about a workspace called `name`
     ///
-    /// If `extra_repos` is `None`, then information is loaded about the current
-    /// workspace.  Otherwise, the workspace root is assumed to be at the path
-    /// `extra_repos/name`.
-    pub fn load(name: &str, extra_repos: Option<&Utf8Path>) -> Result<Self> {
-        let manifest_path =
-            extra_repos.map(|p| p.join(name).join("Cargo.toml"));
+    /// If `workspace_manifest` is `None`, then information is loaded about the
+    /// current workspace.  Otherwise, that path is used as the workspace
+    /// manifest.
+    pub fn load(name: &str, manifest_path: Option<&Utf8Path>) -> Result<Self> {
         eprintln!(
             "loading metadata for workspace {name} from {}",
             manifest_path
@@ -311,6 +309,10 @@ impl Workspace {
                 None
             }
         })
+    }
+
+    pub fn pkg_by_id(&self, pkgid: &PackageId) -> Option<&Package> {
+        self.packages_by_id.get(pkgid)
     }
 }
 

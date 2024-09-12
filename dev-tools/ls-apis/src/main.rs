@@ -23,10 +23,6 @@ struct LsApis {
     #[arg(long)]
     api_manifest: Option<Utf8PathBuf>,
 
-    /// path to directory with clones of dependent repositories
-    #[arg(long)]
-    extra_repos: Option<Utf8PathBuf>,
-
     #[command(subcommand)]
     cmd: Cmds,
 }
@@ -230,20 +226,10 @@ impl TryFrom<&LsApis> for LoadArgs {
         let self_manifest_dir_str = std::env::var("CARGO_MANIFEST_DIR")
             .context("expected CARGO_MANIFEST_DIR in environment")?;
         let self_manifest_dir = Utf8PathBuf::from(self_manifest_dir_str);
-
         let api_manifest_path =
             args.api_manifest.clone().unwrap_or_else(|| {
                 self_manifest_dir.join("src").join("api-manifest.toml")
             });
-        let extra_repos_path = args.extra_repos.clone().unwrap_or_else(|| {
-            self_manifest_dir
-                .join("..")
-                .join("..")
-                .join("out")
-                .join("ls-apis")
-                .join("checkout")
-        });
-
-        Ok(LoadArgs { api_manifest_path, extra_repos_path })
+        Ok(LoadArgs { api_manifest_path })
     }
 }

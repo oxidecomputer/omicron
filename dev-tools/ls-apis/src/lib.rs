@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Compile information about Progenitor-based APIs
+//! Collect information about Progenitor-based APIs
 
 mod api_metadata;
 mod cargo;
@@ -78,8 +78,6 @@ impl Borrow<String> for ServerPackageName {
 pub struct LoadArgs {
     /// path to developer-maintained API metadata
     pub api_manifest_path: Utf8PathBuf,
-    /// path to a directory containing clones of repos that may contain APIs
-    pub extra_repos_path: Utf8PathBuf,
 }
 
 fn parse_toml_file<T: DeserializeOwned>(path: &Utf8Path) -> Result<T> {

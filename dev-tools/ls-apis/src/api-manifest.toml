@@ -411,6 +411,15 @@ nexus-types depends on dns-service-client for defining some types.
 """
 
 [[dependency_filter_rules]]
+ancestor = "nexus-types"
+client = "sled-agent-client"
+evaluation = "bogus"
+note = """
+Past versions of nexus-types that are still referenced in the dependency tree
+depended on sled-agent-client for defining some types.
+"""
+
+[[dependency_filter_rules]]
 ancestor = "sled-agent-types"
 client = "propolis-client"
 evaluation = "bogus"

@@ -6,12 +6,14 @@
 
 use crate::api_metadata::AllApiMetadata;
 use crate::cargo::Workspace;
-use anyhow::{anyhow, ensure, Result};
+use anyhow::{anyhow, ensure, Context, Result};
 use camino::Utf8Path;
+use camino::Utf8PathBuf;
 use cargo_metadata::Package;
 use cargo_metadata::PackageId;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 /// Thin wrapper around a list of workspaces that makes it easy to query which
 /// workspace has which package
@@ -28,34 +30,42 @@ impl Workspaces {
     /// On success, returns `(workspaces, warnings)`, where `warnings` is a list
     /// of potential inconsistencies between API metadata and Cargo metadata.
     pub fn load(
-        extra_repos_path: &Utf8Path,
         api_metadata: &AllApiMetadata,
     ) -> Result<(Workspaces, Vec<anyhow::Error>)> {
-        // Load information about each of the known workspaces.
+        // First, load information about the "omicron" workspace.  This is the
+        // current workspace so we don't need to provide the path to it.
+        let omicron = Arc::new(Workspace::load("omicron", None)?);
+
+        // In order to assemble this metadata, Cargo already has a clone of most
+        // of the other workspaces that we care about.  We'll use those clones
+        // rather than manage our own.
         //
-        // Each of these involves running `cargo metadata`, which is pretty I/O
-        // intensive.  Overall latency benefits significantly from
-        // parallelizing.
+        // To find each of these other repos, we'll need to look up a package in
+        // each of these workspaces and parse the source property.  (This is
+        // technically unstable and may break in future Cargo revisions.)
+        //
+        // Loading each workspace involves running `cargo metaata`, which is
+        // pretty I/O intensive.  Latency benefits significantly from
+        // parallelizing, though we have to respect the dependencies (we can't
+        // look up a package in "maghemite" before we've loaded Maghemite).
         //
         // If we had many more repos than this, we'd probably want to limit the
         // concurrency.
-        let handles: Vec<_> =
-            ["omicron", "crucible", "maghemite", "propolis", "dendrite"]
-                .into_iter()
-                .map(|repo_name| {
-                    let extra_arg = if repo_name == "omicron" {
-                        None
-                    } else {
-                        Some(extra_repos_path.to_owned())
-                    };
-                    std::thread::spawn(move || {
-                        let arg = extra_arg.as_ref().map(|s| s.as_path());
-                        Workspace::load(repo_name, arg)
-                    })
-                })
-                .collect();
+        let handles: Vec<_> = [
+            ("crucible", "crucible-agent-client"),
+            ("propolis", "propolis-client"),
+            ("maghemite", "mg-admin-client"),
+        ]
+        .into_iter()
+        .map(|(repo, omicron_pkg)| {
+            let mine = omicron.clone();
+            std::thread::spawn(move || {
+                load_dependent_repo(&mine, repo, omicron_pkg)
+            })
+        })
+        .collect();
 
-        let workspaces: BTreeMap<_, _> = handles
+        let mut workspaces: BTreeMap<_, _> = handles
             .into_iter()
             .map(|join_handle| {
                 let thr_result = join_handle.join().map_err(|e| {
@@ -65,6 +75,19 @@ impl Workspaces {
                 Ok::<_, anyhow::Error>((workspace.name().to_owned(), workspace))
             })
             .collect::<Result<BTreeMap<_, _>, _>>()?;
+        workspaces.insert(
+            String::from("omicron"),
+            Arc::into_inner(omicron).expect("no more Omicron Arc references"),
+        );
+
+        let maghemite = workspaces
+            .get("maghemite")
+            .ok_or_else(|| anyhow!("missing maghemite workspaces"))?;
+
+        workspaces.insert(
+            String::from("dendrite"),
+            load_dependent_repo(&maghemite, "dendrite", "dpd-client")?,
+        );
 
         // Validate the metadata against what we found in the workspaces.
         let mut client_pkgnames_unused: BTreeSet<_> =
@@ -184,4 +207,61 @@ impl Workspaces {
     ) -> BTreeSet<&'a PackageId> {
         self.workspaces.values().flat_map(move |w| w.pkgids(pkgname)).collect()
     }
+}
+
+/// Load a `Workspace` for a repo `repo` using the manifest path inferred by
+/// looking up one of its packages `pkgname` in `workspace`
+///
+/// For example, we might locate the Crucible repo by looking up the
+/// `crucible-pantry-client` package in the Omicron workspace, finding its
+/// manifest path, and locating the containing Crucible workspace.
+fn load_dependent_repo(
+    workspace: &Workspace,
+    repo: &str,
+    pkgname: &str,
+) -> Result<Workspace> {
+    // `Workspace` doesn't let us look up a non-workspace package by name
+    // because there may be many of them.  So list all the pkgids and take any
+    // one of them -- any of them should work for our purpoes.
+    let pkgid = workspace.pkgids(pkgname).next().ok_or_else(|| {
+        anyhow!(
+            "workspace {} did not contain expected package {}",
+            workspace.name(),
+            pkgname
+        )
+    })?;
+
+    // Now we can look up the package metadata.
+    let pkg = workspace.pkg_by_id(pkgid).ok_or_else(|| {
+        anyhow!(
+            "workspace {}: did not contain expected package id {}",
+            workspace.name(),
+            pkgname
+        )
+    })?;
+
+    // The package metadata should show where the package's manifest file should
+    // be.  This may be buried deep in the workspace.  How do we find the root
+    // of the workspace?  We assume (and verify) that the workspace is checked
+    // out in the usual place under CARGO_HOME.  Then the workspace root is the
+    // full path two component deeper than the checkouts directory.
+    let cargo_home = std::env::var("CARGO_HOME").context("CARGO_HOME")?;
+    let git_checkouts: Utf8PathBuf =
+        [&cargo_home, "git", "checkouts"].into_iter().collect();
+    let relative_path =
+        pkg.manifest_path.strip_prefix(&git_checkouts).map_err(|_| {
+            anyhow!(
+                "workspace {}: package {}: manifest path {:?} was not under \
+                 expected path {:?}",
+                workspace.name(),
+                pkgname,
+                pkg.manifest_path,
+                git_checkouts
+            )
+        })?;
+    let checkout_name: Utf8PathBuf =
+        relative_path.components().take(2).collect();
+    let workspace_manifest =
+        git_checkouts.join(checkout_name).join("Cargo.toml");
+    Workspace::load(repo, Some(&workspace_manifest))
 }

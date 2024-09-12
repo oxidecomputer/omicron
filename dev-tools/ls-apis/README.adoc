@@ -8,25 +8,6 @@ This tool attempts to identify Progenitor-based API dependencies between Rust co
 
 == Quick start
 
-=== Setup
-
-**Before doing anything else**, you need to create clones of several repos into `./out/ls-apis/checkouts`, relative to the root of your Omicron workspace.  (The "out" directory already exists if you've built anything in this Omicron repo already.).  You'll want to do something like this:
-
-```
-# Avoiding `mkdir -p` here so that this fails if you're in the wrong place.
-# ("out" should already exist.)
-mkdir out/ls-apis
-mkdir out/ls-apis/checkout
-cd out/ls-apis/checkout
-git clone https://github.com/oxidecomputer/crucible.git
-git clone https://github.com/oxidecomputer/dendrite.git
-git clone https://github.com/oxidecomputer/maghemite.git
-git clone https://github.com/oxidecomputer/propolis.git
-cd -
-```
-
-The commit checked out of each clone should match what this Omicron workspace is using in package-manifest.toml and Cargo.lock.  (In practice, these can differ from each other.  This tool assumes any differences there are not relevant.  It trusts whatever you've got checked out.)
-
 === Listing APIs and their consumers
 
 ```
