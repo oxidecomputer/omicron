@@ -15,6 +15,7 @@ use nexus_db_model::Vmm;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
+use nexus_types::external_api::views::SledPolicy;
 use nexus_types::identity::Asset;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::Error;
@@ -44,9 +45,27 @@ pub(crate) struct InstanceWatcher {
     id: WatcherIdentity,
 }
 
-const MAX_SLED_AGENTS: NonZeroU32 = unsafe {
-    // Safety: last time I checked, 100 was greater than zero.
-    NonZeroU32::new_unchecked(100)
+/// Determines how many instance checks and their subsequent update sagas (if
+/// the instance's state has changed) can execute concurrently.  If this
+/// number is too high, there's risk that this task could starve other Nexus
+/// activities or overload the database or overload one or more sled agents.
+///
+/// The only consequence of the number being too low is that it may take longer
+/// for the system to notice an instance's VMM state requires an instance state
+/// transition, which translates to increased latency between when events (like
+/// a VMM crash or a completed migration) occur, and when the necessary actions
+/// (like releasing unused resource allocations or allowing an instance to
+/// be restarted or deleted) are performed.  However, in the happy path, instance
+/// update sagas execute immediately upon receipt of a VMM state update pushed
+/// by a sled-agent in `cpapi_instances_put`.  Therefore, discovering a needed
+/// state transition a health check only occurs if the pushed state update was
+/// not handled correctly, or if the sled-agent itself has restarted and
+/// forgotten about the instances it was supposed to know about.  For now, we
+/// tune this pretty low, choosing safety over low recovery latency for these
+/// relatively rare events.
+const MAX_CONCURRENT_CHECKS: NonZeroU32 = unsafe {
+    // Safety: last time I checked, 16 was greater than zero.
+    NonZeroU32::new_unchecked(16)
 };
 
 impl InstanceWatcher {
@@ -66,9 +85,10 @@ impl InstanceWatcher {
     fn check_instance(
         &self,
         opctx: &OpContext,
-        client: &SledAgentClient,
+        client: SledAgentClient,
         target: VirtualMachine,
         vmm: Vmm,
+        sled: Sled,
     ) -> impl Future<Output = Check> + Send + 'static {
         let datastore = self.datastore.clone();
         let sagas = self.sagas.clone();
@@ -81,105 +101,132 @@ impl InstanceWatcher {
                 target.instance_id.to_string(),
             );
             meta.insert("vmm_id".to_string(), vmm_id.to_string());
+            meta.insert("sled_id".to_string(), sled.id().to_string());
             opctx.child(meta)
         };
-        let client = client.clone();
 
         async move {
             slog::trace!(
                 opctx.log, "checking on VMM"; "propolis_id" => %vmm_id
             );
 
-            slog::trace!(opctx.log, "checking on instance...");
-            let rsp = client
-                .vmm_get_state(&vmm_id)
-                .await
-                .map_err(SledAgentInstanceError);
             let mut check = Check {
                 target,
                 outcome: Default::default(),
                 result: Ok(()),
                 update_saga_queued: false,
             };
-            let state: SledVmmState = match rsp {
-                Ok(rsp) => rsp.into_inner().into(),
-                // Oh, this error indicates that the VMM should transition to
-                // `Failed`. Let's synthesize a `SledInstanceState` that does
-                // that.
-                Err(e) if e.vmm_gone() => {
-                    slog::info!(
-                        opctx.log,
-                        "sled-agent error indicates that this instance's \
-                         VMM has failed!";
-                        "error" => %e,
-                    );
-                    check.outcome =
-                        CheckOutcome::Failure(Failure::NoSuchInstance);
-                    // TODO(eliza): it would be nicer if this used the same
-                    // code path as `mark_instance_failed`...
-                    SledVmmState {
-                        vmm_state: nexus::VmmRuntimeState {
-                            r#gen: vmm.runtime.r#gen.0.next(),
-                            state: nexus::VmmState::Failed,
-                            time_updated: chrono::Utc::now(),
-                        },
-                        // It's fine to synthesize `None`s here because a `None`
-                        // just means "don't update the migration state", not
-                        // "there is no migration".
-                        migration_in: None,
-                        migration_out: None,
-                    }
-                }
-                Err(SledAgentInstanceError(ClientError::ErrorResponse(
-                    rsp,
-                ))) => {
-                    let status = rsp.status();
-                    if status.is_client_error() {
-                        slog::warn!(opctx.log, "check failed due to client error";
-                            "status" => ?status, "error" => ?rsp.into_inner());
-                        check.result =
-                            Err(Incomplete::ClientHttpError(status.as_u16()));
-                    } else {
-                        slog::info!(opctx.log, "check failed due to server error";
-                        "status" => ?status, "error" => ?rsp.into_inner());
-                    }
 
-                    check.outcome = CheckOutcome::Failure(
-                        Failure::SledAgentResponse(status.as_u16()),
-                    );
-                    return check;
+            let state = if sled.policy() == SledPolicy::Expunged {
+                // If the sled has been expunged, any VMMs still on that sled
+                // should be marked as `Failed`.
+                slog::info!(
+                    opctx.log,
+                    "instance is assigned to a VMM on an Expunged sled; \
+                     marking it as Failed";
+                );
+                check.outcome = CheckOutcome::Failure(Failure::SledExpunged);
+                // TODO(eliza): it would be nicer if this used the same
+                // code path as `mark_instance_failed`...
+                SledVmmState {
+                    vmm_state: nexus::VmmRuntimeState {
+                        r#gen: vmm.runtime.r#gen.0.next(),
+                        state: nexus::VmmState::Failed,
+                        time_updated: chrono::Utc::now(),
+                    },
+                    // It's fine to synthesize `None`s here because a `None`
+                    // just means "don't update the migration state", not
+                    // "there is no migration".
+                    migration_in: None,
+                    migration_out: None,
                 }
-                Err(SledAgentInstanceError(
-                    ClientError::CommunicationError(e),
-                )) => {
-                    // TODO(eliza): eventually, we may want to transition the
-                    // instance to the `Failed` state if the sled-agent has been
-                    // unreachable for a while. We may also want to take other
-                    // corrective actions or alert an operator in this case.
-                    //
-                    // TODO(eliza): because we have the preported IP address
-                    // of the instance's VMM from our databse query, we could
-                    // also ask the VMM directly when the sled-agent is
-                    // unreachable. We should start doing that here at some
-                    // point.
-                    slog::info!(opctx.log, "sled agent is unreachable"; "error" => ?e);
-                    check.outcome =
-                        CheckOutcome::Failure(Failure::SledAgentUnreachable);
-                    return check;
-                }
-                Err(SledAgentInstanceError(e)) => {
-                    slog::warn!(
-                        opctx.log,
-                        "error checking up on instance";
-                        "error" => ?e,
-                        "status" => ?e.status(),
-                    );
-                    check.result = Err(Incomplete::ClientError);
-                    return check;
+            } else {
+                // Otherwise, ask the sled-agent what it has to say for itself.
+                let rsp = client
+                    .vmm_get_state(&vmm_id)
+                    .await
+                    .map_err(SledAgentInstanceError);
+                match rsp {
+                    Ok(rsp) => {
+                        let state: SledVmmState = rsp.into_inner().into();
+                        check.outcome =
+                            CheckOutcome::Success(state.vmm_state.state.into());
+                        state
+                    }
+                    // Oh, this error indicates that the VMM should transition to
+                    // `Failed`. Let's synthesize a `SledInstanceState` that does
+                    // that.
+                    Err(e) if e.vmm_gone() => {
+                        slog::info!(
+                            opctx.log,
+                            "sled-agent error indicates that this instance's \
+                             VMM has failed!";
+                            "error" => %e,
+                        );
+                        check.outcome =
+                            CheckOutcome::Failure(Failure::NoSuchInstance);
+                        // TODO(eliza): it would be nicer if this used the same
+                        // code path as `mark_instance_failed`...
+                        SledVmmState {
+                            vmm_state: nexus::VmmRuntimeState {
+                                r#gen: vmm.runtime.r#gen.0.next(),
+                                state: nexus::VmmState::Failed,
+                                time_updated: chrono::Utc::now(),
+                            },
+                            // It's fine to synthesize `None`s here because a `None`
+                            // just means "don't update the migration state", not
+                            // "there is no migration".
+                            migration_in: None,
+                            migration_out: None,
+                        }
+                    }
+                    Err(SledAgentInstanceError(
+                        ClientError::ErrorResponse(rsp),
+                    )) => {
+                        let status = rsp.status();
+                        if status.is_client_error() {
+                            slog::warn!(opctx.log, "check incomplete due to client error";
+                            "status" => ?status, "error" => ?rsp.into_inner());
+                        } else {
+                            slog::info!(opctx.log, "check incomplete due to server error";
+                        "status" => ?status, "error" => ?rsp.into_inner());
+                        }
+
+                        check.result = Err(Incomplete::SledAgentHttpError(
+                            status.as_u16(),
+                        ));
+                        return check;
+                    }
+                    Err(SledAgentInstanceError(
+                        ClientError::CommunicationError(e),
+                    )) => {
+                        // TODO(eliza): eventually, we may want to transition the
+                        // instance to the `Failed` state if the sled-agent has been
+                        // unreachable for a while. We may also want to take other
+                        // corrective actions or alert an operator in this case.
+                        //
+                        // TODO(eliza): because we have the purported IP address
+                        // of the instance's VMM from our database query, we could
+                        // also ask the VMM directly when the sled-agent is
+                        // unreachable. We should start doing that here at some
+                        // point.
+                        slog::info!(opctx.log, "sled agent is unreachable"; "error" => ?e);
+                        check.result = Err(Incomplete::SledAgentUnreachable);
+                        return check;
+                    }
+                    Err(SledAgentInstanceError(e)) => {
+                        slog::warn!(
+                            opctx.log,
+                            "error checking up on instance";
+                            "error" => ?e,
+                            "status" => ?e.status(),
+                        );
+                        check.result = Err(Incomplete::ClientError);
+                        return check;
+                    }
                 }
             };
 
-            check.outcome = CheckOutcome::Success(state.vmm_state.state.into());
             debug!(
                 opctx.log,
                 "updating instance state";
@@ -311,26 +358,20 @@ impl Check {
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize,
 )]
 enum Failure {
-    /// The sled-agent for the sled on which the instance is running was
-    /// unreachable.
-    ///
-    /// This may indicate a network partition between us and that sled, that
-    /// the sled-agent process has crashed, or that the sled is down.
-    SledAgentUnreachable,
-    /// The sled-agent responded with an unexpected HTTP error.
-    SledAgentResponse(u16),
     /// The sled-agent indicated that it doesn't know about an instance ID that
     /// we believe it *should* know about. This probably means the sled-agent,
     /// and potentially the whole sled, has been restarted.
     NoSuchInstance,
+    /// The instance was assigned to a sled that was expunged. Its VMM has been
+    /// marked as `Failed`, since the sled is no longer present.
+    SledExpunged,
 }
 
 impl Failure {
     fn as_str(&self) -> Cow<'static, str> {
         match self {
-            Self::SledAgentUnreachable => "unreachable".into(),
-            Self::SledAgentResponse(status) => status.to_string().into(),
             Self::NoSuchInstance => "no_such_instance".into(),
+            Self::SledExpunged => "sled_expunged".into(),
         }
     }
 }
@@ -339,11 +380,16 @@ impl Failure {
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize,
 )]
 enum Incomplete {
-    /// The sled-agent responded with an HTTP client error, indicating that our
-    /// request as somehow malformed.
-    ClientHttpError(u16),
     /// Something else went wrong while making an HTTP request.
     ClientError,
+    /// The sled-agent for the sled on which the instance is running was
+    /// unreachable.
+    ///
+    /// This may indicate a network partition between us and that sled, that
+    /// the sled-agent process has crashed, or that the sled is down.
+    SledAgentUnreachable,
+    /// The sled-agent responded with an unexpected HTTP error.
+    SledAgentHttpError(u16),
     /// We attempted to update the instance state in the database, but no
     /// instance with that UUID existed.
     ///
@@ -360,8 +406,9 @@ enum Incomplete {
 impl Incomplete {
     fn as_str(&self) -> Cow<'static, str> {
         match self {
-            Self::ClientHttpError(status) => status.to_string().into(),
             Self::ClientError => "client_error".into(),
+            Self::SledAgentHttpError(status) => status.to_string().into(),
+            Self::SledAgentUnreachable => "unreachable".into(),
             Self::InstanceNotFound => "instance_not_found".into(),
             Self::UpdateFailed => "update_failed".into(),
         }
@@ -377,15 +424,36 @@ impl BackgroundTask for InstanceWatcher {
     ) -> BoxFuture<'a, serde_json::Value> {
         async {
             let mut tasks = tokio::task::JoinSet::new();
-            let mut paginator = Paginator::new(MAX_SLED_AGENTS);
-            let mk_client = |sled: &Sled| {
-                nexus_networking::sled_client_from_address(
-                    sled.id(),
-                    sled.address(),
-                    &opctx.log,
-                )
-            };
+            // We're using the size of the database query page as a simple
+            // mechanism for limiting the number of concurrent health checks: if
+            // we only query for `MAX_CONCURRENT_CHECKS` records at a time, and
+            // we wait until all spawned health checks have completed before
+            // reading the next batch, it follows that there are only ever
+            // `MAX_CONCURRENT_CHECKS` checks in flight at a time.
+            //
+            // This does mean that, unlike using a counting semaphore or
+            // similar, we may have fewer than the limit health checks running
+            // in parallel as we will not query for a new batch until *all*
+            // checks for the current batch have completed.  If that becomes an
+            // issue, we could implement a more sophisticated
+            // concurrency-limiting scheme later.
+            let mut paginator = Paginator::new(MAX_CONCURRENT_CHECKS);
 
+            let mut total: usize = 0;
+            let mut update_sagas_queued: usize = 0;
+            let mut instance_states: BTreeMap<String, usize> =
+                BTreeMap::new();
+            let mut check_failures: BTreeMap<String, usize> =
+                BTreeMap::new();
+            let mut check_errors: BTreeMap<String, usize> = BTreeMap::new();
+
+            // A `reqwest` client is a reference-counted handle to a connection
+            // pool that can be reused by multiple requests. Making a new client
+            // is fairly expensive, but cloning one is cheap, and cloning it
+            // allows reusing pooled TCP connections. Therefore, we will order
+            // the database query by sled ID, and reuse the same sled-agent
+            // client as long as we are talking to the same sled.
+            let mut curr_client: Option<(Uuid, SledAgentClient)> = None;
             while let Some(p) = paginator.next() {
                 let maybe_batch = self
                     .datastore
@@ -404,71 +472,62 @@ impl BackgroundTask for InstanceWatcher {
                         return serde_json::json!({ "error": e.to_string() });
                     }
                 };
-                paginator = p.found_batch(&batch, &|(sled, _, _, _)| sled.id());
+                paginator = p.found_batch(&batch, &|(sled, _, vmm, _)| (sled.id(), vmm.id));
 
-                // When we iterate over the batch of sled instances, we pop the
-                // first sled from the batch before looping over the rest, to
-                // insure that the initial sled-agent client is created first,
-                // as we need the address of the first sled to construct it.
-                // We could, alternatively, make the sled-agent client an
-                // `Option`, but then every subsequent iteration would have to
-                // handle the case where it's `None`, and I thought this was a
-                // bit neater...
-                let mut batch = batch.into_iter();
-                if let Some((mut curr_sled, instance, vmm, project)) = batch.next() {
-                    let mut client = mk_client(&curr_sled);
-                    let target = VirtualMachine::new(self.id, &curr_sled, &instance, &vmm, &project);
-                    tasks.spawn(self.check_instance(opctx, &client, target, vmm));
+                // Spawn a task to check on each sled in the batch.
+                for (sled, instance, vmm, project) in batch {
+                    let client = match curr_client {
+                        // If we are still talking to the same sled, reuse the
+                        // existing client and its connection pool.
+                        Some((sled_id, ref client)) if sled_id == sled.id() => client.clone(),
+                        // Otherwise, if we've moved on to a new sled, refresh
+                        // the client.
+                        ref mut curr => {
+                            let client = nexus_networking::sled_client_from_address(
+                                sled.id(),
+                                sled.address(),
+                                &opctx.log,
+                            );
+                            *curr = Some((sled.id(), client.clone()));
+                            client
+                        },
+                    };
 
-                    for (sled, instance, vmm, project) in batch {
-                        // We're now talking to a new sled agent; update the client.
-                        if sled.id() != curr_sled.id() {
-                            client = mk_client(&sled);
-                            curr_sled = sled;
+                    let target = VirtualMachine::new(self.id, &sled, &instance, &vmm, &project);
+                    tasks.spawn(self.check_instance(opctx, client, target, vmm, sled));
+                }
+
+                // Now, wait for the check results to come back.
+                while let Some(result) = tasks.join_next().await {
+                    total += 1;
+                    let check = result.expect(
+                        "a `JoinError` is returned if a spawned task \
+                        panics, or if the task is aborted. we never abort \
+                        tasks on this `JoinSet`, and nexus is compiled with \
+                        `panic=\"abort\"`, so neither of these cases should \
+                        ever occur",
+                    );
+                    match check.outcome {
+                        CheckOutcome::Success(state) => {
+                            *instance_states
+                                .entry(state.to_string())
+                                .or_default() += 1;
                         }
-
-                        let target = VirtualMachine::new(self.id, &curr_sled, &instance, &vmm, &project);
-                        tasks.spawn(self.check_instance(opctx, &client, target, vmm));
+                        CheckOutcome::Failure(reason) => {
+                            *check_failures.entry(reason.as_str().into_owned()).or_default() += 1;
+                        }
+                        CheckOutcome::Unknown => {
+                            if let Err(reason) = check.result {
+                                *check_errors.entry(reason.as_str().into_owned()).or_default() += 1;
+                            }
+                        }
                     }
-                }
-            }
-
-            // Now, wait for the check results to come back.
-            let mut total: usize = 0;
-            let mut update_sagas_queued: usize = 0;
-            let mut instance_states: BTreeMap<String, usize> =
-                BTreeMap::new();
-            let mut check_failures: BTreeMap<String, usize> =
-                BTreeMap::new();
-            let mut check_errors: BTreeMap<String, usize> = BTreeMap::new();
-            while let Some(result) = tasks.join_next().await {
-                total += 1;
-                let check = result.expect(
-                    "a `JoinError` is returned if a spawned task \
-                    panics, or if the task is aborted. we never abort \
-                    tasks on this `JoinSet`, and nexus is compiled with \
-                    `panic=\"abort\"`, so neither of these cases should \
-                    ever occur",
-                );
-                match check.outcome {
-                    CheckOutcome::Success(state) => {
-                        *instance_states
-                            .entry(state.to_string())
-                            .or_default() += 1;
+                    if check.update_saga_queued {
+                        update_sagas_queued += 1;
                     }
-                    CheckOutcome::Failure(reason) => {
-                        *check_failures.entry(reason.as_str().into_owned()).or_default() += 1;
-                    }
-                    CheckOutcome::Unknown => {}
-                }
-                if let Err(ref reason) = check.result {
-                    *check_errors.entry(reason.as_str().into_owned()).or_default() += 1;
-                }
-                if check.update_saga_queued {
-                    update_sagas_queued += 1;
-                }
-                self.metrics.lock().unwrap().record_check(check);
+                    self.metrics.lock().unwrap().record_check(check);
 
+                }
             }
 
             // All requests completed! Prune any old instance metrics for

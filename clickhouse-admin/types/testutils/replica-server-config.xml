@@ -42,6 +42,7 @@
         </default>
     </quotas>
 
+    <tmp_path>./data/tmp</tmp_path>
     <user_files_path>./data/user_files</user_files_path>
     <default_profile>default</default_profile>
     <format_schema_path>./data/format_schemas</format_schema_path>

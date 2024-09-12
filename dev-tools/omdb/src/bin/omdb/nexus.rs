@@ -6,6 +6,7 @@
 
 use crate::check_allow_destructive::DestructiveOperationToken;
 use crate::db::DbUrlOptions;
+use crate::helpers::should_colorize;
 use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::Omdb;
 use anyhow::bail;
@@ -15,6 +16,7 @@ use chrono::DateTime;
 use chrono::SecondsFormat;
 use chrono::Utc;
 use clap::Args;
+use clap::ColorChoice;
 use clap::Subcommand;
 use clap::ValueEnum;
 use futures::future::try_join;
@@ -32,6 +34,8 @@ use nexus_client::types::UninitializedSledId;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_saga_recovery::LastPass;
 use nexus_types::deployment::Blueprint;
+use nexus_types::internal_api::background::AbandonedVmmReaperStatus;
+use nexus_types::internal_api::background::InstanceUpdaterStatus;
 use nexus_types::internal_api::background::LookupRegionPortStatus;
 use nexus_types::internal_api::background::RegionReplacementDriverStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementFinishStatus;
@@ -56,6 +60,8 @@ use tabled::settings::object::Columns;
 use tabled::settings::Padding;
 use tabled::Tabled;
 use tokio::sync::OnceCell;
+use update_engine::display::LineDisplay;
+use update_engine::display::LineDisplayStyles;
 use update_engine::display::ProgressRatioDisplay;
 use update_engine::events::EventReport;
 use update_engine::events::StepOutcome;
@@ -111,6 +117,8 @@ enum BackgroundTasksCommands {
     List,
     /// Print human-readable summary of the status of each background task
     Show(BackgroundTasksShowArgs),
+    /// Print an event report for a background task if available.
+    PrintReport(BackgroundTasksPrintReportArgs),
     /// Activate one or more background tasks
     Activate(BackgroundTasksActivateArgs),
 }
@@ -123,6 +131,13 @@ struct BackgroundTasksShowArgs {
     /// "all", "dns_external", or "dns_internal".
     #[clap(value_name = "TASK_NAME")]
     tasks: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+struct BackgroundTasksPrintReportArgs {
+    /// The name of the background task to print a report for.
+    #[clap(value_name = "TASK_NAME")]
+    task: String,
 }
 
 #[derive(Debug, Args)]
@@ -395,6 +410,16 @@ impl NexusArgs {
                 command: BackgroundTasksCommands::Show(args),
             }) => cmd_nexus_background_tasks_show(&client, args).await,
             NexusCommands::BackgroundTasks(BackgroundTasksArgs {
+                command: BackgroundTasksCommands::PrintReport(args),
+            }) => {
+                cmd_nexus_background_tasks_print_report(
+                    &client,
+                    args,
+                    omdb.output.color,
+                )
+                .await
+            }
+            NexusCommands::BackgroundTasks(BackgroundTasksArgs {
                 command: BackgroundTasksCommands::Activate(args),
             }) => {
                 let token = omdb.check_allow_destructive()?;
@@ -642,6 +667,49 @@ async fn cmd_nexus_background_tasks_show(
 
     for (_, bgtask) in &tasks {
         print_task(bgtask);
+    }
+
+    Ok(())
+}
+
+/// Runs `omdb nexus background-tasks print-report`
+async fn cmd_nexus_background_tasks_print_report(
+    client: &nexus_client::Client,
+    args: &BackgroundTasksPrintReportArgs,
+    color: ColorChoice,
+) -> Result<(), anyhow::Error> {
+    let response = client
+        .bgtask_view(&args.task)
+        .await
+        .context("fetching background task")?;
+    let task = response.into_inner();
+    match task.last {
+        LastResult::NeverCompleted => {
+            bail!("task {:?} has never completed", args.task);
+        }
+        LastResult::Completed(last) => {
+            // Clone the details so the original details are preserved for the
+            // error below.
+            let event_buffer = extract_event_buffer(&mut last.details.clone())
+                .with_context(|| {
+                    format!(
+                        "error extracting `event_report` from task details \
+                         -- found {:?}",
+                        last.details
+                    )
+                })?;
+            let Some(event_buffer) = event_buffer else {
+                bail!("task {:?} has no event report", args.task);
+            };
+
+            let mut line_display = LineDisplay::new(std::io::stdout());
+            line_display.set_start_time(last.start_time);
+            if should_colorize(color, supports_color::Stream::Stdout) {
+                line_display.set_styles(LineDisplayStyles::colorized());
+            }
+
+            line_display.write_event_buffer(&event_buffer)?;
+        }
     }
 
     Ok(())
@@ -1165,54 +1233,61 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
             }
         };
     } else if name == "abandoned_vmm_reaper" {
-        #[derive(Deserialize)]
-        struct TaskSuccess {
-            /// total number of abandoned VMMs found
-            found: usize,
-
-            /// number of abandoned VMM records that were deleted
-            vmms_deleted: usize,
-
-            /// number of abandoned VMM records that were already deleted when
-            /// we tried to delete them.
-            vmms_already_deleted: usize,
-
-            /// sled resource reservations that were released
-            sled_reservations_deleted: usize,
-
-            /// number of errors that occurred during the activation
-            error_count: usize,
-
-            /// the last error that occurred during execution.
-            error: Option<String>,
-        }
-        match serde_json::from_value::<TaskSuccess>(details.clone()) {
+        match serde_json::from_value::<AbandonedVmmReaperStatus>(
+            details.clone(),
+        ) {
             Err(error) => eprintln!(
                 "warning: failed to interpret task details: {:?}: {:?}",
                 error, details
             ),
-            Ok(TaskSuccess {
-                found,
+            Ok(AbandonedVmmReaperStatus {
+                vmms_found,
                 vmms_deleted,
                 vmms_already_deleted,
                 sled_reservations_deleted,
-                error_count,
-                error,
+                errors,
             }) => {
-                if let Some(error) = error {
-                    println!("    task did not complete successfully!");
-                    println!("      total errors: {error_count}");
-                    println!("      most recent error: {error}");
+                if !errors.is_empty() {
+                    println!(
+                        "    task did not complete successfully! ({} errors)",
+                        errors.len()
+                    );
+                    for error in errors {
+                        println!("    > {error}");
+                    }
                 }
 
-                println!("    total abandoned VMMs found: {found}");
-                println!("      VMM records deleted: {vmms_deleted}");
+                const VMMS_FOUND: &'static str = "total abandoned VMMs found:";
+                const VMMS_DELETED: &'static str = "  VMM records deleted:";
+                const VMMS_ALREADY_DELETED: &'static str =
+                    "  VMMs already deleted by another Nexus:";
+                const SLED_RESERVATIONS_DELETED: &'static str =
+                    "sled resource reservations deleted:";
+                // To align the number column, figure out the length of the
+                // longest line of text and add one (so that there's a space).
+                //
+                // Yes, I *could* just count the number of characters in each
+                // line myself, but why do something by hand when you could make
+                // the computer do it for you? And, this way, if we change the
+                // text, we won't need to figure it out again.
+                const WIDTH: usize = const_max_len(&[
+                    VMMS_FOUND,
+                    VMMS_DELETED,
+                    VMMS_ALREADY_DELETED,
+                    SLED_RESERVATIONS_DELETED,
+                ]) + 1;
+                const NUM_WIDTH: usize = 3;
+
+                println!("    {VMMS_FOUND:<WIDTH$}{vmms_found:>NUM_WIDTH$}");
                 println!(
-                    "      VMM records already deleted by another Nexus: {}",
-                    vmms_already_deleted,
+                    "    {VMMS_DELETED:<WIDTH$}{vmms_deleted:>NUM_WIDTH$}"
                 );
                 println!(
-                    "    sled resource reservations deleted: {}",
+                    "    {VMMS_ALREADY_DELETED:<WIDTH$}{:>NUM_WIDTH$}",
+                    vmms_already_deleted
+                );
+                println!(
+                    "    {SLED_RESERVATIONS_DELETED:<WIDTH$}{:>NUM_WIDTH$}",
                     sled_reservations_deleted,
                 );
             }
@@ -1400,85 +1475,90 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
             ),
         }
     } else if name == "instance_updater" {
-        #[derive(Deserialize)]
-        struct UpdaterStatus {
-            /// number of instances found with destroyed active VMMs
-            destroyed_active_vmms: usize,
+        let status = match serde_json::from_value::<InstanceUpdaterStatus>(
+            details.clone(),
+        ) {
+            Err(error) => {
+                eprintln!(
+                    "warning: failed to interpret task details: {:?}: {:?}",
+                    error, details,
+                );
+                return;
+            }
+            Ok(status) => status,
+        };
+        let errors = status.errors();
+        let instances_found = status.total_instances_found();
+        let InstanceUpdaterStatus {
+            disabled,
+            destroyed_active_vmms,
+            failed_active_vmms,
+            terminated_active_migrations,
+            sagas_started,
+            sagas_completed,
+            saga_errors,
+            query_errors,
+        } = status;
 
-            /// number of instances found with failed active VMMs
-            failed_active_vmms: usize,
-
-            /// number of instances found with terminated active migrations
-            terminated_active_migrations: usize,
-
-            /// number of update sagas started.
-            sagas_started: usize,
-
-            /// number of sagas completed successfully
-            sagas_completed: usize,
-
-            /// number of sagas which failed
-            sagas_failed: usize,
-
-            /// number of sagas which could not be started
-            saga_start_failures: usize,
-
-            /// the last error that occurred during execution.
-            error: Option<String>,
+        if disabled {
+            println!("    task explicitly disabled by config!")
         }
-        match serde_json::from_value::<UpdaterStatus>(details.clone()) {
-            Err(error) => eprintln!(
-                "warning: failed to interpret task details: {:?}: {:?}",
-                error, details
-            ),
-            Ok(UpdaterStatus {
-                destroyed_active_vmms,
-                failed_active_vmms,
-                terminated_active_migrations,
-                sagas_started,
-                sagas_completed,
-                sagas_failed,
-                saga_start_failures,
-                error,
-            }) => {
-                if let Some(error) = error {
-                    println!("    task did not complete successfully!");
-                    println!("      most recent error: {error}");
-                }
 
-                println!(
-                    "    total instances in need of updates: {}",
-                    destroyed_active_vmms + terminated_active_migrations
-                );
-                println!(
-                    "      instances with Destroyed active VMMs: {}",
-                    destroyed_active_vmms,
-                );
-                println!(
-                    "      instances with Failed active VMMs: {}",
-                    failed_active_vmms,
-                );
-                println!(
-                    "      instances with terminated active migrations: {}",
-                    terminated_active_migrations,
-                );
-                println!("    update sagas started: {sagas_started}");
-                println!(
-                    "    update sagas completed successfully: {}",
-                    sagas_completed,
-                );
-
-                let total_failed = sagas_failed + saga_start_failures;
-                if total_failed > 0 {
-                    println!("    unsuccessful update sagas: {total_failed}");
-                    println!(
-                        "      sagas which could not be started: {}",
-                        saga_start_failures
-                    );
-                    println!("      sagas failed: {sagas_failed}");
+        const FOUND: &'static str = "instances in need of updates:";
+        const DESTROYED: &'static str =
+            "  instances with Destroyed active VMMs:";
+        const FAILED: &'static str = "  instances with Failed active VMMs:";
+        const MIGRATIONS: &'static str =
+            "  instances with terminated migrations:";
+        const SAGAS_STARTED: &'static str = "update sagas started:";
+        const SAGAS_COMPLETED: &'static str =
+            "  update sagas completed successfully:";
+        const SAGA_ERRORS: &'static str = "  update sagas failed:";
+        const QUERY_ERRORS: &'static str =
+            "  errors finding instances to update:";
+        const WIDTH: usize = const_max_len(&[
+            FOUND,
+            DESTROYED,
+            FAILED,
+            MIGRATIONS,
+            SAGAS_STARTED,
+            SAGA_ERRORS,
+            QUERY_ERRORS,
+        ]) + 1;
+        const NUM_WIDTH: usize = 3;
+        if errors > 0 {
+            println!(
+                "    task did not complete successfully! ({errors} errors)"
+            );
+            println!(
+                "      {QUERY_ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
+                query_errors.len()
+            );
+            for error in query_errors {
+                println!("     > {error}");
+            }
+            println!(
+                "      {SAGA_ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
+                saga_errors.len()
+            );
+            for (instance_id, error) in &saga_errors {
+                match instance_id {
+                    Some(id) => println!("      > {id}: {error}"),
+                    None => println!("      > {error}"),
                 }
             }
-        };
+        }
+
+        println!("    {FOUND:<WIDTH$}{instances_found:>NUM_WIDTH$}");
+        println!("    {DESTROYED:<WIDTH$}{destroyed_active_vmms:>NUM_WIDTH$}",);
+        println!("    {FAILED:<WIDTH$}{failed_active_vmms:>NUM_WIDTH$}");
+        println!(
+            "    {MIGRATIONS:<WIDTH$}{:>NUM_WIDTH$}",
+            terminated_active_migrations,
+        );
+        println!("    {SAGAS_STARTED:<WIDTH$}{sagas_started:>NUM_WIDTH$}");
+        println!("    {SAGAS_COMPLETED:<WIDTH$}{sagas_completed:>NUM_WIDTH$}",);
+        println!("    {SAGA_ERRORS:<WIDTH$}{:>NUM_WIDTH$}", saga_errors.len());
     } else if name == "region_snapshot_replacement_start" {
         match serde_json::from_value::<RegionSnapshotReplacementStartStatus>(
             details.clone(),
@@ -2577,4 +2657,17 @@ async fn cmd_nexus_sled_expunge_disk(
         .context("expunging disk")?;
     eprintln!("expunged disk {}", args.physical_disk_id);
     Ok(())
+}
+
+const fn const_max_len(strs: &[&str]) -> usize {
+    let mut max = 0;
+    let mut i = 0;
+    while i < strs.len() {
+        let len = strs[i].len();
+        if len > max {
+            max = len;
+        }
+        i += 1;
+    }
+    max
 }

@@ -475,10 +475,10 @@ task: "abandoned_vmm_reaper"
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    total abandoned VMMs found: 0
-      VMM records deleted: 0
-      VMM records already deleted by another Nexus: 0
-    sled resource reservations deleted: 0
+    total abandoned VMMs found:                0
+      VMM records deleted:                     0
+      VMMs already deleted by another Nexus:   0
+    sled resource reservations deleted:        0
 
 task: "bfd_manager"
   configured period: every <REDACTED_DURATION>s
@@ -523,12 +523,14 @@ task: "instance_updater"
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    total instances in need of updates: 0
-      instances with Destroyed active VMMs: 0
-      instances with Failed active VMMs: 0
-      instances with terminated active migrations: 0
-    update sagas started: 0
-    update sagas completed successfully: 0
+    task explicitly disabled by config!
+    instances in need of updates:             0
+      instances with Destroyed active VMMs:   0
+      instances with Failed active VMMs:      0
+      instances with terminated migrations:   0
+    update sagas started:                     0
+      update sagas completed successfully:    0
+      update sagas failed:                    0
 
 task: "instance_watcher"
   configured period: every <REDACTED_DURATION>s
@@ -902,10 +904,10 @@ task: "abandoned_vmm_reaper"
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    total abandoned VMMs found: 0
-      VMM records deleted: 0
-      VMM records already deleted by another Nexus: 0
-    sled resource reservations deleted: 0
+    total abandoned VMMs found:                0
+      VMM records deleted:                     0
+      VMMs already deleted by another Nexus:   0
+    sled resource reservations deleted:        0
 
 task: "bfd_manager"
   configured period: every <REDACTED_DURATION>s
@@ -950,12 +952,14 @@ task: "instance_updater"
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    total instances in need of updates: 0
-      instances with Destroyed active VMMs: 0
-      instances with Failed active VMMs: 0
-      instances with terminated active migrations: 0
-    update sagas started: 0
-    update sagas completed successfully: 0
+    task explicitly disabled by config!
+    instances in need of updates:             0
+      instances with Destroyed active VMMs:   0
+      instances with Failed active VMMs:      0
+      instances with terminated migrations:   0
+    update sagas started:                     0
+      update sagas completed successfully:    0
+      update sagas failed:                    0
 
 task: "instance_watcher"
   configured period: every <REDACTED_DURATION>s
