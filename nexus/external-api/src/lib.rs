@@ -1484,7 +1484,7 @@ pub trait NexusExternalApi {
     }]
     async fn networking_bgp_config_list(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<PaginatedByNameOrId<params::BgpConfigListSelector>>,
+        query_params: Query<PaginatedByNameOrId>,
     ) -> Result<HttpResponseOk<ResultsPage<BgpConfig>>, HttpError>;
 
     //TODO pagination? the normal by-name/by-id stuff does not work here

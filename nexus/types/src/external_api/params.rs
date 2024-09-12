@@ -1653,13 +1653,6 @@ pub struct BgpConfigSelector {
     pub name_or_id: NameOrId,
 }
 
-/// List BGP configs with an optional name or id.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-pub struct BgpConfigListSelector {
-    /// A name or id to use when selecting BGP config.
-    pub name_or_id: Option<NameOrId>,
-}
-
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct BgpPeerConfig {
     pub peers: Vec<BgpPeer>,
