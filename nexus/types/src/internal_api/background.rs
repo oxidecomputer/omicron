@@ -75,7 +75,6 @@ pub struct AbandonedVmmReaperStatus {
     pub vmms_already_deleted: usize,
     pub errors: Vec<String>,
 }
-
 /// The status of an `instance_updater` background task activation.
 #[derive(Serialize, Deserialize, Default, Debug, PartialEq, Eq)]
 pub struct InstanceUpdaterStatus {
@@ -130,9 +129,9 @@ pub struct InstanceReincarnationStatus {
     /// Instances which reincarnated too recently and still need to take some
     /// time out to settle down a bit.
     pub instances_cooling_down: Vec<(Uuid, DateTime<Utc>)>,
-    /// UUIDs of instances which were reincarnated by a different Nexus'
-    /// instance-reincarnation task, or by a user-triggered restart saga.
-    pub already_reincarnated: Vec<Uuid>,
+    /// UUIDs of instances which changed state before they could be
+    /// reincarnated.
+    pub changed_state: Vec<Uuid>,
     /// Any error that occured while finding instances in need of reincarnation.
     pub query_error: Option<String>,
     /// Errors that occurred while restarting individual instances.

@@ -118,9 +118,6 @@ declare_saga_actions! {
 /// changing its generation.
 const REGISTERED_VMM_RECORD: &'static str = "ensure_registered";
 
-pub(crate) const ALREADY_STARTING_ERROR: &'static str =
-    "instance changed state before it could be started";
-
 #[derive(Debug)]
 pub(crate) struct SagaInstanceStart;
 impl NexusSaga for SagaInstanceStart {
@@ -307,7 +304,7 @@ async fn sis_move_to_starting(
         // must have started the instance already, so unwind.
         Some(_) => {
             return Err(ActionError::action_failed(Error::conflict(
-                ALREADY_STARTING_ERROR,
+                "instance changed state before it could be started",
             )));
         }
 
@@ -349,7 +346,7 @@ async fn sis_move_to_starting(
         .map_err(ActionError::action_failed)?
     {
         return Err(ActionError::action_failed(Error::conflict(
-            ALREADY_STARTING_ERROR,
+            "instance changed state before it could be started",
         )));
     }
 

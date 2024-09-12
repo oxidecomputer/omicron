@@ -1794,15 +1794,15 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 instances_found,
                 instances_reincarnated,
                 instances_cooling_down,
-                already_reincarnated,
+                changed_state,
                 query_error,
                 restart_errors,
             }) => {
                 const FOUND: &'static str =
                     "instances eligible for reincarnation:";
                 const REINCARNATED: &'static str = "  instances reincarnated:";
-                const ALREADY_REINCARNATED: &'static str =
-                    "  instances already reincarnated:";
+                const CHANGED_STATE: &'static str =
+                    "  instances which changed state before they could be reincarnated:";
                 const ERRORS: &'static str =
                     "  instances which failed to be reincarnated:";
                 const COOLING_DOWN: &'static str =
@@ -1812,21 +1812,18 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 const WIDTH: usize = const_max_len(&[
                     FOUND,
                     REINCARNATED,
-                    ALREADY_REINCARNATED,
+                    CHANGED_STATE,
                     ERRORS,
                     COOLING_DOWN,
                     COOLDOWN_PERIOD,
                 ]);
                 let n_restart_errors = restart_errors.len();
                 let n_restarted = instances_reincarnated.len();
-                let n_already_restarted = already_reincarnated.len();
+                let n_changed_state = changed_state.len();
                 let n_chilling_out = instances_cooling_down.len();
                 println!("    {FOUND:<WIDTH$} {instances_found:>3}");
                 println!("    {REINCARNATED:<WIDTH$} {n_restarted:>3}");
-                println!(
-                    "    {ALREADY_REINCARNATED:<WIDTH$} {:>3}",
-                    n_already_restarted
-                );
+                println!("    {CHANGED_STATE:<WIDTH$} {n_changed_state:>3}",);
                 println!("    {COOLING_DOWN:<WIDTH$} {n_chilling_out:>3}");
                 println!("    {ERRORS:<WIDTH$} {n_restart_errors:>3}");
                 println!("    {COOLDOWN_PERIOD:<WIDTH$} {default_cooldown:?}");
@@ -1855,12 +1852,12 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                     }
                 }
 
-                if n_already_restarted > 0 {
+                if n_changed_state > 0 {
                     println!(
-                        "    the following instances were reincarnated by another \
-                         Nexus\n    or a user-triggered start saga:"
+                        "    the following instances states changed before \
+                         they could be reincarnated:"
                     );
-                    for id in already_reincarnated {
+                    for id in changed_state {
                         println!("    > {id}")
                     }
                 }

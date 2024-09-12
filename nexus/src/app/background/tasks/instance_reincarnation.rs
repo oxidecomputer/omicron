@@ -56,7 +56,7 @@ impl BackgroundTask for InstanceReincarnation {
                     "instance reincarnation completed with errors!";
                     "instances_found" => status.instances_found,
                     "instances_reincarnated" => status.instances_reincarnated.len(),
-                    "already_reincarnated" => status.already_reincarnated.len(),
+                    "already_reincarnated" => status.changed_state.len(),
                     "query_error" => ?status.query_error,
                     "restart_errors" => status.restart_errors.len(),
                 );
@@ -66,7 +66,7 @@ impl BackgroundTask for InstanceReincarnation {
                     "instance reincarnation completed";
                     "instances_found" => status.instances_found,
                     "instances_reincarnated" => status.instances_reincarnated.len(),
-                    "already_reincarnated" => status.already_reincarnated.len(),
+                    "already_reincarnated" => status.changed_state.len(),
                 );
             } else {
                 debug!(
@@ -74,7 +74,7 @@ impl BackgroundTask for InstanceReincarnation {
                     "instance reincarnation completed; no instances \
                      in need of reincarnation";
                     "instances_found" => status.instances_found,
-                    "already_reincarnated" => status.already_reincarnated.len(),
+                    "already_reincarnated" => status.changed_state.len(),
                 );
             };
             serde_json::json!(status)
@@ -225,17 +225,15 @@ impl InstanceReincarnation {
                     );
                     status.instances_reincarnated.push(instance_id);
                 }
-                // The instance was restarted by another saga, that's fine...
-                Ok(Err((instance_id, Error::Conflict { message })))
-                    if message.external_message()
-                        == instance_start::ALREADY_STARTING_ERROR =>
-                {
+                // The instance's state changed in the meantime, that's fine...
+                Ok(Err((instance_id, err @ Error::Conflict { .. }))) => {
                     debug!(
                         opctx.log,
-                        "instance {instance_id} was already reincarnated";
+                        "instance {instance_id} changed state before it could be reincarnated";
                         "instance_id" => %instance_id,
+                        "error" => err,
                     );
-                    status.already_reincarnated.push(instance_id);
+                    status.changed_state.push(instance_id);
                 }
                 // Start saga failed
                 Ok(Err((instance_id, error))) => {
@@ -426,7 +424,7 @@ mod test {
                 .expect("JSON must be correctly shaped");
         assert_eq!(status.instances_found, 0);
         assert_eq!(status.instances_reincarnated, Vec::new());
-        assert_eq!(status.already_reincarnated, Vec::new());
+        assert_eq!(status.changed_state, Vec::new());
         assert_eq!(status.instances_cooling_down, Vec::new());
         assert_eq!(status.query_error, None);
         assert_eq!(status.restart_errors, Vec::new());
@@ -457,7 +455,7 @@ mod test {
             status.instances_reincarnated,
             vec![instance_id.into_untyped_uuid()]
         );
-        assert_eq!(status.already_reincarnated, Vec::new());
+        assert_eq!(status.changed_state, Vec::new());
         assert_eq!(status.instances_cooling_down, Vec::new());
         assert_eq!(status.query_error, None);
         assert_eq!(status.restart_errors, Vec::new());
@@ -547,7 +545,7 @@ mod test {
 
         assert_eq!(starter.count_reset(), will_reincarnate.len() as u64);
         assert_eq!(status.instances_found, will_reincarnate.len());
-        assert_eq!(status.already_reincarnated, Vec::new());
+        assert_eq!(status.changed_state, Vec::new());
         assert_eq!(status.query_error, None);
         assert_eq!(status.restart_errors, Vec::new());
 
@@ -621,7 +619,7 @@ mod test {
             status.instances_reincarnated,
             &[instance1_id.into_untyped_uuid()]
         );
-        assert_eq!(status.already_reincarnated, Vec::new());
+        assert_eq!(status.changed_state, Vec::new());
         assert_eq!(status.instances_cooling_down, Vec::new());
         assert_eq!(status.query_error, None);
         assert_eq!(status.restart_errors, Vec::new());
@@ -664,7 +662,7 @@ mod test {
             status.instances_reincarnated,
             &[instance2_id.into_untyped_uuid()]
         );
-        assert_eq!(status.already_reincarnated, Vec::new());
+        assert_eq!(status.changed_state, Vec::new());
         assert_eq!(
             status
                 .instances_cooling_down
@@ -699,7 +697,7 @@ mod test {
             status.instances_reincarnated,
             &[instance1_id.into_untyped_uuid()]
         );
-        assert_eq!(status.already_reincarnated, Vec::new());
+        assert_eq!(status.changed_state, Vec::new());
         assert_eq!(status.instances_cooling_down, Vec::new());
         assert_eq!(status.query_error, None);
         assert_eq!(status.restart_errors, Vec::new());

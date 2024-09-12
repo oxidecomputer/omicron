@@ -470,11 +470,12 @@ impl DataStore {
             // let's not mess with it for now and try to restart it on another
             // pass.
             .filter(dsl::updater_id.is_null())
-            // TODO(eliza): perhaps we ought to check for the presence of an
-            // active VMM here? If there is one, that would indicate that the
-            // instance hasn't been moved to `Failed` correctly. But, we would
-            // also need to handle the case where the active VMM is
-            // SagaUnwound...
+            // N.B. that it's tempting to also filter out instances that have no
+            // active VMM, since they're only valid targets for instance-start
+            // sagas once the active VMM is unlinked, *or* if the active VMM is
+            // `SagaUnwound`. However, checking for the second case
+            // (SagaUnwound) would require joining with the VMM table, so let's
+            // not bother.
             .select(Instance::as_select())
             .load_async::<Instance>(
                 &*self.pool_connection_authorized(opctx).await?,
