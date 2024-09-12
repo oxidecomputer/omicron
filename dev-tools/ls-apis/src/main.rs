@@ -228,7 +228,7 @@ impl TryFrom<&LsApis> for LoadArgs {
         let self_manifest_dir = Utf8PathBuf::from(self_manifest_dir_str);
         let api_manifest_path =
             args.api_manifest.clone().unwrap_or_else(|| {
-                self_manifest_dir.join("src").join("api-manifest.toml")
+                self_manifest_dir.join("api-manifest.toml")
             });
         Ok(LoadArgs { api_manifest_path })
     }

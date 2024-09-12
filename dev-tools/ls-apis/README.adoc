@@ -116,7 +116,7 @@ This tool is aimed at helping answer these questions related to online upgrade:
 This tool combines **two sources of information:**
 
 * Cargo/Rust package metadata (including package names and dependencies)
-* Developer-maintained metadata about APIs and their dependencies, located in link:./src/api-manifest.toml[]
+* Developer-maintained metadata about APIs and their dependencies, located in link:./api-manifest.toml[]
 
 This tool basically works as follows:
 
@@ -131,15 +131,15 @@ The filtering is a little complicated but very important!
 
 Built-in filtering aims to solve a few different problems:
 
-. Many apparent dependencies identified through the above process are bogus.  This usually happens because a package `P` depends on a Progenitor client solely for access to its types (e.g., to define a `From` impl for its own types).  In this case, a component using `P` does not necessarily depend on the corresponding API.  We want to ignore these bogus dependencies altogether.  (If the component _does_ depend on that API, it must have a different dependency on the Progenitor client package and that one will cause this tool to identify the API dependency.)
+. Many apparent dependencies identified through the above process are bogus.  This usually happens because a package `P` depends on a Progenitor client solely for access to its types (e.g., to define a `From` impl for its own types).  In this case, a component using `P` does not necessarily depend on the corresponding API.  We want to ignore these bogus dependencies altogether.  (If the component _does_ depend on that API, it must have a different dependency on the Progenitor client package and that one will still cause this tool to identify the API dependency.)
 . While exploring the dependency graph, we sometimes want to exclude some legitimate dependencies.  Sometimes, a package `P` depends on a Progenitor client, but only for a test program or some other thing that doesn't actually get deployed with `P`.  These are not bogus dependencies, but they're not interesting for the purpose of online upgrade.
 . To keep track of (and filter output based on) developer-maintained labels for each API dependency.  More on this below.
 
-Our broader goal is to construct a DAG whose nodes are deployment units and use edges represent API dependencies between them.  By doing that, we can define an update order that greatly simplifies any changes to these APIs because clients can always assume their dependencies are updated before them.  We hope to do this by:
+Our broader goal is to construct a DAG whose nodes are deployment units and whose edges represent API dependencies between them.  By doing that, we can define an update order that greatly simplifies any changes to these APIs because clients can always assume their dependencies are updated before them.  We hope to do this by:
 
 1. Starting with the complete directed graph of API dependencies discovered by this tool, ignoring bogus dependencies and dependencies from non-deployed components.
-2. Identifying an edge to remove, meaning that we nominate that API as one where clients _cannot_ assume their dependencies will be updated before them.
-3. Checking if we have any cycles.  If so, repeat.
+2. Removing one edge, meaning that we nominate that API as one where clients _cannot_ assume their dependencies will be updated before them.
+3. Checking if we still have cycles.  If so, repeat.
 
 === How filters work
 

@@ -95,10 +95,12 @@ ptime -m timeout 1h cargo test --doc --locked --verbose --no-fail-fast
 # Build the live-tests.  This is only supported on illumos.
 # We also can't actually run them here.  See the README for more details.
 if [[ $target_os == "illumos" ]]; then
+    banner "live-test build"
     ptime -m cargo xtask live-tests
 fi
 
-# Do a test run of the `ls-apis` command.
+# Do some test runs of the `ls-apis` command.
+banner ls-apis
 ptime -m cargo xtask ls-apis apis
 ptime -m cargo xtask ls-apis deployment-units
 ptime -m cargo xtask ls-apis servers

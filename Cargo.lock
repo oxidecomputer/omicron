@@ -12444,14 +12444,11 @@ dependencies = [
  "clap",
  "fs-err",
  "macaddr",
- "omicron-zone-package",
- "petgraph",
  "serde",
  "swrite",
  "tabled",
  "textwrap",
  "toml 0.8.19",
- "url",
  "usdt",
 ]
 
