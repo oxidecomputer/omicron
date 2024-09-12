@@ -107,6 +107,7 @@ impl InstanceReincarnation {
         let mut total_sagas_started = 0;
         let mut running_sagas =
             Vec::with_capacity(self.concurrency_limit.get() as usize);
+        let filter = ReincarnationFilter::new(self.default_cooldown);
         let serialized_authn = authn::saga::Serialized::for_opctx(opctx);
 
         let mut paginator = Paginator::new(self.concurrency_limit);
@@ -131,6 +132,7 @@ impl InstanceReincarnation {
 
             for db_instance in batch {
                 let instance_id = db_instance.id();
+                let policy = db_instance.auto_restart_policy;
                 info!(
                     opctx.log,
                     "attempting to reincarnate Failed instance...";
@@ -138,6 +140,10 @@ impl InstanceReincarnation {
                     "auto_restart_configy" => ?db_instance.auto_restart,
                     "last_auto_restarted_at" => ?db_instance.runtime().time_last_auto_restarted,
                 );
+
+                debug_assert!(self
+                    .filter
+                    .can_reincarnate(policy.unwrap(), db_instance.runtime()));
 
                 let running_saga = async {
                     let dag = instance_start::SagaInstanceStart::prepare(
@@ -178,7 +184,7 @@ impl InstanceReincarnation {
 
             debug!(
                 opctx.log,
-                "found instance in need of reincarnation";
+                "found instances in need of reincarnation";
                 "instances_found" => found,
                 "total_found" => status.instances_found,
                 "sagas_started" => running_sagas.len(),

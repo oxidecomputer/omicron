@@ -42,6 +42,7 @@ use chrono::Utc;
 use diesel::prelude::*;
 use diesel::sql_types;
 use nexus_db_model::Disk;
+use nexus_db_model::VmmFailureReason;
 use omicron_common::api;
 use omicron_common::api::external;
 use omicron_common::api::external::http_pagination::PaginatedBy;
