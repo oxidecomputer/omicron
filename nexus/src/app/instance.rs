@@ -1199,7 +1199,7 @@ impl super::Nexus {
                 propolis_id,
                 &sled_agent_client::types::InstanceEnsureBody {
                     hardware: instance_hardware,
-                    instance_runtime: db_instance.runtime().clone().into(),
+                    migration_id: db_instance.runtime().migration_id,
                     vmm_runtime,
                     instance_id,
                     propolis_addr: SocketAddr::new(

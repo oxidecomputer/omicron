@@ -318,7 +318,7 @@ cockroach-admin-api = { path = "cockroach-admin/api" }
 cockroach-admin-client = { path = "clients/cockroach-admin-client" }
 cockroach-admin-types = { path = "cockroach-admin/types" }
 colored = "2.1"
-const_format = "0.2.32"
+const_format = "0.2.33"
 cookie = "0.18"
 criterion = { version = "0.5.1", features = [ "async_tokio" ] }
 crossbeam = "0.8"
@@ -578,7 +578,7 @@ static_assertions = "1.1.0"
 steno = "0.4.1"
 strum = { version = "0.26", features = [ "derive" ] }
 subprocess = "0.2.9"
-supports-color = "3.0.0"
+supports-color = "3.0.1"
 swrite = "0.1.0"
 libsw = { version = "3.3.1", features = ["tokio"] }
 syn = { version = "2.0" }

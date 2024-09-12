@@ -1145,6 +1145,7 @@ name = "clickhouse-admin-types"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "atomicwrites",
  "camino",
  "camino-tempfile",
  "derive_more",
@@ -1278,18 +1279,18 @@ checksum = "c2459377285ad874054d797f3ccebf984978aa39129f6eafde5cdc8315b612f8"
 
 [[package]]
 name = "const_format"
-version = "0.2.32"
+version = "0.2.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e3a214c7af3d04997541b18d432afaff4c455e79e2029079647e72fc2bd27673"
+checksum = "50c655d81ff1114fb0dcdea9225ea9f0cc712a6f8d189378e82bdf62a473a64b"
 dependencies = [
  "const_format_proc_macros",
 ]
 
 [[package]]
 name = "const_format_proc_macros"
-version = "0.2.32"
+version = "0.2.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c7f6ff08fd20f4f299298a28e2dfa8a8ba1036e6cd2460ac1de7b425d76f2500"
+checksum = "eff1a44b93f47b1bac19a27932f5c591e43d1ba357ee4f61526c8a25603f0eb1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6045,24 +6046,17 @@ dependencies = [
 name = "omicron-ddm-admin-client"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "ddm-admin-client",
  "either",
  "omicron-common",
  "omicron-workspace-hack",
- "omicron-zone-package",
- "progenitor",
  "progenitor-client",
- "quote",
  "reqwest",
- "rustfmt-wrapper",
  "serde",
- "serde_json",
  "sled-hardware-types",
  "slog",
  "thiserror",
  "tokio",
- "toml 0.8.19",
  "uuid",
 ]
 
@@ -6374,6 +6368,7 @@ dependencies = [
  "slog-error-chain",
  "strum",
  "subprocess",
+ "supports-color",
  "tabled",
  "textwrap",
  "tokio",
@@ -10410,9 +10405,9 @@ checksum = "81cdd64d312baedb58e21336b31bc043b77e01cc99033ce76ef539f78e965ebc"
 
 [[package]]
 name = "supports-color"
-version = "3.0.0"
+version = "3.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9829b314621dfc575df4e409e79f9d6a66a3bd707ab73f23cb4aa3a854ac854f"
+checksum = "8775305acf21c96926c900ad056abeef436701108518cf890020387236ac5a77"
 dependencies = [
  "is_ci",
 ]

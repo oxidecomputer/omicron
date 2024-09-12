@@ -19,11 +19,8 @@ use illumos_utils::link::VnicAllocator;
 use illumos_utils::opte::PortManager;
 use illumos_utils::running_zone::ZoneBuilderFactory;
 use omicron_common::api::external::Generation;
-use omicron_common::api::internal::nexus::InstanceRuntimeState;
 use omicron_common::api::internal::nexus::SledVmmState;
-use omicron_common::api::internal::nexus::VmmRuntimeState;
 use omicron_common::api::internal::shared::SledIdentifiers;
-use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use sled_agent_types::instance::*;
 use sled_agent_types::zone_bundle::ZoneBundleMetadata;
@@ -31,7 +28,6 @@ use sled_storage::manager::StorageHandle;
 use sled_storage::resources::AllDisks;
 use slog::Logger;
 use std::collections::{BTreeMap, HashSet};
-use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
@@ -139,30 +135,19 @@ impl InstanceManager {
         })
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub async fn ensure_registered(
         &self,
-        instance_id: InstanceUuid,
         propolis_id: PropolisUuid,
-        hardware: InstanceHardware,
-        instance_runtime: InstanceRuntimeState,
-        vmm_runtime: VmmRuntimeState,
-        propolis_addr: SocketAddr,
+        instance: InstanceEnsureBody,
         sled_identifiers: SledIdentifiers,
-        metadata: InstanceMetadata,
     ) -> Result<SledVmmState, Error> {
         let (tx, rx) = oneshot::channel();
         self.inner
             .tx
             .send(InstanceManagerRequest::EnsureRegistered {
-                instance_id,
                 propolis_id,
-                hardware,
-                instance_runtime,
-                vmm_runtime,
-                propolis_addr,
+                instance,
                 sled_identifiers: Box::new(sled_identifiers),
-                metadata,
                 tx,
             })
             .await
@@ -339,19 +324,14 @@ impl InstanceManager {
 #[derive(strum::Display)]
 enum InstanceManagerRequest {
     EnsureRegistered {
-        instance_id: InstanceUuid,
         propolis_id: PropolisUuid,
-        hardware: InstanceHardware,
-        instance_runtime: InstanceRuntimeState,
-        vmm_runtime: VmmRuntimeState,
-        propolis_addr: SocketAddr,
+        instance: InstanceEnsureBody,
         // These are boxed because they are, apparently, quite large, and Clippy
         // whinges about the overall size of this variant relative to the
         // others. Since we will generally send `EnsureRegistered` requests much
         // less frequently than most of the others, boxing this seems like a
         // reasonable choice...
         sled_identifiers: Box<SledIdentifiers>,
-        metadata: InstanceMetadata,
         tx: oneshot::Sender<Result<SledVmmState, Error>>,
     },
     EnsureUnregistered {
@@ -464,26 +444,12 @@ impl InstanceManagerRunner {
                     let request_variant = request.as_ref().map(|r| r.to_string());
                     let result = match request {
                         Some(EnsureRegistered {
-                            instance_id,
                             propolis_id,
-                            hardware,
-                            instance_runtime,
-                            vmm_runtime,
-                            propolis_addr,
+                            instance,
                             sled_identifiers,
-                            metadata,
                             tx,
                         }) => {
-                            tx.send(self.ensure_registered(
-                                instance_id,
-                                propolis_id,
-                                hardware,
-                                instance_runtime,
-                                vmm_runtime,
-                                propolis_addr,
-                                *sled_identifiers,
-                                metadata
-                            ).await).map_err(|_| Error::FailedSendClientClosed)
+                            tx.send(self.ensure_registered(propolis_id, instance, *sled_identifiers).await).map_err(|_| Error::FailedSendClientClosed)
                         },
                         Some(EnsureUnregistered { propolis_id, tx }) => {
                             self.ensure_unregistered(tx, propolis_id).await
@@ -539,14 +505,15 @@ impl InstanceManagerRunner {
     }
 
     /// Ensures that the instance manager contains a registered instance with
-    /// the supplied instance ID and the Propolis ID specified in
-    /// `initial_hardware`.
+    /// the supplied Propolis ID and the instance spec provided in `instance`.
     ///
     /// # Arguments
     ///
-    /// * instance_id: The ID of the instance to register.
-    /// * initial_hardware: The initial hardware manifest and runtime state of
-    ///   the instance, to be used if the instance does not already exist.
+    /// * `propolis_id`: The ID of the VMM to ensure exists.
+    /// * `instance`: The initial hardware manifest, runtime state, and metadata
+    ///   of the instance, to be used if the instance does not already exist.
+    /// * `sled_identifiers`: This sled's [`SledIdentifiers`] --- you know, like
+    ///   it says on the tin....
     ///
     /// # Return value
     ///
@@ -555,25 +522,27 @@ impl InstanceManagerRunner {
     /// (instance ID, Propolis ID) pair multiple times, but will fail if the
     /// instance is registered with a Propolis ID different from the one the
     /// caller supplied.
-    #[allow(clippy::too_many_arguments)]
     pub async fn ensure_registered(
         &mut self,
-        instance_id: InstanceUuid,
         propolis_id: PropolisUuid,
-        hardware: InstanceHardware,
-        instance_runtime: InstanceRuntimeState,
-        vmm_runtime: VmmRuntimeState,
-        propolis_addr: SocketAddr,
+        instance: InstanceEnsureBody,
         sled_identifiers: SledIdentifiers,
-        metadata: InstanceMetadata,
     ) -> Result<SledVmmState, Error> {
+        let InstanceEnsureBody {
+            instance_id,
+            migration_id,
+            propolis_addr,
+            hardware,
+            vmm_runtime,
+            metadata,
+        } = instance;
         info!(
             &self.log,
             "ensuring instance is registered";
             "instance_id" => %instance_id,
             "propolis_id" => %propolis_id,
+            "migration_id" => ?migration_id,
             "hardware" => ?hardware,
-            "instance_runtime" => ?instance_runtime,
             "vmm_runtime" => ?vmm_runtime,
             "propolis_addr" => ?propolis_addr,
             "metadata" => ?metadata,
@@ -603,7 +572,8 @@ impl InstanceManagerRunner {
                 info!(&self.log,
                       "registering new instance";
                       "instance_id" => %instance_id,
-                      "propolis_id" => %propolis_id);
+                      "propolis_id" => %propolis_id,
+                    "migration_id" => ?migration_id);
 
                 let instance_log = self.log.new(o!(
                     "instance_id" => instance_id.to_string(),
@@ -627,7 +597,7 @@ impl InstanceManagerRunner {
                     hardware,
                     vmm_runtime,
                     propolis_addr,
-                    migration_id: instance_runtime.migration_id,
+                    migration_id,
                 };
 
                 let instance = Instance::new(

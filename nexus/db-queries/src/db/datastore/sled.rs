@@ -822,7 +822,7 @@ impl TransitionError {
 }
 
 #[cfg(test)]
-mod test {
+pub(in crate::db::datastore) mod test {
     use super::*;
     use crate::db::datastore::test::{
         sled_baseboard_for_test, sled_system_hardware_for_test,
@@ -1475,7 +1475,7 @@ mod test {
     // Helper methods
     // ---
 
-    fn test_new_sled_update() -> SledUpdate {
+    pub(crate) fn test_new_sled_update() -> SledUpdate {
         let sled_id = Uuid::new_v4();
         let addr = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0);
         SledUpdate::new(
