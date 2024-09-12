@@ -251,6 +251,7 @@ mod tests {
                             state: VmmState::Destroyed,
                             time_state_updated: Utc::now(),
                             gen: Generation::new(),
+                            failure_reason: None,
                         }
                     }),
                 )

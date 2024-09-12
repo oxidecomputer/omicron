@@ -2269,7 +2269,6 @@ mod tests {
                         nexus_state: InstanceState::NoVmm,
                         time_last_auto_restarted: None,
                         last_failure_reason: None,
-                        last_failure_reason: None,
                     },
                 )
                 .await

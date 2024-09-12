@@ -521,7 +521,7 @@ impl UpdatesRequired {
         // Has the active VMM been destroyed?
         let destroy_active_vmm =
             snapshot.active_vmm.as_ref().and_then(|active_vmm| {
-                if vmm_state.state.is_terminal() {
+                if active_vmm.runtime.state.is_terminal() {
                     let id = PropolisUuid::from_untyped_uuid(active_vmm.id);
                     // Unlink the active VMM ID. If the active VMM was destroyed
                     // because a migration out completed, the next block, which
@@ -1467,6 +1467,7 @@ async fn unwind_instance_lock(
 mod test {
     use super::*;
     use crate::app::db::model::Instance;
+    use crate::app::db::model::VmmFailureReason;
     use crate::app::db::model::VmmRuntimeState;
     use crate::app::saga::create_saga_dag;
     use crate::app::sagas::test_helpers;
@@ -1728,7 +1729,7 @@ mod test {
     }
 
     #[nexus_test(server = crate::Server)]
-    async fn test_active_vmm_destroyed_action_failure_can_unwind(
+    async fn test_active_vmm_failed_action_failure_can_unwind(
         cptestctx: &ControlPlaneTestContext,
     ) {
         ActiveVmmDestroyedTest::failed(Some(VmmFailureReason::SledExpunged))

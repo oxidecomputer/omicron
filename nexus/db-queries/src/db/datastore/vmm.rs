@@ -475,6 +475,7 @@ mod tests {
                         time_state_updated: Utc::now(),
                         r#gen: Generation::new(),
                         state: VmmState::Running,
+                        failure_reason: None,
                     },
                 },
             )
@@ -496,6 +497,7 @@ mod tests {
                         time_state_updated: Utc::now(),
                         r#gen: Generation::new(),
                         state: VmmState::Running,
+                        failure_reason: None,
                     },
                 },
             )
@@ -532,6 +534,7 @@ mod tests {
                     time_state_updated: Utc::now(),
                     r#gen: Generation(vmm1.runtime.r#gen.0.next()),
                     state: VmmState::Stopping,
+                    failure_reason: None,
                 },
                 Migrations {
                     migration_in: None,
@@ -554,6 +557,7 @@ mod tests {
                     time_state_updated: Utc::now(),
                     r#gen: Generation(vmm2.runtime.r#gen.0.next()),
                     state: VmmState::Running,
+                    failure_reason: None,
                 },
                 Migrations {
                     migration_in: Some(&vmm2_migration_in),
@@ -606,6 +610,7 @@ mod tests {
                         time_state_updated: Utc::now(),
                         r#gen: Generation::new(),
                         state: VmmState::Running,
+                        failure_reason: None,
                     },
                 },
             )
@@ -641,6 +646,7 @@ mod tests {
                     time_state_updated: Utc::now(),
                     r#gen: Generation(vmm2.runtime.r#gen.0.next()),
                     state: VmmState::Destroyed,
+                    failure_reason: None,
                 },
                 Migrations {
                     migration_in: Some(&vmm2_migration_in),
@@ -665,6 +671,7 @@ mod tests {
                     time_state_updated: Utc::now(),
                     r#gen: Generation(vmm3.runtime.r#gen.0.next()),
                     state: VmmState::Destroyed,
+                    failure_reason: None,
                 },
                 Migrations {
                     migration_in: Some(&vmm3_migration_in),

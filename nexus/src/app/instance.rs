@@ -1202,6 +1202,7 @@ impl super::Nexus {
                     sled_agent_client::types::VmmState::Starting
                 }
             },
+            failure_reason: None,
         };
         let instance_register_result = sa
             .vmm_register(
