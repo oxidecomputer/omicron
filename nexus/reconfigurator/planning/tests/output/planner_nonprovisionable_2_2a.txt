@@ -83,6 +83,29 @@ to:   blueprint 9f71f5d3-a272-4382-9154-6ea2e171a6c6
     nexus          c26b3bda-5561-44a1-a69f-22103fe209a1   in service    fd00:1122:3344:101::2f
 
 
+ REMOVED SLEDS:
+
+  sled 68d24ac5-f341-49ea-a92a-0381b52ab387 (was active):
+
+    omicron zones from generation 2:
+    ------------------------------------------------------------------------------------------
+    zone type      zone id                                disposition   underlay IP           
+    ------------------------------------------------------------------------------------------
+-   crucible       3b3c14b6-a8e2-4054-a577-8d96cb576230   expunged      fd00:1122:3344:102::29
+-   crucible       57b96d5c-b71e-43e4-8869-7d514003d00d   expunged      fd00:1122:3344:102::2a
+-   crucible       6939ce48-b17c-4616-b176-8a419a7697be   expunged      fd00:1122:3344:102::26
+-   crucible       8d4d2b28-82bb-4e36-80da-1408d8c35d82   expunged      fd00:1122:3344:102::28
+-   crucible       9fd52961-426f-4e62-a644-b70871103fca   expunged      fd00:1122:3344:102::23
+-   crucible       b44cdbc0-0ce0-46eb-8b21-a09e113aa1d0   expunged      fd00:1122:3344:102::24
+-   crucible       b4947d31-f70e-4ee0-8817-0ca6cea9b16b   expunged      fd00:1122:3344:102::2b
+-   crucible       b6b759d0-f60d-42b7-bbbc-9d61c9e895a9   expunged      fd00:1122:3344:102::25
+-   crucible       c407795c-6c8b-428e-8ab8-b962913c447f   expunged      fd00:1122:3344:102::27
+-   crucible       e4b3e159-3dbe-48cb-8497-e3da92a90e5a   expunged      fd00:1122:3344:102::2c
+-   internal_dns   878dfddd-3113-4197-a3ea-e0d4dbe9b476   expunged      fd00:1122:3344:3::1   
+-   internal_ntp   47a87c6e-ef45-4d52-9a3e-69cdd96737cc   expunged      fd00:1122:3344:102::21
+-   nexus          6464d025-4652-4948-919e-740bec5699b1   expunged      fd00:1122:3344:102::22
+
+
  MODIFIED SLEDS:
 
   sled 2d1cb4f2-cf44-40fc-b118-85036eb732a9 (active):
@@ -140,27 +163,6 @@ to:   blueprint 9f71f5d3-a272-4382-9154-6ea2e171a6c6
 -   internal_dns   56ac1706-9e2a-49ba-bd6f-a99c44cb2ccb   expunged      fd00:1122:3344:2::1   
 -   internal_ntp   2aa0ea4f-3561-4989-a98c-9ab7d9a240fb   expunged      fd00:1122:3344:103::21
 -   nexus          67622d61-2df4-414d-aa0e-d1277265f405   expunged      fd00:1122:3344:103::22
-
-
-  sled 68d24ac5-f341-49ea-a92a-0381b52ab387 (active):
-
-    omicron zones from generation 2:
-    ------------------------------------------------------------------------------------------
-    zone type      zone id                                disposition   underlay IP           
-    ------------------------------------------------------------------------------------------
--   crucible       3b3c14b6-a8e2-4054-a577-8d96cb576230   expunged      fd00:1122:3344:102::29
--   crucible       57b96d5c-b71e-43e4-8869-7d514003d00d   expunged      fd00:1122:3344:102::2a
--   crucible       6939ce48-b17c-4616-b176-8a419a7697be   expunged      fd00:1122:3344:102::26
--   crucible       8d4d2b28-82bb-4e36-80da-1408d8c35d82   expunged      fd00:1122:3344:102::28
--   crucible       9fd52961-426f-4e62-a644-b70871103fca   expunged      fd00:1122:3344:102::23
--   crucible       b44cdbc0-0ce0-46eb-8b21-a09e113aa1d0   expunged      fd00:1122:3344:102::24
--   crucible       b4947d31-f70e-4ee0-8817-0ca6cea9b16b   expunged      fd00:1122:3344:102::2b
--   crucible       b6b759d0-f60d-42b7-bbbc-9d61c9e895a9   expunged      fd00:1122:3344:102::25
--   crucible       c407795c-6c8b-428e-8ab8-b962913c447f   expunged      fd00:1122:3344:102::27
--   crucible       e4b3e159-3dbe-48cb-8497-e3da92a90e5a   expunged      fd00:1122:3344:102::2c
--   internal_dns   878dfddd-3113-4197-a3ea-e0d4dbe9b476   expunged      fd00:1122:3344:3::1   
--   internal_ntp   47a87c6e-ef45-4d52-9a3e-69cdd96737cc   expunged      fd00:1122:3344:102::21
--   nexus          6464d025-4652-4948-919e-740bec5699b1   expunged      fd00:1122:3344:102::22
 
 
 ERRORS:

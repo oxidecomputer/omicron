@@ -1861,6 +1861,7 @@ mod test {
         expunged_zones.generation = expunged_zones.generation.next();
 
         blueprint2a.blueprint_zones.remove(&decommissioned_sled_id);
+        blueprint2a.sled_state.remove(&decommissioned_sled_id);
 
         blueprint2a.external_dns_version =
             blueprint2a.external_dns_version.next();
