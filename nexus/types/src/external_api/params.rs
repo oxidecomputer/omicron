@@ -984,7 +984,7 @@ pub enum ExternalIpDetach {
 
 /// A policy determining when an instance should be automatically restarted by
 /// the control plane.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum InstanceAutoRestart {
     /// The instance should not be automatically restarted by the control plane
@@ -996,10 +996,6 @@ pub enum InstanceAutoRestart {
     /// will only automatically restart an instance if the control plane is able
     /// to definitively determine that the instance failed due to a sled reboot
     /// or fault.
-    ///
-    /// This is the default policy for instances that don't specify an
-    /// auto-restart policy.
-    #[default]
     SledFailuresOnly,
     /// The instance should be automatically restarted by the control plane in
     /// the event of any failure. If the instance crashes, or if the sled it's
