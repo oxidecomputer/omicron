@@ -5384,7 +5384,7 @@ pub async fn instance_wait_for_vmm_registration(
                 debug!(
                     log,
                     "instance's active VMM is still Creating";
-                    "isntance_id" => %instance_id,
+                    "instance_id" => %instance_id,
                 );
                 Err(poll::CondCheckError::<Error>::NotYet)
             } else {

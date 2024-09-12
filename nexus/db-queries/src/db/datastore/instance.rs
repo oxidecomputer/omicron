@@ -436,7 +436,7 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    /// List all instances in the [`Failed`](InstanceState::Failed) with an
+    /// List all instances in the [`Failed`](InstanceState::Failed) state with an
     /// auto-restart policy that permits them to be automatically restarted by
     /// the control plane.
     ///
