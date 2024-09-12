@@ -1228,7 +1228,7 @@ async fn siu_commit_instance_updates(
                 "instance update: instance transitioned to Failed, but can \
                  be automatically restarted; activating reincarnation.";
                 "instance_id" => %instance_id,
-                "auto_restart_policy" => ?update.policy,
+                "auto_restart_policy" => ?policy,
             );
             nexus.background_tasks.task_instance_reincarnation.activate();
         }

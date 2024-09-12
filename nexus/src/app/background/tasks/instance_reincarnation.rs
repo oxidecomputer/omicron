@@ -13,11 +13,11 @@ use chrono::Utc;
 use futures::future::BoxFuture;
 use nexus_db_queries::authn;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::background::InstanceReincarnationStatus;
 use omicron_common::api::external::Error;
+use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::task::JoinSet;
@@ -35,7 +35,19 @@ pub struct InstanceReincarnation {
     // TODO(eliza): this default should be overridden by a project-level default
     // when https://github.com/oxidecomputer/omicron/issues/1015 is implemented.
     default_cooldown: TimeDelta,
+    /// The maximum number of concurrently reincarnating instances.
+    ///
+    /// This is a field on the struct as well as the
+    /// `DEFAULT_MAX_CONCURRENT_REINCARNATIONS` constant because we'd like to
+    /// set a lower value for tests.
+    batch_size: NonZeroU32,
 }
+
+const DEFAULT_MAX_CONCURRENT_REINCARNATIONS: NonZeroU32 =
+    match NonZeroU32::new(16) {
+        Some(n) => n,
+        None => unreachable!(), // 16 > 0
+    };
 
 impl BackgroundTask for InstanceReincarnation {
     fn activate<'a>(
@@ -90,7 +102,12 @@ impl InstanceReincarnation {
     ) -> Self {
         let default_cooldown = TimeDelta::from_std(default_cooldown)
             .expect("duration should be in range");
-        Self { datastore, sagas, default_cooldown }
+        Self {
+            datastore,
+            sagas,
+            default_cooldown,
+            batch_size: DEFAULT_MAX_CONCURRENT_REINCARNATIONS,
+        }
     }
 
     async fn actually_activate(
@@ -99,13 +116,15 @@ impl InstanceReincarnation {
         status: &mut InstanceReincarnationStatus,
     ) {
         let mut tasks = JoinSet::new();
-        let mut paginator =
-            Paginator::new(nexus_db_queries::db::datastore::SQL_BATCH_SIZE);
 
-        while let Some(p) = paginator.next() {
+        loop {
             let maybe_batch = self
                 .datastore
-                .find_reincarnatable_instances(opctx, &p.current_pagparams())
+                .find_reincarnatable_instances(
+                    opctx,
+                    self.default_cooldown,
+                    self.batch_size,
+                )
                 .await;
             let batch = match maybe_batch {
                 Ok(batch) => batch,
@@ -119,8 +138,6 @@ impl InstanceReincarnation {
                     break;
                 }
             };
-
-            paginator = p.found_batch(&batch, &|instance| instance.id());
 
             let found = batch.len();
             if found == 0 {
