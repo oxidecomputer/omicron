@@ -36,7 +36,7 @@ pub type Server = dropshot::HttpServer<Arc<ServerContext>>;
 /// Start the dropshot server
 pub async fn start_server(
     clickward: Clickward,
-    keeper_client: ClickhouseCli,
+    clickhouse_cli: ClickhouseCli,
     server_config: Config,
 ) -> Result<Server, StartError> {
     let (drain, registration) = slog_dtrace::with_drain(
@@ -59,7 +59,8 @@ pub async fn start_server(
 
     let context = ServerContext::new(
         clickward,
-        keeper_client,
+        clickhouse_cli
+            .with_log(log.new(slog::o!("component" => "ClickhouseCli"))),
         log.new(slog::o!("component" => "ServerContext")),
     );
     let http_server_starter = dropshot::HttpServerStarter::new(

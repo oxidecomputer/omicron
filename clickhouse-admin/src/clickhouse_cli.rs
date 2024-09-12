@@ -7,6 +7,7 @@ use camino::Utf8PathBuf;
 use clickhouse_admin_types::Lgif;
 use dropshot::HttpError;
 use illumos_utils::{output_to_exec_error, ExecutionError};
+use slog::Logger;
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
 use std::ffi::OsStr;
 use std::io;
@@ -59,11 +60,17 @@ pub struct ClickhouseCli {
     pub binary_path: Utf8PathBuf,
     /// Address on where the clickhouse keeper is listening on
     pub listen_address: SocketAddrV6,
+    pub log: Option<Logger>,
 }
 
 impl ClickhouseCli {
     pub fn new(binary_path: Utf8PathBuf, listen_address: SocketAddrV6) -> Self {
-        Self { binary_path, listen_address }
+        Self { binary_path, listen_address, log: None }
+    }
+
+    pub fn with_log(mut self, log: Logger) -> Self {
+        self.log = Some(log);
+        self
     }
 
     pub async fn lgif(&self) -> Result<Lgif, ClickhouseCliError> {
@@ -71,6 +78,7 @@ impl ClickhouseCli {
             ["lgif"].into_iter(),
             "Retrieve logically grouped information file",
             Lgif::parse,
+            self.log.clone().unwrap(),
         )
         .await
     }
@@ -80,10 +88,11 @@ impl ClickhouseCli {
         subcommand_args: I,
         subcommand_description: &'static str,
         parse: F,
+        log: Logger,
     ) -> Result<T, ClickhouseCliError>
     where
         I: Iterator<Item = &'a str>,
-        F: FnOnce(&[u8]) -> Result<T>,
+        F: FnOnce(&Logger, &[u8]) -> Result<T>,
     {
         let mut command = Command::new(&self.binary_path);
         command
@@ -116,7 +125,7 @@ impl ClickhouseCli {
             return Err(output_to_exec_error(command.as_std(), &output).into());
         }
 
-        parse(&output.stdout).map_err(|err| ClickhouseCliError::Parse {
+        parse(&log, &output.stdout).map_err(|err| ClickhouseCliError::Parse {
             description: subcommand_description,
             stdout: String::from_utf8_lossy(&output.stdout).to_string(),
             stderr: String::from_utf8_lossy(&output.stdout).to_string(),

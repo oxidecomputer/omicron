@@ -54,11 +54,12 @@ async fn main_impl() -> Result<(), CmdError> {
                 .map_err(|err| CmdError::Failure(anyhow!(err)))?;
             config.dropshot.bind_address = SocketAddr::V6(http_address);
             let clickward = Clickward::new();
-            let keeper_client = ClickhouseCli::new(binary_path, listen_address);
+            let clickhouse_cli =
+                ClickhouseCli::new(binary_path, listen_address);
 
             let server = omicron_clickhouse_admin::start_server(
                 clickward,
-                keeper_client,
+                clickhouse_cli,
                 config,
             )
             .await

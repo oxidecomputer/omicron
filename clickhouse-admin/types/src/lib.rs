@@ -8,6 +8,7 @@ use camino::Utf8PathBuf;
 use derive_more::{Add, AddAssign, Display, From};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use slog::{error, info, Logger};
 use std::collections::HashMap;
 use std::fs::create_dir;
 use std::io::{ErrorKind, Write};
@@ -281,7 +282,7 @@ impl Lgif {
         }
     }
 
-    pub fn parse(data: &[u8]) -> Result<Self> {
+    pub fn parse(log: &Logger, data: &[u8]) -> Result<Self> {
         let binding = String::from_utf8_lossy(data);
         let lines = binding.lines();
         let mut lgif: HashMap<String, u128> = HashMap::new();
@@ -292,15 +293,27 @@ impl Lgif {
                 let l: Vec<&str> = line.split('\t').collect();
 
                 if l.len() != 2 {
-                    // TODO: Log that there was an empty line
+                    info!(
+                        log,
+                        "Command output has a line that does not contain two items";
+                        "output line" => ?l,
+                    );
                     continue;
                 }
 
                 let key = l[0].to_string();
-                let value = match u128::from_str(l[1]) {
+                let raw_value = l[1];
+                let value = match u128::from_str(raw_value) {
                     Ok(v) => v,
-                    // TODO: Log error
-                    Err(_) => continue,
+                    Err(e) => {
+                        error!(
+                            log,
+                            "Unable to convert value into u128";
+                            "value" => ?raw_value,
+                            "error" => ?e,
+                        );
+                        continue;
+                    }
                 };
 
                 lgif.insert(key, value);
@@ -312,8 +325,13 @@ impl Lgif {
             match parsed_data.set_field_value(&key, Some(value)) {
                 Ok(()) => (),
                 Err(e) => {
-                    // TODO: Log the error
-                    println!("{e}");
+                    error!(
+                        log,
+                        "Unable to set Lgif struct field with key value pair";
+                        "key" => ?key,
+                        "value" => ?value,
+                        "error" => ?e,
+                    );
                 }
             };
         }
@@ -331,11 +349,20 @@ mod tests {
 
     use camino::Utf8PathBuf;
     use camino_tempfile::Builder;
+    use slog::{o, Drain};
+    use slog_term::{FullFormat, PlainDecorator, TestStdoutWriter};
 
     use crate::{
         ClickhouseHost, KeeperId, KeeperSettings, Lgif, RaftServerSettings,
         ServerId, ServerSettings,
     };
+
+    fn log() -> slog::Logger {
+        let decorator = PlainDecorator::new(TestStdoutWriter);
+        let drain = FullFormat::new(decorator).build().fuse();
+        let drain = slog_async::Async::new(drain).build().fuse();
+        slog::Logger::root(drain, o!())
+    }
 
     #[test]
     fn test_generate_keeper_config() {
@@ -429,11 +456,12 @@ mod tests {
 
     #[test]
     fn test_full_lgif_parse_success() {
+        let log = log();
         let data =
             "first_log_idx\t1\nfirst_log_term\t1\nlast_log_idx\t4386\nlast_log_term\t1\nlast_committed_log_idx\t4386
             \nleader_committed_log_idx\t4386\ntarget_committed_log_idx\t4386\nlast_snapshot_idx\t0\n\n"
             .as_bytes();
-        let lgif = Lgif::parse(data).unwrap();
+        let lgif = Lgif::parse(&log, data).unwrap();
 
         assert!(lgif.first_log_idx == Some(1));
         assert!(lgif.first_log_term == Some(1));
@@ -447,11 +475,12 @@ mod tests {
 
     #[test]
     fn test_partial_lgif_parse_success() {
+        let log = log();
         let data =
             "first_log_idx\t1\nlast_log_idx\t4386\nlast_log_term\t1\nlast_committed_log_idx\t4386
             \nleader_committed_log_idx\t4386\ntarget_committed_log_idx\t4386\nlast_snapshot_idx\t0\n\n"
             .as_bytes();
-        let lgif = Lgif::parse(data).unwrap();
+        let lgif = Lgif::parse(&log, data).unwrap();
 
         assert!(lgif.first_log_idx == Some(1));
         assert!(lgif.first_log_term == None);
@@ -465,11 +494,12 @@ mod tests {
 
     #[test]
     fn test_empty_value_lgif_parse_success() {
+        let log = log();
         let data =
             "first_log_idx\nfirst_log_term\t1\nlast_log_idx\t4386\nlast_log_term\t1\nlast_committed_log_idx\t4386
             \nleader_committed_log_idx\t4386\ntarget_committed_log_idx\t4386\nlast_snapshot_idx\t0\n\n"
             .as_bytes();
-        let lgif = Lgif::parse(data).unwrap();
+        let lgif = Lgif::parse(&log, data).unwrap();
 
         assert!(lgif.first_log_idx == None);
         assert!(lgif.first_log_term == Some(1));
@@ -483,11 +513,31 @@ mod tests {
 
     #[test]
     fn test_non_u128_value_lgif_parse_success() {
+        let log = log();
         let data =
             "first_log_idx\t1\nfirst_log_term\tBOB\nlast_log_idx\t4386\nlast_log_term\t1\nlast_committed_log_idx\t4386
             \nleader_committed_log_idx\t4386\ntarget_committed_log_idx\t4386\nlast_snapshot_idx\t0\n\n"
             .as_bytes();
-        let lgif = Lgif::parse(data).unwrap();
+        let lgif = Lgif::parse(&log, data).unwrap();
+
+        assert!(lgif.first_log_idx == Some(1));
+        assert!(lgif.first_log_term == None);
+        assert!(lgif.last_log_idx == Some(4386));
+        assert!(lgif.last_log_term == Some(1));
+        assert!(lgif.last_committed_log_idx == Some(4386));
+        assert!(lgif.leader_committed_log_idx == Some(4386));
+        assert!(lgif.target_committed_log_idx == Some(4386));
+        assert!(lgif.last_snapshot_idx == Some(0));
+    }
+
+    #[test]
+    fn test_non_existent_key_with_correct_value_lgif_parse_success() {
+        let log = log();
+        let data =
+            "first_log_idx\t1\nfirst_log\t1\nlast_log_idx\t4386\nlast_log_term\t1\nlast_committed_log_idx\t4386
+            \nleader_committed_log_idx\t4386\ntarget_committed_log_idx\t4386\nlast_snapshot_idx\t0\n\n"
+            .as_bytes();
+        let lgif = Lgif::parse(&log, data).unwrap();
 
         assert!(lgif.first_log_idx == Some(1));
         assert!(lgif.first_log_term == None);
@@ -501,12 +551,13 @@ mod tests {
 
     #[test]
     fn test_nonsense_lgif_parse_success() {
+        let log = log();
         let data =
             "Mmmbop,\tba\tduba\tdop\tba\nDu\tbop,\tba\tduba\tdop\tba\nDu\tbop,\tba\tduba\tdop\tba\tdu
             \nYeah, yeah\nMmmbop, ba duba dop ba\nDu bop, ba du dop ba\nDu bop, ba du dop ba du
             \nYeah, yeah"
             .as_bytes();
-        let lgif = Lgif::parse(data).unwrap();
+        let lgif = Lgif::parse(&log, data).unwrap();
 
         assert!(lgif.first_log_idx == None);
         assert!(lgif.first_log_term == None);
