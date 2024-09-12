@@ -127,11 +127,27 @@ impl From<types::VmmState> for omicron_common::api::internal::nexus::VmmState {
     }
 }
 
+impl From<types::VmmFailureReason>
+    for omicron_common::api::internal::nexus::VmmFailureReason
+{
+    fn from(s: types::VmmState) -> Self {
+        use omicron_common::api::internal::nexus::VmmFailureReason as Output;
+        match s {
+            types::VmmFailureReason::SledExpunged => Output::SledExpunged,
+        }
+    }
+}
+
 impl From<types::VmmRuntimeState>
     for omicron_common::api::internal::nexus::VmmRuntimeState
 {
     fn from(s: types::VmmRuntimeState) -> Self {
-        Self { state: s.state.into(), gen: s.gen, time_updated: s.time_updated }
+        Self {
+            state: s.state.into(),
+            gen: s.gen,
+            time_updated: s.time_updated,
+            failure_reason: s.failure_reason.map(Into::into),
+        }
     }
 }
 

@@ -1281,7 +1281,17 @@ impl super::Nexus {
             state: db::model::VmmState::Failed,
             time_state_updated: chrono::Utc::now(),
             r#gen: db::model::Generation(vmm.runtime.r#gen.next()),
-            failure_reason: None, // For now...
+            // TODO(eliza): We should set a failure reason here. However, the
+            // thing is, the failure reasons in the database record are intended
+            // primarily to indicate whether a failure effects only the
+            // individual VMM or the entire sled. `mark_vmm_failed` is presently
+            // called when sled-agent returns a `NO_SUCH_INSTANCE` error, and we
+            // are not currently able to determine whether that is due to an
+            // VMM-level or sled-level fault. We probably don't want to
+            // construct a failure reason that just says "the sled agent said it
+            // doesn't know about this VMM"; instead, we should set a reason
+            // here if we can determine *why*.
+            failure_reason: None,
         };
 
         match self.db_datastore.vmm_update_runtime(&vmm_id, &new_runtime).await

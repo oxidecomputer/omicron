@@ -406,6 +406,7 @@ mod test {
             state: VmmState::Starting,
             gen: Generation::new(),
             time_updated: Utc::now(),
+            failure_reason: None,
         };
 
         let state =

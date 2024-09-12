@@ -515,12 +515,13 @@ impl UpdatesRequired {
 
         let mut update_required = false;
         let mut active_vmm_failed = false;
+        let mut failure_reason = None;
         let mut network_config = None;
 
         // Has the active VMM been destroyed?
         let destroy_active_vmm =
             snapshot.active_vmm.as_ref().and_then(|active_vmm| {
-                if active_vmm.runtime.state.is_terminal() {
+                if vmm_state.state.is_terminal() {
                     let id = PropolisUuid::from_untyped_uuid(active_vmm.id);
                     // Unlink the active VMM ID. If the active VMM was destroyed
                     // because a migration out completed, the next block, which
@@ -529,10 +530,20 @@ impl UpdatesRequired {
                     new_runtime.propolis_id = None;
                     update_required = true;
 
+                    info!(
+                        log,
+                        "instance update: active VMM has terminated";
+                        "instance_id" => %instance_id,
+                        "propolis_id" => %id,
+                        "vmm_state" => ?active_vmm.runtime.state,
+                        "vmm_failure" => ?active_vmm.runtime.failure_reason,
+                    );
+
                     // If the active VMM's state is `Failed`, move the
                     // instance's new state to `Failed` rather than to `NoVmm`.
                     if active_vmm.runtime.state == VmmState::Failed {
                         active_vmm_failed = true;
+                        failure_reason = active_vmm.runtime.failure_reason;
                     }
                     Some(id)
                 } else {
@@ -682,6 +693,9 @@ impl UpdatesRequired {
 
             // We no longer have a VMM.
             new_runtime.nexus_state = if active_vmm_failed {
+                // If the VMM is `Failed`, also propagate the VMM's failure
+                // reason to the instance.
+                new_runtime.last_failure_reason = failure_reason;
                 InstanceState::Failed
             } else {
                 InstanceState::NoVmm
@@ -1497,11 +1511,12 @@ mod test {
     // through the saga:
     //
     // 1. active VMM destroyed
-    // 2. migration source completed
-    // 3. migration target completed
-    // 4. migration source VMM completed and was destroyed,
-    // 5. migration target failed
-    // 6. migration source failed
+    // 2. active VMM failed
+    // 3. migration source completed
+    // 4. migration target completed
+    // 5. migration source VMM completed and was destroyed,
+    // 6. migration target failed
+    // 7. migration source failed
 
     async fn setup_test_project(client: &ClientTestContext) -> Uuid {
         create_default_ip_pool(&client).await;
@@ -1651,6 +1666,7 @@ mod test {
                     migration_id: None,
                     nexus_state: InstanceState::NoVmm,
                     time_last_auto_restarted: None,
+                    last_failure_reason: None,
                 },
             )
             .await
@@ -1670,101 +1686,54 @@ mod test {
     async fn test_active_vmm_destroyed_succeeds(
         cptestctx: &ControlPlaneTestContext,
     ) {
-        let _project_id = setup_test_project(&cptestctx.external_client).await;
-        let (state, params) = setup_active_vmm_destroyed_test(cptestctx).await;
-
-        // Run the instance-update saga.
-        let nexus = &cptestctx.server.server_context().nexus;
-        nexus
-            .sagas
-            .saga_execute::<SagaInstanceUpdate>(params)
-            .await
-            .expect("update saga should succeed");
-
-        // Assert that the saga properly cleaned up the active VMM's resources.
-        verify_active_vmm_destroyed(cptestctx, state.instance().id()).await;
+        ActiveVmmDestroyedTest::destroyed()
+            .run_basic_usage_succeeds_test(cptestctx)
+            .await;
     }
 
     #[nexus_test(server = crate::Server)]
     async fn test_active_vmm_destroyed_actions_succeed_idempotently(
         cptestctx: &ControlPlaneTestContext,
     ) {
-        let _project_id = setup_test_project(&cptestctx.external_client).await;
-        let (state, params) = setup_active_vmm_destroyed_test(cptestctx).await;
-
-        // Build the saga DAG with the provided test parameters
-        let real_params = make_real_params(
-            cptestctx,
-            &test_helpers::test_opctx(cptestctx),
-            params,
-        )
-        .await;
-        let dag =
-            create_saga_dag::<SagaDoActualInstanceUpdate>(real_params).unwrap();
-
-        crate::app::sagas::test_helpers::actions_succeed_idempotently(
-            &cptestctx.server.server_context().nexus,
-            dag,
-        )
-        .await;
-
-        // Assert that the saga properly cleaned up the active VMM's resources.
-        verify_active_vmm_destroyed(cptestctx, state.instance().id()).await;
+        ActiveVmmDestroyedTest::destroyed()
+            .run_actions_succeed_idempotently_test(cptestctx)
+            .await;
     }
 
     #[nexus_test(server = crate::Server)]
     async fn test_active_vmm_destroyed_action_failure_can_unwind(
         cptestctx: &ControlPlaneTestContext,
     ) {
-        let _project_id = setup_test_project(&cptestctx.external_client).await;
-        let nexus = &cptestctx.server.server_context().nexus;
-        let opctx = test_helpers::test_opctx(cptestctx);
-        // Stupid side channel for passing the expected parent start saga's lock
-        // ID into the "after unwinding" method, so that it can check that the
-        // lock is either released or was never acquired.
-        let parent_saga_id = Arc::new(Mutex::new(None));
+        ActiveVmmDestroyedTest::destroyed().run_unwinding_test(cptestctx).await;
+    }
 
-        test_helpers::action_failure_can_unwind::<
-            SagaDoActualInstanceUpdate,
-            _,
-            _,
-        >(
-            nexus,
-            || {
-                let parent_saga_id = parent_saga_id.clone();
-                let opctx = &opctx;
-                Box::pin(async move {
-                    let (_, start_saga_params) =
-                        setup_active_vmm_destroyed_test(cptestctx).await;
+    // === Active VMM failed tests ===
 
-                    // Since the unwinding test will test unwinding from each
-                    // individual saga node *in the saga DAG constructed by the
-                    // provided params*, we need to give it the "real saga"'s
-                    // params rather than the start saga's params. Otherwise,
-                    // we're just testing the unwinding behavior of the trivial
-                    // two-node start saga
-                    let real_params =
-                        make_real_params(cptestctx, opctx, start_saga_params)
-                            .await;
-                    *parent_saga_id.lock().unwrap() =
-                        Some(real_params.orig_lock.updater_id);
-                    real_params
-                })
-            },
-            || {
-                let parent_saga_id = parent_saga_id.clone();
-                Box::pin(async move {
-                    let parent_saga_id =
-                        parent_saga_id.lock().unwrap().take().expect(
-                            "parent saga's lock ID must have been set by the \
-                             `before_saga` function; this is a test bug",
-                        );
-                    after_unwinding(Some(parent_saga_id), cptestctx).await
-                })
-            },
-            &cptestctx.logctx.log,
-        )
-        .await;
+    #[nexus_test(server = crate::Server)]
+    async fn test_active_vmm_failed_succeeds(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        ActiveVmmDestroyedTest::failed(Some(VmmFailureReason::SledExpunged))
+            .run_basic_usage_succeeds_test(cptestctx)
+            .await;
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_active_vmm_failed_actions_succeed_idempotently(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        ActiveVmmDestroyedTest::failed(Some(VmmFailureReason::SledExpunged))
+            .run_actions_succeed_idempotently_test(cptestctx)
+            .await;
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_active_vmm_destroyed_action_failure_can_unwind(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        ActiveVmmDestroyedTest::failed(Some(VmmFailureReason::SledExpunged))
+            .run_unwinding_test(cptestctx)
+            .await;
     }
 
     // === idempotency and unwinding tests for the start saga ===
@@ -1780,7 +1749,8 @@ mod test {
         cptestctx: &ControlPlaneTestContext,
     ) {
         let _project_id = setup_test_project(&cptestctx.external_client).await;
-        let (state, params) = setup_active_vmm_destroyed_test(cptestctx).await;
+        let test = ActiveVmmDestroyedTest::destroyed();
+        let (state, params) = test.setup(cptestctx).await;
         let dag = create_saga_dag::<SagaInstanceUpdate>(params).unwrap();
 
         crate::app::sagas::test_helpers::actions_succeed_idempotently(
@@ -1790,7 +1760,7 @@ mod test {
         .await;
 
         // Assert that the saga properly cleaned up the active VMM's resources.
-        verify_active_vmm_destroyed(cptestctx, state.instance().id()).await;
+        test.verify(cptestctx, state.instance().id()).await;
     }
 
     #[nexus_test(server = crate::Server)]
@@ -1804,8 +1774,9 @@ mod test {
             nexus,
             || {
                 Box::pin(async {
-                    let (_, params) =
-                        setup_active_vmm_destroyed_test(cptestctx).await;
+                    let (_, params) = ActiveVmmDestroyedTest::destroyed()
+                        .setup(cptestctx)
+                        .await;
                     params
                 })
             },
@@ -1819,108 +1790,275 @@ mod test {
 
     // --- test helpers ---
 
-    async fn setup_active_vmm_destroyed_test(
-        cptestctx: &ControlPlaneTestContext,
-    ) -> (InstanceAndActiveVmm, Params) {
-        let client = &cptestctx.external_client;
-        let nexus = &cptestctx.server.server_context().nexus;
-        let datastore = nexus.datastore().clone();
-
-        let opctx = test_helpers::test_opctx(cptestctx);
-        let instance = create_instance(client).await;
-        let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
-
-        // Poke the instance to get it into the Running state.
-        test_helpers::instance_simulate(cptestctx, &instance_id).await;
-
-        let state = test_helpers::instance_fetch(cptestctx, instance_id).await;
-        // The instance should have an active VMM.
-        let instance_runtime = state.instance().runtime();
-        assert_eq!(instance_runtime.nexus_state, InstanceState::Vmm);
-        assert!(instance_runtime.propolis_id.is_some());
-        // Once we destroy the active VMM, we'll assert that the virtual
-        // provisioning and sled resource records it owns have been deallocated.
-        // In order to ensure we're actually testing the correct thing, let's
-        // make sure that those records exist now --- if not, the assertions
-        // later won't mean anything!
-        assert!(
-            !test_helpers::no_virtual_provisioning_resource_records_exist(
-                cptestctx
-            )
-            .await,
-            "we can't assert that a destroyed VMM instance update deallocates \
-             virtual provisioning records if none exist!",
-        );
-        assert!(
-            !test_helpers::no_virtual_provisioning_collection_records_using_instances(cptestctx)
-                .await,
-            "we can't assert that a destroyed VMM instance update deallocates \
-             virtual provisioning records if none exist!",
-        );
-        assert!(
-            !test_helpers::no_sled_resource_instance_records_exist(cptestctx)
-                .await,
-            "we can't assert that a destroyed VMM instance update deallocates \
-             sled resource records if none exist!"
-        );
-
-        // Now, destroy the active VMM
-        let vmm = state.vmm().as_ref().unwrap();
-        let vmm_id = PropolisUuid::from_untyped_uuid(vmm.id);
-        datastore
-            .vmm_update_runtime(
-                &vmm_id,
-                &VmmRuntimeState {
-                    time_state_updated: Utc::now(),
-                    gen: Generation(vmm.runtime.gen.0.next()),
-                    state: VmmState::Destroyed,
-                },
-            )
-            .await
-            .unwrap();
-
-        let (_, _, authz_instance, ..) = LookupPath::new(&opctx, &datastore)
-            .instance_id(instance_id.into_untyped_uuid())
-            .fetch()
-            .await
-            .expect("test instance should be present in datastore");
-        let params = Params {
-            authz_instance,
-            serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
-        };
-        (state, params)
+    #[derive(Copy, Clone, Debug)]
+    struct ActiveVmmDestroyedTest {
+        vmm_state: VmmState,
+        failure_reason: Option<VmmFailureReason>,
     }
 
-    async fn verify_active_vmm_destroyed(
-        cptestctx: &ControlPlaneTestContext,
-        instance_id: Uuid,
-    ) {
-        let state = test_helpers::instance_fetch(
-            cptestctx,
-            InstanceUuid::from_untyped_uuid(instance_id),
-        )
-        .await;
+    impl ActiveVmmDestroyedTest {
+        fn destroyed() -> Self {
+            Self { vmm_state: VmmState::Destroyed, failure_reason: None }
+        }
 
-        // The instance's active VMM has been destroyed, so its state should
-        // transition to `NoVmm`, and its active VMM ID should be unlinked. The
-        // virtual provisioning and sled resources allocated to the instance
-        // should be deallocated.
-        assert_instance_unlocked(state.instance());
-        assert!(state.vmm().is_none());
-        let instance_runtime = state.instance().runtime();
-        assert_eq!(instance_runtime.nexus_state, InstanceState::NoVmm);
-        assert!(instance_runtime.propolis_id.is_none());
-        assert!(
-            test_helpers::no_virtual_provisioning_resource_records_exist(
-                cptestctx
-            )
-            .await
-        );
-        assert!(test_helpers::no_virtual_provisioning_collection_records_using_instances(cptestctx).await);
-        assert!(
-            test_helpers::no_sled_resource_instance_records_exist(cptestctx)
+        fn failed(failure_reason: Option<VmmFailureReason>) -> Self {
+            Self { vmm_state: VmmState::Failed, failure_reason }
+        }
+
+        async fn run_basic_usage_succeeds_test(
+            &self,
+            cptestctx: &ControlPlaneTestContext,
+        ) {
+            let _project_id =
+                setup_test_project(&cptestctx.external_client).await;
+            let (state, params) = self.setup(cptestctx).await;
+
+            // Run the instance-update saga.
+            let nexus = &cptestctx.server.server_context().nexus;
+            nexus
+                .sagas
+                .saga_execute::<SagaInstanceUpdate>(params)
                 .await
-        );
+                .expect("update saga should succeed");
+
+            // Assert that the saga properly cleaned up the active VMM's resources.
+            self.verify(cptestctx, state.instance().id()).await;
+        }
+
+        async fn run_actions_succeed_idempotently_test(
+            &self,
+            cptestctx: &ControlPlaneTestContext,
+        ) {
+            let _project_id =
+                setup_test_project(&cptestctx.external_client).await;
+            let (state, params) = self.setup(cptestctx).await;
+
+            // Build the saga DAG with the provided test parameters
+            let real_params = make_real_params(
+                cptestctx,
+                &test_helpers::test_opctx(cptestctx),
+                params,
+            )
+            .await;
+            let dag =
+                create_saga_dag::<SagaDoActualInstanceUpdate>(real_params)
+                    .unwrap();
+
+            crate::app::sagas::test_helpers::actions_succeed_idempotently(
+                &cptestctx.server.server_context().nexus,
+                dag,
+            )
+            .await;
+
+            // Assert that the saga properly cleaned up the active VMM's resources.
+            self.verify(cptestctx, state.instance().id()).await;
+        }
+
+        async fn run_unwinding_test(
+            &self,
+            cptestctx: &ControlPlaneTestContext,
+        ) {
+            let _project_id =
+                setup_test_project(&cptestctx.external_client).await;
+            let nexus = &cptestctx.server.server_context().nexus;
+            let opctx = test_helpers::test_opctx(cptestctx);
+            // Stupid side channel for passing the expected parent start saga's lock
+            // ID into the "after unwinding" method, so that it can check that the
+            // lock is either released or was never acquired.
+            let parent_saga_id = Arc::new(Mutex::new(None));
+
+            test_helpers::action_failure_can_unwind::<
+                SagaDoActualInstanceUpdate,
+                _,
+                _,
+            >(
+                nexus,
+                || {
+                    let parent_saga_id = parent_saga_id.clone();
+                    let opctx = &opctx;
+                    Box::pin(async move {
+                        let (_, start_saga_params) =
+                            self.setup(cptestctx).await;
+
+                        // Since the unwinding test will test unwinding from each
+                        // individual saga node *in the saga DAG constructed by the
+                        // provided params*, we need to give it the "real saga"'s
+                        // params rather than the start saga's params. Otherwise,
+                        // we're just testing the unwinding behavior of the trivial
+                        // two-node start saga
+                        let real_params = make_real_params(
+                            cptestctx,
+                            opctx,
+                            start_saga_params,
+                        )
+                        .await;
+                        *parent_saga_id.lock().unwrap() =
+                            Some(real_params.orig_lock.updater_id);
+                        real_params
+                    })
+                },
+                || {
+                    let parent_saga_id = parent_saga_id.clone();
+                    Box::pin(async move {
+                        let parent_saga_id =
+                        parent_saga_id.lock().unwrap().take().expect(
+                            "parent saga's lock ID must have been set by the \
+                             `before_saga` function; this is a test bug",
+                        );
+                        after_unwinding(Some(parent_saga_id), cptestctx).await
+                    })
+                },
+                &cptestctx.logctx.log,
+            )
+            .await;
+        }
+
+        async fn setup(
+            &self,
+            cptestctx: &ControlPlaneTestContext,
+        ) -> (InstanceAndActiveVmm, Params) {
+            let client = &cptestctx.external_client;
+            let nexus = &cptestctx.server.server_context().nexus;
+            let datastore = nexus.datastore().clone();
+
+            let opctx = test_helpers::test_opctx(cptestctx);
+            let instance = create_instance(client).await;
+            let instance_id =
+                InstanceUuid::from_untyped_uuid(instance.identity.id);
+
+            info!(
+                &cptestctx.logctx.log,
+                "setting up instance for active VMM destroyed test";
+                "instance_id" => %instance_id,
+                "vmm_state" => ?self.vmm_state,
+                "failure_reason" => ?self.failure_reason,
+            );
+
+            // Poke the instance to get it into the Running state.
+            test_helpers::instance_simulate(cptestctx, &instance_id).await;
+
+            let state =
+                test_helpers::instance_fetch(cptestctx, instance_id).await;
+            // The instance should have an active VMM.
+            let instance_runtime = state.instance().runtime();
+            assert_eq!(instance_runtime.nexus_state, InstanceState::Vmm);
+            assert!(instance_runtime.propolis_id.is_some());
+            // Once we destroy the active VMM, we'll assert that the virtual
+            // provisioning and sled resource records it owns have been deallocated.
+            // In order to ensure we're actually testing the correct thing, let's
+            // make sure that those records exist now --- if not, the assertions
+            // later won't mean anything!
+            assert!(
+                !test_helpers::no_virtual_provisioning_resource_records_exist(
+                    cptestctx
+                )
+                .await,
+                "we can't assert that a destroyed VMM instance update deallocates \
+                 virtual provisioning records if none exist!",
+            );
+            assert!(
+                !test_helpers::no_virtual_provisioning_collection_records_using_instances(cptestctx)
+                    .await,
+                "we can't assert that a destroyed VMM instance update deallocates \
+                 virtual provisioning records if none exist!",
+            );
+            assert!(
+                !test_helpers::no_sled_resource_instance_records_exist(cptestctx)
+                    .await,
+                "we can't assert that a destroyed VMM instance update deallocates \
+                 sled resource records if none exist!"
+            );
+
+            // Now, destroy the active VMM
+            let vmm = state.vmm().as_ref().unwrap();
+            let vmm_id = PropolisUuid::from_untyped_uuid(vmm.id);
+            datastore
+                .vmm_update_runtime(
+                    &vmm_id,
+                    &VmmRuntimeState {
+                        time_state_updated: Utc::now(),
+                        gen: Generation(vmm.runtime.gen.0.next()),
+                        state: self.vmm_state,
+                        failure_reason: self.failure_reason,
+                    },
+                )
+                .await
+                .unwrap();
+
+            let (_, _, authz_instance, ..) =
+                LookupPath::new(&opctx, &datastore)
+                    .instance_id(instance_id.into_untyped_uuid())
+                    .fetch()
+                    .await
+                    .expect("test instance should be present in datastore");
+            let params = Params {
+                authz_instance,
+                serialized_authn: authn::saga::Serialized::for_opctx(&opctx),
+            };
+            (state, params)
+        }
+
+        async fn verify(
+            &self,
+            cptestctx: &ControlPlaneTestContext,
+            instance_id: Uuid,
+        ) {
+            let state = test_helpers::instance_fetch(
+                cptestctx,
+                InstanceUuid::from_untyped_uuid(instance_id),
+            )
+            .await;
+
+            let expected_state = match self.vmm_state {
+                VmmState::Destroyed => InstanceState::NoVmm,
+                VmmState::Failed => InstanceState::Failed,
+                _ => unreachable!(
+                    "don't set up an active VMM destroyed test where the \
+                     active VMM isn't destroyed?",
+                ),
+            };
+
+            info!(
+                &cptestctx.logctx.log,
+                "checking outcome of active VMM destroyed update...";
+                "instance_id" => %instance_id,
+                "expected_state" => ?expected_state,
+                "expected_failure_reason" => ?self.failure_reason,
+                "instance_state" => ?state.instance().runtime(),
+            );
+
+            assert_instance_unlocked(state.instance());
+
+            // The instance's active VMM has been destroyed, so its state should
+            // transition to `NoVmm` or `Failed` (depending on why the instance
+            // was destroyed) and its active VMM ID should be unlinked. The
+            // virtual provisioning and sled resources allocated to the instance
+            // should be deallocated.
+            assert!(state.vmm().is_none());
+            let instance_runtime = state.instance().runtime();
+            assert_eq!(instance_runtime.nexus_state, expected_state);
+            assert!(instance_runtime.propolis_id.is_none());
+            assert!(
+                test_helpers::no_virtual_provisioning_resource_records_exist(
+                    cptestctx
+                )
+                .await
+            );
+            assert!(test_helpers::no_virtual_provisioning_collection_records_using_instances(cptestctx).await);
+            assert!(
+                test_helpers::no_sled_resource_instance_records_exist(
+                    cptestctx
+                )
+                .await
+            );
+
+            // If the active VMM failed, the instance's `last_failure_reason`
+            // should be set to the VMM's failure reason, if there was one.
+            assert_eq!(
+                instance_runtime.last_failure_reason,
+                self.failure_reason
+            );
+        }
     }
 
     // === migration source completed tests ===
@@ -2557,6 +2695,7 @@ mod test {
                 time_state_updated: Utc::now(),
                 gen: Generation(src_vmm.runtime.gen.0.next()),
                 state: vmm_state,
+                failure_reason: None,
             };
 
             let migration = self
@@ -2614,6 +2753,7 @@ mod test {
                 time_state_updated: Utc::now(),
                 gen: Generation(target_vmm.runtime.gen.0.next()),
                 state: vmm_state,
+                failure_reason: None,
             };
 
             let migration = self
