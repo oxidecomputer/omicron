@@ -37,7 +37,9 @@ use crate::db::update_and_check::UpdateAndQueryResult;
 use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
+use diesel::pg;
 use diesel::prelude::*;
+use diesel::sql_types;
 use nexus_db_model::Disk;
 use omicron_common::api;
 use omicron_common::api::external;
@@ -259,6 +261,68 @@ pub enum UpdaterLockError {
     Query(#[from] Error),
 }
 
+/// Separates those instances which have attained Nirvana from those which
+/// remain bound to the cycle of rebirth.
+///
+/// This struct encapsulates the logic to determine whether an instance is
+/// deemed eligible to reincarnate for both in-memory [`Instance`]s and for
+/// filtering database queries. This way, we define the logic in one place,
+/// making it easier for it to be kept in sync.
+#[derive(Clone, Debug)]
+pub struct ReincarnationFilter;
+
+impl ReincarnationFilter {
+    pub fn can_reincarnate(
+        policy: InstanceAutoRestart,
+        state: &InstanceRuntimeState,
+    ) -> bool {
+        // Instances only need to be automatically restarted if they are in the
+        // `Failed` state.
+        if state.nexus_state != InstanceState::Failed {
+            return false;
+        }
+
+        // Check if the instance's configured auto-restart policy permits the
+        // control plane to automatically restart it.
+        match policy {
+            InstanceAutoRestart::Never => false,
+            InstanceAutoRestart::AllFailures => true,
+            // TODO(eliza): currently, we don't have the ability to determine
+            // whether an instance is failed because the sled it was on has
+            // rebooted, or because the individual Propolis VMM crashed. For
+            // now, we assume all failures are VMM failures rather than sled
+            // failures. In the future, we will need to determine if a failure
+            // was a sled-level or VMM-level failure, and use that here to
+            // determine whether or not the instance is restartable.
+            InstanceAutoRestart::SledFailuresOnly => false,
+        }
+    }
+
+    fn where_clause(
+        &self,
+    ) -> impl Expression<SqlType = sql_types::Nullable<sql_types::Bool>>
+           + AppearsOnTable<nexus_db_model::schema::instance::table>
+           + diesel::query_builder::QueryId
+           + diesel::query_builder::QueryFragment<pg::Pg>
+           // I have no idea what this means, but it seems important to Diesel...
+           + diesel::expression::ValidGrouping<
+        (),
+        IsAggregate = diesel::expression::is_aggregate::No,
+    > {
+        use nexus_db_model::schema::instance::dsl;
+        // Only attempt to restart Failed instances.
+        dsl::state
+            .eq(InstanceState::Failed)
+            // The instance's auto-restart policy must allow the control plane
+            // to restart it automatically.
+            //
+            // N.B. that this may become more complex in the future if we grow
+            // additional auto-restart policies that require additional logic
+            // (such as restart limits...))
+            .and(dsl::auto_restart_policy.eq(InstanceAutoRestart::AllFailures))
+    }
+}
+
 impl DataStore {
     /// Idempotently insert a database record for an Instance
     ///
@@ -453,17 +517,8 @@ impl DataStore {
         use db::schema::instance::dsl;
 
         paginated(dsl::instance, dsl::id, pagparams)
-            // Only attempt to reincarnate Failed instances.
-            .filter(dsl::state.eq(InstanceState::Failed))
-            // The instance's auto-restart policy must allow the control plane
-            // to restart it automatically.
-            //
-            // N.B. that this may become more complex in the future if we grow
-            // additional auto-restart policies that require additional logic
-            // (such as restart limits...)
-            .filter(
-                dsl::auto_restart_policy.eq(InstanceAutoRestart::AllFailures),
-            )
+            // Select only those instances which may be reincarnated.
+            .filter(ReincarnationFilter::where_clause())
             // Deleted instances may not be reincarnated.
             .filter(dsl::time_deleted.is_null())
             // If the instance is currently in the process of being updated,

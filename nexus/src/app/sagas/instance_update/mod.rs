@@ -1218,14 +1218,17 @@ async fn siu_commit_instance_updates(
     // update saga is required, and the instance's auto-restart policy allows it
     // to be automatically restarted, activate the instance-reincarnation
     // background task to automatically restart it.
-    if let Some(auto_restart_policy) = update.auto_restart_policy {
-        if update.new_runtime.can_reincarnate(auto_restart_policy) {
+    if let Some(policy) = update.auto_restart_policy {
+        if instance::ReincarnationFilter::can_reincarnate(
+            policy,
+            &update.new_runtime,
+        ) {
             info!(
                 log,
                 "instance update: instance transitioned to Failed, but can \
                  be automatically restarted; activating reincarnation.";
                 "instance_id" => %instance_id,
-                "auto_restart_policy" => ?update.auto_restart_policy,
+                "auto_restart_policy" => ?update.policy,
             );
             nexus.background_tasks.task_instance_reincarnation.activate();
         }

@@ -61,7 +61,7 @@ impl From<params::InstanceAutoRestart> for InstanceAutoRestart {
     }
 }
 
-impl diesel::query_builder::QueryId for InstanceAutoRestart {
+impl diesel::query_builder::QueryId for InstanceAutoRestartEnum {
     type QueryId = ();
     const HAS_STATIC_QUERY_ID: bool = false;
 }
