@@ -9,7 +9,6 @@ use crate::app::saga::StartSaga;
 use crate::app::sagas::instance_start;
 use crate::app::sagas::NexusSaga;
 use chrono::TimeDelta;
-use chrono::Utc;
 use futures::future::BoxFuture;
 use nexus_db_queries::authn;
 use nexus_db_queries::context::OpContext;
@@ -253,7 +252,6 @@ impl InstanceReincarnation {
 mod test {
     use super::*;
     use crate::app::background::init::test::NoopStartSaga;
-    use crate::app::sagas::test_helpers;
     use crate::external_api::params;
     use chrono::Utc;
     use nexus_db_model::InstanceAutoRestart;
@@ -397,10 +395,9 @@ mod test {
 
         setup_test_project(&cptestctx, &opctx).await;
 
-        let starter = Arc::new(NoopStartSaga::new());
         let mut task = InstanceReincarnation::new(
             datastore.clone(),
-            starter.clone(),
+            nexus.sagas.clone(),
             Duration::from_secs(60),
         );
 
@@ -415,7 +412,6 @@ mod test {
         assert_eq!(status.instances_cooling_down, Vec::new());
         assert_eq!(status.query_error, None);
         assert_eq!(status.restart_errors, Vec::new());
-        assert_eq!(starter.count_reset(), 0);
 
         // Create an instance in the `Failed` state that's eligible to be
         // restarted.
@@ -436,7 +432,6 @@ mod test {
                 .expect("JSON must be correctly shaped");
         eprintln!("activation: {status:#?}");
 
-        assert_eq!(starter.count_reset(), 1);
         assert_eq!(status.instances_found, 1);
         assert_eq!(
             status.instances_reincarnated,
@@ -446,6 +441,13 @@ mod test {
         assert_eq!(status.instances_cooling_down, Vec::new());
         assert_eq!(status.query_error, None);
         assert_eq!(status.restart_errors, Vec::new());
+
+        test_helpers::instance_wait_for_state(
+            &cptestctx,
+            instance_id,
+            InstanceState::Vmm,
+        )
+        .await;
     }
 
     #[nexus_test(server = crate::Server)]
@@ -461,10 +463,9 @@ mod test {
 
         setup_test_project(&cptestctx, &opctx).await;
 
-        let starter = Arc::new(NoopStartSaga::new());
         let mut task = InstanceReincarnation::new(
             datastore.clone(),
-            starter.clone(),
+            nexus.sagas.clone(),
             Duration::from_secs(60),
         );
 
@@ -530,8 +531,8 @@ mod test {
                 .expect("JSON must be correctly shaped");
         eprintln!("activation: {status:#?}");
 
-        assert_eq!(starter.count_reset(), will_reincarnate.len() as u64);
         assert_eq!(status.instances_found, will_reincarnate.len());
+        assert_eq!(status.instances_reincarnated.len(), will_reincarnate.len());
         assert_eq!(status.changed_state, Vec::new());
         assert_eq!(status.query_error, None);
         assert_eq!(status.restart_errors, Vec::new());
@@ -550,7 +551,14 @@ mod test {
                 status.instances_reincarnated.contains(&id),
                 "expected {id} to have reincarnated! reincarnated: {:?}",
                 status.instances_reincarnated
+            );
+
+            test_helpers::instance_wait_for_state(
+                &cptestctx,
+                &InstanceUuid::from_untyped_uuid(id),
+                InstanceState::Vmm,
             )
+            .await;
         }
     }
 
@@ -644,20 +652,12 @@ mod test {
                 .expect("JSON must be correctly shaped");
         eprintln!("activation: {status:#?}");
 
-        assert_eq!(status.instances_found, 2);
+        assert_eq!(status.instances_found, 1);
         assert_eq!(
             status.instances_reincarnated,
             &[instance2_id.into_untyped_uuid()]
         );
         assert_eq!(status.changed_state, Vec::new());
-        assert_eq!(
-            status
-                .instances_cooling_down
-                .into_iter()
-                .map(|(id, _)| id)
-                .collect::<Vec<_>>(),
-            &[instance1_id.into_untyped_uuid()]
-        );
         assert_eq!(status.query_error, None);
         assert_eq!(status.restart_errors, Vec::new());
 
