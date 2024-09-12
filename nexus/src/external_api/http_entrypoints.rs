@@ -2991,7 +2991,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn networking_bgp_config_list(
         rqctx: RequestContext<ApiContext>,
-        query_params: Query<PaginatedByNameOrId<params::BgpConfigListSelector>>,
+        query_params: Query<PaginatedByNameOrId>,
     ) -> Result<HttpResponseOk<ResultsPage<BgpConfig>>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
