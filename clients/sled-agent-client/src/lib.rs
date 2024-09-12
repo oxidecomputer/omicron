@@ -130,7 +130,7 @@ impl From<types::VmmState> for omicron_common::api::internal::nexus::VmmState {
 impl From<types::VmmFailureReason>
     for omicron_common::api::internal::nexus::VmmFailureReason
 {
-    fn from(s: types::VmmState) -> Self {
+    fn from(s: types::VmmFailureReason) -> Self {
         use omicron_common::api::internal::nexus::VmmFailureReason as Output;
         match s {
             types::VmmFailureReason::SledExpunged => Output::SledExpunged,
