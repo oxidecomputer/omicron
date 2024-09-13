@@ -299,6 +299,7 @@ impl ReincarnationFilter {
     }
 
     fn where_clause(
+        &self,
     ) -> impl Expression<SqlType = sql_types::Nullable<sql_types::Bool>>
            + AppearsOnTable<nexus_db_model::schema::instance::table>
            + diesel::query_builder::QueryId
@@ -506,35 +507,18 @@ impl DataStore {
     /// This is used by the `instance_reincarnation` RPW to ensure that that any
     /// such instances are restarted.
     ///
-    /// This query returns `n` randomly-ordered instances which are eligible for
-    /// reincarnation. Because reincarnating an instance changes its state so
-    /// that it no longer matches this query, it isn't necessary to use
-    /// pagination to avoid the query returning the same instance multiple
-    /// times: instead, we just actually reincarnate it to remove it from the
-    /// result set. Randomizing the order in which instances are returned allows
-    /// a nicer distribution of work across multiple Nexus replicas'
-    /// `instance_reincarnation` tasks.
+    /// This query is paginated by the instance's UUID, using the provided
+    /// [`DataPageParams`].
     pub async fn find_reincarnatable_instances(
         &self,
         opctx: &OpContext,
-        cooldown: chrono::TimeDelta,
-        n: std::num::NonZeroU32,
+        pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<Instance> {
         use db::schema::instance::dsl;
 
-        define_sql_function!(fn random() -> diesel::sql_types::Float);
-
-        let now = diesel::dsl::now.into_sql::<pg::sql_types::Timestamptz>();
-        dsl::instance
+        paginated(dsl::instance, dsl::id, pagparams)
             // Select only those instances which may be reincarnated.
             .filter(ReincarnationFilter::where_clause())
-            // An instance whose last reincarnation was within the cooldown
-            // interval from now must remain in _bardo_ --- the liminal
-            // state between death and rebirth --- before its next
-            // reincarnation.
-            .filter(dsl::time_last_auto_restarted.is_null().or(
-                dsl::time_last_auto_restarted.eq((now - cooldown).nullable()),
-            ))
             // Deleted instances may not be reincarnated.
             .filter(dsl::time_deleted.is_null())
             // If the instance is currently in the process of being updated,
@@ -548,8 +532,6 @@ impl DataStore {
             // (SagaUnwound) would require joining with the VMM table, so let's
             // not bother.
             .select(Instance::as_select())
-            .order_by(random())
-            .limit(n.get() as i64)
             .load_async::<Instance>(
                 &*self.pool_connection_authorized(opctx).await?,
             )

@@ -12,11 +12,11 @@ use chrono::TimeDelta;
 use futures::future::BoxFuture;
 use nexus_db_queries::authn;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::background::InstanceReincarnationStatus;
 use omicron_common::api::external::Error;
-use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::task::JoinSet;
@@ -34,19 +34,7 @@ pub struct InstanceReincarnation {
     // TODO(eliza): this default should be overridden by a project-level default
     // when https://github.com/oxidecomputer/omicron/issues/1015 is implemented.
     default_cooldown: TimeDelta,
-    /// The maximum number of concurrently reincarnating instances.
-    ///
-    /// This is a field on the struct as well as the
-    /// `DEFAULT_MAX_CONCURRENT_REINCARNATIONS` constant because we'd like to
-    /// set a lower value for tests.
-    batch_size: NonZeroU32,
 }
-
-const DEFAULT_MAX_CONCURRENT_REINCARNATIONS: NonZeroU32 =
-    match NonZeroU32::new(16) {
-        Some(n) => n,
-        None => unreachable!(), // 16 > 0
-    };
 
 impl BackgroundTask for InstanceReincarnation {
     fn activate<'a>(
@@ -101,12 +89,7 @@ impl InstanceReincarnation {
     ) -> Self {
         let default_cooldown = TimeDelta::from_std(default_cooldown)
             .expect("duration should be in range");
-        Self {
-            datastore,
-            sagas,
-            default_cooldown,
-            batch_size: DEFAULT_MAX_CONCURRENT_REINCARNATIONS,
-        }
+        Self { datastore, sagas, default_cooldown }
     }
 
     async fn actually_activate(
@@ -115,15 +98,13 @@ impl InstanceReincarnation {
         status: &mut InstanceReincarnationStatus,
     ) {
         let mut tasks = JoinSet::new();
+        let mut paginator =
+            Paginator::new(nexus_db_queries::db::datastore::SQL_BATCH_SIZE);
 
-        loop {
+        while let Some(p) = paginator.next() {
             let maybe_batch = self
                 .datastore
-                .find_reincarnatable_instances(
-                    opctx,
-                    self.default_cooldown,
-                    self.batch_size,
-                )
+                .find_reincarnatable_instances(opctx, &p.current_pagparams())
                 .await;
             let batch = match maybe_batch {
                 Ok(batch) => batch,
@@ -137,6 +118,8 @@ impl InstanceReincarnation {
                     break;
                 }
             };
+
+            paginator = p.found_batch(&batch, &|instance| instance.id());
 
             let found = batch.len();
             if found == 0 {
@@ -197,51 +180,50 @@ impl InstanceReincarnation {
                 "sagas_started" => total_sagas_started - prev_sagas_started,
                 "total_sagas_started" => total_sagas_started,
             );
+        }
 
-            // All sagas started, wait for them to come back...
-            while let Some(saga_result) = tasks.join_next().await {
-                match saga_result {
-                    // Start saga completed successfully
-                    Ok(Ok(instance_id)) => {
-                        debug!(
-                            opctx.log,
-                            "welcome back to the realm of the living, {instance_id}!";
-                            "instance_id" => %instance_id,
-                        );
-                        status.instances_reincarnated.push(instance_id);
-                    }
-                    // The instance's state changed in the meantime, that's fine...
-                    Ok(Err((instance_id, err @ Error::Conflict { .. }))) => {
-                        debug!(
-                            opctx.log,
-                            "instance {instance_id} changed state before it could be reincarnated";
-                            "instance_id" => %instance_id,
-                            "error" => err,
-                        );
-                        status.changed_state.push(instance_id);
-                    }
-                    // Start saga failed
-                    Ok(Err((instance_id, error))) => {
-                        const ERR_MSG: &'static str =
-                            "instance-start saga failed";
-                        warn!(opctx.log,
-                            "{ERR_MSG}";
-                            "instance_id" => %instance_id,
-                            "error" => %error,
-                        );
-                        status
-                            .restart_errors
-                            .push((instance_id, format!("{ERR_MSG}: {error}")));
-                    }
-                    Err(e) => {
-                        const JOIN_ERR_MSG: &'static str =
+        // All sagas started, wait for them to come back...
+        while let Some(saga_result) = tasks.join_next().await {
+            match saga_result {
+                // Start saga completed successfully
+                Ok(Ok(instance_id)) => {
+                    debug!(
+                        opctx.log,
+                        "welcome back to the realm of the living, {instance_id}!";
+                        "instance_id" => %instance_id,
+                    );
+                    status.instances_reincarnated.push(instance_id);
+                }
+                // The instance's state changed in the meantime, that's fine...
+                Ok(Err((instance_id, err @ Error::Conflict { .. }))) => {
+                    debug!(
+                        opctx.log,
+                        "instance {instance_id} changed state before it could be reincarnated";
+                        "instance_id" => %instance_id,
+                        "error" => err,
+                    );
+                    status.changed_state.push(instance_id);
+                }
+                // Start saga failed
+                Ok(Err((instance_id, error))) => {
+                    const ERR_MSG: &'static str = "instance-start saga failed";
+                    warn!(opctx.log,
+                        "{ERR_MSG}";
+                        "instance_id" => %instance_id,
+                        "error" => %error,
+                    );
+                    status
+                        .restart_errors
+                        .push((instance_id, format!("{ERR_MSG}: {error}")));
+                }
+                Err(e) => {
+                    const JOIN_ERR_MSG: &'static str =
                         "tasks spawned on the JoinSet should never return a \
                         JoinError, as nexus is compiled with panic=\"abort\", \
                         and we never cancel them...";
-                        error!(opctx.log, "{JOIN_ERR_MSG}"; "error" => %e);
-                        if cfg!(debug_assertions) {
-                            unreachable!("{JOIN_ERR_MSG} but, I saw {e}!",)
-                        }
+                    error!(opctx.log, "{JOIN_ERR_MSG}"; "error" => %e);
+                    if cfg!(debug_assertions) {
+                        unreachable!("{JOIN_ERR_MSG} but, I saw {e}!",)
                     }
                 }
             }
