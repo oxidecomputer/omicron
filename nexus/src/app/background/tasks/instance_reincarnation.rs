@@ -63,7 +63,7 @@ impl BackgroundTask for InstanceReincarnation {
                     "query_error" => ?status.query_error,
                     "restart_errors" => status.restart_errors.len(),
                 );
-            } else if !status.instances_reincarnated.is_empty() {
+            } else {
                 info!(
                     &opctx.log,
                     "instance reincarnation completed";
@@ -71,15 +71,7 @@ impl BackgroundTask for InstanceReincarnation {
                     "instances_reincarnated" => status.instances_reincarnated.len(),
                     "instances_changed_state" => status.changed_state.len(),
                 );
-            } else {
-                debug!(
-                    &opctx.log,
-                    "instance reincarnation completed; no instances \
-                     in need of reincarnation";
-                    "instances_found" => status.instances_found,
-                    "instances_changed_state" => status.changed_state.len(),
-                );
-            };
+            }
             serde_json::json!(status)
         })
     }
@@ -141,7 +133,7 @@ impl InstanceReincarnation {
             let found = batch.len();
             status.instances_found += found;
             if found == 0 {
-                debug!(
+                trace!(
                     opctx.log,
                     "no more instances in need of reincarnation";
                     "total_found" => status.instances_found,
@@ -151,6 +143,14 @@ impl InstanceReincarnation {
 
             for db_instance in batch {
                 let instance_id = db_instance.id();
+                info!(
+                    opctx.log,
+                    "attempting to reincarnate Failed instance...";
+                    "instance_id" => %instance_id,
+                    "auto_restart_policy" => ?db_instance.auto_restart_policy,
+                    "last_auto_restarted_at" => ?db_instance.runtime().time_last_auto_restarted,
+                );
+
                 let running_saga = async {
                     let dag = instance_start::SagaInstanceStart::prepare(
                         &instance_start::Params {
