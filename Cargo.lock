@@ -7037,6 +7037,8 @@ dependencies = [
  "hickory-proto",
  "hmac",
  "hyper 0.14.30",
+ "hyper 1.4.1",
+ "hyper-util",
  "indexmap 2.4.0",
  "inout",
  "itertools 0.10.5",
