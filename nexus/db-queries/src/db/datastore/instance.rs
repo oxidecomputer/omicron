@@ -299,7 +299,6 @@ impl ReincarnationFilter {
     }
 
     fn where_clause(
-        &self,
     ) -> impl Expression<SqlType = sql_types::Nullable<sql_types::Bool>>
            + AppearsOnTable<nexus_db_model::schema::instance::table>
            + diesel::query_builder::QueryId
@@ -512,15 +511,25 @@ impl DataStore {
     pub async fn find_reincarnatable_instances(
         &self,
         opctx: &OpContext,
+        cooldown: chrono::TimeDelta,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<Instance> {
         use db::schema::instance::dsl;
 
+        let now =
+            diesel::dsl::now.into_sql::<diesel::pg::sql_types::Timestamptz>();
         paginated(dsl::instance, dsl::id, pagparams)
             // Select only those instances which may be reincarnated.
             .filter(ReincarnationFilter::where_clause())
             // Deleted instances may not be reincarnated.
             .filter(dsl::time_deleted.is_null())
+            // An instance whose last reincarnation was within the cooldown
+            // interval from now must remain in _bardo_ --- the liminal
+            // state between death and rebirth --- before its next
+            // reincarnation.
+            .filter(dsl::time_last_auto_restarted.is_null().or(
+                dsl::time_last_auto_restarted.eq((now - cooldown).nullable()),
+            ))
             // If the instance is currently in the process of being updated,
             // let's not mess with it for now and try to restart it on another
             // pass.

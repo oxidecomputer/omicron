@@ -104,7 +104,11 @@ impl InstanceReincarnation {
         while let Some(p) = paginator.next() {
             let maybe_batch = self
                 .datastore
-                .find_reincarnatable_instances(opctx, &p.current_pagparams())
+                .find_reincarnatable_instances(
+                    opctx,
+                    self.default_cooldown,
+                    &p.current_pagparams(),
+                )
                 .await;
             let batch = match maybe_batch {
                 Ok(batch) => batch,
