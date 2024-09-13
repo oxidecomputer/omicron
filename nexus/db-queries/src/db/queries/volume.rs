@@ -179,11 +179,23 @@ impl<GroupByClause> ValidGrouping<GroupByClause>
 /// ```sql
 /// json_build_object('V3',
 ///       json_build_object(
-///         'regions', (select json_agg(id) from region join t2 on region.id = t2.region_id where (t2.volume_references = 0 or t2.volume_references is null) and region.volume_id = '<volume_id>'),
+///         'regions', (select json_agg(id) from region left join region_snapshot on region.id = region_snapshot.region_id where (region_snapshot.volume_references = 0 or region_snapshot.volume_references is null) and region.volume_id = '<volume_id>'),
 ///         'region_snapshots', (select json_agg(json_build_object('dataset', dataset_id, 'region', region_id, 'snapshot', snapshot_id)) from t2 where t2.volume_references = 0)
 ///       )
 ///     )
 /// ```
+///
+/// Note that the query that populates the `region_snapshots` field is intended
+/// to use the output of `ConditionallyDecreaseReferences`, which only returns
+/// `region_snapshot` rows modified by the UPDATE statement in that query
+/// fragment. If the query that populates the `regions` field were to also use
+/// only the modified rows, it would never match the actual regions of the
+/// volume: the modified rows would be for parts of the read-only parent, where
+/// the regions are in the sub-volumes. This author can't imagine a volume where
+/// the read-only parent had region snapshots of its own regions...
+///
+/// The query that populates the `regions` field uses a LEFT JOIN in the case
+/// that there are no matching region snapshot rows.
 ///
 /// Note if json_agg is executing over zero rows, then the output is `null`, not
 /// `[]`. For example, if the sub-query meant to return regions to clean up
@@ -254,21 +266,21 @@ impl QueryFragment<Pg> for BuildJsonResourcesToCleanUp {
         out.push_identifier(dsl::id::NAME)?;
         out.push_sql(") FROM ");
         region_dsl::region.walk_ast(out.reborrow())?;
-        out.push_sql(" JOIN ");
-        out.push_sql(self.table);
+        out.push_sql(" LEFT JOIN ");
+        out.push_sql("region_snapshot");
         out.push_sql(" ON ");
         out.push_identifier(region_dsl::id::NAME)?;
         out.push_sql(" = ");
-        out.push_sql(self.table);
+        out.push_sql("region_snapshot");
         out.push_sql(".");
         out.push_identifier(region_snapshot_dsl::region_id::NAME)?; // table's schema is equivalent to region_snapshot
         out.push_sql(" WHERE ( ");
 
-        out.push_sql(self.table);
+        out.push_sql("region_snapshot");
         out.push_sql(".");
         out.push_identifier(region_snapshot_dsl::volume_references::NAME)?;
         out.push_sql(" = 0 OR ");
-        out.push_sql(self.table);
+        out.push_sql("region_snapshot");
         out.push_sql(".");
         out.push_identifier(region_snapshot_dsl::volume_references::NAME)?;
         out.push_sql(" IS NULL");
