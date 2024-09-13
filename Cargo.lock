@@ -3008,11 +3008,12 @@ dependencies = [
 [[package]]
 name = "gateway-messages"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=319e7b92db69792ab8efa4c68554ad0cf83adf93#319e7b92db69792ab8efa4c68554ad0cf83adf93"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=ca9f20e32acade9d15fb8d70405a6ef406c719cc#ca9f20e32acade9d15fb8d70405a6ef406c719cc"
 dependencies = [
  "bitflags 2.6.0",
  "hubpack",
  "serde",
+ "serde-big-array",
  "serde_repr",
  "smoltcp 0.9.1",
  "static_assertions",
@@ -3024,7 +3025,7 @@ dependencies = [
 [[package]]
 name = "gateway-sp-comms"
 version = "0.1.1"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=319e7b92db69792ab8efa4c68554ad0cf83adf93#319e7b92db69792ab8efa4c68554ad0cf83adf93"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=ca9f20e32acade9d15fb8d70405a6ef406c719cc#ca9f20e32acade9d15fb8d70405a6ef406c719cc"
 dependencies = [
  "async-trait",
  "backoff",
