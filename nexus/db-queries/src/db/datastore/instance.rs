@@ -39,7 +39,7 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::pg;
 use diesel::prelude::*;
-use diesel::sql_types::{Bool, Nullable};
+use diesel::sql_types::{self, Bool, Nullable};
 use nexus_db_model::Disk;
 use omicron_common::api;
 use omicron_common::api::external;
@@ -509,21 +509,32 @@ impl DataStore {
     /// This is used by the `instance_reincarnation` RPW to ensure that that any
     /// such instances are restarted.
     ///
-    /// This query is paginated by the instance's UUID, using the provided
-    /// [`DataPageParams`].
+    /// This query returns `n` randomly-ordered instances which are eligible for
+    /// reincarnation. Because reincarnating an instance changes its state so
+    /// that it no longer matches this query, it isn't necessary to use
+    /// pagination to avoid the query returning the same instance multiple
+    /// times: instead, we just actually reincarnate it to remove it from the
+    /// result set. Randomizing the order in which instances are returned allows
+    /// a nicer distribution of work across multiple Nexus replicas'
+    /// `instance_reincarnation` tasks.
     pub async fn find_reincarnatable_instances(
         &self,
         opctx: &OpContext,
         cooldown: chrono::TimeDelta,
-        pagparams: &DataPageParams<'_, Uuid>,
+        n: std::num::NonZeroU32,
+        skipped_ids: impl IntoIterator<Item = Uuid>,
     ) -> ListResultVec<Instance> {
         use db::schema::instance::dsl;
 
-        let now =
-            diesel::dsl::now.into_sql::<diesel::pg::sql_types::Timestamptz>();
-        paginated(dsl::instance, dsl::id, pagparams)
+        define_sql_function!(fn random() -> sql_types::Float);
+
+        let now = diesel::dsl::now.into_sql::<pg::sql_types::Timestamptz>();
+        dsl::instance
             // Select only those instances which may be reincarnated.
             .filter(ReincarnationFilter::where_clause())
+            // Exclude any instance IDs we were asked to skip (typically because
+            // a previous start saga for those instances failed unexpectedly)
+            .filter(dsl::id.ne_all(skipped_ids.into_iter()))
             // Deleted instances may not be reincarnated.
             .filter(dsl::time_deleted.is_null())
             // An instance whose last reincarnation was within the cooldown
@@ -544,6 +555,8 @@ impl DataStore {
             // (SagaUnwound) would require joining with the VMM table, so let's
             // not bother.
             .select(Instance::as_select())
+            .order_by(random())
+            .limit(i64::from(n.get()))
             .load_async::<Instance>(
                 &*self.pool_connection_authorized(opctx).await?,
             )

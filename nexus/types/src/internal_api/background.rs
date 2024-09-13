@@ -4,6 +4,7 @@
 
 use serde::Deserialize;
 use serde::Serialize;
+use std::collections::HashMap;
 use std::time::Duration;
 use uuid::Uuid;
 
@@ -131,5 +132,5 @@ pub struct InstanceReincarnationStatus {
     /// Any error that occured while finding instances in need of reincarnation.
     pub query_error: Option<String>,
     /// Errors that occurred while restarting individual instances.
-    pub restart_errors: Vec<(Uuid, String)>,
+    pub restart_errors: HashMap<Uuid, String>,
 }

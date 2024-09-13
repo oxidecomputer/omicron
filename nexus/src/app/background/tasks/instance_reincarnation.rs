@@ -12,14 +12,13 @@ use chrono::TimeDelta;
 use futures::future::BoxFuture;
 use nexus_db_queries::authn;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::background::InstanceReincarnationStatus;
 use omicron_common::api::external::Error;
+use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::task::JoinSet;
 
 pub struct InstanceReincarnation {
     datastore: Arc<DataStore>,
@@ -34,7 +33,15 @@ pub struct InstanceReincarnation {
     // TODO(eliza): this default should be overridden by a project-level default
     // when https://github.com/oxidecomputer/omicron/issues/1015 is implemented.
     default_cooldown: TimeDelta,
+    /// The maximum number of concurrently executing instance-start sagas.
+    concurrency_limit: NonZeroU32,
 }
+
+const DEFAULT_MAX_CONCURRENT_REINCARNATIONS: NonZeroU32 =
+    match NonZeroU32::new(16) {
+        Some(n) => n,
+        None => unreachable!(), // 16 > 0
+    };
 
 impl BackgroundTask for InstanceReincarnation {
     fn activate<'a>(
@@ -89,7 +96,12 @@ impl InstanceReincarnation {
     ) -> Self {
         let default_cooldown = TimeDelta::from_std(default_cooldown)
             .expect("duration should be in range");
-        Self { datastore, sagas, default_cooldown }
+        Self {
+            datastore,
+            sagas,
+            default_cooldown,
+            concurrency_limit: DEFAULT_MAX_CONCURRENT_REINCARNATIONS,
+        }
     }
 
     async fn actually_activate(
@@ -97,17 +109,23 @@ impl InstanceReincarnation {
         opctx: &OpContext,
         status: &mut InstanceReincarnationStatus,
     ) {
-        let mut tasks = JoinSet::new();
-        let mut paginator =
-            Paginator::new(nexus_db_queries::db::datastore::SQL_BATCH_SIZE);
+        let mut total_sagas_started = 0;
+        let mut running_sagas =
+            Vec::with_capacity(self.concurrency_limit.get() as usize);
+        let serialized_authn = authn::saga::Serialized::for_opctx(opctx);
 
-        while let Some(p) = paginator.next() {
+        loop {
             let maybe_batch = self
                 .datastore
                 .find_reincarnatable_instances(
                     opctx,
                     self.default_cooldown,
-                    &p.current_pagparams(),
+                    self.concurrency_limit,
+                    // Any instances which we've already attempted to start and
+                    // couldn't should be excluded from the query, to avoid
+                    // looping forever when an instance is in a permanently
+                    // non-restartable state.
+                    status.restart_errors.keys().copied(),
                 )
                 .await;
             let batch = match maybe_batch {
@@ -123,9 +141,8 @@ impl InstanceReincarnation {
                 }
             };
 
-            paginator = p.found_batch(&batch, &|instance| instance.id());
-
             let found = batch.len();
+            status.instances_found += found;
             if found == 0 {
                 debug!(
                     opctx.log,
@@ -135,99 +152,105 @@ impl InstanceReincarnation {
                 break;
             }
 
-            let prev_sagas_started = tasks.len();
-            status.instances_found += found;
-
-            let serialized_authn = authn::saga::Serialized::for_opctx(opctx);
             for db_instance in batch {
                 let instance_id = db_instance.id();
-                let prepared_saga = instance_start::SagaInstanceStart::prepare(
-                    &instance_start::Params {
-                        db_instance,
-                        serialized_authn: serialized_authn.clone(),
-                        reason: instance_start::Reason::AutoRestart,
-                    },
-                );
-                match prepared_saga {
-                    Ok(saga) => {
-                        let start_saga = self.sagas.clone();
-                        tasks.spawn(async move {
-                            start_saga
-                                .saga_start(saga)
-                                .await
-                                .map_err(|e| (instance_id, e))?;
-                            Ok(instance_id)
-                        });
+                let running_saga = async {
+                    let dag = instance_start::SagaInstanceStart::prepare(
+                        &instance_start::Params {
+                            db_instance,
+                            serialized_authn: serialized_authn.clone(),
+                            reason: instance_start::Reason::AutoRestart,
+                        },
+                    )?;
+                    self.sagas.saga_run(dag).await
+                }
+                .await;
+                match running_saga {
+                    Ok((saga_id, completed)) => {
+                        running_sagas.push((instance_id, saga_id, completed));
                     }
                     Err(error) => {
                         const ERR_MSG: &'static str =
-                            "failed to prepare instance-start saga";
+                            "failed to start instance-start saga";
                         error!(
                             opctx.log,
                             "{ERR_MSG} for {instance_id}";
                             "instance_id" => %instance_id,
                             "error" => %error,
                         );
-                        status
+                        let _prev_error = status
                             .restart_errors
-                            .push((instance_id, format!("{ERR_MSG}: {error}")))
+                            .insert(instance_id, format!("{ERR_MSG}: {error}"));
+                        debug_assert_eq!(
+                            _prev_error, None,
+                            "if a saga for {instance_id} already failed, we \
+                             shouldn't see it again in the same activation!",
+                        );
                     }
                 };
             }
+            total_sagas_started += running_sagas.len();
 
-            let total_sagas_started = tasks.len();
             debug!(
                 opctx.log,
                 "found instance in need of reincarnation";
                 "instances_found" => found,
                 "total_found" => status.instances_found,
-                "sagas_started" => total_sagas_started - prev_sagas_started,
+                "sagas_started" => running_sagas.len(),
                 "total_sagas_started" => total_sagas_started,
             );
-        }
 
-        // All sagas started, wait for them to come back...
-        while let Some(saga_result) = tasks.join_next().await {
-            match saga_result {
-                // Start saga completed successfully
-                Ok(Ok(instance_id)) => {
-                    debug!(
-                        opctx.log,
-                        "welcome back to the realm of the living, {instance_id}!";
-                        "instance_id" => %instance_id,
-                    );
-                    status.instances_reincarnated.push(instance_id);
-                }
-                // The instance's state changed in the meantime, that's fine...
-                Ok(Err((instance_id, err @ Error::Conflict { .. }))) => {
-                    debug!(
-                        opctx.log,
-                        "instance {instance_id} changed state before it could be reincarnated";
-                        "instance_id" => %instance_id,
-                        "error" => err,
-                    );
-                    status.changed_state.push(instance_id);
-                }
-                // Start saga failed
-                Ok(Err((instance_id, error))) => {
-                    const ERR_MSG: &'static str = "instance-start saga failed";
-                    warn!(opctx.log,
-                        "{ERR_MSG}";
-                        "instance_id" => %instance_id,
-                        "error" => %error,
-                    );
-                    status
-                        .restart_errors
-                        .push((instance_id, format!("{ERR_MSG}: {error}")));
-                }
-                Err(e) => {
-                    const JOIN_ERR_MSG: &'static str =
-                        "tasks spawned on the JoinSet should never return a \
-                        JoinError, as nexus is compiled with panic=\"abort\", \
-                        and we never cancel them...";
-                    error!(opctx.log, "{JOIN_ERR_MSG}"; "error" => %e);
-                    if cfg!(debug_assertions) {
-                        unreachable!("{JOIN_ERR_MSG} but, I saw {e}!",)
+            // All sagas started, wait for them to come back before moving on to
+            // the next chunk.
+            // N.B. that although it's tempting to want to query the database
+            // again as soon as one saga completes, so that we're *always*
+            // running `concurrency_limit` sagas in parallel, rather than
+            // running *up to* that many sagas, we ought not to query the
+            // database again until all the sagas we've started have finished.
+            // Otherwise, we may see some instances multiple times, because
+            // their sagas completing is what changes the instance record's
+            // state so that it no longer shows up in the query results.
+            for (instance_id, saga_id, saga) in running_sagas.drain(..) {
+                match saga.await {
+                    // Start saga completed successfully
+                    Ok(_) => {
+                        debug!(
+                            opctx.log,
+                            "welcome back to the realm of the living, {instance_id}!";
+                            "instance_id" => %instance_id,
+                            "start_saga_id" => %saga_id,
+                        );
+                        status.instances_reincarnated.push(instance_id);
+                    }
+                    // The instance's state changed in the meantime, that's fine...
+                    Err(err @ Error::Conflict { .. }) => {
+                        debug!(
+                            opctx.log,
+                            "instance {instance_id} changed state before it could be reincarnated";
+                            "instance_id" => %instance_id,
+                            "start_saga_id" => %saga_id,
+                            "error" => err,
+                        );
+                        status.changed_state.push(instance_id);
+                    }
+                    // Start saga failed
+                    Err(error) => {
+                        const ERR_MSG: &'static str = "instance-start saga";
+                        warn!(opctx.log,
+                            "{ERR_MSG} failed";
+                            "instance_id" => %instance_id,
+                            "start_saga_id" => %saga_id,
+                            "error" => %error,
+                        );
+                        let _prev_error = status.restart_errors.insert(
+                            instance_id,
+                            format!("{ERR_MSG} {saga_id} failed: {error}"),
+                        );
+                        debug_assert_eq!(
+                            _prev_error, None,
+                            "if a saga for {instance_id} already failed, we \
+                             shouldn't see it again in the same activation!",
+                        );
                     }
                 }
             }
@@ -254,6 +277,7 @@ mod test {
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::InstanceUuid;
+    use std::collections::HashMap;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
@@ -397,7 +421,7 @@ mod test {
         assert_eq!(status.instances_reincarnated, Vec::new());
         assert_eq!(status.changed_state, Vec::new());
         assert_eq!(status.query_error, None);
-        assert_eq!(status.restart_errors, Vec::new());
+        assert_eq!(status.restart_errors, HashMap::new());
 
         // Create an instance in the `Failed` state that's eligible to be
         // restarted.
@@ -425,7 +449,7 @@ mod test {
         );
         assert_eq!(status.changed_state, Vec::new());
         assert_eq!(status.query_error, None);
-        assert_eq!(status.restart_errors, Vec::new());
+        assert_eq!(status.restart_errors, HashMap::new());
 
         test_helpers::instance_wait_for_state(
             &cptestctx,
@@ -520,7 +544,7 @@ mod test {
         assert_eq!(status.instances_reincarnated.len(), will_reincarnate.len());
         assert_eq!(status.changed_state, Vec::new());
         assert_eq!(status.query_error, None);
-        assert_eq!(status.restart_errors, Vec::new());
+        assert_eq!(status.restart_errors, HashMap::new());
 
         for id in &status.instances_reincarnated {
             eprintln!("instance {id} reincarnated");
@@ -601,7 +625,7 @@ mod test {
         );
         assert_eq!(status.changed_state, Vec::new());
         assert_eq!(status.query_error, None);
-        assert_eq!(status.restart_errors, Vec::new());
+        assert_eq!(status.restart_errors, HashMap::new());
 
         // Now, let's do some state changes:
         // Pretend instance 1 restarted, and then failed again.
@@ -643,7 +667,7 @@ mod test {
         );
         assert_eq!(status.changed_state, Vec::new());
         assert_eq!(status.query_error, None);
-        assert_eq!(status.restart_errors, Vec::new());
+        assert_eq!(status.restart_errors, HashMap::new());
 
         // Instance 2 should be started
         test_helpers::instance_wait_for_state(
@@ -670,7 +694,7 @@ mod test {
         );
         assert_eq!(status.changed_state, Vec::new());
         assert_eq!(status.query_error, None);
-        assert_eq!(status.restart_errors, Vec::new());
+        assert_eq!(status.restart_errors, HashMap::new());
 
         // Instance 1 should be started.
         test_helpers::instance_wait_for_state(
