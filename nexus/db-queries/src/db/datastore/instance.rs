@@ -528,7 +528,7 @@ impl DataStore {
             // state between death and rebirth --- before its next
             // reincarnation.
             .filter(dsl::time_last_auto_restarted.is_null().or(
-                dsl::time_last_auto_restarted.eq((now - cooldown).nullable()),
+                dsl::time_last_auto_restarted.le((now - cooldown).nullable()),
             ))
             // If the instance is currently in the process of being updated,
             // let's not mess with it for now and try to restart it on another
