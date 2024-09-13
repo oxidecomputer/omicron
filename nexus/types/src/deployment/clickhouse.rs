@@ -74,7 +74,7 @@ pub struct ClickhouseClusterConfig {
     ///      steps 3 and 4 above will be retried for the next keeper process.
     ///   6. If the keeper is not successfully added by the executor it will
     ///      continue to retry indefinitely.
-    ///   7. If the zone is expunged while the planner is has it as part of its
+    ///   7. If the zone is expunged while the planner has it as part of its
     ///      desired state, and the executor is trying to add it, the keeper
     ///      will be removed from the desired state in the next blueprint. If it
     ///      has been added by an executor in the meantime it will be removed on
