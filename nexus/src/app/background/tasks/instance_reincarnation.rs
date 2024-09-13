@@ -67,7 +67,7 @@ impl BackgroundTask for InstanceReincarnation {
                     "instance reincarnation completed with errors!";
                     "instances_found" => status.instances_found,
                     "instances_reincarnated" => status.instances_reincarnated.len(),
-                    "already_reincarnated" => status.changed_state.len(),
+                    "instances_changed_state" => status.changed_state.len(),
                     "query_error" => ?status.query_error,
                     "restart_errors" => status.restart_errors.len(),
                 );
@@ -77,7 +77,7 @@ impl BackgroundTask for InstanceReincarnation {
                     "instance reincarnation completed";
                     "instances_found" => status.instances_found,
                     "instances_reincarnated" => status.instances_reincarnated.len(),
-                    "already_reincarnated" => status.changed_state.len(),
+                    "instances_changed_state" => status.changed_state.len(),
                 );
             } else {
                 debug!(
@@ -85,7 +85,7 @@ impl BackgroundTask for InstanceReincarnation {
                     "instance reincarnation completed; no instances \
                      in need of reincarnation";
                     "instances_found" => status.instances_found,
-                    "already_reincarnated" => status.changed_state.len(),
+                    "instances_changed_state" => status.changed_state.len(),
                 );
             };
             serde_json::json!(status)
@@ -251,7 +251,7 @@ impl InstanceReincarnation {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::app::background::init::test::NoopStartSaga;
+    use crate::app::sagas::test_helpers;
     use crate::external_api::params;
     use chrono::Utc;
     use nexus_db_model::InstanceAutoRestart;
@@ -409,7 +409,6 @@ mod test {
         assert_eq!(status.instances_found, 0);
         assert_eq!(status.instances_reincarnated, Vec::new());
         assert_eq!(status.changed_state, Vec::new());
-        assert_eq!(status.instances_cooling_down, Vec::new());
         assert_eq!(status.query_error, None);
         assert_eq!(status.restart_errors, Vec::new());
 
@@ -438,7 +437,6 @@ mod test {
             vec![instance_id.into_untyped_uuid()]
         );
         assert_eq!(status.changed_state, Vec::new());
-        assert_eq!(status.instances_cooling_down, Vec::new());
         assert_eq!(status.query_error, None);
         assert_eq!(status.restart_errors, Vec::new());
 
@@ -555,7 +553,7 @@ mod test {
 
             test_helpers::instance_wait_for_state(
                 &cptestctx,
-                &InstanceUuid::from_untyped_uuid(id),
+                InstanceUuid::from_untyped_uuid(id),
                 InstanceState::Vmm,
             )
             .await;
@@ -615,7 +613,6 @@ mod test {
             &[instance1_id.into_untyped_uuid()]
         );
         assert_eq!(status.changed_state, Vec::new());
-        assert_eq!(status.instances_cooling_down, Vec::new());
         assert_eq!(status.query_error, None);
         assert_eq!(status.restart_errors, Vec::new());
 
@@ -685,7 +682,6 @@ mod test {
             &[instance1_id.into_untyped_uuid()]
         );
         assert_eq!(status.changed_state, Vec::new());
-        assert_eq!(status.instances_cooling_down, Vec::new());
         assert_eq!(status.query_error, None);
         assert_eq!(status.restart_errors, Vec::new());
 

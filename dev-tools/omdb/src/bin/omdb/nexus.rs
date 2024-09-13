@@ -1793,7 +1793,6 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 default_cooldown,
                 instances_found,
                 instances_reincarnated,
-                instances_cooling_down,
                 changed_state,
                 query_error,
                 restart_errors,
@@ -1805,8 +1804,6 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                     "  instances which changed state before they could be reincarnated:";
                 const ERRORS: &'static str =
                     "  instances which failed to be reincarnated:";
-                const COOLING_DOWN: &'static str =
-                    "  instances still in cooldown:";
                 const COOLDOWN_PERIOD: &'static str =
                     "default cooldown period:";
                 const WIDTH: usize = const_max_len(&[
@@ -1814,17 +1811,14 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                     REINCARNATED,
                     CHANGED_STATE,
                     ERRORS,
-                    COOLING_DOWN,
                     COOLDOWN_PERIOD,
                 ]);
                 let n_restart_errors = restart_errors.len();
                 let n_restarted = instances_reincarnated.len();
                 let n_changed_state = changed_state.len();
-                let n_chilling_out = instances_cooling_down.len();
                 println!("    {FOUND:<WIDTH$} {instances_found:>3}");
                 println!("    {REINCARNATED:<WIDTH$} {n_restarted:>3}");
                 println!("    {CHANGED_STATE:<WIDTH$} {n_changed_state:>3}",);
-                println!("    {COOLING_DOWN:<WIDTH$} {n_chilling_out:>3}");
                 println!("    {ERRORS:<WIDTH$} {n_restart_errors:>3}");
                 println!("    {COOLDOWN_PERIOD:<WIDTH$} {default_cooldown:?}");
 
@@ -1860,18 +1854,6 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                     for id in changed_state {
                         println!("    > {id}")
                     }
-                }
-
-                if n_chilling_out > 0 {
-                    println!(
-                        "    the following instances still need to take some \
-                        time to chill out before\n    they can be reincarnated:",
-                    );
-                }
-                for (id, last_reincarnated) in instances_cooling_down {
-                    println!(
-                        "    > {id} (reincarnated at {last_reincarnated:?})",
-                    );
                 }
             }
         };
