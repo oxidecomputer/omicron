@@ -9,7 +9,7 @@ use diesel::sql_types;
 use uuid::Uuid;
 
 /// For a given Oximeter instance (which is presumably no longer running),
-/// reassign any collectors assigned to it to a different Oximeter. Each
+/// reassign any producers assigned to it to a different Oximeter. Each
 /// assignment is randomly chosen from among the non-expunged Oximeter instances
 /// recorded in the `oximeter` table.
 pub fn reassign_producers_query(oximeter_id: Uuid) -> TypedSqlQuery<()> {

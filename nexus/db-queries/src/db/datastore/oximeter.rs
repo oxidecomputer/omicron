@@ -30,8 +30,7 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::ResourceType;
 use uuid::Uuid;
 
-/// Type returned when reassigning producers from a (presumably defunct)
-/// Oximeter collector.
+/// Type returned when reassigning producers from an Oximeter collector.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CollectorReassignment {
     /// Success: `n` producers were reassigned to other collector(s).
@@ -43,6 +42,8 @@ pub enum CollectorReassignment {
 
 impl DataStore {
     /// Lookup an oximeter instance by its ID.
+    ///
+    /// Fails if the instance has been expunged.
     pub async fn oximeter_lookup(
         &self,
         opctx: &OpContext,
@@ -126,6 +127,8 @@ impl DataStore {
     }
 
     /// List the oximeter collector instances
+    ///
+    /// Omits expunged instances.
     pub async fn oximeter_list(
         &self,
         opctx: &OpContext,
