@@ -197,50 +197,51 @@ impl InstanceReincarnation {
                 "sagas_started" => total_sagas_started - prev_sagas_started,
                 "total_sagas_started" => total_sagas_started,
             );
-        }
 
-        // All sagas started, wait for them to come back...
-        while let Some(saga_result) = tasks.join_next().await {
-            match saga_result {
-                // Start saga completed successfully
-                Ok(Ok(instance_id)) => {
-                    debug!(
-                        opctx.log,
-                        "welcome back to the realm of the living, {instance_id}!";
-                        "instance_id" => %instance_id,
-                    );
-                    status.instances_reincarnated.push(instance_id);
-                }
-                // The instance's state changed in the meantime, that's fine...
-                Ok(Err((instance_id, err @ Error::Conflict { .. }))) => {
-                    debug!(
-                        opctx.log,
-                        "instance {instance_id} changed state before it could be reincarnated";
-                        "instance_id" => %instance_id,
-                        "error" => err,
-                    );
-                    status.changed_state.push(instance_id);
-                }
-                // Start saga failed
-                Ok(Err((instance_id, error))) => {
-                    const ERR_MSG: &'static str = "instance-start saga failed";
-                    warn!(opctx.log,
-                        "{ERR_MSG}";
-                        "instance_id" => %instance_id,
-                        "error" => %error,
-                    );
-                    status
-                        .restart_errors
-                        .push((instance_id, format!("{ERR_MSG}: {error}")));
-                }
-                Err(e) => {
-                    const JOIN_ERR_MSG: &'static str =
+            // All sagas started, wait for them to come back...
+            while let Some(saga_result) = tasks.join_next().await {
+                match saga_result {
+                    // Start saga completed successfully
+                    Ok(Ok(instance_id)) => {
+                        debug!(
+                            opctx.log,
+                            "welcome back to the realm of the living, {instance_id}!";
+                            "instance_id" => %instance_id,
+                        );
+                        status.instances_reincarnated.push(instance_id);
+                    }
+                    // The instance's state changed in the meantime, that's fine...
+                    Ok(Err((instance_id, err @ Error::Conflict { .. }))) => {
+                        debug!(
+                            opctx.log,
+                            "instance {instance_id} changed state before it could be reincarnated";
+                            "instance_id" => %instance_id,
+                            "error" => err,
+                        );
+                        status.changed_state.push(instance_id);
+                    }
+                    // Start saga failed
+                    Ok(Err((instance_id, error))) => {
+                        const ERR_MSG: &'static str =
+                            "instance-start saga failed";
+                        warn!(opctx.log,
+                            "{ERR_MSG}";
+                            "instance_id" => %instance_id,
+                            "error" => %error,
+                        );
+                        status
+                            .restart_errors
+                            .push((instance_id, format!("{ERR_MSG}: {error}")));
+                    }
+                    Err(e) => {
+                        const JOIN_ERR_MSG: &'static str =
                         "tasks spawned on the JoinSet should never return a \
                         JoinError, as nexus is compiled with panic=\"abort\", \
                         and we never cancel them...";
-                    error!(opctx.log, "{JOIN_ERR_MSG}"; "error" => %e);
-                    if cfg!(debug_assertions) {
-                        unreachable!("{JOIN_ERR_MSG} but, I saw {e}!",)
+                        error!(opctx.log, "{JOIN_ERR_MSG}"; "error" => %e);
+                        if cfg!(debug_assertions) {
+                            unreachable!("{JOIN_ERR_MSG} but, I saw {e}!",)
+                        }
                     }
                 }
             }
