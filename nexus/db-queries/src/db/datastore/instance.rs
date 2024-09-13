@@ -39,7 +39,7 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::pg;
 use diesel::prelude::*;
-use diesel::sql_types;
+use diesel::sql_types::{Bool, Nullable};
 use nexus_db_model::Disk;
 use omicron_common::api;
 use omicron_common::api::external;
@@ -303,8 +303,7 @@ impl ReincarnationFilter {
     }
 
     fn where_clause(
-    ) -> impl Expression<SqlType = sql_types::Nullable<sql_types::Bool>>
-           + AppearsOnTable<nexus_db_model::schema::instance::table>
+    ) -> impl AppearsOnTable<db::schema::instance::table, SqlType = Nullable<Bool>>
            + diesel::query_builder::QueryId
            + diesel::query_builder::QueryFragment<pg::Pg>
            // I have no idea what this means, but it seems important to Diesel...
