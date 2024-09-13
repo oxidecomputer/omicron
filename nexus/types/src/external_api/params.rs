@@ -988,7 +988,7 @@ pub enum ExternalIpDetach {
 #[serde(rename_all = "snake_case")]
 pub enum InstanceAutoRestart {
     /// The instance should not be automatically restarted by the control plane
-    /// if it failures.
+    /// if it fails.
     Never,
     /// The instance should be automatically restarted by the control plane if
     /// the sled that it's running on reboots or fails, but it should not be

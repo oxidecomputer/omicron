@@ -224,15 +224,6 @@ pub struct InstanceRuntimeState {
     /// instance has never been auto-restarted by the control plane.
     ///
     /// This field is guarded by the instance's `gen`.
-    // XXX(eliza): I don't love this being a field on `InstanceRuntimeState`,
-    // which has "treat `None` as `NULL`" semantics, meaning that any code that
-    // updates an `InstanceRuntimeState` will have to be careful to not clobber
-    // this...but, it needs to be set in the `instance-start` saga in an
-    // `instance_update_runtime` query, and I don't really want to add a
-    // separate query just to set this field. Most code that sets an
-    // `InstanceRuntimeState` (outside of tests) always copies all other fields
-    // from the prior `InstanceRuntimeState` anyway, so it's unlikely that this
-    // will be messed up...
     #[diesel(column_name = time_last_auto_restarted)]
     pub time_last_auto_restarted: Option<DateTime<Utc>>,
 }

@@ -29,9 +29,6 @@ pub struct InstanceReincarnation {
     /// from now, it may not be automatically restarted until it's had some time
     /// to calm down. This is intended to try and reduce the impact of tight
     /// crash loops.
-    //
-    // TODO(eliza): this default should be overridden by a project-level default
-    // when https://github.com/oxidecomputer/omicron/issues/1015 is implemented.
     default_cooldown: TimeDelta,
     /// The maximum number of concurrently executing instance-start sagas.
     concurrency_limit: NonZeroU32,
