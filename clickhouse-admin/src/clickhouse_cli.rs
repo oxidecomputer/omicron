@@ -74,7 +74,7 @@ impl ClickhouseCli {
 
     pub async fn lgif(&self) -> Result<Lgif, ClickhouseCliError> {
         self.keeper_client_non_interactive(
-            ["lgif"].into_iter(),
+            "lgif",
             "Retrieve logically grouped information file",
             Lgif::parse,
             self.log.clone().unwrap(),
@@ -82,15 +82,14 @@ impl ClickhouseCli {
         .await
     }
 
-    async fn keeper_client_non_interactive<'a, I, F, T>(
+    async fn keeper_client_non_interactive<'a, F, T>(
         &self,
-        subcommand_args: I,
+        query: &str,
         subcommand_description: &'static str,
         parse: F,
         log: Logger,
     ) -> Result<T, ClickhouseCliError>
     where
-        I: Iterator<Item = &'a str>,
         F: FnOnce(&Logger, &[u8]) -> Result<T>,
     {
         let mut command = Command::new(&self.binary_path);
@@ -100,11 +99,8 @@ impl ClickhouseCli {
             .arg(&format!("[{}]", self.listen_address.ip()))
             .arg("--port")
             .arg(&format!("{}", self.listen_address.port()))
-            .arg("--query");
-
-        let args: Vec<&'a str> = subcommand_args.collect();
-        let query = args.join(" ");
-        command.arg(query);
+            .arg("--query")
+            .arg(query);
 
         let output = command.output().await.map_err(|err| {
             let args: Vec<&OsStr> = command.as_std().get_args().collect();
