@@ -10,13 +10,14 @@ use crate::{
 };
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use std::{
     collections::{HashMap, HashSet},
     fmt,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     str::FromStr,
 };
+use strum::EnumCount;
 use uuid::Uuid;
 
 use super::nexus::HostIdentifier;
@@ -379,6 +380,84 @@ impl FromStr for UplinkAddressConfig {
     }
 }
 
+#[derive(
+    Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq, JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+/// To what extent should this port participate in LLDP
+pub enum LldpAdminStatus {
+    #[default]
+    Enabled,
+    Disabled,
+    RxOnly,
+    TxOnly,
+}
+
+impl fmt::Display for LldpAdminStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LldpAdminStatus::Enabled => write!(f, "enabled"),
+            LldpAdminStatus::Disabled => write!(f, "disabled"),
+            LldpAdminStatus::RxOnly => write!(f, "rx_only"),
+            LldpAdminStatus::TxOnly => write!(f, "tx_only"),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct ParseLldpAdminStatusError(String);
+
+impl std::fmt::Display for ParseLldpAdminStatusError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "LLDP admin status error: {}", self.0)
+    }
+}
+
+impl FromStr for LldpAdminStatus {
+    type Err = ParseLldpAdminStatusError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "enabled" => Ok(Self::Enabled),
+            "disabled" => Ok(Self::Disabled),
+            "rxonly" | "rx_only" => Ok(Self::RxOnly),
+            "txonly" | "tx_only" => Ok(Self::TxOnly),
+            _ => Err(ParseLldpAdminStatusError(format!(
+                "not a valid admin status: {s}"
+            ))),
+        }
+    }
+}
+
+/// Per-port LLDP configuration settings.  Only the "status" setting is
+/// mandatory.  All other fields have natural defaults or may be inherited from
+/// the switch.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
+pub struct LldpPortConfig {
+    /// To what extent should this port participate in LLDP
+    pub status: LldpAdminStatus,
+    /// Chassis ID to advertise.  If this is set, it will be advertised as a
+    /// LocallyAssigned ID type.  If this is not set, it will be
+    /// inherited from the switch-level settings.
+    pub chassis_id: Option<String>,
+    /// Port ID to advertise.  If this is set, it will be advertised as a
+    /// LocallyAssigned ID type.  If this is not set, it will be set to
+    /// the port name. e.g., qsfp0/0.
+    pub port_id: Option<String>,
+    /// Port description to advertise.  If this is not set, no
+    /// description will be advertised.
+    pub port_description: Option<String>,
+    /// System name to advertise.  If this is not set, it will be
+    /// inherited from the switch-level settings.
+    pub system_name: Option<String>,
+    /// System description to advertise.  If this is not set, it will be
+    /// inherited from the switch-level settings.
+    pub system_description: Option<String>,
+    /// Management IP addresses to advertise.  If this is not set, it will be
+    /// inherited from the switch-level settings.
+    pub management_addrs: Option<Vec<IpAddr>>,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 pub struct PortConfigV2 {
     /// The set of routes associated with this port.
@@ -398,6 +477,8 @@ pub struct PortConfigV2 {
     /// Whether or not to set autonegotiation
     #[serde(default)]
     pub autoneg: bool,
+    /// LLDP configuration for this port
+    pub lldp: Option<LldpPortConfig>,
 }
 
 /// A set of switch uplinks.
@@ -414,11 +495,13 @@ pub struct HostPortConfig {
     /// IP Address and prefix (e.g., `192.168.0.1/16`) to apply to switchport
     /// (must be in infra_ip pool).  May also include an optional VLAN ID.
     pub addrs: Vec<UplinkAddressConfig>,
+
+    pub lldp: Option<LldpPortConfig>,
 }
 
 impl From<PortConfigV2> for HostPortConfig {
     fn from(x: PortConfigV2) -> Self {
-        Self { port: x.port, addrs: x.addresses }
+        Self { port: x.port, addrs: x.addresses, lldp: x.lldp.clone() }
     }
 }
 
@@ -755,13 +838,11 @@ pub struct ResolvedVpcRouteSet {
 }
 
 /// Describes the purpose of the dataset.
-#[derive(
-    Debug, Serialize, Deserialize, JsonSchema, Clone, Copy, PartialEq, Eq,
-)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Hash, EnumCount)]
 pub enum DatasetKind {
-    Crucible,
+    // Durable datasets for zones
     Cockroach,
+    Crucible,
     /// Used for single-node clickhouse deployments
     Clickhouse,
     /// Used for replicated clickhouse deployments
@@ -770,21 +851,150 @@ pub enum DatasetKind {
     ClickhouseServer,
     ExternalDns,
     InternalDns,
+
+    // Zone filesystems
+    ZoneRoot,
+    Zone {
+        name: String,
+    },
+
+    // Other datasets
+    Debug,
 }
 
+impl Serialize for DatasetKind {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for DatasetKind {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        s.parse().map_err(de::Error::custom)
+    }
+}
+
+impl JsonSchema for DatasetKind {
+    fn schema_name() -> String {
+        "DatasetKind".to_string()
+    }
+
+    fn json_schema(
+        gen: &mut schemars::gen::SchemaGenerator,
+    ) -> schemars::schema::Schema {
+        // The schema is a bit more complicated than this -- it's either one of
+        // the fixed values or a string starting with "zone/" -- but this is
+        // good enough for now.
+        let mut schema = <String>::json_schema(gen).into_object();
+        schema.metadata().description = Some(
+            "The kind of dataset. See the `DatasetKind` enum \
+             in omicron-common for possible values."
+                .to_owned(),
+        );
+        schema.into()
+    }
+}
+
+impl DatasetKind {
+    pub fn dataset_should_be_encrypted(&self) -> bool {
+        match self {
+            // We encrypt all datasets except Crucible.
+            //
+            // Crucible already performs encryption internally, and we
+            // avoid double-encryption.
+            DatasetKind::Crucible => false,
+            _ => true,
+        }
+    }
+
+    /// Returns true if this dataset is delegated to a non-global zone.
+    pub fn zoned(&self) -> bool {
+        use DatasetKind::*;
+        match self {
+            Cockroach | Crucible | Clickhouse | ClickhouseKeeper
+            | ClickhouseServer | ExternalDns | InternalDns => true,
+            ZoneRoot | Zone { .. } | Debug => false,
+        }
+    }
+
+    /// Returns the zone name, if this is a dataset for a zone filesystem.
+    ///
+    /// Otherwise, returns "None".
+    pub fn zone_name(&self) -> Option<&str> {
+        if let DatasetKind::Zone { name } = self {
+            Some(name)
+        } else {
+            None
+        }
+    }
+}
+
+// Be cautious updating this implementation:
+//
+// - It should align with [DatasetKind::FromStr], below
+// - The strings here are used here comprise the dataset name, stored durably
+// on-disk
 impl fmt::Display for DatasetKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use DatasetKind::*;
         let s = match self {
             Crucible => "crucible",
-            Cockroach => "cockroach",
+            Cockroach => "cockroachdb",
             Clickhouse => "clickhouse",
             ClickhouseKeeper => "clickhouse_keeper",
             ClickhouseServer => "clickhouse_server",
             ExternalDns => "external_dns",
             InternalDns => "internal_dns",
+            ZoneRoot => "zone",
+            Zone { name } => {
+                write!(f, "zone/{}", name)?;
+                return Ok(());
+            }
+            Debug => "debug",
         };
         write!(f, "{}", s)
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum DatasetKindParseError {
+    #[error("Dataset unknown: {0}")]
+    UnknownDataset(String),
+}
+
+impl FromStr for DatasetKind {
+    type Err = DatasetKindParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        use DatasetKind::*;
+        let kind = match s {
+            "cockroachdb" => Cockroach,
+            "crucible" => Crucible,
+            "clickhouse" => Clickhouse,
+            "clickhouse_keeper" => ClickhouseKeeper,
+            "clickhouse_server" => ClickhouseServer,
+            "external_dns" => ExternalDns,
+            "internal_dns" => InternalDns,
+            "zone" => ZoneRoot,
+            "debug" => Debug,
+            other => {
+                if let Some(name) = other.strip_prefix("zone/") {
+                    Zone { name: name.to_string() }
+                } else {
+                    return Err(DatasetKindParseError::UnknownDataset(
+                        s.to_string(),
+                    ));
+                }
+            }
+        };
+        Ok(kind)
     }
 }
 
@@ -810,6 +1020,7 @@ pub struct SledIdentifiers {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::api::internal::shared::AllowedSourceIps;
     use oxnet::{IpNet, Ipv4Net, Ipv6Net};
     use std::net::{Ipv4Addr, Ipv6Addr};
@@ -853,5 +1064,50 @@ mod tests {
             AllowedSourceIps::Any,
             serde_json::from_str(r#"{"allow":"any"}"#).unwrap(),
         );
+    }
+
+    #[test]
+    fn test_dataset_kind_serialization() {
+        let kinds = [
+            DatasetKind::Cockroach,
+            DatasetKind::Crucible,
+            DatasetKind::Clickhouse,
+            DatasetKind::ClickhouseKeeper,
+            DatasetKind::ClickhouseServer,
+            DatasetKind::ExternalDns,
+            DatasetKind::InternalDns,
+            DatasetKind::ZoneRoot,
+            DatasetKind::Zone { name: String::from("myzone") },
+            DatasetKind::Debug,
+        ];
+
+        assert_eq!(kinds.len(), DatasetKind::COUNT);
+
+        for kind in &kinds {
+            // To string, from string
+            let as_str = kind.to_string();
+            let from_str =
+                DatasetKind::from_str(&as_str).unwrap_or_else(|_| {
+                    panic!("Failed to convert {kind} to and from string")
+                });
+            assert_eq!(
+                *kind, from_str,
+                "{kind} failed to convert to/from a string"
+            );
+
+            // Serialize, deserialize
+            let ser = serde_json::to_string(&kind)
+                .unwrap_or_else(|_| panic!("Failed to serialize {kind}"));
+            let de: DatasetKind = serde_json::from_str(&ser)
+                .unwrap_or_else(|_| panic!("Failed to deserialize {kind}"));
+            assert_eq!(*kind, de, "{kind} failed serialization");
+
+            // Test that serialization is equivalent to stringifying.
+            assert_eq!(
+                format!("\"{as_str}\""),
+                ser,
+                "{kind} does not match stringification/serialization"
+            );
+        }
     }
 }

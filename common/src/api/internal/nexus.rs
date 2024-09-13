@@ -10,7 +10,6 @@ use crate::api::external::{
 };
 use chrono::{DateTime, Utc};
 use omicron_uuid_kinds::DownstairsRegionKind;
-use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::TypedUuid;
 use omicron_uuid_kinds::UpstairsRepairKind;
 use omicron_uuid_kinds::UpstairsSessionKind;
@@ -60,23 +59,6 @@ pub struct InstanceProperties {
     pub hostname: Hostname,
 }
 
-/// The dynamic runtime properties of an instance: its current VMM ID (if any),
-/// migration information (if any), and the instance state to report if there is
-/// no active VMM.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct InstanceRuntimeState {
-    /// The instance's currently active VMM ID.
-    pub propolis_id: Option<PropolisUuid>,
-    /// If a migration is active, the ID of the target VMM.
-    pub dst_propolis_id: Option<PropolisUuid>,
-    /// If a migration is active, the ID of that migration.
-    pub migration_id: Option<Uuid>,
-    /// Generation number for this state.
-    pub gen: Generation,
-    /// Timestamp for this information.
-    pub time_updated: DateTime<Utc>,
-}
-
 /// One of the states that a VMM can be in.
 #[derive(
     Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq,
@@ -102,6 +84,17 @@ pub enum VmmState {
     Destroyed,
 }
 
+impl VmmState {
+    /// States in which the VMM no longer exists and must be cleaned up.
+    pub const TERMINAL_STATES: &'static [Self] =
+        &[Self::Failed, Self::Destroyed];
+
+    /// Returns `true` if this VMM is in a terminal state.
+    pub fn is_terminal(&self) -> bool {
+        Self::TERMINAL_STATES.contains(self)
+    }
+}
+
 /// The dynamic runtime properties of an individual VMM process.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VmmRuntimeState {
@@ -113,13 +106,9 @@ pub struct VmmRuntimeState {
     pub time_updated: DateTime<Utc>,
 }
 
-/// A wrapper type containing a sled's total knowledge of the state of a
-/// specific VMM and the instance it incarnates.
+/// A wrapper type containing a sled's total knowledge of the state of a VMM.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct SledInstanceState {
-    /// The ID of the VMM whose state is being reported.
-    pub propolis_id: PropolisUuid,
-
+pub struct SledVmmState {
     /// The most recent state of the sled's VMM process.
     pub vmm_state: VmmRuntimeState,
 
@@ -142,7 +131,7 @@ impl Migrations<'_> {
     }
 }
 
-impl SledInstanceState {
+impl SledVmmState {
     pub fn migrations(&self) -> Migrations<'_> {
         Migrations {
             migration_in: self.migration_in.as_ref(),
@@ -223,6 +212,8 @@ pub enum ProducerKind {
     Service,
     /// The producer is a Propolis VMM managing a guest instance.
     Instance,
+    /// The producer is a management gateway service.
+    ManagementGateway,
 }
 
 /// Information announced by a metric server, used so that clients can contact it and collect
@@ -277,31 +268,15 @@ pub struct UpdateArtifactId {
 // Adding a new KnownArtifactKind
 // ===============================
 //
-// Adding a new update artifact kind is a tricky process. To do so:
+// To add a new kind of update artifact:
 //
 // 1. Add it here.
+// 2. Regenerate OpenAPI documents with `cargo xtask openapi generate` -- this
+//    should work without any compile errors.
+// 3. Run `cargo check --all-targets` to resolve compile errors.
 //
-// 2. Add the new kind to <repo root>/clients/src/lib.rs.
-//    The mapping from `UpdateArtifactKind::*` to `types::UpdateArtifactKind::*`
-//    must be left as a `todo!()` for now; `types::UpdateArtifactKind` will not
-//    be updated with the new variant until step 5 below.
-//
-// 4. Add the new kind and the mapping to its `update_artifact_kind` to
-//    <repo root>/nexus/db-model/src/update_artifact.rs
-//
-// 5. Regenerate the OpenAPI specs for nexus and sled-agent:
-//
-//    ```
-//    EXPECTORATE=overwrite cargo nextest run -p omicron-nexus -p omicron-sled-agent openapi
-//    ```
-//
-// 6. Return to <repo root>/{nexus-client,sled-agent-client}/lib.rs from step 2
-//    and replace the `todo!()`s with the new `types::UpdateArtifactKind::*`
-//    variant.
-//
-// See https://github.com/oxidecomputer/omicron/pull/2300 as an example.
-//
-// NOTE: KnownArtifactKind has to be in snake_case due to openapi-lint requirements.
+// NOTE: KnownArtifactKind has to be in snake_case due to openapi-lint
+// requirements.
 
 /// Kinds of update artifacts, as used by Nexus to determine what updates are available and by
 /// sled-agent to determine how to apply an update when asked.

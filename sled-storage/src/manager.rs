@@ -7,7 +7,7 @@
 use std::collections::HashSet;
 
 use crate::config::MountConfig;
-use crate::dataset::{DatasetName, CONFIG_DATASET};
+use crate::dataset::CONFIG_DATASET;
 use crate::disk::RawDisk;
 use crate::error::Error;
 use crate::resources::{AllDisks, StorageResources};
@@ -18,11 +18,14 @@ use illumos_utils::zfs::{Mountpoint, Zfs};
 use illumos_utils::zpool::ZpoolName;
 use key_manager::StorageKeyRequester;
 use omicron_common::disk::{
-    DiskIdentity, DiskVariant, DisksManagementResult,
+    DatasetConfig, DatasetManagementStatus, DatasetName, DatasetsConfig,
+    DatasetsManagementResult, DiskIdentity, DiskVariant, DisksManagementResult,
     OmicronPhysicalDisksConfig,
 };
 use omicron_common::ledger::Ledger;
-use slog::{info, o, warn, Logger};
+use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::GenericUuid;
+use slog::{error, info, o, warn, Logger};
 use std::future::Future;
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::{interval, Duration, MissedTickBehavior};
@@ -61,6 +64,9 @@ const SYNCHRONIZE_INTERVAL: Duration = Duration::from_secs(10);
 
 // The filename of the ledger storing physical disk info
 const DISKS_LEDGER_FILENAME: &str = "omicron-physical-disks.json";
+
+// The filename of the ledger storing dataset info
+const DATASETS_LEDGER_FILENAME: &str = "omicron-datasets.json";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StorageManagerState {
@@ -112,6 +118,16 @@ pub(crate) enum StorageRequest {
     DetectedRawDisksChanged {
         raw_disks: HashSet<RawDisk>,
         tx: DebugIgnore<oneshot::Sender<Result<(), Error>>>,
+    },
+
+    DatasetsEnsure {
+        config: DatasetsConfig,
+        tx: DebugIgnore<
+            oneshot::Sender<Result<DatasetsManagementResult, Error>>,
+        >,
+    },
+    DatasetsList {
+        tx: DebugIgnore<oneshot::Sender<Result<DatasetsConfig, Error>>>,
     },
 
     // Requests to explicitly manage or stop managing a set of devices
@@ -240,6 +256,31 @@ impl StorageHandle {
         rx.map(|result| result.unwrap())
     }
 
+    pub async fn datasets_ensure(
+        &self,
+        config: DatasetsConfig,
+    ) -> Result<DatasetsManagementResult, Error> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(StorageRequest::DatasetsEnsure { config, tx: tx.into() })
+            .await
+            .unwrap();
+
+        rx.await.unwrap()
+    }
+
+    /// Reads the last value written to storage by
+    /// [Self::datasets_ensure].
+    pub async fn datasets_config_list(&self) -> Result<DatasetsConfig, Error> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(StorageRequest::DatasetsList { tx: tx.into() })
+            .await
+            .unwrap();
+
+        rx.await.unwrap()
+    }
+
     pub async fn omicron_physical_disks_ensure(
         &self,
         config: OmicronPhysicalDisksConfig,
@@ -322,6 +363,10 @@ impl StorageHandle {
         rx.await.unwrap()
     }
 
+    // TODO(https://github.com/oxidecomputer/omicron/issues/6043):
+    //
+    // Deprecate usage of this function, prefer to call "datasets_ensure"
+    // and ask for the set of all datasets from Nexus.
     pub async fn upsert_filesystem(
         &self,
         dataset_id: Uuid,
@@ -428,6 +473,12 @@ impl StorageManager {
                 self.ensure_using_exactly_these_disks(raw_disks).await;
                 let _ = tx.0.send(Ok(()));
             }
+            StorageRequest::DatasetsEnsure { config, tx } => {
+                let _ = tx.0.send(self.datasets_ensure(config).await);
+            }
+            StorageRequest::DatasetsList { tx } => {
+                let _ = tx.0.send(self.datasets_config_list().await);
+            }
             StorageRequest::OmicronPhysicalDisksEnsure { config, tx } => {
                 let _ =
                     tx.0.send(self.omicron_physical_disks_ensure(config).await);
@@ -485,12 +536,29 @@ impl StorageManager {
         );
     }
 
+    // Sled Agents can remember which disks they need to manage by reading
+    // a configuration file from the M.2s.
+    //
+    // This function returns the paths to those configuration files.
     async fn all_omicron_disk_ledgers(&self) -> Vec<Utf8PathBuf> {
         self.resources
             .disks()
             .all_m2_mountpoints(CONFIG_DATASET)
             .into_iter()
             .map(|p| p.join(DISKS_LEDGER_FILENAME))
+            .collect()
+    }
+
+    // Sled Agents can remember which datasets they need to manage by reading
+    // a configuration file from the M.2s.
+    //
+    // This function returns the paths to those configuration files.
+    async fn all_omicron_dataset_ledgers(&self) -> Vec<Utf8PathBuf> {
+        self.resources
+            .disks()
+            .all_m2_mountpoints(CONFIG_DATASET)
+            .into_iter()
+            .map(|p| p.join(DATASETS_LEDGER_FILENAME))
             .collect()
     }
 
@@ -545,9 +613,11 @@ impl StorageManager {
         self.resources.insert_or_update_disk(raw_disk).await
     }
 
-    async fn load_ledger(&self) -> Option<Ledger<OmicronPhysicalDisksConfig>> {
+    async fn load_disks_ledger(
+        &self,
+    ) -> Option<Ledger<OmicronPhysicalDisksConfig>> {
         let ledger_paths = self.all_omicron_disk_ledgers().await;
-        let log = self.log.new(o!("request" => "load_ledger"));
+        let log = self.log.new(o!("request" => "load_disks_ledger"));
         let maybe_ledger = Ledger::<OmicronPhysicalDisksConfig>::new(
             &log,
             ledger_paths.clone(),
@@ -579,7 +649,7 @@ impl StorageManager {
         // Now that we're actually able to unpack U.2s, attempt to load the
         // set of disks which we previously stored in the ledger, if one
         // existed.
-        let ledger = self.load_ledger().await;
+        let ledger = self.load_disks_ledger().await;
         if let Some(ledger) = ledger {
             info!(self.log, "Setting StorageResources state to match ledger");
 
@@ -591,7 +661,158 @@ impl StorageManager {
             info!(self.log, "KeyManager ready, but no ledger detected");
         }
 
+        // We don't load any configuration for datasets, since we aren't
+        // currently storing any dataset information in-memory.
+        //
+        // If we ever wanted to do so, however, we could load that information
+        // here.
+
         Ok(())
+    }
+
+    async fn datasets_ensure(
+        &mut self,
+        config: DatasetsConfig,
+    ) -> Result<DatasetsManagementResult, Error> {
+        let log = self.log.new(o!("request" => "datasets_ensure"));
+
+        // As a small input-check, confirm that the UUID of the map of inputs
+        // matches the DatasetConfig.
+        //
+        // The dataset configs are sorted by UUID so they always appear in the
+        // same order, but this check prevents adding an entry of:
+        // - (UUID: X, Config(UUID: Y)), for X != Y
+        if !config.datasets.iter().all(|(id, config)| *id == config.id) {
+            return Err(Error::ConfigUuidMismatch);
+        }
+
+        // We rely on the schema being stable across reboots -- observe
+        // "test_datasets_schema" below for that property guarantee.
+        let ledger_paths = self.all_omicron_dataset_ledgers().await;
+        let maybe_ledger =
+            Ledger::<DatasetsConfig>::new(&log, ledger_paths.clone()).await;
+
+        let mut ledger = match maybe_ledger {
+            Some(ledger) => {
+                info!(
+                    log,
+                    "Comparing 'requested datasets' to ledger on internal storage"
+                );
+                let ledger_data = ledger.data();
+                if config.generation < ledger_data.generation {
+                    warn!(
+                        log,
+                        "Request looks out-of-date compared to prior request";
+                        "requested_generation" => ?config.generation,
+                        "ledger_generation" => ?ledger_data.generation,
+                    );
+                    return Err(Error::DatasetConfigurationOutdated {
+                        requested: config.generation,
+                        current: ledger_data.generation,
+                    });
+                } else if config.generation == ledger_data.generation {
+                    info!(
+                        log,
+                        "Requested generation number matches prior request",
+                    );
+
+                    if ledger_data != &config {
+                        error!(
+                            log,
+                            "Requested configuration changed (with the same generation)";
+                            "generation" => ?config.generation
+                        );
+                        return Err(Error::DatasetConfigurationChanged {
+                            generation: config.generation,
+                        });
+                    }
+                } else {
+                    info!(
+                        log,
+                        "Request looks newer than prior requests";
+                        "requested_generation" => ?config.generation,
+                        "ledger_generation" => ?ledger_data.generation,
+                    );
+                }
+                ledger
+            }
+            None => {
+                info!(log, "No previously-stored 'requested datasets', creating new ledger");
+                Ledger::<DatasetsConfig>::new_with(
+                    &log,
+                    ledger_paths.clone(),
+                    DatasetsConfig::default(),
+                )
+            }
+        };
+
+        let result = self.datasets_ensure_internal(&log, &config).await;
+
+        let ledger_data = ledger.data_mut();
+        if *ledger_data == config {
+            return Ok(result);
+        }
+        *ledger_data = config;
+        ledger.commit().await?;
+
+        Ok(result)
+    }
+
+    // Attempts to ensure that each dataset exist.
+    //
+    // Does not return an error, because the [DatasetsManagementResult] type
+    // includes details about all possible errors that may occur on
+    // a per-dataset granularity.
+    async fn datasets_ensure_internal(
+        &mut self,
+        log: &Logger,
+        config: &DatasetsConfig,
+    ) -> DatasetsManagementResult {
+        let mut status = vec![];
+        for dataset in config.datasets.values() {
+            status.push(self.dataset_ensure_internal(log, dataset).await);
+        }
+        DatasetsManagementResult { status }
+    }
+
+    async fn dataset_ensure_internal(
+        &mut self,
+        log: &Logger,
+        config: &DatasetConfig,
+    ) -> DatasetManagementStatus {
+        let log = log.new(o!("name" => config.name.full_name()));
+        info!(log, "Ensuring dataset");
+        let mut status = DatasetManagementStatus {
+            dataset_name: config.name.clone(),
+            err: None,
+        };
+
+        if let Err(err) = self.ensure_dataset(config).await {
+            warn!(log, "Failed to ensure dataset"; "dataset" => ?status.dataset_name, "err" => ?err);
+            status.err = Some(err.to_string());
+        };
+
+        status
+    }
+
+    // Lists datasets that this sled is configured to use.
+    async fn datasets_config_list(&mut self) -> Result<DatasetsConfig, Error> {
+        let log = self.log.new(o!("request" => "datasets_config_list"));
+
+        let ledger_paths = self.all_omicron_dataset_ledgers().await;
+        let maybe_ledger =
+            Ledger::<DatasetsConfig>::new(&log, ledger_paths.clone()).await;
+
+        match maybe_ledger {
+            Some(ledger) => {
+                info!(log, "Found ledger on internal storage");
+                return Ok(ledger.data().clone());
+            }
+            None => {
+                info!(log, "No ledger detected on internal storage");
+                return Err(Error::LedgerNotFound);
+            }
+        }
     }
 
     // Makes an U.2 disk managed by the control plane within [`StorageResources`].
@@ -765,6 +986,77 @@ impl StorageManager {
         }
     }
 
+    // Ensures a dataset exists within a zpool, according to `config`.
+    async fn ensure_dataset(
+        &mut self,
+        config: &DatasetConfig,
+    ) -> Result<(), Error> {
+        info!(self.log, "ensure_dataset"; "config" => ?config);
+
+        // We can only place datasets within managed disks.
+        // If a disk is attached to this sled, but not a part of the Control
+        // Plane, it is treated as "not found" for dataset placement.
+        if !self
+            .resources
+            .disks()
+            .iter_managed()
+            .any(|(_, disk)| disk.zpool_name() == config.name.pool())
+        {
+            return Err(Error::ZpoolNotFound(format!(
+                "{}",
+                config.name.pool(),
+            )));
+        }
+
+        let zoned = config.name.dataset().zoned();
+        let mountpoint_path = if zoned {
+            Utf8PathBuf::from("/data")
+        } else {
+            config.name.pool().dataset_mountpoint(
+                &Utf8PathBuf::from("/"),
+                &config.name.dataset().to_string(),
+            )
+        };
+        let mountpoint = Mountpoint::Path(mountpoint_path);
+
+        let fs_name = &config.name.full_name();
+        let do_format = true;
+
+        // The "crypt" dataset needs these details, but should already exist
+        // by the time we're creating datasets inside.
+        let encryption_details = None;
+        let size_details = Some(illumos_utils::zfs::SizeDetails {
+            quota: config.quota,
+            reservation: config.reservation,
+            compression: config.compression,
+        });
+        Zfs::ensure_filesystem(
+            fs_name,
+            mountpoint,
+            zoned,
+            do_format,
+            encryption_details,
+            size_details,
+            None,
+        )?;
+        // Ensure the dataset has a usable UUID.
+        if let Ok(id_str) = Zfs::get_oxide_value(&fs_name, "uuid") {
+            if let Ok(id) = id_str.parse::<DatasetUuid>() {
+                if id != config.id {
+                    return Err(Error::UuidMismatch {
+                        name: Box::new(config.name.clone()),
+                        old: id.into_untyped_uuid(),
+                        new: config.id.into_untyped_uuid(),
+                    });
+                }
+                return Ok(());
+            }
+        }
+        Zfs::set_oxide_value(&fs_name, "uuid", &config.id.to_string())?;
+
+        Ok(())
+    }
+
     // Attempts to add a dataset within a zpool, according to `request`.
     async fn add_dataset(
         &mut self,
@@ -824,16 +1116,19 @@ impl StorageManager {
 /// systems.
 #[cfg(all(test, target_os = "illumos"))]
 mod tests {
-    use crate::dataset::DatasetType;
     use crate::disk::RawSyntheticDisk;
     use crate::manager_test_harness::StorageManagerTestHarness;
 
     use super::*;
     use camino_tempfile::tempdir_in;
+    use omicron_common::api::external::Generation;
+    use omicron_common::disk::CompressionAlgorithm;
+    use omicron_common::disk::DatasetKind;
     use omicron_common::disk::DiskManagementError;
     use omicron_common::ledger;
     use omicron_test_utils::dev::test_setup_log;
     use sled_hardware::DiskFirmware;
+    use std::collections::BTreeMap;
     use std::sync::atomic::Ordering;
     use uuid::Uuid;
 
@@ -1299,12 +1594,93 @@ mod tests {
         let dataset_id = Uuid::new_v4();
         let zpool_name = ZpoolName::new_external(config.disks[0].pool_id);
         let dataset_name =
-            DatasetName::new(zpool_name.clone(), DatasetType::Crucible);
+            DatasetName::new(zpool_name.clone(), DatasetKind::Crucible);
         harness
             .handle()
             .upsert_filesystem(dataset_id, dataset_name)
             .await
             .unwrap();
+
+        harness.cleanup().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn ensure_datasets() {
+        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
+        let logctx = test_setup_log("ensure_datasets");
+        let mut harness = StorageManagerTestHarness::new(&logctx.log).await;
+
+        // Test setup: Add a U.2 and M.2, adopt them into the "control plane"
+        // for usage.
+        harness.handle().key_manager_ready().await;
+        let raw_disks =
+            harness.add_vdevs(&["u2_under_test.vdev", "m2_helping.vdev"]).await;
+        let config = harness.make_config(1, &raw_disks);
+        let result = harness
+            .handle()
+            .omicron_physical_disks_ensure(config.clone())
+            .await
+            .expect("Ensuring disks should work after key manager is ready");
+        assert!(!result.has_error(), "{:?}", result);
+
+        // Create a dataset on the newly formatted U.2
+        let id = DatasetUuid::new_v4();
+        let zpool_name = ZpoolName::new_external(config.disks[0].pool_id);
+        let name = DatasetName::new(zpool_name.clone(), DatasetKind::Crucible);
+        let datasets = BTreeMap::from([(
+            id,
+            DatasetConfig {
+                id,
+                name,
+                compression: CompressionAlgorithm::Off,
+                quota: None,
+                reservation: None,
+            },
+        )]);
+        // "Generation = 1" is reserved as "no requests seen yet", so we jump
+        // past it.
+        let generation = Generation::new().next();
+        let mut config = DatasetsConfig { generation, datasets };
+
+        let status =
+            harness.handle().datasets_ensure(config.clone()).await.unwrap();
+        assert!(!status.has_error());
+
+        // List datasets, expect to see what we just created
+        let observed_config =
+            harness.handle().datasets_config_list().await.unwrap();
+        assert_eq!(config, observed_config);
+
+        // Calling "datasets_ensure" with the same input should succeed.
+        let status =
+            harness.handle().datasets_ensure(config.clone()).await.unwrap();
+        assert!(!status.has_error());
+
+        let current_config_generation = config.generation;
+        let next_config_generation = config.generation.next();
+
+        // Calling "datasets_ensure" with an old generation should fail
+        config.generation = Generation::new();
+        let err =
+            harness.handle().datasets_ensure(config.clone()).await.unwrap_err();
+        assert!(matches!(err, Error::DatasetConfigurationOutdated { .. }));
+
+        // However, calling it with a different input and the same generation
+        // number should fail.
+        config.generation = current_config_generation;
+        config.datasets.values_mut().next().unwrap().reservation =
+            Some(1024.into());
+        let err =
+            harness.handle().datasets_ensure(config.clone()).await.unwrap_err();
+        assert!(matches!(err, Error::DatasetConfigurationChanged { .. }));
+
+        // If we bump the generation number while making a change, updated
+        // configs will work.
+        config.generation = next_config_generation;
+        let status =
+            harness.handle().datasets_ensure(config.clone()).await.unwrap();
+        assert!(!status.has_error());
 
         harness.cleanup().await;
         logctx.cleanup_successful();
@@ -1319,6 +1695,15 @@ mod test {
         let schema = schemars::schema_for!(OmicronPhysicalDisksConfig);
         expectorate::assert_contents(
             "../schema/omicron-physical-disks.json",
+            &serde_json::to_string_pretty(&schema).unwrap(),
+        );
+    }
+
+    #[test]
+    fn test_datasets_schema() {
+        let schema = schemars::schema_for!(DatasetsConfig);
+        expectorate::assert_contents(
+            "../schema/omicron-datasets.json",
             &serde_json::to_string_pretty(&schema).unwrap(),
         );
     }

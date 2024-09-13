@@ -1220,8 +1220,7 @@ pub mod test {
     }
 
     async fn no_instances_or_disks_on_sled(sled_agent: &SledAgent) -> bool {
-        sled_agent.instance_count().await == 0
-            && sled_agent.disk_count().await == 0
+        sled_agent.vmm_count().await == 0 && sled_agent.disk_count().await == 0
     }
 
     pub(crate) async fn verify_clean_slate(

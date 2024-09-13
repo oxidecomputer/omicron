@@ -5,7 +5,6 @@
 //! [`DataStore`] helpers for working with VMM records.
 
 use super::DataStore;
-use crate::authz;
 use crate::context::OpContext;
 use crate::db;
 use crate::db::error::public_error_from_diesel;
@@ -40,8 +39,13 @@ use uuid::Uuid;
 
 /// The result of an [`DataStore::vmm_and_migration_update_runtime`] call,
 /// indicating which records were updated.
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct VmmStateUpdateResult {
+    /// The VMM record that the update query found and possibly updated.
+    ///
+    /// NOTE: This is the record prior to the update!
+    pub found_vmm: Vmm,
+
     /// `true` if the VMM record was updated, `false` otherwise.
     pub vmm_updated: bool,
 
@@ -78,11 +82,9 @@ impl DataStore {
         opctx: &OpContext,
         vmm_id: &PropolisUuid,
     ) -> UpdateResult<bool> {
-        let valid_states = vec![DbVmmState::Destroyed, DbVmmState::Failed];
-
         let updated = diesel::update(dsl::vmm)
             .filter(dsl::id.eq(vmm_id.into_untyped_uuid()))
-            .filter(dsl::state.eq_any(valid_states))
+            .filter(dsl::state.eq_any(DbVmmState::DESTROYABLE_STATES))
             .filter(dsl::time_deleted.is_null())
             .set(dsl::time_deleted.eq(Utc::now()))
             .check_if_exists::<Vmm>(vmm_id.into_untyped_uuid())
@@ -108,14 +110,10 @@ impl DataStore {
     pub async fn vmm_fetch(
         &self,
         opctx: &OpContext,
-        authz_instance: &authz::Instance,
         vmm_id: &PropolisUuid,
     ) -> LookupResult<Vmm> {
-        opctx.authorize(authz::Action::Read, authz_instance).await?;
-
         let vmm = dsl::vmm
             .filter(dsl::id.eq(vmm_id.into_untyped_uuid()))
-            .filter(dsl::instance_id.eq(authz_instance.id()))
             .filter(dsl::time_deleted.is_null())
             .select(Vmm::as_select())
             .get_result_async(&*self.pool_connection_authorized(opctx).await?)
@@ -233,13 +231,21 @@ impl DataStore {
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 async move {
-                let vmm_updated = self
+                let vmm_update_result = self
                     .vmm_update_runtime_on_connection(
                         &conn,
                         &vmm_id,
                         new_runtime,
                     )
-                    .await.map(|r| match r.status { UpdateStatus::Updated => true, UpdateStatus::NotUpdatedButExists => false })?;
+                    .await?;
+
+
+                let found_vmm = vmm_update_result.found;
+                let vmm_updated = match vmm_update_result.status {
+                     UpdateStatus::Updated => true,
+                     UpdateStatus::NotUpdatedButExists => false
+                };
+
                 let migration_out_updated = match migration_out {
                     Some(migration) => {
                         let r = self.migration_update_source_on_connection(
@@ -287,6 +293,7 @@ impl DataStore {
                     None => false,
                 };
                 Ok(VmmStateUpdateResult {
+                    found_vmm,
                     vmm_updated,
                     migration_in_updated,
                     migration_out_updated,
@@ -295,6 +302,49 @@ impl DataStore {
             .await
             .map_err(|e| {
                 err.take().unwrap_or_else(|| public_error_from_diesel(e, ErrorHandler::Server))
+            })
+    }
+
+    /// Transitions a VMM to the `SagaUnwound` state.
+    ///
+    /// # Warning
+    ///
+    /// This may *only* be called by the saga that created a VMM record, as it
+    /// unconditionally increments the generation number and advances the VMM to
+    /// the `SagaUnwound` state.
+    ///
+    /// This is necessary as it is executed in compensating actions for
+    /// unwinding saga nodes which cannot easily determine whether other
+    /// actions, which advance the VMM's generation, have executed before the
+    /// saga unwound.
+    pub async fn vmm_mark_saga_unwound(
+        &self,
+        opctx: &OpContext,
+        vmm_id: &PropolisUuid,
+    ) -> Result<bool, Error> {
+        diesel::update(dsl::vmm)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(vmm_id.into_untyped_uuid()))
+            .set((
+                dsl::state.eq(DbVmmState::SagaUnwound),
+                dsl::time_state_updated.eq(chrono::Utc::now()),
+                dsl::state_generation.eq(dsl::state_generation + 1),
+            ))
+            .check_if_exists::<Vmm>(vmm_id.into_untyped_uuid())
+            .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map(|r| match r.status {
+                UpdateStatus::Updated => true,
+                UpdateStatus::NotUpdatedButExists => false,
+            })
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Vmm,
+                        LookupType::ById(vmm_id.into_untyped_uuid()),
+                    ),
+                )
             })
     }
 
@@ -348,7 +398,7 @@ impl DataStore {
 
         paginated(dsl::vmm, dsl::id, pagparams)
             // In order to be considered "abandoned", a VMM must be:
-            // - in the `Destroyed` or `SagaUnwound` state
+            // - in the `Destroyed`, `SagaUnwound`, or `Failed` states
             .filter(dsl::state.eq_any(DbVmmState::DESTROYABLE_STATES))
             // - not deleted yet
             .filter(dsl::time_deleted.is_null())

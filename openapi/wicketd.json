@@ -1773,6 +1773,67 @@
           "last"
         ]
       },
+      "LldpAdminStatus": {
+        "description": "To what extent should this port participate in LLDP",
+        "type": "string",
+        "enum": [
+          "enabled",
+          "disabled",
+          "rx_only",
+          "tx_only"
+        ]
+      },
+      "LldpPortConfig": {
+        "description": "Per-port LLDP configuration settings.  Only the \"status\" setting is mandatory.  All other fields have natural defaults or may be inherited from the switch.",
+        "type": "object",
+        "properties": {
+          "chassis_id": {
+            "nullable": true,
+            "description": "Chassis ID to advertise.  If this is set, it will be advertised as a LocallyAssigned ID type.  If this is not set, it will be inherited from the switch-level settings.",
+            "type": "string"
+          },
+          "management_addrs": {
+            "nullable": true,
+            "description": "Management IP addresses to advertise.  If this is not set, it will be inherited from the switch-level settings.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ip"
+            }
+          },
+          "port_description": {
+            "nullable": true,
+            "description": "Port description to advertise.  If this is not set, no description will be advertised.",
+            "type": "string"
+          },
+          "port_id": {
+            "nullable": true,
+            "description": "Port ID to advertise.  If this is set, it will be advertised as a LocallyAssigned ID type.  If this is not set, it will be set to the port name. e.g., qsfp0/0.",
+            "type": "string"
+          },
+          "status": {
+            "description": "To what extent should this port participate in LLDP",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LldpAdminStatus"
+              }
+            ]
+          },
+          "system_description": {
+            "nullable": true,
+            "description": "System description to advertise.  If this is not set, it will be inherited from the switch-level settings.",
+            "type": "string"
+          },
+          "system_name": {
+            "nullable": true,
+            "description": "System name to advertise.  If this is not set, it will be inherited from the switch-level settings.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
       "Name": {
         "title": "A name unique within the parent collection",
         "description": "Names must begin with a lower case ASCII letter, be composed exclusively of lowercase ASCII, uppercase ASCII, numbers, and '-', and may not end with a '-'. Names cannot be a UUID, but they may contain a UUID. They can be at most 63 characters long.",
@@ -2619,7 +2680,7 @@
         ]
       },
       "RackOperationStatus": {
-        "description": "Current status of any rack-level operation being performed by this bootstrap agent.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Current status of any rack-level operation being performed by this bootstrap agent.\", \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"id\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/TypedUuidForRackInitKind\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"initializing\" ] } } }, { \"description\": \"`id` will be none if the rack was already initialized on startup.\", \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"id\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/TypedUuidForRackInitKind\" } ] }, \"status\": { \"type\": \"string\", \"enum\": [ \"initialized\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"message\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/TypedUuidForRackInitKind\" }, \"message\": { \"type\": \"string\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"initialization_failed\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/TypedUuidForRackInitKind\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"initialization_panicked\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/TypedUuidForRackResetKind\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"resetting\" ] } } }, { \"description\": \"`reset_id` will be None if the rack is in an uninitialized-on-startup, or Some if it is in an uninitialized state due to a reset operation completing.\", \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"reset_id\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/TypedUuidForRackResetKind\" } ] }, \"status\": { \"type\": \"string\", \"enum\": [ \"uninitialized\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"message\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/TypedUuidForRackResetKind\" }, \"message\": { \"type\": \"string\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"reset_failed\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/TypedUuidForRackResetKind\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"reset_panicked\" ] } } } ] } ``` </details>",
+        "description": "Current status of any rack-level operation being performed by this bootstrap agent.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Current status of any rack-level operation being performed by this bootstrap agent.\", \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"id\", \"status\", \"step\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/TypedUuidForRackInitKind\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"initializing\" ] }, \"step\": { \"$ref\": \"#/components/schemas/RssStep\" } } }, { \"description\": \"`id` will be none if the rack was already initialized on startup.\", \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"id\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/TypedUuidForRackInitKind\" } ] }, \"status\": { \"type\": \"string\", \"enum\": [ \"initialized\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"message\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/TypedUuidForRackInitKind\" }, \"message\": { \"type\": \"string\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"initialization_failed\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/TypedUuidForRackInitKind\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"initialization_panicked\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/TypedUuidForRackResetKind\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"resetting\" ] } } }, { \"description\": \"`reset_id` will be None if the rack is in an uninitialized-on-startup, or Some if it is in an uninitialized state due to a reset operation completing.\", \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"reset_id\": { \"allOf\": [ { \"$ref\": \"#/components/schemas/TypedUuidForRackResetKind\" } ] }, \"status\": { \"type\": \"string\", \"enum\": [ \"uninitialized\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"message\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/TypedUuidForRackResetKind\" }, \"message\": { \"type\": \"string\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"reset_failed\" ] } } }, { \"type\": \"object\", \"required\": [ \"id\", \"status\" ], \"properties\": { \"id\": { \"$ref\": \"#/components/schemas/TypedUuidForRackResetKind\" }, \"status\": { \"type\": \"string\", \"enum\": [ \"reset_panicked\" ] } } } ] } ``` </details>",
         "oneOf": [
           {
             "type": "object",
@@ -2632,11 +2693,15 @@
                 "enum": [
                   "initializing"
                 ]
+              },
+              "step": {
+                "$ref": "#/components/schemas/RssStep"
               }
             },
             "required": [
               "id",
-              "status"
+              "status",
+              "step"
             ]
           },
           {
@@ -3087,6 +3152,235 @@
         "required": [
           "destination",
           "nexthop"
+        ]
+      },
+      "RssStep": {
+        "description": "Steps we go through during initial rack setup. Keep this list in order that they happen.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"Steps we go through during initial rack setup. Keep this list in order that they happen.\", \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"requested\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"starting\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"load_existing_plan\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"create_sled_plan\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"init_trust_quorum\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"network_config_update\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"sled_init\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"ensure_storage\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"init_dns\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"configure_dns\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"init_ntp\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"wait_for_time_sync\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"wait_for_database\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"cluster_init\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"zones_init\" ] } } }, { \"type\": \"object\", \"required\": [ \"status\" ], \"properties\": { \"status\": { \"type\": \"string\", \"enum\": [ \"nexus_handoff\" ] } } } ] } ``` </details>",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "requested"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "starting"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "load_existing_plan"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "create_sled_plan"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "init_trust_quorum"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "network_config_update"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "sled_init"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "ensure_storage"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "init_dns"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "configure_dns"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "init_ntp"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "wait_for_time_sync"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "wait_for_database"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "cluster_init"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "zones_init"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "nexus_handoff"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          }
         ]
       },
       "SemverVersion": {
@@ -6303,6 +6597,15 @@
             "items": {
               "$ref": "#/components/schemas/UserSpecifiedBgpPeerConfig"
             }
+          },
+          "lldp": {
+            "nullable": true,
+            "default": null,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LldpPortConfig"
+              }
+            ]
           },
           "routes": {
             "type": "array",

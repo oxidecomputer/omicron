@@ -3,14 +3,15 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{
-    ByteCount, Disk, ExternalIp, Generation, InstanceCpuCount, InstanceState,
+    ByteCount, Disk, ExternalIp, Generation, InstanceAutoRestart,
+    InstanceCpuCount, InstanceState,
 };
 use crate::collection::DatastoreAttachTargetConfig;
 use crate::schema::{disk, external_ip, instance};
 use chrono::{DateTime, Utc};
 use db_macros::Resource;
 use nexus_types::external_api::params;
-use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid};
+use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use serde::Deserialize;
 use serde::Serialize;
 use uuid::Uuid;
@@ -54,8 +55,13 @@ pub struct Instance {
     #[diesel(column_name = hostname)]
     pub hostname: String,
 
-    #[diesel(column_name = boot_on_fault)]
-    pub boot_on_fault: bool,
+    /// The auto-restart policy for this instance.
+    ///
+    /// This indicates whether the instance should be automatically restarted by
+    /// the control plane on failure. If this is `NULL`, no auto-restart policy
+    /// has been configured for this instance by the user.
+    #[diesel(column_name = auto_restart_policy)]
+    pub auto_restart_policy: Option<InstanceAutoRestart>,
 
     #[diesel(embed)]
     pub runtime_state: InstanceRuntimeState,
@@ -104,7 +110,9 @@ impl Instance {
             ncpus: params.ncpus.into(),
             memory: params.memory.into(),
             hostname: params.hostname.to_string(),
-            boot_on_fault: false,
+            // TODO(eliza): allow this to be configured via the instance-create
+            // params...
+            auto_restart_policy: None,
             runtime_state,
 
             updater_gen: Generation::new(),
@@ -212,47 +220,6 @@ impl InstanceRuntimeState {
             dst_propolis_id: None,
             migration_id: None,
             gen: Generation::new(),
-        }
-    }
-}
-
-impl From<omicron_common::api::internal::nexus::InstanceRuntimeState>
-    for InstanceRuntimeState
-{
-    fn from(
-        state: omicron_common::api::internal::nexus::InstanceRuntimeState,
-    ) -> Self {
-        let nexus_state = if state.propolis_id.is_some() {
-            InstanceState::Vmm
-        } else {
-            InstanceState::NoVmm
-        };
-
-        Self {
-            nexus_state,
-            time_updated: state.time_updated,
-            gen: state.gen.into(),
-            propolis_id: state.propolis_id.map(|id| id.into_untyped_uuid()),
-            dst_propolis_id: state
-                .dst_propolis_id
-                .map(|id| id.into_untyped_uuid()),
-            migration_id: state.migration_id,
-        }
-    }
-}
-
-impl From<InstanceRuntimeState>
-    for sled_agent_client::types::InstanceRuntimeState
-{
-    fn from(state: InstanceRuntimeState) -> Self {
-        Self {
-            dst_propolis_id: state
-                .dst_propolis_id
-                .map(PropolisUuid::from_untyped_uuid),
-            gen: state.gen.into(),
-            migration_id: state.migration_id,
-            propolis_id: state.propolis_id.map(PropolisUuid::from_untyped_uuid),
-            time_updated: state.time_updated,
         }
     }
 }

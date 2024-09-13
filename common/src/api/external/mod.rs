@@ -593,7 +593,18 @@ impl JsonSchema for RoleName {
 //
 // TODO: custom JsonSchema impl to describe i64::MAX limit; this is blocked by
 // https://github.com/oxidecomputer/typify/issues/589
-#[derive(Copy, Clone, Debug, Serialize, JsonSchema, PartialEq, Eq)]
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Serialize,
+    JsonSchema,
+    Hash,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+)]
 pub struct ByteCount(u64);
 
 impl<'de> Deserialize<'de> for ByteCount {
@@ -2229,7 +2240,7 @@ pub struct SwitchPortSettingsView {
     pub links: Vec<SwitchPortLinkConfig>,
 
     /// Link-layer discovery protocol (LLDP) settings.
-    pub link_lldp: Vec<LldpServiceConfig>,
+    pub link_lldp: Vec<LldpLinkConfig>,
 
     /// Layer 3 interface settings.
     pub interfaces: Vec<SwitchInterfaceConfig>,
@@ -2371,7 +2382,7 @@ pub struct SwitchPortLinkConfig {
 
     /// The link-layer discovery protocol service configuration id for this
     /// link.
-    pub lldp_service_config_id: Uuid,
+    pub lldp_link_config_id: Option<Uuid>,
 
     /// The name of this link.
     pub link_name: String,
@@ -2391,34 +2402,30 @@ pub struct SwitchPortLinkConfig {
 
 /// A link layer discovery protocol (LLDP) service configuration.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct LldpServiceConfig {
+pub struct LldpLinkConfig {
     /// The id of this LLDP service instance.
     pub id: Uuid,
 
-    /// The link-layer discovery protocol configuration for this service.
-    pub lldp_config_id: Option<Uuid>,
-
     /// Whether or not the LLDP service is enabled.
     pub enabled: bool,
-}
 
-/// A link layer discovery protocol (LLDP) base configuration.
-#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize, PartialEq)]
-pub struct LldpConfig {
-    #[serde(flatten)]
-    pub identity: IdentityMetadata,
+    /// The LLDP link name TLV.
+    pub link_name: Option<String>,
+
+    /// The LLDP link description TLV.
+    pub link_description: Option<String>,
 
     /// The LLDP chassis identifier TLV.
-    pub chassis_id: String,
+    pub chassis_id: Option<String>,
 
-    /// THE LLDP system name TLV.
-    pub system_name: String,
+    /// The LLDP system name TLV.
+    pub system_name: Option<String>,
 
-    /// THE LLDP system description TLV.
-    pub system_description: String,
+    /// The LLDP system description TLV.
+    pub system_description: Option<String>,
 
-    /// THE LLDP management IP TLV.
-    pub management_ip: oxnet::IpNet,
+    /// The LLDP management IP TLV.
+    pub management_ip: Option<oxnet::IpNet>,
 }
 
 /// Describes the kind of an switch interface.

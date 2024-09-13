@@ -37,6 +37,20 @@ use crate::{
     StepContextPayload, StepHandle, StepSpec,
 };
 
+/// Makes an MPSC channel suitable for the update engine.
+///
+/// This function is a convenience wrapper around
+/// [`tokio::sync::mpsc::channel`] that creates a channel of the appropriate
+/// size, and may aid in type inference.
+#[inline]
+pub fn channel<S: StepSpec>(
+) -> (mpsc::Sender<Event<S>>, mpsc::Receiver<Event<S>>) {
+    // This is a large enough channel to handle incoming messages without
+    // stalling.
+    const CHANNEL_SIZE: usize = 256;
+    mpsc::channel(CHANNEL_SIZE)
+}
+
 /// An identifier for a particular engine execution.
 ///
 /// All events coming from an execution have the same engine ID. Nested engines
@@ -86,6 +100,9 @@ pub struct UpdateEngine<'a, S: StepSpec> {
 
 impl<'a, S: StepSpec + 'a> UpdateEngine<'a, S> {
     /// Creates a new `UpdateEngine`.
+    ///
+    /// It is recommended that `sender` be created using the [`channel`]
+    /// function, which sets an appropriate channel size.
     pub fn new(log: &slog::Logger, sender: mpsc::Sender<Event<S>>) -> Self {
         let sender = Arc::new(DefaultSender { sender });
         Self::new_impl(log, EngineSender { sender })

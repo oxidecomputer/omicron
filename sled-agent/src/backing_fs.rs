@@ -25,6 +25,9 @@ use camino::Utf8PathBuf;
 use illumos_utils::zfs::{
     EnsureFilesystemError, GetValueError, Mountpoint, SizeDetails, Zfs,
 };
+use omicron_common::api::external::ByteCount;
+use omicron_common::disk::CompressionAlgorithm;
+use once_cell::sync::Lazy;
 use std::io;
 
 #[derive(Debug, thiserror::Error)]
@@ -48,9 +51,9 @@ struct BackingFs<'a> {
     // Mountpoint
     mountpoint: &'static str,
     // Optional quota, in _bytes_
-    quota: Option<usize>,
+    quota: Option<ByteCount>,
     // Optional compression mode
-    compression: Option<&'static str>,
+    compression: CompressionAlgorithm,
     // Linked service
     service: Option<&'static str>,
     // Subdirectories to ensure
@@ -63,7 +66,7 @@ impl<'a> BackingFs<'a> {
             name,
             mountpoint: "legacy",
             quota: None,
-            compression: None,
+            compression: CompressionAlgorithm::Off,
             service: None,
             subdirs: None,
         }
@@ -74,13 +77,13 @@ impl<'a> BackingFs<'a> {
         self
     }
 
-    const fn quota(mut self, quota: usize) -> Self {
+    const fn quota(mut self, quota: ByteCount) -> Self {
         self.quota = Some(quota);
         self
     }
 
-    const fn compression(mut self, compression: &'static str) -> Self {
-        self.compression = Some(compression);
+    const fn compression(mut self, compression: CompressionAlgorithm) -> Self {
+        self.compression = compression;
         self
     }
 
@@ -99,18 +102,19 @@ const BACKING_FMD_DATASET: &'static str = "fmd";
 const BACKING_FMD_MOUNTPOINT: &'static str = "/var/fm/fmd";
 const BACKING_FMD_SUBDIRS: [&'static str; 3] = ["rsrc", "ckpt", "xprt"];
 const BACKING_FMD_SERVICE: &'static str = "svc:/system/fmd:default";
-const BACKING_FMD_QUOTA: usize = 500 * (1 << 20); // 500 MiB
+const BACKING_FMD_QUOTA: u64 = 500 * (1 << 20); // 500 MiB
 
-const BACKING_COMPRESSION: &'static str = "on";
+const BACKING_COMPRESSION: CompressionAlgorithm = CompressionAlgorithm::On;
 
 const BACKINGFS_COUNT: usize = 1;
-static BACKINGFS: [BackingFs; BACKINGFS_COUNT] =
+static BACKINGFS: Lazy<[BackingFs; BACKINGFS_COUNT]> = Lazy::new(|| {
     [BackingFs::new(BACKING_FMD_DATASET)
         .mountpoint(BACKING_FMD_MOUNTPOINT)
         .subdirs(&BACKING_FMD_SUBDIRS)
-        .quota(BACKING_FMD_QUOTA)
+        .quota(ByteCount::try_from(BACKING_FMD_QUOTA).unwrap())
         .compression(BACKING_COMPRESSION)
-        .service(BACKING_FMD_SERVICE)];
+        .service(BACKING_FMD_SERVICE)]
+});
 
 /// Ensure that the backing filesystems are mounted.
 /// If the underlying dataset for a backing fs does not exist on the specified
@@ -137,6 +141,7 @@ pub(crate) fn ensure_backing_fs(
 
         let size_details = Some(SizeDetails {
             quota: bfs.quota,
+            reservation: None,
             compression: bfs.compression,
         });
 

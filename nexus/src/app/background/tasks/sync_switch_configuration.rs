@@ -51,8 +51,9 @@ use omicron_common::{
 use serde_json::json;
 use sled_agent_client::types::{
     BgpConfig as SledBgpConfig, BgpPeerConfig as SledBgpPeerConfig,
-    EarlyNetworkConfig, EarlyNetworkConfigBody, HostPortConfig, PortConfigV2,
-    RackNetworkConfigV2, RouteConfig as SledRouteConfig, UplinkAddressConfig,
+    EarlyNetworkConfig, EarlyNetworkConfigBody, HostPortConfig,
+    LldpAdminStatus, LldpPortConfig, PortConfigV2, RackNetworkConfigV2,
+    RouteConfig as SledRouteConfig, UplinkAddressConfig,
 };
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
@@ -564,10 +565,10 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         if !bgp_announce_prefixes.contains_key(&bgp_config.bgp_announce_set_id) {
                             let announcements = match self
                                 .datastore
-                                .bgp_announce_list(
+                                .bgp_announcement_list(
                                     opctx,
                                     &params::BgpAnnounceSetSelector {
-                                        name_or_id: bgp_config
+                                        announce_set: bgp_config
                                             .bgp_announce_set_id
                                             .into(),
                                     },
@@ -993,7 +994,23 @@ impl BackgroundTask for SwitchPortSettingsManager {
                             .map(|l| l.speed)
                             .unwrap_or(SwitchLinkSpeed::Speed100G)
                             .into(),
-                    };
+			lldp: info
+			    .link_lldp
+			    .get(0) //TODO https://github.com/oxidecomputer/omicron/issues/3062
+			    .map(|c|  LldpPortConfig {
+				status: match c.enabled {
+				    true => LldpAdminStatus::Enabled,
+				    false=> LldpAdminStatus::Disabled,
+				},
+				port_id: c.link_name.clone(),
+				port_description: c.link_description.clone(),
+				chassis_id: c.chassis_id.clone(),
+				system_name: c.system_name.clone(),
+				system_description: c.system_description.clone(),
+				management_addrs:c.management_ip.map(|a| vec![a.ip()]),
+			    })
+		    }
+                    ;
 
                     for peer in port_config.bgp_peers.iter_mut() {
                         peer.communities = match self
@@ -1412,6 +1429,29 @@ fn uplinks(
         let PortSettingsChange::Apply(config) = change else {
             continue;
         };
+
+        let lldp = if config.link_lldp.is_empty() {
+            None
+        } else {
+            let x = &config.link_lldp[0];
+            Some(LldpPortConfig {
+                status: if x.enabled {
+                    LldpAdminStatus::Enabled
+                } else {
+                    LldpAdminStatus::Disabled
+                },
+                port_id: x.link_name.clone(),
+                port_description: x.link_description.clone(),
+                chassis_id: x.chassis_id.clone(),
+                system_name: x.system_name.clone(),
+                system_description: x.system_description.clone(),
+                management_addrs: x.management_ip.map(|a| {
+                    let ip: oxnet::IpNet = a.into();
+                    vec![ip.addr()]
+                }),
+            })
+        };
+
         let config = HostPortConfig {
             port: port.port_name.clone(),
             addrs: config
@@ -1422,6 +1462,7 @@ fn uplinks(
                     vlan_id: a.vlan_id.map(|v| v.into()),
                 })
                 .collect(),
+            lldp,
         };
 
         match uplinks.entry(*location) {

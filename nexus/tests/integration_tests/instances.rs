@@ -780,12 +780,13 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     let instance_next = instance_get(&client, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
 
-    let original_sled = nexus
-        .instance_sled_id(&instance_id)
+    let sled_info = nexus
+        .active_instance_info(&instance_id, None)
         .await
         .unwrap()
         .expect("running instance should have a sled");
 
+    let original_sled = sled_info.sled_id;
     let dst_sled_id = if original_sled == default_sled_id {
         other_sled_id
     } else {
@@ -808,12 +809,13 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     .parsed_body::<Instance>()
     .unwrap();
 
-    let current_sled = nexus
-        .instance_sled_id(&instance_id)
+    let new_sled_info = nexus
+        .active_instance_info(&instance_id, None)
         .await
         .unwrap()
         .expect("running instance should have a sled");
 
+    let current_sled = new_sled_info.sled_id;
     assert_eq!(current_sled, original_sled);
 
     // Ensure that both sled agents report that the migration is in progress.
@@ -840,6 +842,15 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(migration.target_state, MigrationState::Pending.into());
     assert_eq!(migration.source_state, MigrationState::Pending.into());
 
+    let info = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("instance should be on a sled");
+    let src_propolis_id = info.propolis_id;
+    let dst_propolis_id =
+        info.dst_propolis_id.expect("instance should have a migration target");
+
     // Simulate the migration. We will use `instance_single_step_on_sled` to
     // single-step both sled-agents through the migration state machine and
     // ensure that the migration state looks nice at each step.
@@ -847,15 +858,15 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
         cptestctx,
         nexus,
         original_sled,
-        instance_id,
+        src_propolis_id,
         migration_id,
     )
     .await;
 
     // Move source to "migrating".
-    instance_single_step_on_sled(cptestctx, nexus, original_sled, instance_id)
+    vmm_single_step_on_sled(cptestctx, nexus, original_sled, src_propolis_id)
         .await;
-    instance_single_step_on_sled(cptestctx, nexus, original_sled, instance_id)
+    vmm_single_step_on_sled(cptestctx, nexus, original_sled, src_propolis_id)
         .await;
 
     let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
@@ -865,9 +876,9 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(instance.runtime.run_state, InstanceState::Migrating);
 
     // Move target to "migrating".
-    instance_single_step_on_sled(cptestctx, nexus, dst_sled_id, instance_id)
+    vmm_single_step_on_sled(cptestctx, nexus, dst_sled_id, dst_propolis_id)
         .await;
-    instance_single_step_on_sled(cptestctx, nexus, dst_sled_id, instance_id)
+    vmm_single_step_on_sled(cptestctx, nexus, dst_sled_id, dst_propolis_id)
         .await;
 
     let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
@@ -877,7 +888,7 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(instance.runtime.run_state, InstanceState::Migrating);
 
     // Move the source to "completed"
-    instance_simulate_on_sled(cptestctx, nexus, original_sled, instance_id)
+    vmm_simulate_on_sled(cptestctx, nexus, original_sled, src_propolis_id)
         .await;
 
     let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
@@ -887,15 +898,16 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(instance.runtime.run_state, InstanceState::Migrating);
 
     // Move the target to "completed".
-    instance_simulate_on_sled(cptestctx, nexus, dst_sled_id, instance_id).await;
+    vmm_simulate_on_sled(cptestctx, nexus, dst_sled_id, dst_propolis_id).await;
 
     instance_wait_for_state(&client, instance_id, InstanceState::Running).await;
 
     let current_sled = nexus
-        .instance_sled_id(&instance_id)
+        .active_instance_info(&instance_id, None)
         .await
         .unwrap()
-        .expect("migrated instance should still have a sled");
+        .expect("migrated instance should still have a sled")
+        .sled_id;
 
     assert_eq!(current_sled, dst_sled_id);
 
@@ -978,11 +990,13 @@ async fn test_instance_migrate_v2p_and_routes(
         .derive_guest_network_interface_info(&opctx, &authz_instance)
         .await
         .unwrap();
+
     let original_sled_id = nexus
-        .instance_sled_id(&instance_id)
+        .active_instance_info(&instance_id, None)
         .await
         .unwrap()
-        .expect("running instance should have a sled");
+        .expect("running instance should have a sled")
+        .sled_id;
 
     let mut sled_agents = vec![cptestctx.sled_agent.sled_agent.clone()];
     sled_agents.extend(other_sleds.iter().map(|tup| tup.1.sled_agent.clone()));
@@ -1035,25 +1049,35 @@ async fn test_instance_migrate_v2p_and_routes(
             .expect("since we've started a migration, the instance record must have a migration id!")
     };
 
+    let info = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("instance should be on a sled");
+    let src_propolis_id = info.propolis_id;
+    let dst_propolis_id =
+        info.dst_propolis_id.expect("instance should have a migration target");
+
     // Tell both sled-agents to pretend to do the migration.
     instance_simulate_migration_source(
         cptestctx,
         nexus,
         original_sled_id,
-        instance_id,
+        src_propolis_id,
         migration_id,
     )
     .await;
-    instance_simulate_on_sled(cptestctx, nexus, original_sled_id, instance_id)
+    vmm_simulate_on_sled(cptestctx, nexus, original_sled_id, src_propolis_id)
         .await;
-    instance_simulate_on_sled(cptestctx, nexus, dst_sled_id, instance_id).await;
+    vmm_simulate_on_sled(cptestctx, nexus, dst_sled_id, dst_propolis_id).await;
     instance_wait_for_state(&client, instance_id, InstanceState::Running).await;
 
     let current_sled = nexus
-        .instance_sled_id(&instance_id)
+        .active_instance_info(&instance_id, None)
         .await
         .unwrap()
-        .expect("migrated instance should have a sled");
+        .expect("migrated instance should have a sled")
+        .sled_id;
     assert_eq!(current_sled, dst_sled_id);
 
     for sled_agent in &sled_agents {
@@ -1082,15 +1106,196 @@ async fn test_instance_migrate_v2p_and_routes(
 }
 
 // Verifies that if a request to reboot or stop an instance fails because of a
-// 500-level error from sled agent, then the instance moves to the Failed state.
+// 404 error from sled agent, then the instance moves to the Failed state, and
+// can be restarted once it has transitioned to that state..
 #[nexus_test]
-async fn test_instance_failed_after_sled_agent_error(
+async fn test_instance_failed_after_sled_agent_forgets_vmm_can_be_restarted(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let instance_name = "losing-is-fun";
+    let instance_id = make_forgotten_instance(&cptestctx, instance_name).await;
+
+    // Attempting to reboot the forgotten instance will result in a 404
+    // NO_SUCH_INSTANCE from the sled-agent, which Nexus turns into a 503.
+    expect_instance_reboot_fail(
+        client,
+        instance_name,
+        http::StatusCode::SERVICE_UNAVAILABLE,
+    )
+    .await;
+
+    // Wait for the instance to transition to Failed.
+    instance_wait_for_state(client, instance_id, InstanceState::Failed).await;
+
+    // Now, the instance should be restartable.
+    expect_instance_start_ok(client, instance_name).await;
+}
+
+// Verifies that if a request to reboot or stop an instance fails because of a
+// 404 error from sled agent, then the instance moves to the Failed state, and
+// can be deleted once it has transitioned to that state..
+#[nexus_test]
+async fn test_instance_failed_after_sled_agent_forgets_vmm_can_be_deleted(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let instance_name = "losing-is-fun";
+    let instance_id = make_forgotten_instance(&cptestctx, instance_name).await;
+
+    // Attempting to reboot the forgotten instance will result in a 404
+    // NO_SUCH_INSTANCE from the sled-agent, which Nexus turns into a 503.
+    expect_instance_reboot_fail(
+        client,
+        instance_name,
+        http::StatusCode::SERVICE_UNAVAILABLE,
+    )
+    .await;
+
+    // Wait for the instance to transition to Failed.
+    instance_wait_for_state(client, instance_id, InstanceState::Failed).await;
+
+    // Now, the instance should be deleteable.
+    expect_instance_delete_ok(client, instance_name).await;
+}
+
+// Verifies that the instance-watcher background task transitions an instance
+// to Failed when the sled-agent returns a 404, and that the instance can be
+// deleted after it transitions to Failed.
+#[nexus_test]
+async fn test_instance_failed_by_instance_watcher_can_be_deleted(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let instance_name = "losing-is-fun";
+    let instance_id = make_forgotten_instance(&cptestctx, instance_name).await;
+
+    nexus_test_utils::background::activate_background_task(
+        &cptestctx.internal_client,
+        "instance_watcher",
+    )
+    .await;
+
+    // Wait for the instance to transition to Failed.
+    instance_wait_for_state(client, instance_id, InstanceState::Failed).await;
+
+    // Now, the instance should be deleteable.
+    expect_instance_delete_ok(&client, instance_name).await;
+}
+
+// Verifies that the instance-watcher background task transitions an instance
+// to Failed when the sled-agent returns a 404, and that the instance can be
+// deleted after it transitions to Failed.
+#[nexus_test]
+async fn test_instance_failed_by_instance_watcher_can_be_restarted(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let instance_name = "losing-is-fun";
+    let instance_id = make_forgotten_instance(&cptestctx, instance_name).await;
+
+    nexus_test_utils::background::activate_background_task(
+        &cptestctx.internal_client,
+        "instance_watcher",
+    )
+    .await;
+
+    // Wait for the instance to transition to Failed.
+    instance_wait_for_state(client, instance_id, InstanceState::Failed).await;
+
+    // Now, the instance should be deleteable.
+    expect_instance_delete_ok(&client, instance_name).await;
+}
+
+// Verified that instances currently on Expunged sleds are marked as failed.
+#[nexus_test]
+async fn test_instance_failed_when_on_expunged_sled(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
     let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
-    let instance_name = "losing-is-fun";
+    let instance1_name = "romeo";
+    let instance2_name = "juliet";
+
+    create_project_and_pool(&client).await;
+
+    // Create and start the test instances.
+    let mk_instance = |name: &'static str| async move {
+        let instance_url = get_instance_url(name);
+        let instance = create_instance(client, PROJECT_NAME, name).await;
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+        instance_simulate(nexus, &instance_id).await;
+        let instance_next = instance_get(&client, &instance_url).await;
+        assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
+
+        slog::info!(
+            &cptestctx.logctx.log,
+            "test instance is running";
+            "instance_name" => %name,
+            "instance_id" => %instance_id,
+        );
+
+        instance_id
+    };
+    let instance1_id = mk_instance(instance1_name).await;
+    let instance2_id = mk_instance(instance2_name).await;
+
+    // Create a second sled for instances on the Expunged sled to be assigned
+    // to.
+    let default_sled_id: SledUuid =
+        nexus_test_utils::SLED_AGENT_UUID.parse().unwrap();
+    let update_dir = Utf8Path::new("/should/be/unused");
+    let other_sled_id = SledUuid::new_v4();
+    let _other_sa = nexus_test_utils::start_sled_agent(
+        cptestctx.logctx.log.new(o!("sled_id" => other_sled_id.to_string())),
+        cptestctx.server.get_http_server_internal_address().await,
+        other_sled_id,
+        &update_dir,
+        sim::SimMode::Explicit,
+    )
+    .await
+    .unwrap();
+
+    // Expunge the sled
+    slog::info!(
+        &cptestctx.logctx.log,
+        "expunging sled";
+        "sled_id" => %default_sled_id,
+    );
+    let int_client = &cptestctx.internal_client;
+    int_client
+        .make_request(
+            Method::POST,
+            "/sleds/expunge",
+            Some(params::SledSelector {
+                sled: default_sled_id.into_untyped_uuid(),
+            }),
+            StatusCode::OK,
+        )
+        .await
+        .unwrap();
+
+    // Wait for both instances to transition to Failed.
+    instance_wait_for_state(client, instance1_id, InstanceState::Failed).await;
+    instance_wait_for_state(client, instance2_id, InstanceState::Failed).await;
+
+    // Now, the instances should be deleteable...
+    expect_instance_delete_ok(&client, instance1_name).await;
+    // ...or restartable.
+    expect_instance_start_ok(client, instance2_name).await;
+}
+
+#[nexus_test]
+async fn test_instances_are_not_marked_failed_on_other_sled_agent_errors(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+    let instance_name = "my-cool-instance";
 
     // Create and start the test instance.
     create_project_and_pool(&client).await;
@@ -1105,62 +1310,142 @@ async fn test_instance_failed_after_sled_agent_error(
     sled_agent
         .set_instance_ensure_state_error(Some(
             omicron_common::api::external::Error::internal_error(
-                "injected by test_instance_failed_after_sled_agent_error",
+                "somebody set up us the bomb",
             ),
         ))
         .await;
 
-    let url = get_instance_url(format!("{}/reboot", instance_name).as_str());
-    NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &url)
-            .body(None as Option<&serde_json::Value>),
+    // Attempting to reboot the instance will fail, but it should *not* go to
+    // Failed.
+    expect_instance_reboot_fail(
+        client,
+        instance_name,
+        http::StatusCode::INTERNAL_SERVER_ERROR,
     )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap()
-    .parsed_body::<Instance>()
-    .expect_err("expected injected failure");
+    .await;
 
     let instance_next = instance_get(&client, &instance_url).await;
-    assert_eq!(instance_next.runtime.run_state, InstanceState::Failed);
-
-    NexusRequest::object_delete(client, &get_instance_url(instance_name))
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .unwrap();
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
 
     sled_agent.set_instance_ensure_state_error(None).await;
 
+    expect_instance_reboot_ok(client, instance_name).await;
+}
+
+#[nexus_test]
+async fn test_instances_are_not_marked_failed_on_other_sled_agent_errors_by_instance_watcher(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+    let instance_name = "my-cool-instance";
+
+    // Create and start the test instance.
+    create_project_and_pool(&client).await;
+    let instance_url = get_instance_url(instance_name);
     let instance = create_instance(client, PROJECT_NAME, instance_name).await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
     instance_simulate(nexus, &instance_id).await;
     let instance_next = instance_get(&client, &instance_url).await;
     assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
 
+    let sled_agent = &cptestctx.sled_agent.sled_agent;
     sled_agent
         .set_instance_ensure_state_error(Some(
             omicron_common::api::external::Error::internal_error(
-                "injected by test_instance_failed_after_sled_agent_error",
+                "you have no chance to survive, make your time",
             ),
         ))
         .await;
 
-    let url = get_instance_url(format!("{}/stop", instance_name).as_str());
-    NexusRequest::new(
-        RequestBuilder::new(client, Method::POST, &url)
-            .body(None as Option<&serde_json::Value>),
+    nexus_test_utils::background::activate_background_task(
+        &cptestctx.internal_client,
+        "instance_watcher",
     )
-    .authn_as(AuthnMode::PrivilegedUser)
-    .execute()
-    .await
-    .unwrap()
-    .parsed_body::<Instance>()
-    .expect_err("expected injected failure");
+    .await;
 
     let instance_next = instance_get(&client, &instance_url).await;
-    assert_eq!(instance_next.runtime.run_state, InstanceState::Failed);
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
+}
+
+/// Prepare an instance and sled-agent for one of the "instance fails after
+/// sled-agent forgets VMM" tests.
+async fn make_forgotten_instance(
+    cptestctx: &ControlPlaneTestContext,
+    instance_name: &str,
+) -> InstanceUuid {
+    let client = &cptestctx.external_client;
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+
+    // Create and start the test instance.
+    create_project_and_pool(&client).await;
+    let instance_url = get_instance_url(instance_name);
+    let instance = create_instance(client, PROJECT_NAME, instance_name).await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+    instance_simulate(nexus, &instance_id).await;
+    let instance_next = instance_get(&client, &instance_url).await;
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
+
+    // Forcibly unregister the instance from the sled-agent without telling
+    // Nexus. It will now behave as though it has forgotten the instance and
+    // return a 404 error with the "NO_SUCH_INSTANCE" error code
+    let vmm_id = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("running instance must be on a sled")
+        .propolis_id;
+    let sled_agent = &cptestctx.sled_agent.sled_agent;
+    sled_agent
+        .instance_unregister(vmm_id)
+        .await
+        .expect("instance_unregister must succeed");
+
+    instance_id
+}
+
+async fn expect_instance_delete_ok(
+    client: &ClientTestContext,
+    instance_name: &str,
+) {
+    NexusRequest::object_delete(&client, &get_instance_url(instance_name))
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("instance should be deleted");
+}
+
+async fn expect_instance_reboot_fail(
+    client: &ClientTestContext,
+    instance_name: &str,
+    status: http::StatusCode,
+) {
+    let url = get_instance_url(format!("{instance_name}/reboot").as_str());
+    let builder = RequestBuilder::new(client, Method::POST, &url)
+        .body(None as Option<&serde_json::Value>)
+        .expect_status(Some(status));
+    NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("expected instance reboot to fail");
+}
+
+async fn expect_instance_reboot_ok(
+    client: &ClientTestContext,
+    instance_name: &str,
+) {
+    let url = get_instance_url(format!("{instance_name}/reboot").as_str());
+    let builder = RequestBuilder::new(client, Method::POST, &url)
+        .body(None as Option<&serde_json::Value>)
+        .expect_status(Some(http::StatusCode::ACCEPTED));
+    NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("expected instance reboot to succeed");
 }
 
 /// Assert values for fleet, silo, and project using both system and silo
@@ -1373,10 +1658,11 @@ async fn test_instance_metrics_with_migration(
     // Request migration to the other sled. This reserves resources on the
     // target sled, but shouldn't change the virtual provisioning counters.
     let original_sled = nexus
-        .instance_sled_id(&instance_id)
+        .active_instance_info(&instance_id, None)
         .await
         .unwrap()
-        .expect("running instance should have a sled");
+        .expect("running instance should have a sled")
+        .sled_id;
 
     let dst_sled_id = if original_sled == default_sled_id {
         other_sled_id
@@ -1420,6 +1706,15 @@ async fn test_instance_metrics_with_migration(
             .expect("since we've started a migration, the instance record must have a migration id!")
     };
 
+    let info = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("instance should be on a sled");
+    let src_propolis_id = info.propolis_id;
+    let dst_propolis_id =
+        info.dst_propolis_id.expect("instance should have a migration target");
+
     // Wait for the instance to be in the `Migrating` state. Otherwise, the
     // subsequent `instance_wait_for_state(..., Running)` may see the `Running`
     // state from the *old* VMM, rather than waiting for the migration to
@@ -1428,13 +1723,13 @@ async fn test_instance_metrics_with_migration(
         cptestctx,
         nexus,
         original_sled,
-        instance_id,
+        src_propolis_id,
         migration_id,
     )
     .await;
-    instance_single_step_on_sled(cptestctx, nexus, original_sled, instance_id)
+    vmm_single_step_on_sled(cptestctx, nexus, original_sled, src_propolis_id)
         .await;
-    instance_single_step_on_sled(cptestctx, nexus, dst_sled_id, instance_id)
+    vmm_single_step_on_sled(cptestctx, nexus, dst_sled_id, dst_propolis_id)
         .await;
     instance_wait_for_state(&client, instance_id, InstanceState::Migrating)
         .await;
@@ -1444,9 +1739,9 @@ async fn test_instance_metrics_with_migration(
     // Complete migration on the target. Simulated migrations always succeed.
     // After this the instance should be running and should continue to appear
     // to be provisioned.
-    instance_simulate_on_sled(cptestctx, nexus, original_sled, instance_id)
+    vmm_simulate_on_sled(cptestctx, nexus, original_sled, src_propolis_id)
         .await;
-    instance_simulate_on_sled(cptestctx, nexus, dst_sled_id, instance_id).await;
+    vmm_simulate_on_sled(cptestctx, nexus, dst_sled_id, dst_propolis_id).await;
     instance_wait_for_state(&client, instance_id, InstanceState::Running).await;
 
     check_provisioning_state(4, 1).await;
@@ -3337,10 +3632,11 @@ async fn test_disks_detached_when_instance_destroyed(
     let apictx = &cptestctx.server.server_context();
     let nexus = &apictx.nexus;
     let sa = nexus
-        .instance_sled_by_id(&instance_id)
+        .active_instance_info(&instance_id, None)
         .await
         .unwrap()
-        .expect("instance should be on a sled while it's running");
+        .expect("instance should be on a sled while it's running")
+        .sled_client;
 
     // Stop and delete instance
     instance_post(&client, instance_name, InstanceOp::Stop).await;
@@ -5080,28 +5376,29 @@ pub async fn assert_sled_vpc_routes(
 /// instance, and then tell it to finish simulating whatever async transition is
 /// going on.
 pub async fn instance_simulate(nexus: &Arc<Nexus>, id: &InstanceUuid) {
-    let sa = nexus
-        .instance_sled_by_id(id)
+    let sled_info = nexus
+        .active_instance_info(id, None)
         .await
         .unwrap()
         .expect("instance must be on a sled to simulate a state change");
-    sa.instance_finish_transition(id.into_untyped_uuid()).await;
+
+    sled_info.sled_client.vmm_finish_transition(sled_info.propolis_id).await;
 }
 
 /// Simulate one step of an ongoing instance state transition.  To do this, we
 /// have to look up the instance, then get the sled agent associated with that
 /// instance, and then tell it to finish simulating whatever async transition is
 /// going on.
-async fn instance_single_step_on_sled(
+async fn vmm_single_step_on_sled(
     cptestctx: &ControlPlaneTestContext,
     nexus: &Arc<Nexus>,
     sled_id: SledUuid,
-    instance_id: InstanceUuid,
+    propolis_id: PropolisUuid,
 ) {
     info!(&cptestctx.logctx.log, "Single-stepping simulated instance on sled";
-          "instance_id" => %instance_id, "sled_id" => %sled_id);
+          "propolis_id" => %propolis_id, "sled_id" => %sled_id);
     let sa = nexus.sled_client(&sled_id).await.unwrap();
-    sa.instance_single_step(instance_id.into_untyped_uuid()).await;
+    sa.vmm_single_step(propolis_id).await;
 }
 
 pub async fn instance_simulate_with_opctx(
@@ -5109,27 +5406,28 @@ pub async fn instance_simulate_with_opctx(
     id: &InstanceUuid,
     opctx: &OpContext,
 ) {
-    let sa = nexus
-        .instance_sled_by_id_with_opctx(id, opctx)
+    let sled_info = nexus
+        .active_instance_info(id, Some(opctx))
         .await
         .unwrap()
         .expect("instance must be on a sled to simulate a state change");
-    sa.instance_finish_transition(id.into_untyped_uuid()).await;
+
+    sled_info.sled_client.vmm_finish_transition(sled_info.propolis_id).await;
 }
 
 /// Simulates state transitions for the incarnation of the instance on the
 /// supplied sled (which may not be the sled ID currently stored in the
 /// instance's CRDB record).
-async fn instance_simulate_on_sled(
+async fn vmm_simulate_on_sled(
     cptestctx: &ControlPlaneTestContext,
     nexus: &Arc<Nexus>,
     sled_id: SledUuid,
-    instance_id: InstanceUuid,
+    propolis_id: PropolisUuid,
 ) {
     info!(&cptestctx.logctx.log, "Poking simulated instance on sled";
-          "instance_id" => %instance_id, "sled_id" => %sled_id);
+          "propolis_id" => %propolis_id, "sled_id" => %sled_id);
     let sa = nexus.sled_client(&sled_id).await.unwrap();
-    sa.instance_finish_transition(instance_id.into_untyped_uuid()).await;
+    sa.vmm_finish_transition(propolis_id).await;
 }
 
 /// Simulates a migration source for the provided instance ID, sled ID, and
@@ -5138,19 +5436,19 @@ async fn instance_simulate_migration_source(
     cptestctx: &ControlPlaneTestContext,
     nexus: &Arc<Nexus>,
     sled_id: SledUuid,
-    instance_id: InstanceUuid,
+    propolis_id: PropolisUuid,
     migration_id: Uuid,
 ) {
     info!(
         &cptestctx.logctx.log,
         "Simulating migration source sled";
-        "instance_id" => %instance_id,
+        "propolis_id" => %propolis_id,
         "sled_id" => %sled_id,
         "migration_id" => %migration_id,
     );
     let sa = nexus.sled_client(&sled_id).await.unwrap();
-    sa.instance_simulate_migration_source(
-        instance_id.into_untyped_uuid(),
+    sa.vmm_simulate_migration_source(
+        propolis_id,
         sled_agent_client::SimulateMigrationSource {
             migration_id,
             result: sled_agent_client::SimulatedMigrationResult::Success,

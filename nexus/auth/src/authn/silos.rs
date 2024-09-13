@@ -107,7 +107,9 @@ impl SamlIdentityProvider {
 
         let authn_request_url = if let Some(key) = self.private_key_bytes()? {
             // sign authn request if keys were supplied
-            authn_request.signed_redirect(&encoded_relay_state, &key)
+            let pkey = openssl::pkey::PKey::private_key_from_der(&key)
+                .map_err(|e| anyhow!(e.to_string()))?;
+            authn_request.signed_redirect(&encoded_relay_state, pkey)
         } else {
             authn_request.redirect(&encoded_relay_state)
         }
@@ -294,10 +296,7 @@ impl SamlIdentityProvider {
             )
         })?;
 
-        let signature_algorithm: String =
-            assertion_signature.signed_info.signature_method.algorithm;
-
-        match signature_algorithm.as_str() {
+        match assertion_signature.signed_info.signature_method.algorithm.value()  {
             // List taken from Signature section of
             // https://www.w3.org/TR/xmldsig-core1/#sec-AlgID, removing
             // discouraged items.
@@ -314,7 +313,7 @@ impl SamlIdentityProvider {
             "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha512" |
             "http://www.w3.org/2009/xmldsig11#dsa-sha256" => {}
 
-            _ => {
+            signature_algorithm => {
                 return Err(
                     HttpError::for_bad_request(
                         None,

@@ -176,6 +176,62 @@
         }
       }
     },
+    "/datasets": {
+      "get": {
+        "summary": "Lists the datasets that this sled is configured to use",
+        "operationId": "datasets_get",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetsConfig"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "summary": "Configures datasets to be used on this sled",
+        "operationId": "datasets_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DatasetsConfig"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetsManagementResult"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/disks/{disk_id}": {
       "put": {
         "operationId": "disk_put",
@@ -207,278 +263,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/DiskRuntimeState"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/instances/{instance_id}": {
-      "put": {
-        "operationId": "instance_register",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "instance_id",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/TypedUuidForInstanceKind"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/InstanceEnsureBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SledInstanceState"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
-      "delete": {
-        "operationId": "instance_unregister",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "instance_id",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/TypedUuidForInstanceKind"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InstanceUnregisterResponse"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/instances/{instance_id}/disks/{disk_id}/snapshot": {
-      "post": {
-        "summary": "Take a snapshot of a disk that is attached to an instance",
-        "operationId": "instance_issue_disk_snapshot_request",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "disk_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "in": "path",
-            "name": "instance_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/InstanceIssueDiskSnapshotRequestBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InstanceIssueDiskSnapshotRequestResponse"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/instances/{instance_id}/external-ip": {
-      "put": {
-        "operationId": "instance_put_external_ip",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "instance_id",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/TypedUuidForInstanceKind"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/InstanceExternalIpBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
-      "delete": {
-        "operationId": "instance_delete_external_ip",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "instance_id",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/TypedUuidForInstanceKind"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/InstanceExternalIpBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/instances/{instance_id}/state": {
-      "get": {
-        "operationId": "instance_get_state",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "instance_id",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/TypedUuidForInstanceKind"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SledInstanceState"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
-      "put": {
-        "operationId": "instance_put_state",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "instance_id",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/TypedUuidForInstanceKind"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/InstancePutStateBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InstancePutStateResponse"
                 }
               }
             }
@@ -883,6 +667,277 @@
         "responses": {
           "204": {
             "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/vmms/{propolis_id}": {
+      "put": {
+        "operationId": "vmm_register",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "propolis_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstanceEnsureBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SledVmmState"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "vmm_unregister",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "propolis_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VmmUnregisterResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/vmms/{propolis_id}/disks/{disk_id}/snapshot": {
+      "post": {
+        "summary": "Take a snapshot of a disk that is attached to an instance",
+        "operationId": "vmm_issue_disk_snapshot_request",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "disk_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "propolis_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VmmIssueDiskSnapshotRequestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VmmIssueDiskSnapshotRequestResponse"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/vmms/{propolis_id}/external-ip": {
+      "put": {
+        "operationId": "vmm_put_external_ip",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "propolis_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstanceExternalIpBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "vmm_delete_external_ip",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "propolis_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstanceExternalIpBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/vmms/{propolis_id}/state": {
+      "get": {
+        "operationId": "vmm_get_state",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "propolis_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SledVmmState"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "operationId": "vmm_put_state",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "propolis_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VmmPutStateBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VmmPutStateResponse"
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -2006,6 +2061,112 @@
           }
         ]
       },
+      "CompressionAlgorithm": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "on"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "off"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "gzip"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "level": {
+                "$ref": "#/components/schemas/GzipLevel"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "gzip_n"
+                ]
+              }
+            },
+            "required": [
+              "level",
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "lz4"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "lzjb"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "zle"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
       "CrucibleOpts": {
         "description": "CrucibleOpts\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"id\", \"lossy\", \"read_only\", \"target\" ], \"properties\": { \"cert_pem\": { \"type\": [ \"string\", \"null\" ] }, \"control\": { \"type\": [ \"string\", \"null\" ] }, \"flush_timeout\": { \"type\": [ \"number\", \"null\" ], \"format\": \"float\" }, \"id\": { \"type\": \"string\", \"format\": \"uuid\" }, \"key\": { \"type\": [ \"string\", \"null\" ] }, \"key_pem\": { \"type\": [ \"string\", \"null\" ] }, \"lossy\": { \"type\": \"boolean\" }, \"read_only\": { \"type\": \"boolean\" }, \"root_cert_pem\": { \"type\": [ \"string\", \"null\" ] }, \"target\": { \"type\": \"array\", \"items\": { \"type\": \"string\" } } } } ``` </details>",
         "type": "object",
@@ -2057,6 +2218,132 @@
           "lossy",
           "read_only",
           "target"
+        ]
+      },
+      "DatasetConfig": {
+        "description": "Configuration information necessary to request a single dataset",
+        "type": "object",
+        "properties": {
+          "compression": {
+            "description": "The compression mode to be used by the dataset",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CompressionAlgorithm"
+              }
+            ]
+          },
+          "id": {
+            "description": "The UUID of the dataset being requested",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+              }
+            ]
+          },
+          "name": {
+            "description": "The dataset's name",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/DatasetName"
+              }
+            ]
+          },
+          "quota": {
+            "nullable": true,
+            "description": "The upper bound on the amount of storage used by this dataset",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          },
+          "reservation": {
+            "nullable": true,
+            "description": "The lower bound on the amount of storage usable by this dataset",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          }
+        },
+        "required": [
+          "compression",
+          "id",
+          "name"
+        ]
+      },
+      "DatasetKind": {
+        "description": "The kind of dataset. See the `DatasetKind` enum in omicron-common for possible values.",
+        "type": "string"
+      },
+      "DatasetManagementStatus": {
+        "description": "Identifies how a single dataset management operation may have succeeded or failed.",
+        "type": "object",
+        "properties": {
+          "dataset_name": {
+            "$ref": "#/components/schemas/DatasetName"
+          },
+          "err": {
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "dataset_name"
+        ]
+      },
+      "DatasetName": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/DatasetKind"
+          },
+          "pool_name": {
+            "$ref": "#/components/schemas/ZpoolName"
+          }
+        },
+        "required": [
+          "kind",
+          "pool_name"
+        ]
+      },
+      "DatasetsConfig": {
+        "type": "object",
+        "properties": {
+          "datasets": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/DatasetConfig"
+            }
+          },
+          "generation": {
+            "description": "generation number of this configuration\n\nThis generation number is owned by the control plane (i.e., RSS or Nexus, depending on whether RSS-to-Nexus handoff has happened).  It should not be bumped within Sled Agent.\n\nSled Agent rejects attempts to set the configuration to a generation older than the one it's currently running.\n\nNote that \"Generation::new()\", AKA, the first generation number, is reserved for \"no datasets\". This is the default configuration for a sled before any requests have been made.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          }
+        },
+        "required": [
+          "datasets",
+          "generation"
+        ]
+      },
+      "DatasetsManagementResult": {
+        "description": "The result from attempting to manage datasets.",
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DatasetManagementStatus"
+            }
+          }
+        },
+        "required": [
+          "status"
         ]
       },
       "DhcpConfig": {
@@ -2701,6 +2988,11 @@
         "format": "uint64",
         "minimum": 0
       },
+      "GzipLevel": {
+        "type": "integer",
+        "format": "uint8",
+        "minimum": 0
+      },
       "HostIdentifier": {
         "description": "A `HostIdentifier` represents either an IP host or network (v4 or v6), or an entire VPC (identified by its VNI). It is used in firewall rule host filters.",
         "oneOf": [
@@ -2751,6 +3043,14 @@
             "items": {
               "$ref": "#/components/schemas/UplinkAddressConfig"
             }
+          },
+          "lldp": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LldpPortConfig"
+              }
+            ]
           },
           "port": {
             "description": "Switchport to use for external connectivity",
@@ -2829,11 +3129,11 @@
               }
             ]
           },
-          "instance_runtime": {
-            "description": "The instance runtime state for the instance being registered.",
+          "instance_id": {
+            "description": "The ID of the instance for which this VMM is being created.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/InstanceRuntimeState"
+                "$ref": "#/components/schemas/TypedUuidForInstanceKind"
               }
             ]
           },
@@ -2845,17 +3145,15 @@
               }
             ]
           },
+          "migration_id": {
+            "nullable": true,
+            "description": "The ID of the migration in to this VMM, if this VMM is being ensured is part of a migration in. If this is `None`, the VMM is not being created due to a migration.",
+            "type": "string",
+            "format": "uuid"
+          },
           "propolis_addr": {
             "description": "The address at which this VMM should serve a Propolis server API.",
             "type": "string"
-          },
-          "propolis_id": {
-            "description": "The ID of the VMM being registered. This may not be the active VMM ID in the instance runtime state (e.g. if the new VMM is going to be a migration target).",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TypedUuidForPropolisKind"
-              }
-            ]
           },
           "vmm_runtime": {
             "description": "The initial VMM runtime state for the VMM being registered.",
@@ -2868,10 +3166,9 @@
         },
         "required": [
           "hardware",
-          "instance_runtime",
+          "instance_id",
           "metadata",
           "propolis_addr",
-          "propolis_id",
           "vmm_runtime"
         ]
       },
@@ -2977,30 +3274,6 @@
           "source_nat"
         ]
       },
-      "InstanceIssueDiskSnapshotRequestBody": {
-        "type": "object",
-        "properties": {
-          "snapshot_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "snapshot_id"
-        ]
-      },
-      "InstanceIssueDiskSnapshotRequestResponse": {
-        "type": "object",
-        "properties": {
-          "snapshot_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "snapshot_id"
-        ]
-      },
       "InstanceMetadata": {
         "description": "Metadata used to track statistics about an instance.",
         "type": "object",
@@ -3063,175 +3336,18 @@
           "ncpus"
         ]
       },
-      "InstancePutStateBody": {
-        "description": "The body of a request to move a previously-ensured instance into a specific runtime state.",
-        "type": "object",
-        "properties": {
-          "state": {
-            "description": "The state into which the instance should be driven.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/InstanceStateRequested"
-              }
-            ]
-          }
-        },
-        "required": [
-          "state"
-        ]
-      },
-      "InstancePutStateResponse": {
-        "description": "The response sent from a request to move an instance into a specific runtime state.",
-        "type": "object",
-        "properties": {
-          "updated_runtime": {
-            "nullable": true,
-            "description": "The current runtime state of the instance after handling the request to change its state. If the instance's state did not change, this field is `None`.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SledInstanceState"
-              }
-            ]
-          }
-        }
-      },
-      "InstanceRuntimeState": {
-        "description": "The dynamic runtime properties of an instance: its current VMM ID (if any), migration information (if any), and the instance state to report if there is no active VMM.",
-        "type": "object",
-        "properties": {
-          "dst_propolis_id": {
-            "nullable": true,
-            "description": "If a migration is active, the ID of the target VMM.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TypedUuidForPropolisKind"
-              }
-            ]
-          },
-          "gen": {
-            "description": "Generation number for this state.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Generation"
-              }
-            ]
-          },
-          "migration_id": {
-            "nullable": true,
-            "description": "If a migration is active, the ID of that migration.",
-            "type": "string",
-            "format": "uuid"
-          },
-          "propolis_id": {
-            "nullable": true,
-            "description": "The instance's currently active VMM ID.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TypedUuidForPropolisKind"
-              }
-            ]
-          },
-          "time_updated": {
-            "description": "Timestamp for this information.",
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "gen",
-          "time_updated"
-        ]
-      },
-      "InstanceStateRequested": {
-        "description": "Requestable running state of an Instance.\n\nA subset of [`omicron_common::api::external::InstanceState`].",
-        "oneOf": [
-          {
-            "description": "Run this instance by migrating in from a previous running incarnation of the instance.",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "migration_target"
-                ]
-              },
-              "value": {
-                "$ref": "#/components/schemas/InstanceMigrationTargetParams"
-              }
-            },
-            "required": [
-              "type",
-              "value"
-            ]
-          },
-          {
-            "description": "Start the instance if it is not already running.",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "running"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "description": "Stop the instance.",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "stopped"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "description": "Immediately reset the instance, as though it had stopped and immediately began to run again.",
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "reboot"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          }
-        ]
-      },
-      "InstanceUnregisterResponse": {
-        "description": "The response sent from a request to unregister an instance.",
-        "type": "object",
-        "properties": {
-          "updated_runtime": {
-            "nullable": true,
-            "description": "The current state of the instance after handling the request to unregister it. If the instance's state did not change, this field is `None`.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/SledInstanceState"
-              }
-            ]
-          }
-        }
-      },
       "Inventory": {
         "description": "Identity and basic status information about this sled agent",
         "type": "object",
         "properties": {
           "baseboard": {
             "$ref": "#/components/schemas/Baseboard"
+          },
+          "datasets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InventoryDataset"
+            }
           },
           "disks": {
             "type": "array",
@@ -3269,6 +3385,7 @@
         },
         "required": [
           "baseboard",
+          "datasets",
           "disks",
           "reservoir_size",
           "sled_agent_address",
@@ -3277,6 +3394,69 @@
           "usable_hardware_threads",
           "usable_physical_ram",
           "zpools"
+        ]
+      },
+      "InventoryDataset": {
+        "description": "Identifies information about datasets within Oxide-managed zpools",
+        "type": "object",
+        "properties": {
+          "available": {
+            "description": "The amount of remaining space usable by the dataset (and children) assuming there is no other activity within the pool.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          },
+          "compression": {
+            "description": "The compression algorithm used for this dataset, if any.",
+            "type": "string"
+          },
+          "id": {
+            "nullable": true,
+            "description": "Although datasets mandated by the control plane will have UUIDs, datasets can be created (and have been created) without UUIDs.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+              }
+            ]
+          },
+          "name": {
+            "description": "This name is the full path of the dataset.",
+            "type": "string"
+          },
+          "quota": {
+            "nullable": true,
+            "description": "The maximum amount of space usable by a dataset and all descendents.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          },
+          "reservation": {
+            "nullable": true,
+            "description": "The minimum amount of space guaranteed to a dataset and descendents.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          },
+          "used": {
+            "description": "The amount of space consumed by this dataset and descendents.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          }
+        },
+        "required": [
+          "available",
+          "compression",
+          "name",
+          "used"
         ]
       },
       "InventoryDisk": {
@@ -3403,6 +3583,67 @@
         "pattern": "^[0-9]{1,5}(-[0-9]{1,5})?$",
         "minLength": 1,
         "maxLength": 11
+      },
+      "LldpAdminStatus": {
+        "description": "To what extent should this port participate in LLDP",
+        "type": "string",
+        "enum": [
+          "enabled",
+          "disabled",
+          "rx_only",
+          "tx_only"
+        ]
+      },
+      "LldpPortConfig": {
+        "description": "Per-port LLDP configuration settings.  Only the \"status\" setting is mandatory.  All other fields have natural defaults or may be inherited from the switch.",
+        "type": "object",
+        "properties": {
+          "chassis_id": {
+            "nullable": true,
+            "description": "Chassis ID to advertise.  If this is set, it will be advertised as a LocallyAssigned ID type.  If this is not set, it will be inherited from the switch-level settings.",
+            "type": "string"
+          },
+          "management_addrs": {
+            "nullable": true,
+            "description": "Management IP addresses to advertise.  If this is not set, it will be inherited from the switch-level settings.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ip"
+            }
+          },
+          "port_description": {
+            "nullable": true,
+            "description": "Port description to advertise.  If this is not set, no description will be advertised.",
+            "type": "string"
+          },
+          "port_id": {
+            "nullable": true,
+            "description": "Port ID to advertise.  If this is set, it will be advertised as a LocallyAssigned ID type.  If this is not set, it will be set to the port name. e.g., qsfp0/0.",
+            "type": "string"
+          },
+          "status": {
+            "description": "To what extent should this port participate in LLDP",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LldpAdminStatus"
+              }
+            ]
+          },
+          "system_description": {
+            "nullable": true,
+            "description": "System description to advertise.  If this is not set, it will be inherited from the switch-level settings.",
+            "type": "string"
+          },
+          "system_name": {
+            "nullable": true,
+            "description": "System name to advertise.  If this is not set, it will be inherited from the switch-level settings.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ]
       },
       "MacAddr": {
         "example": "ff:ff:ff:ff:ff:ff",
@@ -4104,6 +4345,15 @@
               "$ref": "#/components/schemas/BgpPeerConfig"
             }
           },
+          "lldp": {
+            "nullable": true,
+            "description": "LLDP configuration for this port",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LldpPortConfig"
+              }
+            ]
+          },
           "port": {
             "description": "Nmae of the port this config applies to.",
             "type": "string"
@@ -4589,8 +4839,27 @@
           "sled_id"
         ]
       },
-      "SledInstanceState": {
-        "description": "A wrapper type containing a sled's total knowledge of the state of a specific VMM and the instance it incarnates.",
+      "SledRole": {
+        "description": "Describes the role of the sled within the rack.\n\nNote that this may change if the sled is physically moved within the rack.",
+        "oneOf": [
+          {
+            "description": "The sled is a general compute sled.",
+            "type": "string",
+            "enum": [
+              "gimlet"
+            ]
+          },
+          {
+            "description": "The sled is attached to the network switch, and has additional responsibilities.",
+            "type": "string",
+            "enum": [
+              "scrimlet"
+            ]
+          }
+        ]
+      },
+      "SledVmmState": {
+        "description": "A wrapper type containing a sled's total knowledge of the state of a VMM.",
         "type": "object",
         "properties": {
           "migration_in": {
@@ -4611,14 +4880,6 @@
               }
             ]
           },
-          "propolis_id": {
-            "description": "The ID of the VMM whose state is being reported.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TypedUuidForPropolisKind"
-              }
-            ]
-          },
           "vmm_state": {
             "description": "The most recent state of the sled's VMM process.",
             "allOf": [
@@ -4629,27 +4890,7 @@
           }
         },
         "required": [
-          "propolis_id",
           "vmm_state"
-        ]
-      },
-      "SledRole": {
-        "description": "Describes the role of the sled within the rack.\n\nNote that this may change if the sled is physically moved within the rack.",
-        "oneOf": [
-          {
-            "description": "The sled is a general compute sled.",
-            "type": "string",
-            "enum": [
-              "gimlet"
-            ]
-          },
-          {
-            "description": "The sled is attached to the network switch, and has additional responsibilities.",
-            "type": "string",
-            "enum": [
-              "scrimlet"
-            ]
-          }
         ]
       },
       "Slot": {
@@ -4834,7 +5075,11 @@
           "sync"
         ]
       },
-      "TypedUuidForPropolisKind": {
+      "TypedUuidForDatasetKind": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "TypedUuidForInstanceKind": {
         "type": "string",
         "format": "uuid"
       },
@@ -4917,6 +5162,62 @@
           "virtual_mac",
           "vni"
         ]
+      },
+      "VmmIssueDiskSnapshotRequestBody": {
+        "type": "object",
+        "properties": {
+          "snapshot_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "snapshot_id"
+        ]
+      },
+      "VmmIssueDiskSnapshotRequestResponse": {
+        "type": "object",
+        "properties": {
+          "snapshot_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "snapshot_id"
+        ]
+      },
+      "VmmPutStateBody": {
+        "description": "The body of a request to move a previously-ensured instance into a specific runtime state.",
+        "type": "object",
+        "properties": {
+          "state": {
+            "description": "The state into which the instance should be driven.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VmmStateRequested"
+              }
+            ]
+          }
+        },
+        "required": [
+          "state"
+        ]
+      },
+      "VmmPutStateResponse": {
+        "description": "The response sent from a request to move an instance into a specific runtime state.",
+        "type": "object",
+        "properties": {
+          "updated_runtime": {
+            "nullable": true,
+            "description": "The current runtime state of the instance after handling the request to change its state. If the instance's state did not change, this field is `None`.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SledVmmState"
+              }
+            ]
+          }
+        }
       },
       "VmmRuntimeState": {
         "description": "The dynamic runtime properties of an individual VMM process.",
@@ -5010,6 +5311,90 @@
             ]
           }
         ]
+      },
+      "VmmStateRequested": {
+        "description": "Requestable running state of an Instance.\n\nA subset of [`omicron_common::api::external::InstanceState`].",
+        "oneOf": [
+          {
+            "description": "Run this instance by migrating in from a previous running incarnation of the instance.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "migration_target"
+                ]
+              },
+              "value": {
+                "$ref": "#/components/schemas/InstanceMigrationTargetParams"
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "description": "Start the instance if it is not already running.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "running"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Stop the instance.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "stopped"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Immediately reset the instance, as though it had stopped and immediately began to run again.",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "reboot"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        ]
+      },
+      "VmmUnregisterResponse": {
+        "description": "The response sent from a request to unregister an instance.",
+        "type": "object",
+        "properties": {
+          "updated_runtime": {
+            "nullable": true,
+            "description": "The current state of the instance after handling the request to unregister it. If the instance's state did not change, this field is `None`.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SledVmmState"
+              }
+            ]
+          }
+        }
       },
       "Vni": {
         "description": "A Geneve Virtual Network Identifier",
@@ -5331,7 +5716,7 @@
           "B"
         ]
       },
-      "TypedUuidForInstanceKind": {
+      "TypedUuidForPropolisKind": {
         "type": "string",
         "format": "uuid"
       }

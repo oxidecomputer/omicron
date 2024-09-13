@@ -37,13 +37,17 @@ use nexus_types::external_api::views::SledState;
 use omicron_common::address::get_internal_dns_server_addresses;
 use omicron_common::address::get_sled_address;
 use omicron_common::address::get_switch_zone_address;
+use omicron_common::address::ReservedRackSubnet;
 use omicron_common::address::CP_SERVICES_RESERVED_ADDRESSES;
+use omicron_common::address::DNS_HTTP_PORT;
+use omicron_common::address::DNS_PORT;
 use omicron_common::address::NTP_PORT;
 use omicron_common::address::SLED_RESERVED_ADDRESSES;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
+use omicron_common::policy::MAX_INTERNAL_DNS_REDUNDANCY;
 use omicron_uuid_kinds::ExternalIpKind;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneKind;
@@ -73,6 +77,7 @@ use typed_rng::UuidRng;
 use super::external_networking::BuilderExternalNetworking;
 use super::external_networking::ExternalNetworkingChoice;
 use super::external_networking::ExternalSnatNetworkingChoice;
+use super::internal_dns::DnsSubnetAllocator;
 use super::zones::is_already_expunged;
 use super::zones::BuilderZoneState;
 use super::zones::BuilderZonesConfig;
@@ -106,6 +111,12 @@ pub enum Error {
     },
     #[error("programming error in planner")]
     Planner(#[source] anyhow::Error),
+    #[error("no reserved subnets available for DNS")]
+    NoAvailableDnsSubnets,
+    #[error(
+        "can only have {MAX_INTERNAL_DNS_REDUNDANCY} internal DNS servers"
+    )]
+    TooManyDnsServers,
 }
 
 /// Describes whether an idempotent "ensure" operation resulted in action taken
@@ -197,6 +208,7 @@ pub struct BlueprintBuilder<'a> {
     input: &'a PlanningInput,
     sled_ip_allocators: BTreeMap<SledUuid, IpAllocator>,
     external_networking: BuilderExternalNetworking<'a>,
+    internal_dns_subnets: DnsSubnetAllocator,
 
     // These fields will become part of the final blueprint.  See the
     // corresponding fields in `Blueprint`.
@@ -291,6 +303,8 @@ impl<'a> BlueprintBuilder<'a> {
 
         let external_networking =
             BuilderExternalNetworking::new(parent_blueprint, input)?;
+        let internal_dns_subnets =
+            DnsSubnetAllocator::new(parent_blueprint, input)?;
 
         // Prefer the sled state from our parent blueprint for sleds
         // that were in it; there may be new sleds in `input`, in which
@@ -323,6 +337,7 @@ impl<'a> BlueprintBuilder<'a> {
             input,
             sled_ip_allocators: BTreeMap::new(),
             external_networking,
+            internal_dns_subnets,
             zones: BlueprintZonesBuilder::new(parent_blueprint),
             disks: BlueprintDisksBuilder::new(parent_blueprint),
             sled_state,
@@ -619,6 +634,69 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(EnsureMultiple::Changed { added, removed })
     }
 
+    fn sled_add_zone_internal_dns(
+        &mut self,
+        sled_id: SledUuid,
+        gz_address_index: u32,
+    ) -> Result<Ensure, Error> {
+        let sled_subnet = self.sled_resources(sled_id)?.subnet;
+        let rack_subnet = ReservedRackSubnet::from_subnet(sled_subnet);
+        let dns_subnet = self.internal_dns_subnets.alloc(rack_subnet)?;
+        let address = dns_subnet.dns_address();
+        let zpool = self.sled_select_zpool(sled_id, ZoneKind::InternalDns)?;
+        let zone_type =
+            BlueprintZoneType::InternalDns(blueprint_zone_type::InternalDns {
+                dataset: OmicronZoneDataset { pool_name: zpool.clone() },
+                dns_address: SocketAddrV6::new(address, DNS_PORT, 0, 0),
+                http_address: SocketAddrV6::new(address, DNS_HTTP_PORT, 0, 0),
+                gz_address: dns_subnet.gz_address(),
+                gz_address_index,
+            });
+
+        let zone = BlueprintZoneConfig {
+            disposition: BlueprintZoneDisposition::InService,
+            id: self.rng.zone_rng.next(),
+            underlay_address: address,
+            filesystem_pool: Some(zpool),
+            zone_type,
+        };
+
+        self.sled_add_zone(sled_id, zone)?;
+        Ok(Ensure::Added)
+    }
+
+    pub fn sled_ensure_zone_multiple_internal_dns(
+        &mut self,
+        sled_id: SledUuid,
+        desired_zone_count: usize,
+    ) -> Result<EnsureMultiple, Error> {
+        // How many internal DNS zones do we need to add?
+        let count =
+            self.sled_num_running_zones_of_kind(sled_id, ZoneKind::InternalDns);
+        let to_add = match desired_zone_count.checked_sub(count) {
+            Some(0) => return Ok(EnsureMultiple::NotNeeded),
+            Some(n) => n,
+            None => {
+                return Err(Error::Planner(anyhow!(
+                    "removing an internal DNS zone not yet supported \
+                     (sled {sled_id} has {count}; \
+                     planner wants {desired_zone_count})"
+                )));
+            }
+        };
+
+        for i in count..desired_zone_count {
+            self.sled_add_zone_internal_dns(
+                sled_id,
+                i.try_into().map_err(|_| {
+                    Error::Planner(anyhow!("zone index overflow"))
+                })?,
+            )?;
+        }
+
+        Ok(EnsureMultiple::Changed { added: to_add, removed: 0 })
+    }
+
     pub fn sled_ensure_zone_ntp(
         &mut self,
         sled_id: SledUuid,
@@ -636,14 +714,18 @@ impl<'a> BlueprintBuilder<'a> {
         let sled_subnet = sled_info.subnet;
         let ip = self.sled_alloc_ip(sled_id)?;
         let ntp_address = SocketAddrV6::new(ip, NTP_PORT, 0, 0);
+
         // Construct the list of internal DNS servers.
         //
         // It'd be tempting to get this list from the other internal NTP
-        // servers but there may not be any of those.  We could also
-        // construct this list manually from the set of internal DNS servers
-        // actually deployed.  Instead, we take the same approach as RSS:
-        // these are at known, fixed addresses relative to the AZ subnet
-        // (which itself is a known-prefix parent subnet of the sled subnet).
+        // servers, but there may not be any of those.  We could also
+        // construct it manually from the set of internal DNS servers
+        // actually deployed, or ask the DNS subnet allocator; but those
+        // would both require that all the internal DNS zones be added
+        // before any NTP zones, a constraint we don't currently enforce.
+        // Instead, we take the same approach as RSS: they are at known,
+        // fixed addresses relative to the AZ subnet (which itself is a
+        // known-prefix parent subnet of the sled subnet).
         let dns_servers =
             get_internal_dns_server_addresses(sled_subnet.net().prefix());
 
@@ -1139,13 +1221,13 @@ impl<'a> BlueprintBuilder<'a> {
         allocator.alloc().ok_or(Error::OutOfAddresses { sled_id })
     }
 
-    // Selects a zpools for this zone type.
-    //
-    // This zpool may be used for either durable storage or transient
-    // storage - the usage is up to the caller.
-    //
-    // If `zone_kind` already exists on `sled_id`, it is prevented
-    // from using the same zpool as exisitng zones with the same kind.
+    /// Selects a zpool for this zone type.
+    ///
+    /// This zpool may be used for either durable storage or transient
+    /// storage - the usage is up to the caller.
+    ///
+    /// If `zone_kind` already exists on `sled_id`, it is prevented
+    /// from using the same zpool as existing zones with the same kind.
     fn sled_select_zpool(
         &self,
         sled_id: SledUuid,
@@ -1255,9 +1337,13 @@ impl<'a> BlueprintZonesBuilder<'a> {
     }
 
     /// Returns a mutable reference to a sled's Omicron zones *because* we're
-    /// going to change them.  It's essential that the caller _does_ change them
-    /// because we will have bumped the generation number and we don't want to
-    /// do that if no changes are being made.
+    /// going to change them.
+    ///
+    /// This updates internal data structures, and it is recommended that it be
+    /// called only when the caller actually wishes to make changes to zones.
+    /// But making no changes after calling this does not result in a changed
+    /// blueprint. (In particular, the generation number is only updated if
+    /// the state of any zones was updated.)
     pub fn change_sled_zones(
         &mut self,
         sled_id: SledUuid,
@@ -1364,9 +1450,11 @@ impl<'a> BlueprintDisksBuilder<'a> {
     }
 
     /// Returns a mutable reference to a sled's Omicron disks *because* we're
-    /// going to change them.  It's essential that the caller _does_ change them
-    /// because we will have bumped the generation number and we don't want to
-    /// do that if no changes are being made.
+    /// going to change them.
+    ///
+    /// Unlike [`BlueprintZonesBuilder::change_sled_zones`], it is essential
+    /// that the caller _does_ change them, because constructing this bumps the
+    /// generation number unconditionally.
     pub fn change_sled_disks(
         &mut self,
         sled_id: SledUuid,

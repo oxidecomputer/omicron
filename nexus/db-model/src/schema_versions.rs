@@ -17,7 +17,7 @@ use std::collections::BTreeMap;
 ///
 /// This must be updated when you change the database schema.  Refer to
 /// schema/crdb/README.adoc in the root of this repository for details.
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(88, 0, 0);
+pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(96, 0, 0);
 
 /// List of all past database schema versions, in *reverse* order
 ///
@@ -29,6 +29,14 @@ static KNOWN_VERSIONS: Lazy<Vec<KnownVersion>> = Lazy::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
+        KnownVersion::new(96, "inv-dataset"),
+        KnownVersion::new(95, "turn-boot-on-fault-into-auto-restart"),
+        KnownVersion::new(94, "put-back-creating-vmm-state"),
+        KnownVersion::new(93, "dataset-kinds-zone-and-debug"),
+        KnownVersion::new(92, "lldp-link-config-nullable"),
+        KnownVersion::new(91, "add-management-gateway-producer-kind"),
+        KnownVersion::new(90, "lookup-bgp-config-by-asn"),
+        KnownVersion::new(89, "collapse_lldp_settings"),
         KnownVersion::new(88, "route-local-pref"),
         KnownVersion::new(87, "add-clickhouse-server-enum-variants"),
         KnownVersion::new(86, "snapshot-replacement"),

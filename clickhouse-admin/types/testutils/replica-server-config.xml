@@ -1,0 +1,107 @@
+
+<clickhouse>
+
+    <logger>
+        <level>trace</level>
+        <log>./log/clickhouse.log</log>
+        <errorlog>./log/clickhouse.err.log</errorlog>
+        <size>100M</size>
+        <count>1</count>
+    </logger>
+
+    <path>./data</path>
+
+    <profiles>
+        <default>
+            <load_balancing>random</load_balancing>
+        </default>
+
+    </profiles>
+
+    <users>
+        <default>
+            <password></password>
+            <networks>
+                <ip>::/0</ip>
+            </networks>
+            <profile>default</profile>
+            <quota>default</quota>
+        </default>
+    </users>
+
+    <quotas>
+        <default>
+            <interval>
+                <duration>3600</duration>
+                <queries>0</queries>
+                <errors>0</errors>
+                <result_rows>0</result_rows>
+                <read_rows>0</read_rows>
+                <execution_time>0</execution_time>
+            </interval>
+        </default>
+    </quotas>
+
+    <tmp_path>./data/tmp</tmp_path>
+    <user_files_path>./data/user_files</user_files_path>
+    <default_profile>default</default_profile>
+    <format_schema_path>./data/format_schemas</format_schema_path>
+    <display_name>oximeter_cluster_1</display_name>
+    <listen_host>ff::8</listen_host>
+    <http_port>8123</http_port>
+    <tcp_port>9000</tcp_port>
+    <interserver_http_port>9009</interserver_http_port>
+    <interserver_http_host>ff::8</interserver_http_host>
+    <distributed_ddl>
+        <!-- Cleanup settings (active tasks will not be removed) -->
+
+        <!-- Controls task TTL (default 1 week) -->
+        <task_max_lifetime>604800</task_max_lifetime>
+
+        <!-- Controls how often cleanup should be performed (in seconds) -->
+        <cleanup_delay_period>60</cleanup_delay_period>
+
+        <!-- Controls how many tasks could be in the queue -->
+        <max_tasks_in_queue>1000</max_tasks_in_queue>
+     </distributed_ddl>
+
+    <macros>
+        <shard>1</shard>
+        <replica>1</replica>
+        <cluster>oximeter_cluster</cluster>
+    </macros>
+
+    <remote_servers replace="true">
+        <oximeter_cluster>
+            <!-- TODO(https://github.com/oxidecomputer/omicron/issues/3823): secret handling TBD -->
+            <secret>some-unique-value</secret>
+            <shard>
+                <internal_replication>true</internal_replication>
+                <replica>
+                    <host>ff::9</host>
+                    <port>9000</port>
+                </replica>
+                <replica>
+                    <host>ohai.com</host>
+                    <port>9000</port>
+                </replica>
+            </shard>
+        </oximeter_cluster>
+    </remote_servers>
+        
+    <zookeeper>
+        <node>
+            <host>[ff::1]</host>
+            <port>9181</port>
+        </node>
+        <node>
+            <host>127.0.0.1</host>
+            <port>9181</port>
+        </node>
+        <node>
+            <host>we.dont.want.brackets.com</host>
+            <port>9181</port>
+        </node>
+    </zookeeper>
+
+</clickhouse>

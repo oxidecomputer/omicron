@@ -6,6 +6,7 @@
 
 use crate::check_allow_destructive::DestructiveOperationToken;
 use crate::db::DbUrlOptions;
+use crate::helpers::should_colorize;
 use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::Omdb;
 use anyhow::bail;
@@ -15,6 +16,7 @@ use chrono::DateTime;
 use chrono::SecondsFormat;
 use chrono::Utc;
 use clap::Args;
+use clap::ColorChoice;
 use clap::Subcommand;
 use clap::ValueEnum;
 use futures::future::try_join;
@@ -32,10 +34,14 @@ use nexus_client::types::UninitializedSledId;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_saga_recovery::LastPass;
 use nexus_types::deployment::Blueprint;
+use nexus_types::internal_api::background::AbandonedVmmReaperStatus;
+use nexus_types::internal_api::background::InstanceUpdaterStatus;
 use nexus_types::internal_api::background::LookupRegionPortStatus;
 use nexus_types::internal_api::background::RegionReplacementDriverStatus;
+use nexus_types::internal_api::background::RegionSnapshotReplacementFinishStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementGarbageCollectStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStartStatus;
+use nexus_types::internal_api::background::RegionSnapshotReplacementStepStatus;
 use nexus_types::inventory::BaseboardId;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DemoSagaUuid;
@@ -50,7 +56,21 @@ use slog_error_chain::InlineErrorChain;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::str::FromStr;
+use tabled::settings::object::Columns;
+use tabled::settings::Padding;
 use tabled::Tabled;
+use tokio::sync::OnceCell;
+use update_engine::display::LineDisplay;
+use update_engine::display::LineDisplayStyles;
+use update_engine::display::ProgressRatioDisplay;
+use update_engine::events::EventReport;
+use update_engine::events::StepOutcome;
+use update_engine::EventBuffer;
+use update_engine::ExecutionStatus;
+use update_engine::ExecutionTerminalInfo;
+use update_engine::NestedError;
+use update_engine::NestedSpec;
+use update_engine::TerminalKind;
 use uuid::Uuid;
 
 /// Arguments to the "omdb nexus" subcommand
@@ -97,6 +117,8 @@ enum BackgroundTasksCommands {
     List,
     /// Print human-readable summary of the status of each background task
     Show(BackgroundTasksShowArgs),
+    /// Print an event report for a background task if available.
+    PrintReport(BackgroundTasksPrintReportArgs),
     /// Activate one or more background tasks
     Activate(BackgroundTasksActivateArgs),
 }
@@ -109,6 +131,13 @@ struct BackgroundTasksShowArgs {
     /// "all", "dns_external", or "dns_internal".
     #[clap(value_name = "TASK_NAME")]
     tasks: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+struct BackgroundTasksPrintReportArgs {
+    /// The name of the background task to print a report for.
+    #[clap(value_name = "TASK_NAME")]
+    task: String,
 }
 
 #[derive(Debug, Args)]
@@ -244,6 +273,10 @@ struct BlueprintTargetSetArgs {
     blueprint_id: Uuid,
     /// whether this blueprint should be enabled
     enabled: BlueprintTargetSetEnabled,
+    /// if specified, diff against the current target and wait for confirmation
+    /// before proceeding
+    #[clap(long)]
+    diff: bool,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -376,6 +409,16 @@ impl NexusArgs {
             NexusCommands::BackgroundTasks(BackgroundTasksArgs {
                 command: BackgroundTasksCommands::Show(args),
             }) => cmd_nexus_background_tasks_show(&client, args).await,
+            NexusCommands::BackgroundTasks(BackgroundTasksArgs {
+                command: BackgroundTasksCommands::PrintReport(args),
+            }) => {
+                cmd_nexus_background_tasks_print_report(
+                    &client,
+                    args,
+                    omdb.output.color,
+                )
+                .await
+            }
             NexusCommands::BackgroundTasks(BackgroundTasksArgs {
                 command: BackgroundTasksCommands::Activate(args),
             }) => {
@@ -624,6 +667,49 @@ async fn cmd_nexus_background_tasks_show(
 
     for (_, bgtask) in &tasks {
         print_task(bgtask);
+    }
+
+    Ok(())
+}
+
+/// Runs `omdb nexus background-tasks print-report`
+async fn cmd_nexus_background_tasks_print_report(
+    client: &nexus_client::Client,
+    args: &BackgroundTasksPrintReportArgs,
+    color: ColorChoice,
+) -> Result<(), anyhow::Error> {
+    let response = client
+        .bgtask_view(&args.task)
+        .await
+        .context("fetching background task")?;
+    let task = response.into_inner();
+    match task.last {
+        LastResult::NeverCompleted => {
+            bail!("task {:?} has never completed", args.task);
+        }
+        LastResult::Completed(last) => {
+            // Clone the details so the original details are preserved for the
+            // error below.
+            let event_buffer = extract_event_buffer(&mut last.details.clone())
+                .with_context(|| {
+                    format!(
+                        "error extracting `event_report` from task details \
+                         -- found {:?}",
+                        last.details
+                    )
+                })?;
+            let Some(event_buffer) = event_buffer else {
+                bail!("task {:?} has no event report", args.task);
+            };
+
+            let mut line_display = LineDisplay::new(std::io::stdout());
+            line_display.set_start_time(last.start_time);
+            if should_colorize(color, supports_color::Stream::Stdout) {
+                line_display.set_styles(LineDisplayStyles::colorized());
+            }
+
+            line_display.write_event_buffer(&event_buffer)?;
+        }
     }
 
     Ok(())
@@ -1147,54 +1233,61 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
             }
         };
     } else if name == "abandoned_vmm_reaper" {
-        #[derive(Deserialize)]
-        struct TaskSuccess {
-            /// total number of abandoned VMMs found
-            found: usize,
-
-            /// number of abandoned VMM records that were deleted
-            vmms_deleted: usize,
-
-            /// number of abandoned VMM records that were already deleted when
-            /// we tried to delete them.
-            vmms_already_deleted: usize,
-
-            /// sled resource reservations that were released
-            sled_reservations_deleted: usize,
-
-            /// number of errors that occurred during the activation
-            error_count: usize,
-
-            /// the last error that occurred during execution.
-            error: Option<String>,
-        }
-        match serde_json::from_value::<TaskSuccess>(details.clone()) {
+        match serde_json::from_value::<AbandonedVmmReaperStatus>(
+            details.clone(),
+        ) {
             Err(error) => eprintln!(
                 "warning: failed to interpret task details: {:?}: {:?}",
                 error, details
             ),
-            Ok(TaskSuccess {
-                found,
+            Ok(AbandonedVmmReaperStatus {
+                vmms_found,
                 vmms_deleted,
                 vmms_already_deleted,
                 sled_reservations_deleted,
-                error_count,
-                error,
+                errors,
             }) => {
-                if let Some(error) = error {
-                    println!("    task did not complete successfully!");
-                    println!("      total errors: {error_count}");
-                    println!("      most recent error: {error}");
+                if !errors.is_empty() {
+                    println!(
+                        "    task did not complete successfully! ({} errors)",
+                        errors.len()
+                    );
+                    for error in errors {
+                        println!("    > {error}");
+                    }
                 }
 
-                println!("    total abandoned VMMs found: {found}");
-                println!("      VMM records deleted: {vmms_deleted}");
+                const VMMS_FOUND: &'static str = "total abandoned VMMs found:";
+                const VMMS_DELETED: &'static str = "  VMM records deleted:";
+                const VMMS_ALREADY_DELETED: &'static str =
+                    "  VMMs already deleted by another Nexus:";
+                const SLED_RESERVATIONS_DELETED: &'static str =
+                    "sled resource reservations deleted:";
+                // To align the number column, figure out the length of the
+                // longest line of text and add one (so that there's a space).
+                //
+                // Yes, I *could* just count the number of characters in each
+                // line myself, but why do something by hand when you could make
+                // the computer do it for you? And, this way, if we change the
+                // text, we won't need to figure it out again.
+                const WIDTH: usize = const_max_len(&[
+                    VMMS_FOUND,
+                    VMMS_DELETED,
+                    VMMS_ALREADY_DELETED,
+                    SLED_RESERVATIONS_DELETED,
+                ]) + 1;
+                const NUM_WIDTH: usize = 3;
+
+                println!("    {VMMS_FOUND:<WIDTH$}{vmms_found:>NUM_WIDTH$}");
                 println!(
-                    "      VMM records already deleted by another Nexus: {}",
-                    vmms_already_deleted,
+                    "    {VMMS_DELETED:<WIDTH$}{vmms_deleted:>NUM_WIDTH$}"
                 );
                 println!(
-                    "    sled resource reservations deleted: {}",
+                    "    {VMMS_ALREADY_DELETED:<WIDTH$}{:>NUM_WIDTH$}",
+                    vmms_already_deleted
+                );
+                println!(
+                    "    {SLED_RESERVATIONS_DELETED:<WIDTH$}{:>NUM_WIDTH$}",
                     sled_reservations_deleted,
                 );
             }
@@ -1382,77 +1475,90 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
             ),
         }
     } else if name == "instance_updater" {
-        #[derive(Deserialize)]
-        struct UpdaterStatus {
-            /// number of instances found with destroyed active VMMs
-            destroyed_active_vmms: usize,
+        let status = match serde_json::from_value::<InstanceUpdaterStatus>(
+            details.clone(),
+        ) {
+            Err(error) => {
+                eprintln!(
+                    "warning: failed to interpret task details: {:?}: {:?}",
+                    error, details,
+                );
+                return;
+            }
+            Ok(status) => status,
+        };
+        let errors = status.errors();
+        let instances_found = status.total_instances_found();
+        let InstanceUpdaterStatus {
+            disabled,
+            destroyed_active_vmms,
+            failed_active_vmms,
+            terminated_active_migrations,
+            sagas_started,
+            sagas_completed,
+            saga_errors,
+            query_errors,
+        } = status;
 
-            /// number of instances found with terminated active migrations
-            terminated_active_migrations: usize,
-
-            /// number of update sagas started.
-            sagas_started: usize,
-
-            /// number of sagas completed successfully
-            sagas_completed: usize,
-
-            /// number of sagas which failed
-            sagas_failed: usize,
-
-            /// number of sagas which could not be started
-            saga_start_failures: usize,
-
-            /// the last error that occurred during execution.
-            error: Option<String>,
+        if disabled {
+            println!("    task explicitly disabled by config!")
         }
-        match serde_json::from_value::<UpdaterStatus>(details.clone()) {
-            Err(error) => eprintln!(
-                "warning: failed to interpret task details: {:?}: {:?}",
-                error, details
-            ),
-            Ok(UpdaterStatus {
-                destroyed_active_vmms,
-                terminated_active_migrations,
-                sagas_started,
-                sagas_completed,
-                sagas_failed,
-                saga_start_failures,
-                error,
-            }) => {
-                if let Some(error) = error {
-                    println!("    task did not complete successfully!");
-                    println!("      most recent error: {error}");
-                }
 
-                println!(
-                    "    total instances in need of updates: {}",
-                    destroyed_active_vmms + terminated_active_migrations
-                );
-                println!(
-                    "      instances with destroyed active VMMs: {}",
-                    destroyed_active_vmms,
-                );
-                println!(
-                    "      instances with terminated active migrations: {}",
-                    terminated_active_migrations,
-                );
-                println!("    update sagas started: {sagas_started}");
-                println!(
-                    "    update sagas completed successfully: {}",
-                    sagas_completed,
-                );
-
-                let total_failed = sagas_failed + saga_start_failures;
-                if total_failed > 0 {
-                    println!("    unsuccessful update sagas: {total_failed}");
-                    println!(
-                        "      sagas which could not be started: {}",
-                        saga_start_failures
-                    );
-                    println!("      sagas failed: {sagas_failed}");
+        const FOUND: &'static str = "instances in need of updates:";
+        const DESTROYED: &'static str =
+            "  instances with Destroyed active VMMs:";
+        const FAILED: &'static str = "  instances with Failed active VMMs:";
+        const MIGRATIONS: &'static str =
+            "  instances with terminated migrations:";
+        const SAGAS_STARTED: &'static str = "update sagas started:";
+        const SAGAS_COMPLETED: &'static str =
+            "  update sagas completed successfully:";
+        const SAGA_ERRORS: &'static str = "  update sagas failed:";
+        const QUERY_ERRORS: &'static str =
+            "  errors finding instances to update:";
+        const WIDTH: usize = const_max_len(&[
+            FOUND,
+            DESTROYED,
+            FAILED,
+            MIGRATIONS,
+            SAGAS_STARTED,
+            SAGA_ERRORS,
+            QUERY_ERRORS,
+        ]) + 1;
+        const NUM_WIDTH: usize = 3;
+        if errors > 0 {
+            println!(
+                "    task did not complete successfully! ({errors} errors)"
+            );
+            println!(
+                "      {QUERY_ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
+                query_errors.len()
+            );
+            for error in query_errors {
+                println!("     > {error}");
+            }
+            println!(
+                "      {SAGA_ERRORS:<WIDTH$}{:>NUM_WIDTH$}",
+                saga_errors.len()
+            );
+            for (instance_id, error) in &saga_errors {
+                match instance_id {
+                    Some(id) => println!("      > {id}: {error}"),
+                    None => println!("      > {error}"),
                 }
             }
-        };
+        }
+
+        println!("    {FOUND:<WIDTH$}{instances_found:>NUM_WIDTH$}");
+        println!("    {DESTROYED:<WIDTH$}{destroyed_active_vmms:>NUM_WIDTH$}",);
+        println!("    {FAILED:<WIDTH$}{failed_active_vmms:>NUM_WIDTH$}");
+        println!(
+            "    {MIGRATIONS:<WIDTH$}{:>NUM_WIDTH$}",
+            terminated_active_migrations,
+        );
+        println!("    {SAGAS_STARTED:<WIDTH$}{sagas_started:>NUM_WIDTH$}");
+        println!("    {SAGAS_COMPLETED:<WIDTH$}{sagas_completed:>NUM_WIDTH$}",);
+        println!("    {SAGA_ERRORS:<WIDTH$}{:>NUM_WIDTH$}", saga_errors.len());
     } else if name == "region_snapshot_replacement_start" {
         match serde_json::from_value::<RegionSnapshotReplacementStartStatus>(
             details.clone(),
@@ -1510,6 +1616,164 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 }
             }
         }
+    } else if name == "region_snapshot_replacement_step" {
+        match serde_json::from_value::<RegionSnapshotReplacementStepStatus>(
+            details.clone(),
+        ) {
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            ),
+
+            Ok(status) => {
+                println!(
+                    "    total step records created ok: {}",
+                    status.step_records_created_ok.len(),
+                );
+                for line in &status.step_records_created_ok {
+                    println!("    > {line}");
+                }
+
+                println!(
+                    "    total step garbage collect saga invoked ok: {}",
+                    status.step_garbage_collect_invoked_ok.len(),
+                );
+                for line in &status.step_garbage_collect_invoked_ok {
+                    println!("    > {line}");
+                }
+
+                println!(
+                    "    total step saga invoked ok: {}",
+                    status.step_invoked_ok.len(),
+                );
+                for line in &status.step_invoked_ok {
+                    println!("    > {line}");
+                }
+
+                println!("    errors: {}", status.errors.len());
+                for line in &status.errors {
+                    println!("    > {line}");
+                }
+            }
+        }
+    } else if name == "blueprint_loader" {
+        #[derive(Deserialize)]
+        struct BlueprintLoaderStatus {
+            target_id: Uuid,
+            time_created: DateTime<Utc>,
+            status: String,
+            enabled: bool,
+        }
+
+        match serde_json::from_value::<BlueprintLoaderStatus>(details.clone()) {
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            ),
+            Ok(status) => {
+                println!("    target blueprint: {}", status.target_id);
+                println!(
+                    "    execution:        {}",
+                    if status.enabled { "enabled" } else { "disabled" }
+                );
+                println!(
+                    "    created at:       {}",
+                    humantime::format_rfc3339_millis(
+                        status.time_created.into()
+                    )
+                );
+                println!("    status:           {}", status.status);
+            }
+        }
+    } else if name == "blueprint_executor" {
+        let mut value = details.clone();
+        // Extract and remove the event report. (If we don't do this, the
+        // `Debug` output can be quite large.)
+        //
+        // TODO: show more of the event buffer.
+        let event_buffer = extract_event_buffer(&mut value);
+
+        #[derive(Deserialize)]
+        struct BlueprintExecutorStatus {
+            target_id: Uuid,
+            enabled: bool,
+            execution_error: Option<NestedError>,
+        }
+
+        match serde_json::from_value::<BlueprintExecutorStatus>(value) {
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            ),
+            Ok(status) => {
+                // TODO: switch the other outputs to tabled as well.
+                let mut builder = tabled::builder::Builder::default();
+                builder.push_record([
+                    "target blueprint:".to_string(),
+                    status.target_id.to_string(),
+                ]);
+                builder.push_record([
+                    "execution:".to_string(),
+                    if status.enabled {
+                        "enabled".to_string()
+                    } else {
+                        "disabled".to_string()
+                    },
+                ]);
+
+                push_event_buffer_summary(event_buffer, &mut builder);
+
+                match status.execution_error {
+                    Some(error) => {
+                        builder.push_record([
+                            "error:".to_string(),
+                            error.to_string(),
+                        ]);
+
+                        for source in error.sources() {
+                            builder.push_record([
+                                "  caused by:".to_string(),
+                                source.to_string(),
+                            ]);
+                        }
+                    }
+                    None => {
+                        builder.push_record([
+                            "error:".to_string(),
+                            "(none)".to_string(),
+                        ]);
+                    }
+                }
+
+                let mut table = builder.build();
+                bgtask_apply_kv_style(&mut table);
+                println!("{}", table);
+            }
+        }
+    } else if name == "region_snapshot_replacement_finish" {
+        match serde_json::from_value::<RegionSnapshotReplacementFinishStatus>(
+            details.clone(),
+        ) {
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            ),
+
+            Ok(status) => {
+                println!(
+                    "    total records transitioned to done: {}",
+                    status.records_set_to_done.len(),
+                );
+                for line in &status.records_set_to_done {
+                    println!("    > {line}");
+                }
+
+                println!("    errors: {}", status.errors.len());
+                for line in &status.errors {
+                    println!("    > {line}");
+                }
+            }
+        }
     } else {
         println!(
             "warning: unknown background task: {:?} \
@@ -1527,6 +1791,181 @@ fn reason_str(reason: &ActivationReason) -> &'static str {
         ActivationReason::Signaled => "an explicit signal",
         ActivationReason::Dependency => "a dependent task completing",
         ActivationReason::Timeout => "a periodic timer firing",
+    }
+}
+
+fn bgtask_apply_kv_style(table: &mut tabled::Table) {
+    let style = tabled::settings::Style::empty();
+    table.with(style).with(
+        tabled::settings::Modify::new(Columns::first())
+            // Background task tables are offset by 4 characters.
+            .with(Padding::new(4, 0, 0, 0)),
+    );
+}
+
+/// Extract and remove the event report, returning None if it wasn't found and
+/// an error if something else went wrong. (If we don't do this, the `Debug`
+/// output can be quite large.)
+fn extract_event_buffer(
+    value: &mut serde_json::Value,
+) -> anyhow::Result<Option<EventBuffer<NestedSpec>>> {
+    let Some(obj) = value.as_object_mut() else {
+        bail!("expected value to be an object")
+    };
+    let Some(event_report) = obj.remove("event_report") else {
+        return Ok(None);
+    };
+
+    // Try deserializing the event report generically. We could deserialize to
+    // a more explicit spec, e.g. `ReconfiguratorExecutionSpec`, but that's
+    // unnecessary for omdb's purposes.
+    let value: Result<EventReport<NestedSpec>, NestedError> =
+        serde_json::from_value(event_report)
+            .context("failed to deserialize event report")?;
+    let event_report = value.context(
+        "event report stored as Err rather than Ok (did receiver task panic?)",
+    )?;
+
+    let mut event_buffer = EventBuffer::default();
+    event_buffer.add_event_report(event_report);
+    Ok(Some(event_buffer))
+}
+
+// Make a short summary of the current state of an execution based on an event
+// buffer, and add it to the table.
+fn push_event_buffer_summary(
+    event_buffer: anyhow::Result<Option<EventBuffer<NestedSpec>>>,
+    builder: &mut tabled::builder::Builder,
+) {
+    match event_buffer {
+        Ok(Some(buffer)) => {
+            event_buffer_summary_impl(buffer, builder);
+        }
+        Ok(None) => {
+            builder.push_record(["status:", "(no event report found)"]);
+        }
+        Err(error) => {
+            builder.push_record([
+                "event report error:".to_string(),
+                error.to_string(),
+            ]);
+            for source in error.chain() {
+                builder.push_record([
+                    "  caused by:".to_string(),
+                    source.to_string(),
+                ]);
+            }
+        }
+    }
+}
+
+fn event_buffer_summary_impl(
+    buffer: EventBuffer<NestedSpec>,
+    builder: &mut tabled::builder::Builder,
+) {
+    let Some(summary) = buffer.root_execution_summary() else {
+        builder.push_record(["status:", "(no information found)"]);
+        return;
+    };
+
+    match summary.execution_status {
+        ExecutionStatus::NotStarted => {
+            builder.push_record(["status:", "not started"]);
+        }
+        ExecutionStatus::Running { step_key, .. } => {
+            let step_data = buffer.get(&step_key).expect("step exists");
+            builder.push_record([
+                "status:".to_string(),
+                format!(
+                    "running: {} (step {})",
+                    step_data.step_info().description,
+                    ProgressRatioDisplay::index_and_total(
+                        step_key.index,
+                        summary.total_steps,
+                    ),
+                ),
+            ]);
+        }
+        ExecutionStatus::Terminal(info) => {
+            push_event_buffer_terminal_info(
+                &info,
+                summary.total_steps,
+                &buffer,
+                builder,
+            );
+        }
+    }
+
+    // Also look for warnings.
+    for (_, step_data) in buffer.iter_steps_recursive() {
+        if let Some(reason) = step_data.step_status().completion_reason() {
+            if let Some(info) = reason.step_completed_info() {
+                if let StepOutcome::Warning { message, .. } = &info.outcome {
+                    builder.push_record([
+                        "warning:".to_string(),
+                        // This can be a nested step, so don't print out the
+                        // index.
+                        format!(
+                            "at: {}: {}",
+                            step_data.step_info().description,
+                            message
+                        ),
+                    ]);
+                }
+            }
+        }
+    }
+}
+
+fn push_event_buffer_terminal_info(
+    info: &ExecutionTerminalInfo,
+    total_steps: usize,
+    buffer: &EventBuffer<NestedSpec>,
+    builder: &mut tabled::builder::Builder,
+) {
+    let step_data = buffer.get(&info.step_key).expect("step exists");
+
+    match info.kind {
+        TerminalKind::Completed => {
+            let v = format!("completed ({} steps)", total_steps);
+            builder.push_record(["status:".to_string(), v]);
+        }
+        TerminalKind::Failed => {
+            let v = format!(
+                "failed at: {} (step {})",
+                step_data.step_info().description,
+                ProgressRatioDisplay::index_and_total(
+                    info.step_key.index,
+                    total_steps,
+                )
+            );
+            builder.push_record(["status:".to_string(), v]);
+
+            // Don't show the error here, because it's duplicated in another
+            // field that's already shown.
+        }
+        TerminalKind::Aborted => {
+            let v = format!(
+                "aborted at: {} (step {})",
+                step_data.step_info().description,
+                ProgressRatioDisplay::index_and_total(
+                    info.step_key.index,
+                    total_steps,
+                )
+            );
+            builder.push_record(["status:".to_string(), v]);
+
+            let Some(reason) = step_data.step_status().abort_reason() else {
+                builder.push_record(["  reason:", "(no reason found)"]);
+                return;
+            };
+
+            builder.push_record([
+                "  reason:".to_string(),
+                reason.message_display(&buffer).to_string(),
+            ]);
+            // TODO: show last progress event
+        }
     }
 }
 
@@ -1722,6 +2161,38 @@ async fn cmd_nexus_blueprints_target_set(
     args: &BlueprintTargetSetArgs,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
+    // Helper to only fetch the current target once. We may need it immediately
+    // if `args.diff` is true, or later if `args.enabled` is "inherit" (or
+    // both).
+    let current_target = OnceCell::new();
+    let get_current_target = || async {
+        current_target
+            .get_or_try_init(|| client.blueprint_target_view())
+            .await
+            .context("failed to fetch current target blueprint")
+    };
+
+    if args.diff {
+        let current_target = get_current_target().await?;
+        let blueprint1 = client
+            .blueprint_view(&current_target.target_id)
+            .await
+            .context("failed to fetch target blueprint")?
+            .into_inner();
+        let blueprint2 =
+            client.blueprint_view(&args.blueprint_id).await.with_context(
+                || format!("fetching blueprint {}", args.blueprint_id),
+            )?;
+        let diff = blueprint2.diff_since_blueprint(&blueprint1);
+        println!("{}", diff.display());
+        println!(
+            "\nDo you want to make {} the target blueprint?",
+            args.blueprint_id
+        );
+        let mut prompt = ConfirmationPrompt::new();
+        prompt.read_and_validate("y/N", "y")?;
+    }
+
     let enabled = match args.enabled {
         BlueprintTargetSetEnabled::Enabled => true,
         BlueprintTargetSetEnabled::Disabled => false,
@@ -1734,12 +2205,11 @@ async fn cmd_nexus_blueprints_target_set(
         // operator. (In the case of the current target blueprint being changed
         // entirely, that will result in a failure to set the current target
         // below, because its parent will no longer be the current target.)
-        BlueprintTargetSetEnabled::Inherit => client
-            .blueprint_target_view()
-            .await
-            .map(|current| current.into_inner().enabled)
-            .context("failed to fetch current target blueprint")?,
+        BlueprintTargetSetEnabled::Inherit => {
+            get_current_target().await?.enabled
+        }
     };
+
     client
         .blueprint_target_set(&nexus_client::types::BlueprintTargetSet {
             target_id: args.blueprint_id,
@@ -1966,7 +2436,7 @@ impl ConfirmationPrompt {
         {
             Ok(input)
         } else {
-            bail!("expungement aborted")
+            bail!("operation aborted")
         }
     }
 
@@ -2187,4 +2657,17 @@ async fn cmd_nexus_sled_expunge_disk(
         .context("expunging disk")?;
     eprintln!("expunged disk {}", args.physical_disk_id);
     Ok(())
+}
+
+const fn const_max_len(strs: &[&str]) -> usize {
+    let mut max = 0;
+    let mut i = 0;
+    while i < strs.len() {
+        let len = strs[i].len();
+        if len > max {
+            max = len;
+        }
+        i += 1;
+    }
+    max
 }

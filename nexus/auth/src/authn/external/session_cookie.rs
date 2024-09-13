@@ -277,7 +277,7 @@ mod test {
     ) -> SchemeResult {
         let scheme = HttpAuthnSessionCookie {};
         let log = slog::Logger::root(slog::Discard, o!());
-        let mut request = http::Request::new(hyper::Body::from("hi"));
+        let mut request = http::Request::new(dropshot::Body::from("hi"));
         if let Some(cookie) = cookie {
             let headers = request.headers_mut();
             headers.insert(http::header::COOKIE, cookie.parse().unwrap());

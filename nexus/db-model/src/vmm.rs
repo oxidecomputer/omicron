@@ -60,27 +60,19 @@ pub struct Vmm {
     pub runtime: VmmRuntimeState,
 }
 
-/// The set of states that a VMM can have when it is created.
-pub enum VmmInitialState {
-    Starting,
-    Migrating,
-}
-
 impl Vmm {
     /// Creates a new VMM record.
+    ///
+    /// The new VMM record will be in [`VmmState::Creating`] until it is
+    /// registered with a sled-agent.
     pub fn new(
         id: PropolisUuid,
         instance_id: InstanceUuid,
         sled_id: SledUuid,
         propolis_ip: ipnetwork::IpNetwork,
         propolis_port: u16,
-        initial_state: VmmInitialState,
     ) -> Self {
         let now = Utc::now();
-        let state = match initial_state {
-            VmmInitialState::Starting => VmmState::Starting,
-            VmmInitialState::Migrating => VmmState::Migrating,
-        };
 
         Self {
             id: id.into_untyped_uuid(),
@@ -91,7 +83,7 @@ impl Vmm {
             propolis_ip,
             propolis_port: SqlU16(propolis_port),
             runtime: VmmRuntimeState {
-                state,
+                state: VmmState::Creating,
                 time_state_updated: now,
                 gen: Generation::new(),
             },

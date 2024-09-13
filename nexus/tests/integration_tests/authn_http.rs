@@ -243,7 +243,7 @@ async fn whoami_request(
     }
 
     let request = builder
-        .body(hyper::Body::empty())
+        .body(dropshot::Body::empty())
         .expect("attempted to construct invalid request");
 
     let mut response = hyper::Client::new()

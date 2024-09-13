@@ -746,44 +746,6 @@
         }
       }
     },
-    "/instances/{instance_id}": {
-      "put": {
-        "summary": "Report updated state for an instance.",
-        "operationId": "cpapi_instances_put",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "instance_id",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SledInstanceState"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "resource updated"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
     "/instances/{instance_id}/migrate": {
       "post": {
         "operationId": "instance_migrate",
@@ -1460,6 +1422,43 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/vmms/{propolis_id}": {
+      "put": {
+        "summary": "Report updated state for a VMM.",
+        "operationId": "cpapi_instances_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "propolis_id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForPropolisKind"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SledVmmState"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -2712,39 +2711,8 @@
         ]
       },
       "DatasetKind": {
-        "description": "Describes the purpose of the dataset.",
-        "oneOf": [
-          {
-            "type": "string",
-            "enum": [
-              "crucible",
-              "cockroach",
-              "external_dns",
-              "internal_dns"
-            ]
-          },
-          {
-            "description": "Used for single-node clickhouse deployments",
-            "type": "string",
-            "enum": [
-              "clickhouse"
-            ]
-          },
-          {
-            "description": "Used for replicated clickhouse deployments",
-            "type": "string",
-            "enum": [
-              "clickhouse_keeper"
-            ]
-          },
-          {
-            "description": "Used for replicated clickhouse deployments",
-            "type": "string",
-            "enum": [
-              "clickhouse_server"
-            ]
-          }
-        ]
+        "description": "The kind of dataset. See the `DatasetKind` enum in omicron-common for possible values.",
+        "type": "string"
       },
       "DatasetPutRequest": {
         "description": "Describes a dataset within a pool.",
@@ -3749,6 +3717,67 @@
           "start_time"
         ]
       },
+      "LldpAdminStatus": {
+        "description": "To what extent should this port participate in LLDP",
+        "type": "string",
+        "enum": [
+          "enabled",
+          "disabled",
+          "rx_only",
+          "tx_only"
+        ]
+      },
+      "LldpPortConfig": {
+        "description": "Per-port LLDP configuration settings.  Only the \"status\" setting is mandatory.  All other fields have natural defaults or may be inherited from the switch.",
+        "type": "object",
+        "properties": {
+          "chassis_id": {
+            "nullable": true,
+            "description": "Chassis ID to advertise.  If this is set, it will be advertised as a LocallyAssigned ID type.  If this is not set, it will be inherited from the switch-level settings.",
+            "type": "string"
+          },
+          "management_addrs": {
+            "nullable": true,
+            "description": "Management IP addresses to advertise.  If this is not set, it will be inherited from the switch-level settings.",
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "ip"
+            }
+          },
+          "port_description": {
+            "nullable": true,
+            "description": "Port description to advertise.  If this is not set, no description will be advertised.",
+            "type": "string"
+          },
+          "port_id": {
+            "nullable": true,
+            "description": "Port ID to advertise.  If this is set, it will be advertised as a LocallyAssigned ID type.  If this is not set, it will be set to the port name. e.g., qsfp0/0.",
+            "type": "string"
+          },
+          "status": {
+            "description": "To what extent should this port participate in LLDP",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LldpAdminStatus"
+              }
+            ]
+          },
+          "system_description": {
+            "nullable": true,
+            "description": "System description to advertise.  If this is not set, it will be inherited from the switch-level settings.",
+            "type": "string"
+          },
+          "system_name": {
+            "nullable": true,
+            "description": "System name to advertise.  If this is not set, it will be inherited from the switch-level settings.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
       "MacAddr": {
         "example": "ff:ff:ff:ff:ff:ff",
         "title": "A MAC address",
@@ -4154,6 +4183,15 @@
               "$ref": "#/components/schemas/BgpPeerConfig"
             }
           },
+          "lldp": {
+            "nullable": true,
+            "description": "LLDP configuration for this port",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/LldpPortConfig"
+              }
+            ]
+          },
           "port": {
             "description": "Nmae of the port this config applies to.",
             "type": "string"
@@ -4372,6 +4410,13 @@
             "type": "string",
             "enum": [
               "instance"
+            ]
+          },
+          {
+            "description": "The producer is a management gateway service.",
+            "type": "string",
+            "enum": [
+              "management_gateway"
             ]
           }
         ]
@@ -4985,50 +5030,6 @@
           "id"
         ]
       },
-      "SledInstanceState": {
-        "description": "A wrapper type containing a sled's total knowledge of the state of a specific VMM and the instance it incarnates.",
-        "type": "object",
-        "properties": {
-          "migration_in": {
-            "nullable": true,
-            "description": "The current state of any inbound migration to this VMM.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/MigrationRuntimeState"
-              }
-            ]
-          },
-          "migration_out": {
-            "nullable": true,
-            "description": "The state of any outbound migration from this VMM.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/MigrationRuntimeState"
-              }
-            ]
-          },
-          "propolis_id": {
-            "description": "The ID of the VMM whose state is being reported.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TypedUuidForPropolisKind"
-              }
-            ]
-          },
-          "vmm_state": {
-            "description": "The most recent state of the sled's VMM process.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/VmmRuntimeState"
-              }
-            ]
-          }
-        },
-        "required": [
-          "propolis_id",
-          "vmm_state"
-        ]
-      },
       "SledPolicy": {
         "description": "The operator-defined policy of a sled.",
         "oneOf": [
@@ -5143,6 +5144,41 @@
           }
         ]
       },
+      "SledVmmState": {
+        "description": "A wrapper type containing a sled's total knowledge of the state of a VMM.",
+        "type": "object",
+        "properties": {
+          "migration_in": {
+            "nullable": true,
+            "description": "The current state of any inbound migration to this VMM.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MigrationRuntimeState"
+              }
+            ]
+          },
+          "migration_out": {
+            "nullable": true,
+            "description": "The state of any outbound migration from this VMM.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/MigrationRuntimeState"
+              }
+            ]
+          },
+          "vmm_state": {
+            "description": "The most recent state of the sled's VMM process.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VmmRuntimeState"
+              }
+            ]
+          }
+        },
+        "required": [
+          "vmm_state"
+        ]
+      },
       "SourceNatConfig": {
         "description": "An IP address and port range used for source NAT, i.e., making outbound network connections from guests or services.",
         "type": "object",
@@ -5252,10 +5288,6 @@
         "format": "uuid"
       },
       "TypedUuidForOmicronZoneKind": {
-        "type": "string",
-        "format": "uuid"
-      },
-      "TypedUuidForPropolisKind": {
         "type": "string",
         "format": "uuid"
       },
@@ -5520,6 +5552,10 @@
             ]
           }
         ]
+      },
+      "TypedUuidForPropolisKind": {
+        "type": "string",
+        "format": "uuid"
       }
     },
     "responses": {

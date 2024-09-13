@@ -66,8 +66,8 @@ use nexus_sled_agent_shared::inventory::{
     OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig, ZoneKind,
 };
 use omicron_common::address::CLICKHOUSE_ADMIN_PORT;
-use omicron_common::address::CLICKHOUSE_KEEPER_PORT;
-use omicron_common::address::CLICKHOUSE_PORT;
+use omicron_common::address::CLICKHOUSE_HTTP_PORT;
+use omicron_common::address::CLICKHOUSE_KEEPER_TCP_PORT;
 use omicron_common::address::COCKROACH_PORT;
 use omicron_common::address::CRUCIBLE_PANTRY_PORT;
 use omicron_common::address::CRUCIBLE_PORT;
@@ -90,6 +90,7 @@ use omicron_common::api::internal::shared::{
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
 };
+use omicron_common::disk::{DatasetKind, DatasetName};
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
 use once_cell::sync::OnceCell;
@@ -103,9 +104,7 @@ use sled_hardware::underlay;
 use sled_hardware::SledMode;
 use sled_hardware_types::Baseboard;
 use sled_storage::config::MountConfig;
-use sled_storage::dataset::{
-    DatasetName, DatasetType, CONFIG_DATASET, INSTALL_DATASET, ZONE_DATASET,
-};
+use sled_storage::dataset::{CONFIG_DATASET, INSTALL_DATASET, ZONE_DATASET};
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::collections::BTreeMap;
@@ -1550,7 +1549,7 @@ impl ServiceManager {
                 };
 
                 let listen_addr = *underlay_address;
-                let listen_port = &CLICKHOUSE_PORT.to_string();
+                let listen_port = &CLICKHOUSE_HTTP_PORT.to_string();
 
                 let nw_setup_service = Self::zone_network_setup_install(
                     Some(&info.underlay_address),
@@ -1574,10 +1573,6 @@ impl ServiceManager {
                             .add_property_group(config),
                     );
 
-                let ch_address =
-                    SocketAddr::new(IpAddr::V6(listen_addr), CLICKHOUSE_PORT)
-                        .to_string();
-
                 let admin_address = SocketAddr::new(
                     IpAddr::V6(listen_addr),
                     CLICKHOUSE_ADMIN_PORT,
@@ -1585,13 +1580,11 @@ impl ServiceManager {
                 .to_string();
 
                 let clickhouse_admin_config =
-                    PropertyGroupBuilder::new("config")
-                        .add_property(
-                            "clickhouse_address",
-                            "astring",
-                            ch_address,
-                        )
-                        .add_property("http_address", "astring", admin_address);
+                    PropertyGroupBuilder::new("config").add_property(
+                        "http_address",
+                        "astring",
+                        admin_address,
+                    );
                 let clickhouse_admin_service =
                     ServiceBuilder::new("oxide/clickhouse-admin").add_instance(
                         ServiceInstanceBuilder::new("default")
@@ -1628,7 +1621,7 @@ impl ServiceManager {
                 };
 
                 let listen_addr = *underlay_address;
-                let listen_port = CLICKHOUSE_PORT.to_string();
+                let listen_port = CLICKHOUSE_HTTP_PORT.to_string();
 
                 let nw_setup_service = Self::zone_network_setup_install(
                     Some(&info.underlay_address),
@@ -1653,10 +1646,6 @@ impl ServiceManager {
                                 .add_property_group(config),
                         );
 
-                let ch_address =
-                    SocketAddr::new(IpAddr::V6(listen_addr), CLICKHOUSE_PORT)
-                        .to_string();
-
                 let admin_address = SocketAddr::new(
                     IpAddr::V6(listen_addr),
                     CLICKHOUSE_ADMIN_PORT,
@@ -1664,13 +1653,11 @@ impl ServiceManager {
                 .to_string();
 
                 let clickhouse_admin_config =
-                    PropertyGroupBuilder::new("config")
-                        .add_property(
-                            "clickhouse_address",
-                            "astring",
-                            ch_address,
-                        )
-                        .add_property("http_address", "astring", admin_address);
+                    PropertyGroupBuilder::new("config").add_property(
+                        "http_address",
+                        "astring",
+                        admin_address,
+                    );
                 let clickhouse_admin_service =
                     ServiceBuilder::new("oxide/clickhouse-admin").add_instance(
                         ServiceInstanceBuilder::new("default")
@@ -1710,7 +1697,7 @@ impl ServiceManager {
                 };
 
                 let listen_addr = *underlay_address;
-                let listen_port = &CLICKHOUSE_KEEPER_PORT.to_string();
+                let listen_port = &CLICKHOUSE_KEEPER_TCP_PORT.to_string();
 
                 let nw_setup_service = Self::zone_network_setup_install(
                     Some(&info.underlay_address),
@@ -1735,10 +1722,6 @@ impl ServiceManager {
                                 .add_property_group(config),
                         );
 
-                let ch_address =
-                    SocketAddr::new(IpAddr::V6(listen_addr), CLICKHOUSE_PORT)
-                        .to_string();
-
                 let admin_address = SocketAddr::new(
                     IpAddr::V6(listen_addr),
                     CLICKHOUSE_ADMIN_PORT,
@@ -1746,13 +1729,11 @@ impl ServiceManager {
                 .to_string();
 
                 let clickhouse_admin_config =
-                    PropertyGroupBuilder::new("config")
-                        .add_property(
-                            "clickhouse_address",
-                            "astring",
-                            ch_address,
-                        )
-                        .add_property("http_address", "astring", admin_address);
+                    PropertyGroupBuilder::new("config").add_property(
+                        "http_address",
+                        "astring",
+                        admin_address,
+                    );
                 let clickhouse_admin_service =
                     ServiceBuilder::new("oxide/clickhouse-admin").add_instance(
                         ServiceInstanceBuilder::new("default")
@@ -1875,7 +1856,7 @@ impl ServiceManager {
 
                 let dataset_name = DatasetName::new(
                     dataset.pool_name.clone(),
-                    DatasetType::Crucible,
+                    DatasetKind::Crucible,
                 )
                 .full_name();
                 let uuid = &Uuid::new_v4().to_string();
@@ -3995,6 +3976,19 @@ impl ServiceManager {
         &self,
         our_ports: Vec<HostPortConfig>,
     ) -> Result<(), Error> {
+        // Helper function to add a property-value pair
+        // if the config actually has a value set.
+        fn apv(
+            smfh: &SmfHelper,
+            prop: &str,
+            val: &Option<String>,
+        ) -> Result<(), Error> {
+            if let Some(v) = val {
+                smfh.addpropvalue_type(prop, v, "astring")?
+            }
+            Ok(())
+        }
+
         // We expect the switch zone to be running, as we're called immediately
         // after `ensure_zone()` above and we just successfully configured
         // uplinks via DPD running in our switch zone. If somehow we're in any
@@ -4017,26 +4011,76 @@ impl ServiceManager {
             }
         };
 
-        info!(self.inner.log, "Setting up uplinkd service");
-        let smfh = SmfHelper::new(&zone, &SwitchService::Uplink);
+        info!(self.inner.log, "ensuring scrimlet uplinks");
+        let usmfh = SmfHelper::new(&zone, &SwitchService::Uplink);
+        let lsmfh = SmfHelper::new(
+            &zone,
+            &SwitchService::Lldpd { baseboard: Baseboard::Unknown },
+        );
 
         // We want to delete all the properties in the `uplinks` group, but we
         // don't know their names, so instead we'll delete and recreate the
         // group, then add all our properties.
-        smfh.delpropgroup("uplinks")?;
-        smfh.addpropgroup("uplinks", "application")?;
+        let _ = usmfh.delpropgroup("uplinks");
+        usmfh.addpropgroup("uplinks", "application")?;
 
         for port_config in &our_ports {
             for addr in &port_config.addrs {
-                info!(self.inner.log, "configuring port: {port_config:?}");
-                smfh.addpropvalue_type(
+                usmfh.addpropvalue_type(
                     &format!("uplinks/{}_0", port_config.port,),
                     &addr.to_string(),
                     "astring",
                 )?;
             }
+
+            if let Some(lldp_config) = &port_config.lldp {
+                let group_name = format!("port_{}", port_config.port);
+                info!(self.inner.log, "setting up {group_name}");
+                let _ = lsmfh.delpropgroup(&group_name);
+                lsmfh.addpropgroup(&group_name, "application")?;
+                apv(
+                    &lsmfh,
+                    &format!("{group_name}/status"),
+                    &Some(lldp_config.status.to_string()),
+                )?;
+                apv(
+                    &lsmfh,
+                    &format!("{group_name}/chassis_id"),
+                    &lldp_config.chassis_id,
+                )?;
+                apv(
+                    &lsmfh,
+                    &format!("{group_name}/system_name"),
+                    &lldp_config.system_name,
+                )?;
+                apv(
+                    &lsmfh,
+                    &format!("{group_name}/system_description"),
+                    &lldp_config.system_description,
+                )?;
+                apv(
+                    &lsmfh,
+                    &format!("{group_name}/port_description"),
+                    &lldp_config.port_description,
+                )?;
+                apv(
+                    &lsmfh,
+                    &format!("{group_name}/port_id"),
+                    &lldp_config.port_id,
+                )?;
+                if let Some(a) = &lldp_config.management_addrs {
+                    for address in a {
+                        apv(
+                            &lsmfh,
+                            &format!("{group_name}/management_addrs"),
+                            &Some(address.to_string()),
+                        )?;
+                    }
+                }
+            }
         }
-        smfh.refresh()?;
+        usmfh.refresh()?;
+        lsmfh.refresh()?;
 
         Ok(())
     }

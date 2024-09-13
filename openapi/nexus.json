@@ -468,6 +468,7 @@
           {
             "in": "path",
             "name": "certificate",
+            "description": "Name or ID of the certificate",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -504,6 +505,7 @@
           {
             "in": "path",
             "name": "certificate",
+            "description": "Name or ID of the certificate",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -4167,7 +4169,7 @@
           {
             "in": "path",
             "name": "rack_id",
-            "description": "The rack's unique ID.",
+            "description": "ID of the rack",
             "required": true,
             "schema": {
               "type": "string",
@@ -5028,7 +5030,7 @@
           {
             "in": "path",
             "name": "user_id",
-            "description": "The user's internal id",
+            "description": "The user's internal ID",
             "required": true,
             "schema": {
               "type": "string",
@@ -5070,7 +5072,7 @@
           {
             "in": "path",
             "name": "user_id",
-            "description": "The user's internal id",
+            "description": "The user's internal ID",
             "required": true,
             "schema": {
               "type": "string",
@@ -5208,7 +5210,7 @@
     "/v1/system/ip-pools": {
       "get": {
         "tags": [
-          "system/networking"
+          "system/ip-pools"
         ],
         "summary": "List IP pools",
         "operationId": "ip_pool_list",
@@ -5265,7 +5267,7 @@
       },
       "post": {
         "tags": [
-          "system/networking"
+          "system/ip-pools"
         ],
         "summary": "Create IP pool",
         "operationId": "ip_pool_create",
@@ -5302,7 +5304,7 @@
     "/v1/system/ip-pools/{pool}": {
       "get": {
         "tags": [
-          "system/networking"
+          "system/ip-pools"
         ],
         "summary": "Fetch IP pool",
         "operationId": "ip_pool_view",
@@ -5338,7 +5340,7 @@
       },
       "put": {
         "tags": [
-          "system/networking"
+          "system/ip-pools"
         ],
         "summary": "Update IP pool",
         "operationId": "ip_pool_update",
@@ -5384,7 +5386,7 @@
       },
       "delete": {
         "tags": [
-          "system/networking"
+          "system/ip-pools"
         ],
         "summary": "Delete IP pool",
         "operationId": "ip_pool_delete",
@@ -5415,7 +5417,7 @@
     "/v1/system/ip-pools/{pool}/ranges": {
       "get": {
         "tags": [
-          "system/networking"
+          "system/ip-pools"
         ],
         "summary": "List ranges for IP pool",
         "description": "Ranges are ordered by their first address.",
@@ -5477,7 +5479,7 @@
     "/v1/system/ip-pools/{pool}/ranges/add": {
       "post": {
         "tags": [
-          "system/networking"
+          "system/ip-pools"
         ],
         "summary": "Add range to IP pool",
         "description": "IPv6 ranges are not allowed yet.",
@@ -5526,7 +5528,7 @@
     "/v1/system/ip-pools/{pool}/ranges/remove": {
       "post": {
         "tags": [
-          "system/networking"
+          "system/ip-pools"
         ],
         "summary": "Remove range from IP pool",
         "operationId": "ip_pool_range_remove",
@@ -5567,7 +5569,7 @@
     "/v1/system/ip-pools/{pool}/silos": {
       "get": {
         "tags": [
-          "system/networking"
+          "system/ip-pools"
         ],
         "summary": "List IP pool's linked silos",
         "operationId": "ip_pool_silo_list",
@@ -5633,7 +5635,7 @@
       },
       "post": {
         "tags": [
-          "system/networking"
+          "system/ip-pools"
         ],
         "summary": "Link IP pool to silo",
         "description": "Users in linked silos can allocate external IPs from this pool for their instances. A silo can have at most one default pool. IPs are allocated from the default pool when users ask for one without specifying a pool.",
@@ -5682,7 +5684,7 @@
     "/v1/system/ip-pools/{pool}/silos/{silo}": {
       "put": {
         "tags": [
-          "system/networking"
+          "system/ip-pools"
         ],
         "summary": "Make IP pool default for silo",
         "description": "When a user asks for an IP (e.g., at instance create time) without specifying a pool, the IP comes from the default pool if a default is configured. When a pool is made the default for a silo, any existing default will remain linked to the silo, but will no longer be the default.",
@@ -5736,7 +5738,7 @@
       },
       "delete": {
         "tags": [
-          "system/networking"
+          "system/ip-pools"
         ],
         "summary": "Unlink IP pool from silo",
         "description": "Will fail if there are any outstanding IPs allocated in the silo.",
@@ -5775,7 +5777,7 @@
     "/v1/system/ip-pools/{pool}/utilization": {
       "get": {
         "tags": [
-          "system/networking"
+          "system/ip-pools"
         ],
         "summary": "Fetch IP pool utilization",
         "operationId": "ip_pool_utilization_view",
@@ -5813,7 +5815,7 @@
     "/v1/system/ip-pools-service": {
       "get": {
         "tags": [
-          "system/networking"
+          "system/ip-pools"
         ],
         "summary": "Fetch Oxide service IP pool",
         "operationId": "ip_pool_service_view",
@@ -5840,7 +5842,7 @@
     "/v1/system/ip-pools-service/ranges": {
       "get": {
         "tags": [
-          "system/networking"
+          "system/ip-pools"
         ],
         "summary": "List IP ranges for the Oxide service pool",
         "description": "Ranges are ordered by their first address.",
@@ -5893,7 +5895,7 @@
     "/v1/system/ip-pools-service/ranges/add": {
       "post": {
         "tags": [
-          "system/networking"
+          "system/ip-pools"
         ],
         "summary": "Add IP range to Oxide service pool",
         "description": "IPv6 ranges are not allowed yet.",
@@ -5931,7 +5933,7 @@
     "/v1/system/ip-pools-service/ranges/remove": {
       "post": {
         "tags": [
-          "system/networking"
+          "system/ip-pools"
         ],
         "summary": "Remove IP range from Oxide service pool",
         "operationId": "ip_pool_service_range_remove",
@@ -6423,14 +6425,6 @@
           },
           {
             "in": "query",
-            "name": "name_or_id",
-            "description": "A name or id to use when selecting BGP config.",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "query",
             "name": "page_token",
             "description": "Token returned by previous call to retrieve the subsequent page",
             "schema": {
@@ -6533,21 +6527,39 @@
         }
       }
     },
-    "/v1/system/networking/bgp-announce": {
+    "/v1/system/networking/bgp-announce-set": {
       "get": {
         "tags": [
           "system/networking"
         ],
-        "summary": "Get originated routes for a BGP configuration",
+        "summary": "List BGP announce sets",
         "operationId": "networking_bgp_announce_set_list",
         "parameters": [
           {
             "in": "query",
-            "name": "name_or_id",
-            "description": "A name or id to use when selecting BGP port settings",
-            "required": true,
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
             "schema": {
-              "$ref": "#/components/schemas/NameOrId"
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
             }
           }
         ],
@@ -6557,10 +6569,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "title": "Array_of_BgpAnnouncement",
+                  "title": "Array_of_BgpAnnounceSet",
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/BgpAnnouncement"
+                    "$ref": "#/components/schemas/BgpAnnounceSet"
                   }
                 }
               }
@@ -6572,6 +6584,9 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
+        },
+        "x-dropshot-pagination": {
+          "required": []
         }
       },
       "put": {
@@ -6609,7 +6624,9 @@
             "$ref": "#/components/responses/Error"
           }
         }
-      },
+      }
+    },
+    "/v1/system/networking/bgp-announce-set/{announce_set}": {
       "delete": {
         "tags": [
           "system/networking"
@@ -6618,9 +6635,9 @@
         "operationId": "networking_bgp_announce_set_delete",
         "parameters": [
           {
-            "in": "query",
-            "name": "name_or_id",
-            "description": "A name or id to use when selecting BGP port settings",
+            "in": "path",
+            "name": "announce_set",
+            "description": "Name or ID of the announce set",
             "required": true,
             "schema": {
               "$ref": "#/components/schemas/NameOrId"
@@ -6630,6 +6647,48 @@
         "responses": {
           "204": {
             "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/system/networking/bgp-announce-set/{announce_set}/announcement": {
+      "get": {
+        "tags": [
+          "system/networking"
+        ],
+        "summary": "Get originated routes for a specified BGP announce set",
+        "operationId": "networking_bgp_announcement_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "announce_set",
+            "description": "Name or ID of the announce set",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_BgpAnnouncement",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BgpAnnouncement"
+                  }
+                }
+              }
+            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -7799,7 +7858,7 @@
           {
             "in": "path",
             "name": "user_id",
-            "description": "The user's internal id",
+            "description": "The user's internal ID",
             "required": true,
             "schema": {
               "type": "string",
@@ -16026,7 +16085,7 @@
             "description": "The link-layer discovery protocol (LLDP) configuration for the link.",
             "allOf": [
               {
-                "$ref": "#/components/schemas/LldpServiceConfigCreate"
+                "$ref": "#/components/schemas/LldpLinkConfigCreate"
               }
             ]
           },
@@ -16147,10 +16206,15 @@
           }
         ]
       },
-      "LldpServiceConfig": {
+      "LldpLinkConfig": {
         "description": "A link layer discovery protocol (LLDP) service configuration.",
         "type": "object",
         "properties": {
+          "chassis_id": {
+            "nullable": true,
+            "description": "The LLDP chassis identifier TLV.",
+            "type": "string"
+          },
           "enabled": {
             "description": "Whether or not the LLDP service is enabled.",
             "type": "boolean"
@@ -16160,11 +16224,34 @@
             "type": "string",
             "format": "uuid"
           },
-          "lldp_config_id": {
+          "link_description": {
             "nullable": true,
-            "description": "The link-layer discovery protocol configuration for this service.",
-            "type": "string",
-            "format": "uuid"
+            "description": "The LLDP link description TLV.",
+            "type": "string"
+          },
+          "link_name": {
+            "nullable": true,
+            "description": "The LLDP link name TLV.",
+            "type": "string"
+          },
+          "management_ip": {
+            "nullable": true,
+            "description": "The LLDP management IP TLV.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/IpNet"
+              }
+            ]
+          },
+          "system_description": {
+            "nullable": true,
+            "description": "The LLDP system description TLV.",
+            "type": "string"
+          },
+          "system_name": {
+            "nullable": true,
+            "description": "The LLDP system name TLV.",
+            "type": "string"
           }
         },
         "required": [
@@ -16172,22 +16259,44 @@
           "id"
         ]
       },
-      "LldpServiceConfigCreate": {
-        "description": "The LLDP configuration associated with a port. LLDP may be either enabled or disabled, if enabled, an LLDP configuration must be provided by name or id.",
+      "LldpLinkConfigCreate": {
+        "description": "The LLDP configuration associated with a port.",
         "type": "object",
         "properties": {
+          "chassis_id": {
+            "nullable": true,
+            "description": "The LLDP chassis identifier TLV.",
+            "type": "string"
+          },
           "enabled": {
             "description": "Whether or not LLDP is enabled.",
             "type": "boolean"
           },
-          "lldp_config": {
+          "link_description": {
             "nullable": true,
-            "description": "A reference to the LLDP configuration used. Must not be `None` when `enabled` is `true`.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/NameOrId"
-              }
-            ]
+            "description": "The LLDP link description TLV.",
+            "type": "string"
+          },
+          "link_name": {
+            "nullable": true,
+            "description": "The LLDP link name TLV.",
+            "type": "string"
+          },
+          "management_ip": {
+            "nullable": true,
+            "description": "The LLDP management IP TLV.",
+            "type": "string",
+            "format": "ip"
+          },
+          "system_description": {
+            "nullable": true,
+            "description": "The LLDP system description TLV.",
+            "type": "string"
+          },
+          "system_name": {
+            "nullable": true,
+            "description": "The LLDP system name TLV.",
+            "type": "string"
           }
         },
         "required": [
@@ -19211,7 +19320,8 @@
             "description": "The name of this link.",
             "type": "string"
           },
-          "lldp_service_config_id": {
+          "lldp_link_config_id": {
+            "nullable": true,
             "description": "The link-layer discovery protocol service configuration id for this link.",
             "type": "string",
             "format": "uuid"
@@ -19240,7 +19350,6 @@
           "autoneg",
           "fec",
           "link_name",
-          "lldp_service_config_id",
           "mtu",
           "port_settings_id",
           "speed"
@@ -19502,7 +19611,7 @@
             "description": "Link-layer discovery protocol (LLDP) settings.",
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/LldpServiceConfig"
+              "$ref": "#/components/schemas/LldpLinkConfig"
             }
           },
           "links": {
@@ -19811,7 +19920,8 @@
               "nanoseconds",
               "volts",
               "amps",
-              "degrees_celcius"
+              "watts",
+              "degrees_celsius"
             ]
           },
           {
@@ -21336,6 +21446,13 @@
       "description": "These operations pertain to hardware inventory and management. Racks are the unit of expansion of an Oxide deployment. Racks are in turn composed of sleds, switches, power supplies, and a cabled backplane.",
       "externalDocs": {
         "url": "http://docs.oxide.computer/api/system-hardware"
+      }
+    },
+    {
+      "name": "system/ip-pools",
+      "description": "IP pools are collections of external IPs that can be assigned to silos. When a pool is linked to a silo, users in that silo can allocate IPs from the pool for their instances.",
+      "externalDocs": {
+        "url": "http://docs.oxide.computer/api/system-ip-pools"
       }
     },
     {

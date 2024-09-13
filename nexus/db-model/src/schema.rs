@@ -139,35 +139,28 @@ table! {
 table! {
     switch_port_settings_link_config (port_settings_id, link_name) {
         port_settings_id -> Uuid,
-        lldp_service_config_id -> Uuid,
         link_name -> Text,
         mtu -> Int4,
         fec -> crate::SwitchLinkFecEnum,
         speed -> crate::SwitchLinkSpeedEnum,
         autoneg -> Bool,
+        lldp_link_config_id -> Nullable<Uuid>,
     }
 }
 
 table! {
-    lldp_service_config (id) {
+    lldp_link_config (id) {
         id -> Uuid,
         enabled -> Bool,
-        lldp_config_id -> Nullable<Uuid>,
-    }
-}
-
-table! {
-    lldp_config (id) {
-        id -> Uuid,
-        name -> Text,
-        description -> Text,
+        link_name -> Nullable<Text>,
+        link_description -> Nullable<Text>,
+        chassis_id -> Nullable<Text>,
+        system_name -> Nullable<Text>,
+        system_description -> Nullable<Text>,
+        management_ip -> Nullable<Inet>,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
         time_deleted -> Nullable<Timestamptz>,
-        chassis_id -> Text,
-        system_name -> Text,
-        system_description -> Text,
-        management_ip -> Inet,
     }
 }
 
@@ -414,7 +407,7 @@ table! {
         ncpus -> Int8,
         memory -> Int8,
         hostname -> Text,
-        boot_on_fault -> Bool,
+        auto_restart_policy -> Nullable<crate::InstanceAutoRestartEnum>,
         time_state_updated -> Timestamptz,
         state_generation -> Int8,
         active_propolis_id -> Nullable<Uuid>,
@@ -1030,6 +1023,7 @@ table! {
 
         kind -> crate::DatasetKindEnum,
         size_used -> Nullable<Int8>,
+        zone_name -> Nullable<Text>,
     }
 }
 
@@ -1444,6 +1438,21 @@ table! {
         id -> Uuid,
         sled_id -> Uuid,
         total_size -> Int8,
+    }
+}
+
+table! {
+    inv_dataset (inv_collection_id, sled_id, name) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+
+        id -> Nullable<Uuid>,
+        name -> Text,
+        available -> Int8,
+        used -> Int8,
+        quota -> Nullable<Int8>,
+        reservation -> Nullable<Int8>,
+        compression -> Text,
     }
 }
 
@@ -1896,7 +1905,8 @@ allow_tables_to_appear_in_same_query!(
 
 allow_tables_to_appear_in_same_query!(
     switch_port,
-    switch_port_settings_bgp_peer_config
+    switch_port_settings_bgp_peer_config,
+    bgp_config
 );
 
 allow_tables_to_appear_in_same_query!(disk, virtual_provisioning_resource);

@@ -62,6 +62,8 @@ Nextest https://github.com/nextest-rs/nextest/issues/16[does not support doctest
 
 Similarly, you can run tests inside a https://github.com/oxidecomputer/falcon[Falcon] based VM. This is described in the `test-utils` https://github.com/oxidecomputer/omicron/tree/main/test-utils[README].
 
+There's also a xref:./live-tests/README.adoc[`live-tests`] test suite that can be run by hand in a _deployed_ Omicron system.
+
 === rustfmt and clippy
 
 You can **format the code** using `cargo fmt`.  Make sure to run this before pushing changes.  The CI checks that the code is correctly formatted.
@@ -206,12 +208,14 @@ We also use these OpenAPI documents as the source for the clients we generate
 using https://github.com/oxidecomputer/progenitor[Progenitor]. Clients are
 automatically updated when the coresponding OpenAPI document is modified.
 
-There are currently two kinds of services based on how their corresponding documents are generated: *managed* and *unmanaged*. Eventually, all services within Omicron will transition to being managed.
+OpenAPI documents are tracked by the `cargo xtask openapi` command.
 
-* A *managed* service is tracked by the `cargo xtask openapi` command, using Dropshot's relatively new API trait functionality.
-* An *unmanaged* service is defined the traditional way, by gluing together a set of implementation functions, and is tracked by an independent test.
+* To regenerate all OpenAPI documents, run `cargo xtask openapi generate`.
+* To check whether all OpenAPI documents are up-to-date, run `cargo xtask
+  openapi check`.
 
-To check whether your document is managed, run `cargo xtask openapi list`: it will list out all managed OpenAPI documents. If your document is not on the list, it is unmanaged.
+For more information, see the documentation in
+link:./dev-tools/openapi-manager[`dev-tools/openapi-manager`].
 
 Note that Omicron contains a nominally circular dependency:
 
@@ -222,33 +226,6 @@ Note that Omicron contains a nominally circular dependency:
 
 We effectively "break" this circular dependency by virtue of the OpenAPI
 documents being checked in.
-
-==== Updating or Creating New Managed Services
-
-See the documentation in link:./dev-tools/openapi-manager[`dev-tools/openapi-manager`] for more information.
-
-==== Updating Unmanaged Services
-
-In general, changes to unmanaged service APs **require the following set of build steps**:
-
-. Make changes to the service API.
-. Update the OpenAPI document by running the relevant test with overwrite set:
-  `EXPECTORATE=overwrite cargo nextest run -p <package> -- test_nexus_openapi_internal`
-  (changing the package name and test name as necessary).  It's important to do
-  this _before_ the next step.
-. This will cause the generated client to be updated which may break the build
-  for dependent consumers.
-. Modify any dependent services to fix calls to the generated client.
-
-Note that if you make changes to both Nexus and Sled Agent simultaneously, you
-may end up in a spot where neither can build and therefore neither OpenAPI
-document can be generated. In this case, revert or comment out changes in one
-so that the OpenAPI document can be generated.
-
-This is a particular problem if you find yourself resolving merge conflicts in the generated files.  You have basically two options for this:
-
-* Resolve the merge conflicts by hand.  This is usually not too bad in practice.
-* Take the upstream copy of the file, back out your client side changes (`git stash` and its `-p` option can be helpful for this), follow the steps above to regenerate the file using the automated test, and finally re-apply your changes to the client side.  This is essentially getting yourself back to step 1 above and then following the procedure above.
 
 === Resolving merge conflicts in Cargo.lock
 

@@ -16,6 +16,7 @@ use std::mem;
 pub(crate) enum DiscretionaryOmicronZone {
     BoundaryNtp,
     CockroachDb,
+    InternalDns,
     Nexus,
     // TODO expand this enum as we start to place more services
 }
@@ -27,6 +28,7 @@ impl DiscretionaryOmicronZone {
         match zone_type {
             BlueprintZoneType::BoundaryNtp(_) => Some(Self::BoundaryNtp),
             BlueprintZoneType::CockroachDb(_) => Some(Self::CockroachDb),
+            BlueprintZoneType::InternalDns(_) => Some(Self::InternalDns),
             BlueprintZoneType::Nexus(_) => Some(Self::Nexus),
             // Zones that we should place but don't yet.
             BlueprintZoneType::Clickhouse(_)
@@ -34,7 +36,6 @@ impl DiscretionaryOmicronZone {
             | BlueprintZoneType::ClickhouseServer(_)
             | BlueprintZoneType::CruciblePantry(_)
             | BlueprintZoneType::ExternalDns(_)
-            | BlueprintZoneType::InternalDns(_)
             | BlueprintZoneType::Oximeter(_) => None,
             // Zones that get special handling for placement (all sleds get
             // them, although internal NTP has some interactions with boundary
@@ -50,6 +51,7 @@ impl From<DiscretionaryOmicronZone> for ZoneKind {
         match zone {
             DiscretionaryOmicronZone::BoundaryNtp => Self::BoundaryNtp,
             DiscretionaryOmicronZone::CockroachDb => Self::CockroachDb,
+            DiscretionaryOmicronZone::InternalDns => Self::InternalDns,
             DiscretionaryOmicronZone::Nexus => Self::Nexus,
         }
     }

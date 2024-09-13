@@ -11,8 +11,8 @@ versions = [
 [[metrics]]
 name = "request_latency_histogram"
 description = "Duration for the server to handle a request"
-units = "seconds"
-datum_type = "histogram_f64"
+units = "nanoseconds"
+datum_type = "histogram_u64"
 versions = [
     { added_in = 1, fields = [ "operation_id", "status_code" ] }
 ]

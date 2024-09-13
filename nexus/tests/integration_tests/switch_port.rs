@@ -11,9 +11,9 @@ use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params::{
     Address, AddressConfig, AddressLotBlockCreate, AddressLotCreate,
     BgpAnnounceSetCreate, BgpAnnouncementCreate, BgpConfigCreate,
-    BgpPeerConfig, LinkConfigCreate, LldpServiceConfigCreate, Route,
-    RouteConfig, SwitchInterfaceConfigCreate, SwitchInterfaceKind,
-    SwitchPortApplySettings, SwitchPortSettingsCreate,
+    BgpPeerConfig, LinkConfigCreate, LldpLinkConfigCreate, Route, RouteConfig,
+    SwitchInterfaceConfigCreate, SwitchInterfaceKind, SwitchPortApplySettings,
+    SwitchPortSettingsCreate,
 };
 use nexus_types::external_api::views::Rack;
 use omicron_common::api::external::ImportExportPolicy;
@@ -76,7 +76,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
 
     NexusRequest::objects_post(
         client,
-        "/v1/system/networking/bgp-announce",
+        "/v1/system/networking/bgp-announce-set",
         &announce_set,
     )
     .authn_as(AuthnMode::PrivilegedUser)
@@ -118,7 +118,15 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
         "phy0".into(),
         LinkConfigCreate {
             mtu: 4700,
-            lldp: LldpServiceConfigCreate { enabled: false, lldp_config: None },
+            lldp: LldpLinkConfigCreate {
+                enabled: true,
+                link_name: Some("Link Name".into()),
+                link_description: Some("link_ Dscription".into()),
+                chassis_id: Some("Chassis ID".into()),
+                system_name: Some("System Name".into()),
+                system_description: Some("System description".into()),
+                management_ip: None,
+            },
             fec: LinkFec::None,
             speed: LinkSpeed::Speed100G,
             autoneg: false,
@@ -177,8 +185,16 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     assert_eq!(link0.mtu, 4700);
 
     let lldp0 = &created.link_lldp[0];
-    assert_eq!(lldp0.enabled, false);
-    assert_eq!(lldp0.lldp_config_id, None);
+    assert_eq!(lldp0.enabled, true);
+    assert_eq!(lldp0.link_name, Some("Link Name".to_string()));
+    assert_eq!(lldp0.link_description, Some("Link Description".to_string()));
+    assert_eq!(lldp0.chassis_id, Some("Chassis ID".to_string()));
+    assert_eq!(lldp0.system_name, Some("System Name".to_string()));
+    assert_eq!(
+        lldp0.system_description,
+        Some("System Description".to_string())
+    );
+    assert_eq!(lldp0.management_ip, None);
 
     let ifx0 = &created.interfaces[0];
     assert_eq!(&ifx0.interface_name, "phy0");
@@ -213,8 +229,16 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
     assert_eq!(link0.mtu, 4700);
 
     let lldp0 = &roundtrip.link_lldp[0];
-    assert_eq!(lldp0.enabled, false);
-    assert_eq!(lldp0.lldp_config_id, None);
+    assert_eq!(lldp0.enabled, true);
+    assert_eq!(lldp0.link_name, Some("Link Name".to_string()));
+    assert_eq!(lldp0.link_description, Some("Link Description".to_string()));
+    assert_eq!(lldp0.chassis_id, Some("Chassis ID".to_string()));
+    assert_eq!(lldp0.system_name, Some("System Name".to_string()));
+    assert_eq!(
+        lldp0.system_description,
+        Some("System Description".to_string())
+    );
+    assert_eq!(lldp0.management_ip, None);
 
     let ifx0 = &roundtrip.interfaces[0];
     assert_eq!(&ifx0.interface_name, "phy0");

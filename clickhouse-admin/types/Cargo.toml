@@ -1,0 +1,21 @@
+[package]
+name = "clickhouse-admin-types"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+atomicwrites.workspace = true
+camino.workspace = true
+camino-tempfile.workspace = true
+derive_more.workspace = true
+omicron-common.workspace = true
+omicron-workspace-hack.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+expectorate.workspace = true

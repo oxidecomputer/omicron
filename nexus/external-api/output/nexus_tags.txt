@@ -146,11 +146,7 @@ sled_view                                GET      /v1/system/hardware/sleds/{sle
 switch_list                              GET      /v1/system/hardware/switches
 switch_view                              GET      /v1/system/hardware/switches/{switch_id}
 
-API operations found with tag "system/metrics"
-OPERATION ID                             METHOD   URL PATH
-system_metric                            GET      /v1/system/metrics/{metric_name}
-
-API operations found with tag "system/networking"
+API operations found with tag "system/ip-pools"
 OPERATION ID                             METHOD   URL PATH
 ip_pool_create                           POST     /v1/system/ip-pools
 ip_pool_delete                           DELETE   /v1/system/ip-pools/{pool}
@@ -169,6 +165,13 @@ ip_pool_silo_update                      PUT      /v1/system/ip-pools/{pool}/sil
 ip_pool_update                           PUT      /v1/system/ip-pools/{pool}
 ip_pool_utilization_view                 GET      /v1/system/ip-pools/{pool}/utilization
 ip_pool_view                             GET      /v1/system/ip-pools/{pool}
+
+API operations found with tag "system/metrics"
+OPERATION ID                             METHOD   URL PATH
+system_metric                            GET      /v1/system/metrics/{metric_name}
+
+API operations found with tag "system/networking"
+OPERATION ID                             METHOD   URL PATH
 networking_address_lot_block_list        GET      /v1/system/networking/address-lot/{address_lot}/blocks
 networking_address_lot_create            POST     /v1/system/networking/address-lot
 networking_address_lot_delete            DELETE   /v1/system/networking/address-lot/{address_lot}
@@ -178,9 +181,10 @@ networking_allow_list_view               GET      /v1/system/networking/allow-li
 networking_bfd_disable                   POST     /v1/system/networking/bfd-disable
 networking_bfd_enable                    POST     /v1/system/networking/bfd-enable
 networking_bfd_status                    GET      /v1/system/networking/bfd-status
-networking_bgp_announce_set_delete       DELETE   /v1/system/networking/bgp-announce
-networking_bgp_announce_set_list         GET      /v1/system/networking/bgp-announce
-networking_bgp_announce_set_update       PUT      /v1/system/networking/bgp-announce
+networking_bgp_announce_set_delete       DELETE   /v1/system/networking/bgp-announce-set/{announce_set}
+networking_bgp_announce_set_list         GET      /v1/system/networking/bgp-announce-set
+networking_bgp_announce_set_update       PUT      /v1/system/networking/bgp-announce-set
+networking_bgp_announcement_list         GET      /v1/system/networking/bgp-announce-set/{announce_set}/announcement
 networking_bgp_config_create             POST     /v1/system/networking/bgp
 networking_bgp_config_delete             DELETE   /v1/system/networking/bgp
 networking_bgp_config_list               GET      /v1/system/networking/bgp

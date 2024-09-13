@@ -246,7 +246,8 @@ impl DbUrlOptions {
         eprintln!("note: using database URL {}", &db_url);
 
         let db_config = db::Config { url: db_url.clone() };
-        let pool = Arc::new(db::Pool::new(&log.clone(), &db_config));
+        let pool =
+            Arc::new(db::Pool::new_single_host(&log.clone(), &db_config));
 
         // Being a dev tool, we want to try this operation even if the schema
         // doesn't match what we expect.  So we use `DataStore::new_unchecked()`
@@ -4224,7 +4225,7 @@ async fn cmd_db_inventory(
 }
 
 async fn cmd_db_inventory_baseboard_ids(
-    conn: &DataStoreConnection<'_>,
+    conn: &DataStoreConnection,
     limit: NonZeroU32,
 ) -> Result<(), anyhow::Error> {
     #[derive(Tabled)]
@@ -4261,7 +4262,7 @@ async fn cmd_db_inventory_baseboard_ids(
 }
 
 async fn cmd_db_inventory_cabooses(
-    conn: &DataStoreConnection<'_>,
+    conn: &DataStoreConnection,
     limit: NonZeroU32,
 ) -> Result<(), anyhow::Error> {
     #[derive(Tabled)]
@@ -4302,7 +4303,7 @@ async fn cmd_db_inventory_cabooses(
 }
 
 async fn cmd_db_inventory_physical_disks(
-    conn: &DataStoreConnection<'_>,
+    conn: &DataStoreConnection,
     limit: NonZeroU32,
     args: InvPhysicalDisksArgs,
 ) -> Result<(), anyhow::Error> {
@@ -4359,7 +4360,7 @@ async fn cmd_db_inventory_physical_disks(
 }
 
 async fn cmd_db_inventory_rot_pages(
-    conn: &DataStoreConnection<'_>,
+    conn: &DataStoreConnection,
     limit: NonZeroU32,
 ) -> Result<(), anyhow::Error> {
     #[derive(Tabled)]
@@ -4394,7 +4395,7 @@ async fn cmd_db_inventory_rot_pages(
 }
 
 async fn cmd_db_inventory_collections_list(
-    conn: &DataStoreConnection<'_>,
+    conn: &DataStoreConnection,
     limit: NonZeroU32,
 ) -> Result<(), anyhow::Error> {
     #[derive(Tabled)]
@@ -4742,6 +4743,51 @@ fn inv_collection_print_sleds(collection: &Collection) {
             "    reservoir (GiB):     {}",
             sled.reservoir_size.to_whole_gibibytes()
         );
+
+        if !sled.zpools.is_empty() {
+            println!("    physical disks:");
+        }
+        for disk in &sled.disks {
+            let nexus_types::inventory::PhysicalDisk {
+                identity,
+                variant,
+                slot,
+            } = disk;
+            println!("      {variant:?}: {identity:?} in {slot}");
+        }
+
+        if !sled.zpools.is_empty() {
+            println!("    zpools");
+        }
+        for zpool in &sled.zpools {
+            let nexus_types::inventory::Zpool { id, total_size, .. } = zpool;
+            println!("      {id}: total size: {total_size}");
+        }
+
+        if !sled.datasets.is_empty() {
+            println!("    datasets:");
+        }
+        for dataset in &sled.datasets {
+            let nexus_types::inventory::Dataset {
+                id,
+                name,
+                available,
+                used,
+                quota,
+                reservation,
+                compression,
+            } = dataset;
+
+            let id = if let Some(id) = id {
+                id.to_string()
+            } else {
+                String::from("none")
+            };
+
+            println!("      {name} - id: {id}, compression: {compression}");
+            println!("        available: {available}, used: {used}");
+            println!("        reservation: {reservation:?}, quota: {quota:?}");
+        }
 
         if let Some(zones) = collection.omicron_zones.get(&sled.sled_id) {
             println!(

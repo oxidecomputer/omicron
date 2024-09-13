@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::installinator_progress::IprArtifactServer;
+use dropshot::Body;
 use dropshot::FreeformBody;
 use dropshot::HttpError;
 use dropshot::HttpResponseHeaders;
@@ -11,7 +12,7 @@ use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::Path;
 use dropshot::RequestContext;
 use dropshot::TypedBody;
-use hyper::Body;
+use futures::TryStreamExt;
 use installinator_api::body_to_artifact_response;
 use installinator_api::InstallinatorApi;
 use installinator_api::ReportQuery;
@@ -73,10 +74,11 @@ impl InstallinatorApi for WicketdInstallinatorApiImpl {
                     }
                 };
 
-                Ok(body_to_artifact_response(
-                    size,
-                    Body::wrap_stream(data_stream),
-                ))
+                let body = http_body_util::StreamBody::new(
+                    data_stream.map_ok(|b| hyper::body::Frame::data(b)),
+                );
+
+                Ok(body_to_artifact_response(size, Body::wrap(body)))
             }
             None => {
                 Err(HttpError::for_not_found(None, "Artifact not found".into()))

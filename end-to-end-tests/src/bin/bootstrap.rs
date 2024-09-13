@@ -8,8 +8,8 @@ use oxide_client::types::{
     NameOrId, SiloQuotasUpdate,
 };
 use oxide_client::{
-    ClientDisksExt, ClientHiddenExt, ClientProjectsExt,
-    ClientSystemNetworkingExt, ClientSystemSilosExt,
+    ClientDisksExt, ClientHiddenExt, ClientProjectsExt, ClientSystemIpPoolsExt,
+    ClientSystemSilosExt,
 };
 use serde::{de::DeserializeOwned, Deserialize};
 use std::time::Duration;
@@ -151,8 +151,8 @@ async fn main() -> Result<()> {
 async fn deserialize_byte_stream<T: DeserializeOwned>(
     response: oxide_client::ResponseValue<oxide_client::ByteStream>,
 ) -> Result<T> {
-    let body = hyper::Body::wrap_stream(response.into_inner_stream());
-    let bytes = hyper::body::to_bytes(body).await?;
+    let body = dropshot::Body::wrap_stream(response.into_inner_stream());
+    let bytes = dropshot::Body::to_bytes(body).await?;
     Ok(serde_json::from_slice(&bytes)?)
 }
 

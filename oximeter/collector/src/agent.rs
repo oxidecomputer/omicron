@@ -849,13 +849,12 @@ mod tests {
     use super::OximeterAgent;
     use super::ProducerEndpoint;
     use crate::self_stats::FailureReason;
-    use hyper::service::make_service_fn;
+    use dropshot::Body;
     use hyper::service::service_fn;
-    use hyper::Body;
     use hyper::Request;
     use hyper::Response;
-    use hyper::Server;
     use hyper::StatusCode;
+    use hyper_util::rt::TokioIo;
     use omicron_common::api::internal::nexus::ProducerKind;
     use omicron_test_utils::dev::test_setup_log;
     use std::convert::Infallible;
@@ -865,6 +864,7 @@ mod tests {
     use std::sync::atomic::AtomicU64;
     use std::sync::atomic::Ordering;
     use std::time::Duration;
+    use tokio::net::TcpListener;
     use tokio::sync::oneshot;
     use tokio::time::Instant;
     use uuid::Uuid;
@@ -915,12 +915,37 @@ mod tests {
         // will be no actual data here, but the sample counter will increment.
         let addr =
             SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0));
-        let make_svc = make_service_fn(|_conn| async {
+        let listener = TcpListener::bind(addr).await.unwrap();
+
+        let make_svc = service_fn(|_request| async {
             Ok::<_, Infallible>(service_fn(|_: Request<Body>| async {
                 N_SUCCESSFUL_COLLECTIONS.fetch_add(1, Ordering::SeqCst);
                 Ok::<_, Infallible>(Response::new(Body::from("[]")))
             }))
         });
+
+        tokio::spawn(async {
+            loop {
+                let (stream, _) = listener.accept().await?;
+
+                // Use an adapter to access something implementing `tokio::io` traits as if they implement
+                // `hyper::rt` IO traits.
+                let io = TokioIo::new(stream);
+
+                // Spawn a tokio task to serve multiple connections concurrently
+                tokio::task::spawn(async move {
+                    // Finally, we bind the incoming connection to our `hello` service
+                    if let Err(err) = hyper::server::conn::http1::Builder::new()
+                        // `service_fn` converts our function in a `Service`
+                        .serve_connection(io, make_svc)
+                        .await
+                    {
+                        eprintln!("Error serving connection: {:?}", err);
+                    }
+                });
+            }
+        });
+
         let server = Server::bind(&addr).serve(make_svc);
         let address = server.local_addr();
         let _task = tokio::task::spawn(server);

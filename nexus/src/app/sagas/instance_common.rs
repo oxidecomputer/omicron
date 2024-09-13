@@ -7,7 +7,6 @@
 use std::net::{IpAddr, Ipv6Addr};
 
 use crate::Nexus;
-use chrono::Utc;
 use nexus_db_model::{
     ByteCount, ExternalIp, InstanceState, IpAttachState, Ipv4NatEntry,
     SledReservationConstraints, SledResource, VmmState,
@@ -24,6 +23,12 @@ use super::NexusActionContext;
 
 /// The port propolis-server listens on inside the propolis zone.
 const DEFAULT_PROPOLIS_PORT: u16 = 12400;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub(super) struct VmmAndSledIds {
+    pub(super) vmm_id: PropolisUuid,
+    pub(super) sled_id: SledUuid,
+}
 
 /// Reserves resources for a new VMM whose instance has `ncpus` guest logical
 /// processors and `guest_memory` bytes of guest RAM. The selected sled is
@@ -92,7 +97,6 @@ pub async fn create_and_insert_vmm_record(
     propolis_id: PropolisUuid,
     sled_id: SledUuid,
     propolis_ip: Ipv6Addr,
-    initial_state: nexus_db_model::VmmInitialState,
 ) -> Result<db::model::Vmm, ActionError> {
     let vmm = db::model::Vmm::new(
         propolis_id,
@@ -100,7 +104,6 @@ pub async fn create_and_insert_vmm_record(
         sled_id,
         IpAddr::V6(propolis_ip).into(),
         DEFAULT_PROPOLIS_PORT,
-        initial_state,
     );
 
     let vmm = datastore
@@ -109,32 +112,6 @@ pub async fn create_and_insert_vmm_record(
         .map_err(ActionError::action_failed)?;
 
     Ok(vmm)
-}
-
-/// Given a previously-inserted VMM record, set its state to `SagaUnwound` and
-/// then delete it.
-///
-/// This function succeeds idempotently if called with the same parameters,
-/// provided that the VMM record was not changed by some other actor after the
-/// calling saga inserted it.
-///
-/// This function is intended to be called when a saga which created a VMM
-/// record unwinds.
-pub async fn unwind_vmm_record(
-    datastore: &DataStore,
-    opctx: &OpContext,
-    prev_record: &db::model::Vmm,
-) -> Result<(), anyhow::Error> {
-    let new_runtime = db::model::VmmRuntimeState {
-        state: db::model::VmmState::SagaUnwound,
-        time_state_updated: Utc::now(),
-        gen: prev_record.runtime.gen.next().into(),
-    };
-
-    let prev_id = PropolisUuid::from_untyped_uuid(prev_record.id);
-    datastore.vmm_update_runtime(&prev_id, &new_runtime).await?;
-    datastore.vmm_mark_deleted(&opctx, &prev_id).await?;
-    Ok(())
 }
 
 /// Allocates a new IPv6 address for a propolis instance that will run on the
@@ -213,12 +190,12 @@ pub async fn instance_ip_move_state(
 /// the Attaching or Detaching state so that concurrent attempts to start the
 /// instance will notice that the IP state is in flux and ask the caller to
 /// retry.
-pub async fn instance_ip_get_instance_state(
+pub(super) async fn instance_ip_get_instance_state(
     sagactx: &NexusActionContext,
     serialized_authn: &authn::saga::Serialized,
     authz_instance: &authz::Instance,
     verb: &str,
-) -> Result<Option<SledUuid>, ActionError> {
+) -> Result<Option<VmmAndSledIds>, ActionError> {
     // XXX: we can get instance state (but not sled ID) in same transaction
     //      as attach (but not detach) wth current design. We need to re-query
     //      for sled ID anyhow, so keep consistent between attach/detach.
@@ -236,7 +213,11 @@ pub async fn instance_ip_get_instance_state(
         inst_and_vmm.vmm().as_ref().map(|vmm| vmm.runtime.state);
     let found_instance_state =
         inst_and_vmm.instance().runtime_state.nexus_state;
-    let mut sled_id = inst_and_vmm.sled_id();
+    let mut propolis_and_sled_id =
+        inst_and_vmm.vmm().as_ref().map(|vmm| VmmAndSledIds {
+            vmm_id: PropolisUuid::from_untyped_uuid(vmm.id),
+            sled_id: SledUuid::from_untyped_uuid(vmm.sled_id),
+        });
 
     slog::debug!(
         osagactx.log(), "evaluating instance state for IP attach/detach";
@@ -257,7 +238,7 @@ pub async fn instance_ip_get_instance_state(
     match (found_instance_state, found_vmm_state) {
         // If there's no VMM, the instance is definitely not on any sled.
         (InstanceState::NoVmm, _) | (_, Some(VmmState::SagaUnwound)) => {
-            sled_id = None;
+            propolis_and_sled_id = None;
         }
 
         // If the instance is running normally or rebooting, it's resident on
@@ -267,14 +248,14 @@ pub async fn instance_ip_get_instance_state(
             Some(VmmState::Running) | Some(VmmState::Rebooting),
         ) => {}
 
-        // If the VMM is in the Stopping, Migrating, or Starting states, its
-        // sled assignment is in doubt, so report a transient state error and
-        // ask the caller to retry.
+        // If the VMM is in the Creating, Stopping, Migrating, or Starting
+        // states, its  sled assignment is in doubt, so report a transient state
+        // error and ask the caller to retry.
         //
-        // Although an instance with a Starting VMM has a sled assignment,
-        // there's no way to tell at this point whether or not there's a
-        // concurrent instance-start saga that has passed the point where it
-        // sends IP assignments to the instance's new sled:
+        // Although an instance with a Starting (or Creating) VMM has a sled
+        // assignment, there's no way to tell at this point whether or not
+        // there's a  concurrent instance-start saga that has passed the point
+        // where it sends IP assignments to the instance's new sled:
         //
         // - If the start saga is still in progress and hasn't pushed any IP
         //   information to the instance's new sled yet, then either of two
@@ -296,7 +277,8 @@ pub async fn instance_ip_get_instance_state(
             Some(state @ VmmState::Starting)
             | Some(state @ VmmState::Migrating)
             | Some(state @ VmmState::Stopping)
-            | Some(state @ VmmState::Stopped),
+            | Some(state @ VmmState::Stopped)
+            | Some(state @ VmmState::Creating),
         ) => {
             return Err(ActionError::action_failed(Error::unavail(&format!(
                 "can't {verb} in transient state {state}"
@@ -340,7 +322,7 @@ pub async fn instance_ip_get_instance_state(
         }
     }
 
-    Ok(sled_id)
+    Ok(propolis_and_sled_id)
 }
 
 /// Adds a NAT entry to DPD, routing packets bound for `target_ip` to a
@@ -441,18 +423,19 @@ pub async fn instance_ip_remove_nat(
 /// Inform the OPTE port for a running instance that it should start
 /// sending/receiving traffic on a given IP address.
 ///
-/// This call is a no-op if `sled_uuid` is `None` or the saga is explicitly
-/// set to be inactive in event of double attach/detach (`!target_ip.do_saga`).
-pub async fn instance_ip_add_opte(
+/// This call is a no-op if the instance is not active (`propolis_and_sled` is
+/// `None`) or the calling saga is explicitly set to be inactive in the event of
+/// a double attach/detach (`!target_ip.do_saga`).
+pub(super) async fn instance_ip_add_opte(
     sagactx: &NexusActionContext,
-    authz_instance: &authz::Instance,
-    sled_uuid: Option<SledUuid>,
+    vmm_and_sled: Option<VmmAndSledIds>,
     target_ip: ModifyStateForExternalIp,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
 
     // No physical sled? Don't inform OPTE.
-    let Some(sled_uuid) = sled_uuid else {
+    let Some(VmmAndSledIds { vmm_id: propolis_id, sled_id }) = vmm_and_sled
+    else {
         return Ok(());
     };
 
@@ -470,17 +453,14 @@ pub async fn instance_ip_add_opte(
 
     osagactx
         .nexus()
-        .sled_client(&sled_uuid)
+        .sled_client(&sled_id)
         .await
         .map_err(|_| {
             ActionError::action_failed(Error::unavail(
                 "sled agent client went away mid-attach/detach",
             ))
         })?
-        .instance_put_external_ip(
-            &InstanceUuid::from_untyped_uuid(authz_instance.id()),
-            &sled_agent_body,
-        )
+        .vmm_put_external_ip(&propolis_id, &sled_agent_body)
         .await
         .map_err(|e| {
             ActionError::action_failed(match e {
@@ -499,18 +479,20 @@ pub async fn instance_ip_add_opte(
 /// Inform the OPTE port for a running instance that it should cease
 /// sending/receiving traffic on a given IP address.
 ///
-/// This call is a no-op if `sled_uuid` is `None` or the saga is explicitly
-/// set to be inactive in event of double attach/detach (`!target_ip.do_saga`).
-pub async fn instance_ip_remove_opte(
+/// This call is a no-op if the instance is not active (`propolis_and_sled` is
+/// `None`) or the calling saga is explicitly set to be inactive in the event of
+/// a double attach/detach (`!target_ip.do_saga`).
+pub(super) async fn instance_ip_remove_opte(
     sagactx: &NexusActionContext,
-    authz_instance: &authz::Instance,
-    sled_uuid: Option<SledUuid>,
+    propolis_and_sled: Option<VmmAndSledIds>,
     target_ip: ModifyStateForExternalIp,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
 
     // No physical sled? Don't inform OPTE.
-    let Some(sled_uuid) = sled_uuid else {
+    let Some(VmmAndSledIds { vmm_id: propolis_id, sled_id }) =
+        propolis_and_sled
+    else {
         return Ok(());
     };
 
@@ -528,17 +510,14 @@ pub async fn instance_ip_remove_opte(
 
     osagactx
         .nexus()
-        .sled_client(&sled_uuid)
+        .sled_client(&sled_id)
         .await
         .map_err(|_| {
             ActionError::action_failed(Error::unavail(
                 "sled agent client went away mid-attach/detach",
             ))
         })?
-        .instance_delete_external_ip(
-            &InstanceUuid::from_untyped_uuid(authz_instance.id()),
-            &sled_agent_body,
-        )
+        .vmm_delete_external_ip(&propolis_id, &sled_agent_body)
         .await
         .map_err(|e| {
             ActionError::action_failed(match e {

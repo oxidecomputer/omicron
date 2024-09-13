@@ -11,7 +11,7 @@ use bootstore::schemes::v0::NetworkConfig;
 use camino::Utf8PathBuf;
 use display_error_chain::DisplayErrorChain;
 use dropshot::{
-    ApiDescription, FreeformBody, HttpError, HttpResponseCreated,
+    ApiDescription, Body, FreeformBody, HttpError, HttpResponseCreated,
     HttpResponseDeleted, HttpResponseHeaders, HttpResponseOk,
     HttpResponseUpdatedNoContent, Path, Query, RequestContext, StreamingBody,
     TypedBody,
@@ -21,16 +21,16 @@ use nexus_sled_agent_shared::inventory::{
 };
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::{
-    DiskRuntimeState, SledInstanceState, UpdateArtifactId,
+    DiskRuntimeState, SledVmmState, UpdateArtifactId,
 };
 use omicron_common::api::internal::shared::{
     ResolvedVpcRouteSet, ResolvedVpcRouteState, SledIdentifiers, SwitchPorts,
     VirtualNetworkInterfaceHost,
 };
 use omicron_common::disk::{
-    DiskVariant, DisksManagementResult, M2Slot, OmicronPhysicalDisksConfig,
+    DatasetsConfig, DatasetsManagementResult, DiskVariant,
+    DisksManagementResult, M2Slot, OmicronPhysicalDisksConfig,
 };
-use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use sled_agent_api::*;
 use sled_agent_types::boot_disk::{
     BootDiskOsWriteStatus, BootDiskPathParams, BootDiskUpdatePathParams,
@@ -41,8 +41,8 @@ use sled_agent_types::disk::DiskEnsureBody;
 use sled_agent_types::early_networking::EarlyNetworkConfig;
 use sled_agent_types::firewall_rules::VpcFirewallRulesEnsureBody;
 use sled_agent_types::instance::{
-    InstanceEnsureBody, InstanceExternalIpBody, InstancePutStateBody,
-    InstancePutStateResponse, InstanceUnregisterResponse,
+    InstanceEnsureBody, InstanceExternalIpBody, VmmPutStateBody,
+    VmmPutStateResponse, VmmUnregisterResponse,
 };
 use sled_agent_types::sled::AddSledRequest;
 use sled_agent_types::time_sync::TimeSync;
@@ -133,8 +133,11 @@ impl SledAgentApi for SledAgentImpl {
                 path, e,
             ))
         })?;
-        let stream = hyper_staticfile::FileBytesStream::new(f);
-        let body = FreeformBody(stream.into_body());
+        let file_access = hyper_staticfile::vfs::TokioFileAccess::new(f);
+        let file_stream =
+            hyper_staticfile::util::FileBytesStream::new(file_access);
+        let body = Body::wrap(hyper_staticfile::Body::Full(file_stream));
+        let body = FreeformBody(body);
         let mut response =
             HttpResponseHeaders::new_unnamed(HttpResponseOk(body));
         response.headers_mut().append(
@@ -220,6 +223,23 @@ impl SledAgentApi for SledAgentImpl {
         .map_err(HttpError::from)
     }
 
+    async fn datasets_put(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<DatasetsConfig>,
+    ) -> Result<HttpResponseOk<DatasetsManagementResult>, HttpError> {
+        let sa = rqctx.context();
+        let body_args = body.into_inner();
+        let result = sa.datasets_ensure(body_args).await?;
+        Ok(HttpResponseOk(result))
+    }
+
+    async fn datasets_get(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<DatasetsConfig>, HttpError> {
+        let sa = rqctx.context();
+        Ok(HttpResponseOk(sa.datasets_config_list().await?))
+    }
+
     async fn zone_bundle_cleanup(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<BTreeMap<Utf8PathBuf, CleanupCount>>, HttpError>
@@ -294,80 +314,69 @@ impl SledAgentApi for SledAgentImpl {
         Ok(HttpResponseUpdatedNoContent())
     }
 
-    async fn instance_register(
+    async fn vmm_register(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<InstancePathParam>,
+        path_params: Path<VmmPathParam>,
         body: TypedBody<InstanceEnsureBody>,
-    ) -> Result<HttpResponseOk<SledInstanceState>, HttpError> {
+    ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
         let sa = rqctx.context();
-        let instance_id = path_params.into_inner().instance_id;
+        let propolis_id = path_params.into_inner().propolis_id;
         let body_args = body.into_inner();
         Ok(HttpResponseOk(
-            sa.instance_ensure_registered(
-                instance_id,
-                body_args.propolis_id,
-                body_args.hardware,
-                body_args.instance_runtime,
-                body_args.vmm_runtime,
-                body_args.propolis_addr,
-                body_args.metadata,
-            )
-            .await?,
+            sa.instance_ensure_registered(propolis_id, body_args).await?,
         ))
     }
 
-    async fn instance_unregister(
+    async fn vmm_unregister(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<InstancePathParam>,
-    ) -> Result<HttpResponseOk<InstanceUnregisterResponse>, HttpError> {
+        path_params: Path<VmmPathParam>,
+    ) -> Result<HttpResponseOk<VmmUnregisterResponse>, HttpError> {
         let sa = rqctx.context();
-        let instance_id = path_params.into_inner().instance_id;
-        Ok(HttpResponseOk(sa.instance_ensure_unregistered(instance_id).await?))
+        let id = path_params.into_inner().propolis_id;
+        Ok(HttpResponseOk(sa.instance_ensure_unregistered(id).await?))
     }
 
-    async fn instance_put_state(
+    async fn vmm_put_state(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<InstancePathParam>,
-        body: TypedBody<InstancePutStateBody>,
-    ) -> Result<HttpResponseOk<InstancePutStateResponse>, HttpError> {
+        path_params: Path<VmmPathParam>,
+        body: TypedBody<VmmPutStateBody>,
+    ) -> Result<HttpResponseOk<VmmPutStateResponse>, HttpError> {
         let sa = rqctx.context();
-        let instance_id = path_params.into_inner().instance_id;
+        let id = path_params.into_inner().propolis_id;
         let body_args = body.into_inner();
-        Ok(HttpResponseOk(
-            sa.instance_ensure_state(instance_id, body_args.state).await?,
-        ))
+        Ok(HttpResponseOk(sa.instance_ensure_state(id, body_args.state).await?))
     }
 
-    async fn instance_get_state(
+    async fn vmm_get_state(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<InstancePathParam>,
-    ) -> Result<HttpResponseOk<SledInstanceState>, HttpError> {
+        path_params: Path<VmmPathParam>,
+    ) -> Result<HttpResponseOk<SledVmmState>, HttpError> {
         let sa = rqctx.context();
-        let instance_id = path_params.into_inner().instance_id;
-        Ok(HttpResponseOk(sa.instance_get_state(instance_id).await?))
+        let id = path_params.into_inner().propolis_id;
+        Ok(HttpResponseOk(sa.instance_get_state(id).await?))
     }
 
-    async fn instance_put_external_ip(
+    async fn vmm_put_external_ip(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<InstancePathParam>,
+        path_params: Path<VmmPathParam>,
         body: TypedBody<InstanceExternalIpBody>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
-        let instance_id = path_params.into_inner().instance_id;
+        let id = path_params.into_inner().propolis_id;
         let body_args = body.into_inner();
-        sa.instance_put_external_ip(instance_id, &body_args).await?;
+        sa.instance_put_external_ip(id, &body_args).await?;
         Ok(HttpResponseUpdatedNoContent())
     }
 
-    async fn instance_delete_external_ip(
+    async fn vmm_delete_external_ip(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<InstancePathParam>,
+        path_params: Path<VmmPathParam>,
         body: TypedBody<InstanceExternalIpBody>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = rqctx.context();
-        let instance_id = path_params.into_inner().instance_id;
+        let id = path_params.into_inner().propolis_id;
         let body_args = body.into_inner();
-        sa.instance_delete_external_ip(instance_id, &body_args).await?;
+        sa.instance_delete_external_ip(id, &body_args).await?;
         Ok(HttpResponseUpdatedNoContent())
     }
 
@@ -399,26 +408,24 @@ impl SledAgentApi for SledAgentImpl {
         Ok(HttpResponseUpdatedNoContent())
     }
 
-    async fn instance_issue_disk_snapshot_request(
+    async fn vmm_issue_disk_snapshot_request(
         rqctx: RequestContext<Self::Context>,
-        path_params: Path<InstanceIssueDiskSnapshotRequestPathParam>,
-        body: TypedBody<InstanceIssueDiskSnapshotRequestBody>,
-    ) -> Result<
-        HttpResponseOk<InstanceIssueDiskSnapshotRequestResponse>,
-        HttpError,
-    > {
+        path_params: Path<VmmIssueDiskSnapshotRequestPathParam>,
+        body: TypedBody<VmmIssueDiskSnapshotRequestBody>,
+    ) -> Result<HttpResponseOk<VmmIssueDiskSnapshotRequestResponse>, HttpError>
+    {
         let sa = rqctx.context();
         let path_params = path_params.into_inner();
         let body = body.into_inner();
 
-        sa.instance_issue_disk_snapshot_request(
-            InstanceUuid::from_untyped_uuid(path_params.instance_id),
+        sa.vmm_issue_disk_snapshot_request(
+            path_params.propolis_id,
             path_params.disk_id,
             body.snapshot_id,
         )
         .await?;
 
-        Ok(HttpResponseOk(InstanceIssueDiskSnapshotRequestResponse {
+        Ok(HttpResponseOk(VmmIssueDiskSnapshotRequestResponse {
             snapshot_id: body.snapshot_id,
         }))
     }

@@ -59,7 +59,7 @@ pub struct RequestBuilder<'a> {
     method: http::Method,
     uri: http::Uri,
     headers: http::HeaderMap<http::header::HeaderValue>,
-    body: hyper::Body,
+    body: dropshot::Body,
     error: Option<anyhow::Error>,
     allow_non_dropshot_errors: bool,
 
@@ -84,7 +84,7 @@ impl<'a> RequestBuilder<'a> {
             method,
             uri,
             headers: http::HeaderMap::new(),
-            body: hyper::Body::empty(),
+            body: dropshot::Body::empty(),
             expected_status: None,
             allowed_headers: Some(vec![
                 http::header::CONTENT_ENCODING,
@@ -125,8 +125,8 @@ impl<'a> RequestBuilder<'a> {
     /// If `body` is `None`, the request body will be empty.
     pub fn raw_body(mut self, body: Option<String>) -> Self {
         match body {
-            Some(body) => self.body = hyper::Body::from(body),
-            None => self.body = hyper::Body::empty(),
+            Some(body) => self.body = dropshot::Body::from(body),
+            None => self.body = dropshot::Body::empty(),
         };
         self
     }
@@ -143,8 +143,8 @@ impl<'a> RequestBuilder<'a> {
         });
         match new_body {
             Some(Err(error)) => self.error = Some(error),
-            Some(Ok(new_body)) => self.body = hyper::Body::from(new_body),
-            None => self.body = hyper::Body::empty(),
+            Some(Ok(new_body)) => self.body = dropshot::Body::from(new_body),
+            None => self.body = dropshot::Body::empty(),
         };
         self
     }
@@ -168,12 +168,12 @@ impl<'a> RequestBuilder<'a> {
                         let stream = tokio_util::io::ReaderStream::new(
                             tokio::fs::File::from_std(file),
                         );
-                        self.body = hyper::Body::wrap_stream(stream);
+                        self.body = dropshot::Body::wrap_stream(stream);
                     }
                     Err(error) => self.error = Some(error),
                 }
             }
-            None => self.body = hyper::Body::empty(),
+            None => self.body = dropshot::Body::empty(),
         };
         self
     }
@@ -192,8 +192,8 @@ impl<'a> RequestBuilder<'a> {
         });
         match new_body {
             Some(Err(error)) => self.error = Some(error),
-            Some(Ok(new_body)) => self.body = hyper::Body::from(new_body),
-            None => self.body = hyper::Body::empty(),
+            Some(Ok(new_body)) => self.body = dropshot::Body::from(new_body),
+            None => self.body = dropshot::Body::empty(),
         };
         self.header(
             http::header::CONTENT_TYPE,
@@ -421,7 +421,7 @@ impl<'a> RequestBuilder<'a> {
         // or malicious server could do damage by sending us an enormous
         // response here.  Since we only use this in a test suite, we ignore
         // that risk.
-        let response_body = hyper::body::to_bytes(response.body_mut())
+        let response_body = dropshot::Body::to_bytes(response.body_mut())
             .await
             .context("reading response body")?;
 

@@ -20,6 +20,7 @@ pub use self::location_map::SwitchPortConfig;
 pub use self::location_map::SwitchPortDescription;
 use self::location_map::ValidatedLocationConfig;
 use crate::error::SpCommsError;
+use crate::error::SpLookupError;
 use crate::error::StartupError;
 use gateway_messages::IgnitionState;
 use gateway_sp_comms::default_discovery_addr;
@@ -316,18 +317,18 @@ impl ManagementSwitch {
         self.location_map.get().is_some()
     }
 
-    fn location_map(&self) -> Result<&LocationMap, SpCommsError> {
+    fn location_map(&self) -> Result<&LocationMap, SpLookupError> {
         let discovery_result = self
             .location_map
             .get()
-            .ok_or(SpCommsError::DiscoveryNotYetComplete)?;
+            .ok_or(SpLookupError::DiscoveryNotYetComplete)?;
         discovery_result
             .as_ref()
-            .map_err(|s| SpCommsError::DiscoveryFailed { reason: s.clone() })
+            .map_err(|s| SpLookupError::DiscoveryFailed { reason: s.clone() })
     }
 
     /// Get the identifier of our local switch.
-    pub fn local_switch(&self) -> Result<SpIdentifier, SpCommsError> {
+    pub fn local_switch(&self) -> Result<SpIdentifier, SpLookupError> {
         let location_map = self.location_map()?;
         Ok(location_map.port_to_id(self.local_ignition_controller_port))
     }
@@ -347,11 +348,11 @@ impl ManagementSwitch {
     /// This method will fail if discovery is not yet complete (i.e., we don't
     /// know the logical identifiers of any SP yet!) or if `id` specifies an SP
     /// that doesn't exist in our discovered location map.
-    fn get_port(&self, id: SpIdentifier) -> Result<SwitchPort, SpCommsError> {
+    fn get_port(&self, id: SpIdentifier) -> Result<SwitchPort, SpLookupError> {
         let location_map = self.location_map()?;
         let port = location_map
             .id_to_port(id)
-            .ok_or(SpCommsError::SpDoesNotExist(id))?;
+            .ok_or(SpLookupError::SpDoesNotExist(id))?;
         Ok(port)
     }
 
@@ -362,7 +363,7 @@ impl ManagementSwitch {
     /// This method will fail if discovery is not yet complete (i.e., we don't
     /// know the logical identifiers of any SP yet!) or if `id` specifies an SP
     /// that doesn't exist in our discovered location map.
-    pub fn sp(&self, id: SpIdentifier) -> Result<&SingleSp, SpCommsError> {
+    pub fn sp(&self, id: SpIdentifier) -> Result<&SingleSp, SpLookupError> {
         let port = self.get_port(id)?;
         Ok(self.port_to_sp(port))
     }
@@ -377,7 +378,7 @@ impl ManagementSwitch {
     pub fn ignition_target(
         &self,
         id: SpIdentifier,
-    ) -> Result<u8, SpCommsError> {
+    ) -> Result<u8, SpLookupError> {
         let port = self.get_port(id)?;
         Ok(self.port_to_ignition_target[port.0])
     }
@@ -389,7 +390,7 @@ impl ManagementSwitch {
     /// therefore can't map our switch ports to SP identities).
     pub(crate) fn all_sps(
         &self,
-    ) -> Result<impl Iterator<Item = (SpIdentifier, &SingleSp)>, SpCommsError>
+    ) -> Result<impl Iterator<Item = (SpIdentifier, &SingleSp)>, SpLookupError>
     {
         let location_map = self.location_map()?;
         Ok(location_map
