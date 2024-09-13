@@ -110,7 +110,7 @@ impl ClickhouseCli {
             let args: Vec<&OsStr> = command.as_std().get_args().collect();
             let args_parsed: Vec<String> = args
                 .iter()
-                .map(|&os_str| os_str.to_string_lossy().into_owned())
+                .map(|&os_str| os_str.to_str().unwrap().to_owned())
                 .collect();
             let args_str = args_parsed.join(" ");
             ClickhouseCliError::Run {

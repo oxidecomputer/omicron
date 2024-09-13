@@ -231,7 +231,7 @@ macro_rules! define_struct_and_set_values {
 
         impl $name {
             // Check if a field name matches a given key and set its value
-            pub fn set_field_value(&mut self, key: &str, value: Option<u128>) -> Result<()> {
+            pub fn set_field_value(&mut self, key: &str, value: Option<u64>) -> Result<()> {
                 match key {
                     $(
                         stringify!($field_name) => {
@@ -257,21 +257,21 @@ define_struct_and_set_values! {
     /// Logically grouped information file from a keeper node
     struct Lgif {
         /// Index of the first log entry in the current log segment
-        first_log_idx: Option<u128>,
+        first_log_idx: Option<u64>,
         /// Term of the leader when the first log entry was created
-        first_log_term: Option<u128>,
+        first_log_term: Option<u64>,
         /// Index of the last log entry in the current log segment
-        last_log_idx: Option<u128>,
+        last_log_idx: Option<u64>,
         /// Term of the leader when the last log entry was created
-        last_log_term: Option<u128>,
+        last_log_term: Option<u64>,
         /// Index of the last committed log entry
-        last_committed_log_idx: Option<u128>,
+        last_committed_log_idx: Option<u64>,
         /// Index of the last committed log entry from the leader's perspective
-        leader_committed_log_idx: Option<u128>,
+        leader_committed_log_idx: Option<u64>,
         /// Target index for log commitment during replication or recovery
-        target_committed_log_idx: Option<u128>,
+        target_committed_log_idx: Option<u64>,
         /// Index of the most recent snapshot taken
-        last_snapshot_idx: Option<u128>,
+        last_snapshot_idx: Option<u64>,
     }
 }
 
@@ -310,18 +310,18 @@ impl Lgif {
         //
         // 1. Create an iterator over the lines of a string. These are split at newlines.
         // 2. Each line is split by the tab, and we make sure that the key and value are
-        //    valid. If a value is not valid, we ignore it and mode on. We want to keep
+        //    valid. If a value is not valid, we ignore it and move on. We want to keep
         //    other key-value pairs if they are valid.
         // 3. Once we have a HashMap of valid key-value pairs, we set the fields of the
         //    Lgif struct with the retrieved data. To do this we make sure that the name
-        //    of each HasMap key matches one of the field names and then we set the
+        //    of each HashMap key matches one of the field names and then we set the
         //    corresponding value. If a key does not match any of the struct's fields we
         //    log an error, but continue populating all valid key-value pairs.
         // 4. We return an error only if the response had no valid key-value pairs.
         //
         let binding = String::from_utf8_lossy(data);
         let lines = binding.lines();
-        let mut lgif: HashMap<String, u128> = HashMap::new();
+        let mut lgif: HashMap<String, u64> = HashMap::new();
 
         for line in lines {
             let line = line.trim();
@@ -339,12 +339,12 @@ impl Lgif {
 
                 let key = l[0].to_string();
                 let raw_value = l[1];
-                let value = match u128::from_str(raw_value) {
+                let value = match u64::from_str(raw_value) {
                     Ok(v) => v,
                     Err(e) => {
                         error!(
                             log,
-                            "Unable to convert value into u128";
+                            "Unable to convert value into u64";
                             "value" => ?raw_value,
                             "error" => ?e,
                         );
@@ -549,7 +549,7 @@ mod tests {
     }
 
     #[test]
-    fn test_non_u128_value_lgif_parse_success() {
+    fn test_non_u64_value_lgif_parse_success() {
         let log = log();
         let data =
             "first_log_idx\t1\nfirst_log_term\tBOB\nlast_log_idx\t4386\nlast_log_term\t1\nlast_committed_log_idx\t4386
