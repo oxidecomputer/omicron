@@ -38,6 +38,7 @@ use nexus_types::internal_api::background::AbandonedVmmReaperStatus;
 use nexus_types::internal_api::background::InstanceUpdaterStatus;
 use nexus_types::internal_api::background::LookupRegionPortStatus;
 use nexus_types::internal_api::background::RegionReplacementDriverStatus;
+use nexus_types::internal_api::background::RegionReplacementStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementFinishStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementGarbageCollectStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStartStatus;
@@ -1102,29 +1103,36 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
             }
         };
     } else if name == "region_replacement" {
-        #[derive(Deserialize)]
-        struct TaskSuccess {
-            /// how many region replacements were started ok
-            region_replacement_started_ok: usize,
-
-            /// how many region replacements could not be started
-            region_replacement_started_err: usize,
-        }
-
-        match serde_json::from_value::<TaskSuccess>(details.clone()) {
+        match serde_json::from_value::<RegionReplacementStatus>(details.clone())
+        {
             Err(error) => eprintln!(
                 "warning: failed to interpret task details: {:?}: {:?}",
                 error, details
             ),
-            Ok(success) => {
+
+            Ok(status) => {
                 println!(
-                    "    number of region replacements started ok: {}",
-                    success.region_replacement_started_ok
+                    "    number of region replacement requests created ok: \
+                    {}",
+                    status.requests_created_ok.len()
                 );
+                for line in &status.requests_created_ok {
+                    println!("    > {line}");
+                }
+
                 println!(
-                    "    number of region replacement start errors: {}",
-                    success.region_replacement_started_err
+                    "    number of region replacement start sagas started \
+                    ok: {}",
+                    status.start_invoked_ok.len()
                 );
+                for line in &status.start_invoked_ok {
+                    println!("    > {line}");
+                }
+
+                println!("    number of errors: {}", status.errors.len());
+                for line in &status.errors {
+                    println!("    > {line}");
+                }
             }
         };
     } else if name == "instance_watcher" {
@@ -1303,7 +1311,8 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
 
             Ok(status) => {
                 println!(
-                    "    number of region replacement drive sagas started ok: {}",
+                    "    number of region replacement drive sagas started ok: \
+                    {}",
                     status.drive_invoked_ok.len()
                 );
                 for line in &status.drive_invoked_ok {
@@ -1311,7 +1320,8 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 }
 
                 println!(
-                    "    number of region replacement finish sagas started ok: {}",
+                    "    number of region replacement finish sagas started \
+                    ok: {}",
                     status.finish_invoked_ok.len()
                 );
                 for line in &status.finish_invoked_ok {
@@ -2642,10 +2652,10 @@ async fn cmd_nexus_sled_expunge_disk(
     }
 
     eprintln!(
-        "WARNING: This operation will PERMANENTLY and IRRECOVABLY mark physical disk \
-        {} ({}) expunged. To proceed, type the physical disk's serial number.",
-        args.physical_disk_id,
-        physical_disk.serial,
+        "WARNING: This operation will PERMANENTLY and IRRECOVABLY mark \
+        physical disk {} ({}) expunged. To proceed, type the physical disk's \
+        serial number.",
+        args.physical_disk_id, physical_disk.serial,
     );
     prompt.read_and_validate("disk serial number", &physical_disk.serial)?;
 
