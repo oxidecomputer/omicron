@@ -20,7 +20,7 @@ pub struct ClickhouseClusterConfig {
     /// This is used by `clickhouse-admin` in the clickhouse server and keeper
     /// zones to discard old configurations.
     pub generation: Generation,
-    /// Clickhouse Server ids must be unique and are handed out monotonically.
+    /// Clickhouse Server IDs must be unique and are handed out monotonically.
     /// Keep track of the last used one.
     pub max_used_server_id: ServerId,
     /// CLickhouse Keeper ids must be unique and are handed out monotonically.

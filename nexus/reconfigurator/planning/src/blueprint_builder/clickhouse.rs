@@ -20,6 +20,7 @@ use thiserror::Error;
 // the `BlueprintBuilder` in the current planning iteration.
 //
 // Will be removed once the planner starts using this code
+// See: https://github.com/oxidecomputer/omicron/issues/6577
 #[allow(unused)]
 struct InServiceClickhouseZones {
     keepers: BTreeSet<OmicronZoneUuid>,
@@ -59,6 +60,7 @@ impl From<&BTreeMap<SledUuid, BlueprintZonesConfig>>
 /// allocated.
 //
 // Will be removed once the planner starts using this code
+// See: https://github.com/oxidecomputer/omicron/issues/6577
 #[allow(unused)]
 pub struct ClickhouseAllocator {
     log: Logger,
@@ -69,7 +71,9 @@ pub struct ClickhouseAllocator {
 }
 
 /// Errors encountered when trying to plan keeper deployments
+//
 // Will be removed once the planner starts using this code
+// See: https://github.com/oxidecomputer/omicron/issues/6577
 #[allow(unused)]
 #[derive(Debug, Error)]
 pub enum KeeperAllocationError {
@@ -82,6 +86,7 @@ pub enum KeeperAllocationError {
 }
 
 // Will be removed once the planner starts using this code
+// https://github.com/oxidecomputer/omicron/issues/6577
 #[allow(unused)]
 impl ClickhouseAllocator {
     pub fn new(
@@ -151,12 +156,12 @@ impl ClickhouseAllocator {
             return bump_gen_if_necessary(new_config);
         }
 
-        // Save the log index for next ime
+        // Save the log index for next time
         new_config.highest_seen_keeper_leader_committed_log_index =
             inventory_membership.leader_committed_log_index;
 
         if current_keepers != inventory_membership.raft_config {
-            // We're still trying to reach our desired state We want to ensure
+            // We're still trying to reach our desired state. We want to ensure,
             // however, that if we are currently trying to add a node, that we
             // have not expunged the zone of the keeper that we are trying to
             // add. This can happen for a number of reasons, and without this
@@ -182,7 +187,7 @@ impl ClickhouseAllocator {
                 });
             }
 
-            // If we are not adding a keeper than we are done.
+            // If we are not adding a keeper then we are done.
             // The executor is trying to remove one from the cluster.
             //
             // This should always succeed eventually, barring a bug in

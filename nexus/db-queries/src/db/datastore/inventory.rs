@@ -2155,7 +2155,8 @@ impl DataStore {
             rot_pages_found,
             sled_agents,
             omicron_zones,
-            // currently unused
+            // Currently unused
+            // See: https://github.com/oxidecomputer/omicron/issues/6578
             clickhouse_keeper_cluster_membership: BTreeMap::new(),
         })
     }

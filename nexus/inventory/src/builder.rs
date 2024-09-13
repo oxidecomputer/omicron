@@ -148,6 +148,7 @@ impl CollectionBuilder {
             sled_agents: self.sleds,
             omicron_zones: self.omicron_zones,
             // Currently unused
+            // See: https://github.com/oxidecomputer/omicron/issues/6578
             clickhouse_keeper_cluster_membership: BTreeMap::new(),
         }
     }
