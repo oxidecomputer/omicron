@@ -1112,8 +1112,7 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
 
             Ok(status) => {
                 println!(
-                    "    number of region replacement requests created ok: \
-                    {}",
+                    "    region replacement requests created ok: {}",
                     status.requests_created_ok.len()
                 );
                 for line in &status.requests_created_ok {
@@ -1121,15 +1120,14 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 }
 
                 println!(
-                    "    number of region replacement start sagas started \
-                    ok: {}",
+                    "    region replacement start sagas started ok: {}",
                     status.start_invoked_ok.len()
                 );
                 for line in &status.start_invoked_ok {
                     println!("    > {line}");
                 }
 
-                println!("    number of errors: {}", status.errors.len());
+                println!("    errors: {}", status.errors.len());
                 for line in &status.errors {
                     println!("    > {line}");
                 }
@@ -1311,8 +1309,7 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
 
             Ok(status) => {
                 println!(
-                    "    number of region replacement drive sagas started ok: \
-                    {}",
+                    "    region replacement drive sagas started ok: {}",
                     status.drive_invoked_ok.len()
                 );
                 for line in &status.drive_invoked_ok {
@@ -1320,15 +1317,14 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 }
 
                 println!(
-                    "    number of region replacement finish sagas started \
-                    ok: {}",
+                    "    region replacement finish sagas started ok: {}",
                     status.finish_invoked_ok.len()
                 );
                 for line in &status.finish_invoked_ok {
                     println!("    > {line}");
                 }
 
-                println!("    number of errors: {}", status.errors.len());
+                println!("    errors: {}", status.errors.len());
                 for line in &status.errors {
                     println!("    > {line}");
                 }
