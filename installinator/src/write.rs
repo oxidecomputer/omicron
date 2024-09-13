@@ -1075,7 +1075,7 @@ mod tests {
             (SharedTransport(Arc::clone(&inner)), SharedTransport(inner))
         };
 
-        let (event_sender, event_receiver) = tokio::sync::mpsc::channel(512);
+        let (event_sender, event_receiver) = update_engine::channel();
 
         let receiver_handle = tokio::spawn(async move {
             ReceiverStream::new(event_receiver).collect::<Vec<_>>().await

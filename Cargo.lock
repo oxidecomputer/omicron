@@ -309,9 +309,9 @@ dependencies = [
 
 [[package]]
 name = "async-trait"
-version = "0.1.81"
+version = "0.1.82"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e0c28dcc82d7c8ead5cb13beb15405b57b8546e93215673ff8ca0349a028107"
+checksum = "a27b8a3a6e1a44fa4c8baf1f653e4172e81486d4941f2237e20dc2d0cf4ddff1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1131,6 +1131,7 @@ checksum = "98cc8fbded0c607b7ba9dd60cd98df59af97e84d24e49c8557331cfc26d301ce"
 name = "clickhouse-admin-api"
 version = "0.1.0"
 dependencies = [
+ "clickhouse-admin-types",
  "dropshot 0.10.2-dev",
  "omicron-common",
  "omicron-uuid-kinds",
@@ -1144,6 +1145,7 @@ name = "clickhouse-admin-types"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "atomicwrites",
  "camino",
  "camino-tempfile",
  "derive_more",
@@ -1277,18 +1279,18 @@ checksum = "c2459377285ad874054d797f3ccebf984978aa39129f6eafde5cdc8315b612f8"
 
 [[package]]
 name = "const_format"
-version = "0.2.32"
+version = "0.2.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e3a214c7af3d04997541b18d432afaff4c455e79e2029079647e72fc2bd27673"
+checksum = "50c655d81ff1114fb0dcdea9225ea9f0cc712a6f8d189378e82bdf62a473a64b"
 dependencies = [
  "const_format_proc_macros",
 ]
 
 [[package]]
 name = "const_format_proc_macros"
-version = "0.2.32"
+version = "0.2.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c7f6ff08fd20f4f299298a28e2dfa8a8ba1036e6cd2460ac1de7b425d76f2500"
+checksum = "eff1a44b93f47b1bac19a27932f5c591e43d1ba357ee4f61526c8a25603f0eb1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3006,11 +3008,12 @@ dependencies = [
 [[package]]
 name = "gateway-messages"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=319e7b92db69792ab8efa4c68554ad0cf83adf93#319e7b92db69792ab8efa4c68554ad0cf83adf93"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=ca9f20e32acade9d15fb8d70405a6ef406c719cc#ca9f20e32acade9d15fb8d70405a6ef406c719cc"
 dependencies = [
  "bitflags 2.6.0",
  "hubpack",
  "serde",
+ "serde-big-array",
  "serde_repr",
  "smoltcp 0.9.1",
  "static_assertions",
@@ -3022,7 +3025,7 @@ dependencies = [
 [[package]]
 name = "gateway-sp-comms"
 version = "0.1.1"
-source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=319e7b92db69792ab8efa4c68554ad0cf83adf93#319e7b92db69792ab8efa4c68554ad0cf83adf93"
+source = "git+https://github.com/oxidecomputer/management-gateway-service?rev=ca9f20e32acade9d15fb8d70405a6ef406c719cc#ca9f20e32acade9d15fb8d70405a6ef406c719cc"
 dependencies = [
  "async-trait",
  "backoff",
@@ -3985,6 +3988,12 @@ name = "indoc"
 version = "1.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bfa799dd5ed20a7e349f3b4639aa80d74549c81716d9ec4f994c9b5815598306"
+
+[[package]]
+name = "indoc"
+version = "2.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b248f5224d1d606005e02c97f5aa4e88eeb230488bcc03bc9ca4d7991399f2b5"
 
 [[package]]
 name = "inout"
@@ -5394,6 +5403,7 @@ dependencies = [
  "slog",
  "slog-error-chain",
  "tokio",
+ "update-engine",
  "uuid",
 ]
 
@@ -5479,6 +5489,7 @@ dependencies = [
 name = "nexus-sled-agent-shared"
 version = "0.1.0"
 dependencies = [
+ "illumos-utils",
  "omicron-common",
  "omicron-passwords",
  "omicron-uuid-kinds",
@@ -5605,6 +5616,7 @@ dependencies = [
  "strum",
  "test-strategy",
  "thiserror",
+ "update-engine",
  "uuid",
 ]
 
@@ -6035,24 +6047,17 @@ dependencies = [
 name = "omicron-ddm-admin-client"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "ddm-admin-client",
  "either",
  "omicron-common",
  "omicron-workspace-hack",
- "omicron-zone-package",
- "progenitor",
  "progenitor-client",
- "quote",
  "reqwest",
- "rustfmt-wrapper",
  "serde",
- "serde_json",
  "sled-hardware-types",
  "slog",
  "thiserror",
  "tokio",
- "toml 0.8.19",
  "uuid",
 ]
 
@@ -6305,6 +6310,7 @@ dependencies = [
  "tufaceous",
  "tufaceous-lib",
  "update-common",
+ "update-engine",
  "uuid",
 ]
 
@@ -6363,10 +6369,12 @@ dependencies = [
  "slog-error-chain",
  "strum",
  "subprocess",
+ "supports-color",
  "tabled",
  "textwrap",
  "tokio",
  "unicode-width",
+ "update-engine",
  "url",
  "uuid",
 ]
@@ -7787,7 +7795,7 @@ version = "0.27.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b3aa6f61d235de56ccffbca8627377ebe6ff0052a419f67b098f319a5f32e06d"
 dependencies = [
- "indoc",
+ "indoc 1.0.9",
  "js-sys",
  "lalrpop",
  "lalrpop-util",
@@ -8296,9 +8304,9 @@ checksum = "a1d01941d82fa2ab50be1e79e6714289dd7cde78eba4c074bc5a4374f650dfe0"
 
 [[package]]
 name = "quick-xml"
-version = "0.31.0"
+version = "0.33.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1004a344b30a54e2ee58d66a71b32d2db2feb0a31f9a2d302bf0536f15de2a33"
+checksum = "0ca7dd09b5f4a9029c35e323b086d0a68acdc673317b9c4d002c6f1d4a7278c6"
 dependencies = [
  "memchr",
  "serde",
@@ -9182,9 +9190,9 @@ dependencies = [
 
 [[package]]
 name = "samael"
-version = "0.0.15"
+version = "0.0.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5da862a2115c0767681e28309a367dbd0a2366026948aae0272787e582d71eaf"
+checksum = "6c3e9664150c82db0eba06db746594e1e8e092c5c91986ee0fe46c0619fb159f"
 dependencies = [
  "base64 0.22.1",
  "bindgen",
@@ -9846,6 +9854,7 @@ dependencies = [
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
+ "once_cell",
  "rand",
  "schemars",
  "serde",
@@ -10397,9 +10406,9 @@ checksum = "81cdd64d312baedb58e21336b31bc043b77e01cc99033ce76ef539f78e965ebc"
 
 [[package]]
 name = "supports-color"
-version = "3.0.0"
+version = "3.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9829b314621dfc575df4e409e79f9d6a66a3bd707ab73f23cb4aa3a854ac854f"
+checksum = "8775305acf21c96926c900ad056abeef436701108518cf890020387236ac5a77"
 dependencies = [
  "is_ci",
 ]
@@ -11549,8 +11558,10 @@ dependencies = [
  "derive-where",
  "either",
  "futures",
+ "indent_write",
  "indexmap 2.4.0",
  "indicatif",
+ "indoc 2.0.5",
  "libsw",
  "linear-map",
  "omicron-test-utils",

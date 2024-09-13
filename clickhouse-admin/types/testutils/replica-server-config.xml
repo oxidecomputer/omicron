@@ -42,6 +42,7 @@
         </default>
     </quotas>
 
+    <tmp_path>./data/tmp</tmp_path>
     <user_files_path>./data/user_files</user_files_path>
     <default_profile>default</default_profile>
     <format_schema_path>./data/format_schemas</format_schema_path>
@@ -77,11 +78,11 @@
             <shard>
                 <internal_replication>true</internal_replication>
                 <replica>
-                    <host>ff::08</host>
+                    <host>ff::9</host>
                     <port>9000</port>
                 </replica>
                 <replica>
-                    <host>ff::09</host>
+                    <host>ohai.com</host>
                     <port>9000</port>
                 </replica>
             </shard>
@@ -90,7 +91,7 @@
         
     <zookeeper>
         <node>
-            <host>[ff::01]</host>
+            <host>[ff::1]</host>
             <port>9181</port>
         </node>
         <node>

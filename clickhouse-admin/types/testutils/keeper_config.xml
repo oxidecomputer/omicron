@@ -10,6 +10,7 @@
     </logger>
 
     <listen_host>ff::8</listen_host>
+    <path>./</path>
     <keeper_server>
         <enable_reconfiguration>false</enable_reconfiguration>
         <tcp_port>9181</tcp_port>
@@ -25,19 +26,19 @@
 
             <server>
                 <id>1</id>
-                <hostname>ff::01</hostname>
+                <hostname>ff::1</hostname>
                 <port>9234</port>
             </server>
             
             <server>
                 <id>2</id>
-                <hostname>ff::02</hostname>
+                <hostname>127.0.0.1</hostname>
                 <port>9234</port>
             </server>
             
             <server>
                 <id>3</id>
-                <hostname>ff::03</hostname>
+                <hostname>ohai.com</hostname>
                 <port>9234</port>
             </server>
             

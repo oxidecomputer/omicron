@@ -407,7 +407,7 @@ table! {
         ncpus -> Int8,
         memory -> Int8,
         hostname -> Text,
-        boot_on_fault -> Bool,
+        auto_restart_policy -> Nullable<crate::InstanceAutoRestartEnum>,
         time_state_updated -> Timestamptz,
         state_generation -> Int8,
         active_propolis_id -> Nullable<Uuid>,
@@ -1439,6 +1439,21 @@ table! {
         id -> Uuid,
         sled_id -> Uuid,
         total_size -> Int8,
+    }
+}
+
+table! {
+    inv_dataset (inv_collection_id, sled_id, name) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+
+        id -> Nullable<Uuid>,
+        name -> Text,
+        available -> Int8,
+        used -> Int8,
+        quota -> Nullable<Int8>,
+        reservation -> Nullable<Int8>,
+        compression -> Text,
     }
 }
 

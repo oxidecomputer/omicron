@@ -70,6 +70,7 @@ progenitor::generate_api!(
         SledRole = nexus_sled_agent_shared::inventory::SledRole,
         SourceNatConfig = omicron_common::api::internal::shared::SourceNatConfig,
         SwitchLocation = omicron_common::api::external::SwitchLocation,
+        TypedUuidForDatasetKind = omicron_uuid_kinds::DatasetUuid,
         TypedUuidForInstanceKind = omicron_uuid_kinds::InstanceUuid,
         TypedUuidForPropolisKind = omicron_uuid_kinds::PropolisUuid,
         TypedUuidForZpoolKind = omicron_uuid_kinds::ZpoolUuid,
@@ -82,22 +83,6 @@ progenitor::generate_api!(
 impl omicron_common::api::external::ClientError for types::Error {
     fn message(&self) -> String {
         self.message.clone()
-    }
-}
-
-impl From<omicron_common::api::internal::nexus::InstanceRuntimeState>
-    for types::InstanceRuntimeState
-{
-    fn from(
-        s: omicron_common::api::internal::nexus::InstanceRuntimeState,
-    ) -> Self {
-        Self {
-            propolis_id: s.propolis_id,
-            dst_propolis_id: s.dst_propolis_id,
-            migration_id: s.migration_id,
-            gen: s.gen,
-            time_updated: s.time_updated,
-        }
     }
 }
 
@@ -122,20 +107,6 @@ impl From<omicron_common::api::external::InstanceCpuCount>
 {
     fn from(s: omicron_common::api::external::InstanceCpuCount) -> Self {
         Self(s.0)
-    }
-}
-
-impl From<types::InstanceRuntimeState>
-    for omicron_common::api::internal::nexus::InstanceRuntimeState
-{
-    fn from(s: types::InstanceRuntimeState) -> Self {
-        Self {
-            propolis_id: s.propolis_id,
-            dst_propolis_id: s.dst_propolis_id,
-            migration_id: s.migration_id,
-            gen: s.gen,
-            time_updated: s.time_updated,
-        }
     }
 }
 

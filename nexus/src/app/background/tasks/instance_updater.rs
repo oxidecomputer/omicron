@@ -8,7 +8,6 @@ use crate::app::background::BackgroundTask;
 use crate::app::saga::StartSaga;
 use crate::app::sagas::instance_update;
 use crate::app::sagas::NexusSaga;
-use anyhow::Context;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use nexus_db_model::Instance;
@@ -18,11 +17,14 @@ use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::DataStore;
 use nexus_db_queries::{authn, authz};
 use nexus_types::identity::Resource;
+use nexus_types::internal_api::background::InstanceUpdaterStatus;
+use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use serde_json::json;
 use std::future::Future;
 use std::sync::Arc;
 use tokio::task::JoinSet;
+use uuid::Uuid;
 
 pub struct InstanceUpdater {
     datastore: Arc<DataStore>,
@@ -42,12 +44,12 @@ impl InstanceUpdater {
     async fn actually_activate(
         &mut self,
         opctx: &OpContext,
-        stats: &mut ActivationStats,
-    ) -> Result<(), anyhow::Error> {
+        status: &mut InstanceUpdaterStatus,
+    ) {
         async fn find_instances(
             what: &'static str,
             log: &slog::Logger,
-            last_err: &mut Result<(), anyhow::Error>,
+            status: &mut InstanceUpdaterStatus,
             query: impl Future<Output = ListResultVec<Instance>>,
         ) -> Vec<Instance> {
             slog::debug!(&log, "looking for instances with {what}...");
@@ -61,20 +63,21 @@ impl InstanceUpdater {
                     list
                 }
                 Err(error) => {
+                    const ERR_MSG: &'static str =
+                        "failed to list instances with ";
                     slog::error!(
                         &log,
-                        "failed to list instances with {what}";
-                        "error" => %error,
+                        "{ERR_MSG} {what}";
+                        "error" => &error,
                     );
-                    *last_err = Err(error).with_context(|| {
-                        format!("failed to find instances with {what}",)
-                    });
+                    status
+                        .query_errors
+                        .push(format!("{ERR_MSG} {what}: {error}"));
                     Vec::new()
                 }
             }
         }
 
-        let mut last_err = Ok(());
         let mut sagas = JoinSet::new();
 
         // NOTE(eliza): These don't, strictly speaking, need to be two separate
@@ -84,52 +87,39 @@ impl InstanceUpdater {
         let destroyed_active_vmms = find_instances(
             "destroyed active VMMs",
             &opctx.log,
-            &mut last_err,
+            status,
             self.datastore
                 .find_instances_by_active_vmm_state(opctx, VmmState::Destroyed),
         )
         .await;
-        stats.destroyed_active_vmms = destroyed_active_vmms.len();
-        self.start_sagas(
-            &opctx,
-            stats,
-            &mut last_err,
-            &mut sagas,
-            destroyed_active_vmms,
-        )
-        .await;
+        status.destroyed_active_vmms = destroyed_active_vmms.len();
+        self.start_sagas(&opctx, status, &mut sagas, destroyed_active_vmms)
+            .await;
 
         let failed_active_vmms = find_instances(
             "failed active VMMs",
             &opctx.log,
-            &mut last_err,
+            status,
             self.datastore
                 .find_instances_by_active_vmm_state(opctx, VmmState::Failed),
         )
         .await;
-        stats.failed_active_vmms = failed_active_vmms.len();
-        self.start_sagas(
-            &opctx,
-            stats,
-            &mut last_err,
-            &mut sagas,
-            failed_active_vmms,
-        )
-        .await;
+        status.failed_active_vmms = failed_active_vmms.len();
+        self.start_sagas(&opctx, status, &mut sagas, failed_active_vmms).await;
 
         let terminated_active_migrations = find_instances(
             "terminated active migrations",
             &opctx.log,
-            &mut last_err,
+            status,
             self.datastore
                 .find_instances_with_terminated_active_migrations(opctx),
         )
         .await;
-        stats.terminated_active_migrations = terminated_active_migrations.len();
+        status.terminated_active_migrations =
+            terminated_active_migrations.len();
         self.start_sagas(
             &opctx,
-            stats,
-            &mut last_err,
+            status,
             &mut sagas,
             terminated_active_migrations,
         )
@@ -139,33 +129,37 @@ impl InstanceUpdater {
         while let Some(saga_result) = sagas.join_next().await {
             match saga_result {
                 Err(err) => {
-                    debug_assert!(
-                        false,
-                        "since nexus is compiled with `panic=\"abort\"`, and \
-                         we never cancel the tasks on the `JoinSet`, a \
-                         `JoinError` should never be observed!",
+                    const MSG: &'static str = "since nexus is compiled with \
+                     `panic=\"abort\"`, and we never cancel the tasks on the \
+                     `JoinSet`, a `JoinError` should never be observed!";
+                    debug_assert!(false, "{MSG}");
+                    error!(opctx.log, "{MSG}"; "error" => ?err);
+                    status
+                        .saga_errors
+                        .push((None, format!("unexpected JoinError: {err}")));
+                }
+                Ok(Err((instance_id, err))) => {
+                    const MSG: &'static str = "update saga failed";
+                    warn!(
+                        opctx.log,
+                        "{MSG}!";
+                        "instance_id" => %instance_id,
+                        "error" => &err,
                     );
-                    stats.sagas_failed += 1;
-                    last_err = Err(err.into());
+                    status
+                        .saga_errors
+                        .push((Some(instance_id), err.to_string()));
                 }
-                Ok(Err(err)) => {
-                    warn!(opctx.log, "update saga failed!"; "error" => %err);
-                    stats.sagas_failed += 1;
-                    last_err = Err(err);
-                }
-                Ok(Ok(())) => stats.sagas_completed += 1,
+                Ok(Ok(())) => status.sagas_completed += 1,
             }
         }
-
-        last_err
     }
 
     async fn start_sagas(
         &self,
         opctx: &OpContext,
-        stats: &mut ActivationStats,
-        last_err: &mut Result<(), anyhow::Error>,
-        sagas: &mut JoinSet<Result<(), anyhow::Error>>,
+        status: &mut InstanceUpdaterStatus,
+        sagas: &mut JoinSet<Result<(), (Uuid, Error)>>,
         instances: impl IntoIterator<Item = Instance>,
     ) {
         let serialized_authn = authn::saga::Serialized::for_opctx(opctx);
@@ -183,45 +177,34 @@ impl InstanceUpdater {
                         authz_instance,
                     },
                 )
-                .with_context(|| {
-                    format!("failed to prepare instance-update saga for {instance_id}")
-                })
             }
             .await;
             match saga {
                 Ok(saga) => {
                     let start_saga = self.sagas.clone();
                     sagas.spawn(async move {
-                        start_saga.saga_start(saga).await.with_context(|| {
-                            format!("update saga for {instance_id} failed")
-                        })
+                        start_saga
+                            .saga_start(saga)
+                            .await
+                            .map_err(|e| (instance_id, e))
                     });
-                    stats.sagas_started += 1;
+                    status.sagas_started += 1;
                 }
                 Err(err) => {
+                    const ERR_MSG: &str = "failed to start update saga";
                     warn!(
                         opctx.log,
-                        "failed to start instance-update saga!";
+                        "{ERR_MSG}!";
                         "instance_id" => %instance_id,
                         "error" => %err,
                     );
-                    stats.saga_start_failures += 1;
-                    *last_err = Err(err);
+                    status
+                        .saga_errors
+                        .push((Some(instance_id), format!("{ERR_MSG}: {err}")));
                 }
             }
         }
     }
-}
-
-#[derive(Default)]
-struct ActivationStats {
-    destroyed_active_vmms: usize,
-    failed_active_vmms: usize,
-    terminated_active_migrations: usize,
-    sagas_started: usize,
-    sagas_completed: usize,
-    sagas_failed: usize,
-    saga_start_failures: usize,
 }
 
 impl BackgroundTask for InstanceUpdater {
@@ -230,64 +213,40 @@ impl BackgroundTask for InstanceUpdater {
         opctx: &'a OpContext,
     ) -> BoxFuture<'a, serde_json::Value> {
         async {
-            let mut stats = ActivationStats::default();
+            let mut status = InstanceUpdaterStatus::default();
 
-            let error = if self.disable {
+            if self.disable {
                 slog::info!(&opctx.log, "background instance updater explicitly disabled");
-                None
+                status.disabled = true;
+                return json!(status);
+            }
+
+            self.actually_activate(opctx, &mut status).await;
+            if status.errors() == 0 {
+                slog::info!(
+                    &opctx.log,
+                    "instance updater activation completed";
+                    "destroyed_active_vmms" => status.destroyed_active_vmms,
+                    "failed_active_vmms" => status.failed_active_vmms,
+                    "terminated_active_migrations" => status.terminated_active_migrations,
+                    "update_sagas_started" => status.sagas_started,
+                    "update_sagas_completed" => status.sagas_completed,
+                );
             } else {
-                match self.actually_activate(opctx, &mut stats).await {
-                    Ok(()) => {
-                        slog::info!(
-                            &opctx.log,
-                            "instance updater activation completed";
-                            "destroyed_active_vmms" => stats.destroyed_active_vmms,
-                            "failed_active_vmms" => stats.failed_active_vmms,
-                            "terminated_active_migrations" => stats.terminated_active_migrations,
-                            "update_sagas_started" => stats.sagas_started,
-                            "update_sagas_completed" => stats.sagas_completed,
-                        );
-                        debug_assert_eq!(
-                            stats.sagas_failed,
-                            0,
-                            "if the task completed successfully, then no sagas \
-                            should have failed",
-                        );
-                        debug_assert_eq!(
-                            stats.saga_start_failures,
-                            0,
-                            "if the task completed successfully, all sagas \
-                            should have started successfully"
-                        );
-                        None
-                    }
-                    Err(error) => {
-                        slog::warn!(
-                            &opctx.log,
-                            "instance updater activation failed!";
-                            "error" => %error,
-                            "destroyed_active_vmms" => stats.destroyed_active_vmms,
-                            "failed_active_vmms" => stats.failed_active_vmms,
-                            "terminated_active_migrations" => stats.terminated_active_migrations,
-                            "update_sagas_started" => stats.sagas_started,
-                            "update_sagas_completed" => stats.sagas_completed,
-                            "update_sagas_failed" => stats.sagas_failed,
-                            "update_saga_start_failures" => stats.saga_start_failures,
-                        );
-                        Some(error.to_string())
-                    }
-                }
+                slog::error!(
+                    &opctx.log,
+                    "instance updater activation failed!";
+                    "query_errors" => status.query_errors.len(),
+                    "saga_errors" => status.saga_errors.len(),
+                    "destroyed_active_vmms" => status.destroyed_active_vmms,
+                    "failed_active_vmms" => status.failed_active_vmms,
+                    "terminated_active_migrations" => status.terminated_active_migrations,
+                    "update_sagas_started" => status.sagas_started,
+                    "update_sagas_completed" => status.sagas_completed,
+                );
             };
-            json!({
-                "destroyed_active_vmms": stats.destroyed_active_vmms,
-                "failed_active_vmms": stats.failed_active_vmms,
-                "terminated_active_migrations": stats.terminated_active_migrations,
-                "sagas_started": stats.sagas_started,
-                "sagas_completed": stats.sagas_completed,
-                "sagas_failed": stats.sagas_failed,
-                "saga_start_failures": stats.saga_start_failures,
-                "error": error,
-            })
+
+            json!(status)
         }
         .boxed()
     }

@@ -18,16 +18,14 @@ use anyhow::Context;
 use dropshot::{HttpError, HttpServer};
 use futures::lock::Mutex;
 use nexus_sled_agent_shared::inventory::{
-    Inventory, InventoryDisk, InventoryZpool, OmicronZonesConfig, SledRole,
+    Inventory, InventoryDataset, InventoryDisk, InventoryZpool,
+    OmicronZonesConfig, SledRole,
 };
 use omicron_common::api::external::{
     ByteCount, DiskState, Error, Generation, ResourceType,
 };
 use omicron_common::api::internal::nexus::{
     DiskRuntimeState, MigrationRuntimeState, MigrationState, SledVmmState,
-};
-use omicron_common::api::internal::nexus::{
-    InstanceRuntimeState, VmmRuntimeState,
 };
 use omicron_common::api::internal::shared::{
     RackNetworkConfig, ResolvedVpcRoute, ResolvedVpcRouteSet,
@@ -38,7 +36,7 @@ use omicron_common::disk::{
     DatasetsConfig, DatasetsManagementResult, DiskIdentity, DiskVariant,
     DisksManagementResult, OmicronPhysicalDisksConfig,
 };
-use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid, ZpoolUuid};
+use omicron_uuid_kinds::{GenericUuid, PropolisUuid, ZpoolUuid};
 use oxnet::Ipv6Net;
 use propolis_client::{
     types::VolumeConstructionRequest, Client as PropolisClient,
@@ -49,8 +47,8 @@ use sled_agent_types::early_networking::{
     EarlyNetworkConfig, EarlyNetworkConfigBody,
 };
 use sled_agent_types::instance::{
-    InstanceExternalIpBody, InstanceHardware, InstanceMetadata,
-    VmmPutStateResponse, VmmStateRequested, VmmUnregisterResponse,
+    InstanceEnsureBody, InstanceExternalIpBody, VmmPutStateResponse,
+    VmmStateRequested, VmmUnregisterResponse,
 };
 use slog::Logger;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -208,9 +206,9 @@ impl SledAgent {
     ///
     /// Crucible regions are returned with a port number, and volume
     /// construction requests contain a single Nexus region (which points to
-    /// three crucible regions). Extract the region addresses, lookup the
-    /// region from the port (which should be unique), and pair disk id with
-    /// region ids. This map is referred to later when making snapshots.
+    /// three crucible regions). Extract the region addresses, lookup the region
+    /// from the port and pair disk id with region ids. This map is referred to
+    /// later when making snapshots.
     pub async fn map_disk_ids_to_region_ids(
         &self,
         volume_construction_request: &VolumeConstructionRequest,
@@ -234,22 +232,18 @@ impl SledAgent {
 
         let storage = self.storage.lock().await;
         for target in targets {
-            let crucible_data = storage
-                .get_dataset_for_port(target.port())
+            let region = storage
+                .get_region_for_port(target.port())
                 .await
                 .ok_or_else(|| {
                     Error::internal_error(&format!(
-                        "no dataset for port {}",
+                        "no region for port {}",
                         target.port()
                     ))
                 })?;
 
-            for region in crucible_data.list().await {
-                if region.port_number == target.port() {
-                    let region_id = Uuid::from_str(&region.id.0).unwrap();
-                    region_ids.push(region_id);
-                }
-            }
+            let region_id = Uuid::from_str(&region.id.0).unwrap();
+            region_ids.push(region_id);
         }
 
         let mut disk_id_to_region_ids = self.disk_id_to_region_ids.lock().await;
@@ -263,13 +257,17 @@ impl SledAgent {
     /// (described by `target`).
     pub async fn instance_register(
         self: &Arc<Self>,
-        instance_id: InstanceUuid,
         propolis_id: PropolisUuid,
-        hardware: InstanceHardware,
-        instance_runtime: InstanceRuntimeState,
-        vmm_runtime: VmmRuntimeState,
-        metadata: InstanceMetadata,
+        instance: InstanceEnsureBody,
     ) -> Result<SledVmmState, Error> {
+        let InstanceEnsureBody {
+            instance_id,
+            migration_id,
+            hardware,
+            vmm_runtime,
+            metadata,
+            ..
+        } = instance;
         // respond with a fake 500 level failure if asked to ensure an instance
         // with more than 16 CPUs.
         let ncpus: i64 = (&hardware.properties.ncpus).into();
@@ -365,14 +363,13 @@ impl SledAgent {
             }
         }
 
-        let migration_in = instance_runtime.migration_id.map(|migration_id| {
-            MigrationRuntimeState {
+        let migration_in =
+            migration_id.map(|migration_id| MigrationRuntimeState {
                 migration_id,
                 state: MigrationState::Pending,
                 gen: Generation::new(),
                 time_updated: chrono::Utc::now(),
-            }
-        });
+            });
 
         let instance_run_time_state = self
             .vmms
@@ -669,6 +666,8 @@ impl SledAgent {
             Error::not_found_by_id(ResourceType::Disk, &disk_id)
         })?;
 
+        info!(self.log, "disk id {} region ids are {:?}", disk_id, region_ids);
+
         let storage = self.storage.lock().await;
 
         for region_id in region_ids {
@@ -676,7 +675,10 @@ impl SledAgent {
                 storage.get_dataset_for_region(*region_id).await;
 
             if let Some(crucible_data) = crucible_data {
-                crucible_data.create_snapshot(*region_id, snapshot_id).await;
+                crucible_data
+                    .create_snapshot(*region_id, snapshot_id)
+                    .await
+                    .map_err(|e| Error::internal_error(&e.to_string()))?;
             } else {
                 return Err(Error::not_found_by_id(
                     ResourceType::Disk,
@@ -855,6 +857,30 @@ impl SledAgent {
                     })
                 })
                 .collect::<Result<Vec<_>, anyhow::Error>>()?,
+            // NOTE: We report the "configured" datasets as the "real" datasets
+            // unconditionally here. No real datasets exist, so we're free
+            // to lie here, but this information should be taken with a
+            // particularly careful grain-of-salt -- it's supposed to
+            // represent the "real" datasets the sled agent can observe.
+            datasets: storage
+                .datasets_config_list()
+                .await
+                .map(|config| {
+                    config
+                        .datasets
+                        .into_iter()
+                        .map(|(id, config)| InventoryDataset {
+                            id: Some(id),
+                            name: config.name.full_name(),
+                            available: ByteCount::from_kibibytes_u32(0),
+                            used: ByteCount::from_kibibytes_u32(0),
+                            quota: config.quota,
+                            reservation: config.reservation,
+                            compression: config.compression.to_string(),
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_else(|_| vec![]),
         })
     }
 
