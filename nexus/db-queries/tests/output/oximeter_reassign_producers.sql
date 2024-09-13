@@ -1,5 +1,6 @@
 WITH
-  available_oximeters AS (SELECT ARRAY (SELECT id FROM oximeter WHERE time_deleted IS NULL) AS ids),
+  available_oximeters
+    AS (SELECT ARRAY (SELECT id FROM oximeter WHERE time_expunged IS NULL) AS ids),
   new_assignments
     AS (
       SELECT

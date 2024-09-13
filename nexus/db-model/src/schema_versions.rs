@@ -29,7 +29,7 @@ static KNOWN_VERSIONS: Lazy<Vec<KnownVersion>> = Lazy::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
-        KnownVersion::new(95, "oximeter-add-time-deleted"),
+        KnownVersion::new(95, "oximeter-add-time-expunged"),
         KnownVersion::new(94, "put-back-creating-vmm-state"),
         KnownVersion::new(93, "dataset-kinds-zone-and-debug"),
         KnownVersion::new(92, "lldp-link-config-nullable"),

@@ -1340,18 +1340,18 @@ CREATE TABLE IF NOT EXISTS omicron.public.oximeter (
     time_modified TIMESTAMPTZ NOT NULL,
     ip INET NOT NULL,
     port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
-    time_deleted TIMESTAMPTZ
+    time_expunged TIMESTAMPTZ
 );
 
 /*
  * The query Nexus runs to choose an Oximeter instance for new metric producers
- * involves listing the non-deleted instances sorted by ID, which would require
+ * involves listing the non-expunged instances sorted by ID, which would require
  * a full table scan without this index.
  */
-CREATE UNIQUE INDEX IF NOT EXISTS list_non_deleted_oximeter ON omicron.public.oximeter (
+CREATE UNIQUE INDEX IF NOT EXISTS list_non_expunged_oximeter ON omicron.public.oximeter (
     id
 ) WHERE
-    time_deleted IS NULL;
+    time_expunged IS NULL;
 
 /*
  * The kind of metric producer each record corresponds to.

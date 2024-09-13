@@ -50,7 +50,7 @@ impl DataStore {
     ) -> Result<OximeterInfo, Error> {
         use db::schema::oximeter::dsl;
         dsl::oximeter
-            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::time_expunged.is_null())
             .find(*id)
             .first_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -72,11 +72,12 @@ impl DataStore {
         // constraint violation to the caller.
         //
         // TODO-completeness - We should return an error if `info.id()` maps to
-        // an existing row that has been deleted. We don't expect that to happen
-        // in practice (it would mean an expunged Oximeter zone has come back to
-        // life and reregistered itself). If it does happen, as written we'll
-        // update time_modified/ip/port but leave time_deleted set to whatever
-        // it was (which will leave the Oximeter in the "deleted" state).
+        // an existing row that has been expunged. We don't expect that to
+        // happen in practice (it would mean an expunged Oximeter zone has come
+        // back to life and reregistered itself). If it does happen, as written
+        // we'll update time_modified/ip/port but leave time_expunged set to
+        // whatever it was (which will leave the Oximeter in the "expunged"
+        // state).
         diesel::insert_into(dsl::oximeter)
             .values(*info)
             .on_conflict(dsl::id)
@@ -100,11 +101,11 @@ impl DataStore {
         Ok(())
     }
 
-    /// Mark an Oximeter instance as deleted
+    /// Mark an Oximeter instance as expunged
     ///
     /// This method is idempotent and has no effect if called with the ID for an
-    /// already-deleted Oximeter.
-    pub async fn oximeter_delete(
+    /// already-expunged Oximeter.
+    pub async fn oximeter_expunge(
         &self,
         opctx: &OpContext,
         id: Uuid,
@@ -114,9 +115,9 @@ impl DataStore {
         let now = Utc::now();
 
         diesel::update(dsl::oximeter)
-            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::time_expunged.is_null())
             .filter(dsl::id.eq(id))
-            .set(dsl::time_deleted.eq(now))
+            .set(dsl::time_expunged.eq(now))
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
@@ -132,7 +133,7 @@ impl DataStore {
     ) -> ListResultVec<OximeterInfo> {
         use db::schema::oximeter::dsl;
         paginated(dsl::oximeter, dsl::id, page_params)
-            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::time_expunged.is_null())
             .load_async::<OximeterInfo>(
                 &*self.pool_connection_authorized(opctx).await?,
             )
@@ -145,7 +146,7 @@ impl DataStore {
     /// The new Oximeter instance for each producer will be randomly selected
     /// from all available Oximeters. On success, returns the number of metric
     /// producers reassigned. Fails if there are no available Oximeter instances
-    /// (e.g., all Oximeter instances have been deleted).
+    /// (e.g., all Oximeter instances have been expunged).
     pub async fn oximeter_reassign_all_producers(
         &self,
         opctx: &OpContext,
@@ -171,7 +172,7 @@ impl DataStore {
         producer: &ProducerEndpoint,
     ) -> Result<(), Error> {
         // Our caller has already chosen an Oximeter instance for this producer,
-        // but we don't want to allow it to use a nonexistent or deleted
+        // but we don't want to allow it to use a nonexistent or expunged
         // Oximeter. This query turns into a `SELECT all_the_fields_of_producer
         // WHERE producer.oximeter_id is legal` in a diesel-compatible way. I'm
         // not aware of a helper method to generate "all the fields of
@@ -202,7 +203,7 @@ impl DataStore {
                 .filter(
                     dsl::id
                         .eq(producer.oximeter_id)
-                        .and(dsl::time_deleted.is_null()),
+                        .and(dsl::time_expunged.is_null()),
                 )
         };
 
@@ -234,7 +235,7 @@ impl DataStore {
 
         // We expect `n` to basically always be 1 (1 row was inserted or
         // updated). It can be 0 if `producer.oximeter_id` doesn't exist or has
-        // been deleted. It can never be 2 or greater because
+        // been expunged. It can never be 2 or greater because
         // `producer_subquery` filters on finding an exact row for its Oximeter
         // instance's ID.
         match n {
@@ -399,9 +400,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_oximeter_delete() {
+    async fn test_oximeter_expunge() {
         // Setup
-        let logctx = dev::test_setup_log("test_oximeter_delete");
+        let logctx = dev::test_setup_log("test_oximeter_expunge");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) =
             datastore_test(&logctx, &db, Uuid::new_v4()).await;
@@ -424,7 +425,7 @@ mod tests {
                 .expect("inserted collector");
         }
 
-        // Ensure all our collectors exist and aren't deleted.
+        // Ensure all our collectors exist and aren't expunged.
         let mut all_collectors = datastore
             .oximeter_list(&opctx, &DataPageParams::max_page())
             .await
@@ -433,20 +434,20 @@ mod tests {
         assert_eq!(all_collectors.len(), collector_ids.len());
         for (info, &expected_id) in all_collectors.iter().zip(&collector_ids) {
             assert_eq!(info.id, expected_id);
-            assert!(info.time_deleted.is_none());
+            assert!(info.time_expunged.is_none());
         }
 
         // Delete the first two of them.
         datastore
-            .oximeter_delete(&opctx, collector_ids[0])
+            .oximeter_expunge(&opctx, collector_ids[0])
             .await
-            .expect("deleted collector");
+            .expect("expunged collector");
         datastore
-            .oximeter_delete(&opctx, collector_ids[1])
+            .oximeter_expunge(&opctx, collector_ids[1])
             .await
-            .expect("deleted collector");
+            .expect("expunged collector");
 
-        // Ensure those two were deleted.
+        // Ensure those two were expunged.
         let mut all_collectors = datastore
             .oximeter_list(&opctx, &DataPageParams::max_page())
             .await
@@ -457,13 +458,13 @@ mod tests {
             all_collectors.iter().zip(&collector_ids[2..])
         {
             assert_eq!(info.id, expected_id);
-            assert!(info.time_deleted.is_none());
+            assert!(info.time_expunged.is_none());
         }
 
-        // Deletion is idempotent. To test, we'll read the deleted rows
-        // directly, delete them again, and confirm the row contents haven't
+        // Deletion is idempotent. To test, we'll read the expunged rows
+        // directly, expunge them again, and confirm the row contents haven't
         // changed.
-        let find_oximeter_ignoring_deleted = |id| {
+        let find_oximeter_ignoring_expunged = |id| {
             let datastore = &datastore;
             let opctx = &opctx;
             async move {
@@ -480,24 +481,28 @@ mod tests {
                 info
             }
         };
-        let deleted0a = find_oximeter_ignoring_deleted(collector_ids[0]).await;
-        let deleted1a = find_oximeter_ignoring_deleted(collector_ids[1]).await;
-        assert!(deleted0a.time_deleted.is_some());
-        assert!(deleted1a.time_deleted.is_some());
+        let expunged0a =
+            find_oximeter_ignoring_expunged(collector_ids[0]).await;
+        let expunged1a =
+            find_oximeter_ignoring_expunged(collector_ids[1]).await;
+        assert!(expunged0a.time_expunged.is_some());
+        assert!(expunged1a.time_expunged.is_some());
 
         datastore
-            .oximeter_delete(&opctx, collector_ids[0])
+            .oximeter_expunge(&opctx, collector_ids[0])
             .await
-            .expect("deleted collector");
+            .expect("expunged collector");
         datastore
-            .oximeter_delete(&opctx, collector_ids[1])
+            .oximeter_expunge(&opctx, collector_ids[1])
             .await
-            .expect("deleted collector");
+            .expect("expunged collector");
 
-        let deleted0b = find_oximeter_ignoring_deleted(collector_ids[0]).await;
-        let deleted1b = find_oximeter_ignoring_deleted(collector_ids[1]).await;
-        assert_eq!(deleted0a, deleted0b);
-        assert_eq!(deleted1a, deleted1b);
+        let expunged0b =
+            find_oximeter_ignoring_expunged(collector_ids[0]).await;
+        let expunged1b =
+            find_oximeter_ignoring_expunged(collector_ids[1]).await;
+        assert_eq!(expunged0a, expunged0b);
+        assert_eq!(expunged1a, expunged1b);
 
         // Cleanup
         db.cleanup().await.unwrap();
@@ -505,10 +510,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_producer_endpoint_create_rejects_deleted_oximeters() {
+    async fn test_producer_endpoint_create_rejects_expunged_oximeters() {
         // Setup
         let logctx = dev::test_setup_log(
-            "test_producer_endpoint_create_rejects_deleted_oximeters",
+            "test_producer_endpoint_create_rejects_expunged_oximeters",
         );
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) =
@@ -546,12 +551,12 @@ mod tests {
 
         // Delete the first collector.
         datastore
-            .oximeter_delete(&opctx, collector_ids[0])
+            .oximeter_expunge(&opctx, collector_ids[0])
             .await
-            .expect("deleted collector");
+            .expect("expunged collector");
 
         // Attempting to insert a producer assigned to the first collector
-        // should fail, now that it's deleted.
+        // should fail, now that it's expunged.
         let err = {
             let producer = ProducerEndpoint::new(
                 &nexus::ProducerEndpoint {
@@ -646,9 +651,9 @@ mod tests {
 
         // Delete one collector.
         datastore
-            .oximeter_delete(&opctx, collector_ids[0])
+            .oximeter_expunge(&opctx, collector_ids[0])
             .await
-            .expect("deleted Oximeter");
+            .expect("expunged Oximeter");
 
         // Reassign producers that belonged to that collector.
         let num_reassigned = datastore
@@ -737,13 +742,13 @@ mod tests {
         // Delete all four collectors.
         for &collector_id in &collector_ids {
             datastore
-                .oximeter_delete(&opctx, collector_id)
+                .oximeter_expunge(&opctx, collector_id)
                 .await
-                .expect("deleted Oximeter");
+                .expect("expunged Oximeter");
         }
 
         // Try to reassign producers that belonged to each collector; this
-        // should fail, as all collectors have been deleted.
+        // should fail, as all collectors have been expunged.
         for &collector_id in &collector_ids {
             let num_reassigned = datastore
                 .oximeter_reassign_all_producers(&opctx, collector_id)

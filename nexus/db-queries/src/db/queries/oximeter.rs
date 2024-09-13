@@ -10,22 +10,22 @@ use uuid::Uuid;
 
 /// For a given Oximeter instance (which is presumably no longer running),
 /// reassign any collectors assigned to it to a different Oximeter. Each
-/// assignment is randomly chosen from among the non-deleted Oximeter instances
+/// assignment is randomly chosen from among the non-expunged Oximeter instances
 /// recorded in the `oximeter` table.
 pub fn reassign_producers_query(oximeter_id: Uuid) -> TypedSqlQuery<()> {
     let builder = QueryBuilder::new();
 
-    // Find all non-deleted Oximeter instances.
+    // Find all non-expunged Oximeter instances.
     let builder = builder.sql(
         "\
         WITH available_oximeters AS ( \
           SELECT ARRAY( \
-            SELECT id FROM oximeter WHERE time_deleted IS NULL
+            SELECT id FROM oximeter WHERE time_expunged IS NULL
           ) AS ids \
         ), ",
     );
 
-    // Create a mapping of producer ID <-> new, random, non-deleted Oximeter ID
+    // Create a mapping of producer ID <-> new, random, non-expunged Oximeter ID
     // for every producer assigned to `oximeter_id`. If the `ids` array from the
     // previous expression is empty, every `new_id` column in this expression
     // will be NULL. We'll catch that in the update below.
@@ -46,8 +46,9 @@ pub fn reassign_producers_query(oximeter_id: Uuid) -> TypedSqlQuery<()> {
         .bind::<sql_types::Uuid, _>(oximeter_id);
 
     // Actually perform the update. If the `new_id` column from the previous
-    // step is `NULL` (because there aren't any non-deleted Oximeter instances),
-    // this will fail the `NOT NULL` constraint on the oximeter_id column.
+    // step is `NULL` (because there aren't any non-expunged Oximeter
+    // instances), this will fail the `NOT NULL` constraint on the oximeter_id
+    // column.
     let builder = builder
         .sql(
             "\
