@@ -61,7 +61,8 @@ impl RegionSnapshotReplacementFindAffected {
         let saga_dag = SagaRegionSnapshotReplacementStep::prepare(&params)?;
         // We only care that the saga was started, and don't wish to wait for it
         // to complete, so use `StartSaga::saga_start`, rather than `saga_run`.
-        self.sagas.saga_start(saga_dag).await
+        self.sagas.saga_start(saga_dag).await?;
+        Ok(())
     }
 
     async fn send_garbage_collect_request(

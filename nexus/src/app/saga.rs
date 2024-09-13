@@ -90,46 +90,61 @@ pub(crate) fn create_saga_dag<N: NexusSaga>(
 pub(crate) trait StartSaga: Send + Sync {
     /// Create a new saga (of type `N` with parameters `params`), start it
     /// running, but do not wait for it to finish.
-    fn saga_start(&self, dag: SagaDag) -> BoxFuture<'_, Result<(), Error>>;
+    ///
+    /// This method returns the ID of the running saga.
+    fn saga_start(&self, dag: SagaDag) -> BoxFuture<'_, Result<SagaId, Error>>;
 
     /// Create a new saga (of type `N` with parameters `params`), start it
-    /// running, and wait for it to finish.
-    fn saga_run(&self, dag: SagaDag) -> BoxFuture<'_, Result<(), Error>>;
+    /// running, and return a future that can be used to wait for it to finish
+    /// (along with the saga's ID).
+    ///
+    /// Callers who do not need to wait for the saga's completion should use
+    /// `StartSaga::saga_start`, instead, as it avoids allocating the second
+    /// `BoxFuture` for the completion future.
+    fn saga_run(
+        &self,
+        dag: SagaDag,
+    ) -> BoxFuture<'_, Result<(SagaId, SagaCompletionFuture), Error>>;
 }
 
+pub type SagaCompletionFuture = BoxFuture<'static, Result<(), Error>>;
+
 impl StartSaga for SagaExecutor {
-    fn saga_start(&self, dag: SagaDag) -> BoxFuture<'_, Result<(), Error>> {
+    fn saga_start(&self, dag: SagaDag) -> BoxFuture<'_, Result<SagaId, Error>> {
         async move {
             let runnable_saga = self.saga_prepare(dag).await?;
             // start() returns a future that can be used to wait for the saga to
             // complete.  We don't need that here.  (Cancelling this has no
             // effect on the running saga.)
-            let _ = runnable_saga.start().await?;
+            let running_saga = runnable_saga.start().await?;
 
-            Ok(())
+            Ok(running_saga.id)
         }
         .boxed()
     }
 
-    fn saga_run(&self, dag: SagaDag) -> BoxFuture<'_, Result<(), Error>> {
+    fn saga_run(
+        &self,
+        dag: SagaDag,
+    ) -> BoxFuture<'_, Result<(SagaId, SagaCompletionFuture), Error>> {
         async move {
-            // Prepare the saga
-            self.saga_prepare(dag)
-                .await?
-                // Start the saga, returning a future that can be used to wait for
-                // its completion
-                .start()
-                .await?
-                // Wait for the saga to complete.
-                .wait_until_stopped()
-                .await
-                // Eat the saga's outputs, saga log, etc., and just return
-                // whether it succeeded or failed. This is necessary because
-                // some tests rely on a `NoopStartSaga` implementation that
-                // doesn't actually run sagas and therefore cannot produce a
-                // real saga log or outputs.
-                .into_omicron_result()
-                .map(|_| ())
+            let runnable_saga = self.saga_prepare(dag).await?;
+            let running_saga = runnable_saga.start().await?;
+            let id = running_saga.id;
+            let completed = async move {
+                running_saga
+                    .wait_until_stopped()
+                    .await
+                    // Eat the saga's outputs, saga log, etc., and just return
+                    // whether it succeeded or failed. This is necessary because
+                    // some tests rely on a `NoopStartSaga` implementation that
+                    // doesn't actually run sagas and therefore cannot produce a
+                    // real saga log or outputs.
+                    .into_omicron_result()
+                    .map(|_| ())
+            }
+            .boxed();
+            Ok((id, completed))
         }
         .boxed()
     }

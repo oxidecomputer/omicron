@@ -249,13 +249,28 @@ impl InstanceWatcher {
                         _ => Err(Incomplete::UpdateFailed),
                     };
                 }
-                Ok(Some((_, saga))) => {
-                    check.update_saga_queued = true;
-                    if let Err(e) = sagas.saga_run(saga).await {
-                        warn!(opctx.log, "update saga failed"; "error" => ?e);
+                Ok(Some((_, saga))) => match sagas.saga_run(saga).await {
+                    Ok((saga_id, completed)) => {
+                        check.update_saga_queued = true;
+                        if let Err(e) = completed.await {
+                            warn!(
+                                opctx.log,
+                                "update saga failed";
+                                "saga_id" => %saga_id,
+                                "error" => e,
+                            );
+                            check.result = Err(Incomplete::UpdateFailed);
+                        }
+                    }
+                    Err(e) => {
+                        warn!(
+                            opctx.log,
+                            "update saga could not be started";
+                            "error" => e,
+                        );
                         check.result = Err(Incomplete::UpdateFailed);
                     }
-                }
+                },
                 Ok(None) => {}
             };
 
