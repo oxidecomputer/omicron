@@ -15142,6 +15142,12 @@
             "type": "string",
             "format": "date-time"
           },
+          "time_last_auto_restarted": {
+            "nullable": true,
+            "description": "The timestamp of the most recent time this instance was automatically restarted by the control plane.\n\nIf this is not present, then this instance has not been automatically restarted.",
+            "type": "string",
+            "format": "date-time"
+          },
           "time_modified": {
             "description": "timestamp when this resource was last modified",
             "type": "string",
@@ -15177,7 +15183,7 @@
             ]
           },
           {
-            "description": "The instance should be automatically restarted by the control plane if the sled that it's running on reboots or fails, but it should not be restarted automatically if the individual instance fails. This policy will only automatically restart an instance if the control plane is able to definitively determine that the instance failed due to a sled reboot or fault.\n\nThis is the default policy for instances that don't specify an auto-restart policy.",
+            "description": "The instance should be automatically restarted by the control plane if the sled that it's running on reboots or fails, but it should not be restarted automatically if the individual instance fails. This policy will only automatically restart an instance if the control plane is able to definitively determine that the instance failed due to a sled reboot or fault.",
             "type": "string",
             "enum": [
               "sled_failures_only"

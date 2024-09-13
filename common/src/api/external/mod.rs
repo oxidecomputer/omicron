@@ -1158,6 +1158,12 @@ impl From<&InstanceCpuCount> for i64 {
 pub struct InstanceRuntimeState {
     pub run_state: InstanceState,
     pub time_run_state_updated: DateTime<Utc>,
+    /// The timestamp of the most recent time this instance was automatically
+    /// restarted by the control plane.
+    ///
+    /// If this is not present, then this instance has not been automatically
+    /// restarted.
+    pub time_last_auto_restarted: Option<DateTime<Utc>>,
 }
 
 /// View of an Instance

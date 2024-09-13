@@ -211,6 +211,10 @@ impl From<InstanceAndActiveVmm> for external::Instance {
             runtime: external::InstanceRuntimeState {
                 run_state: value.effective_state(),
                 time_run_state_updated,
+                time_last_auto_restarted: value
+                    .instance
+                    .runtime_state
+                    .time_last_auto_restarted,
             },
         }
     }
