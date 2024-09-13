@@ -941,7 +941,10 @@ mod tests {
             .expect("failed to request statistics from task");
         let stats = rx.await.expect("failed to receive statistics from task");
 
-        mock_ok.assert_calls(stats.collections.datum.value() as usize);
+        let count = stats.collections.datum.value() as usize;
+
+        assert!(count != 0);
+        mock_ok.assert_calls(count);
         assert!(stats.failed_collections.is_empty());
         logctx.cleanup_successful();
     }
@@ -1077,18 +1080,18 @@ mod tests {
             .await
             .expect("failed to request statistics from task");
         let stats = rx.await.expect("failed to receive statistics from task");
+        let count = stats
+            .failed_collections
+            .get(&FailureReason::Other(
+                reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            ))
+            .unwrap()
+            .datum
+            .value() as usize;
 
         assert_eq!(stats.collections.datum.value(), 0);
-        mock_fail.assert_calls(
-            stats
-                .failed_collections
-                .get(&FailureReason::Other(
-                    reqwest::StatusCode::INTERNAL_SERVER_ERROR,
-                ))
-                .unwrap()
-                .datum
-                .value() as usize,
-        );
+        assert!(count != 0);
+        mock_fail.assert_calls(count);
         assert_eq!(stats.failed_collections.len(), 1);
         logctx.cleanup_successful();
     }
