@@ -849,21 +849,11 @@ mod tests {
     use super::OximeterAgent;
     use super::ProducerEndpoint;
     use crate::self_stats::FailureReason;
-    use hyper::service::make_service_fn;
-    use hyper::service::service_fn;
-    use hyper::Body;
-    use hyper::Request;
-    use hyper::Response;
-    use hyper::Server;
-    use hyper::StatusCode;
     use omicron_common::api::internal::nexus::ProducerKind;
     use omicron_test_utils::dev::test_setup_log;
-    use std::convert::Infallible;
     use std::net::Ipv6Addr;
     use std::net::SocketAddr;
     use std::net::SocketAddrV6;
-    use std::sync::atomic::AtomicU64;
-    use std::sync::atomic::Ordering;
     use std::time::Duration;
     use tokio::sync::oneshot;
     use tokio::time::Instant;
@@ -888,12 +878,6 @@ mod tests {
             + COLLECTION_INTERVAL.as_millis() as u64 / 2,
     );
 
-    // The number of actual successful test collections.
-    static N_SUCCESSFUL_COLLECTIONS: AtomicU64 = AtomicU64::new(0);
-
-    // The number of actual failed test collections.
-    static N_FAILED_COLLECTIONS: AtomicU64 = AtomicU64::new(0);
-
     // Test that we count successful collections from a target correctly.
     #[tokio::test]
     async fn test_self_stat_collection_count() {
@@ -911,25 +895,18 @@ mod tests {
         .await
         .unwrap();
 
-        // And a dummy server that will always report empty statistics. There
-        // will be no actual data here, but the sample counter will increment.
-        let addr =
-            SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0));
-        let make_svc = make_service_fn(|_conn| async {
-            Ok::<_, Infallible>(service_fn(|_: Request<Body>| async {
-                N_SUCCESSFUL_COLLECTIONS.fetch_add(1, Ordering::SeqCst);
-                Ok::<_, Infallible>(Response::new(Body::from("[]")))
-            }))
+        // Spawn the mock server that always reports empty statistics.
+        let server = httpmock::MockServer::start();
+        let mock_ok = server.mock(|when, then| {
+            when.any_request();
+            then.status(reqwest::StatusCode::OK).body("[]");
         });
-        let server = Server::bind(&addr).serve(make_svc);
-        let address = server.local_addr();
-        let _task = tokio::task::spawn(server);
 
         // Register the dummy producer.
         let endpoint = ProducerEndpoint {
             id: Uuid::new_v4(),
             kind: ProducerKind::Service,
-            address,
+            address: *server.address(),
             interval: COLLECTION_INTERVAL,
         };
         collector
@@ -963,10 +940,8 @@ mod tests {
             .await
             .expect("failed to request statistics from task");
         let stats = rx.await.expect("failed to receive statistics from task");
-        assert_eq!(
-            stats.collections.datum.value(),
-            N_SUCCESSFUL_COLLECTIONS.load(Ordering::SeqCst)
-        );
+
+        mock_ok.assert_calls(stats.collections.datum.value() as usize);
         assert!(stats.failed_collections.is_empty());
         logctx.cleanup_successful();
     }
@@ -1057,26 +1032,18 @@ mod tests {
         .await
         .unwrap();
 
-        // And a dummy server that will always fail with a 500.
-        let addr =
-            SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0));
-        let make_svc = make_service_fn(|_conn| async {
-            Ok::<_, Infallible>(service_fn(|_: Request<Body>| async {
-                N_FAILED_COLLECTIONS.fetch_add(1, Ordering::SeqCst);
-                let mut res = Response::new(Body::from("im ded"));
-                *res.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
-                Ok::<_, Infallible>(res)
-            }))
+        // Spawn the mock server that always responds with a server error
+        let server = httpmock::MockServer::start();
+        let mock_fail = server.mock(|when, then| {
+            when.any_request();
+            then.status(500).body("im ded");
         });
-        let server = Server::bind(&addr).serve(make_svc);
-        let address = server.local_addr();
-        let _task = tokio::task::spawn(server);
 
         // Register the rather flaky producer.
         let endpoint = ProducerEndpoint {
             id: Uuid::new_v4(),
             kind: ProducerKind::Service,
-            address,
+            address: *server.address(),
             interval: COLLECTION_INTERVAL,
         };
         collector
@@ -1084,13 +1051,11 @@ mod tests {
             .await
             .expect("failed to register flaky producer");
 
-        // Step time until there has been exactly `N_COLLECTIONS` collections.
+        // Step time for a few collections.
         //
-        // NOTE: This is technically still a bit racy, in that the server task
-        // may have made a different number of attempts than we expect. In
-        // practice, we've not seen this one fail, so basing the number of
-        // counts on time seems reasonable, especially since we don't have other
-        // low-cost options for verifying the behavior.
+        // Due to scheduling variations, we don't verify the number of
+        // collections we expect based on time, but we instead check that every
+        // collection that _has_ occurred bumps the counter.
         tokio::time::pause();
         let now = Instant::now();
         while now.elapsed() < TEST_WAIT_PERIOD {
@@ -1112,15 +1077,17 @@ mod tests {
             .await
             .expect("failed to request statistics from task");
         let stats = rx.await.expect("failed to receive statistics from task");
+
         assert_eq!(stats.collections.datum.value(), 0);
-        assert_eq!(
+        mock_fail.assert_calls(
             stats
                 .failed_collections
-                .get(&FailureReason::Other(StatusCode::INTERNAL_SERVER_ERROR))
+                .get(&FailureReason::Other(
+                    reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+                ))
                 .unwrap()
                 .datum
-                .value(),
-            N_FAILED_COLLECTIONS.load(Ordering::SeqCst),
+                .value() as usize,
         );
         assert_eq!(stats.failed_collections.len(), 1);
         logctx.cleanup_successful();
