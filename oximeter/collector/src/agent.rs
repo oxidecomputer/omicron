@@ -196,6 +196,16 @@ async fn collection_task(
                     }
                     #[cfg(test)]
                     Some(CollectionMessage::Statistics { reply_tx }) => {
+                        // Time should be paused when using this retrieval
+                        // mechanism. We advance time to cause a panic if this
+                        // message were to be sent with time *not* paused.
+                        tokio::time::advance(Duration::from_nanos(1)).await;
+                        // The collection timer *may* be ready to go in which
+                        // case we would do a collection right after
+                        // processesing this message, thus changing the actual
+                        // data. Instead we reset the timer to prevent
+                        // additional collections (i.e. since time is paused).
+                        collection_timer.reset();
                         debug!(
                             log,
                             "received request for current task statistics"
