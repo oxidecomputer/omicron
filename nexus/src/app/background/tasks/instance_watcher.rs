@@ -251,7 +251,7 @@ impl InstanceWatcher {
                 }
                 Ok(Some((_, saga))) => {
                     check.update_saga_queued = true;
-                    if let Err(e) = sagas.saga_start(saga).await {
+                    if let Err(e) = sagas.saga_run(saga).await {
                         warn!(opctx.log, "update saga failed"; "error" => ?e);
                         check.result = Err(Incomplete::UpdateFailed);
                     }

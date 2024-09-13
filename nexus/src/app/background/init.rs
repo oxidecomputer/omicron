@@ -912,6 +912,7 @@ fn init_dns(
 #[cfg(test)]
 pub mod test {
     use crate::app::saga::StartSaga;
+    use crate::app::saga::StartSagaCompletionFuture;
     use dropshot::HandlerTaskMode;
     use futures::FutureExt;
     use nexus_db_model::DnsGroup;
@@ -952,6 +953,18 @@ pub mod test {
         > {
             let _ = self.count.fetch_add(1, Ordering::SeqCst);
             async { Ok(()) }.boxed()
+        }
+
+        fn saga_run(
+            &self,
+            dag: steno::SagaDag,
+        ) -> futures::prelude::future::BoxFuture<
+            '_,
+            Result<(), omicron_common::api::external::Error>,
+        > {
+            // Because we don't actually run sagas, this is equivalent to
+            // `saga_start`.
+            self.saga_start(dag)
         }
     }
 

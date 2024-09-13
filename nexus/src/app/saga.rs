@@ -91,6 +91,10 @@ pub(crate) trait StartSaga: Send + Sync {
     /// Create a new saga (of type `N` with parameters `params`), start it
     /// running, but do not wait for it to finish.
     fn saga_start(&self, dag: SagaDag) -> BoxFuture<'_, Result<(), Error>>;
+
+    /// Create a new saga (of type `N` with parameters `params`), start it
+    /// running, and wait for it to finish.
+    fn saga_run(&self, dag: SagaDag) -> BoxFuture<'_, Result<(), Error>>;
 }
 
 impl StartSaga for SagaExecutor {
@@ -101,7 +105,31 @@ impl StartSaga for SagaExecutor {
             // complete.  We don't need that here.  (Cancelling this has no
             // effect on the running saga.)
             let _ = runnable_saga.start().await?;
+
             Ok(())
+        }
+        .boxed()
+    }
+
+    fn saga_run(&self, dag: SagaDag) -> BoxFuture<'_, Result<(), Error>> {
+        async move {
+            // Prepare the saga
+            self.saga_prepare(dag)
+                .await?
+                // Start the saga, returning a future that can be used to wait for
+                // its completion
+                .start()
+                .await?
+                // Wait for the saga to complete.
+                .wait_until_stopped()
+                .await
+                // Eat the saga's outputs, saga log, etc., and just return
+                // whether it succeeded or failed. This is necessary because
+                // some tests rely on a `NoopStartSaga` implementation that
+                // doesn't actually run sagas and therefore cannot produce a
+                // real saga log or outputs.
+                .into_omicron_result()
+                .map(|_| ())
         }
         .boxed()
     }

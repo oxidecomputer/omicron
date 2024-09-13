@@ -59,6 +59,8 @@ impl RegionSnapshotReplacementFindAffected {
         };
 
         let saga_dag = SagaRegionSnapshotReplacementStep::prepare(&params)?;
+        // We only care that the saga was started, and don't wish to wait for it
+        // to complete, so use `StartSaga::saga_start`, rather than `saga_run`.
         self.sagas.saga_start(saga_dag).await
     }
 
@@ -89,7 +91,12 @@ impl RegionSnapshotReplacementFindAffected {
 
         let saga_dag =
             SagaRegionSnapshotReplacementStepGarbageCollect::prepare(&params)?;
-        self.sagas.saga_start(saga_dag).await
+
+        // We only care that the saga was started, and don't wish to wait for it
+        // to complete, so throwing out the future returned by `saga_start` is
+        // fine. Dropping it will *not* cancel the saga itself.
+        self.sagas.saga_start(saga_dag).await?;
+        Ok(())
     }
 
     async fn clean_up_region_snapshot_replacement_step_volumes(

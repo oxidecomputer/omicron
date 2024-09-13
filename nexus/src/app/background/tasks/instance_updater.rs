@@ -184,7 +184,8 @@ impl InstanceUpdater {
                     let start_saga = self.sagas.clone();
                     sagas.spawn(async move {
                         start_saga
-                            .saga_start(saga)
+                            // Start the saga and wait for it to complete
+                            .saga_run(saga)
                             .await
                             .map_err(|e| (instance_id, e))
                     });
