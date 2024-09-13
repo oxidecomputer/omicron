@@ -18,11 +18,15 @@ request_body_max_bytes = 536870912
 # as our contact to the ignition controller)?
 local_ignition_controller_interface = "fake-switch0"
 
-# when sending UDP RPC packets to an SP, how many total attempts do we make
-# before giving up?
-rpc_max_attempts = 5
+# When sending UDP RPC packets to an SP (other than to reset it), how many total
+# attempts do we make before giving up?
+rpc_max_attempts_general = 5
 
-# sleep time between UDP RPC resends (up to `rpc_max_attempts`)
+# When sending UDP RPC packets to an SP (to reset it), how many total attempts
+# do we make before giving up?
+rpc_max_attempts_reset = 30
+
+# sleep time between UDP RPC resends (up to `rpc_max_attempts_*`)
 rpc_per_attempt_timeout_millis = 2000
 
 [switch.location]
