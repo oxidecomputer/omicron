@@ -40,8 +40,7 @@ nexus-client.workspace = true
 
 [dev-dependencies]
 expectorate.workspace = true
-hyper.workspace = true
-hyper-util.workspace = true
+httpmock.workspace = true
 omicron-test-utils.workspace = true
 openapi-lint.workspace = true
 openapiv3.workspace = true

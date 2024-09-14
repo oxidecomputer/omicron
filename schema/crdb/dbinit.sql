@@ -644,9 +644,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.region_snapshot (
     PRIMARY KEY (dataset_id, region_id, snapshot_id)
 );
 
-/* Index for use during join with region table */
+/* Indexes for use during join with region table */
 CREATE INDEX IF NOT EXISTS lookup_region_by_dataset on omicron.public.region_snapshot (
     dataset_id, region_id
+);
+
+CREATE INDEX IF NOT EXISTS lookup_region_snapshot_by_region_id on omicron.public.region_snapshot (
+    region_id
 );
 
 /*
@@ -4284,7 +4288,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '96.0.0', NULL)
+    (TRUE, NOW(), NOW(), '97.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
