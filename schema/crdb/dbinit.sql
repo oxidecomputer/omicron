@@ -1035,7 +1035,7 @@ CREATE TYPE IF NOT EXISTS omicron.public.instance_auto_restart_v2 AS ENUM (
      * if it fails, but reserves the right to choose not to restart it
      * immediately.
      */
-     'best_effort',
+     'best_effort'
 );
 
 
