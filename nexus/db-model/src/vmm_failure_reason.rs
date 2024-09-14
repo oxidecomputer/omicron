@@ -68,7 +68,7 @@ impl From<VmmFailureReason> for sled_agent_client::types::VmmFailureReason {
     }
 }
 
-impl diesel::query_builder::QueryId for VmmFailureReason {
+impl diesel::query_builder::QueryId for VmmFailureReasonEnum {
     type QueryId = ();
     const HAS_STATIC_QUERY_ID: bool = false;
 }
