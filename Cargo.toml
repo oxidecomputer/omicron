@@ -383,6 +383,7 @@ hickory-server = "0.24.1"
 highway = "1.2.0"
 hkdf = "0.12.4"
 http = "0.2.12"
+httpmock = "0.8.0-alpha.1"
 httptest = "0.15.5"
 hubtools = { git = "https://github.com/oxidecomputer/hubtools.git", branch = "main" }
 humantime = "2.1.0"
