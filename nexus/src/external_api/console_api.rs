@@ -24,13 +24,14 @@
 use crate::context::ApiContext;
 use anyhow::Context;
 use camino::{Utf8Path, Utf8PathBuf};
+use dropshot::Body;
 use dropshot::{
     http_response_found, http_response_see_other, HttpError, HttpResponseFound,
     HttpResponseHeaders, HttpResponseSeeOther, HttpResponseUpdatedNoContent,
     Path, Query, RequestContext,
 };
+use futures::TryStreamExt;
 use http::{header, HeaderName, HeaderValue, Response, StatusCode};
-use dropshot::Body;
 use nexus_db_model::AuthenticationMode;
 use nexus_db_queries::authn::silos::IdentityProviderType;
 use nexus_db_queries::context::OpContext;
@@ -750,7 +751,10 @@ async fn serve_static(
     resp = resp.header(http::header::CONTENT_LENGTH, metadata.len());
 
     let stream = FramedRead::new(file, BytesCodec::new());
-    let body = Body::wrap_stream(stream);
+    let body = http_body_util::StreamBody::new(
+        stream.map_ok(|b| hyper::body::Frame::data(b.freeze())),
+    );
+    let body = Body::wrap(body);
     Ok(resp.body(body)?)
 }
 

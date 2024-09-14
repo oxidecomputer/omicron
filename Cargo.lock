@@ -1772,14 +1772,14 @@ dependencies = [
 [[package]]
 name = "crucible-agent-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?branch=hyper-v1#1167ae67674dd8b7263fbf5c95e2081c4ed2475b"
+source = "git+https://github.com/oxidecomputer/crucible?branch=hyper-v1#c6e6780c3af9ca7989c6966970fc31eaa33d3ab9"
 dependencies = [
  "anyhow",
  "chrono",
  "crucible-workspace-hack",
  "percent-encoding",
- "progenitor 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
- "reqwest 0.11.27",
+ "progenitor 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=dependabot/cargo/reqwest-0.12.4)",
+ "reqwest 0.12.7",
  "schemars",
  "serde",
  "serde_json",
@@ -1788,7 +1788,7 @@ dependencies = [
 [[package]]
 name = "crucible-common"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?branch=hyper-v1#1167ae67674dd8b7263fbf5c95e2081c4ed2475b"
+source = "git+https://github.com/oxidecomputer/crucible?branch=hyper-v1#c6e6780c3af9ca7989c6966970fc31eaa33d3ab9"
 dependencies = [
  "anyhow",
  "atty",
@@ -1818,14 +1818,14 @@ dependencies = [
 [[package]]
 name = "crucible-pantry-client"
 version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/crucible?branch=hyper-v1#1167ae67674dd8b7263fbf5c95e2081c4ed2475b"
+source = "git+https://github.com/oxidecomputer/crucible?branch=hyper-v1#c6e6780c3af9ca7989c6966970fc31eaa33d3ab9"
 dependencies = [
  "anyhow",
  "chrono",
  "crucible-workspace-hack",
  "percent-encoding",
- "progenitor 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
- "reqwest 0.11.27",
+ "progenitor 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=dependabot/cargo/reqwest-0.12.4)",
+ "reqwest 0.12.7",
  "schemars",
  "serde",
  "serde_json",
@@ -1835,7 +1835,7 @@ dependencies = [
 [[package]]
 name = "crucible-smf"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/crucible?branch=hyper-v1#1167ae67674dd8b7263fbf5c95e2081c4ed2475b"
+source = "git+https://github.com/oxidecomputer/crucible?branch=hyper-v1#c6e6780c3af9ca7989c6966970fc31eaa33d3ab9"
 dependencies = [
  "crucible-workspace-hack",
  "libc",
@@ -5927,6 +5927,7 @@ dependencies = [
  "headers",
  "hickory-resolver",
  "http 1.1.0",
+ "http-body-util",
  "hyper 1.4.1",
  "illumos-utils",
  "internal-dns",
@@ -6605,6 +6606,7 @@ dependencies = [
  "hex",
  "hickory-resolver",
  "http 1.1.0",
+ "http-body-util",
  "httptest",
  "hubtools",
  "hyper 1.4.1",

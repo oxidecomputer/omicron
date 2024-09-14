@@ -199,7 +199,6 @@ mod test {
     use async_trait::async_trait;
     use chrono::{DateTime, Duration, Utc};
     use http;
-    use hyper;
     use slog;
     use std::collections::HashMap;
     use std::sync::Mutex;

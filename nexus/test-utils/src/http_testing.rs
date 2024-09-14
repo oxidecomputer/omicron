@@ -10,7 +10,9 @@ use anyhow::Context;
 use camino::Utf8Path;
 use dropshot::test_util::ClientTestContext;
 use dropshot::ResultsPage;
+use futures::TryStreamExt;
 use headers::authorization::Credentials;
+use http_body_util::BodyExt;
 use nexus_db_queries::authn::external::spoof;
 use nexus_db_queries::db::identity::Asset;
 use serde_urlencoded;
@@ -168,7 +170,10 @@ impl<'a> RequestBuilder<'a> {
                         let stream = tokio_util::io::ReaderStream::new(
                             tokio::fs::File::from_std(file),
                         );
-                        self.body = dropshot::Body::wrap_stream(stream);
+                        let body = http_body_util::StreamBody::new(
+                            stream.map_ok(|b| hyper::body::Frame::data(b)),
+                        );
+                        self.body = dropshot::Body::wrap(body);
                     }
                     Err(error) => self.error = Some(error),
                 }
@@ -421,9 +426,12 @@ impl<'a> RequestBuilder<'a> {
         // or malicious server could do damage by sending us an enormous
         // response here.  Since we only use this in a test suite, we ignore
         // that risk.
-        let response_body = dropshot::Body::to_bytes(response.body_mut())
+        let response_body = response
+            .body_mut()
+            .collect()
             .await
-            .context("reading response body")?;
+            .context("reading response body")?
+            .to_bytes();
 
         // For "204 No Content" responses, validate that we got no content in
         // the body.
