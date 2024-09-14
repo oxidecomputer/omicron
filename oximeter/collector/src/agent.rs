@@ -865,7 +865,6 @@ mod tests {
     use std::net::SocketAddr;
     use std::net::SocketAddrV6;
     use std::time::Duration;
-    use tokio::net::TcpListener;
     use tokio::sync::oneshot;
     use tokio::time::Instant;
     use uuid::Uuid;
