@@ -1111,12 +1111,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
     CONSTRAINT vmm_iff_active_propolis CHECK (
         ((state = 'vmm') AND (active_propolis_id IS NOT NULL)) OR
         ((state != 'vmm') AND (active_propolis_id IS NULL))
-    ),
-
-    /* If an instance has a failure reason, it must be in the failed state. */
-    CONSTRAINT failure_reason_only_if_failed CHECK (
-        ((state != 'failed') AND (last_failure_reason IS NULL)) OR
-        (state = 'failed')
     )
 );
 
@@ -3752,7 +3746,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.vmm (
     /* If a VMM has a failure reason, it must be in the failed state. */
     CONSTRAINT failure_reason_only_if_failed CHECK (
         ((state != 'failed') AND (failure_reason IS NULL)) OR
-        (state = 'failed')
+        (state = 'failed') OR
+        /*
+         * Destroyed is the only state that a Failed VMM may transition to,
+         * so allow the failure reason to remain when transitioning from Failed
+         * to Destroyed.
+         */
+        (state = 'destroyed')
     )
 
 );
