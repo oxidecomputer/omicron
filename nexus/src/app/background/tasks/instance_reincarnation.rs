@@ -141,8 +141,7 @@ impl InstanceReincarnation {
                     "last_auto_restarted_at" => ?db_instance.runtime().time_last_auto_restarted,
                 );
 
-                debug_assert!(self
-                    .filter
+                debug_assert!(filter
                     .can_reincarnate(policy.unwrap(), db_instance.runtime()));
 
                 let running_saga = async {
