@@ -290,15 +290,9 @@ impl ReincarnationFilter {
         // control plane to automatically restart it.
         match policy {
             InstanceAutoRestart::Never => false,
-            InstanceAutoRestart::AllFailures => true,
-            // TODO(eliza): currently, we don't have the ability to determine
-            // whether an instance is failed because the sled it was on has
-            // rebooted, or because the individual Propolis VMM crashed. For
-            // now, we assume all failures are VMM failures rather than sled
-            // failures. In the future, we will need to determine if a failure
-            // was a sled-level or VMM-level failure, and use that here to
-            // determine whether or not the instance is restartable.
-            InstanceAutoRestart::SledFailuresOnly => false,
+            // Eventually, this may depend on the failure reason and/or the last
+            // auto-restart timestamp.
+            InstanceAutoRestart::BestEffort => true,
         }
     }
 
@@ -320,8 +314,8 @@ impl ReincarnationFilter {
             //
             // N.B. that this may become more complex in the future if we grow
             // additional auto-restart policies that require additional logic
-            // (such as restart limits...))
-            .and(dsl::auto_restart_policy.eq(InstanceAutoRestart::AllFailures))
+            // (such as restart limits...)
+            .and(dsl::auto_restart_policy.eq(InstanceAutoRestart::BestEffort))
     }
 }
 

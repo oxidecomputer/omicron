@@ -426,7 +426,7 @@ mod test {
             &cptestctx,
             &opctx,
             "my-cool-instance",
-            InstanceAutoRestart::AllFailures,
+            InstanceAutoRestart::BestEffort,
             InstanceState::Failed,
         )
         .await;
@@ -483,7 +483,7 @@ mod test {
                 &cptestctx,
                 &opctx,
                 &format!("sotapanna-{i}"),
-                InstanceAutoRestart::AllFailures,
+                InstanceAutoRestart::BestEffort,
                 InstanceState::Failed,
             )
             .await;
@@ -494,17 +494,12 @@ mod test {
         let mut will_not_reincarnate = std::collections::BTreeSet::new();
         // Some instances which are `Failed` but don't have policies permitting
         // them to be reincarnated.
-        for (i, &policy) in
-            [InstanceAutoRestart::Never, InstanceAutoRestart::SledFailuresOnly]
-                .iter()
-                // Just so we can generate unique names...
-                .enumerate()
-        {
+        for i in 0..3 {
             let id = create_instance(
                 &cptestctx,
                 &opctx,
                 &format!("arahant-{i}"),
-                policy,
+                InstanceAutoRestart::Never,
                 InstanceState::Failed,
             )
             .await;
@@ -522,7 +517,7 @@ mod test {
                 &cptestctx,
                 &opctx,
                 &format!("anagami-{i}"),
-                InstanceAutoRestart::AllFailures,
+                InstanceAutoRestart::BestEffort,
                 state,
             )
             .await;
@@ -595,7 +590,7 @@ mod test {
             &cptestctx,
             &opctx,
             "victor",
-            InstanceAutoRestart::AllFailures,
+            InstanceAutoRestart::BestEffort,
             InstanceState::Failed,
         )
         .await;
@@ -603,7 +598,7 @@ mod test {
             &cptestctx,
             &opctx,
             "frankenstein",
-            InstanceAutoRestart::AllFailures,
+            InstanceAutoRestart::BestEffort,
             InstanceState::Vmm,
         )
         .await;

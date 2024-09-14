@@ -10,7 +10,7 @@ use std::fmt;
 
 impl_enum_type!(
     #[derive(SqlType, Debug)]
-    #[diesel(postgres_type(name = "instance_auto_restart", schema = "public"))]
+    #[diesel(postgres_type(name = "instance_auto_restart_v2", schema = "public"))]
     pub struct InstanceAutoRestartEnum;
 
     #[derive(Copy, Clone, Debug, PartialEq, AsExpression, FromSqlRow, Serialize, Deserialize)]
@@ -19,16 +19,14 @@ impl_enum_type!(
 
     // Enum values
     Never => b"never"
-    SledFailuresOnly => b"sled_failures_only"
-    AllFailures => b"all_failures"
+    BestEffort => b"best_effort"
 );
 
 impl InstanceAutoRestart {
     pub fn label(&self) -> &'static str {
         match self {
             Self::Never => "never",
-            Self::SledFailuresOnly => "sled_failures_only",
-            Self::AllFailures => "all_failures",
+            Self::BestEffort => "best_effort",
         }
     }
 }
@@ -43,8 +41,7 @@ impl From<InstanceAutoRestart> for params::InstanceAutoRestart {
     fn from(value: InstanceAutoRestart) -> Self {
         match value {
             InstanceAutoRestart::Never => Self::Never,
-            InstanceAutoRestart::SledFailuresOnly => Self::SledFailuresOnly,
-            InstanceAutoRestart::AllFailures => Self::AllFailures,
+            InstanceAutoRestart::BestEffort => Self::BestEffort,
         }
     }
 }
@@ -53,10 +50,7 @@ impl From<params::InstanceAutoRestart> for InstanceAutoRestart {
     fn from(value: params::InstanceAutoRestart) -> Self {
         match value {
             params::InstanceAutoRestart::Never => Self::Never,
-            params::InstanceAutoRestart::SledFailuresOnly => {
-                Self::SledFailuresOnly
-            }
-            params::InstanceAutoRestart::AllFailures => Self::AllFailures,
+            params::InstanceAutoRestart::BestEffort => Self::BestEffort,
         }
     }
 }

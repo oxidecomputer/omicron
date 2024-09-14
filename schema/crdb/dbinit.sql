@@ -1024,24 +1024,18 @@ CREATE TYPE IF NOT EXISTS omicron.public.vmm_state AS ENUM (
     'saga_unwound'
 );
 
-CREATE TYPE IF NOT EXISTS omicron.public.instance_auto_restart AS ENUM (
+CREATE TYPE IF NOT EXISTS omicron.public.instance_auto_restart_v2 AS ENUM (
     /*
      * The instance should not, under any circumstances, be automatically
      * rebooted by the control plane.
      */
     'never',
     /*
-     * The instance should be automatically restarted if, and only if, the sled
-     * it was running on has restarted or become unavailable. If the individual
-     * Propolis VMM process for this instance crashes, it should *not* be
-     * restarted automatically.
+     * The control plane will make a reasonable attempt to restart this instance
+     * if it fails, but reserves the right to choose not to restart it
+     * immediately.
      */
-     'sled_failures_only',
-    /*
-     * The instance should be automatically restarted any time a fault is
-     * detected
-     */
-    'all_failures'
+     'best_effort',
 );
 
 
@@ -1105,7 +1099,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
      * What failures should result in an instance being automatically restarted
      * by the control plane.
      */
-    auto_restart_policy omicron.public.instance_auto_restart,
+    auto_restart_policy omicron.public.instance_auto_restart_v2,
 
     /*
      * The time of the most recent auto-restart attempt, or NULL if the control
@@ -4305,7 +4299,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '99.0.0', NULL)
+    (TRUE, NOW(), NOW(), '100.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

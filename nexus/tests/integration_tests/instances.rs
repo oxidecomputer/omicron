@@ -1316,7 +1316,7 @@ async fn test_instance_failed_by_instance_watcher_automatically_reincarnates(
         make_forgotten_instance(
             &cptestctx,
             "resurgam",
-            Some(params::InstanceAutoRestart::AllFailures),
+            Some(params::InstanceAutoRestart::BestEffort),
         )
         .await
     );

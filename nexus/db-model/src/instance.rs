@@ -124,15 +124,6 @@ impl Instance {
     pub fn runtime(&self) -> &InstanceRuntimeState {
         &self.runtime_state
     }
-
-    /// Returns `true` if this instance can be automatically restarted.
-    pub fn can_reincarnate(&self) -> bool {
-        self.auto_restart_policy
-            .map(|policy| self.runtime_state.can_reincarnate(policy))
-            // If the instance does not have a specified auto-restart policy,
-            // assume it cannot be restarted.
-            .unwrap_or(false)
-    }
 }
 
 impl DatastoreAttachTargetConfig<Disk> for Instance {
@@ -238,31 +229,6 @@ impl InstanceRuntimeState {
             migration_id: None,
             gen: Generation::new(),
             time_last_auto_restarted: None,
-        }
-    }
-
-    /// Returns `true` if this instance can be automatically restarted by the
-    /// provided [`InstanceAutoRestart`] policy.
-    pub fn can_reincarnate(&self, policy: InstanceAutoRestart) -> bool {
-        // Instances only need to be automatically restarted if they are in the
-        // `Failed` state.
-        if self.nexus_state != InstanceState::Failed {
-            return false;
-        }
-
-        // Check if the instance's configured auto-restart policy permits the
-        // control plane to automatically restart it.
-        match policy {
-            InstanceAutoRestart::Never => false,
-            InstanceAutoRestart::AllFailures => true,
-            // TODO(eliza): currently, we don't have the ability to determine
-            // whether an instance is failed because the sled it was on has
-            // rebooted, or because the individual Propolis VMM crashed. For
-            // now, we assume all failures are VMM failures rather than sled
-            // failures. In the future, we will need to determine if a failure
-            // was a sled-level or VMM-level failure, and use that here to
-            // determine whether or not the instance is restartable.
-            InstanceAutoRestart::SledFailuresOnly => false,
         }
     }
 }

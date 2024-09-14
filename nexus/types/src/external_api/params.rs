@@ -990,18 +990,11 @@ pub enum InstanceAutoRestart {
     /// The instance should not be automatically restarted by the control plane
     /// if it fails.
     Never,
-    /// The instance should be automatically restarted by the control plane if
-    /// the sled that it's running on reboots or fails, but it should not be
-    /// restarted automatically if the individual instance fails. This policy
-    /// will only automatically restart an instance if the control plane is able
-    /// to definitively determine that the instance failed due to a sled reboot
-    /// or fault.
-    SledFailuresOnly,
-    /// The instance should be automatically restarted by the control plane in
-    /// the event of any failure. If the instance crashes, or if the sled it's
-    /// running on reboots, the control plane will always attempt to
-    /// automatically restart this instance.
-    AllFailures,
+    /// The control plane will make a best-effort attempt to ensure this
+    /// instance is running, but will not guarantee that the instance will
+    /// always be restarted. The control plane may choose not to restart this
+    /// instance in order to preserve the overall availability of the system.
+    BestEffort,
 }
 
 /// Create-time parameters for an `Instance`
