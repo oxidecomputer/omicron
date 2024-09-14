@@ -8,10 +8,14 @@ use debug_ignore::DebugIgnore;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZoneType;
+use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
 use nexus_types::deployment::OmicronZoneExternalIp;
 use nexus_types::deployment::PlanningInput;
+use nexus_types::deployment::SledFilter;
+use nexus_types::external_api::views::SledPolicy;
 use nexus_types::inventory::SourceNatConfig;
 use omicron_common::address::IpRange;
 use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
@@ -41,6 +45,12 @@ pub(super) struct BuilderExternalNetworking<'a> {
     boundary_ntp_v6_ips: AvailableIterator<'static, Ipv6Addr>,
     nexus_v4_ips: AvailableIterator<'static, Ipv4Addr>,
     nexus_v6_ips: AvailableIterator<'static, Ipv6Addr>,
+    external_dns_v4_ips: AvailableIterator<'static, Ipv4Addr>,
+    external_dns_v6_ips: AvailableIterator<'static, Ipv6Addr>,
+
+    // External DNS server addresses currently only come from RSS;
+    // see https://github.com/oxidecomputer/omicron/issues/3732
+    available_external_dns_ips: BTreeSet<OmicronZoneExternalFloatingAddr>,
 
     // Allocator for external IPs for service zones
     external_ip_alloc: ExternalIpAllocator<'a>,
@@ -99,6 +109,13 @@ impl<'a> BuilderExternalNetworking<'a> {
             HashSet::new();
         let mut existing_boundary_ntp_v6_ips: HashSet<Ipv6Addr> =
             HashSet::new();
+        let mut existing_external_dns_v4_ips: HashSet<Ipv4Addr> =
+            HashSet::new();
+        let mut existing_external_dns_v6_ips: HashSet<Ipv6Addr> =
+            HashSet::new();
+        let mut available_external_dns_ips: BTreeSet<
+            OmicronZoneExternalFloatingAddr,
+        > = BTreeSet::new();
         let mut external_ip_alloc =
             ExternalIpAllocator::new(input.service_ip_pool_ranges());
         let mut used_macs: HashSet<MacAddr> = HashSet::new();
@@ -132,6 +149,18 @@ impl<'a> BuilderExternalNetworking<'a> {
                         }
                     }
                 },
+                BlueprintZoneType::ExternalDns(dns) => match dns.nic.ip {
+                    IpAddr::V4(ip) => {
+                        if !existing_external_dns_v4_ips.insert(ip) {
+                            bail!("duplicate external DNS IP: {ip}");
+                        }
+                    }
+                    IpAddr::V6(ip) => {
+                        if !existing_external_dns_v6_ips.insert(ip) {
+                            bail!("duplicate external DNS IP: {ip}");
+                        }
+                    }
+                },
                 _ => (),
             }
 
@@ -145,6 +174,38 @@ impl<'a> BuilderExternalNetworking<'a> {
 
                 if !used_macs.insert(nic.mac) {
                     bail!("duplicate service vNIC MAC: {}", nic.mac);
+                }
+            }
+        }
+
+        // Recycle the IP addresses of expunged or about-to-be-expunged
+        // external DNS zones. The latter is an unfortunate consequence
+        // of when this builder is constructed. An alternative would be
+        // a hook in expungement, but that seems possibly worse than this
+        // (admittedly awkward) filter.
+        // TODO: Remove when external DNS addresses come from policy.
+        for (_, z) in parent_blueprint
+            .all_omicron_zones(BlueprintZoneFilter::All)
+            .filter(|(sled_id, zone)| {
+                zone.disposition == BlueprintZoneDisposition::Expunged
+                    || input.all_sleds(SledFilter::Commissioned).any(
+                        |(id, sled)| {
+                            id == *sled_id
+                                && sled.policy == SledPolicy::Expunged
+                        },
+                    )
+            })
+        {
+            if let BlueprintZoneType::ExternalDns(dns) = &z.zone_type {
+                match dns.nic.ip {
+                    IpAddr::V4(ip) => existing_external_dns_v4_ips.insert(ip),
+                    IpAddr::V6(ip) => existing_external_dns_v6_ips.insert(ip),
+                };
+                if !available_external_dns_ips.insert(dns.dns_address) {
+                    bail!(
+                        "unavailable external DNS IP: {}",
+                        dns.dns_address.addr
+                    );
                 }
             }
         }
@@ -191,7 +252,12 @@ impl<'a> BuilderExternalNetworking<'a> {
                     }
                 }
                 IpAddr::V4(ip) if DNS_OPTE_IPV4_SUBNET.contains(ip) => {
-                    // TODO check existing_dns_v4_ips, once it exists
+                    if !existing_external_dns_v4_ips.contains(&ip) {
+                        bail!(
+                            "planning input contains unexpected NIC \
+                             (IP not found in parent blueprint): {nic_entry:?}"
+                        );
+                    }
                 }
                 IpAddr::V6(ip) if NEXUS_OPTE_IPV6_SUBNET.contains(ip) => {
                     if !existing_nexus_v6_ips.contains(&ip) {
@@ -210,7 +276,12 @@ impl<'a> BuilderExternalNetworking<'a> {
                     }
                 }
                 IpAddr::V6(ip) if DNS_OPTE_IPV6_SUBNET.contains(ip) => {
-                    // TODO check existing_dns_v6_ips, once it exists
+                    if !existing_external_dns_v6_ips.contains(&ip) {
+                        bail!(
+                            "planning input contains unexpected NIC \
+                             (IP not found in parent blueprint): {nic_entry:?}"
+                        );
+                    }
                 }
                 _ => {
                     bail!(
@@ -249,6 +320,16 @@ impl<'a> BuilderExternalNetworking<'a> {
             NTP_OPTE_IPV6_SUBNET.iter().skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),
             existing_boundary_ntp_v6_ips,
         );
+        let external_dns_v4_ips = AvailableIterator::new(
+            DNS_OPTE_IPV4_SUBNET
+                .addr_iter()
+                .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),
+            existing_external_dns_v4_ips,
+        );
+        let external_dns_v6_ips = AvailableIterator::new(
+            DNS_OPTE_IPV6_SUBNET.iter().skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),
+            existing_external_dns_v6_ips,
+        );
         let available_system_macs =
             AvailableIterator::new(MacAddr::iter_system(), used_macs);
 
@@ -257,6 +338,9 @@ impl<'a> BuilderExternalNetworking<'a> {
             boundary_ntp_v6_ips,
             nexus_v4_ips,
             nexus_v6_ips,
+            external_dns_v4_ips,
+            external_dns_v6_ips,
+            available_external_dns_ips,
             external_ip_alloc,
             available_system_macs,
         })
@@ -330,6 +414,62 @@ impl<'a> BuilderExternalNetworking<'a> {
             nic_subnet,
             nic_mac,
         })
+    }
+
+    pub(super) fn for_new_external_dns(
+        &mut self,
+    ) -> Result<ExternalNetworkingChoice, Error> {
+        let dns_address = self
+            .available_external_dns_ips
+            .pop_first()
+            .ok_or(Error::NoExternalServiceIpAvailable)?;
+
+        let (nic_ip, nic_subnet) = match dns_address.addr.ip() {
+            IpAddr::V4(_) => (
+                self.external_dns_v4_ips
+                    .next()
+                    .ok_or(Error::ExhaustedOpteIps {
+                        kind: ZoneKind::ExternalDns,
+                    })?
+                    .into(),
+                IpNet::from(*DNS_OPTE_IPV4_SUBNET),
+            ),
+            IpAddr::V6(_) => (
+                self.external_dns_v6_ips
+                    .next()
+                    .ok_or(Error::ExhaustedOpteIps {
+                        kind: ZoneKind::ExternalDns,
+                    })?
+                    .into(),
+                IpNet::from(*DNS_OPTE_IPV6_SUBNET),
+            ),
+        };
+        let nic_mac = self
+            .available_system_macs
+            .next()
+            .ok_or(Error::NoSystemMacAddressAvailable)?;
+
+        Ok(ExternalNetworkingChoice {
+            external_ip: dns_address.addr.ip(),
+            nic_ip,
+            nic_subnet,
+            nic_mac,
+        })
+    }
+
+    /// Allow a test to manually add an external DNS address,
+    /// which could otherwise only be added via RSS.
+    ///
+    /// TODO-cleanup: Remove when external DNS addresses are in the policy.
+    #[cfg(test)]
+    pub fn add_external_dns_ip(
+        &mut self,
+        addr: OmicronZoneExternalFloatingAddr,
+    ) {
+        assert!(
+            self.available_external_dns_ips.insert(addr),
+            "duplicate external DNS IP address"
+        );
     }
 }
 

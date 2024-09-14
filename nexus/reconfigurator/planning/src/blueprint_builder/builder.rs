@@ -25,6 +25,7 @@ use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::DiskFilter;
+use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::deployment::OmicronZoneExternalSnatIp;
 use nexus_types::deployment::PlanningInput;
@@ -69,6 +70,7 @@ use std::fmt;
 use std::hash::Hash;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
+use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use thiserror::Error;
 use typed_rng::TypedUuidRng;
@@ -697,6 +699,88 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(EnsureMultiple::Changed { added: to_add, removed: 0 })
     }
 
+    fn sled_add_zone_external_dns(
+        &mut self,
+        sled_id: SledUuid,
+    ) -> Result<Ensure, Error> {
+        let id = self.rng.zone_rng.next();
+        let ExternalNetworkingChoice {
+            external_ip,
+            nic_ip,
+            nic_subnet,
+            nic_mac,
+        } = self.external_networking.for_new_external_dns()?;
+        let nic = NetworkInterface {
+            id: self.rng.network_interface_rng.next(),
+            kind: NetworkInterfaceKind::Service { id: id.into_untyped_uuid() },
+            name: format!("external-dns-{id}").parse().unwrap(),
+            ip: nic_ip,
+            mac: nic_mac,
+            subnet: nic_subnet,
+            vni: Vni::SERVICES_VNI,
+            primary: true,
+            slot: 0,
+            transit_ips: vec![],
+        };
+
+        let underlay_address = self.sled_alloc_ip(sled_id)?;
+        let http_address =
+            SocketAddrV6::new(underlay_address, DNS_HTTP_PORT, 0, 0);
+        let dns_address = OmicronZoneExternalFloatingAddr {
+            id: self.rng.external_ip_rng.next(),
+            addr: SocketAddr::new(external_ip, DNS_PORT),
+        };
+        let pool_name =
+            self.sled_select_zpool(sled_id, ZoneKind::ExternalDns)?;
+        let dataset = OmicronZoneDataset { pool_name };
+        let zone_type =
+            BlueprintZoneType::ExternalDns(blueprint_zone_type::ExternalDns {
+                dataset,
+                http_address,
+                dns_address,
+                nic,
+            });
+        let filesystem_pool =
+            Some(self.sled_select_zpool(sled_id, zone_type.kind())?);
+
+        let zone = BlueprintZoneConfig {
+            disposition: BlueprintZoneDisposition::InService,
+            id,
+            underlay_address,
+            filesystem_pool,
+            zone_type,
+        };
+        self.sled_add_zone(sled_id, zone)?;
+        Ok(Ensure::Added)
+    }
+
+    pub fn sled_ensure_zone_multiple_external_dns(
+        &mut self,
+        sled_id: SledUuid,
+        desired_zone_count: usize,
+    ) -> Result<EnsureMultiple, Error> {
+        // How many external DNS zones do we need to add?
+        let count =
+            self.sled_num_running_zones_of_kind(sled_id, ZoneKind::ExternalDns);
+        let to_add = match desired_zone_count.checked_sub(count) {
+            Some(0) => return Ok(EnsureMultiple::NotNeeded),
+            Some(n) => n,
+            None => {
+                return Err(Error::Planner(anyhow!(
+                    "removing an external DNS zone not yet supported \
+                     (sled {sled_id} has {count}; \
+                     planner wants {desired_zone_count})"
+                )));
+            }
+        };
+
+        for _ in 0..to_add {
+            self.sled_add_zone_external_dns(sled_id)?;
+        }
+
+        Ok(EnsureMultiple::Changed { added: to_add, removed: 0 })
+    }
+
     pub fn sled_ensure_zone_ntp(
         &mut self,
         sled_id: SledUuid,
@@ -1269,6 +1353,29 @@ impl<'a> BlueprintBuilder<'a> {
                 sled_id
             ))
         })
+    }
+
+    /// Determine the number of external DNS zones (and therefore addresses)
+    /// by examining the parent blueprint.
+    ///
+    /// TODO-cleanup: Remove when external DNS addresses are in the policy.
+    pub fn count_parent_external_dns_zones(&self) -> usize {
+        self.parent_blueprint
+            .all_omicron_zones(BlueprintZoneFilter::All)
+            .filter(|(_id, zone)| zone.zone_type.is_external_dns())
+            .count()
+    }
+
+    /// Allow a test to manually add an external DNS address, which could
+    /// ordinarily only come from RSS.
+    ///
+    /// TODO-cleanup: Remove when external DNS addresses are in the policy.
+    #[cfg(test)]
+    pub fn add_external_dns_ip(
+        &mut self,
+        addr: OmicronZoneExternalFloatingAddr,
+    ) {
+        self.external_networking.add_external_dns_ip(addr);
     }
 }
 

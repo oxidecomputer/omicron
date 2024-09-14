@@ -354,6 +354,7 @@ impl<'a> Planner<'a> {
             DiscretionaryOmicronZone::BoundaryNtp,
             DiscretionaryOmicronZone::CockroachDb,
             DiscretionaryOmicronZone::InternalDns,
+            DiscretionaryOmicronZone::ExternalDns,
             DiscretionaryOmicronZone::Nexus,
         ] {
             let num_zones_to_add = self.num_additional_zones_needed(zone_kind);
@@ -434,6 +435,9 @@ impl<'a> Planner<'a> {
             }
             DiscretionaryOmicronZone::InternalDns => {
                 self.input.target_internal_dns_zone_count()
+            }
+            DiscretionaryOmicronZone::ExternalDns => {
+                self.blueprint.count_parent_external_dns_zones()
             }
             DiscretionaryOmicronZone::Nexus => {
                 self.input.target_nexus_zone_count()
@@ -519,6 +523,12 @@ impl<'a> Planner<'a> {
                 }
                 DiscretionaryOmicronZone::InternalDns => {
                     self.blueprint.sled_ensure_zone_multiple_internal_dns(
+                        sled_id,
+                        new_total_zone_count,
+                    )?
+                }
+                DiscretionaryOmicronZone::ExternalDns => {
+                    self.blueprint.sled_ensure_zone_multiple_external_dns(
                         sled_id,
                         new_total_zone_count,
                     )?
@@ -725,6 +735,7 @@ mod test {
     use super::Planner;
     use crate::blueprint_builder::test::verify_blueprint;
     use crate::blueprint_builder::test::DEFAULT_N_SLEDS;
+    use crate::blueprint_builder::BlueprintBuilder;
     use crate::example::example;
     use crate::example::ExampleSystem;
     use crate::system::SledBuilder;
@@ -742,6 +753,7 @@ mod test {
     use nexus_types::deployment::CockroachDbClusterVersion;
     use nexus_types::deployment::CockroachDbPreserveDowngrade;
     use nexus_types::deployment::CockroachDbSettings;
+    use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
     use nexus_types::deployment::OmicronZoneNetworkResources;
     use nexus_types::deployment::SledDisk;
     use nexus_types::external_api::views::PhysicalDiskPolicy;
@@ -750,6 +762,7 @@ mod test {
     use nexus_types::external_api::views::SledProvisionPolicy;
     use nexus_types::external_api::views::SledState;
     use nexus_types::inventory::OmicronZonesFound;
+    use omicron_common::address::DNS_PORT;
     use omicron_common::api::external::Generation;
     use omicron_common::disk::DiskIdentity;
     use omicron_common::policy::MAX_INTERNAL_DNS_REDUNDANCY;
@@ -760,6 +773,8 @@ mod test {
     use omicron_uuid_kinds::ZpoolUuid;
     use std::collections::HashMap;
     use std::mem;
+    use std::net::IpAddr;
+    use std::net::SocketAddr;
     use typed_rng::TypedUuidRng;
 
     /// Runs through a basic sequence of blueprints for adding a sled
@@ -1337,6 +1352,159 @@ mod test {
         println!(
             "zone {} reused external IP {} from expunged zone {}",
             new_zone.id, expunged_ip, zone.id
+        );
+
+        logctx.cleanup_successful();
+    }
+
+    /// Check that the planner will reuse external DNS IPs that were
+    /// previously assigned to expunged zones
+    #[test]
+    fn test_reuse_external_dns_ips_from_expunged_zones() {
+        static TEST_NAME: &str =
+            "planner_reuse_external_dns_ips_from_expunged_zones";
+        let logctx = test_setup_log(TEST_NAME);
+
+        // Use our example system as a starting point.
+        let (collection, input, blueprint1) =
+            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+
+        // We should not be able to add any external DNS zones yet,
+        // because we haven't give it any addresses (which currently
+        // come only from RSS).
+        let mut builder = BlueprintBuilder::new_based_on(
+            &logctx.log,
+            &blueprint1,
+            &input,
+            TEST_NAME,
+        )
+        .expect("failed to build blueprint builder");
+        let sled_id = builder.sled_ids_with_zones().next().expect("no sleds");
+        builder
+            .sled_ensure_zone_multiple_external_dns(sled_id, 3)
+            .expect_err("shouldn't have any external DNS IP addresses");
+
+        // Build a builder for a modfied blueprint that will include
+        // some external DNS addresses.
+        let mut blueprint_builder = BlueprintBuilder::new_based_on(
+            &logctx.log,
+            &blueprint1,
+            &input,
+            TEST_NAME,
+        )
+        .expect("failed to build blueprint builder");
+
+        // Manually reach into the external networking allocator and "find"
+        // some external IP addresses (maybe they fell off a truck).
+        // TODO-cleanup: Remove when external DNS addresses are in the policy.
+        let external_dns_ips =
+            ["10.0.0.1", "10.0.0.2", "10.0.0.3"].map(|addr| {
+                addr.parse::<IpAddr>()
+                    .expect("can't parse external DNS IP address")
+            });
+        let mut external_ip_rng =
+            TypedUuidRng::from_seed(TEST_NAME, "ExternalIp");
+        for addr in external_dns_ips {
+            blueprint_builder.add_external_dns_ip(
+                OmicronZoneExternalFloatingAddr {
+                    id: external_ip_rng.next(),
+                    addr: SocketAddr::new(addr, DNS_PORT),
+                },
+            );
+        }
+
+        // Now we can add external DNS zones. We'll add three to the first sled.
+        let sled_id =
+            blueprint_builder.sled_ids_with_zones().next().expect("no sleds");
+        blueprint_builder
+            .sled_ensure_zone_multiple_external_dns(sled_id, 3)
+            .expect("can't build blueprint with external DNS IP addresses");
+        let blueprint1a = blueprint_builder.build();
+        assert_eq!(
+            blueprint1a
+                .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+                .filter(|(_, zone)| zone.zone_type.is_external_dns())
+                .count(),
+            3,
+            "can't find external DNS zones in edited blueprint"
+        );
+
+        // Plan with external DNS.
+        let input_builder = input.clone().into_builder();
+        let input = input_builder.build();
+        let blueprint2 = Planner::new_based_on(
+            logctx.log.clone(),
+            &blueprint1a,
+            &input,
+            "test_blueprint2",
+            &collection,
+        )
+        .expect("failed to create planner")
+        .with_rng_seed((TEST_NAME, "bp2"))
+        .plan()
+        .expect("failed to plan");
+
+        let diff = blueprint2.diff_since_blueprint(&blueprint1);
+        println!("1 -> 2 (added external DNS zones):\n{}", diff.display());
+
+        // The first sled should have three external DNS zones.
+        assert_eq!(
+            blueprint2
+                .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+                .filter(|(_, zone)| zone.zone_type.is_external_dns())
+                .count(),
+            3,
+            "can't find external DNS zones in planned blueprint"
+        );
+
+        // Expunge the first sled and re-plan.
+        let mut input_builder = input.into_builder();
+        let (&sled_id, details) =
+            input_builder.sleds_mut().iter_mut().next().expect("no sleds");
+        details.policy = SledPolicy::Expunged;
+        let input = input_builder.build();
+        let blueprint3 = Planner::new_based_on(
+            logctx.log.clone(),
+            &blueprint2,
+            &input,
+            "test_blueprint3",
+            &collection,
+        )
+        .expect("failed to create planner")
+        .with_rng_seed((TEST_NAME, "bp3"))
+        .plan()
+        .expect("failed to re-plan");
+
+        let diff = blueprint3.diff_since_blueprint(&blueprint2);
+        println!("2 -> 3 (expunged sled):\n{}", diff.display());
+
+        // The expunged sled should have three expunged external DNS zones.
+        assert_eq!(
+            blueprint3.blueprint_zones[&sled_id]
+                .zones
+                .iter()
+                .filter(|zone| {
+                    zone.disposition == BlueprintZoneDisposition::Expunged
+                        && zone.zone_type.is_external_dns()
+                })
+                .count(),
+            3
+        );
+
+        // And the IP addresses of the new external DNS zones should be the
+        // same as the original set that we "found".
+        let mut ips = blueprint3
+            .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+            .filter_map(|(_id, zone)| {
+                zone.zone_type.is_external_dns().then(|| {
+                    zone.zone_type.external_networking().unwrap().0.ip()
+                })
+            })
+            .collect::<Vec<IpAddr>>();
+        ips.sort();
+        assert_eq!(
+            ips, external_dns_ips,
+            "wrong addresses for new external DNS zones"
         );
 
         logctx.cleanup_successful();
