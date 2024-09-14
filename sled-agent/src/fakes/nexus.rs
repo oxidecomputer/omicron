@@ -7,11 +7,11 @@
 //! This must be an exact subset of the Nexus internal interface
 //! to operate correctly.
 
+use dropshot::Body;
 use dropshot::{
     endpoint, ApiDescription, FreeformBody, HttpError, HttpResponseOk,
     HttpResponseUpdatedNoContent, Path, RequestContext, TypedBody,
 };
-use dropshot::Body;
 use internal_dns::ServiceName;
 use nexus_client::types::SledAgentInfo;
 use omicron_common::api::external::Error;
