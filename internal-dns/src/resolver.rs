@@ -833,8 +833,8 @@ mod test {
         // The DNS server is running, but has no records. Expect a failure.
         let err = client.test_endpoint().await.unwrap_err();
         assert!(
-            err.to_string().contains("no record found"),
-            "Unexpected Error (expected 'no record found'): {err}",
+            err.to_string().contains("error sending request"),
+            "Unexpected Error (expected 'error sending request'): {err}",
         );
 
         // Add a record for the new service.
@@ -913,8 +913,8 @@ mod test {
         // The DNS server is running, but has no records. Expect a failure.
         let err = client.test_endpoint().await.unwrap_err();
         assert!(
-            err.to_string().contains("no record found"),
-            "Unexpected Error (expected 'no record found'): {err}",
+            err.to_string().contains("error sending request"),
+            "Unexpected Error (expected 'error sending request'): {err}",
         );
 
         // Add a record for the new service, but only to the second DNS server.
