@@ -8,28 +8,21 @@ use crate::app::background::BackgroundTask;
 use crate::app::saga::StartSaga;
 use crate::app::sagas::instance_start;
 use crate::app::sagas::NexusSaga;
-use chrono::TimeDelta;
 use futures::future::BoxFuture;
 use nexus_db_queries::authn;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::datastore::instance;
 use nexus_db_queries::db::DataStore;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::background::InstanceReincarnationStatus;
 use omicron_common::api::external::Error;
 use std::num::NonZeroU32;
 use std::sync::Arc;
-use std::time::Duration;
 
 pub struct InstanceReincarnation {
     datastore: Arc<DataStore>,
     sagas: Arc<dyn StartSaga>,
-    /// The default cooldown period between automatic restarts.
-    ///
-    /// If an instance's last automatic restart occurred less than this duration
-    /// from now, it may not be automatically restarted until it's had some time
-    /// to calm down. This is intended to try and reduce the impact of tight
-    /// crash loops.
-    default_cooldown: TimeDelta,
+    filter: instance::ReincarnationFilter,
     /// The maximum number of concurrently executing instance-start sagas.
     concurrency_limit: NonZeroU32,
 }
@@ -47,10 +40,6 @@ impl BackgroundTask for InstanceReincarnation {
     ) -> BoxFuture<'a, serde_json::Value> {
         Box::pin(async move {
             let mut status = InstanceReincarnationStatus::default();
-            status.default_cooldown = self.default_cooldown.to_std().expect(
-                "cooldown came from a `std::time::Duration` which was \
-                 non-negative, so it should remain non-negative",
-            );
             self.actually_activate(opctx, &mut status).await;
             if !status.restart_errors.is_empty() || status.query_error.is_some()
             {
@@ -81,14 +70,11 @@ impl InstanceReincarnation {
     pub(crate) fn new(
         datastore: Arc<DataStore>,
         sagas: Arc<dyn StartSaga>,
-        default_cooldown: Duration,
     ) -> Self {
-        let default_cooldown = TimeDelta::from_std(default_cooldown)
-            .expect("duration should be in range");
         Self {
             datastore,
             sagas,
-            default_cooldown,
+            filter: instance::ReincarnationFilter::DEFAULT.clone(),
             concurrency_limit: DEFAULT_MAX_CONCURRENT_REINCARNATIONS,
         }
     }
@@ -108,7 +94,7 @@ impl InstanceReincarnation {
                 .datastore
                 .find_reincarnatable_instances(
                     opctx,
-                    self.default_cooldown,
+                    &self.filter,
                     self.concurrency_limit,
                     // Any instances which we've already attempted to start and
                     // couldn't should be excluded from the query, to avoid
@@ -260,6 +246,7 @@ mod test {
     use super::*;
     use crate::app::sagas::test_helpers;
     use crate::external_api::params;
+    use chrono::TimeDelta;
     use chrono::Utc;
     use nexus_db_model::InstanceAutoRestart;
     use nexus_db_model::InstanceRuntimeState;
@@ -275,6 +262,7 @@ mod test {
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::InstanceUuid;
     use std::collections::HashMap;
+    use std::time::Duration;
 
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
@@ -403,11 +391,8 @@ mod test {
 
         setup_test_project(&cptestctx, &opctx).await;
 
-        let mut task = InstanceReincarnation::new(
-            datastore.clone(),
-            nexus.sagas.clone(),
-            Duration::from_secs(60),
-        );
+        let mut task =
+            InstanceReincarnation::new(datastore.clone(), nexus.sagas.clone());
 
         // Noop test
         let result = task.activate(&opctx).await;
@@ -469,11 +454,8 @@ mod test {
 
         setup_test_project(&cptestctx, &opctx).await;
 
-        let mut task = InstanceReincarnation::new(
-            datastore.clone(),
-            nexus.sagas.clone(),
-            Duration::from_secs(60),
-        );
+        let mut task =
+            InstanceReincarnation::new(datastore.clone(), nexus.sagas.clone());
 
         // Create instances in the `Failed` state that are eligible to be
         // restarted.
@@ -580,11 +562,14 @@ mod test {
 
         setup_test_project(&cptestctx, &opctx).await;
 
-        let mut task = InstanceReincarnation::new(
-            datastore.clone(),
-            nexus.sagas.clone(),
-            COOLDOWN,
-        );
+        let mut task =
+            InstanceReincarnation::new(datastore.clone(), nexus.sagas.clone());
+
+        task.filter = {
+            let delta = chrono::TimeDelta::from_std(COOLDOWN)
+                .expect("10 seconds is definitely in range");
+            instance::ReincarnationFilter::with_default_cooldown(delta)
+        };
 
         let instance1_id = create_instance(
             &cptestctx,

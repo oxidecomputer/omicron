@@ -1219,10 +1219,9 @@ async fn siu_commit_instance_updates(
     // to be automatically restarted, activate the instance-reincarnation
     // background task to automatically restart it.
     if let Some(policy) = update.auto_restart_policy {
-        if instance::ReincarnationFilter::can_reincarnate(
-            policy,
-            &update.new_runtime,
-        ) {
+        if instance::ReincarnationFilter::DEFAULT
+            .can_reincarnate(policy, &update.new_runtime)
+        {
             info!(
                 log,
                 "instance update: instance transitioned to Failed, but can \

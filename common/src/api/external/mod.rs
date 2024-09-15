@@ -1185,6 +1185,9 @@ pub struct Instance {
 
     #[serde(flatten)]
     pub runtime: InstanceRuntimeState,
+
+    /// The cooldown period between automatic restarts of this instance.
+    pub auto_restart_cooldown: std::time::Duration,
 }
 
 // DISKS

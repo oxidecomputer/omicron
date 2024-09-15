@@ -597,11 +597,6 @@ pub struct InstanceReincarnationConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
-
-    /// default cooldown period (in seconds) before an auto-restarted instance
-    /// can be restarted again.
-    #[serde_as(as = "DurationSeconds<u64>")]
-    pub default_cooldown_secs: Duration,
 }
 
 #[serde_as]
@@ -926,8 +921,7 @@ mod test {
             instance_watcher.period_secs = 30
             instance_updater.period_secs = 30
             instance_updater.disable = false
-            instance_reincarnation.period_secs = 60
-            instance_reincarnation.default_cooldown_secs = 60
+            instance_reincarnation.period_secs = 67
             service_firewall_propagation.period_secs = 300
             v2p_mapping_propagation.period_secs = 30
             abandoned_vmm_reaper.period_secs = 60
@@ -1084,8 +1078,7 @@ mod test {
                             disable: false,
                         },
                         instance_reincarnation: InstanceReincarnationConfig {
-                            period_secs: Duration::from_secs(60),
-                            default_cooldown_secs: Duration::from_secs(60),
+                            period_secs: Duration::from_secs(67),
                         },
                         service_firewall_propagation:
                             ServiceFirewallPropagationConfig {
@@ -1190,8 +1183,7 @@ mod test {
             region_replacement_driver.period_secs = 30
             instance_watcher.period_secs = 30
             instance_updater.period_secs = 30
-            instance_reincarnation.period_secs = 60
-            instance_reincarnation.default_cooldown_secs = 60
+            instance_reincarnation.period_secs = 67
             service_firewall_propagation.period_secs = 300
             v2p_mapping_propagation.period_secs = 30
             abandoned_vmm_reaper.period_secs = 60
