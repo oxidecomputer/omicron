@@ -8,8 +8,11 @@ use super::{
 };
 use crate::collection::DatastoreAttachTargetConfig;
 use crate::schema::{disk, external_ip, instance};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeDelta, Utc};
 use db_macros::Resource;
+use diesel::pg;
+use diesel::prelude::*;
+use diesel::sql_types::{Bool, Nullable};
 use nexus_types::external_api::params;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use serde::Deserialize;
@@ -55,13 +58,8 @@ pub struct Instance {
     #[diesel(column_name = hostname)]
     pub hostname: String,
 
-    /// The auto-restart policy for this instance.
-    ///
-    /// This indicates whether the instance should be automatically restarted by
-    /// the control plane on failure. If this is `NULL`, no auto-restart policy
-    /// has been configured for this instance by the user.
-    #[diesel(column_name = auto_restart_policy)]
-    pub auto_restart_policy: Option<InstanceAutoRestart>,
+    #[diesel(embed)]
+    pub auto_restart: InstanceAutoRestartConfig,
 
     #[diesel(embed)]
     pub runtime_state: InstanceRuntimeState,
@@ -110,10 +108,10 @@ impl Instance {
             ncpus: params.ncpus.into(),
             memory: params.memory.into(),
             hostname: params.hostname.to_string(),
-            auto_restart_policy: params
-                .auto_restart_policy
-                .clone()
-                .map(Into::into),
+            auto_restart: InstanceAutoRestartConfig {
+                policy: params.auto_restart_policy.clone().map(Into::into),
+                cooldown: None,
+            },
             runtime_state,
 
             updater_gen: Generation::new(),
@@ -189,7 +187,6 @@ pub struct InstanceRuntimeState {
     pub propolis_id: Option<Uuid>,
 
     /// If a migration is in progress, the ID of the Propolis server that is
-    /// the migration target.
     ///
     /// This field is guarded by the instance's `gen`.
     #[diesel(column_name = target_propolis_id)]
@@ -230,5 +227,198 @@ impl InstanceRuntimeState {
             gen: Generation::new(),
             time_last_auto_restarted: None,
         }
+    }
+}
+
+/// Configuration for automatic instance restarts.
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    AsChangeset,
+    Selectable,
+    Insertable,
+    Queryable,
+    Serialize,
+    Deserialize,
+)]
+#[diesel(table_name = instance)]
+pub struct InstanceAutoRestartConfig {
+    /// The auto-restart policy for this instance.
+    ///
+    /// This indicates whether the instance should be automatically restarted by
+    /// the control plane on failure. If this is `NULL`, no auto-restart policy
+    /// has been configured for this instance by the user.
+    #[diesel(column_name = auto_restart_policy)]
+    pub policy: Option<InstanceAutoRestart>,
+    /// The cooldown period that must elapse between automatic restarts of this
+    /// instance.
+    ///
+    /// If this is `NULL`, no explicit cooldown period has been configured for
+    /// this instance, and the default cooldown period should be used instead.
+    #[diesel(column_name = auto_restart_cooldown)]
+    #[serde(default, with = "optional_time_delta")]
+    pub cooldown: Option<TimeDelta>,
+}
+
+impl InstanceAutoRestartConfig {
+    /// The default cooldown used when an instance has no overridden cooldown.
+    pub const DEFAULT_COOLDOWN: TimeDelta = match TimeDelta::try_hours(1) {
+        Some(delta) => delta,
+        None => unreachable!(), // 1 hour should be representable...
+    };
+
+    /// The default policy used when an instance does not override the
+    /// reincarnation policy.
+    pub const DEFAULT_POLICY: InstanceAutoRestart = InstanceAutoRestart::Never;
+
+    /// Returns `true` if `self` permits an instance to reincarnate given the
+    /// provided `state`.
+    pub fn can_reincarnate(&self, state: &InstanceRuntimeState) -> bool {
+        // Instances only need to be automatically restarted if they are in the
+        // `Failed` state.
+        if state.nexus_state != InstanceState::Failed {
+            return false;
+        }
+
+        // Check if the instance's configured auto-restart policy permits the
+        // control plane to automatically restart it.
+        let policy = self.policy.unwrap_or(Self::DEFAULT_POLICY);
+        if policy == InstanceAutoRestart::Never {
+            return false;
+        }
+
+        // If the instance is permitted to reincarnate, ensure that its last
+        // reincarnation was at least one cooldown period ago.
+        if let Some(last) = state.time_last_auto_restarted {
+            // If no explicit cooldown is present, use the default.
+            // Eventually, we may also allow a project-level default, so we will
+            // need to consider that as well.
+            let cooldown = self.cooldown.unwrap_or(Self::DEFAULT_COOLDOWN);
+            Utc::now().signed_duration_since(last) >= cooldown
+        } else {
+            true
+        }
+    }
+
+    /// Filters a database query to include only instances whose auto-restart
+    /// configs permit them to reincarnate.
+    ///
+    /// Yes, this should probably be in `nexus-db-queries`, but it seemed nice
+    /// for it to be defined on the same struct as the in-memory logic
+    /// (`can_reincarnate`).
+    pub fn filter_reincarnatable(
+    ) -> impl AppearsOnTable<instance::table, SqlType = Nullable<Bool>>
+           + diesel::query_builder::QueryId
+           + diesel::query_builder::QueryFragment<pg::Pg>
+           // I have no idea what this means, but it seems important to Diesel...
+           + diesel::expression::ValidGrouping<
+        (),
+        IsAggregate = diesel::expression::is_aggregate::No,
+    > {
+        use instance::dsl;
+
+        let now = diesel::dsl::now.into_sql::<pg::sql_types::Timestamptz>();
+
+        dsl::state
+            // Only attempt to restart Failed instances.
+            .eq(InstanceState::Failed)
+            // The instance's auto-restart policy must allow the control plane
+            // to restart it automatically.
+            //
+            // N.B. that this may become more complex in the future if we grow
+            // additional auto-restart policies that require additional logic
+            // (such as restart limits...)
+            .and(dsl::auto_restart_policy.eq(InstanceAutoRestart::BestEffort))
+            // An instance whose last reincarnation was within the cooldown
+            // interval from now must remain in _bardo_ --- the liminal
+            // state between death and rebirth --- before its next
+            // reincarnation.
+            .and(
+                // If the instance has never previously been reincarnated, then
+                // it's allowed to reincarnate.
+                dsl::time_last_auto_restarted
+                    .is_null()
+                    // Or, if it has an overridden cooldown period, has that elapsed?
+                    .or(dsl::auto_restart_cooldown.is_not_null().and(
+                        dsl::time_last_auto_restarted
+                            .le(now.nullable() - dsl::auto_restart_cooldown),
+                    ))
+                    // Or, finally, if it does not have an overridden cooldown
+                    // period, has the default cooldown period elapsed?
+                    .or(dsl::auto_restart_cooldown.is_null().and(
+                        dsl::time_last_auto_restarted
+                            .le((now - Self::DEFAULT_COOLDOWN).nullable()),
+                    )),
+            )
+    }
+}
+
+/// It's just a type with the same representation as a `TimeDelta` that
+/// implements `Serialize` and `Deserialize`, because chrono apparently doesn't.
+/// If you feel like this is unfortunate...yeah, I do too.
+#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
+struct SerdeTimeDelta {
+    secs: i64,
+    nanos: i32,
+}
+
+impl From<TimeDelta> for SerdeTimeDelta {
+    fn from(delta: TimeDelta) -> Self {
+        Self { secs: delta.num_seconds(), nanos: delta.subsec_nanos() }
+    }
+}
+
+impl TryFrom<SerdeTimeDelta> for TimeDelta {
+    type Error = &'static str;
+    fn try_from(
+        SerdeTimeDelta { secs, nanos }: SerdeTimeDelta,
+    ) -> Result<Self, Self::Error> {
+        // This is a bit weird: `chrono::TimeDelta`'s getter for
+        // nanoseconds (`TimeDelta::subsec_nanos`) returns them as an i32,
+        // with the sign coming from the seconds part, but when constructing
+        // a `TimeDelta`, it takes them as a `u32` and panics if they're too
+        // big. So, we take the absolute value here, because what the serialize
+        // impl saw may have had its sign bit set, but the constructor will get
+        // mad if we give it something with that bit set. Hopefully that made
+        // sense?
+        let nanos = nanos.unsigned_abs();
+        TimeDelta::new(secs, nanos).ok_or("time delta out of range")
+    }
+}
+mod optional_time_delta {
+    use super::*;
+    use serde::{Deserializer, Serializer};
+
+    pub(super) fn deserialize<'de, D>(
+        deserializer: D,
+    ) -> Result<Option<TimeDelta>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let val = Option::<SerdeTimeDelta>::deserialize(deserializer)?;
+        match val {
+            None => return Ok(None),
+            Some(delta) => delta
+                .try_into()
+                .map_err(|e| {
+                    <D::Error as serde::de::Error>::custom(format!(
+                        "{e}: {val:?}"
+                    ))
+                })
+                .map(Some),
+        }
+    }
+
+    pub(super) fn serialize<S>(
+        td: &Option<TimeDelta>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        td.as_ref()
+            .map(|&delta| SerdeTimeDelta::from(delta))
+            .serialize(serializer)
     }
 }

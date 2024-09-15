@@ -408,6 +408,7 @@ table! {
         memory -> Int8,
         hostname -> Text,
         auto_restart_policy -> Nullable<crate::InstanceAutoRestartEnum>,
+        auto_restart_cooldown -> Nullable<Interval>,
         time_state_updated -> Timestamptz,
         state_generation -> Int8,
         active_propolis_id -> Nullable<Uuid>,

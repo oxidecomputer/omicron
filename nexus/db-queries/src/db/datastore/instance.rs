@@ -20,7 +20,7 @@ use crate::db::identity::Resource;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Generation;
 use crate::db::model::Instance;
-use crate::db::model::InstanceAutoRestart;
+use crate::db::model::InstanceAutoRestartConfig;
 use crate::db::model::InstanceRuntimeState;
 use crate::db::model::InstanceState;
 use crate::db::model::Migration;
@@ -37,9 +37,8 @@ use crate::db::update_and_check::UpdateAndQueryResult;
 use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
-use diesel::pg;
 use diesel::prelude::*;
-use diesel::sql_types::{self, Bool, Nullable};
+use diesel::sql_types;
 use nexus_db_model::Disk;
 use omicron_common::api;
 use omicron_common::api::external;
@@ -209,13 +208,18 @@ impl From<InstanceAndActiveVmm> for external::Instance {
                 .parse()
                 .expect("found invalid hostname in the database"),
 
-            // Eventually, this may be configurable either at the instance-
-            // or project-level, so we will have to take that into account. For
-            // now, though, it's hard-coded, so it's fine to just use that.
-            auto_restart_cooldown: ReincarnationFilter::DEFAULT
+            auto_restart_cooldown: value
+                .instance()
+                .auto_restart
                 .cooldown
+                // Eventually, this may have a project-level default, so if the
+                // instance doesn't provide a value we'll have to use the
+                // project's default if one exists. For now, though, fall back
+                // to the hard- coded default if the instance hasn't overridden
+                // it.
+                .unwrap_or(InstanceAutoRestartConfig::DEFAULT_COOLDOWN)
                 .to_std()
-                .expect("this should never be negative"),
+                .expect("we should never make a negative cooldown period"),
 
             runtime: external::InstanceRuntimeState {
                 run_state: value.effective_state(),
@@ -272,97 +276,6 @@ pub enum UpdaterLockError {
     /// An error occurred executing the query.
     #[error("error locking instance: {0}")]
     Query(#[from] Error),
-}
-
-/// Separates those instances which have attained Nirvana from those which
-/// remain bound to the cycle of rebirth.
-///
-/// This struct encapsulates the logic to determine whether an instance is
-/// deemed eligible to reincarnate for both in-memory [`Instance`]s and for
-/// filtering database queries. This way, we define the logic in one place,
-/// making it easier for it to be kept in sync.
-#[derive(Clone, Debug)]
-pub struct ReincarnationFilter {
-    cooldown: chrono::TimeDelta,
-}
-
-impl ReincarnationFilter {
-    pub const DEFAULT: Self = match chrono::TimeDelta::try_hours(1) {
-        Some(cooldown) => Self::with_default_cooldown(cooldown),
-        None => unreachable!(), // 1 hour must be in range...
-    };
-
-    /// Constructs a new `ReincarnationFilter` with the provided cooldown period
-    /// between automatic restarts.
-    ///
-    /// At present, this is used only for the instance-reincarnation background
-    /// task's tests.
-    pub const fn with_default_cooldown(cooldown: chrono::TimeDelta) -> Self {
-        Self { cooldown }
-    }
-
-    pub fn can_reincarnate(
-        &self,
-        policy: InstanceAutoRestart,
-        state: &InstanceRuntimeState,
-    ) -> bool {
-        // Instances only need to be automatically restarted if they are in the
-        // `Failed` state.
-        if state.nexus_state != InstanceState::Failed {
-            return false;
-        }
-
-        // Check if the instance's configured auto-restart policy permits the
-        // control plane to automatically restart it.
-        if policy == InstanceAutoRestart::Never {
-            return false;
-        };
-
-        // If the instance is permitted to reincarnate, ensure that its last
-        // reincarnation was at least one cooldown period ago.
-        if let Some(last_reincarnation) = state.time_last_auto_restarted {
-            Utc::now().signed_duration_since(last_reincarnation)
-                >= self.cooldown
-        } else {
-            true
-        }
-    }
-
-    fn where_clause(
-        &self,
-    ) -> impl AppearsOnTable<db::schema::instance::table, SqlType = Nullable<Bool>>
-           + diesel::query_builder::QueryId
-           + diesel::query_builder::QueryFragment<pg::Pg>
-           // I have no idea what this means, but it seems important to Diesel...
-           + diesel::expression::ValidGrouping<
-        (),
-        IsAggregate = diesel::expression::is_aggregate::No,
-    > {
-        use nexus_db_model::schema::instance::dsl;
-
-        let now = diesel::dsl::now.into_sql::<pg::sql_types::Timestamptz>();
-
-        dsl::state
-            // Only attempt to restart Failed instances.
-            .eq(InstanceState::Failed)
-            // The instance's auto-restart policy must allow the control plane
-            // to restart it automatically.
-            //
-            // N.B. that this may become more complex in the future if we grow
-            // additional auto-restart policies that require additional logic
-            // (such as restart limits...)
-            .and(dsl::auto_restart_policy.eq(InstanceAutoRestart::BestEffort))
-            // An instance whose last reincarnation was within the cooldown
-            // interval from now must remain in _bardo_ --- the liminal
-            // state between death and rebirth --- before its next
-            // reincarnation.
-            .and(
-                dsl::time_last_auto_restarted
-                    .is_null()
-                    .or(dsl::time_last_auto_restarted
-                        .le((now - self.cooldown).nullable())),
-            )
-    }
 }
 
 impl DataStore {
@@ -560,7 +473,6 @@ impl DataStore {
     pub async fn find_reincarnatable_instances(
         &self,
         opctx: &OpContext,
-        filter: &ReincarnationFilter,
         n: std::num::NonZeroU32,
         skipped_ids: impl IntoIterator<Item = Uuid>,
     ) -> ListResultVec<Instance> {
@@ -570,7 +482,7 @@ impl DataStore {
 
         dsl::instance
             // Select only those instances which may be reincarnated.
-            .filter(filter.where_clause())
+            .filter(InstanceAutoRestartConfig::filter_reincarnatable())
             // Exclude any instance IDs we were asked to skip (typically because
             // a previous start saga for those instances failed unexpectedly)
             .filter(dsl::id.ne_all(skipped_ids.into_iter()))

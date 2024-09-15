@@ -1107,6 +1107,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
      */
     time_last_auto_restarted TIMESTAMPTZ,
 
+    /*
+     * The cooldown period that must elapse between consecutive auto restart
+     * attempts. If this is NULL, no cooldown period is explicitly configured
+     * for this instance, and the default cooldown period should be used.
+     */
+     auto_restart_cooldown INTERVAL,
+
     CONSTRAINT vmm_iff_active_propolis CHECK (
         ((state = 'vmm') AND (active_propolis_id IS NOT NULL)) OR
         ((state != 'vmm') AND (active_propolis_id IS NULL))
