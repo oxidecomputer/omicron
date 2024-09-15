@@ -312,6 +312,7 @@ dof = { version = "0.3.0", default-features = false, features = ["des"] }
 hyper-582f2526e08bb6a0 = { package = "hyper", version = "0.14.30", features = ["full"] }
 hyper-rustls = { version = "0.27.2", default-features = false, features = ["http1", "http2", "ring", "tls12", "webpki-tokio"] }
 hyper-util = { version = "0.1.7", features = ["full"] }
+indicatif = { version = "0.17.8", features = ["rayon"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
 reqwest-a6292c17cd707f01 = { package = "reqwest", version = "0.11.27", features = ["json"] }
@@ -326,6 +327,7 @@ dof = { version = "0.3.0", default-features = false, features = ["des"] }
 hyper-582f2526e08bb6a0 = { package = "hyper", version = "0.14.30", features = ["full"] }
 hyper-rustls = { version = "0.27.2", default-features = false, features = ["http1", "http2", "ring", "tls12", "webpki-tokio"] }
 hyper-util = { version = "0.1.7", features = ["full"] }
+indicatif = { version = "0.17.8", features = ["rayon"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
 reqwest-a6292c17cd707f01 = { package = "reqwest", version = "0.11.27", features = ["json"] }
