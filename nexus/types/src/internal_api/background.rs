@@ -6,6 +6,14 @@ use serde::Deserialize;
 use serde::Serialize;
 use uuid::Uuid;
 
+/// The status of a `region_replacement` background task activation
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct RegionReplacementStatus {
+    pub requests_created_ok: Vec<String>,
+    pub start_invoked_ok: Vec<String>,
+    pub errors: Vec<String>,
+}
+
 /// The status of a `region_replacement_drive` background task activation
 #[derive(Serialize, Deserialize, Default)]
 pub struct RegionReplacementDriverStatus {
