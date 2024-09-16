@@ -1234,10 +1234,10 @@ pub enum InstanceAutoRestartPolicy {
     /// The instance should not be automatically restarted by the control plane
     /// if it fails.
     Never,
-    /// The control plane will make a best-effort attempt to ensure this
-    /// instance is running, but will not guarantee that the instance will
-    /// always be restarted. The control plane may choose not to restart this
-    /// instance in order to preserve the overall availability of the system.
+    /// If this instance is running and unexpectedly fails (e.g. due to a host
+    /// software crash or unexpected host reboot), the control plane will make a
+    /// best-effort attempt to restart it. The control plane may choose not to
+    /// restart the instance to preserve the overall availability of the system.
     BestEffort,
 }
 

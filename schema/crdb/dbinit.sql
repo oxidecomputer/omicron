@@ -1031,9 +1031,10 @@ CREATE TYPE IF NOT EXISTS omicron.public.instance_auto_restart_v2 AS ENUM (
      */
     'never',
     /*
-     * The control plane will make a reasonable attempt to restart this instance
-     * if it fails, but reserves the right to choose not to restart it
-     * immediately.
+     * If this instance is running and unexpectedly fails (e.g. due to a host
+     * software crash or unexpected host reboot), the control plane will make a
+     * best-effort attempt to restart it. The control plane may choose not to
+     * restart the instance to preserve the overall availability of the system.
      */
      'best_effort'
 );
