@@ -7,8 +7,8 @@
 
 use clickhouse_admin_types::KeeperId;
 use nexus_types::deployment::{
-    all_omicron_zones, BlueprintZoneFilter, BlueprintZoneType,
-    BlueprintZonesConfig, ClickhouseClusterConfig,
+    Blueprint, BlueprintZoneFilter, BlueprintZoneType, BlueprintZonesConfig,
+    ClickhouseClusterConfig,
 };
 use nexus_types::inventory::ClickhouseKeeperClusterMembership;
 use omicron_uuid_kinds::{OmicronZoneUuid, SledUuid};
@@ -35,7 +35,7 @@ impl From<&BTreeMap<SledUuid, BlueprintZonesConfig>>
     ) -> Self {
         let mut keepers = BTreeSet::new();
         let mut servers = BTreeSet::new();
-        for (_, bp_zone_config) in all_omicron_zones(
+        for (_, bp_zone_config) in Blueprint::all_bp_zones(
             zones_by_sled_id,
             BlueprintZoneFilter::ShouldBeRunning,
         ) {
