@@ -1369,8 +1369,19 @@ CREATE TABLE IF NOT EXISTS omicron.public.oximeter (
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     ip INET NOT NULL,
-    port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL
+    port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
+    time_expunged TIMESTAMPTZ
 );
+
+/*
+ * The query Nexus runs to choose an Oximeter instance for new metric producers
+ * involves listing the non-expunged instances sorted by ID, which would require
+ * a full table scan without this index.
+ */
+CREATE UNIQUE INDEX IF NOT EXISTS list_non_expunged_oximeter ON omicron.public.oximeter (
+    id
+) WHERE
+    time_expunged IS NULL;
 
 /*
  * The kind of metric producer each record corresponds to.
@@ -4288,7 +4299,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '97.0.0', NULL)
+    (TRUE, NOW(), NOW(), '98.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

@@ -115,6 +115,7 @@ pub use dns::DnsVersionUpdateBuilder;
 pub use instance::{InstanceAndActiveVmm, InstanceGestalt};
 pub use inventory::DataStoreInventoryTest;
 use nexus_db_model::AllSchemaVersions;
+pub use oximeter::CollectorReassignment;
 pub use rack::RackInit;
 pub use rack::SledUnderlayAllocationResult;
 pub use region::RegionAllocationFor;
