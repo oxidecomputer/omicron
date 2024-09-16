@@ -15,20 +15,22 @@ use kstat_rs::Data;
 use kstat_rs::Kstat;
 use kstat_rs::Named;
 use oximeter::types::Cumulative;
+use oximeter::FieldType;
+use oximeter::FieldValue;
 use oximeter::Sample;
+use oximeter::Target;
+use uuid::Uuid;
 
 oximeter::use_timeseries!("sled-data-link.toml");
+pub use self::sled_data_link::SledDataLink as SledDataLinkTarget;
 
 /// Helper function to extract the same kstat metrics from all link targets.
-fn extract_link_kstats<T>(
-    target: &T,
+fn extract_link_kstats(
+    target: &SledDataLink,
     named_data: &Named,
     creation_time: DateTime<Utc>,
     snapshot_time: DateTime<Utc>,
-) -> Option<Result<Sample, Error>>
-where
-    T: KstatTarget,
-{
+) -> Option<Result<Sample, Error>> {
     let Named { name, value } = named_data;
     if *name == "rbytes64" {
         Some(value.as_u64().and_then(|x| {
@@ -83,23 +85,52 @@ where
     }
 }
 
-// Helper trait for defining `KstatTarget` for all the link-based stats.
-trait LinkKstatTarget: KstatTarget {
-    fn link_name(&self) -> &str;
+#[derive(Clone, Debug)]
+pub struct SledDataLink {
+    /// The target for this link.
+    pub target: SledDataLinkTarget,
+    /// Flag indicating whether the sled associated with this link is synced.
+    pub synced: bool,
 }
 
-impl LinkKstatTarget for sled_data_link::SledDataLink {
-    fn link_name(&self) -> &str {
-        &self.link_name
+impl SledDataLink {
+    /// Create a new `SledDataLink` with the given target and synchronization
+    /// flag.
+    pub fn new(target: SledDataLinkTarget, synced: bool) -> Self {
+        Self { target, synced }
+    }
+
+    /// Create a new `SledDataLink` with the given target and no synchronization
+    /// flag set to `false` by default.
+    pub fn fresh(target: SledDataLinkTarget) -> Self {
+        Self { target, synced: false }
+    }
+
+    /// Return the name of the link.
+    pub fn link_name(&self) -> &str {
+        &self.target.link_name
+    }
+
+    /// Return the zone name of the link.
+    pub fn zone_name(&self) -> &str {
+        &self.target.zone_name
+    }
+
+    /// Return the kind of link.
+    pub fn kind(&self) -> &str {
+        &self.target.kind
+    }
+
+    /// Return the idenity of the sled.
+    pub fn sled_id(&self) -> Uuid {
+        self.target.sled_id
     }
 }
 
-impl<T> KstatTarget for T
-where
-    T: LinkKstatTarget,
-{
+impl KstatTarget for SledDataLink {
     fn interested(&self, kstat: &Kstat<'_>) -> bool {
-        kstat.ks_module == "link"
+        self.synced
+            && kstat.ks_module == "link"
             && kstat.ks_instance == 0
             && kstat.ks_name == self.link_name()
     }
@@ -121,6 +152,25 @@ where
                 extract_link_kstats(self, nd, *creation_time, snapshot_time)
             })
             .collect()
+    }
+}
+
+// NOTE: Delegate to the inner target type for this implementation.
+impl Target for SledDataLink {
+    fn name(&self) -> &'static str {
+        self.target.name()
+    }
+
+    fn field_names(&self) -> &'static [&'static str] {
+        self.target.field_names()
+    }
+
+    fn field_types(&self) -> Vec<FieldType> {
+        self.target.field_types()
+    }
+
+    fn field_values(&self) -> Vec<FieldValue> {
+        self.target.field_values()
     }
 }
 
@@ -226,9 +276,9 @@ mod tests {
     }
 
     #[test]
-    fn test_sled_datalink() {
+    fn test_kstat_interested() {
         let link = TestEtherstub::new();
-        let dl = sled_data_link::SledDataLink {
+        let target = SledDataLinkTarget {
             rack_id: RACK_ID,
             sled_id: SLED_ID,
             sled_serial: SLED_SERIAL.into(),
@@ -238,6 +288,37 @@ mod tests {
             sled_revision: SLED_REVISION,
             zone_name: ZONE_NAME.into(),
         };
+        // not with a synced sled (by default)
+        let mut dl = SledDataLink::fresh(target);
+
+        let ctl = Ctl::new().unwrap();
+        let ctl = ctl.update().unwrap();
+        let kstat = ctl
+            .filter(Some("link"), Some(0), Some(link.name.as_str()))
+            .next()
+            .unwrap();
+
+        assert!(!dl.interested(&kstat));
+
+        // with a synced sled
+        dl.synced = true;
+        assert!(dl.interested(&kstat));
+    }
+
+    #[test]
+    fn test_sled_datalink() {
+        let link = TestEtherstub::new();
+        let target = SledDataLinkTarget {
+            rack_id: RACK_ID,
+            sled_id: SLED_ID,
+            sled_serial: SLED_SERIAL.into(),
+            link_name: link.name.clone().into(),
+            kind: KIND.into(),
+            sled_model: SLED_MODEL.into(),
+            sled_revision: SLED_REVISION,
+            zone_name: ZONE_NAME.into(),
+        };
+        let dl = SledDataLink::new(target, true);
         let ctl = Ctl::new().unwrap();
         let ctl = ctl.update().unwrap();
         let mut kstat = ctl
@@ -254,7 +335,7 @@ mod tests {
     async fn test_kstat_sampler() {
         let mut sampler = KstatSampler::new(&test_logger()).unwrap();
         let link = TestEtherstub::new();
-        let dl = sled_data_link::SledDataLink {
+        let target = SledDataLinkTarget {
             rack_id: RACK_ID,
             sled_id: SLED_ID,
             sled_serial: SLED_SERIAL.into(),
@@ -264,6 +345,7 @@ mod tests {
             sled_revision: SLED_REVISION,
             zone_name: ZONE_NAME.into(),
         };
+        let dl = SledDataLink::new(target, true);
         let details = CollectionDetails::never(Duration::from_secs(1));
         let id = sampler.add_target(dl, details).await.unwrap();
         let samples: Vec<_> = sampler.produce().unwrap().collect();
@@ -304,7 +386,7 @@ mod tests {
         let mut sampler =
             KstatSampler::with_sample_limit(&test_logger(), limit).unwrap();
         let link = TestEtherstub::new();
-        let dl = sled_data_link::SledDataLink {
+        let target = SledDataLinkTarget {
             rack_id: RACK_ID,
             sled_id: SLED_ID,
             sled_serial: SLED_SERIAL.into(),
@@ -314,6 +396,7 @@ mod tests {
             sled_revision: SLED_REVISION,
             zone_name: ZONE_NAME.into(),
         };
+        let dl = SledDataLink::new(target, true);
         let details = CollectionDetails::never(Duration::from_secs(1));
         sampler.add_target(dl, details).await.unwrap();
         let samples: Vec<_> = sampler.produce().unwrap().collect();
@@ -373,7 +456,7 @@ mod tests {
         let mut sampler = KstatSampler::new(&log).unwrap();
         let link = TestEtherstub::new();
         info!(log, "created test etherstub"; "name" => &link.name);
-        let dl = sled_data_link::SledDataLink {
+        let target = SledDataLinkTarget {
             rack_id: RACK_ID,
             sled_id: SLED_ID,
             sled_serial: SLED_SERIAL.into(),
@@ -383,6 +466,7 @@ mod tests {
             sled_revision: SLED_REVISION,
             zone_name: ZONE_NAME.into(),
         };
+        let dl = SledDataLink::new(target, true);
         let collection_interval = Duration::from_secs(1);
         let expiry = Duration::from_secs(1);
         let details = CollectionDetails::duration(collection_interval, expiry);
@@ -432,7 +516,7 @@ mod tests {
         let mut sampler = KstatSampler::new(&log).unwrap();
         let link = TestEtherstub::new();
         info!(log, "created test etherstub"; "name" => &link.name);
-        let dl = sled_data_link::SledDataLink {
+        let target = SledDataLinkTarget {
             rack_id: RACK_ID,
             sled_id: SLED_ID,
             sled_serial: SLED_SERIAL.into(),
@@ -442,6 +526,7 @@ mod tests {
             sled_revision: SLED_REVISION,
             zone_name: ZONE_NAME.into(),
         };
+        let dl = SledDataLink::new(target, true);
         let collection_interval = Duration::from_secs(1);
         let expiry = Duration::from_secs(1);
         let details = CollectionDetails::duration(collection_interval, expiry);
@@ -483,7 +568,7 @@ mod tests {
             name: link.name.clone(),
         };
         info!(log, "created test etherstub"; "name" => &link.name);
-        let dl = sled_data_link::SledDataLink {
+        let target = SledDataLinkTarget {
             rack_id: RACK_ID,
             sled_id: SLED_ID,
             sled_serial: SLED_SERIAL.into(),
@@ -493,6 +578,7 @@ mod tests {
             sled_revision: SLED_REVISION,
             zone_name: ZONE_NAME.into(),
         };
+        let dl = SledDataLink::new(target, true);
         let collection_interval = Duration::from_secs(1);
         let expiry = Duration::from_secs(1);
         let details = CollectionDetails::duration(collection_interval, expiry);
@@ -532,7 +618,7 @@ mod tests {
             name: link.name.clone(),
         };
         info!(log, "created test etherstub"; "name" => &link.name);
-        let dl = sled_data_link::SledDataLink {
+        let target = SledDataLinkTarget {
             rack_id: RACK_ID,
             sled_id: SLED_ID,
             sled_serial: SLED_SERIAL.into(),
@@ -542,6 +628,7 @@ mod tests {
             sled_revision: SLED_REVISION,
             zone_name: ZONE_NAME.into(),
         };
+        let dl = SledDataLink::new(target, true);
         let collection_interval = Duration::from_secs(1);
         let expiry = Duration::from_secs(1);
         let details = CollectionDetails::duration(collection_interval, expiry);

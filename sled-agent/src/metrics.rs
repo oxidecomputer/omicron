@@ -8,7 +8,8 @@ use illumos_utils::running_zone::RunningZone;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::api::internal::nexus::ProducerKind;
 use omicron_common::api::internal::shared::SledIdentifiers;
-use oximeter_instruments::kstat::link::sled_data_link::SledDataLink;
+use oximeter_instruments::kstat::link::SledDataLink;
+use oximeter_instruments::kstat::link::SledDataLinkTarget;
 use oximeter_instruments::kstat::CollectionDetails;
 use oximeter_instruments::kstat::Error as KstatError;
 use oximeter_instruments::kstat::KstatSampler;
@@ -23,6 +24,8 @@ use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use uuid::Uuid;
+
+type TrackedLinks = HashMap<String, Target>;
 
 /// The interval on which we ask `oximeter` to poll us for metric data.
 const METRIC_COLLECTION_INTERVAL: Duration = Duration::from_secs(30);
@@ -84,6 +87,8 @@ pub(crate) enum Message {
     TrackOptePort { zone_name: String, name: String },
     /// Stop tracking the named OPTE port.
     UntrackOptePort { name: String },
+    /// Notify the task that a sled has been synced.
+    SyncedSled { sled_id: Uuid, synced: bool },
     // TODO-completeness: We will probably want to track other kinds of
     // statistics here too. For example, we could send messages when a zone is
     // created / destroyed to track zonestats; we might also want to support
@@ -100,6 +105,39 @@ impl LinkKind {
     const OPTE: &'static str = "opte";
 }
 
+struct Target {
+    id: TargetId,
+    sled_datalink: SledDataLink,
+}
+
+impl Target {
+    /// Create a new target.
+    fn new(id: TargetId, sled_datalink: SledDataLink) -> Self {
+        Self { id, sled_datalink }
+    }
+
+    /// Return the target id associated with the kstat sampler.
+    fn id(&self) -> TargetId {
+        self.id
+    }
+
+    /// Return the sled datalink's Uuid identifier.
+    fn sled_id(&self) -> Uuid {
+        self.sled_datalink.target.sled_id
+    }
+}
+
+fn get_collection_details(kind: &str) -> CollectionDetails {
+    if is_transient_link(kind) {
+        CollectionDetails::duration(
+            LINK_SAMPLE_INTERVAL,
+            TRANSIENT_LINK_EXPIRATION_INTERVAL,
+        )
+    } else {
+        CollectionDetails::never(LINK_SAMPLE_INTERVAL)
+    }
+}
+
 /// The main task used to collect and publish sled-agent metrics.
 async fn metrics_task(
     sled_identifiers: SledIdentifiers,
@@ -108,7 +146,8 @@ async fn metrics_task(
     log: Logger,
     mut rx: mpsc::Receiver<Message>,
 ) {
-    let mut tracked_links: HashMap<String, TargetId> = HashMap::new();
+    let mut tracked_links: TrackedLinks = HashMap::new();
+    let mut sled_synced: bool = false;
 
     // Main polling loop, waiting for messages from other pieces of the code to
     // track various statistics.
@@ -118,9 +157,10 @@ async fn metrics_task(
             return;
         };
         trace!(log, "received message"; "message" => ?message);
+
         match message {
             Message::TrackPhysical { zone_name, name } => {
-                let link = SledDataLink {
+                let target = SledDataLinkTarget {
                     kind: LinkKind::PHYSICAL.into(),
                     link_name: name.into(),
                     rack_id: sled_identifiers.rack_id,
@@ -130,11 +170,12 @@ async fn metrics_task(
                     sled_serial: sled_identifiers.serial.clone().into(),
                     zone_name: zone_name.into(),
                 };
+                let link = SledDataLink::new(target, sled_synced);
                 add_datalink(&log, &mut tracked_links, &kstat_sampler, link)
                     .await;
             }
             Message::TrackVnic { zone_name, name } => {
-                let link = SledDataLink {
+                let target = SledDataLinkTarget {
                     kind: LinkKind::VNIC.into(),
                     link_name: name.into(),
                     rack_id: sled_identifiers.rack_id,
@@ -144,6 +185,7 @@ async fn metrics_task(
                     sled_serial: sled_identifiers.serial.clone().into(),
                     zone_name: zone_name.into(),
                 };
+                let link = SledDataLink::new(target, sled_synced);
                 add_datalink(&log, &mut tracked_links, &kstat_sampler, link)
                     .await;
             }
@@ -152,7 +194,7 @@ async fn metrics_task(
                     .await
             }
             Message::TrackOptePort { zone_name, name } => {
-                let link = SledDataLink {
+                let target = SledDataLinkTarget {
                     kind: LinkKind::OPTE.into(),
                     link_name: name.into(),
                     rack_id: sled_identifiers.rack_id,
@@ -162,12 +204,25 @@ async fn metrics_task(
                     sled_serial: sled_identifiers.serial.clone().into(),
                     zone_name: zone_name.into(),
                 };
+                let link = SledDataLink::new(target, sled_synced);
                 add_datalink(&log, &mut tracked_links, &kstat_sampler, link)
                     .await;
             }
             Message::UntrackOptePort { name } => {
                 remove_datalink(&log, &mut tracked_links, &kstat_sampler, name)
                     .await
+            }
+            Message::SyncedSled { sled_id, synced } => {
+                if sled_id == sled_identifiers.sled_id && synced {
+                    sled_synced = true;
+                    sync_sled_datalinks(
+                        &log,
+                        &mut tracked_links,
+                        &kstat_sampler,
+                        sled_id,
+                    )
+                    .await
+                }
             }
         }
     }
@@ -176,12 +231,12 @@ async fn metrics_task(
 /// Stop tracking a link by name.
 async fn remove_datalink(
     log: &Logger,
-    tracked_links: &mut HashMap<String, TargetId>,
+    tracked_links: &mut HashMap<String, Target>,
     kstat_sampler: &KstatSampler,
     name: String,
 ) {
     match tracked_links.remove(&name) {
-        Some(id) => match kstat_sampler.remove_target(id).await {
+        Some(target) => match kstat_sampler.remove_target(target.id()).await {
             Ok(_) => {
                 debug!(
                     log,
@@ -213,32 +268,24 @@ async fn remove_datalink(
 /// Start tracking a new link of the specified kind.
 async fn add_datalink(
     log: &Logger,
-    tracked_links: &mut HashMap<String, TargetId>,
+    tracked_links: &mut HashMap<String, Target>,
     kstat_sampler: &KstatSampler,
     link: SledDataLink,
 ) {
-    match tracked_links.entry(link.link_name.to_string()) {
+    match tracked_links.entry(link.link_name().to_string()) {
         Entry::Vacant(entry) => {
-            let details = if is_transient_link(&link.kind) {
-                CollectionDetails::duration(
-                    LINK_SAMPLE_INTERVAL,
-                    TRANSIENT_LINK_EXPIRATION_INTERVAL,
-                )
-            } else {
-                CollectionDetails::never(LINK_SAMPLE_INTERVAL)
-            };
-            let kind = link.kind.clone();
-            let zone_name = link.zone_name.clone();
-            match kstat_sampler.add_target(link, details).await {
+            let details = get_collection_details(link.kind());
+            let link_to_add = link.clone();
+            match kstat_sampler.add_target(link_to_add, details).await {
                 Ok(id) => {
                     debug!(
                         log,
                         "Added new link to kstat sampler";
                         "link_name" => entry.key(),
-                        "link_kind" => %kind,
-                        "zone_name" => %zone_name,
+                        "link_kind" => %link.kind(),
+                        "zone_name" => %link.zone_name(),
                     );
-                    entry.insert(id);
+                    entry.insert(Target::new(id, link));
                 }
                 Err(err) => {
                     error!(
@@ -246,8 +293,8 @@ async fn add_datalink(
                         "Failed to add VNIC to kstat sampler, \
                         no metrics will be collected for it";
                         "link_name" => entry.key(),
-                        "link_kind" => %kind,
-                        "zone_name" => %zone_name,
+                        "link_kind" => %link.kind(),
+                        "zone_name" => %link.zone_name(),
                         "error" => ?err,
                     );
                 }
@@ -260,6 +307,41 @@ async fn add_datalink(
                 but it is already being tracked";
                 "link_name" => entry.key(),
             );
+        }
+    }
+}
+
+/// Update tracked links when a sled is synced.
+async fn sync_sled_datalinks(
+    log: &Logger,
+    tracked_links: &mut TrackedLinks,
+    kstat_sampler: &KstatSampler,
+    sled_id: Uuid,
+) {
+    for (link_name, target) in tracked_links.iter_mut() {
+        if target.sled_id() == sled_id {
+            target.sled_datalink.synced = true;
+            let details = get_collection_details(target.sled_datalink.kind());
+            match kstat_sampler
+                .update_target(target.sled_datalink.clone(), details)
+                .await
+            {
+                Ok(_) => {
+                    debug!(
+                        log,
+                        "Updated link already tracked by kstat sampler";
+                        "link_name" => link_name,
+                    );
+                }
+                Err(err) => {
+                    error!(
+                        log,
+                        "Failed to update link already tracked by kstat sampler";
+                        "link_name" => link_name,
+                        "error" => ?err,
+                    );
+                }
+            }
         }
     }
 }
@@ -278,7 +360,7 @@ fn is_transient_link(kind: &str) -> bool {
 /// `MetricsHandle`.
 #[derive(Debug)]
 pub struct MetricsManager {
-    /// Receive-side of a channel used to pass the background task messages.
+    /// Sender-side of a channel used to pass the background task messages.
     #[cfg_attr(test, allow(dead_code))]
     tx: mpsc::Sender<Message>,
     /// The background task itself.
@@ -437,6 +519,14 @@ impl MetricsRequestQueue {
             success &= self.untrack_opte_port(port).await;
         }
         success
+    }
+
+    /// Notify the task that a sled's synced value has changed.
+    ///
+    /// Typically, this is used to notify the task that a sled has *indeed* been
+    /// synced with NTP.
+    pub async fn synced_sled(&self, sled_id: Uuid, synced: bool) -> bool {
+        self.0.send(Message::SyncedSled { sled_id, synced }).await.is_ok()
     }
 }
 
