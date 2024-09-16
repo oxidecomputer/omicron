@@ -626,10 +626,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "af496613e5922fc2fd4ef37eaa92331c848524e6"
+source.commit = "986c0061f00436a827567eb5076d1ccb2de4112f"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm-gz.sha256.txt
-source.sha256 = "8accbd6e17479e65f501848ad54833b34521dead062ac91f55c2c12f41dbd716"
+source.sha256 = "e3c1f832076aff5109e969bec3eb3031c146d3390dfd12a8e1721777d04a45cd"
 output.type = "tarball"
 
 [package.mg-ddm]
@@ -642,10 +642,10 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "af496613e5922fc2fd4ef37eaa92331c848524e6"
+source.commit = "986c0061f00436a827567eb5076d1ccb2de4112f"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mg-ddm.sha256.txt
-source.sha256 = "d0209d9ef742125615737fac6c165836f21ea4e6452ce0f7fd013c54a37aee77"
+source.sha256 = "7e9ce2834a53ad4e74406997dc5db7fc24ed9e67747bbc87431baf31de9098ec"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -657,7 +657,7 @@ source.repo = "maghemite"
 # `tools/maghemite_openapi_version`. Failing to do so will cause a failure when
 # building `ddm-admin-client` (which will instruct you to update
 # `tools/maghemite_openapi_version`).
-source.commit = "af496613e5922fc2fd4ef37eaa92331c848524e6"
+source.commit = "986c0061f00436a827567eb5076d1ccb2de4112f"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/maghemite/image/<commit>/mgd.sha256.txt
 source.sha256 = "cadf32c724ff2c15de70e032898a2eed75ef99e78acaa6eb45fc772d7d6daaa1"
