@@ -21,12 +21,14 @@ use std::collections::BTreeMap;
 use std::fmt::Display;
 use wicketd_client::types::{ArtifactId, SemverVersion};
 
+type ArtifactVersions = Vec<(SemverVersion, Option<Vec<u8>>)>;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RackUpdateState {
     pub items: BTreeMap<ComponentId, UpdateItem>,
     pub system_version: Option<SemverVersion>,
-    pub artifacts: Vec<ArtifactId>,
-    pub artifact_versions: BTreeMap<KnownArtifactKind, SemverVersion>,
+    pub artifacts: Vec<(ArtifactId, Option<Vec<u8>>)>,
+    pub artifact_versions: BTreeMap<KnownArtifactKind, ArtifactVersions>,
     // The update item currently selected is recorded in
     // state.rack_state.selected.
     pub status_view_displayed: bool,
@@ -102,15 +104,18 @@ impl RackUpdateState {
         &mut self,
         logger: &Logger,
         system_version: Option<SemverVersion>,
-        artifacts: Vec<ArtifactId>,
+        artifacts: Vec<(ArtifactId, Option<Vec<u8>>)>,
         reports: EventReportMap,
     ) {
         self.system_version = system_version;
         self.artifacts = artifacts;
         self.artifact_versions.clear();
-        for id in &mut self.artifacts {
+        for (id, s) in &mut self.artifacts {
             if let Ok(known) = id.kind.parse() {
-                self.artifact_versions.insert(known, id.version.clone());
+                self.artifact_versions
+                    .entry(known)
+                    .and_modify(|x| x.push((id.version.clone(), s.clone())))
+                    .or_insert(vec![(id.version.clone(), s.clone())]);
             }
         }
 

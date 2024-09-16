@@ -32,7 +32,7 @@ pub enum Event {
     /// TUF repo artifacts unpacked by wicketd, and event reports
     ArtifactsAndEventReports {
         system_version: Option<SemverVersion>,
-        artifacts: Vec<ArtifactId>,
+        artifacts: Vec<(ArtifactId, Option<Vec<u8>>)>,
         event_reports: EventReportMap,
     },
 

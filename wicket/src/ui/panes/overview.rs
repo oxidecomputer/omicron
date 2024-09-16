@@ -1130,7 +1130,9 @@ fn append_caboose(
         git_commit,
         // Currently `name` is always the same as `board`, so we'll skip it.
         name: _,
+        sign,
         version,
+        epoch,
     } = caboose;
     let label_style = style::text_label();
     let ok_style = style::text_success();
@@ -1151,6 +1153,27 @@ fn append_caboose(
         ]
         .into(),
     );
+    if let Some(s) = sign {
+        spans.push(
+            vec![
+                prefix.clone(),
+                Span::styled("Sign Hash: ", label_style),
+                Span::styled(s.clone(), ok_style),
+            ]
+            .into(),
+        );
+    }
+    if let Some(s) = epoch {
+        spans.push(
+            vec![
+                prefix.clone(),
+                Span::styled("Epoch: ", label_style),
+                Span::styled(s.clone(), ok_style),
+            ]
+            .into(),
+        );
+    }
+
     let mut version_spans =
         vec![prefix.clone(), Span::styled("Version: ", label_style)];
     version_spans.push(Span::styled(version, ok_style));

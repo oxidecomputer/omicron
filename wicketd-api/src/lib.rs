@@ -460,6 +460,7 @@ pub enum GetInventoryResponse {
 pub struct InstallableArtifacts {
     pub artifact_id: ArtifactId,
     pub installable: Vec<ArtifactHashId>,
+    pub sign: Option<Vec<u8>>,
 }
 
 /// The response to a `get_artifacts` call: the system version, and the list of

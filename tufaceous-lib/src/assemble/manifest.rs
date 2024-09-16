@@ -297,11 +297,14 @@ impl<'a> FakeDataAttributes<'a> {
             KnownArtifactKind::SwitchRot => "SimRot",
         };
 
+        // For our purposes sign = board represents what we want for the RoT
+        // and we don't care about the SP at this point
         let caboose = CabooseBuilder::default()
             .git_commit("this-is-fake-data")
             .board(board)
             .version(self.version.to_string())
             .name(self.name)
+            .sign(board)
             .build();
 
         let mut builder = HubrisArchiveBuilder::with_fake_image();

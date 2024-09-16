@@ -12,4 +12,6 @@ pub struct SpComponentCaboose {
     pub board: String,
     pub name: String,
     pub version: String,
+    pub sign: Option<String>,
+    pub epoch: Option<String>,
 }

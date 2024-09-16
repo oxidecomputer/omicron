@@ -138,6 +138,13 @@ fn version_or_unknown(caboose: Option<&SpComponentCaboose>) -> String {
     caboose.map(|c| c.version.as_str()).unwrap_or("UNKNOWN").to_string()
 }
 
+fn caboose_sign(caboose: Option<&SpComponentCaboose>) -> Option<Vec<u8>> {
+    match caboose {
+        None => None,
+        Some(c) => c.sign.as_ref().map(|s| s.as_bytes().to_vec()),
+    }
+}
+
 impl Component {
     pub fn sp(&self) -> &Sp {
         match self {
@@ -189,6 +196,31 @@ impl Component {
             // with.
             rot.caboose_stage0next.as_ref().map_or(None, |x| x.as_ref())
         }))
+    }
+
+    // Technically the slots could have different SIGN values in the
+    // caboose. An active slot implies the RoT is up and valid so
+    // we should rely on that value for selection.
+    // We also use this for the bootloader selection as the SIGN
+    // of the bootloader is going to be identical to the RoT.
+    pub fn rot_sign(&self) -> Option<Vec<u8>> {
+        match self.rot_active_slot() {
+            None => return None,
+            Some(s) => match s {
+                RotSlot::A => caboose_sign(
+                    self.sp()
+                        .rot
+                        .as_ref()
+                        .and_then(|rot| rot.caboose_a.as_ref()),
+                ),
+                RotSlot::B => caboose_sign(
+                    self.sp()
+                        .rot
+                        .as_ref()
+                        .and_then(|rot| rot.caboose_b.as_ref()),
+                ),
+            },
+        }
     }
 }
 
