@@ -1021,6 +1021,10 @@ pub struct InstanceCreate {
     #[serde(default)]
     pub disks: Vec<InstanceDiskAttachment>,
 
+    /// Choice of which disk this instance should boot from.
+    #[serde(default)]
+    pub boot_device: Option<String>,
+
     /// An allowlist of SSH public keys to be transferred to the instance via
     /// cloud-init during instance creation.
     ///

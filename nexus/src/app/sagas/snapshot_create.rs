@@ -2115,6 +2115,18 @@ mod test {
         disks_to_attach: Vec<InstanceDiskAttachment>,
     ) -> InstanceAndActiveVmm {
         let instances_url = format!("/v1/instances?project={}", PROJECT_NAME,);
+        let boot_device = disks_to_attach.get(0).map(|disk| {
+            let name = match disk {
+                params::InstanceDiskAttachment::Create(create) => {
+                    create.identity.name.as_str()
+                },
+                params::InstanceDiskAttachment::Attach(attach) => {
+                    attach.name.as_str()
+                },
+            };
+            name.to_string()
+        });
+
         let instance: Instance = object_create(
             client,
             &instances_url,
@@ -2133,6 +2145,7 @@ mod test {
                 network_interfaces:
                     params::InstanceNetworkInterfaceAttachment::None,
                 disks: disks_to_attach,
+                boot_device,
                 external_ips: vec![],
                 start: true,
             },

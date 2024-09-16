@@ -63,6 +63,10 @@ pub struct Instance {
     #[diesel(column_name = auto_restart_policy)]
     pub auto_restart_policy: Option<InstanceAutoRestart>,
 
+    /// The primary boot device for this instance.
+    #[diesel(column_name = boot_device)]
+    pub boot_device: Option<String>,
+
     #[diesel(embed)]
     pub runtime_state: InstanceRuntimeState,
 
@@ -113,6 +117,7 @@ impl Instance {
             // TODO(eliza): allow this to be configured via the instance-create
             // params...
             auto_restart_policy: None,
+            boot_device: params.boot_device.clone(),
             runtime_state,
 
             updater_gen: Generation::new(),

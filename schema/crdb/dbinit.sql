@@ -1107,6 +1107,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
      */
     auto_restart_policy omicron.public.instance_auto_restart,
 
+    /*
+     * Which disk, if any, is the one this instance should be directed to boot
+     * from. With a boot device selected, guest OSes cannot configure their
+     * boot policy for future boots, so also permit NULL to indicate a guest
+     * does not want our policy, and instead should be permitted control over
+     * its boot-time fates.
+     */
+    boot_device STRING(63),
+
     CONSTRAINT vmm_iff_active_propolis CHECK (
         ((state = 'vmm') AND (active_propolis_id IS NOT NULL)) OR
         ((state != 'vmm') AND (active_propolis_id IS NULL))

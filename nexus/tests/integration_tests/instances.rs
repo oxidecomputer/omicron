@@ -225,6 +225,7 @@ async fn test_create_instance_with_bad_hostname_impl(
         network_interfaces: Default::default(),
         external_ips: vec![],
         disks: vec![],
+        boot_device: None,
         start: false,
         ssh_public_keys: None,
     };
@@ -330,6 +331,7 @@ async fn test_instances_create_reboot_halt(
                     params::InstanceNetworkInterfaceAttachment::Default,
                 external_ips: vec![],
                 disks: vec![],
+                boot_device: None,
                 start: true,
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
@@ -1788,6 +1790,7 @@ async fn test_instances_create_stopped_start(
                 params::InstanceNetworkInterfaceAttachment::Default,
             external_ips: vec![],
             disks: vec![],
+            boot_device: None,
             start: false,
         },
     )
@@ -1967,6 +1970,7 @@ async fn test_instance_using_image_from_other_project_fails(
                         size: ByteCount::from_gibibytes_u32(4),
                     },
                 )],
+                boot_device: None,
                 start: true,
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
@@ -2030,6 +2034,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
         network_interfaces: interface_params.clone(),
         external_ips: vec![],
         disks: vec![],
+        boot_device: None,
         start: true,
     };
     let response = NexusRequest::objects_post(
@@ -2058,6 +2063,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
         network_interfaces: interface_params,
         external_ips: vec![],
         disks: vec![],
+        boot_device: None,
         start: true,
     };
     let _ = NexusRequest::objects_post(
@@ -2147,6 +2153,7 @@ async fn test_instance_with_single_explicit_ip_address(
         network_interfaces: interface_params,
         external_ips: vec![],
         disks: vec![],
+        boot_device: None,
         start: true,
     };
     let response = NexusRequest::objects_post(
@@ -2262,6 +2269,7 @@ async fn test_instance_with_new_custom_network_interfaces(
         network_interfaces: interface_params,
         external_ips: vec![],
         disks: vec![],
+        boot_device: None,
         start: true,
     };
     let response = NexusRequest::objects_post(
@@ -2377,6 +2385,7 @@ async fn test_instance_create_delete_network_interface(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::None,
         external_ips: vec![],
         disks: vec![],
+        boot_device: None,
         start: true,
     };
     let response = NexusRequest::objects_post(
@@ -2621,6 +2630,7 @@ async fn test_instance_update_network_interfaces(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::None,
         external_ips: vec![],
         disks: vec![],
+        boot_device: None,
         start: true,
     };
     let response = NexusRequest::objects_post(
@@ -3020,6 +3030,7 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
         network_interfaces: interface_params,
         external_ips: vec![],
         disks: vec![],
+        boot_device: None,
         start: true,
     };
     let builder =
@@ -3090,6 +3101,7 @@ async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
                 name: Name::try_from(String::from("probablydata")).unwrap(),
             },
         )],
+        boot_device: Some(String::from("probablydata")),
         start: true,
     };
 
@@ -3164,6 +3176,7 @@ async fn test_instance_create_attach_disks(
                 },
             ),
         ],
+        boot_device: Some(String::from("created-disk")),
         start: true,
     };
 
@@ -3260,6 +3273,7 @@ async fn test_instance_create_attach_disks_undo(
                 params::InstanceDiskAttach { name: faulted_disk.identity.name },
             ),
         ],
+        boot_device: Some(String::from("probablydata")),
         start: true,
     };
 
@@ -3337,6 +3351,7 @@ async fn test_attach_eight_disks_to_instance(
                 )
             })
             .collect(),
+        boot_device: Some(String::from("probablydata0")),
         start: true,
     };
 
@@ -3418,6 +3433,7 @@ async fn test_cannot_attach_nine_disks_to_instance(
                 )
             })
             .collect(),
+        boot_device: Some(String::from("probablydata0")),
         start: true,
     };
 
@@ -3513,6 +3529,7 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
                 )
             })
             .collect(),
+        boot_device: Some(String::from("probablydata0")),
         start: true,
     };
 
@@ -3597,6 +3614,7 @@ async fn test_disks_detached_when_instance_destroyed(
                 )
             })
             .collect(),
+        boot_device: Some(String::from("probablydata0")),
         start: true,
     };
 
@@ -3688,6 +3706,7 @@ async fn test_disks_detached_when_instance_destroyed(
                 )
             })
             .collect(),
+        boot_device: Some(String::from("probablydata0")),
         start: true,
     };
 
@@ -3741,6 +3760,7 @@ async fn test_instances_memory_rejected_less_than_min_memory_size(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![],
+        boot_device: None,
         start: true,
     };
 
@@ -3791,6 +3811,7 @@ async fn test_instances_memory_not_divisible_by_min_memory_size(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![],
+        boot_device: None,
         start: true,
     };
 
@@ -3841,6 +3862,7 @@ async fn test_instances_memory_greater_than_max_size(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![],
+        boot_device: None,
         start: true,
     };
 
@@ -3924,6 +3946,7 @@ async fn test_instance_create_with_ssh_keys(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![],
+        boot_device: None,
     };
 
     let builder =
@@ -3970,6 +3993,7 @@ async fn test_instance_create_with_ssh_keys(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![],
+        boot_device: None,
     };
 
     let builder =
@@ -4015,6 +4039,7 @@ async fn test_instance_create_with_ssh_keys(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![],
+        boot_device: None,
     };
 
     let builder =
@@ -4135,6 +4160,7 @@ async fn test_cannot_provision_instance_beyond_cpu_capacity(
                 params::InstanceNetworkInterfaceAttachment::Default,
             external_ips: vec![],
             disks: vec![],
+            boot_device: None,
             start: false,
         };
 
@@ -4191,6 +4217,7 @@ async fn test_cannot_provision_instance_beyond_cpu_limit(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![],
+        boot_device: None,
         start: false,
     };
     let url_instances = get_instances_url();
@@ -4244,6 +4271,7 @@ async fn test_cannot_provision_instance_beyond_ram_capacity(
                 params::InstanceNetworkInterfaceAttachment::Default,
             external_ips: vec![],
             disks: vec![],
+            boot_device: None,
             start: false,
         };
 
@@ -4542,6 +4570,7 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
         }],
         ssh_public_keys: None,
         disks: vec![],
+        boot_device: None,
         start: true,
     };
     let error = object_create_error(
@@ -4609,6 +4638,7 @@ async fn test_instance_ephemeral_ip_from_orphan_pool(
         }],
         ssh_public_keys: None,
         disks: vec![],
+        boot_device: None,
         start: true,
     };
 
@@ -4670,6 +4700,7 @@ async fn test_instance_ephemeral_ip_no_default_pool_error(
         }],
         ssh_public_keys: None,
         disks: vec![],
+        boot_device: None,
         start: true,
     };
 
@@ -4804,6 +4835,7 @@ async fn test_instance_allow_only_one_ephemeral_ip(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![ephemeral_create.clone(), ephemeral_create],
         disks: vec![],
+        boot_device: None,
         start: true,
     };
     let error = object_create_error(
@@ -4934,6 +4966,7 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
             pool: Some("default".parse::<Name>().unwrap().into()),
         }],
         disks: vec![],
+        boot_device: None,
         start: true,
     };
     let url_instances = format!("/v1/instances?project={}", PROJECT_NAME);

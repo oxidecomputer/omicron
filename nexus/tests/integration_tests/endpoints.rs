@@ -429,6 +429,7 @@ pub static DEMO_INSTANCE_CREATE: Lazy<params::InstanceCreate> =
             pool: Some(DEMO_IP_POOL_NAME.clone().into()),
         }],
         disks: vec![],
+        boot_device: None,
         start: true,
     });
 

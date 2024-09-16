@@ -1019,6 +1019,16 @@ impl super::Nexus {
             });
         }
 
+        let boot_order = match db_instance.boot_device.as_ref() {
+            Some(device) => {
+                // TODO: ensure that one of the disk request is backed by this name
+                Some(vec![device.to_owned()])
+            }
+            None => {
+                None
+            }
+        };
+
         let nics = self
             .db_datastore
             .derive_guest_network_interface_info(&opctx, &authz_instance)
@@ -1166,6 +1176,7 @@ impl super::Nexus {
                 search_domains: Vec::new(),
             },
             disks: disk_reqs,
+            boot_order,
             cloud_init_bytes: Some(base64::Engine::encode(
                 &base64::engine::general_purpose::STANDARD,
                 db_instance.generate_cidata(&ssh_keys)?,
@@ -2246,6 +2257,7 @@ mod tests {
             network_interfaces: InstanceNetworkInterfaceAttachment::None,
             external_ips: vec![],
             disks: vec![],
+            boot_device: None,
             ssh_public_keys: None,
             start: false,
         };

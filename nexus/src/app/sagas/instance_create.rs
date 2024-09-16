@@ -1125,6 +1125,7 @@ pub mod test {
                         name: DISK_NAME.parse().unwrap(),
                     },
                 )],
+                boot_device: Some(String::from(DISK_NAME)),
                 start: false,
             },
             boundary_switches: HashSet::from([SwitchLocation::Switch0]),

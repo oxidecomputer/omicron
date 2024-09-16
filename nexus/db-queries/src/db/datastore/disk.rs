@@ -336,6 +336,8 @@ impl DataStore {
                 .filter(instance::dsl::state
                         .eq_any(ok_to_detach_instance_states)
                         .and(instance::dsl::active_propolis_id.is_null())),
+                        // TODO: sure did think i could just call .name() here...
+//                        .and(instance::dsl::boot_device.ne(authz_disk.name()))),
             disk::table
                 .into_boxed()
                 .filter(disk::dsl::disk_state.eq_any(ok_to_detach_disk_state_labels)),
@@ -388,6 +390,9 @@ impl DataStore {
                                 // Ok-to-be-detached instance states:
                                 api::external::InstanceState::Creating |
                                 api::external::InstanceState::Stopped => {
+                                    // TODO: if the disk is the current boot option, it also can't
+                                    // be detached. Detect the condition and report it here if so.
+                                    //
                                     // We can't detach, but the error hasn't
                                     // helped us infer why.
                                     return Err(Error::internal_error(

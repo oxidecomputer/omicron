@@ -3232,6 +3232,13 @@
               "$ref": "#/components/schemas/DiskRequest"
             }
           },
+          "boot_order": {
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "ephemeral_ip": {
             "nullable": true,
             "description": "Zero or more external IP addresses (either floating or ephemeral), provided to an instance to allow inbound connectivity.",

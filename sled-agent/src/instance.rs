@@ -735,6 +735,7 @@ impl InstanceRunner {
                 .cloned()
                 .map(Into::into)
                 .collect(),
+            boot_order: Some(vec![]),
             migrate,
             cloud_init_bytes: self.cloud_init_bytes.clone().map(|x| x.0),
         };
@@ -1836,6 +1837,7 @@ mod tests {
                 search_domains: vec![],
             },
             disks: vec![],
+            boot_device: None,
             cloud_init_bytes: None,
         };
 

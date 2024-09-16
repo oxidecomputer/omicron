@@ -2836,6 +2836,7 @@ mod tests {
                             params::InstanceNetworkInterfaceAttachment::None,
                         external_ips: vec![],
                         disks: vec![],
+                        boot_device: None,
                         ssh_public_keys: None,
                         start: false,
                     },
