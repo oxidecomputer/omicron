@@ -17372,10 +17372,10 @@
         ]
       },
       "RouteDestination": {
-        "description": "A `RouteDestination` is used to match traffic with a routing rule, on the destination of that traffic.\n\nWhen traffic is to be sent to a destination that is within a given `RouteDestination`, the corresponding `RouterRoute` applies, and traffic will be forward to the `RouteTarget` for that rule.",
+        "description": "A `RouteDestination` is used to match traffic with a routing rule based on the destination of that traffic.\n\nWhen traffic is to be sent to a destination that is within a given `RouteDestination`, the corresponding `RouterRoute` applies, and traffic will be forward to the `RouteTarget` for that rule.",
         "oneOf": [
           {
-            "description": "Route applies to traffic destined for a specific IP address",
+            "description": "Route applies to traffic destined for the specified IP address",
             "type": "object",
             "properties": {
               "type": {
@@ -17395,7 +17395,7 @@
             ]
           },
           {
-            "description": "Route applies to traffic destined for a specific IP subnet",
+            "description": "Route applies to traffic destined for the specified IP subnet",
             "type": "object",
             "properties": {
               "type": {
@@ -17414,7 +17414,7 @@
             ]
           },
           {
-            "description": "Route applies to traffic destined for the given VPC.",
+            "description": "Route applies to traffic destined for the specified VPC",
             "type": "object",
             "properties": {
               "type": {
@@ -17433,7 +17433,7 @@
             ]
           },
           {
-            "description": "Route applies to traffic",
+            "description": "Route applies to traffic destined for the specified VPC subnet",
             "type": "object",
             "properties": {
               "type": {

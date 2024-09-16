@@ -1411,8 +1411,8 @@ pub enum RouteTarget {
     Drop,
 }
 
-/// A `RouteDestination` is used to match traffic with a routing rule, on the
-/// destination of that traffic.
+/// A `RouteDestination` is used to match traffic with a routing rule based on
+/// the destination of that traffic.
 ///
 /// When traffic is to be sent to a destination that is within a given
 /// `RouteDestination`, the corresponding `RouterRoute` applies, and traffic
@@ -1430,13 +1430,13 @@ pub enum RouteTarget {
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 #[display("{}:{0}", style = "lowercase")]
 pub enum RouteDestination {
-    /// Route applies to traffic destined for a specific IP address
+    /// Route applies to traffic destined for the specified IP address
     Ip(IpAddr),
-    /// Route applies to traffic destined for a specific IP subnet
+    /// Route applies to traffic destined for the specified IP subnet
     IpNet(IpNet),
-    /// Route applies to traffic destined for the given VPC.
+    /// Route applies to traffic destined for the specified VPC
     Vpc(Name),
-    /// Route applies to traffic
+    /// Route applies to traffic destined for the specified VPC subnet
     Subnet(Name),
 }
 
