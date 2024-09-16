@@ -149,18 +149,26 @@ impl ClickhouseAllocator {
             return bump_gen_if_necessary(new_config);
         };
 
-        // If we've already seen this inventory then skip keeper planning
-        if inventory_membership.leader_committed_log_index
-            <= self.parent_config.highest_seen_keeper_leader_committed_log_index
+        // Save the log index for next time if it's been incremented
+        let inventory_updated = if inventory_membership
+            .leader_committed_log_index
+            > self.parent_config.highest_seen_keeper_leader_committed_log_index
         {
-            return bump_gen_if_necessary(new_config);
-        }
-
-        // Save the log index for next time
-        new_config.highest_seen_keeper_leader_committed_log_index =
-            inventory_membership.leader_committed_log_index;
+            new_config.highest_seen_keeper_leader_committed_log_index =
+                inventory_membership.leader_committed_log_index;
+            true
+        } else {
+            false
+        };
 
         if current_keepers != inventory_membership.raft_config {
+            // We know that there is a reconfiguration in progress. If there has
+            // been no inventory update to reflect the change yet, then skip the
+            // rest of planning.
+            if !inventory_updated {
+                return bump_gen_if_necessary(new_config);
+            }
+
             // We're still trying to reach our desired state. We want to ensure,
             // however, that if we are currently trying to add a node, that we
             // have not expunged the zone of the keeper that we are trying to
@@ -478,6 +486,8 @@ pub mod test {
         allocator.inventory.as_mut().unwrap().leader_committed_log_index += 1;
         let new_config = allocator.plan().unwrap();
         assert!(!new_config.needs_generation_bump(&allocator.parent_config));
+
+        logctx.cleanup_successful();
     }
 
     #[test]
@@ -517,8 +527,6 @@ pub mod test {
         // in-service zones
         allocator.in_service_clickhouse_zones.keepers.pop_first();
         allocator.in_service_clickhouse_zones.keepers.pop_first();
-        // Bump the inventory index so that we get to this check
-        allocator.inventory.as_mut().unwrap().leader_committed_log_index += 1;
 
         // Running the planner should remove one of the keepers from the new config
         let new_config = allocator.plan().unwrap();
@@ -592,6 +600,8 @@ pub mod test {
         allocator.parent_config = new_config;
         let new_config = allocator.plan().unwrap();
         assert!(!new_config.needs_generation_bump(&allocator.parent_config));
+
+        logctx.cleanup_successful();
     }
 
     #[test]
@@ -690,6 +700,8 @@ pub mod test {
         assert_eq!(new_config.keepers.len(), 5);
         assert_eq!(*new_config.keepers.get(&new_zone_id).unwrap(), KeeperId(6));
         assert_eq!(new_config.max_used_keeper_id, 6.into());
+
+        logctx.cleanup_successful();
     }
 
     #[test]
@@ -746,6 +758,8 @@ pub mod test {
         let new_config = allocator.plan().unwrap();
         assert_eq!(new_config.keepers.len(), 4);
         assert!(!new_config.keepers.contains_key(&zone_to_expunge));
+
+        logctx.cleanup_successful();
     }
 
     #[test]
@@ -807,6 +821,8 @@ pub mod test {
         assert_eq!(new_config.max_used_keeper_id, 4.into());
         assert_eq!(new_config.keepers.len(), 4);
         assert_eq!(new_config.servers.len(), 5);
+
+        logctx.cleanup_successful();
     }
 
     #[test]
@@ -844,5 +860,7 @@ pub mod test {
         // software to trigger alerts, etc... In practice the `BlueprintBuilder`
         // should not change it's config when it receives an error.
         assert!(allocator.plan().is_err());
+
+        logctx.cleanup_successful();
     }
 }
