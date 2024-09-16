@@ -205,7 +205,7 @@ impl Blueprint {
     /// Iterate over the [`BlueprintZoneConfig`] instances that match the
     /// provided filter, along with the associated sled id.
     //
-    // Ths was moved to a free function so that it could be used in the
+    // This is a scoped function so that it can be used in the
     // `BlueprintBuilder` during planning as well as in the `Blueprint`.
     pub fn all_bp_zones(
         zones_by_sled_id: &BTreeMap<SledUuid, BlueprintZonesConfig>,
