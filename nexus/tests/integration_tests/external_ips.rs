@@ -1265,7 +1265,7 @@ async fn instance_for_external_ips(
         vec![],
         fips,
         start,
-        None,
+        Default::default(),
     )
     .await
 }

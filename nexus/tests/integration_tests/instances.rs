@@ -56,6 +56,7 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Instance;
+use omicron_common::api::external::InstanceAutoRestartPolicy;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::InstanceNetworkInterface;
 use omicron_common::api::external::InstanceState;
@@ -774,7 +775,7 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
         Vec::<params::InstanceDiskAttachment>::new(),
         Vec::<params::ExternalIpCreate>::new(),
         true,
-        None,
+        Default::default(),
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -966,7 +967,7 @@ async fn test_instance_migrate_v2p_and_routes(
         Vec::<params::InstanceDiskAttachment>::new(),
         Vec::<params::ExternalIpCreate>::new(),
         true,
-        None,
+        Default::default(),
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -1120,8 +1121,12 @@ async fn test_instance_failed_after_sled_agent_forgets_vmm_can_be_restarted(
     let client = &cptestctx.external_client;
 
     let instance_name = "losing-is-fun";
-    let instance_id =
-        make_forgotten_instance(&cptestctx, instance_name, None).await;
+    let instance_id = make_forgotten_instance(
+        &cptestctx,
+        instance_name,
+        auto_restart_never(),
+    )
+    .await;
 
     // Attempting to reboot the forgotten instance will result in a 404
     // NO_SUCH_INSTANCE from the sled-agent, which Nexus turns into a 503.
@@ -1149,8 +1154,12 @@ async fn test_instance_failed_after_sled_agent_forgets_vmm_can_be_deleted(
     let client = &cptestctx.external_client;
 
     let instance_name = "losing-is-fun";
-    let instance_id =
-        make_forgotten_instance(&cptestctx, instance_name, None).await;
+    let instance_id = make_forgotten_instance(
+        &cptestctx,
+        instance_name,
+        auto_restart_never(),
+    )
+    .await;
 
     // Attempting to reboot the forgotten instance will result in a 404
     // NO_SUCH_INSTANCE from the sled-agent, which Nexus turns into a 503.
@@ -1177,8 +1186,12 @@ async fn test_instance_failed_by_instance_watcher_can_be_deleted(
 ) {
     let client = &cptestctx.external_client;
     let instance_name = "losing-is-fun";
-    let instance_id =
-        make_forgotten_instance(&cptestctx, instance_name, None).await;
+    let instance_id = make_forgotten_instance(
+        &cptestctx,
+        instance_name,
+        auto_restart_never(),
+    )
+    .await;
 
     nexus_test_utils::background::activate_background_task(
         &cptestctx.internal_client,
@@ -1202,8 +1215,12 @@ async fn test_instance_failed_by_instance_watcher_can_be_restarted(
 ) {
     let client = &cptestctx.external_client;
     let instance_name = "losing-is-fun";
-    let instance_id =
-        make_forgotten_instance(&cptestctx, instance_name, None).await;
+    let instance_id = make_forgotten_instance(
+        &cptestctx,
+        instance_name,
+        auto_restart_never(),
+    )
+    .await;
 
     nexus_test_utils::background::activate_background_task(
         &cptestctx.internal_client,
@@ -1316,7 +1333,7 @@ async fn test_instance_failed_by_instance_watcher_automatically_reincarnates(
         make_forgotten_instance(
             &cptestctx,
             "resurgam",
-            Some(params::InstanceAutoRestart::BestEffort),
+            auto_restart_best_effort(),
         )
         .await
     );
@@ -1437,7 +1454,7 @@ async fn test_instances_are_not_marked_failed_on_other_sled_agent_errors_by_inst
 async fn make_forgotten_instance(
     cptestctx: &ControlPlaneTestContext,
     instance_name: &str,
-    auto_restart_policy: Option<params::InstanceAutoRestart>,
+    auto_restart: params::InstanceAutoRestart,
 ) -> InstanceUuid {
     let client = &cptestctx.external_client;
     let apictx = &cptestctx.server.server_context();
@@ -1456,7 +1473,7 @@ async fn make_forgotten_instance(
         // External IPs=
         Vec::<params::ExternalIpCreate>::new(),
         true,
-        auto_restart_policy,
+        auto_restart,
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -1480,6 +1497,20 @@ async fn make_forgotten_instance(
         .expect("instance_unregister must succeed");
 
     instance_id
+}
+
+fn auto_restart_never() -> params::InstanceAutoRestart {
+    params::InstanceAutoRestart {
+        policy: Some(InstanceAutoRestartPolicy::Never),
+        cooldown_secs: None, // use the default cooldown
+    }
+}
+
+fn auto_restart_best_effort() -> params::InstanceAutoRestart {
+    params::InstanceAutoRestart {
+        policy: Some(InstanceAutoRestartPolicy::Never),
+        cooldown_secs: None, // use the default cooldown
+    }
 }
 
 async fn expect_instance_delete_ok(
@@ -1698,7 +1729,7 @@ async fn test_instance_metrics_with_migration(
         Vec::<params::InstanceDiskAttachment>::new(),
         Vec::<params::ExternalIpCreate>::new(),
         true,
-        None,
+        Default::default(),
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -4843,7 +4874,7 @@ async fn test_instance_attach_several_external_ips(
         vec![],
         external_ip_create,
         true,
-        None,
+        Default::default(),
     )
     .await;
 
@@ -4944,7 +4975,7 @@ async fn create_instance_with_pool(
             pool: pool_name.map(|name| name.parse::<Name>().unwrap().into()),
         }],
         true,
-        None,
+        Default::default(),
     )
     .await
 }
