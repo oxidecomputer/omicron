@@ -1346,13 +1346,17 @@ async fn test_instance_failed_by_instance_watcher_automatically_reincarnates(
         .await
     );
 
-    // Wait for the instance to transition to Failed.
-    dbg!(
-        instance_wait_for_state(client, instance_id, InstanceState::Failed)
-            .await
-    );
-
     // Now, it should be automatically restarted!
+
+    // N.B.: it's tempting to want to wait for the instance to transition
+    // the way to `Failed`, or at least to `Stopping`, before it transitions to
+    // `Starting` again, but
+    // unfortunately, because the instance-update saga triggered by the
+    // instance-watcher task immediately triggers instance reincarnation, and
+    // this instance will be the only instance eligible to reincarnate, it's
+    // _very_ easy for the test to miss the very brief period of time it's in
+    // the `Failed` state, especially if we only poll once per second in
+    // `instance_wait_for_state`.
     dbg!(
         instance_wait_for_state(client, instance_id, InstanceState::Starting)
             .await
