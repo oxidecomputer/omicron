@@ -20,7 +20,7 @@ use crate::db::identity::Resource;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Generation;
 use crate::db::model::Instance;
-use crate::db::model::InstanceAutoRestartConfig;
+use crate::db::model::InstanceAutoRestart;
 use crate::db::model::InstanceRuntimeState;
 use crate::db::model::InstanceState;
 use crate::db::model::Migration;
@@ -196,6 +196,32 @@ impl From<InstanceAndActiveVmm> for external::Instance {
             .as_ref()
             .map(|vmm| vmm.runtime.time_state_updated)
             .unwrap_or(value.instance.runtime_state.time_updated);
+        let auto_restart = {
+            // The instance may or may not explicitly override the cooldown and
+            // auto-restart policy settings. If it does not, return whatever
+            // default values Nexus is currently using, so that they can be
+            // displayed in the UI.
+            //
+            // Eventually, these fields may have project-level defaults, so if the
+            // instance doesn't provide a value we'll have to use the
+            // project's default if one exists. For now, though, fall back
+            // to the hard- coded default if the instance hasn't overridden
+            // it.
+            let cooldown = value
+                .instance
+                .auto_restart
+                .cooldown
+                .unwrap_or(InstanceAutoRestart::DEFAULT_COOLDOWN)
+                .to_std()
+                .expect("auto-restart cooldowns should not be negative");
+            let policy = value
+                .instance
+                .auto_restart
+                .policy
+                .unwrap_or(InstanceAutoRestart::DEFAULT_POLICY)
+                .into();
+            external::InstanceAutoRestart { cooldown, policy }
+        };
 
         Self {
             identity: value.instance.identity(),
@@ -208,19 +234,6 @@ impl From<InstanceAndActiveVmm> for external::Instance {
                 .parse()
                 .expect("found invalid hostname in the database"),
 
-            auto_restart_cooldown: value
-                .instance()
-                .auto_restart
-                .cooldown
-                // Eventually, this may have a project-level default, so if the
-                // instance doesn't provide a value we'll have to use the
-                // project's default if one exists. For now, though, fall back
-                // to the hard- coded default if the instance hasn't overridden
-                // it.
-                .unwrap_or(InstanceAutoRestartConfig::DEFAULT_COOLDOWN)
-                .to_std()
-                .expect("we should never make a negative cooldown period"),
-
             runtime: external::InstanceRuntimeState {
                 run_state: value.effective_state(),
                 time_run_state_updated,
@@ -229,6 +242,8 @@ impl From<InstanceAndActiveVmm> for external::Instance {
                     .runtime_state
                     .time_last_auto_restarted,
             },
+
+            auto_restart,
         }
     }
 }
@@ -482,7 +497,7 @@ impl DataStore {
 
         dsl::instance
             // Select only those instances which may be reincarnated.
-            .filter(InstanceAutoRestartConfig::filter_reincarnatable())
+            .filter(InstanceAutoRestart::filter_reincarnatable())
             // Exclude any instance IDs we were asked to skip (typically because
             // a previous start saga for those instances failed unexpectedly)
             .filter(dsl::id.ne_all(skipped_ids.into_iter()))
@@ -1705,7 +1720,7 @@ mod tests {
                         disks: Vec::new(),
                         ssh_public_keys: None,
                         start: false,
-                        auto_restart_policy: None,
+                        auto_restart: Default::default(),
                     },
                 ),
             )

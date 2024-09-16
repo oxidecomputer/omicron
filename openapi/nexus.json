@@ -13153,6 +13153,25 @@
           "sum_of_samples"
         ]
       },
+      "Duration": {
+        "type": "object",
+        "properties": {
+          "nanos": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "secs": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "nanos",
+          "secs"
+        ]
+      },
       "EphemeralIpCreate": {
         "description": "Parameters for creating an ephemeral IP address for an instance.",
         "type": "object",
@@ -15092,6 +15111,22 @@
         "description": "View of an Instance",
         "type": "object",
         "properties": {
+          "auto_restart_cooldown": {
+            "description": "The cooldown period that must elapse between automatic restarts of this instance.\n\nIf the instance transitions to `Failed`, is automatically restarted, and then transitions to `Failed` again, it will not be automatically restarted again until this duration has elapsed since the last automatic restart.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          },
+          "auto_restart_policy": {
+            "description": "The auto-restart policy for this instance. This may be explicitly configured for the instance, or may be a default value.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceAutoRestartPolicy"
+              }
+            ]
+          },
           "description": {
             "description": "human-readable free-form text about a resource",
             "type": "string"
@@ -15159,6 +15194,8 @@
           }
         },
         "required": [
+          "auto_restart_cooldown",
+          "auto_restart_policy",
           "description",
           "hostname",
           "id",
@@ -15173,6 +15210,30 @@
         ]
       },
       "InstanceAutoRestart": {
+        "description": "Configures how and when an instance should be automatically restarted.",
+        "type": "object",
+        "properties": {
+          "cooldown_secs": {
+            "nullable": true,
+            "description": "The cooldown period that must elapse between automatic restarts of this instance, in seconds.\n\nIf this is `null`, no explicit cooldown period has been configured for this instance, and the default cooldown period should be used instead.",
+            "default": null,
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "policy": {
+            "nullable": true,
+            "description": "The auto-restart policy for this instance.\n\nThis indicates whether the instance should be automatically restarted by the control plane on failure. If this is `null`, no auto-restart policy has been configured for this instance by the user.",
+            "default": null,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceAutoRestartPolicy"
+              }
+            ]
+          }
+        }
+      },
+      "InstanceAutoRestartPolicy": {
         "description": "A policy determining when an instance should be automatically restarted by the control plane.",
         "oneOf": [
           {
@@ -15201,10 +15262,12 @@
         "description": "Create-time parameters for an `Instance`",
         "type": "object",
         "properties": {
-          "auto_restart_policy": {
-            "nullable": true,
-            "description": "A policy that indicates whether the control plane should automatically restart this instance if it fails.",
-            "default": null,
+          "auto_restart": {
+            "description": "Configuration for automatically restarting this instance if it fails.",
+            "default": {
+              "cooldown_secs": null,
+              "policy": null
+            },
             "allOf": [
               {
                 "$ref": "#/components/schemas/InstanceAutoRestart"

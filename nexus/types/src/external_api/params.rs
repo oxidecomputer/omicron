@@ -12,8 +12,9 @@ use http::Uri;
 use omicron_common::api::external::{
     AddressLotKind, AllowedSourceIps, BfdMode, BgpPeer, ByteCount, Hostname,
     IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
-    InstanceCpuCount, LinkFec, LinkSpeed, Name, NameOrId, PaginationOrder,
-    RouteDestination, RouteTarget, SemverVersion, UserId,
+    InstanceAutoRestartPolicy, InstanceCpuCount, LinkFec, LinkSpeed, Name,
+    NameOrId, PaginationOrder, RouteDestination, RouteTarget, SemverVersion,
+    UserId,
 };
 use omicron_common::disk::DiskVariant;
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
@@ -951,6 +952,32 @@ pub struct InstanceDiskAttach {
     pub name: Name,
 }
 
+/// Configures how and when an instance should be automatically restarted.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+pub struct InstanceAutoRestart {
+    /// The auto-restart policy for this instance.
+    ///
+    /// This indicates whether the instance should be automatically restarted by
+    /// the control plane on failure. If this is `null`, no auto-restart policy
+    /// has been configured for this instance by the user.
+    #[serde(default)]
+    pub policy: Option<InstanceAutoRestartPolicy>,
+    /// The cooldown period that must elapse between automatic restarts of this
+    /// instance, in seconds.
+    ///
+    /// If this is `null`, no explicit cooldown period has been configured for
+    /// this instance, and the default cooldown period should be used instead.
+    #[serde(default)]
+    #[validate(max = "InstanceAutoRestart::MAX_COOLDOWN_SECS")]
+    pub cooldown_secs: Option<u64>,
+}
+
+impl InstanceAutoRestart {
+    /// The maximum number of seconds representable by a `chrono::TimeDelta`.
+    pub const MAX_COOLDOWN_SECS: u64 =
+        chrono::TimeDelta::max_value().num_seconds().unsigned_abs();
+}
+
 /// Parameters for creating an external IP address for instances.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -980,21 +1007,6 @@ pub struct EphemeralIpCreate {
 pub enum ExternalIpDetach {
     Ephemeral,
     Floating { floating_ip: NameOrId },
-}
-
-/// A policy determining when an instance should be automatically restarted by
-/// the control plane.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum InstanceAutoRestart {
-    /// The instance should not be automatically restarted by the control plane
-    /// if it fails.
-    Never,
-    /// The control plane will make a best-effort attempt to ensure this
-    /// instance is running, but will not guarantee that the instance will
-    /// always be restarted. The control plane may choose not to restart this
-    /// instance in order to preserve the overall availability of the system.
-    BestEffort,
 }
 
 /// Create-time parameters for an `Instance`
@@ -1048,10 +1060,9 @@ pub struct InstanceCreate {
     #[serde(default = "bool_true")]
     pub start: bool,
 
-    /// A policy that indicates whether the control plane should automatically
-    /// restart this instance if it fails.
+    /// Configuration for automatically restarting this instance if it fails.
     #[serde(default)]
-    pub auto_restart_policy: Option<InstanceAutoRestart>,
+    pub auto_restart: InstanceAutoRestart,
 }
 
 #[inline]
@@ -2118,4 +2129,22 @@ pub struct DeviceAccessTokenRequest {
     pub grant_type: String,
     pub device_code: String,
     pub client_id: Uuid,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_max_auto_restart_cooldown_is_valid_timedelta() {
+        let max_secs =
+            i64::try_from(dbg!(InstanceAutoRestart::MAX_COOLDOWN_SECS))
+                .expect("must fit in an i64");
+        let delta = chrono::TimeDelta::try_seconds(max_secs);
+        assert_ne!(
+            delta, None,
+            "max auto restart cooldown seconds ({max_secs}) must be \
+             representable as a `chrono::TimeDelta`",
+        );
+    }
 }

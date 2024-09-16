@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::impl_enum_type;
-use nexus_types::external_api::params;
+use omicron_common::api::external;
 use serde::Deserialize;
 use serde::Serialize;
 use std::fmt;
@@ -11,18 +11,18 @@ use std::fmt;
 impl_enum_type!(
     #[derive(SqlType, Debug)]
     #[diesel(postgres_type(name = "instance_auto_restart_v2", schema = "public"))]
-    pub struct InstanceAutoRestartEnum;
+    pub struct InstanceAutoRestartPolicyEnum;
 
     #[derive(Copy, Clone, Debug, PartialEq, AsExpression, FromSqlRow, Serialize, Deserialize)]
-    #[diesel(sql_type = InstanceAutoRestartEnum)]
-    pub enum InstanceAutoRestart;
+    #[diesel(sql_type = InstanceAutoRestartPolicyEnum)]
+    pub enum InstanceAutoRestartPolicy;
 
     // Enum values
     Never => b"never"
     BestEffort => b"best_effort"
 );
 
-impl InstanceAutoRestart {
+impl InstanceAutoRestartPolicy {
     pub fn label(&self) -> &'static str {
         match self {
             Self::Never => "never",
@@ -31,31 +31,31 @@ impl InstanceAutoRestart {
     }
 }
 
-impl fmt::Display for InstanceAutoRestart {
+impl fmt::Display for InstanceAutoRestartPolicy {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         self.label().fmt(f)
     }
 }
 
-impl From<InstanceAutoRestart> for params::InstanceAutoRestart {
-    fn from(value: InstanceAutoRestart) -> Self {
+impl From<InstanceAutoRestartPolicy> for external::InstanceAutoRestartPolicy {
+    fn from(value: InstanceAutoRestartPolicy) -> Self {
         match value {
-            InstanceAutoRestart::Never => Self::Never,
-            InstanceAutoRestart::BestEffort => Self::BestEffort,
+            InstanceAutoRestartPolicy::Never => Self::Never,
+            InstanceAutoRestartPolicy::BestEffort => Self::BestEffort,
         }
     }
 }
 
-impl From<params::InstanceAutoRestart> for InstanceAutoRestart {
-    fn from(value: params::InstanceAutoRestart) -> Self {
+impl From<external::InstanceAutoRestartPolicy> for InstanceAutoRestartPolicy {
+    fn from(value: external::InstanceAutoRestartPolicy) -> Self {
         match value {
-            params::InstanceAutoRestart::Never => Self::Never,
-            params::InstanceAutoRestart::BestEffort => Self::BestEffort,
+            external::InstanceAutoRestartPolicy::Never => Self::Never,
+            external::InstanceAutoRestartPolicy::BestEffort => Self::BestEffort,
         }
     }
 }
 
-impl diesel::query_builder::QueryId for InstanceAutoRestartEnum {
+impl diesel::query_builder::QueryId for InstanceAutoRestartPolicyEnum {
     type QueryId = ();
     const HAS_STATIC_QUERY_ID: bool = false;
 }

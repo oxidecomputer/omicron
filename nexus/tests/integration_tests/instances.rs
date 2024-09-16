@@ -228,7 +228,7 @@ async fn test_create_instance_with_bad_hostname_impl(
         disks: vec![],
         start: false,
         ssh_public_keys: None,
-        auto_restart_policy: None,
+        auto_restart: Default::default(),
     };
     let mut body: serde_json::Value =
         serde_json::from_str(&serde_json::to_string(&params).unwrap()).unwrap();
@@ -333,7 +333,7 @@ async fn test_instances_create_reboot_halt(
                 external_ips: vec![],
                 disks: vec![],
                 start: true,
-                auto_restart_policy: None,
+                auto_restart: Default::default(),
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -1866,7 +1866,7 @@ async fn test_instances_create_stopped_start(
             external_ips: vec![],
             disks: vec![],
             start: false,
-            auto_restart_policy: None,
+            auto_restart: Default::default(),
         },
     )
     .await;
@@ -2046,7 +2046,7 @@ async fn test_instance_using_image_from_other_project_fails(
                     },
                 )],
                 start: true,
-                auto_restart_policy: None,
+                auto_restart: Default::default(),
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -2110,7 +2110,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
         external_ips: vec![],
         disks: vec![],
         start: true,
-        auto_restart_policy: None,
+        auto_restart: Default::default(),
     };
     let response = NexusRequest::objects_post(
         client,
@@ -2139,7 +2139,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
         external_ips: vec![],
         disks: vec![],
         start: true,
-        auto_restart_policy: None,
+        auto_restart: Default::default(),
     };
     let _ = NexusRequest::objects_post(
         client,
@@ -2230,7 +2230,7 @@ async fn test_instance_with_single_explicit_ip_address(
         disks: vec![],
         start: true,
 
-        auto_restart_policy: None,
+        auto_restart: Default::default(),
     };
     let response = NexusRequest::objects_post(
         client,
@@ -2346,7 +2346,7 @@ async fn test_instance_with_new_custom_network_interfaces(
         external_ips: vec![],
         disks: vec![],
         start: true,
-        auto_restart_policy: None,
+        auto_restart: Default::default(),
     };
     let response = NexusRequest::objects_post(
         client,
@@ -2462,7 +2462,7 @@ async fn test_instance_create_delete_network_interface(
         external_ips: vec![],
         disks: vec![],
         start: true,
-        auto_restart_policy: None,
+        auto_restart: Default::default(),
     };
     let response = NexusRequest::objects_post(
         client,
@@ -2707,7 +2707,7 @@ async fn test_instance_update_network_interfaces(
         external_ips: vec![],
         disks: vec![],
         start: true,
-        auto_restart_policy: None,
+        auto_restart: Default::default(),
     };
     let response = NexusRequest::objects_post(
         client,
@@ -3107,7 +3107,7 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
         external_ips: vec![],
         disks: vec![],
         start: true,
-        auto_restart_policy: None,
+        auto_restart: Default::default(),
     };
     let builder =
         RequestBuilder::new(client, http::Method::POST, &get_instances_url())
@@ -3178,7 +3178,7 @@ async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
             },
         )],
         start: true,
-        auto_restart_policy: None,
+        auto_restart: Default::default(),
     };
 
     let builder =
@@ -3253,7 +3253,7 @@ async fn test_instance_create_attach_disks(
             ),
         ],
         start: true,
-        auto_restart_policy: None,
+        auto_restart: Default::default(),
     };
 
     let builder =
@@ -3350,7 +3350,7 @@ async fn test_instance_create_attach_disks_undo(
             ),
         ],
         start: true,
-        auto_restart_policy: None,
+        auto_restart: Default::default(),
     };
 
     let builder =
@@ -3428,7 +3428,7 @@ async fn test_attach_eight_disks_to_instance(
             })
             .collect(),
         start: true,
-        auto_restart_policy: None,
+        auto_restart: Default::default(),
     };
 
     let builder =
@@ -3510,7 +3510,7 @@ async fn test_cannot_attach_nine_disks_to_instance(
             })
             .collect(),
         start: true,
-        auto_restart_policy: None,
+        auto_restart: Default::default(),
     };
 
     let url_instances = format!("/v1/instances?project={}", project_name);
@@ -3606,7 +3606,7 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
             })
             .collect(),
         start: true,
-        auto_restart_policy: None,
+        auto_restart: Default::default(),
     };
 
     let builder =
@@ -3691,7 +3691,7 @@ async fn test_disks_detached_when_instance_destroyed(
             })
             .collect(),
         start: true,
-        auto_restart_policy: None,
+        auto_restart: Default::default(),
     };
 
     let builder =
@@ -3783,7 +3783,7 @@ async fn test_disks_detached_when_instance_destroyed(
             })
             .collect(),
         start: true,
-        auto_restart_policy: None,
+        auto_restart: Default::default(),
     };
 
     let builder =
@@ -3837,7 +3837,7 @@ async fn test_instances_memory_rejected_less_than_min_memory_size(
         external_ips: vec![],
         disks: vec![],
         start: true,
-        auto_restart_policy: None,
+        auto_restart: Default::default(),
     };
 
     let error = NexusRequest::new(
@@ -3888,7 +3888,7 @@ async fn test_instances_memory_not_divisible_by_min_memory_size(
         external_ips: vec![],
         disks: vec![],
         start: true,
-        auto_restart_policy: None,
+        auto_restart: Default::default(),
     };
 
     let error = NexusRequest::new(
@@ -3939,7 +3939,7 @@ async fn test_instances_memory_greater_than_max_size(
         external_ips: vec![],
         disks: vec![],
         start: true,
-        auto_restart_policy: None,
+        auto_restart: Default::default(),
     };
 
     let error = NexusRequest::new(
@@ -4022,7 +4022,7 @@ async fn test_instance_create_with_ssh_keys(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![],
-        auto_restart_policy: None,
+        auto_restart: Default::default(),
     };
 
     let builder =
@@ -4069,7 +4069,7 @@ async fn test_instance_create_with_ssh_keys(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![],
-        auto_restart_policy: None,
+        auto_restart: Default::default(),
     };
 
     let builder =
@@ -4115,7 +4115,7 @@ async fn test_instance_create_with_ssh_keys(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![],
-        auto_restart_policy: None,
+        auto_restart: Default::default(),
     };
 
     let builder =
@@ -4237,7 +4237,7 @@ async fn test_cannot_provision_instance_beyond_cpu_capacity(
             external_ips: vec![],
             disks: vec![],
             start: false,
-            auto_restart_policy: None,
+            auto_restart: Default::default(),
         };
 
         let url_instances = get_instances_url();
@@ -4294,7 +4294,7 @@ async fn test_cannot_provision_instance_beyond_cpu_limit(
         external_ips: vec![],
         disks: vec![],
         start: false,
-        auto_restart_policy: None,
+        auto_restart: Default::default(),
     };
     let url_instances = get_instances_url();
 
@@ -4348,7 +4348,7 @@ async fn test_cannot_provision_instance_beyond_ram_capacity(
             external_ips: vec![],
             disks: vec![],
             start: false,
-            auto_restart_policy: None,
+            auto_restart: Default::default(),
         };
 
         let url_instances = get_instances_url();
@@ -4647,7 +4647,7 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
         ssh_public_keys: None,
         disks: vec![],
         start: true,
-        auto_restart_policy: None,
+        auto_restart: Default::default(),
     };
     let error = object_create_error(
         client,
@@ -4715,7 +4715,7 @@ async fn test_instance_ephemeral_ip_from_orphan_pool(
         ssh_public_keys: None,
         disks: vec![],
         start: true,
-        auto_restart_policy: None,
+        auto_restart: Default::default(),
     };
 
     // instance create 404s
@@ -4777,7 +4777,7 @@ async fn test_instance_ephemeral_ip_no_default_pool_error(
         ssh_public_keys: None,
         disks: vec![],
         start: true,
-        auto_restart_policy: None,
+        auto_restart: Default::default(),
     };
 
     let url = format!("/v1/instances?project={}", PROJECT_NAME);
@@ -4913,7 +4913,7 @@ async fn test_instance_allow_only_one_ephemeral_ip(
         external_ips: vec![ephemeral_create.clone(), ephemeral_create],
         disks: vec![],
         start: true,
-        auto_restart_policy: None,
+        auto_restart: Default::default(),
     };
     let error = object_create_error(
         client,
@@ -5045,7 +5045,7 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
         }],
         disks: vec![],
         start: true,
-        auto_restart_policy: None,
+        auto_restart: Default::default(),
     };
     let url_instances = format!("/v1/instances?project={}", PROJECT_NAME);
     NexusRequest::objects_post(client, &url_instances, &instance_params)

@@ -5,7 +5,6 @@
 use serde::Deserialize;
 use serde::Serialize;
 use std::collections::HashMap;
-use std::time::Duration;
 use uuid::Uuid;
 
 /// The status of a `region_replacement` background task activation
@@ -120,8 +119,6 @@ impl InstanceUpdaterStatus {
 /// The status of an `instance_reincarnation` background task activation.
 #[derive(Default, Serialize, Deserialize, Debug)]
 pub struct InstanceReincarnationStatus {
-    /// Default cooldown period between reincarnations.
-    pub default_cooldown: Duration,
     /// Total number of instances in need of reincarnation on this activation.
     pub instances_found: usize,
     /// UUIDs of instances reincarnated successfully by this activation.

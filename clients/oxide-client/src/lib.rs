@@ -19,6 +19,9 @@ progenitor::generate_api!(
     spec = "../../openapi/nexus.json",
     interface = Builder,
     tags = Separate,
+    patch = {
+        InstanceAutoRestart = { derives = [Default] },
+    }
 );
 
 /// Custom reqwest DNS resolver intended for use with the Oxide client

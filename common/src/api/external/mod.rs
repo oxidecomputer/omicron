@@ -1186,8 +1186,59 @@ pub struct Instance {
     #[serde(flatten)]
     pub runtime: InstanceRuntimeState,
 
-    /// The cooldown period between automatic restarts of this instance.
-    pub auto_restart_cooldown: std::time::Duration,
+    #[serde(flatten)]
+    pub auto_restart: InstanceAutoRestart,
+}
+
+/// The auto-restart behavior used by the control plane in the event that an
+/// instance fails.
+//
+// Note that this differs from the `InstanceAutoRestart` type in
+// `nexus_types::external_api::params`, because that type permits the
+// auto-restart policy and cooldown period to be `None`, as the user may not
+// supply values when creating the instance. However, when looking up an
+// instance that has already been created, we will always populate these fields,
+// because default values are used when no explicit configuration is supplied,
+// and we would like UIs and other systems that consume the API to be able to
+// rely on us always providing the *currently in use* values.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InstanceAutoRestart {
+    /// The auto-restart policy for this instance. This may be explicitly
+    /// configured for the instance, or may be a default value.
+    //
+    // Rename this field, as the struct is `#[serde(flatten)]`ed into the
+    // `Instance` type, and therefore, it should be called `auto_restart_policy`
+    // rather than just "policy".
+    #[serde(rename = "auto_restart_policy")]
+    pub policy: InstanceAutoRestartPolicy,
+    /// The cooldown period that must elapse between automatic restarts of this
+    /// instance.
+    ///
+    /// If the instance transitions to `Failed`, is automatically
+    /// restarted, and then transitions to `Failed` again, it will not be
+    /// automatically restarted again until this duration has elapsed since the
+    /// last automatic restart.
+    //
+    // Rename this field, as the struct is `#[serde(flatten)]`ed into the
+    // `Instance` type, and therefore, it should be called `auto_restart_policy`
+    // rather than just "policy".
+    #[serde(rename = "auto_restart_cooldown")]
+    pub cooldown: std::time::Duration,
+}
+
+/// A policy determining when an instance should be automatically restarted by
+/// the control plane.
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum InstanceAutoRestartPolicy {
+    /// The instance should not be automatically restarted by the control plane
+    /// if it fails.
+    Never,
+    /// The control plane will make a best-effort attempt to ensure this
+    /// instance is running, but will not guarantee that the instance will
+    /// always be restarted. The control plane may choose not to restart this
+    /// instance in order to preserve the overall availability of the system.
+    BestEffort,
 }
 
 // DISKS

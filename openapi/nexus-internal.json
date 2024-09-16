@@ -3316,6 +3316,22 @@
         "description": "View of an Instance",
         "type": "object",
         "properties": {
+          "auto_restart_cooldown": {
+            "description": "The cooldown period that must elapse between automatic restarts of this instance.\n\nIf the instance transitions to `Failed`, is automatically restarted, and then transitions to `Failed` again, it will not be automatically restarted again until this duration has elapsed since the last automatic restart.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Duration"
+              }
+            ]
+          },
+          "auto_restart_policy": {
+            "description": "The auto-restart policy for this instance. This may be explicitly configured for the instance, or may be a default value.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceAutoRestartPolicy"
+              }
+            ]
+          },
           "description": {
             "description": "human-readable free-form text about a resource",
             "type": "string"
@@ -3383,6 +3399,8 @@
           }
         },
         "required": [
+          "auto_restart_cooldown",
+          "auto_restart_policy",
           "description",
           "hostname",
           "id",
@@ -3394,6 +3412,25 @@
           "time_created",
           "time_modified",
           "time_run_state_updated"
+        ]
+      },
+      "InstanceAutoRestartPolicy": {
+        "description": "A policy determining when an instance should be automatically restarted by the control plane.",
+        "oneOf": [
+          {
+            "description": "The instance should not be automatically restarted by the control plane if it fails.",
+            "type": "string",
+            "enum": [
+              "never"
+            ]
+          },
+          {
+            "description": "The control plane will make a best-effort attempt to ensure this instance is running, but will not guarantee that the instance will always be restarted. The control plane may choose not to restart this instance in order to preserve the overall availability of the system.",
+            "type": "string",
+            "enum": [
+              "best_effort"
+            ]
+          }
         ]
       },
       "InstanceCpuCount": {

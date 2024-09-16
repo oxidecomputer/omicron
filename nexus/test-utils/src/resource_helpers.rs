@@ -481,7 +481,7 @@ pub async fn create_instance(
         // External IPs=
         Vec::<params::ExternalIpCreate>::new(),
         true,
-        None,
+        Default::default(),
     )
     .await
 }
@@ -497,7 +497,7 @@ pub async fn create_instance_with(
     disks: Vec<params::InstanceDiskAttachment>,
     external_ips: Vec<params::ExternalIpCreate>,
     start: bool,
-    auto_restart_policy: Option<params::InstanceAutoRestart>,
+    auto_restart: params::InstanceAutoRestart,
 ) -> Instance {
     let url = format!("/v1/instances?project={}", project_name);
     object_create(
@@ -519,7 +519,7 @@ pub async fn create_instance_with(
             external_ips,
             disks,
             start,
-            auto_restart_policy,
+            auto_restart,
         },
     )
     .await

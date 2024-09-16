@@ -1790,7 +1790,6 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 error, details
             ),
             Ok(InstanceReincarnationStatus {
-                default_cooldown,
                 instances_found,
                 instances_reincarnated,
                 changed_state,
@@ -1820,7 +1819,6 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 println!("    {REINCARNATED:<WIDTH$} {n_restarted:>3}");
                 println!("    {CHANGED_STATE:<WIDTH$} {n_changed_state:>3}",);
                 println!("    {ERRORS:<WIDTH$} {n_restart_errors:>3}");
-                println!("    {COOLDOWN_PERIOD:<WIDTH$} {default_cooldown:?}");
 
                 if let Some(e) = query_error {
                     println!(

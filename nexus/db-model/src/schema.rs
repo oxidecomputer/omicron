@@ -407,7 +407,7 @@ table! {
         ncpus -> Int8,
         memory -> Int8,
         hostname -> Text,
-        auto_restart_policy -> Nullable<crate::InstanceAutoRestartEnum>,
+        auto_restart_policy -> Nullable<crate::InstanceAutoRestartPolicyEnum>,
         auto_restart_cooldown -> Nullable<Interval>,
         time_state_updated -> Timestamptz,
         state_generation -> Int8,

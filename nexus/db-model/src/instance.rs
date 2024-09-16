@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{
-    ByteCount, Disk, ExternalIp, Generation, InstanceAutoRestart,
+    ByteCount, Disk, ExternalIp, Generation, InstanceAutoRestartPolicy,
     InstanceCpuCount, InstanceState,
 };
 use crate::collection::DatastoreAttachTargetConfig;
@@ -59,7 +59,7 @@ pub struct Instance {
     pub hostname: String,
 
     #[diesel(embed)]
-    pub auto_restart: InstanceAutoRestartConfig,
+    pub auto_restart: InstanceAutoRestart,
 
     #[diesel(embed)]
     pub runtime_state: InstanceRuntimeState,
@@ -108,10 +108,7 @@ impl Instance {
             ncpus: params.ncpus.into(),
             memory: params.memory.into(),
             hostname: params.hostname.to_string(),
-            auto_restart: InstanceAutoRestartConfig {
-                policy: params.auto_restart_policy.clone().map(Into::into),
-                cooldown: None,
-            },
+            auto_restart: params.auto_restart.clone().into(),
             runtime_state,
 
             updater_gen: Generation::new(),
@@ -243,14 +240,15 @@ impl InstanceRuntimeState {
     Deserialize,
 )]
 #[diesel(table_name = instance)]
-pub struct InstanceAutoRestartConfig {
+pub struct InstanceAutoRestart {
     /// The auto-restart policy for this instance.
     ///
     /// This indicates whether the instance should be automatically restarted by
     /// the control plane on failure. If this is `NULL`, no auto-restart policy
     /// has been configured for this instance by the user.
     #[diesel(column_name = auto_restart_policy)]
-    pub policy: Option<InstanceAutoRestart>,
+    #[serde(default)]
+    pub policy: Option<InstanceAutoRestartPolicy>,
     /// The cooldown period that must elapse between automatic restarts of this
     /// instance.
     ///
@@ -261,7 +259,7 @@ pub struct InstanceAutoRestartConfig {
     pub cooldown: Option<TimeDelta>,
 }
 
-impl InstanceAutoRestartConfig {
+impl InstanceAutoRestart {
     /// The default cooldown used when an instance has no overridden cooldown.
     pub const DEFAULT_COOLDOWN: TimeDelta = match TimeDelta::try_hours(1) {
         Some(delta) => delta,
@@ -270,7 +268,8 @@ impl InstanceAutoRestartConfig {
 
     /// The default policy used when an instance does not override the
     /// reincarnation policy.
-    pub const DEFAULT_POLICY: InstanceAutoRestart = InstanceAutoRestart::Never;
+    pub const DEFAULT_POLICY: InstanceAutoRestartPolicy =
+        InstanceAutoRestartPolicy::Never;
 
     /// Returns `true` if `self` permits an instance to reincarnate given the
     /// provided `state`.
@@ -284,7 +283,7 @@ impl InstanceAutoRestartConfig {
         // Check if the instance's configured auto-restart policy permits the
         // control plane to automatically restart it.
         let policy = self.policy.unwrap_or(Self::DEFAULT_POLICY);
-        if policy == InstanceAutoRestart::Never {
+        if policy == InstanceAutoRestartPolicy::Never {
             return false;
         }
 
@@ -329,7 +328,10 @@ impl InstanceAutoRestartConfig {
             // N.B. that this may become more complex in the future if we grow
             // additional auto-restart policies that require additional logic
             // (such as restart limits...)
-            .and(dsl::auto_restart_policy.eq(InstanceAutoRestart::BestEffort))
+            .and(
+                dsl::auto_restart_policy
+                    .eq(InstanceAutoRestartPolicy::BestEffort),
+            )
             // An instance whose last reincarnation was within the cooldown
             // interval from now must remain in _bardo_ --- the liminal
             // state between death and rebirth --- before its next
@@ -351,6 +353,19 @@ impl InstanceAutoRestartConfig {
                             .le((now - Self::DEFAULT_COOLDOWN).nullable()),
                     )),
             )
+    }
+}
+
+impl From<params::InstanceAutoRestart> for InstanceAutoRestart {
+    fn from(value: params::InstanceAutoRestart) -> Self {
+        let cooldown = value.cooldown_secs.map(|secs| {
+            let secs = i64::try_from(secs).expect(
+                "external API should validate that the cooldown seconds are \
+                 in range",
+            );
+            TimeDelta::seconds(secs)
+        });
+        Self { policy: value.policy.map(Into::into), cooldown }
     }
 }
 

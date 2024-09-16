@@ -243,7 +243,6 @@ mod test {
     use crate::app::sagas::test_helpers;
     use crate::external_api::params;
     use chrono::Utc;
-    use nexus_db_model::InstanceAutoRestart;
     use nexus_db_model::InstanceRuntimeState;
     use nexus_db_model::InstanceState;
     use nexus_db_queries::authz;
@@ -254,6 +253,7 @@ mod test {
     use nexus_test_utils_macros::nexus_test;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_common::api::external::InstanceAutoRestartPolicy;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::InstanceUuid;
     use std::collections::HashMap;
@@ -281,11 +281,25 @@ mod test {
         authz_project
     }
 
+    fn auto_restart_never() -> params::InstanceAutoRestart {
+        params::InstanceAutoRestart {
+            policy: Some(InstanceAutoRestartPolicy::Never),
+            cooldown_secs: None, // use the default cooldown
+        }
+    }
+
+    fn auto_restart_best_effort() -> params::InstanceAutoRestart {
+        params::InstanceAutoRestart {
+            policy: Some(InstanceAutoRestartPolicy::Never),
+            cooldown_secs: None, // use the default cooldown
+        }
+    }
+
     async fn create_instance(
         cptestctx: &ControlPlaneTestContext,
         opctx: &OpContext,
         name: &str,
-        restart_policy: InstanceAutoRestart,
+        auto_restart: params::InstanceAutoRestart,
         state: InstanceState,
     ) -> InstanceUuid {
         let instances_url = format!("/v1/instances?project={}", PROJECT_NAME);
@@ -317,7 +331,7 @@ mod test {
                     disks: Vec::new(),
                     ssh_public_keys: None,
                     start: state == InstanceState::Vmm,
-                    auto_restart_policy: Some(restart_policy.into()),
+                    auto_restart: auto_restart.clone(),
                 },
             )
             .await;
@@ -327,7 +341,9 @@ mod test {
             put_instance_in_state(cptestctx, opctx, id, state).await;
         }
 
-        eprintln!("instance {id}: policy={restart_policy:?}; state={state:?}");
+        eprintln!(
+            "instance {id}: auto_restart={auto_restart:?}; state={state:?}"
+        );
         id
     }
 
@@ -406,7 +422,7 @@ mod test {
             &cptestctx,
             &opctx,
             "my-cool-instance",
-            InstanceAutoRestart::BestEffort,
+            auto_restart_best_effort(),
             InstanceState::Failed,
         )
         .await;
@@ -460,7 +476,7 @@ mod test {
                 &cptestctx,
                 &opctx,
                 &format!("sotapanna-{i}"),
-                InstanceAutoRestart::BestEffort,
+                auto_restart_best_effort(),
                 InstanceState::Failed,
             )
             .await;
@@ -476,7 +492,7 @@ mod test {
                 &cptestctx,
                 &opctx,
                 &format!("arahant-{i}"),
-                InstanceAutoRestart::Never,
+                auto_restart_never(),
                 InstanceState::Failed,
             )
             .await;
@@ -494,7 +510,7 @@ mod test {
                 &cptestctx,
                 &opctx,
                 &format!("anagami-{i}"),
-                InstanceAutoRestart::BestEffort,
+                auto_restart_best_effort(),
                 state,
             )
             .await;
@@ -541,13 +557,17 @@ mod test {
     }
 
     #[nexus_test(server = crate::Server)]
-    #[ignore] // TODO(eliza): need to add a DB mechanism for setting an instance's cooldown...
     async fn test_cooldown_on_subsequent_reincarnations(
         cptestctx: &ControlPlaneTestContext,
     ) {
         // Don't make the test run for a long time just waiting for the cooldown
         // to elapse.
-        const COOLDOWN: Duration = Duration::from_secs(10);
+        const COOLDOWN_SECS: u64 = 10;
+
+        let restart_params = params::InstanceAutoRestart {
+            cooldown_secs: Some(COOLDOWN_SECS),
+            ..auto_restart_best_effort()
+        };
 
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
@@ -565,7 +585,7 @@ mod test {
             &cptestctx,
             &opctx,
             "victor",
-            InstanceAutoRestart::BestEffort,
+            restart_params.clone(),
             InstanceState::Failed,
         )
         .await;
@@ -573,7 +593,7 @@ mod test {
             &cptestctx,
             &opctx,
             "frankenstein",
-            InstanceAutoRestart::BestEffort,
+            restart_params.clone(),
             InstanceState::Vmm,
         )
         .await;
@@ -646,7 +666,7 @@ mod test {
 
         // Wait out the cooldown period, and give it another shot. Now, instance
         // 1 should be restarted again.
-        tokio::time::sleep(COOLDOWN + Duration::from_secs(1)).await;
+        tokio::time::sleep(Duration::from_secs(COOLDOWN_SECS + 1)).await;
 
         let result = task.activate(&opctx).await;
         let status =
