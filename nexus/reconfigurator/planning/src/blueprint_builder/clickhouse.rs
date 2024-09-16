@@ -193,7 +193,7 @@ impl ClickhouseAllocator {
             // This should always succeed eventually, barring a bug in
             // clickhouse.
             //
-            if added_keepers.len() == 0 {
+            if added_keepers.is_empty() {
                 return bump_gen_if_necessary(new_config);
             }
 
@@ -670,7 +670,7 @@ pub mod test {
         assert_eq!(new_config.keepers.len(), 4);
 
         // Let's make sure that the right keeper was expunged.
-        assert!(new_config.keepers.get(&zone_to_expunge).is_none());
+        assert!(!new_config.keepers.contains_key(&zone_to_expunge));
 
         // Adding a new zone should allow a new keeper to get provisioned as
         // long as the inventory reflects the last one is gone. Let's set the
@@ -745,7 +745,7 @@ pub mod test {
         allocator.inventory.as_mut().unwrap().leader_committed_log_index += 1;
         let new_config = allocator.plan().unwrap();
         assert_eq!(new_config.keepers.len(), 4);
-        assert!(new_config.keepers.get(&zone_to_expunge).is_none());
+        assert!(!new_config.keepers.contains_key(&zone_to_expunge));
     }
 
     #[test]
@@ -778,7 +778,7 @@ pub mod test {
         };
 
         let zone_to_expunge =
-            allocator.parent_config.servers.keys().next().unwrap().clone();
+            *allocator.parent_config.servers.keys().next().unwrap();
 
         allocator.in_service_clickhouse_zones.servers.remove(&zone_to_expunge);
 
@@ -792,7 +792,7 @@ pub mod test {
 
         // Let's ensure that the zone to expunge isn't actually in the new
         // config
-        assert!(new_config.servers.get(&zone_to_expunge).is_none());
+        assert!(!new_config.servers.contains_key(&zone_to_expunge));
 
         // We can add a new keeper and server at the same time
         let new_keeper_zone = OmicronZoneUuid::new_v4();
