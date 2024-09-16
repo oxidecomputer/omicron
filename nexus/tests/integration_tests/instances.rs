@@ -1508,7 +1508,7 @@ fn auto_restart_never() -> params::InstanceAutoRestart {
 
 fn auto_restart_best_effort() -> params::InstanceAutoRestart {
     params::InstanceAutoRestart {
-        policy: Some(InstanceAutoRestartPolicy::Never),
+        policy: Some(InstanceAutoRestartPolicy::BestEffort),
         cooldown_secs: None, // use the default cooldown
     }
 }
