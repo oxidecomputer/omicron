@@ -16,19 +16,19 @@ use slog::{error, Logger};
 use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
-// The set of in service clickhouse server and keeper zones as constructed by
-// the `BlueprintBuilder` in the current planning iteration.
+// The set of clickhouse server and keeper zones that should be running as
+// constructed by the `BlueprintBuilder` in the current planning iteration.
 //
 // Will be removed once the planner starts using this code
 // See: https://github.com/oxidecomputer/omicron/issues/6577
 #[allow(unused)]
-struct InServiceClickhouseZones {
+struct ClickhouseZonesThatShouldBeRunning {
     keepers: BTreeSet<OmicronZoneUuid>,
     servers: BTreeSet<OmicronZoneUuid>,
 }
 
 impl From<&BTreeMap<SledUuid, BlueprintZonesConfig>>
-    for InServiceClickhouseZones
+    for ClickhouseZonesThatShouldBeRunning
 {
     fn from(
         zones_by_sled_id: &BTreeMap<SledUuid, BlueprintZonesConfig>,
@@ -49,7 +49,7 @@ impl From<&BTreeMap<SledUuid, BlueprintZonesConfig>>
                 _ => (),
             }
         }
-        InServiceClickhouseZones { keepers, servers }
+        ClickhouseZonesThatShouldBeRunning { keepers, servers }
     }
 }
 
@@ -64,7 +64,7 @@ impl From<&BTreeMap<SledUuid, BlueprintZonesConfig>>
 #[allow(unused)]
 pub struct ClickhouseAllocator {
     log: Logger,
-    in_service_clickhouse_zones: InServiceClickhouseZones,
+    active_clickhouse_zones: ClickhouseZonesThatShouldBeRunning,
     parent_config: ClickhouseClusterConfig,
     // The latest clickhouse cluster membership from inventory
     inventory: Option<ClickhouseKeeperClusterMembership>,
@@ -97,7 +97,7 @@ impl ClickhouseAllocator {
     ) -> ClickhouseAllocator {
         ClickhouseAllocator {
             log,
-            in_service_clickhouse_zones: zones_by_sled_id.into(),
+            active_clickhouse_zones: zones_by_sled_id.into(),
             parent_config: clickhouse_cluster_config,
             inventory,
         }
@@ -122,10 +122,10 @@ impl ClickhouseAllocator {
 
         // First, remove the clickhouse servers that are no longer in service
         new_config.servers.retain(|zone_id, _| {
-            self.in_service_clickhouse_zones.servers.contains(zone_id)
+            self.active_clickhouse_zones.servers.contains(zone_id)
         });
         // Next, add any new clickhouse servers
-        for zone_id in &self.in_service_clickhouse_zones.servers {
+        for zone_id in &self.active_clickhouse_zones.servers {
             if !new_config.servers.contains_key(zone_id) {
                 // Allocate a new `ServerId` and map it to the server zone
                 new_config.max_used_server_id += 1.into();
@@ -219,8 +219,7 @@ impl ClickhouseAllocator {
 
             // Let's ensure that this zone has not been expunged yet. If it has that means
             // that adding the keeper will never succeed.
-            if !self.in_service_clickhouse_zones.keepers.contains(added_zone_id)
-            {
+            if !self.active_clickhouse_zones.keepers.contains(added_zone_id) {
                 // The zone has been expunged, so we must remove it from our configuration.
                 new_config.keepers.remove(added_zone_id);
 
@@ -246,7 +245,7 @@ impl ClickhouseAllocator {
         // We remove first, because the zones are already gone and therefore
         // don't help our quorum.
         for (zone_id, _) in &self.parent_config.keepers {
-            if !self.in_service_clickhouse_zones.keepers.contains(&zone_id) {
+            if !self.active_clickhouse_zones.keepers.contains(&zone_id) {
                 // Remove the keeper for the first expunged zone we see.
                 // Remember, we only do one keeper membership change at time.
                 new_config.keepers.remove(zone_id);
@@ -255,7 +254,7 @@ impl ClickhouseAllocator {
         }
 
         // Do we need to add any nodes to in service zones that don't have them
-        for zone_id in &self.in_service_clickhouse_zones.keepers {
+        for zone_id in &self.active_clickhouse_zones.keepers {
             if !new_config.keepers.contains_key(zone_id) {
                 // Allocate a new `KeeperId` and map it to the server zone
                 new_config.max_used_keeper_id += 1.into();
@@ -283,7 +282,7 @@ pub mod test {
         n_server_zones: u64,
         n_keepers: u64,
         n_servers: u64,
-    ) -> (InServiceClickhouseZones, ClickhouseClusterConfig) {
+    ) -> (ClickhouseZonesThatShouldBeRunning, ClickhouseClusterConfig) {
         // Generate the maximum number of (`ZoneId`, `KeeperId`) pairs
         // Note that we order by `KeeperId` so that we have determinism during
         // tests
@@ -310,7 +309,7 @@ pub mod test {
             .cloned()
             .collect();
 
-        let in_service_clickhouse_zones = InServiceClickhouseZones {
+        let active_clickhouse_zones = ClickhouseZonesThatShouldBeRunning {
             keepers: keeper_zone_ids.clone(),
             servers: server_zone_ids.clone(),
         };
@@ -338,7 +337,7 @@ pub mod test {
             servers,
         };
 
-        (in_service_clickhouse_zones, parent_clickhouse_cluster_config)
+        (active_clickhouse_zones, parent_clickhouse_cluster_config)
     }
 
     #[test]
@@ -349,7 +348,7 @@ pub mod test {
         let (n_keeper_zones, n_server_zones, n_keepers, n_servers) =
             (3, 2, 3, 2);
 
-        let (in_service_clickhouse_zones, parent_config) = initial_config(
+        let (active_clickhouse_zones, parent_config) = initial_config(
             n_keeper_zones,
             n_server_zones,
             n_keepers,
@@ -364,7 +363,7 @@ pub mod test {
 
         let mut allocator = ClickhouseAllocator {
             log: logctx.log.clone(),
-            in_service_clickhouse_zones,
+            active_clickhouse_zones,
             parent_config: parent_config.clone(),
             inventory,
         };
@@ -395,7 +394,7 @@ pub mod test {
         let (n_keeper_zones, n_server_zones, n_keepers, n_servers) =
             (5, 2, 3, 2);
 
-        let (in_service_clickhouse_zones, parent_config) = initial_config(
+        let (active_clickhouse_zones, parent_config) = initial_config(
             n_keeper_zones,
             n_server_zones,
             n_keepers,
@@ -413,7 +412,7 @@ pub mod test {
         // allocator should allocate one more keeper.
         let mut allocator = ClickhouseAllocator {
             log: logctx.log.clone(),
-            in_service_clickhouse_zones,
+            active_clickhouse_zones,
             parent_config: parent_config.clone(),
             inventory,
         };
@@ -498,7 +497,7 @@ pub mod test {
         let (n_keeper_zones, n_server_zones, n_keepers, n_servers) =
             (5, 2, 5, 2);
 
-        let (in_service_clickhouse_zones, parent_config) = initial_config(
+        let (active_clickhouse_zones, parent_config) = initial_config(
             n_keeper_zones,
             n_server_zones,
             n_keepers,
@@ -513,7 +512,7 @@ pub mod test {
 
         let mut allocator = ClickhouseAllocator {
             log: logctx.log.clone(),
-            in_service_clickhouse_zones,
+            active_clickhouse_zones,
             parent_config: parent_config.clone(),
             inventory,
         };
@@ -525,8 +524,8 @@ pub mod test {
 
         // Now expunge 2 of the 5 keeper zones by removing them from the
         // in-service zones
-        allocator.in_service_clickhouse_zones.keepers.pop_first();
-        allocator.in_service_clickhouse_zones.keepers.pop_first();
+        allocator.active_clickhouse_zones.keepers.pop_first();
+        allocator.active_clickhouse_zones.keepers.pop_first();
 
         // Running the planner should remove one of the keepers from the new config
         let new_config = allocator.plan().unwrap();
@@ -613,7 +612,7 @@ pub mod test {
         let (n_keeper_zones, n_server_zones, n_keepers, n_servers) =
             (5, 2, 4, 2);
 
-        let (in_service_clickhouse_zones, parent_config) = initial_config(
+        let (active_clickhouse_zones, parent_config) = initial_config(
             n_keeper_zones,
             n_server_zones,
             n_keepers,
@@ -628,7 +627,7 @@ pub mod test {
 
         let mut allocator = ClickhouseAllocator {
             log: logctx.log.clone(),
-            in_service_clickhouse_zones,
+            active_clickhouse_zones,
             parent_config,
             inventory,
         };
@@ -655,7 +654,7 @@ pub mod test {
             .find(|(_, &keeper_id)| keeper_id == keeper_to_expunge)
             .map(|(zone_id, _)| *zone_id)
             .unwrap();
-        allocator.in_service_clickhouse_zones.keepers.remove(&zone_to_expunge);
+        allocator.active_clickhouse_zones.keepers.remove(&zone_to_expunge);
 
         // Bump the inventory commit index so we guarantee we perform the keeper
         // checks
@@ -695,7 +694,7 @@ pub mod test {
             .raft_config
             .remove(&keeper_to_expunge);
         let new_zone_id = OmicronZoneUuid::new_v4();
-        allocator.in_service_clickhouse_zones.keepers.insert(new_zone_id);
+        allocator.active_clickhouse_zones.keepers.insert(new_zone_id);
         let new_config = allocator.plan().unwrap();
         assert_eq!(new_config.keepers.len(), 5);
         assert_eq!(*new_config.keepers.get(&new_zone_id).unwrap(), KeeperId(6));
@@ -713,7 +712,7 @@ pub mod test {
         let (n_keeper_zones, n_server_zones, n_keepers, n_servers) =
             (5, 2, 4, 2);
 
-        let (in_service_clickhouse_zones, parent_config) = initial_config(
+        let (active_clickhouse_zones, parent_config) = initial_config(
             n_keeper_zones,
             n_server_zones,
             n_keepers,
@@ -728,7 +727,7 @@ pub mod test {
 
         let mut allocator = ClickhouseAllocator {
             log: logctx.log.clone(),
-            in_service_clickhouse_zones,
+            active_clickhouse_zones,
             parent_config,
             inventory,
         };
@@ -750,7 +749,7 @@ pub mod test {
             .map(|(zone_id, _)| *zone_id)
             .unwrap();
         allocator.parent_config = new_config;
-        allocator.in_service_clickhouse_zones.keepers.remove(&zone_to_expunge);
+        allocator.active_clickhouse_zones.keepers.remove(&zone_to_expunge);
 
         // Bump the inventory commit index so we guarantee we perform the keeper
         // checks
@@ -771,7 +770,7 @@ pub mod test {
         let (n_keeper_zones, n_server_zones, n_keepers, n_servers) =
             (3, 5, 3, 2);
 
-        let (in_service_clickhouse_zones, parent_config) = initial_config(
+        let (active_clickhouse_zones, parent_config) = initial_config(
             n_keeper_zones,
             n_server_zones,
             n_keepers,
@@ -786,7 +785,7 @@ pub mod test {
 
         let mut allocator = ClickhouseAllocator {
             log: logctx.log.clone(),
-            in_service_clickhouse_zones,
+            active_clickhouse_zones,
             parent_config,
             inventory,
         };
@@ -794,7 +793,7 @@ pub mod test {
         let zone_to_expunge =
             *allocator.parent_config.servers.keys().next().unwrap();
 
-        allocator.in_service_clickhouse_zones.servers.remove(&zone_to_expunge);
+        allocator.active_clickhouse_zones.servers.remove(&zone_to_expunge);
 
         // After running the planner we should see 4 servers:
         // Start with 2, expunge 1, add 3 to reach the number of zones we have.
@@ -811,8 +810,8 @@ pub mod test {
         // We can add a new keeper and server at the same time
         let new_keeper_zone = OmicronZoneUuid::new_v4();
         let new_server_id = OmicronZoneUuid::new_v4();
-        allocator.in_service_clickhouse_zones.keepers.insert(new_keeper_zone);
-        allocator.in_service_clickhouse_zones.servers.insert(new_server_id);
+        allocator.active_clickhouse_zones.keepers.insert(new_keeper_zone);
+        allocator.active_clickhouse_zones.servers.insert(new_server_id);
         allocator.parent_config = new_config;
         allocator.inventory.as_mut().unwrap().leader_committed_log_index += 1;
         let new_config = allocator.plan().unwrap();
@@ -834,7 +833,7 @@ pub mod test {
         let (n_keeper_zones, n_server_zones, n_keepers, n_servers) =
             (3, 2, 3, 2);
 
-        let (in_service_clickhouse_zones, parent_config) = initial_config(
+        let (active_clickhouse_zones, parent_config) = initial_config(
             n_keeper_zones,
             n_server_zones,
             n_keepers,
@@ -851,7 +850,7 @@ pub mod test {
 
         let allocator = ClickhouseAllocator {
             log: logctx.log.clone(),
-            in_service_clickhouse_zones,
+            active_clickhouse_zones,
             parent_config,
             inventory,
         };
