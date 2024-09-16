@@ -9,7 +9,9 @@ use chrono::Utc;
 use dropshot::test_util::ClientTestContext;
 use http::method::Method;
 use http::StatusCode;
+use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
+use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::DataStore;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
@@ -3442,4 +3444,79 @@ async fn test_upstairs_notify_downstairs_client_stops(
         )
         .await
         .unwrap();
+}
+
+/// Assert the `decrease_crucible_resource_count_and_soft_delete_volume` CTE
+/// returns the regions associated with the volume.
+#[nexus_test]
+async fn test_cte_returns_regions(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let _disk_test = DiskTest::new(&cptestctx).await;
+    create_project_and_pool(client).await;
+    let disks_url = get_disks_url();
+
+    let disk = params::DiskCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "disk".parse().unwrap(),
+            description: String::from("disk"),
+        },
+        disk_source: params::DiskSource::Blank {
+            block_size: params::BlockSize::try_from(512).unwrap(),
+        },
+        size: ByteCount::from_gibibytes_u32(2),
+    };
+
+    let disk: Disk = NexusRequest::new(
+        RequestBuilder::new(client, Method::POST, &disks_url)
+            .body(Some(&disk))
+            .expect_status(Some(StatusCode::CREATED)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body()
+    .unwrap();
+
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    let disk_id = disk.identity.id;
+
+    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+        .disk_id(disk_id)
+        .fetch()
+        .await
+        .unwrap_or_else(|_| panic!("test disk {:?} should exist", disk_id));
+
+    let allocated_regions =
+        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+
+    assert_eq!(allocated_regions.len(), 3);
+
+    let resources_to_clean_up = datastore
+        .decrease_crucible_resource_count_and_soft_delete_volume(
+            db_disk.volume_id,
+        )
+        .await
+        .unwrap();
+
+    let datasets_and_regions_to_clean =
+        datastore.regions_to_delete(&resources_to_clean_up).await.unwrap();
+
+    assert_eq!(datasets_and_regions_to_clean.len(), 3);
+
+    assert_eq!(
+        datasets_and_regions_to_clean
+            .into_iter()
+            .map(|(_, region)| region.id())
+            .collect::<Vec<Uuid>>(),
+        allocated_regions
+            .into_iter()
+            .map(|(_, region)| region.id())
+            .collect::<Vec<Uuid>>(),
+    );
 }

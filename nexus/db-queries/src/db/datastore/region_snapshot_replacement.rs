@@ -894,9 +894,7 @@ impl DataStore {
                         .check_if_exists::<RegionSnapshotReplacementStep>(
                             region_snapshot_replacement_step_id,
                         )
-                        .execute_and_check(
-                            &*self.pool_connection_authorized(opctx).await?,
-                        )
+                        .execute_and_check(&conn)
                         .await?;
 
                 match result.status {
