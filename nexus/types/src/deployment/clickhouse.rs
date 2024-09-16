@@ -23,7 +23,7 @@ pub struct ClickhouseClusterConfig {
     /// Clickhouse Server IDs must be unique and are handed out monotonically.
     /// Keep track of the last used one.
     pub max_used_server_id: ServerId,
-    /// CLickhouse Keeper ids must be unique and are handed out monotonically.
+    /// CLickhouse Keeper IDss must be unique and are handed out monotonically.
     /// Keep track of the last used one.
     pub max_used_keeper_id: KeeperId,
     /// An arbitrary name for the Clickhouse cluster shared by all nodes
@@ -64,21 +64,23 @@ pub struct ClickhouseClusterConfig {
     ///   1. We start with 3 keeper nodes in 3 deployed keeper zones and need to
     ///      add two to reach our desired policy of 5 keepers
     ///   2. The planner adds 2 new keeper zones to the blueprint
-    ///   3. The planner will also add **one** new keeper process that matches
-    ///      one of the deployed zones to the desired keeper cluster.
-    ///   4. The executor will start the new keeper process, attempt to add it
-    ///      to the keeper cluster by pushing configuration updates to the other
-    ///      keepers, and then updating the clickhouse server configurations to
-    ///      know about the new keeper.
-    ///   5. If the keeper is successfully added, as reflected in inventory, then
-    ///      steps 3 and 4 above will be retried for the next keeper process.
+    ///   3. The planner will also add **one** new keeper to the `keepers` field
+    ///      below that matches one of the deployed zones.
+    ///   4. The executor will start the new keeper process that was added
+    ///      to the `keepers` field, attempt to add it to the keeper cluster
+    ///      by pushing configuration updates to the other keepers, and then
+    ///      updating the clickhouse server configurations to know about the
+    ///      new keeper.
+    ///   5. If the keeper is successfully added, as reflected in inventory,
+    ///      then steps 3 and 4 above will be repeated for the next keeper
+    ///      process.
     ///   6. If the keeper is not successfully added by the executor it will
     ///      continue to retry indefinitely.
     ///   7. If the zone is expunged while the planner has it as part of its
-    ///      desired state, and the executor is trying to add it, the keeper
-    ///      will be removed from the desired state in the next blueprint. If it
-    ///      has been added by an executor in the meantime it will be removed on
-    ///      the next iteration of an executor.
+    ///      desired state in `keepers`, and the executor is trying to add it,
+    ///      the keeper will be removed from `keepers` in the next blueprint.
+    ///      If it has been added to the actual cluster by an executor in the
+    ///      meantime it will be removed on the next iteration of an executor.
     pub keepers: BTreeMap<OmicronZoneUuid, KeeperId>,
 
     /// The desired state of clickhouse server processes on the rack

@@ -163,25 +163,15 @@ impl Collection {
             .map(|(sled_id, _)| *sled_id)
     }
 
-    /// Return the latest clickhouse keeper configuration in this last collection, if there is one.
+    /// Return the latest clickhouse keeper configuration in this collection, if
+    /// there is one.
     pub fn latest_clickhouse_keeper_membership(
         &self,
     ) -> Option<(OmicronZoneUuid, ClickhouseKeeperClusterMembership)> {
-        let mut latest = None;
-        for (zone_id, membership) in &self.clickhouse_keeper_cluster_membership
-        {
-            match &latest {
-                None => latest = Some((*zone_id, membership.clone())),
-                Some((_, latest_membership)) => {
-                    if membership.leader_committed_log_index
-                        > latest_membership.leader_committed_log_index
-                    {
-                        latest = Some((*zone_id, membership.clone()));
-                    }
-                }
-            }
-        }
-        latest
+        self.clickhouse_keeper_cluster_membership
+            .iter()
+            .max_by_key(|(_, membership)| membership.leader_committed_log_index)
+            .map(|(zone_id, membership)| (*zone_id, membership.clone()))
     }
 }
 

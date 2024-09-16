@@ -200,7 +200,7 @@ impl ClickhouseAllocator {
             // Let's find the matching zone id for the keeper we are adding
             //
             // Unwrap is fine, because we know we have exactly one added keeper
-            // at this point, and it is present in our config.
+            // at this point, and it is present in our `parent_config`.
             let added_keeper_id = added_keepers.pop_first().unwrap();
             let (added_zone_id, _) = self
                 .parent_config
