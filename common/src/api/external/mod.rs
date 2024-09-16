@@ -1212,7 +1212,7 @@ pub struct InstanceAutoRestart {
     #[serde(rename = "auto_restart_policy")]
     pub policy: InstanceAutoRestartPolicy,
     /// The cooldown period that must elapse between automatic restarts of this
-    /// instance.
+    /// instance, in seconds.
     ///
     /// If the instance transitions to `Failed`, is automatically
     /// restarted, and then transitions to `Failed` again, it will not be
@@ -1223,7 +1223,7 @@ pub struct InstanceAutoRestart {
     // `Instance` type, and therefore, it should be called `auto_restart_policy`
     // rather than just "policy".
     #[serde(rename = "auto_restart_cooldown")]
-    pub cooldown: std::time::Duration,
+    pub cooldown_secs: u64,
 }
 
 /// A policy determining when an instance should be automatically restarted by

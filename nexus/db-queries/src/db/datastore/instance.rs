@@ -207,20 +207,24 @@ impl From<InstanceAndActiveVmm> for external::Instance {
             // project's default if one exists. For now, though, fall back
             // to the hard- coded default if the instance hasn't overridden
             // it.
-            let cooldown = value
+            let cooldown_secs = value
                 .instance
                 .auto_restart
                 .cooldown
                 .unwrap_or(InstanceAutoRestart::DEFAULT_COOLDOWN)
-                .to_std()
-                .expect("auto-restart cooldowns should not be negative");
+                // This should always be a whole number of seconds, as the
+                // external API only accepts seconds.
+                .num_seconds()
+                // This should always be positive, but let's just take the
+                // absolute value instead of asserting.
+                .unsigned_abs();
             let policy = value
                 .instance
                 .auto_restart
                 .policy
                 .unwrap_or(InstanceAutoRestart::DEFAULT_POLICY)
                 .into();
-            external::InstanceAutoRestart { cooldown, policy }
+            external::InstanceAutoRestart { cooldown_secs, policy }
         };
 
         Self {

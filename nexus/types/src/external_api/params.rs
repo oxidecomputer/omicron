@@ -968,11 +968,19 @@ pub struct InstanceAutoRestart {
     /// If this is `null`, no explicit cooldown period has been configured for
     /// this instance, and the default cooldown period should be used instead.
     #[serde(default)]
-    #[validate(max = "InstanceAutoRestart::MAX_COOLDOWN_SECS")]
+    #[validate(range(
+        min = "InstanceAutoRestart::MIN_COOLDOWN_SECS",
+        max = "InstanceAutoRestart::MAX_COOLDOWN_SECS",
+    ))]
     pub cooldown_secs: Option<u64>,
 }
 
 impl InstanceAutoRestart {
+    /// The minimum cooldown period between automatic restarts.
+    ///
+    /// 1 minute ought to be enough for everyone...
+    pub const MIN_COOLDOWN_SECS: u64 = 60;
+
     /// The maximum number of seconds representable by a `chrono::TimeDelta`.
     pub const MAX_COOLDOWN_SECS: u64 =
         chrono::TimeDelta::max_value().num_seconds().unsigned_abs();
