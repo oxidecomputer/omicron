@@ -532,7 +532,6 @@ task: "instance_reincarnation"
       instances reincarnated:                                            0
       instances which changed state before they could be reincarnated:   0
       instances which failed to be reincarnated:                         0
-    default cooldown period:                                           <REDACTED_DURATION>s
 
 task: "instance_updater"
   configured period: every <REDACTED_DURATION>s
@@ -973,7 +972,6 @@ task: "instance_reincarnation"
       instances reincarnated:                                            0
       instances which changed state before they could be reincarnated:   0
       instances which failed to be reincarnated:                         0
-    default cooldown period:                                           <REDACTED_DURATION>s
 
 task: "instance_updater"
   configured period: every <REDACTED_DURATION>s
