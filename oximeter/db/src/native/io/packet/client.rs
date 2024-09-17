@@ -72,7 +72,7 @@ impl Encoder {
     /// Encode a ClientInfo into the buffer.
     ///
     /// See the source here:
-    /// https://github.com/ClickHouse/ClickHouse/blob/98a2c1c638c2ff9cea36e68c9ac16b3cf142387b/src/Interpreters/ClientInfo.cpp#L24
+    /// <https://github.com/ClickHouse/ClickHouse/blob/98a2c1c638c2ff9cea36e68c9ac16b3cf142387b/src/Interpreters/ClientInfo.cpp#L24>
     /// for details on the ordering of these fields.
     fn encode_client_info(&self, info: ClientInfo, mut dst: &mut BytesMut) {
         let kind = match info.query_kind {

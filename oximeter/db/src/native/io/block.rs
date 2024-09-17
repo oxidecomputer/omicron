@@ -90,7 +90,7 @@ fn decode_block_info(src: &mut &[u8]) -> Result<Option<BlockInfo>, Error> {
 /// zero byte is used to signal the end of the block info.
 ///
 /// See
-/// https://github.com/ClickHouse/ClickHouse/blob/98a2c1c638c2ff9cea36e68c9ac16b3cf142387b/src/Core/BlockInfo.cpp#L21 for details on this encoding.
+/// <https://github.com/ClickHouse/ClickHouse/blob/98a2c1c638c2ff9cea36e68c9ac16b3cf142387b/src/Core/BlockInfo.cpp#L21> for details on this encoding.
 fn encode_block_info(info: BlockInfo, mut dst: &mut BytesMut) {
     io::varuint::encode(BlockInfo::OVERFLOW_FIELD_NUM, &mut dst);
     dst.put_u8(u8::from(info.is_overflows));
