@@ -82,7 +82,7 @@ impl ClickhouseCli {
         .await
     }
 
-    async fn keeper_client_non_interactive<'a, F, T>(
+    async fn keeper_client_non_interactive<F, T>(
         &self,
         query: &str,
         subcommand_description: &'static str,
@@ -103,15 +103,15 @@ impl ClickhouseCli {
             .arg(query);
 
         let output = command.output().await.map_err(|err| {
-            let args: Vec<&OsStr> = command.as_std().get_args().collect();
-            let args_parsed: Vec<String> = args
+            let err_args: Vec<&OsStr> = command.as_std().get_args().collect();
+            let err_args_parsed: Vec<String> = err_args
                 .iter()
-                .map(|&os_str| os_str.to_str().unwrap().to_owned())
+                .map(|&os_str| os_str.to_string_lossy().into_owned())
                 .collect();
-            let args_str = args_parsed.join(" ");
+            let err_args_str = err_args_parsed.join(" ");
             ClickhouseCliError::Run {
                 description: subcommand_description,
-                subcommand: args_str,
+                subcommand: err_args_str,
                 err,
             }
         })?;
