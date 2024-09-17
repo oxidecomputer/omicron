@@ -3640,6 +3640,62 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone_nic (
     PRIMARY KEY (blueprint_id, id)
 );
 
+-- Blueprint information related to clickhouse cluster management
+--
+-- Rows for this table will only exist for deployments with an existing
+-- `ClickhousePolicy` as part of the fleet `Policy`. In the limit, this will be
+-- all deployments.
+CREATE TABLE IF NOT EXISTS omicron.public.bp_clickhouse_cluster_config (
+    -- Foreign key into the `blueprint` table
+    blueprint_id UUID PRIMARY KEY,
+    -- Generation number to track changes to the cluster state.
+    -- Used as optimizitic concurrency control.
+    generation INT8 NOT NULL,
+
+    -- Clickhouse server and keeper ids can never be reused. We hand them out
+    -- monotonically and keep track of the last one used here.
+    max_used_server_id INT8 NOT NULL,
+    max_used_keeper_id INT8 NOT NULL
+
+    -- Each clickhouse cluster has a unique name and secret value. These are set
+    -- once and shared among all nodes for the lifetime of the fleet.
+    cluster_name TEXT NOT NULL
+    cluster_secret TEXT NOT NULL
+
+    -- A recording of an inventory value that serves as a marker to inform the
+    -- reconfigurator when a collection of a raft configuration is recent.
+    highest_seen_keeper_leader_committed_log_index INT8 NOT NULL
+);
+
+-- Mapping of an Omicron zone ID to Clickhouse Keeper node ID in a specific
+-- blueprint.
+--
+-- This can logically be considered a subtable of `bp_clickhouse_cluster_config`
+CREATE TABLE IF NOT EXISTS omicron.public.bp_clickhouse_keeper_zone_id_to_node_id (
+    -- Foreign key into the `blueprint` table
+    blueprint_id UUID NOT NULL,
+
+    omicron_zone_id UUID NOT NULL,
+    keeper_id INT8 NOT NULL,
+
+    PRIMARY KEY (blueprint_id, omicron_zone_id, keeper_node_id)
+)
+
+-- Mapping of an Omicron zone ID to Clickhouse Server node ID in a specific
+-- blueprint.
+--
+-- This can logically be considered a subtable of `bp_clickhouse_cluster_config`
+CREATE TABLE IF NOT EXISTS omicron.public.bp_clickhouse_server_zone_id_to_node_id (
+    -- Foreign key into the `blueprint` table
+    blueprint_id UUID NOT NULL,
+
+    omicron_zone_id UUID NOT NULL,
+    server_id INT8 NOT NULL,
+
+    PRIMARY KEY (blueprint_id, omicron_zone_id, keeper_node_id)
+)
+
+
 -- Mapping of Omicron zone ID to CockroachDB node ID. This isn't directly used
 -- by the blueprint tables above, but is used by the more general Reconfigurator
 -- system along with them (e.g., to decommission expunged CRDB nodes).
@@ -4299,7 +4355,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '98.0.0', NULL)
+    (TRUE, NOW(), NOW(), '99.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

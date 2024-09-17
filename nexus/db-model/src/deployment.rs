@@ -8,9 +8,11 @@
 use crate::inventory::ZoneType;
 use crate::omicron_zone_config::{self, OmicronZoneNic};
 use crate::schema::{
-    blueprint, bp_omicron_physical_disk, bp_omicron_zone, bp_omicron_zone_nic,
-    bp_sled_omicron_physical_disks, bp_sled_omicron_zones, bp_sled_state,
-    bp_target,
+    blueprint, bp_clickhouse_cluster_config,
+    bp_clickhouse_keeper_zone_id_to_node_id,
+    bp_clickhouse_server_zone_id_to_node_id, bp_omicron_physical_disk,
+    bp_omicron_zone, bp_omicron_zone_nic, bp_sled_omicron_physical_disks,
+    bp_sled_omicron_zones, bp_sled_state, bp_target,
 };
 use crate::typed_uuid::DbTypedUuid;
 use crate::{
@@ -19,6 +21,7 @@ use crate::{
 };
 use anyhow::{anyhow, bail, Context, Result};
 use chrono::{DateTime, Utc};
+use clickhouse_admin_types::{KeeperId, ServerId};
 use ipnetwork::IpNetwork;
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
 use nexus_types::deployment::BlueprintTarget;
@@ -27,7 +30,7 @@ use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::{
-    blueprint_zone_type, BlueprintPhysicalDisksConfig,
+    blueprint_zone_type, BlueprintPhysicalDisksConfig, ClickhouseClusterConfig,
 };
 use nexus_types::deployment::{BlueprintPhysicalDiskConfig, BlueprintZoneType};
 use nexus_types::deployment::{
@@ -800,6 +803,96 @@ impl From<BpOmicronZoneNic> for OmicronZoneNic {
             is_primary: value.is_primary,
             slot: value.slot,
         }
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = bp_clickhouse_cluster_config)]
+pub struct BpClickhouseClusterConfig {
+    pub blueprint_id: Uuid,
+    pub generation: Generation,
+    pub max_used_server_id: i64,
+    pub max_used_keeper_id: i64,
+    pub cluster_name: String,
+    pub cluster_secret: String,
+    pub highest_seen_keeper_leader_committed_log_index: i64,
+}
+
+impl BpClickhouseClusterConfig {
+    pub fn new(
+        blueprint_id: Uuid,
+        config: &ClickhouseClusterConfig,
+    ) -> anyhow::Result<BpClickhouseClusterConfig> {
+        Ok(BpClickhouseClusterConfig {
+            blueprint_id,
+            generation: Generation(config.generation),
+            max_used_server_id: config
+                .max_used_server_id
+                .0
+                .try_into()
+                .context("more than 2^63 IDs in use")?,
+            max_used_keeper_id: config
+                .max_used_keeper_id
+                .0
+                .try_into()
+                .context("more than 2^63 IDs in use")?,
+            cluster_name: config.cluster_name.clone(),
+            cluster_secret: config.cluster_secret.clone(),
+            highest_seen_keeper_leader_committed_log_index: config
+                .highest_seen_keeper_leader_committed_log_index
+                .try_into()
+                .context("more than 2^63 IDs in use")?,
+        })
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = bp_clickhouse_keeper_zone_id_to_node_id)]
+pub struct BpClickhouseKeeperZoneIdToNodeId {
+    pub blueprint_id: Uuid,
+    pub omicron_zone_id: Uuid,
+    pub keeper_id: i64,
+}
+
+impl BpClickhouseKeeperZoneIdToNodeId {
+    pub fn new(
+        blueprint_id: Uuid,
+        omicron_zone_id: OmicronZoneUuid,
+        keeper_id: KeeperId,
+    ) -> anyhow::Result<BpClickhouseKeeperZoneIdToNodeId> {
+        Ok(BpClickhouseKeeperZoneIdToNodeId {
+            blueprint_id,
+            omicron_zone_id: omicron_zone_id.into_untyped_uuid(),
+            keeper_id: keeper_id
+                .0
+                .try_into()
+                .context("more than 2^63 IDs in use")?,
+        })
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = bp_clickhouse_server_zone_id_to_node_id)]
+pub struct BpClickhouseServerZoneIdToNodeId {
+    pub blueprint_id: Uuid,
+    pub omicron_zone_id: Uuid,
+    pub server_id: i64,
+}
+
+impl BpClickhouseServerZoneIdToNodeId {
+    pub fn new(
+        blueprint_id: Uuid,
+        omicron_zone_id: OmicronZoneUuid,
+        server_id: ServerId,
+    ) -> anyhow::Result<BpClickhouseServerZoneIdToNodeId> {
+        Ok(BpClickhouseServerZoneIdToNodeId {
+            blueprint_id,
+            omicron_zone_id: omicron_zone_id.into_untyped_uuid(),
+            server_id: server_id
+                .0
+                .try_into()
+                .context("more than 2^63 IDs in use")?,
+        })
     }
 }
 
