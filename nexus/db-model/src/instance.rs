@@ -10,6 +10,7 @@ use crate::collection::DatastoreAttachTargetConfig;
 use crate::schema::{disk, external_ip, instance};
 use chrono::{DateTime, TimeDelta, Utc};
 use db_macros::Resource;
+use diesel::expression::{is_aggregate, ValidGrouping};
 use diesel::pg;
 use diesel::prelude::*;
 use diesel::sql_types::{Bool, Nullable};
@@ -307,14 +308,15 @@ impl InstanceAutoRestart {
     /// for it to be defined on the same struct as the in-memory logic
     /// (`can_reincarnate`).
     pub fn filter_reincarnatable(
-    ) -> impl AppearsOnTable<instance::table, SqlType = Nullable<Bool>>
+    ) -> impl diesel::query_builder::QueryFragment<pg::Pg>
            + diesel::query_builder::QueryId
-           + diesel::query_builder::QueryFragment<pg::Pg>
-           // I have no idea what this means, but it seems important to Diesel...
-           + diesel::expression::ValidGrouping<
-        (),
-        IsAggregate = diesel::expression::is_aggregate::No,
-    > {
+           // All elements in this expression appear on the `instance` table, so
+           // it's a valid `filter` for that table, and the expression evaluates
+           // to a bool (or NULL), making it a valid WHERE clause.
+           + AppearsOnTable<instance::table, SqlType = Nullable<Bool>>
+           // I think this trait tells diesel that the query fragment has no
+           // GROUP BY clause, so that it knows it can be used as a WHERE clause
+           + ValidGrouping<(), IsAggregate = is_aggregate::No> {
         use instance::dsl;
 
         let now = diesel::dsl::now.into_sql::<pg::sql_types::Timestamptz>();
