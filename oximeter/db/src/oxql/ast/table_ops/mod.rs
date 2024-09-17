@@ -13,6 +13,8 @@ pub mod group_by;
 pub mod join;
 pub mod limit;
 
+use std::fmt;
+
 use self::align::Align;
 use self::filter::Filter;
 use self::group_by::GroupBy;
@@ -34,6 +36,19 @@ pub enum BasicTableOp {
     Join(Join),
     Align(Align),
     Limit(Limit),
+}
+
+impl fmt::Display for BasicTableOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            BasicTableOp::Get(name) => write!(f, "get {name}"),
+            BasicTableOp::Filter(filter) => write!(f, "filter {filter}"),
+            BasicTableOp::GroupBy(group_by) => write!(f, "{group_by}"),
+            BasicTableOp::Join(_) => write!(f, "join"),
+            BasicTableOp::Align(align) => write!(f, "align {align}"),
+            BasicTableOp::Limit(limit) => write!(f, "{limit}"),
+        }
+    }
 }
 
 impl BasicTableOp {
@@ -59,11 +74,36 @@ pub struct GroupedTableOp {
     pub ops: Vec<Query>,
 }
 
+impl fmt::Display for GroupedTableOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{{ ")?;
+        let n_queries = self.ops.len();
+        for (i, query) in self.ops.iter().enumerate() {
+            write!(f, "{query}")?;
+            if i < n_queries - 1 {
+                write!(f, "; ")?;
+            } else {
+                write!(f, "")?;
+            }
+        }
+        write!(f, " }}")
+    }
+}
+
 /// Any kind of OxQL table operation.
 #[derive(Clone, Debug, PartialEq)]
 pub enum TableOp {
     Basic(BasicTableOp),
     Grouped(GroupedTableOp),
+}
+
+impl fmt::Display for TableOp {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TableOp::Basic(basic) => write!(f, "{basic}"),
+            TableOp::Grouped(grouped) => write!(f, "{grouped}"),
+        }
+    }
 }
 
 impl TableOp {
