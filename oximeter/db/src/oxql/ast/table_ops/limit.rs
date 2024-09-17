@@ -8,7 +8,7 @@
 
 use anyhow::Error;
 use oxql_types::Table;
-use std::num::NonZeroUsize;
+use std::{fmt, num::NonZeroUsize};
 
 /// The kind of limiting operation
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -27,6 +27,17 @@ pub struct Limit {
     /// The number of points the timeseries is limited to.
     pub count: NonZeroUsize,
 }
+
+impl fmt::Display for Limit {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let kind = match self.kind {
+            LimitKind::First => "first",
+            LimitKind::Last => "last",
+        };
+        write!(f, "{kind} {}", self.count)
+    }
+}
+
 impl Limit {
     /// Apply the limit operation to the input tables.
     pub(crate) fn apply(&self, tables: &[Table]) -> Result<Vec<Table>, Error> {

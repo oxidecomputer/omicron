@@ -14,6 +14,7 @@ use crate::oxql::ast::table_ops::filter;
 use crate::oxql::ast::table_ops::filter::Filter;
 use crate::oxql::ast::table_ops::limit::Limit;
 use crate::oxql::ast::table_ops::limit::LimitKind;
+use crate::oxql::Query;
 use crate::query::field_table_name;
 use crate::Error;
 use crate::Metric;
@@ -111,6 +112,40 @@ struct ConsistentKeyGroup {
 }
 
 impl Client {
+    /// Build a query plan for the OxQL query.
+    pub async fn plan_oxql_query(
+        &self,
+        query: impl AsRef<str>,
+    ) -> Result<oxql::plan::Plan, Error> {
+        let query = query.as_ref();
+        let parsed_query = oxql::Query::new(query)?;
+        self.build_query_plan(&parsed_query).await
+    }
+
+    /// Build a query plan for the OxQL query.
+    async fn build_query_plan(
+        &self,
+        query: &Query,
+    ) -> Result<oxql::plan::Plan, Error> {
+        let referenced_timeseries = query.all_timeseries_names();
+        let schema = self
+            .schema
+            .lock()
+            .await
+            .iter()
+            .filter_map(|(name, schema)| {
+                if referenced_timeseries.contains(name) {
+                    Some((name.clone(), schema.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let plan =
+            oxql::plan::Plan::new(query.parsed_query().clone(), &schema)?;
+        Ok(plan)
+    }
+
     /// Run a OxQL query.
     pub async fn oxql_query(
         &self,
@@ -130,6 +165,15 @@ impl Client {
         // See https://github.com/oxidecomputer/omicron/issues/5298.
         let query = query.as_ref();
         let parsed_query = oxql::Query::new(query)?;
+        let plan = self.build_query_plan(&parsed_query).await?;
+        if plan.requires_full_table_scan() {
+            return Err(Error::Oxql(anyhow::anyhow!(
+                "This query requires at least one full table scan. \
+                Please rewrite the query to filter either the fields \
+                or timestamps, in order to reduce the amount of data \
+                fetched from the database."
+            )));
+        }
         let query_id = Uuid::new_v4();
         let query_log =
             self.log.new(slog::o!("query_id" => query_id.to_string()));
@@ -819,12 +863,12 @@ impl Client {
         // return.
         //
         // This is used to ensure that we never go above the limit in
-        // `MAX_RESULT_SIZE`. That restricts the _total_ number of rows we want
-        // to retch from the database. So we set our limit to be one more than
-        // the remainder on our allotment. If we get exactly as many as we set
-        // in the limit, then we fail the query because there are more rows that
-        // _would_ be returned. We don't know how many more, but there is at
-        // least 1 that pushes us over the limit. This prevents tricky
+        // `MAX_DATABASE_ROWS`. That restricts the _total_ number of rows we
+        // want to retch from the database. So we set our limit to be one more
+        // than the remainder on our allotment. If we get exactly as many as we
+        // set in the limit, then we fail the query because there are more row
+        // that _would_ be returned. We don't know how many more, but there is
+        // at least 1 that pushes us over the limit. This prevents tricky
         // TOCTOU-like bugs where we need to check the limit twice, and improves
         // performance, since we don't return much more than we could possibly
         // handle.

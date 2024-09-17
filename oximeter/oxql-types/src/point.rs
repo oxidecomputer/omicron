@@ -43,8 +43,13 @@ pub enum DataType {
 
 impl DataType {
     /// True if this is a numeric scalar type.
-    pub fn is_numeric(&self) -> bool {
+    pub const fn is_numeric(&self) -> bool {
         matches!(self, DataType::Integer | DataType::Double)
+    }
+
+    /// Return true if this is a distribution data type.
+    pub const fn is_distribution(&self) -> bool {
+        matches!(self, DataType::IntegerDistribution | DataType::DoubleDistribution)
     }
 }
 
@@ -106,6 +111,12 @@ pub enum MetricType {
     Delta,
     /// The value represents an accumulation between two points in time.
     Cumulative,
+}
+impl MetricType {
+    /// Return true if this is cumulative.
+    pub const fn is_cumulative(&self) -> bool {
+        matches!(self, MetricType::Cumulative)
+    }
 }
 
 impl fmt::Display for MetricType {
