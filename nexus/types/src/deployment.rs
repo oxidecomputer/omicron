@@ -642,6 +642,7 @@ pub struct BlueprintZoneConfig {
 
     pub id: OmicronZoneUuid,
     pub underlay_address: Ipv6Addr,
+    /// zpool used for the zone's (transient) root filesystem
     pub filesystem_pool: Option<ZpoolName>,
     pub zone_type: BlueprintZoneType,
 }
