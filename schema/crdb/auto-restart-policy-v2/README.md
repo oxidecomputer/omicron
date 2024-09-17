@@ -34,6 +34,7 @@ from one enum to another:
 5. Recreate the state column with the new type.
 6. Populate the column's values using the data saved in the temporary column.
 7. Drop the temporary column.
+8. Drop the old enum type.
 
 This is broadly similar to the approach used in the
 [`separate-instance-and-vmm-states`](../separate-instance-and-vmm-states/)
