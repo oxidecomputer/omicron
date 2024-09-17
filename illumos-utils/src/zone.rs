@@ -27,7 +27,7 @@ pub const ROUTE: &str = "/usr/sbin/route";
 
 // TODO: These could become enums
 pub const ZONE_PREFIX: &str = "oxz_";
-pub const PROPOLIS_ZONE_PREFIX: &str = "oxz_propolis-server_";
+pub const PROPOLIS_ZONE_PREFIX: &str = "oxz_propolis_";
 
 #[derive(thiserror::Error, Debug)]
 enum Error {
