@@ -199,7 +199,7 @@ impl Blueprint {
         &self,
         filter: BlueprintZoneFilter,
     ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)> {
-        Blueprint::all_bp_zones(&self.blueprint_zones, filter)
+        Blueprint::filtered_zones(&self.blueprint_zones, filter)
     }
 
     /// Iterate over the [`BlueprintZoneConfig`] instances that match the
@@ -207,7 +207,7 @@ impl Blueprint {
     //
     // This is a scoped function so that it can be used in the
     // `BlueprintBuilder` during planning as well as in the `Blueprint`.
-    pub fn all_bp_zones(
+    pub fn filtered_zones(
         zones_by_sled_id: &BTreeMap<SledUuid, BlueprintZonesConfig>,
         filter: BlueprintZoneFilter,
     ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)> {

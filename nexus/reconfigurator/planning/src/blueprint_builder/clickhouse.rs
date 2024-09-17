@@ -35,7 +35,7 @@ impl From<&BTreeMap<SledUuid, BlueprintZonesConfig>>
     ) -> Self {
         let mut keepers = BTreeSet::new();
         let mut servers = BTreeSet::new();
-        for (_, bp_zone_config) in Blueprint::all_bp_zones(
+        for (_, bp_zone_config) in Blueprint::filtered_zones(
             zones_by_sled_id,
             BlueprintZoneFilter::ShouldBeRunning,
         ) {

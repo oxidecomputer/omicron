@@ -23,7 +23,7 @@ pub struct ClickhouseClusterConfig {
     /// Clickhouse Server IDs must be unique and are handed out monotonically.
     /// Keep track of the last used one.
     pub max_used_server_id: ServerId,
-    /// CLickhouse Keeper IDss must be unique and are handed out monotonically.
+    /// Clickhouse Keeper IDs must be unique and are handed out monotonically.
     /// Keep track of the last used one.
     pub max_used_keeper_id: KeeperId,
     /// An arbitrary name for the Clickhouse cluster shared by all nodes
