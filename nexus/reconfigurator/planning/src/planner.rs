@@ -1457,7 +1457,8 @@ mod test {
             "can't find external DNS zones in planned blueprint"
         );
 
-        // Expunge the first sled and re-plan.
+        // Expunge the first sled and re-plan. That gets us three expunged
+        // external DNS zones ...
         let mut input_builder = input.into_builder();
         let (&sled_id, details) =
             input_builder.sleds_mut().iter_mut().next().expect("no sleds");
@@ -1477,8 +1478,6 @@ mod test {
 
         let diff = blueprint3.diff_since_blueprint(&blueprint2);
         println!("2 -> 3 (expunged sled):\n{}", diff.display());
-
-        // The expunged sled should have three expunged external DNS zones.
         assert_eq!(
             blueprint3.blueprint_zones[&sled_id]
                 .zones
@@ -1491,9 +1490,25 @@ mod test {
             3
         );
 
+        // ... which we can pick up after one more round of planning.
+        let blueprint4 = Planner::new_based_on(
+            logctx.log.clone(),
+            &blueprint3,
+            &input,
+            "test_blueprint4",
+            &collection,
+        )
+        .expect("failed to create planner")
+        .with_rng_seed((TEST_NAME, "bp4"))
+        .plan()
+        .expect("failed to re-re-plan");
+
+        let diff = blueprint4.diff_since_blueprint(&blueprint3);
+        println!("3 -> 4 (expunged zones):\n{}", diff.display());
+
         // And the IP addresses of the new external DNS zones should be the
         // same as the original set that we "found".
-        let mut ips = blueprint3
+        let mut ips = blueprint4
             .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
             .filter_map(|(_id, zone)| {
                 zone.zone_type.is_external_dns().then(|| {

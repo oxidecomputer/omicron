@@ -8,14 +8,11 @@ use debug_ignore::DebugIgnore;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::Blueprint;
-use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
 use nexus_types::deployment::OmicronZoneExternalIp;
 use nexus_types::deployment::PlanningInput;
-use nexus_types::deployment::SledFilter;
-use nexus_types::external_api::views::SledPolicy;
 use nexus_types::inventory::SourceNatConfig;
 use omicron_common::address::IpRange;
 use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
@@ -178,29 +175,12 @@ impl<'a> BuilderExternalNetworking<'a> {
             }
         }
 
-        // Recycle the IP addresses of expunged or about-to-be-expunged
-        // external DNS zones. The latter is an unfortunate consequence
-        // of when this builder is constructed. An alternative would be
-        // a hook in expungement, but that seems possibly worse than this
-        // (admittedly awkward) filter.
+        // Recycle the IP addresses of expunged external DNS zones.
         // TODO: Remove when external DNS addresses come from policy.
-        for (_, z) in parent_blueprint
-            .all_omicron_zones(BlueprintZoneFilter::All)
-            .filter(|(sled_id, zone)| {
-                zone.disposition == BlueprintZoneDisposition::Expunged
-                    || input.all_sleds(SledFilter::Commissioned).any(
-                        |(id, sled)| {
-                            id == *sled_id
-                                && sled.policy == SledPolicy::Expunged
-                        },
-                    )
-            })
+        for (_, zone) in
+            parent_blueprint.all_omicron_zones(BlueprintZoneFilter::Expunged)
         {
-            if let BlueprintZoneType::ExternalDns(dns) = &z.zone_type {
-                match dns.nic.ip {
-                    IpAddr::V4(ip) => existing_external_dns_v4_ips.insert(ip),
-                    IpAddr::V6(ip) => existing_external_dns_v6_ips.insert(ip),
-                };
+            if let BlueprintZoneType::ExternalDns(dns) = &zone.zone_type {
                 if !available_external_dns_ips.insert(dns.dns_address) {
                     bail!(
                         "unavailable external DNS IP: {}",

@@ -1358,7 +1358,7 @@ impl<'a> BlueprintBuilder<'a> {
     /// TODO-cleanup: Remove when external DNS addresses are in the policy.
     pub fn count_parent_external_dns_zones(&self) -> usize {
         self.parent_blueprint
-            .all_omicron_zones(BlueprintZoneFilter::All)
+            .all_omicron_zones(BlueprintZoneFilter::Expunged)
             .filter(|(_id, zone)| zone.zone_type.is_external_dns())
             .count()
     }
