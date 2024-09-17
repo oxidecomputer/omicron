@@ -63,7 +63,16 @@ pub async fn shell() -> anyhow::Result<()> {
                 }
                 match conn.query(query, None).await {
                     Ok(result) => print_query_result(result),
-                    Err(e) => eprintln!("{}", DisplayErrorChain::new(&e)),
+                    Err(e) => {
+                        eprintln!(
+                            "{}\n{}",
+                            "Error!".underlined().red(),
+                            DisplayErrorChain::new(&e),
+                        );
+                        conn = native::Connection::new(addr)
+                            .await
+                            .context("Trying to rebuild connection")?;
+                    }
                 }
             }
             Ok(Signal::CtrlD) => return Ok(()),
