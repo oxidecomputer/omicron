@@ -8,9 +8,11 @@
 use crate::inventory::ZoneType;
 use crate::omicron_zone_config::{self, OmicronZoneNic};
 use crate::schema::{
-    blueprint, bp_omicron_physical_disk, bp_omicron_zone, bp_omicron_zone_nic,
-    bp_sled_omicron_physical_disks, bp_sled_omicron_zones, bp_sled_state,
-    bp_target,
+    blueprint, bp_clickhouse_cluster_config,
+    bp_clickhouse_keeper_zone_id_to_node_id,
+    bp_clickhouse_server_zone_id_to_node_id, bp_omicron_physical_disk,
+    bp_omicron_zone, bp_omicron_zone_nic, bp_sled_omicron_physical_disks,
+    bp_sled_omicron_zones, bp_sled_state, bp_target,
 };
 use crate::typed_uuid::DbTypedUuid;
 use crate::{
@@ -801,6 +803,34 @@ impl From<BpOmicronZoneNic> for OmicronZoneNic {
             slot: value.slot,
         }
     }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = bp_clickhouse_cluster_config)]
+pub struct BpClickhouseClusterConfig {
+    pub blueprint_id: Uuid,
+    pub generation: Generation,
+    pub max_used_server_id: i64,
+    pub max_used_keeper_id: i64,
+    pub cluster_name: String,
+    pub cluster_secret: String,
+    pub highest_seen_keeper_leader_committed_log_index: i64,
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = bp_clickhouse_keeper_zone_id_to_node_id)]
+pub struct BpClickhouseKeeperZoneIdToNodeId {
+    pub blueprint_id: Uuid,
+    pub omicron_zone_id: Uuid,
+    pub keeper_id: i64,
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = bp_clickhouse_server_zone_id_to_node_id)]
+pub struct BpClickhouseServerZoneIdToNodeId {
+    pub blueprint_id: Uuid,
+    pub omicron_zone_id: Uuid,
+    pub server_id: i64,
 }
 
 mod diesel_util {

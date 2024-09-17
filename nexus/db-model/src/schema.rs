@@ -1632,7 +1632,7 @@ table! {
         blueprint_id -> Uuid,
         generation -> Int8,
         max_used_server_id -> Int8,
-        max_used_keeepr_id -> Int8,
+        max_used_keeper_id -> Int8,
         cluster_name -> Text,
         cluster_secret -> Text,
         highest_seen_keeper_leader_committed_log_index -> Int8,
