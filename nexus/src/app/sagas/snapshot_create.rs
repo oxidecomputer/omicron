@@ -2119,10 +2119,10 @@ mod test {
             let name = match disk {
                 params::InstanceDiskAttachment::Create(create) => {
                     create.identity.name.as_str()
-                },
+                }
                 params::InstanceDiskAttachment::Attach(attach) => {
                     attach.name.as_str()
-                },
+                }
             };
             name.to_string()
         });

@@ -1024,9 +1024,7 @@ impl super::Nexus {
                 // TODO: ensure that one of the disk request is backed by this name
                 Some(vec![device.to_owned()])
             }
-            None => {
-                None
-            }
+            None => None,
         };
 
         let nics = self
