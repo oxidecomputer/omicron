@@ -13,7 +13,9 @@ use anyhow::{anyhow, Context};
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::{Builder, Utf8TempDir};
 use dropshot::test_util::{log_prefix_for_test, LogContext};
-use std::net::{IpAddr, Ipv6Addr, SocketAddr};
+use futures::stream::FuturesUnordered;
+use futures::StreamExt as _;
+use std::net::{Ipv6Addr, SocketAddrV6};
 use thiserror::Error;
 use tokio::{
     fs::File,
@@ -42,22 +44,199 @@ const CLICKHOUSE_READY: &'static str =
 // port number on which it is listening.
 const CLICKHOUSE_PORT: &'static str = "Application: Listening for http://[::1]";
 
-/// A `ClickHouseInstance` is used to start and manage a ClickHouse single node server process.
+/// A ClickHouse deployment, either single-node or a cluster.
+#[derive(Debug)]
+pub enum ClickHouseDeployment {
+    /// A single-node deployment.
+    ///
+    /// This starts a single replica on one server. It is expected to work with
+    /// the non-replicated version of the `oximeter` database.
+    SingleNode(ClickHouseInstance),
+    /// A replicated ClickHouse cluster.
+    ///
+    /// This starts several replica servers, and the required ClickHouse Keeper
+    /// nodes that manage the cluster. It is expected to work with the
+    /// replicated version of the `oximeter` database.
+    Cluster(ClickHouseCluster),
+}
+
+impl ClickHouseDeployment {
+    /// Create a single-node deployment.
+    pub async fn new_single_node(
+        logctx: &LogContext,
+        http_port: u16,
+    ) -> Result<Self, anyhow::Error> {
+        ClickHouseInstance::new_single_node(logctx, http_port)
+            .await
+            .map(Self::SingleNode)
+    }
+
+    /// Create a replicated cluster deployment.
+    pub async fn new_cluster(
+        logctx: &LogContext,
+        replica_config: PathBuf,
+        keeper_config: PathBuf,
+    ) -> Result<Self, anyhow::Error> {
+        ClickHouseCluster::new(logctx, replica_config, keeper_config)
+            .await
+            .map(Self::Cluster)
+    }
+
+    /// Return true if this is a cluster deployment.
+    pub fn is_cluster(&self) -> bool {
+        matches!(self, ClickHouseDeployment::Cluster(_))
+    }
+
+    /// Return an HTTP address for any instance in the deployment.
+    ///
+    /// If this is a single-node, there's only one of these. For a replicated
+    /// cluster deployment, this returns an HTTP address to one of them, but
+    /// it's not specified which.
+    ///
+    /// If one cares about a specific server, one can iterate over them and get
+    /// their exact addresses.
+    pub fn http_address(&self) -> SocketAddrV6 {
+        match self {
+            ClickHouseDeployment::SingleNode(instance) => instance.address,
+            ClickHouseDeployment::Cluster(cluster) => {
+                cluster.replicas.first().unwrap().address
+            }
+        }
+    }
+
+    /// Cleanup all child processes and data files in the deployment.
+    pub async fn cleanup(&mut self) -> Result<(), anyhow::Error> {
+        match self {
+            ClickHouseDeployment::SingleNode(instance) => {
+                instance.cleanup().await
+            }
+            ClickHouseDeployment::Cluster(cluster) => cluster.cleanup().await,
+        }
+    }
+
+    /// Return the path to the replica configuration files.
+    ///
+    /// This is only Some(_) in a cluster deployment. In a single-node, we use a
+    /// configuration embedded in the server binary itself.
+    pub fn replica_config_path(&self) -> Option<&Path> {
+        match self {
+            ClickHouseDeployment::SingleNode(_) => None,
+            ClickHouseDeployment::Cluster(cluster) => {
+                Some(cluster.replica_config_path())
+            }
+        }
+    }
+
+    /// Return the path to the replica configuration files.
+    ///
+    /// This is only Some(_) in a cluster deployment. In a single-node, there
+    /// are no Keepers, and so no config file for them.
+    pub fn keeper_config_path(&self) -> Option<&Path> {
+        match self {
+            ClickHouseDeployment::SingleNode(_) => None,
+            ClickHouseDeployment::Cluster(cluster) => {
+                Some(cluster.keeper_config_path())
+            }
+        }
+    }
+
+    /// Wait for any node in the cluster to shutdown.
+    pub async fn wait_for_shutdown(
+        &mut self,
+    ) -> Result<ClusterNode, anyhow::Error> {
+        match self {
+            ClickHouseDeployment::SingleNode(instance) => {
+                instance.wait_for_shutdown().await
+            }
+            ClickHouseDeployment::Cluster(cluster) => {
+                cluster.wait_for_shutdown().await
+            }
+        }
+    }
+
+    /// Wait for _all_ nodes in the cluster to shutdown.
+    pub async fn wait_for_all_shutdown(&mut self) -> Result<(), anyhow::Error> {
+        match self {
+            ClickHouseDeployment::SingleNode(instance) => {
+                instance.wait_for_shutdown().await.map(|_| ())
+            }
+            ClickHouseDeployment::Cluster(cluster) => {
+                cluster.wait_for_all_shutdown().await
+            }
+        }
+    }
+
+    /// Return an iterator over all the replicas in the deployment.
+    pub fn instances(
+        &self,
+    ) -> Box<dyn Iterator<Item = &ClickHouseInstance> + '_> {
+        match self {
+            ClickHouseDeployment::SingleNode(instance) => {
+                Box::new(std::iter::once(instance))
+            }
+            ClickHouseDeployment::Cluster(cluster) => {
+                Box::new(cluster.instances())
+            }
+        }
+    }
+
+    /// Return an iterator over all the ClickHouse Keepers in the deployment.
+    pub fn keepers(&self) -> Box<dyn Iterator<Item = &ClickHouseKeeper> + '_> {
+        match self {
+            ClickHouseDeployment::SingleNode(_) => Box::new(std::iter::empty()),
+            ClickHouseDeployment::Cluster(cluster) => {
+                Box::new(cluster.keepers())
+            }
+        }
+    }
+}
+
+/// A ClickHouse Keeper, which forms a quorum with others to manage replicas.
+#[derive(Debug)]
+pub struct ClickHouseKeeper(ClickHouseInstance);
+
+impl std::ops::Deref for ClickHouseKeeper {
+    type Target = ClickHouseInstance;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for ClickHouseKeeper {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl ClickHouseKeeper {
+    /// Construct a new Keeper.
+    pub fn new() -> Result<Self, anyhow::Error> {
+        todo!()
+    }
+}
+
+/// A `ClickHouseInstance` is used to start and manage one ClickHouse server.
+/// process.
+///
+/// Note that this only refers to ClickHouse _replicas_ or data servers. The
+/// Keepers in a cluster are managed through `ClickHouseKeeper` objects.
 #[derive(Debug)]
 pub struct ClickHouseInstance {
     // Directory in which all data, logs, etc are stored.
     data_dir: Option<ClickHouseDataDir>,
     data_path: Utf8PathBuf,
-    // The HTTP port the server is listening on
-    port: u16,
     // The address the server is listening on
-    pub address: SocketAddr,
+    pub address: SocketAddrV6,
     // Full list of command-line arguments
     args: Vec<String>,
     // Subprocess handle
     child: Option<tokio::process::Child>,
+    // Environment variables for the child process.
+    env: BTreeMap<String, String>,
 }
 
+/// An error starting a ClickHouse proceess.
 #[derive(Debug, Error)]
 pub enum ClickHouseError {
     #[error("Failed to open ClickHouse log file")]
@@ -78,7 +257,7 @@ pub enum ClickHouseError {
 
 impl ClickHouseInstance {
     /// Start a new single node ClickHouse server on the given IPv6 port.
-    pub async fn new_single_node(
+    async fn new_single_node(
         logctx: &LogContext,
         port: u16,
     ) -> Result<Self, anyhow::Error> {
@@ -96,6 +275,16 @@ impl ClickHouseInstance {
             data_dir.datastore_path().to_string(),
         ];
 
+        // By default ClickHouse forks a child if it's been explicitly
+        // requested via the following environment variable, _or_ if it's
+        // not attached to a TTY. Avoid this behavior, so that we can
+        // correctly deliver SIGINT. The "watchdog" masks SIGINT, meaning
+        // we'd have to deliver that to the _child_, which is more
+        // complicated.
+        let mut env: BTreeMap<_, _> =
+            [(String::from("CLICKHOUSE_WATCHDOG_ENABLE"), String::from("0"))]
+                .into_iter()
+                .collect();
         let child = tokio::process::Command::new("clickhouse")
             .args(&args)
             // ClickHouse internally tees its logs to a file, so we throw away
@@ -104,35 +293,32 @@ impl ClickHouseInstance {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .current_dir(data_dir.cwd_path())
-            // By default ClickHouse forks a child if it's been explicitly
-            // requested via the following environment variable, _or_ if it's
-            // not attached to a TTY. Avoid this behavior, so that we can
-            // correctly deliver SIGINT. The "watchdog" masks SIGINT, meaning
-            // we'd have to deliver that to the _child_, which is more
-            // complicated.
-            .env("CLICKHOUSE_WATCHDOG_ENABLE", "0")
+            .envs(&env)
             .spawn()
             .with_context(|| {
                 format!("failed to spawn `clickhouse` (with args: {:?})", &args)
             })?;
-
+        for (k, v) in std::env::vars_os() {
+            env.insert(
+                k.to_string_lossy().to_string(),
+                v.to_string_lossy().to_string(),
+            );
+        }
         let data_path = data_dir.root_path().to_path_buf();
         let port = wait_for_port(data_dir.log_path()).await?;
-
-        let address = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), port);
-
+        let address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, port, 0, 0);
         Ok(Self {
             data_dir: Some(data_dir),
             data_path,
-            port,
             address,
             args,
             child: Some(child),
+            env,
         })
     }
 
     /// Start a new replicated ClickHouse server on the given IPv6 port.
-    pub async fn new_replicated(
+    async fn new_replicated(
         logctx: &LogContext,
         port: u16,
         tcp_port: u16,
@@ -147,6 +333,46 @@ impl ClickHouseInstance {
             "--config-file".to_string(),
             format!("{}", config_path.display()),
         ];
+        let mut env: BTreeMap<_, _> = [
+            (String::from("CLICKHOUSE_WATCHDOG_ENABLE"), String::from("0")),
+            (String::from("CH_LOG"), data_dir.log_path().to_string()),
+            (String::from("CH_ERROR_LOG"), data_dir.err_log_path().to_string()),
+            (String::from("CH_REPLICA_DISPLAY_NAME"), name.clone()),
+            (String::from("CH_LISTEN_ADDR"), String::from("::")),
+            (String::from("CH_LISTEN_PORT"), port.to_string()),
+            (String::from("CH_TCP_PORT"), tcp_port.to_string()),
+            (String::from("CH_INTERSERVER_PORT"), interserver_port.to_string()),
+            (
+                String::from("CH_DATASTORE"),
+                data_dir.datastore_path().to_string(),
+            ),
+            (String::from("CH_TMP_PATH"), data_dir.tmp_path().to_string()),
+            (
+                String::from("CH_USER_FILES_PATH"),
+                data_dir.user_files_path().to_string(),
+            ),
+            (
+                String::from("CH_USER_LOCAL_DIR"),
+                data_dir.access_path().to_string(),
+            ),
+            (
+                String::from("CH_FORMAT_SCHEMA_PATH"),
+                data_dir.format_schemas_path().to_string(),
+            ),
+            (String::from("CH_REPLICA_NUMBER"), r_number.clone()),
+            (String::from("CH_REPLICA_HOST_01"), String::from("::1")),
+            (String::from("CH_REPLICA_HOST_02"), String::from("::1")),
+            // ClickHouse servers have a small quirk, where when setting the
+            // keeper hosts as IPv6 localhost addresses in the replica
+            // configuration file, they must be wrapped in square brackets
+            // Otherwise, when running any query, a "Service not found" error
+            // appears.
+            (String::from("CH_KEEPER_HOST_01"), String::from("[::1]")),
+            (String::from("CH_KEEPER_HOST_02"), String::from("[::1]")),
+            (String::from("CH_KEEPER_HOST_03"), String::from("[::1]")),
+        ]
+        .into_iter()
+        .collect();
 
         let child = tokio::process::Command::new("clickhouse")
             .args(&args)
@@ -154,38 +380,19 @@ impl ClickHouseInstance {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .current_dir(data_dir.cwd_path())
-            .env("CLICKHOUSE_WATCHDOG_ENABLE", "0")
-            .env("CH_LOG", data_dir.log_path())
-            .env("CH_ERROR_LOG", data_dir.err_log_path())
-            .env("CH_REPLICA_DISPLAY_NAME", name)
-            .env("CH_LISTEN_ADDR", "::")
-            .env("CH_LISTEN_PORT", port.to_string())
-            .env("CH_TCP_PORT", tcp_port.to_string())
-            .env("CH_INTERSERVER_PORT", interserver_port.to_string())
-            .env("CH_DATASTORE", data_dir.datastore_path())
-            .env("CH_TMP_PATH", data_dir.tmp_path())
-            .env("CH_USER_FILES_PATH", data_dir.user_files_path())
-            .env("CH_USER_LOCAL_DIR", data_dir.access_path())
-            .env("CH_FORMAT_SCHEMA_PATH", data_dir.format_schemas_path())
-            .env("CH_REPLICA_NUMBER", r_number)
-            .env("CH_REPLICA_HOST_01", "::1")
-            .env("CH_REPLICA_HOST_02", "::1")
-            // ClickHouse servers have a small quirk, where when setting the
-            // keeper hosts as IPv6 localhost addresses in the replica
-            // configuration file, they must be wrapped in square brackets
-            // Otherwise, when running any query, a "Service not found" error
-            // appears.
-            .env("CH_KEEPER_HOST_01", "[::1]")
-            .env("CH_KEEPER_HOST_02", "[::1]")
-            .env("CH_KEEPER_HOST_03", "[::1]")
+            .envs(&env)
             .spawn()
             .with_context(|| {
                 format!("failed to spawn `clickhouse` (with args: {:?})", &args)
             })?;
-
+        for (k, v) in std::env::vars_os() {
+            env.insert(
+                k.to_string_lossy().to_string(),
+                v.to_string_lossy().to_string(),
+            );
+        }
         let data_path = data_dir.root_path().to_path_buf();
-        let address = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), port);
-
+        let address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, port, 0, 0);
         let result = wait_for_ready(
             data_dir.log_path(),
             CLICKHOUSE_TIMEOUT,
@@ -196,17 +403,17 @@ impl ClickHouseInstance {
             Ok(()) => Ok(Self {
                 data_dir: Some(data_dir),
                 data_path,
-                port,
                 address,
                 args,
                 child: Some(child),
+                env,
             }),
             Err(e) => Err(e),
         }
     }
 
     /// Start a new ClickHouse keeper on the given IPv6 port.
-    pub async fn new_keeper(
+    async fn new_keeper(
         logctx: &LogContext,
         port: u16,
         k_id: u16,
@@ -225,30 +432,44 @@ impl ClickHouseInstance {
             "--config-file".to_string(),
             format!("{}", config_path.display()),
         ];
+        let mut env: BTreeMap<_, _> = [
+            (String::from("CLICKHOUSE_WATCHDOG_ENABLE"), String::from("0")),
+            (String::from("CH_LOG"), data_dir.keeper_log_path().to_string()),
+            (
+                String::from("CH_ERROR_LOG"),
+                data_dir.keeper_err_log_path().to_string(),
+            ),
+            (String::from("CH_LISTEN_ADDR"), String::from("::")),
+            (String::from("CH_LISTEN_PORT"), port.to_string()),
+            (String::from("CH_KEEPER_ID_CURRENT"), k_id.to_string()),
+            (
+                String::from("CH_DATASTORE"),
+                data_dir.datastore_path().to_string(),
+            ),
+            (
+                String::from("CH_LOG_STORAGE_PATH"),
+                data_dir.keeper_log_storage_path().to_string(),
+            ),
+            (
+                String::from("CH_SNAPSHOT_STORAGE_PATH"),
+                data_dir.keeper_snapshot_storage_path().to_string(),
+            ),
+            (String::from("CH_KEEPER_ID_01"), String::from("1")),
+            (String::from("CH_KEEPER_ID_02"), String::from("2")),
+            (String::from("CH_KEEPER_ID_03"), String::from("3")),
+            (String::from("CH_KEEPER_HOST_01"), String::from("::1")),
+            (String::from("CH_KEEPER_HOST_02"), String::from("::1")),
+            (String::from("CH_KEEPER_HOST_03"), String::from("::1")),
+        ]
+        .into_iter()
+        .collect();
 
         let child = tokio::process::Command::new("clickhouse")
             .args(&args)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
-            .env("CLICKHOUSE_WATCHDOG_ENABLE", "0")
-            .env("CH_LOG", data_dir.keeper_log_path())
-            .env("CH_ERROR_LOG", data_dir.keeper_err_log_path())
-            .env("CH_LISTEN_ADDR", "::")
-            .env("CH_LISTEN_PORT", port.to_string())
-            .env("CH_KEEPER_ID_CURRENT", k_id.to_string())
-            .env("CH_DATASTORE", data_dir.datastore_path())
-            .env("CH_LOG_STORAGE_PATH", data_dir.keeper_log_storage_path())
-            .env(
-                "CH_SNAPSHOT_STORAGE_PATH",
-                data_dir.keeper_snapshot_storage_path(),
-            )
-            .env("CH_KEEPER_ID_01", "1")
-            .env("CH_KEEPER_ID_02", "2")
-            .env("CH_KEEPER_ID_03", "3")
-            .env("CH_KEEPER_HOST_01", "::1")
-            .env("CH_KEEPER_HOST_02", "::1")
-            .env("CH_KEEPER_HOST_03", "::1")
+            .envs(&env)
             .spawn()
             .with_context(|| {
                 format!(
@@ -256,10 +477,14 @@ impl ClickHouseInstance {
                     &args
                 )
             })?;
-
+        for (k, v) in std::env::vars_os() {
+            env.insert(
+                k.to_string_lossy().to_string(),
+                v.to_string_lossy().to_string(),
+            );
+        }
         let data_path = data_dir.root_path().to_path_buf();
-        let address = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), port);
-
+        let address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, port, 0, 0);
         let result = wait_for_ready(
             data_dir.keeper_log_path(),
             CLICKHOUSE_KEEPER_TIMEOUT,
@@ -270,21 +495,30 @@ impl ClickHouseInstance {
             Ok(()) => Ok(Self {
                 data_dir: Some(data_dir),
                 data_path,
-                port,
                 address,
                 args,
                 child: Some(child),
+                env,
             }),
             Err(e) => Err(e),
         }
     }
 
     /// Wait for the ClickHouse server process to shutdown, after it's been killed.
-    pub async fn wait_for_shutdown(&mut self) -> Result<(), anyhow::Error> {
-        if let Some(mut child) = self.child.take() {
+    pub async fn wait_for_shutdown(
+        &mut self,
+    ) -> Result<ClusterNode, anyhow::Error> {
+        // NOTE: Await the child's shutdown, but do _not_ take it out of the
+        // option yet. This allows us to await the shutdown of an entire
+        // cluster by awaiting each child in parallel, exiting when the first
+        // exits. By keeping these around, we can still deliver the signal to
+        // the other, non-exited children.
+        if let Some(child) = &mut self.child {
             child.wait().await?;
         }
-        self.cleanup().await
+        let _ = self.child.take();
+        self.cleanup().await?;
+        Ok(ClusterNode { kind: NodeKind::Replica, index: 1 })
     }
 
     /// Kill the ClickHouse server process and cleanup the data directory.
@@ -309,6 +543,11 @@ impl ClickHouseInstance {
         &self.args
     }
 
+    /// Return the environment used to start the ClickHouse process.
+    pub fn environment(&self) -> &BTreeMap<String, String> {
+        &self.env
+    }
+
     /// Return the child PID, if any
     pub fn pid(&self) -> Option<u32> {
         self.child.as_ref().and_then(|child| child.id())
@@ -316,7 +555,7 @@ impl ClickHouseInstance {
 
     /// Return the HTTP port the server is listening on.
     pub fn port(&self) -> u16 {
-        self.port
+        self.address.port()
     }
 }
 
@@ -508,60 +747,49 @@ impl Drop for ClickHouseInstance {
     }
 }
 
+/// Number of data replicas in our test cluster.
+pub const N_REPLICAS: u8 = 2;
+
+/// Number of ClickHouse Keepers in our test cluster.
+pub const N_KEEPERS: u8 = 3;
+
 /// A `ClickHouseCluster` is used to start and manage a 2 replica 3 keeper ClickHouse cluster.
 #[derive(Debug)]
 pub struct ClickHouseCluster {
-    pub replica_1: ClickHouseInstance,
-    pub replica_2: ClickHouseInstance,
-    pub keeper_1: ClickHouseInstance,
-    pub keeper_2: ClickHouseInstance,
-    pub keeper_3: ClickHouseInstance,
-    pub replica_config_path: PathBuf,
-    pub keeper_config_path: PathBuf,
+    replicas: Vec<ClickHouseInstance>,
+    keepers: Vec<ClickHouseKeeper>,
+    replica_config_path: PathBuf,
+    keeper_config_path: PathBuf,
 }
 
 impl ClickHouseCluster {
+    /// Construct a new ClickHouse replicated cluster.
     pub async fn new(
         logctx: &LogContext,
         replica_config: PathBuf,
         keeper_config: PathBuf,
     ) -> Result<Self, anyhow::Error> {
-        // Start all Keeper coordinator nodes
-        let keeper_amount = 3;
-        let mut keepers =
-            Self::new_keeper_set(logctx, keeper_amount, &keeper_config).await?;
-
-        // Start all replica nodes
-        let replica_amount = 2;
-        let mut replicas =
-            Self::new_replica_set(logctx, replica_amount, &replica_config)
-                .await?;
-
-        let r1 = replicas.swap_remove(0);
-        let r2 = replicas.swap_remove(0);
-        let k1 = keepers.swap_remove(0);
-        let k2 = keepers.swap_remove(0);
-        let k3 = keepers.swap_remove(0);
-
+        let keepers =
+            Self::new_keeper_set(logctx, N_KEEPERS, &keeper_config).await?;
+        let replicas =
+            Self::new_replica_set(logctx, N_REPLICAS, &replica_config).await?;
         Ok(Self {
-            replica_1: r1,
-            replica_2: r2,
-            keeper_1: k1,
-            keeper_2: k2,
-            keeper_3: k3,
+            replicas,
+            keepers,
             replica_config_path: replica_config,
             keeper_config_path: keeper_config,
         })
     }
 
-    pub async fn new_keeper_set(
+    /// Create the set of ClickHouse Keepers for the cluster.
+    async fn new_keeper_set(
         logctx: &LogContext,
-        keeper_amount: u16,
+        n_keepers: u8,
         config_path: &PathBuf,
-    ) -> Result<Vec<ClickHouseInstance>, anyhow::Error> {
-        let mut keepers = vec![];
+    ) -> Result<Vec<ClickHouseKeeper>, anyhow::Error> {
+        let mut keepers = Vec::with_capacity(usize::from(n_keepers));
 
-        for i in 1..=keeper_amount {
+        for i in 1..=u16::from(n_keepers) {
             let k_port = 9180 + i;
             let k_id = i;
 
@@ -575,20 +803,21 @@ impl ClickHouseCluster {
             .map_err(|e| {
                 anyhow!("Failed to start ClickHouse keeper {}: {}", i, e)
             })?;
-            keepers.push(k)
+            keepers.push(ClickHouseKeeper(k));
         }
 
         Ok(keepers)
     }
 
-    pub async fn new_replica_set(
+    /// Create the set of ClickHouse replicas for the cluster.
+    async fn new_replica_set(
         logctx: &LogContext,
-        replica_amount: u16,
+        n_replicas: u8,
         config_path: &PathBuf,
     ) -> Result<Vec<ClickHouseInstance>, anyhow::Error> {
-        let mut replicas = vec![];
+        let mut replicas = Vec::with_capacity(usize::from(n_replicas));
 
-        for i in 1..=replica_amount {
+        for i in 1..=u16::from(n_replicas) {
             let r_port = 8122 + i;
             let r_tcp_port = 9000 + i;
             let r_interserver_port = 9008 + i;
@@ -620,6 +849,139 @@ impl ClickHouseCluster {
     pub fn keeper_config_path(&self) -> &Path {
         &self.keeper_config_path
     }
+
+    /// Clean up all nodes in the cluster.
+    async fn cleanup(&mut self) -> Result<(), anyhow::Error> {
+        for info in self.children_mut() {
+            info.child.cleanup().await.with_context(|| {
+                format!(
+                    "cleaning up {:?} node {} (PID {})",
+                    info.node.kind,
+                    info.node.index,
+                    info.child
+                        .pid()
+                        .map(|pid| pid.to_string())
+                        .unwrap_or_else(|| String::from("?")),
+                )
+            })?;
+        }
+        Ok(())
+    }
+
+    /// Wait for any node in the cluster to exit, returning information about
+    /// the node that exited.
+    ///
+    /// The error message contains information about which node in the cluster
+    /// shutdown.
+    async fn wait_for_shutdown(
+        &mut self,
+    ) -> Result<ClusterNode, anyhow::Error> {
+        let mut futs = FuturesUnordered::new();
+        for each in self.children_mut() {
+            futs.push(async move {
+                let ChildWaitInfo { child, node: ClusterNode { kind, index } } =
+                    each;
+                let pid = child
+                    .pid()
+                    .map(|pid| pid.to_string())
+                    .unwrap_or_else(|| String::from("?"));
+                child.wait_for_shutdown().await.with_context(|| {
+                    format!("ClickHouse {kind:?} {index} (PID {pid}) shutdown")
+                })
+            });
+        }
+        match futs.next().await {
+            Some(res) => res,
+            None => anyhow::bail!("Failed to await child future"),
+        }
+    }
+
+    /// Wait for _all_ nodes in the cluster to exit.
+    async fn wait_for_all_shutdown(&mut self) -> Result<(), anyhow::Error> {
+        let mut res = Ok(());
+        for each in self.children_mut() {
+            let ChildWaitInfo { child, node: ClusterNode { kind, index } } =
+                each;
+            let pid = child
+                .pid()
+                .map(|pid| pid.to_string())
+                .unwrap_or_else(|| String::from("?"));
+            res = child
+                .wait_for_shutdown()
+                .await
+                .with_context(|| {
+                    format!(
+                        "ClickHouse {kind:?} {index} (PID {pid}) shutdown, \
+                    data dir: {}",
+                        child.data_path(),
+                    )
+                })
+                .map(|_| ());
+        }
+        res
+    }
+
+    /// Return an iterator over all the ClickHouse instances in the cluster.
+    fn instances(&self) -> impl Iterator<Item = &ClickHouseInstance> {
+        self.replicas.iter()
+    }
+
+    /// Return an iterator over alll the ClickHouse Keepers in the cluster.
+    fn keepers(&self) -> impl Iterator<Item = &ClickHouseKeeper> {
+        self.keepers.iter()
+    }
+
+    // Return an iterator over the child processes as instances.
+    //
+    // This is pretty hacky, but used to wait _any_ child in
+    // `wait_for_shutdown()`, along with child kind and its index among that
+    // kind.
+    fn children_mut(&mut self) -> impl Iterator<Item = ChildWaitInfo> {
+        let keepers =
+            self.keepers.iter_mut().enumerate().map(|(index, child)| {
+                ChildWaitInfo {
+                    child,
+                    node: ClusterNode {
+                        kind: NodeKind::Keeper,
+                        index: index + 1,
+                    },
+                }
+            });
+        self.replicas
+            .iter_mut()
+            .enumerate()
+            .map(|(index, child)| ChildWaitInfo {
+                child,
+                node: ClusterNode { kind: NodeKind::Keeper, index: index + 1 },
+            })
+            .chain(keepers)
+    }
+}
+
+/// Helper type to wait for any child to exit.
+///
+/// See `ClickHouseCluster::children_mut`;
+struct ChildWaitInfo<'a> {
+    child: &'a mut ClickHouseInstance,
+    node: ClusterNode,
+}
+
+/// Any node in the ClickHouse deployment.
+#[derive(Clone, Copy, Debug)]
+pub struct ClusterNode {
+    /// The kind of node.
+    pub kind: NodeKind,
+    /// The node's index, among nodes of the same kind.
+    pub index: usize,
+}
+
+/// The kind of a node in a ClickHouse deployment.
+#[derive(Clone, Copy, Debug)]
+pub enum NodeKind {
+    /// This node is a data replica server.
+    Replica,
+    /// This node is a Keeper server.
+    Keeper,
 }
 
 // Wait for the ClickHouse log file to become available, including the

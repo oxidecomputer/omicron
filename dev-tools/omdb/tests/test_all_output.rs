@@ -130,7 +130,7 @@ async fn test_omdb_success_cases(cptestctx: &ControlPlaneTestContext) {
     let mgs_url = format!("http://{}/", gwtestctx.client.bind_address);
     let ox_url = format!("http://{}/", cptestctx.oximeter.server_address());
     let ox_test_producer = cptestctx.producer.address().ip();
-    let ch_url = format!("http://{}/", cptestctx.clickhouse.address);
+    let ch_url = format!("http://{}/", cptestctx.clickhouse.http_address());
 
     let tmpdir = camino_tempfile::tempdir()
         .expect("failed to create temporary directory");
@@ -308,7 +308,7 @@ async fn test_omdb_env_settings(cptestctx: &ControlPlaneTestContext) {
         format!("http://{}", cptestctx.internal_client.bind_address);
     let ox_url = format!("http://{}/", cptestctx.oximeter.server_address());
     let ox_test_producer = cptestctx.producer.address().ip();
-    let ch_url = format!("http://{}/", cptestctx.clickhouse.address);
+    let ch_url = format!("http://{}/", cptestctx.clickhouse.http_address());
     let dns_sockaddr = cptestctx.internal_dns.dns_server.local_address();
     let mut output = String::new();
 

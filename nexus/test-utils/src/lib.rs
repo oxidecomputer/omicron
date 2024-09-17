@@ -112,7 +112,7 @@ pub struct ControlPlaneTestContext<N> {
     pub internal_client: ClientTestContext,
     pub server: N,
     pub database: dev::db::CockroachInstance,
-    pub clickhouse: dev::clickhouse::ClickHouseInstance,
+    pub clickhouse: dev::clickhouse::ClickHouseDeployment,
     pub logctx: LogContext,
     pub sled_agent_storage: camino_tempfile::Utf8TempDir,
     pub sled_agent: sim::Server,
@@ -275,7 +275,7 @@ pub struct ControlPlaneTestContextBuilder<'a, N: NexusServer> {
 
     pub server: Option<N>,
     pub database: Option<dev::db::CockroachInstance>,
-    pub clickhouse: Option<dev::clickhouse::ClickHouseInstance>,
+    pub clickhouse: Option<dev::clickhouse::ClickHouseDeployment>,
     pub sled_agent_storage: Option<camino_tempfile::Utf8TempDir>,
     pub sled_agent: Option<sim::Server>,
     pub sled_agent2_storage: Option<camino_tempfile::Utf8TempDir>,
@@ -447,13 +447,14 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
     pub async fn start_clickhouse(&mut self) {
         let log = &self.logctx.log;
         debug!(log, "Starting Clickhouse");
-        let clickhouse = dev::clickhouse::ClickHouseInstance::new_single_node(
-            &self.logctx,
-            0,
-        )
-        .await
-        .unwrap();
-        let port = clickhouse.port();
+        let clickhouse =
+            dev::clickhouse::ClickHouseDeployment::new_single_node(
+                &self.logctx,
+                0,
+            )
+            .await
+            .unwrap();
+        let port = clickhouse.http_address().port();
 
         let zpool_id = ZpoolUuid::new_v4();
         let dataset_id = Uuid::new_v4();
@@ -594,7 +595,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         let oximeter = start_oximeter(
             log.new(o!("component" => "oximeter")),
             nexus_internal_addr,
-            clickhouse.port(),
+            clickhouse.http_address().port(),
             collector_id,
         )
         .await

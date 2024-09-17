@@ -1114,7 +1114,7 @@ mod tests {
     use crate::{Metric, Target};
     use chrono::{DateTime, Utc};
     use dropshot::test_util::LogContext;
-    use omicron_test_utils::dev::clickhouse::ClickHouseInstance;
+    use omicron_test_utils::dev::clickhouse::ClickHouseDeployment;
     use omicron_test_utils::dev::test_setup_log;
     use oximeter::{types::Cumulative, FieldValue};
     use oximeter::{DatumType, Sample};
@@ -1148,7 +1148,7 @@ mod tests {
 
     struct TestContext {
         logctx: LogContext,
-        clickhouse: ClickHouseInstance,
+        clickhouse: ClickHouseDeployment,
         client: Client,
         test_data: TestData,
     }
@@ -1236,10 +1236,10 @@ mod tests {
 
     async fn setup_oxql_test(name: &str) -> TestContext {
         let logctx = test_setup_log(name);
-        let db = ClickHouseInstance::new_single_node(&logctx, 0)
+        let db = ClickHouseDeployment::new_single_node(&logctx, 0)
             .await
             .expect("Failed to start ClickHouse");
-        let client = Client::new(db.address, &logctx.log);
+        let client = Client::new(db.http_address().into(), &logctx.log);
         client
             .init_single_node_db()
             .await
