@@ -182,8 +182,10 @@ pub fn load_test_config() -> NexusConfig {
     // configuration options, we expect many of those can be usefully configured
     // (and reconfigured) for the test suite.
     let config_file_path = Utf8Path::new("tests/config.test.toml");
-    let mut config = NexusConfig::from_file(config_file_path)
-        .expect("failed to load config.test.toml");
+    let mut config = match NexusConfig::from_file(&config_file_path) {
+        Ok(config) => config,
+        Err(error) => panic!("failed to load {config_file_path}: {error}"),
+    };
     config.deployment.id = Uuid::new_v4();
     config
 }
