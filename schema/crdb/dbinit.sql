@@ -1097,12 +1097,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
     state omicron.public.instance_state_v2 NOT NULL,
 
     /*
-     * What failures should result in an instance being automatically restarted
-     * by the control plane.
-     */
-    auto_restart_policy omicron.public.instance_auto_restart_v2,
-
-    /*
      * The time of the most recent auto-restart attempt, or NULL if the control
      * plane has never attempted to automatically restart this instance.
      */
@@ -1114,6 +1108,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
      * for this instance, and the default cooldown period should be used.
      */
      auto_restart_cooldown INTERVAL,
+
+    /*
+     * What failures should result in an instance being automatically restarted
+     * by the control plane.
+     */
+    auto_restart_policy omicron.public.instance_auto_restart_v2,
 
     CONSTRAINT vmm_iff_active_propolis CHECK (
         ((state = 'vmm') AND (active_propolis_id IS NOT NULL)) OR
