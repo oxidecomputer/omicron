@@ -493,7 +493,6 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         n: std::num::NonZeroU32,
-        skipped_ids: impl IntoIterator<Item = Uuid>,
     ) -> ListResultVec<Instance> {
         use db::schema::instance::dsl;
 
@@ -502,9 +501,6 @@ impl DataStore {
         dsl::instance
             // Select only those instances which may be reincarnated.
             .filter(InstanceAutoRestart::filter_reincarnatable())
-            // Exclude any instance IDs we were asked to skip (typically because
-            // a previous start saga for those instances failed unexpectedly)
-            .filter(dsl::id.ne_all(skipped_ids.into_iter()))
             // Deleted instances may not be reincarnated.
             .filter(dsl::time_deleted.is_null())
             // If the instance is currently in the process of being updated,

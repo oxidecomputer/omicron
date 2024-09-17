@@ -89,15 +89,7 @@ impl InstanceReincarnation {
         loop {
             let maybe_batch = self
                 .datastore
-                .find_reincarnatable_instances(
-                    opctx,
-                    self.concurrency_limit,
-                    // Any instances which we've already attempted to start and
-                    // couldn't should be excluded from the query, to avoid
-                    // looping forever when an instance is in a permanently
-                    // non-restartable state.
-                    status.restart_errors.keys().copied(),
-                )
+                .find_reincarnatable_instances(opctx, self.concurrency_limit)
                 .await;
             let batch = match maybe_batch {
                 Ok(batch) => batch,
