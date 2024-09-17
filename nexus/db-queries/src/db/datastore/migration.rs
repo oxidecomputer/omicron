@@ -236,7 +236,7 @@ mod tests {
                         disks: Vec::new(),
                         ssh_public_keys: None,
                         start: false,
-                        auto_restart: Default::default(),
+                        auto_restart_policy: Default::default(),
                     },
                 ),
             )

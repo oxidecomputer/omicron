@@ -249,7 +249,7 @@ mod test {
                 params::InstanceDiskAttach { name: DISK_NAME.parse().unwrap() },
             )],
             start: false,
-            auto_restart: Default::default(),
+            auto_restart_policy: Default::default(),
         }
     }
 

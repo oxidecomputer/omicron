@@ -2135,7 +2135,7 @@ mod test {
                 disks: disks_to_attach,
                 external_ips: vec![],
                 start: true,
-                auto_restart: Default::default(),
+                auto_restart_policy: Default::default(),
             },
         )
         .await;

@@ -273,25 +273,11 @@ mod test {
         authz_project
     }
 
-    fn auto_restart_never() -> params::InstanceAutoRestart {
-        params::InstanceAutoRestart {
-            policy: Some(InstanceAutoRestartPolicy::Never),
-            cooldown_secs: None, // use the default cooldown
-        }
-    }
-
-    fn auto_restart_best_effort() -> params::InstanceAutoRestart {
-        params::InstanceAutoRestart {
-            policy: Some(InstanceAutoRestartPolicy::BestEffort),
-            cooldown_secs: None, // use the default cooldown
-        }
-    }
-
     async fn create_instance(
         cptestctx: &ControlPlaneTestContext,
         opctx: &OpContext,
         name: &str,
-        auto_restart: params::InstanceAutoRestart,
+        auto_restart: InstanceAutoRestartPolicy,
         state: InstanceState,
     ) -> InstanceUuid {
         let instances_url = format!("/v1/instances?project={}", PROJECT_NAME);
@@ -323,7 +309,7 @@ mod test {
                     disks: Vec::new(),
                     ssh_public_keys: None,
                     start: state == InstanceState::Vmm,
-                    auto_restart: auto_restart.clone(),
+                    auto_restart_policy: Some(auto_restart),
                 },
             )
             .await;
@@ -334,7 +320,7 @@ mod test {
         }
 
         eprintln!(
-            "instance {id}: auto_restart={auto_restart:?}; state={state:?}"
+            "instance {id}: auto_restart_policy={auto_restart:?}; state={state:?}"
         );
         id
     }
@@ -414,7 +400,7 @@ mod test {
             &cptestctx,
             &opctx,
             "my-cool-instance",
-            auto_restart_best_effort(),
+            InstanceAutoRestartPolicy::BestEffort,
             InstanceState::Failed,
         )
         .await;
@@ -468,7 +454,7 @@ mod test {
                 &cptestctx,
                 &opctx,
                 &format!("sotapanna-{i}"),
-                auto_restart_best_effort(),
+                InstanceAutoRestartPolicy::BestEffort,
                 InstanceState::Failed,
             )
             .await;
@@ -484,7 +470,7 @@ mod test {
                 &cptestctx,
                 &opctx,
                 &format!("arahant-{i}"),
-                auto_restart_never(),
+                InstanceAutoRestartPolicy::Never,
                 InstanceState::Failed,
             )
             .await;
@@ -502,7 +488,7 @@ mod test {
                 &cptestctx,
                 &opctx,
                 &format!("anagami-{i}"),
-                auto_restart_best_effort(),
+                InstanceAutoRestartPolicy::BestEffort,
                 state,
             )
             .await;
@@ -552,15 +538,6 @@ mod test {
     async fn test_cooldown_on_subsequent_reincarnations(
         cptestctx: &ControlPlaneTestContext,
     ) {
-        // Don't make the test run for a long time just waiting for the cooldown
-        // to elapse.
-        const COOLDOWN_SECS: u64 = 10;
-
-        let restart_params = params::InstanceAutoRestart {
-            cooldown_secs: Some(COOLDOWN_SECS),
-            ..auto_restart_best_effort()
-        };
-
         let nexus = &cptestctx.server.server_context().nexus;
         let datastore = nexus.datastore();
         let opctx = OpContext::for_tests(
@@ -577,15 +554,28 @@ mod test {
             &cptestctx,
             &opctx,
             "victor",
-            restart_params.clone(),
+            InstanceAutoRestartPolicy::BestEffort,
             InstanceState::Failed,
         )
         .await;
+        // Use the test-only API to set the cooldown period for instance 1 to ten
+        // seconds, so that we don't have to make the test run for an hour to wait
+        // out the default cooldown.
+        const COOLDOWN_SECS: u64 = 10;
+        datastore
+            .instance_set_auto_restart_cooldown(
+                &opctx,
+                &instance1_id,
+                chrono::TimeDelta::seconds(COOLDOWN_SECS as i64),
+            )
+            .await
+            .expect("we must be able to set the cooldown period");
+
         let instance2_id = create_instance(
             &cptestctx,
             &opctx,
             "frankenstein",
-            restart_params.clone(),
+            InstanceAutoRestartPolicy::BestEffort,
             InstanceState::Vmm,
         )
         .await;

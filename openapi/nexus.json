@@ -15183,31 +15183,6 @@
           "time_run_state_updated"
         ]
       },
-      "InstanceAutoRestart": {
-        "description": "Configures how and when an instance should be automatically restarted.",
-        "type": "object",
-        "properties": {
-          "cooldown_secs": {
-            "nullable": true,
-            "description": "The cooldown period that must elapse between automatic restarts of this instance, in seconds.\n\nIf this is `null`, no explicit cooldown period has been configured for this instance, and the default cooldown period should be used instead.",
-            "default": null,
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 60,
-            "maximum": 9223372036854776
-          },
-          "policy": {
-            "nullable": true,
-            "description": "The auto-restart policy for this instance.\n\nThis indicates whether the instance should be automatically restarted by the control plane on failure. If this is `null`, no auto-restart policy has been configured for this instance by the user.",
-            "default": null,
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/InstanceAutoRestartPolicy"
-              }
-            ]
-          }
-        }
-      },
       "InstanceAutoRestartPolicy": {
         "description": "A policy determining when an instance should be automatically restarted by the control plane.",
         "oneOf": [
@@ -15237,15 +15212,13 @@
         "description": "Create-time parameters for an `Instance`",
         "type": "object",
         "properties": {
-          "auto_restart": {
-            "description": "Configuration for automatically restarting this instance if it fails.",
-            "default": {
-              "cooldown_secs": null,
-              "policy": null
-            },
+          "auto_restart_policy": {
+            "nullable": true,
+            "description": "The auto-restart policy for this instance.\n\nThis indicates whether the instance should be automatically restarted by the control plane on failure. If this is `null`, no auto-restart policy has been configured for this instance by the user.",
+            "default": null,
             "allOf": [
               {
-                "$ref": "#/components/schemas/InstanceAutoRestart"
+                "$ref": "#/components/schemas/InstanceAutoRestartPolicy"
               }
             ]
           },

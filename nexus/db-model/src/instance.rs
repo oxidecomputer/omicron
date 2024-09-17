@@ -102,6 +102,11 @@ impl Instance {
             identity.time_modified,
         );
 
+        let auto_restart = InstanceAutoRestart {
+            policy: params.auto_restart_policy.map(Into::into),
+            cooldown: None,
+        };
+
         Self {
             identity,
             project_id,
@@ -109,7 +114,8 @@ impl Instance {
             ncpus: params.ncpus.into(),
             memory: params.memory.into(),
             hostname: params.hostname.to_string(),
-            auto_restart: params.auto_restart.clone().into(),
+            auto_restart,
+
             runtime_state,
 
             updater_gen: Generation::new(),
@@ -355,19 +361,6 @@ impl InstanceAutoRestart {
                             .le((now - Self::DEFAULT_COOLDOWN).nullable()),
                     )),
             )
-    }
-}
-
-impl From<params::InstanceAutoRestart> for InstanceAutoRestart {
-    fn from(value: params::InstanceAutoRestart) -> Self {
-        let cooldown = value.cooldown_secs.map(|secs| {
-            let secs = i64::try_from(secs).expect(
-                "external API should validate that the cooldown seconds are \
-                 in range",
-            );
-            TimeDelta::seconds(secs)
-        });
-        Self { policy: value.policy.map(Into::into), cooldown }
     }
 }
 

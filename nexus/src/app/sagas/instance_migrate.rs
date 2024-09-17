@@ -618,7 +618,7 @@ mod tests {
                 external_ips: vec![],
                 disks: vec![],
                 start: true,
-                auto_restart: Default::default(),
+                auto_restart_policy: Default::default(),
             },
         )
         .await

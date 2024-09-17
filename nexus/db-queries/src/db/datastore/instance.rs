@@ -53,6 +53,7 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::MessagePair;
 use omicron_common::api::external::ResourceType;
+use omicron_common::api::external::UpdateResult;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
@@ -1649,6 +1650,51 @@ impl DataStore {
             },
         }
     }
+
+    /// Sets an instance's auto-restart cooldown period to the provided
+    /// `TimeDelta`.
+    ///
+    /// This method returns `Error::Conflict` if the auto-restart cooldown
+    /// period has already been set.
+    ///
+    ///At present, this is only used for tests. If a future
+    /// external API for configuring this and other instance properties is
+    /// added, tests using this should be updated to use that instead.
+    pub async fn instance_set_auto_restart_cooldown(
+        &self,
+        opctx: &OpContext,
+        instance_id: &InstanceUuid,
+        cooldown: chrono::TimeDelta,
+    ) -> UpdateResult<bool> {
+        use db::schema::instance::dsl;
+        let id = instance_id.into_untyped_uuid();
+
+        let r = diesel::update(dsl::instance)
+            .filter(dsl::id.eq(id))
+            .filter(dsl::auto_restart_cooldown.is_null())
+            .set(dsl::auto_restart_cooldown.eq(cooldown))
+            .check_if_exists::<Instance>(id)
+            .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Instance,
+                        LookupType::ById(id),
+                    ),
+                )
+            })?;
+        if r.status == UpdateStatus::Updated {
+            Ok(true)
+        } else if r.found.auto_restart.cooldown == Some(cooldown) {
+            Ok(false)
+        } else {
+            Err(Error::conflict(
+                "instance auto-restart cooldown is already set",
+            ))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1724,7 +1770,7 @@ mod tests {
                         disks: Vec::new(),
                         ssh_public_keys: None,
                         start: false,
-                        auto_restart: Default::default(),
+                        auto_restart_policy: Default::default(),
                     },
                 ),
             )

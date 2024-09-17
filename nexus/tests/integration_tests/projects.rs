@@ -163,7 +163,7 @@ async fn test_project_deletion_with_instance(
             external_ips: vec![],
             disks: vec![],
             start: false,
-            auto_restart: Default::default(),
+            auto_restart_policy: Default::default(),
         },
     )
     .await;

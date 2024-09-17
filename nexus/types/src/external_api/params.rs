@@ -952,40 +952,6 @@ pub struct InstanceDiskAttach {
     pub name: Name,
 }
 
-/// Configures how and when an instance should be automatically restarted.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
-pub struct InstanceAutoRestart {
-    /// The auto-restart policy for this instance.
-    ///
-    /// This indicates whether the instance should be automatically restarted by
-    /// the control plane on failure. If this is `null`, no auto-restart policy
-    /// has been configured for this instance by the user.
-    #[serde(default)]
-    pub policy: Option<InstanceAutoRestartPolicy>,
-    /// The cooldown period that must elapse between automatic restarts of this
-    /// instance, in seconds.
-    ///
-    /// If this is `null`, no explicit cooldown period has been configured for
-    /// this instance, and the default cooldown period should be used instead.
-    #[serde(default)]
-    #[validate(range(
-        min = "InstanceAutoRestart::MIN_COOLDOWN_SECS",
-        max = "InstanceAutoRestart::MAX_COOLDOWN_SECS",
-    ))]
-    pub cooldown_secs: Option<u64>,
-}
-
-impl InstanceAutoRestart {
-    /// The minimum cooldown period between automatic restarts.
-    ///
-    /// 1 minute ought to be enough for everyone...
-    pub const MIN_COOLDOWN_SECS: u64 = 60;
-
-    /// The maximum number of seconds representable by a `chrono::TimeDelta`.
-    pub const MAX_COOLDOWN_SECS: u64 =
-        chrono::TimeDelta::max_value().num_seconds().unsigned_abs();
-}
-
 /// Parameters for creating an external IP address for instances.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -1068,9 +1034,13 @@ pub struct InstanceCreate {
     #[serde(default = "bool_true")]
     pub start: bool,
 
-    /// Configuration for automatically restarting this instance if it fails.
+    /// The auto-restart policy for this instance.
+    ///
+    /// This indicates whether the instance should be automatically restarted by
+    /// the control plane on failure. If this is `null`, no auto-restart policy
+    /// has been configured for this instance by the user.
     #[serde(default)]
-    pub auto_restart: InstanceAutoRestart,
+    pub auto_restart_policy: Option<InstanceAutoRestartPolicy>,
 }
 
 #[inline]
@@ -2137,22 +2107,4 @@ pub struct DeviceAccessTokenRequest {
     pub grant_type: String,
     pub device_code: String,
     pub client_id: Uuid,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_max_auto_restart_cooldown_is_valid_timedelta() {
-        let max_secs =
-            i64::try_from(dbg!(InstanceAutoRestart::MAX_COOLDOWN_SECS))
-                .expect("must fit in an i64");
-        let delta = chrono::TimeDelta::try_seconds(max_secs);
-        assert_ne!(
-            delta, None,
-            "max auto restart cooldown seconds ({max_secs}) must be \
-             representable as a `chrono::TimeDelta`",
-        );
-    }
 }

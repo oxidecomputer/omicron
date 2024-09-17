@@ -1126,7 +1126,7 @@ pub mod test {
                     },
                 )],
                 start: false,
-                auto_restart: Default::default(),
+                auto_restart_policy: Default::default(),
             },
             boundary_switches: HashSet::from([SwitchLocation::Switch0]),
         }

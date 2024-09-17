@@ -63,7 +63,7 @@ async fn create_instance_expect_failure(
         external_ips: vec![],
         disks: vec![],
         start: true,
-        auto_restart: Default::default(),
+        auto_restart_policy: Default::default(),
     };
 
     NexusRequest::new(
