@@ -383,62 +383,64 @@
         "type": "object",
         "properties": {
           "first_log_idx": {
-            "nullable": true,
             "description": "Index of the first log entry in the current log segment",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
           "first_log_term": {
-            "nullable": true,
             "description": "Term of the leader when the first log entry was created",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
           "last_committed_log_idx": {
-            "nullable": true,
             "description": "Index of the last committed log entry",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
           "last_log_idx": {
-            "nullable": true,
             "description": "Index of the last log entry in the current log segment",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
           "last_log_term": {
-            "nullable": true,
             "description": "Term of the leader when the last log entry was created",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
           "last_snapshot_idx": {
-            "nullable": true,
             "description": "Index of the most recent snapshot taken",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
           "leader_committed_log_idx": {
-            "nullable": true,
             "description": "Index of the last committed log entry from the leader's perspective",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           },
           "target_committed_log_idx": {
-            "nullable": true,
             "description": "Target index for log commitment during replication or recovery",
             "type": "integer",
             "format": "uint64",
             "minimum": 0
           }
-        }
+        },
+        "required": [
+          "first_log_idx",
+          "first_log_term",
+          "last_committed_log_idx",
+          "last_log_idx",
+          "last_log_term",
+          "last_snapshot_idx",
+          "leader_committed_log_idx",
+          "target_committed_log_idx"
+        ]
       },
       "LogConfig": {
         "type": "object",
