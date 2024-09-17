@@ -93,6 +93,7 @@ features = [ "rt-multi-thread", "macros" ]
 
 [dev-dependencies]
 camino-tempfile.workspace = true
+criterion = { workspace = true, features = [ "async_tokio" ] }
 expectorate.workspace = true
 indexmap.workspace = true
 itertools.workspace = true
@@ -134,3 +135,7 @@ native-sql = [
 [[bin]]
 name = "oxdb"
 doc = false
+
+[[bench]]
+name = "protocol"
+harness = false

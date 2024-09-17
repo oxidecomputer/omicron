@@ -175,7 +175,10 @@ impl tokio_util::codec::Decoder for Decoder {
                 // Again, we probably need to handle this more gracefully, but
                 // it's not clear how in the absence of a header with the packet
                 // size.
-                probes::unrecognized__server__packet!(|| (u64::from(kind), src.len()));
+                probes::unrecognized__server__packet!(|| (
+                    u64::from(kind),
+                    src.len()
+                ));
                 src.clear();
                 return Err(Error::UnrecognizedServerPacket(kind));
             }

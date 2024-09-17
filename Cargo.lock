@@ -7482,6 +7482,7 @@ dependencies = [
  "chrono",
  "clap",
  "clickward",
+ "criterion",
  "crossterm 0.28.1",
  "display-error-chain",
  "dropshot 0.10.2-dev",

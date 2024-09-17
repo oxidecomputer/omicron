@@ -6,7 +6,7 @@
 
 // Copyright 2024 Oxide Computer Company
 
-use crate::native::{self, block::ValueArray, packets::client::QueryResult};
+use crate::native::{self, block::ValueArray, QueryResult};
 use anyhow::Context as _;
 use crossterm::style::Stylize;
 use display_error_chain::DisplayErrorChain;

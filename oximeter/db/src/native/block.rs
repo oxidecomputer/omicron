@@ -117,7 +117,14 @@ pub struct BlockInfo {
     /// In that case, this block contains only the aggregated overflow data
     /// beyond `max_rows_to_group_by`.
     pub is_overflows: bool,
-    /// Used to optimize merges for distributed aggregation.
+    /// Used to optimize merges for distributed aggregation, when using a
+    /// "two-level" aggregation method.
+    ///
+    /// This is only relevant if the `group_by_two_level_threshold` setting is
+    /// non-zero (which it is not by default). But if it is, ClickHouse attempts
+    /// to break up large GROUP BY operations into two levels, where it
+    /// distributes the data and does groupings in parallel, and then finally
+    /// groups all those groups again in a merge step.
     pub bucket_num: i32,
 }
 
@@ -128,7 +135,13 @@ impl BlockInfo {
 
 impl Default for BlockInfo {
     fn default() -> Self {
-        Self { is_overflows: false, bucket_num: -1 }
+        Self {
+            is_overflows: false,
+            // This value is -1 if the block doesn't contain any data resulting
+            // from a two-level aggregation. We never expect that method to be
+            // used, so we use -1 here.
+            bucket_num: -1,
+        }
     }
 }
 
@@ -335,7 +348,6 @@ impl ValueArray {
             ) => us.append(&mut them),
             (_, _) => unreachable!(),
         }
-        todo!()
     }
 }
 

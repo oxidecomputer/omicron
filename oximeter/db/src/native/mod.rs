@@ -120,12 +120,13 @@
 //! actually sent if we believe we have an outstanding query.
 
 pub use connection::Connection;
-use packets::server::Exception;
+pub use packets::client::QueryResult;
+pub use packets::server::Exception;
 
 pub mod block;
 pub mod connection;
-pub mod io;
-pub mod packets;
+mod io;
+mod packets;
 
 #[usdt::provider(provider = "clickhouse_io")]
 mod probes {

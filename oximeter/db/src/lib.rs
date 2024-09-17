@@ -35,7 +35,7 @@ use thiserror::Error;
 mod client;
 pub mod model;
 #[cfg(feature = "native-sql")]
-mod native;
+pub mod native;
 #[cfg(any(feature = "oxql", test))]
 pub mod oxql;
 pub mod query;
