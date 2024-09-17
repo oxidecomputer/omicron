@@ -481,7 +481,6 @@ mod test {
         );
         assert_event_buffer_completed(&event_buffer);
 
-
         s1.verify_and_clear();
         s2.verify_and_clear();
 
