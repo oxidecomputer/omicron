@@ -42,12 +42,14 @@ use uuid::Uuid;
 
 mod blueprint_diff;
 mod blueprint_display;
+mod clickhouse;
 pub mod execution;
 mod network_resources;
 mod planning_input;
 mod tri_map;
 mod zone_type;
 
+pub use clickhouse::ClickhouseClusterConfig;
 pub use network_resources::AddNetworkResourceError;
 pub use network_resources::OmicronZoneExternalFloatingAddr;
 pub use network_resources::OmicronZoneExternalFloatingIp;
@@ -197,7 +199,19 @@ impl Blueprint {
         &self,
         filter: BlueprintZoneFilter,
     ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)> {
-        self.blueprint_zones.iter().flat_map(move |(sled_id, z)| {
+        Blueprint::filtered_zones(&self.blueprint_zones, filter)
+    }
+
+    /// Iterate over the [`BlueprintZoneConfig`] instances that match the
+    /// provided filter, along with the associated sled id.
+    //
+    // This is a scoped function so that it can be used in the
+    // `BlueprintBuilder` during planning as well as in the `Blueprint`.
+    pub fn filtered_zones(
+        zones_by_sled_id: &BTreeMap<SledUuid, BlueprintZonesConfig>,
+        filter: BlueprintZoneFilter,
+    ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)> {
+        zones_by_sled_id.iter().flat_map(move |(sled_id, z)| {
             z.zones
                 .iter()
                 .filter(move |z| z.disposition.matches(filter))
