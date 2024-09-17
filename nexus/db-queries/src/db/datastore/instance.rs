@@ -21,6 +21,7 @@ use crate::db::lookup::LookupPath;
 use crate::db::model::Generation;
 use crate::db::model::Instance;
 use crate::db::model::InstanceAutoRestart;
+use crate::db::model::InstanceAutoRestartPolicy;
 use crate::db::model::InstanceRuntimeState;
 use crate::db::model::InstanceState;
 use crate::db::model::Migration;
@@ -196,35 +197,38 @@ impl From<InstanceAndActiveVmm> for external::Instance {
             .as_ref()
             .map(|vmm| vmm.runtime.time_state_updated)
             .unwrap_or(value.instance.runtime_state.time_updated);
-        let auto_restart = {
-            // The instance may or may not explicitly override the cooldown and
-            // auto-restart policy settings. If it does not, return whatever
-            // default values Nexus is currently using, so that they can be
-            // displayed in the UI.
-            //
-            // Eventually, these fields may have project-level defaults, so if the
-            // instance doesn't provide a value we'll have to use the
-            // project's default if one exists. For now, though, fall back
-            // to the hard- coded default if the instance hasn't overridden
-            // it.
-            let cooldown_secs = value
-                .instance
-                .auto_restart
-                .cooldown
-                .unwrap_or(InstanceAutoRestart::DEFAULT_COOLDOWN)
-                // This should always be a whole number of seconds, as the
-                // external API only accepts seconds.
-                .num_seconds()
-                // This should always be positive, but let's just take the
-                // absolute value instead of asserting.
-                .unsigned_abs();
+        let auto_restart_status = {
+            let cooldown_expiration =
+                value.instance.runtime_state.time_last_auto_restarted.map(
+                    |t| {
+                        // The instance may or may not explicitly override the cooldown and
+                        // auto-restart policy settings. If it does not, return whatever
+                        // default values Nexus is currently using, so that they can be
+                        // displayed in the UI.
+                        //
+                        // Eventually, these fields may have project-level defaults, so if the
+                        // instance doesn't provide a value we'll have to use the
+                        // project's default if one exists. For now, though, fall back
+                        // to the hard- coded default if the instance hasn't overridden
+                        // it.
+                        let cooldown_duration =
+                            value.instance.auto_restart.cooldown.unwrap_or(
+                                InstanceAutoRestart::DEFAULT_COOLDOWN,
+                            );
+                        t + cooldown_duration
+                    },
+                );
+
             let policy = value
                 .instance
                 .auto_restart
                 .policy
-                .unwrap_or(InstanceAutoRestart::DEFAULT_POLICY)
-                .into();
-            external::InstanceAutoRestart { cooldown_secs, policy }
+                .unwrap_or(InstanceAutoRestart::DEFAULT_POLICY);
+            let enabled = match policy {
+                InstanceAutoRestartPolicy::Never => false,
+                InstanceAutoRestartPolicy::BestEffort => true,
+            };
+            external::InstanceAutoRestartStatus { enabled, cooldown_expiration }
         };
 
         Self {
@@ -247,7 +251,7 @@ impl From<InstanceAndActiveVmm> for external::Instance {
                     .time_last_auto_restarted,
             },
 
-            auto_restart,
+            auto_restart_status,
         }
     }
 }

@@ -13153,25 +13153,6 @@
           "sum_of_samples"
         ]
       },
-      "Duration": {
-        "type": "object",
-        "properties": {
-          "nanos": {
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          },
-          "secs": {
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
-          }
-        },
-        "required": [
-          "nanos",
-          "secs"
-        ]
-      },
       "EphemeralIpCreate": {
         "description": "Parameters for creating an ephemeral IP address for an instance.",
         "type": "object",
@@ -15111,21 +15092,15 @@
         "description": "View of an Instance",
         "type": "object",
         "properties": {
-          "auto_restart_cooldown": {
-            "description": "The cooldown period that must elapse between automatic restarts of this instance.\n\nIf the instance transitions to `Failed`, is automatically restarted, and then transitions to `Failed` again, it will not be automatically restarted again until this duration has elapsed since the last automatic restart.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Duration"
-              }
-            ]
+          "auto_restart_cooldown_expiration": {
+            "nullable": true,
+            "description": "The time at which the auto-restart cooldown period for this instance completes, permitting it to be automatically restarted again. If the instance enters the `Failed` state, it will not be restarted until after this time.\n\nIf this is not present, then either the instance has never been automatically restarted, or the cooldown period has already expired, allowing the instance to be restarted immediately if it fails.",
+            "type": "string",
+            "format": "date-time"
           },
-          "auto_restart_policy": {
-            "description": "The auto-restart policy for this instance. This may be explicitly configured for the instance, or may be a default value.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/InstanceAutoRestartPolicy"
-              }
-            ]
+          "auto_restart_enabled": {
+            "description": "`true` if this instance's auto-restart policy will permit the control plane is permitted to automatically restart it if it enters the `Failed` state.",
+            "type": "boolean"
           },
           "description": {
             "description": "human-readable free-form text about a resource",
@@ -15194,8 +15169,7 @@
           }
         },
         "required": [
-          "auto_restart_cooldown",
-          "auto_restart_policy",
+          "auto_restart_enabled",
           "description",
           "hostname",
           "id",
@@ -15219,7 +15193,8 @@
             "default": null,
             "type": "integer",
             "format": "uint64",
-            "minimum": 0
+            "minimum": 60,
+            "maximum": 9223372036854776
           },
           "policy": {
             "nullable": true,
@@ -15244,7 +15219,7 @@
             ]
           },
           {
-            "description": "The control plane will make a best-effort attempt to ensure this instance is running, but will not guarantee that the instance will always be restarted. The control plane may choose not to restart this instance in order to preserve the overall availability of the system.",
+            "description": "If this instance is running and unexpectedly fails (e.g. due to a host software crash or unexpected host reboot), the control plane will make a best-effort attempt to restart it. The control plane may choose not to restart the instance to preserve the overall availability of the system.",
             "type": "string",
             "enum": [
               "best_effort"

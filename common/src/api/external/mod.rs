@@ -1187,43 +1187,36 @@ pub struct Instance {
     pub runtime: InstanceRuntimeState,
 
     #[serde(flatten)]
-    pub auto_restart: InstanceAutoRestart,
+    pub auto_restart_status: InstanceAutoRestartStatus,
 }
 
-/// The auto-restart behavior used by the control plane in the event that an
-/// instance fails.
-//
-// Note that this differs from the `InstanceAutoRestart` type in
-// `nexus_types::external_api::params`, because that type permits the
-// auto-restart policy and cooldown period to be `None`, as the user may not
-// supply values when creating the instance. However, when looking up an
-// instance that has already been created, we will always populate these fields,
-// because default values are used when no explicit configuration is supplied,
-// and we would like UIs and other systems that consume the API to be able to
-// rely on us always providing the *currently in use* values.
+/// Status of control-plane driven automatic failure recovery for this instance.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
-pub struct InstanceAutoRestart {
-    /// The auto-restart policy for this instance. This may be explicitly
-    /// configured for the instance, or may be a default value.
+pub struct InstanceAutoRestartStatus {
+    /// `true` if this instance's auto-restart policy will permit the control
+    /// plane is permitted to automatically restart it if it enters the `Failed`
+    /// state.
     //
     // Rename this field, as the struct is `#[serde(flatten)]`ed into the
-    // `Instance` type, and therefore, it should be called `auto_restart_policy`
-    // rather than just "policy".
-    #[serde(rename = "auto_restart_policy")]
-    pub policy: InstanceAutoRestartPolicy,
-    /// The cooldown period that must elapse between automatic restarts of this
-    /// instance, in seconds.
+    // `Instance` type, and we would like the field to be prefixed with
+    // `auto_restart`.
+    #[serde(rename = "auto_restart_enabled")]
+    pub enabled: bool,
+
+    /// The time at which the auto-restart cooldown period for this instance
+    /// completes, permitting it to be automatically restarted again. If the
+    /// instance enters the `Failed` state, it will not be restarted until after
+    /// this time.
     ///
-    /// If the instance transitions to `Failed`, is automatically
-    /// restarted, and then transitions to `Failed` again, it will not be
-    /// automatically restarted again until this duration has elapsed since the
-    /// last automatic restart.
+    /// If this is not present, then either the instance has never been
+    /// automatically restarted, or the cooldown period has already expired,
+    /// allowing the instance to be restarted immediately if it fails.
     //
     // Rename this field, as the struct is `#[serde(flatten)]`ed into the
-    // `Instance` type, and therefore, it should be called `auto_restart_policy`
-    // rather than just "policy".
-    #[serde(rename = "auto_restart_cooldown")]
-    pub cooldown_secs: u64,
+    // `Instance` type, and we would like the field to be prefixed with
+    // `auto_restart`.
+    #[serde(rename = "auto_restart_cooldown_expiration")]
+    pub cooldown_expiration: Option<DateTime<Utc>>,
 }
 
 /// A policy determining when an instance should be automatically restarted by
