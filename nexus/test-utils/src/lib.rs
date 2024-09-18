@@ -450,7 +450,6 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         let clickhouse =
             dev::clickhouse::ClickHouseDeployment::new_single_node(
                 &self.logctx,
-                0,
             )
             .await
             .unwrap();

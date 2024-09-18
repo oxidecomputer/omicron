@@ -1281,7 +1281,7 @@ mod tests {
     #[tokio::test]
     async fn test_single_node() {
         let logctx = test_setup_log("test_single_node");
-        let mut db = ClickHouseDeployment::new_single_node(&logctx, 0)
+        let mut db = ClickHouseDeployment::new_single_node(&logctx)
             .await
             .expect("Failed to start ClickHouse");
         bad_db_connection_test().await.unwrap();
@@ -3508,7 +3508,7 @@ mod tests {
         const TEST_NAME: &str = "test_apply_one_schema_upgrade_single_node";
         let logctx = test_setup_log(TEST_NAME);
         let log = &logctx.log;
-        let mut db = ClickHouseDeployment::new_single_node(&logctx, 0)
+        let mut db = ClickHouseDeployment::new_single_node(&logctx)
             .await
             .expect("Failed to start ClickHouse");
         let address = db.http_address().into();
@@ -3522,7 +3522,7 @@ mod tests {
         let logctx =
             test_setup_log("test_ensure_schema_with_version_gaps_fails");
         let log = &logctx.log;
-        let mut db = ClickHouseDeployment::new_single_node(&logctx, 0)
+        let mut db = ClickHouseDeployment::new_single_node(&logctx)
             .await
             .expect("Failed to start ClickHouse");
         let address = db.http_address().into();
@@ -3565,7 +3565,7 @@ mod tests {
             "test_ensure_schema_with_missing_desired_schema_version_fails",
         );
         let log = &logctx.log;
-        let mut db = ClickHouseDeployment::new_single_node(&logctx, 0)
+        let mut db = ClickHouseDeployment::new_single_node(&logctx)
             .await
             .expect("Failed to start ClickHouse");
         let address = db.http_address().into();
@@ -3698,7 +3698,7 @@ mod tests {
             "test_ensure_schema_walks_through_multiple_steps_single_node";
         let logctx = test_setup_log(TEST_NAME);
         let log = &logctx.log;
-        let mut db = ClickHouseDeployment::new_single_node(&logctx, 0)
+        let mut db = ClickHouseDeployment::new_single_node(&logctx)
             .await
             .expect("Failed to start ClickHouse");
         let address = db.http_address().into();
@@ -3795,7 +3795,7 @@ mod tests {
         let logctx = test_setup_log("test_select_all_field_types");
         let log = &logctx.log;
 
-        let mut db = ClickHouseDeployment::new_single_node(&logctx, 0)
+        let mut db = ClickHouseDeployment::new_single_node(&logctx)
             .await
             .expect("Failed to start ClickHouse");
         let address = db.http_address().into();
@@ -3827,7 +3827,7 @@ mod tests {
     async fn test_sql_query_output() {
         let logctx = test_setup_log("test_sql_query_output");
         let log = &logctx.log;
-        let mut db = ClickHouseDeployment::new_single_node(&logctx, 0)
+        let mut db = ClickHouseDeployment::new_single_node(&logctx)
             .await
             .expect("Failed to start ClickHouse");
         let address = db.http_address().into();
@@ -3976,7 +3976,7 @@ mod tests {
         let mut db = if replicated {
             create_cluster(&logctx).await
         } else {
-            ClickHouseDeployment::new_single_node(&logctx, 0)
+            ClickHouseDeployment::new_single_node(&logctx)
                 .await
                 .expect("Failed to start ClickHouse")
         };
@@ -4167,7 +4167,7 @@ mod tests {
         const TEST_NAME: &str = "test_expunge_timeseries_by_name_single_node";
         let logctx = test_setup_log(TEST_NAME);
         let log = &logctx.log;
-        let mut db = ClickHouseDeployment::new_single_node(&logctx, 0)
+        let mut db = ClickHouseDeployment::new_single_node(&logctx)
             .await
             .expect("Failed to start ClickHouse");
         test_expunge_timeseries_by_name_impl(

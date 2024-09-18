@@ -9,7 +9,7 @@ use clap::{Args, Parser, Subcommand};
 use dropshot::test_util::LogContext;
 use futures::StreamExt;
 use libc::SIGINT;
-use omicron_test_utils::dev;
+use omicron_test_utils::dev::{self, clickhouse::ClickHousePorts};
 use signal_hook_tokio::Signals;
 
 #[tokio::main]
@@ -43,10 +43,13 @@ enum ChDevCmd {
 #[derive(Clone, Debug, Args)]
 struct ChRunArgs {
     /// The HTTP port on which the server will listen
-    #[clap(short, long, default_value = "8123", action)]
-    port: u16,
+    #[clap(short = 'H', long, default_value_t = 8123, action)]
+    http_port: u16,
+    /// The port on which the native protocol server will listen
+    #[clap(short, long, default_value_t = 9000, action)]
+    native_port: u16,
     /// Starts a ClickHouse replicated cluster of 2 replicas and 3 keeper nodes
-    #[clap(long, conflicts_with = "port", action)]
+    #[clap(long, conflicts_with_all = ["http_port", "native_port"], action)]
     replicated: bool,
 }
 
@@ -61,7 +64,8 @@ impl ChRunArgs {
         if self.replicated {
             start_replicated_cluster(&logctx).await?;
         } else {
-            start_single_node(&logctx, self.port).await?;
+            start_single_node(&logctx, self.http_port, self.native_port)
+                .await?;
         }
         Ok(())
     }
@@ -69,18 +73,24 @@ impl ChRunArgs {
 
 async fn start_single_node(
     logctx: &LogContext,
-    port: u16,
+    http_port: u16,
+    native_port: u16,
 ) -> Result<(), anyhow::Error> {
     // Start a stream listening for SIGINT
     let signals = Signals::new(&[SIGINT]).expect("failed to wait for SIGINT");
     let mut signal_stream = signals.fuse();
 
     // Start the database server process, possibly on a specific port
+    let ports = ClickHousePorts::new(http_port, native_port).context(
+        "Replica HTTP and native protocol ports must not be the same",
+    )?;
     let mut deployment =
-        dev::clickhouse::ClickHouseDeployment::new_single_node(logctx, port)
-            .await?;
+        dev::clickhouse::ClickHouseDeployment::new_single_node_with_ports(
+            logctx, ports,
+        )
+        .await?;
     let db_instance = deployment
-        .instances()
+        .replicas()
         .next()
         .expect("Should have launched a ClickHouse instance");
     println!(
@@ -99,7 +109,11 @@ async fn start_single_node(
     );
     println!(
         "ch-dev: ClickHouse HTTP server listening on port {}",
-        db_instance.port()
+        db_instance.http_address.port()
+    );
+    println!(
+        "ch-dev: ClickHouse Native server listening on port {}",
+        db_instance.native_address.port()
     );
     println!(
         "ch-dev: ClickHouse data stored in: [{}]",
@@ -164,7 +178,7 @@ async fn start_replicated_cluster(
         cluster.replica_config_path().unwrap().display(),
         cluster.keeper_config_path().unwrap().display()
     );
-    for instance in cluster.instances() {
+    for instance in cluster.replicas() {
         println!(
             "ch-dev: running ClickHouse replica with full command:\
             \n\"clickhouse {}\"",
@@ -184,7 +198,11 @@ async fn start_replicated_cluster(
         );
         println!(
             "ch-dev: ClickHouse replica HTTP server is listening on port {}",
-            instance.address.port(),
+            instance.http_address.port(),
+        );
+        println!(
+            "ch-dev: ClickHouse replica Native server is listening on port {}",
+            instance.native_address.port(),
         );
     }
     for keeper in cluster.keepers() {
@@ -206,7 +224,7 @@ async fn start_replicated_cluster(
             keeper.data_path(),
         );
         println!(
-            "ch-dev: ClickHouse Keeper HTTP server is listening on port {}",
+            "ch-dev: ClickHouse Keeper server is listening on port {}",
             keeper.address.port(),
         );
     }
