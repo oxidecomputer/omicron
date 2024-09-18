@@ -11,6 +11,7 @@ use crate::app::sagas::NexusSaga;
 use futures::future::BoxFuture;
 use nexus_db_queries::authn;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::background::InstanceReincarnationStatus;
@@ -86,10 +87,11 @@ impl InstanceReincarnation {
             Vec::with_capacity(self.concurrency_limit.get() as usize);
         let serialized_authn = authn::saga::Serialized::for_opctx(opctx);
 
-        loop {
+        let mut paginator = Paginator::new(self.concurrency_limit);
+        while let Some(p) = paginator.next() {
             let maybe_batch = self
                 .datastore
-                .find_reincarnatable_instances(opctx, self.concurrency_limit)
+                .find_reincarnatable_instances(opctx, &p.current_pagparams())
                 .await;
             let batch = match maybe_batch {
                 Ok(batch) => batch,
@@ -103,6 +105,8 @@ impl InstanceReincarnation {
                     break;
                 }
             };
+
+            paginator = p.found_batch(&batch, &|instance| instance.id());
 
             let found = batch.len();
             status.instances_found += found;

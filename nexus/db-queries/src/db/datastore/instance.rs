@@ -61,7 +61,6 @@ use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::SledUuid;
 use ref_cast::RefCast;
-use std::num::NonZeroU32;
 use uuid::Uuid;
 
 /// Wraps a record of an `Instance` along with its active `Vmm`, if it has one.
@@ -499,9 +498,9 @@ impl DataStore {
     pub async fn find_reincarnatable_instances(
         &self,
         opctx: &OpContext,
-        n: NonZeroU32,
+        pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<Instance> {
-        Self::find_reincarnatable_instances_query(n)
+        Self::find_reincarnatable_instances_query(pagparams)
             .load_async::<Instance>(
                 &*self.pool_connection_authorized(opctx).await?,
             )
@@ -510,13 +509,13 @@ impl DataStore {
     }
 
     pub(crate) fn find_reincarnatable_instances_query(
-        n: NonZeroU32,
+        pagparams: &DataPageParams<'_, Uuid>,
     ) -> impl RunnableQuery<Instance> {
         use db::schema::instance::dsl;
 
         define_sql_function!(fn random() -> sql_types::Float);
 
-        dsl::instance
+        paginated(dsl::instance, dsl::id, &pagparams)
             // Select only those instances which may be reincarnated.
             .filter(InstanceAutoRestart::filter_reincarnatable())
             // Deleted instances may not be reincarnated.
@@ -532,8 +531,6 @@ impl DataStore {
             // (SagaUnwound) would require joining with the VMM table, so let's
             // not bother.
             .select(Instance::as_select())
-            .order_by(random())
-            .limit(i64::from(n.get()))
     }
 
     /// Fetches information about an Instance that the caller has previously
@@ -2874,11 +2871,18 @@ mod tests {
         let pool = db::Pool::new_single_host(&logctx.log, &cfg);
         let conn = pool.claim().await.unwrap();
 
-        let limit = NonZeroU32::new(16).expect("16 > 0");
-        let explanation = DataStore::find_reincarnatable_instances_query(limit)
-            .explain_async(&conn)
-            .await
-            .unwrap();
+        let limit = std::num::NonZeroU32::new(16).expect("16 > 0");
+        let pagparams = DataPageParams {
+            marker: None,
+            direction:
+                omicron_common::api::external::PaginationOrder::Ascending,
+            limit,
+        };
+        let explanation =
+            DataStore::find_reincarnatable_instances_query(&pagparams)
+                .explain_async(&conn)
+                .await
+                .unwrap();
 
         assert_contents(
             "tests/output/explain_find_reincarnatable_instances",
