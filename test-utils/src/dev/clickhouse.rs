@@ -127,7 +127,7 @@ impl ClickHouseDeployment {
         }
     }
 
-    /// Return the path to the replica configuration files.
+    /// Return the path to the keeper configuration files.
     ///
     /// This is only Some(_) in a cluster deployment. In a single-node, there
     /// are no Keepers, and so no config file for them.
@@ -206,13 +206,6 @@ impl std::ops::Deref for ClickHouseKeeper {
 impl std::ops::DerefMut for ClickHouseKeeper {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
-    }
-}
-
-impl ClickHouseKeeper {
-    /// Construct a new Keeper.
-    pub fn new() -> Result<Self, anyhow::Error> {
-        todo!()
     }
 }
 
