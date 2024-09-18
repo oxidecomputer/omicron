@@ -1283,6 +1283,7 @@ mod tests {
                     disk.firmware.active_slot(),
                     disk.firmware.next_active_slot(),
                     disk.firmware.slot1_read_only(),
+                    disk.firmware.number_of_slots(),
                     slots,
                 );
             }

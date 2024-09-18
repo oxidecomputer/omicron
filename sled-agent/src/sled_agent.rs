@@ -1221,11 +1221,16 @@ impl SledAgent {
         let mut zpools = vec![];
         let mut datasets = vec![];
         let all_disks = self.storage().get_latest_disks().await;
-        for (identity, variant, slot, _firmware) in all_disks.iter_all() {
+        for (identity, variant, slot, firmware) in all_disks.iter_all() {
             disks.push(InventoryDisk {
                 identity: identity.clone(),
                 variant,
                 slot,
+                active_firmware_slot: firmware.active_slot(),
+                next_active_firmware_slot: firmware.next_active_slot(),
+                number_of_firmware_slots: firmware.number_of_slots(),
+                slot1_is_read_only: firmware.slot1_read_only(),
+                slot_firmware_versions: firmware.slots().to_vec(),
             });
         }
         for zpool in all_disks.all_u2_zpools() {

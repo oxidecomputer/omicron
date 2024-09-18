@@ -7,10 +7,10 @@
 use crate::omicron_zone_config::{self, OmicronZoneNic};
 use crate::schema::{
     hw_baseboard_id, inv_caboose, inv_collection, inv_collection_error,
-    inv_dataset, inv_omicron_zone, inv_omicron_zone_nic, inv_physical_disk,
-    inv_root_of_trust, inv_root_of_trust_page, inv_service_processor,
-    inv_sled_agent, inv_sled_omicron_zones, inv_zpool, sw_caboose,
-    sw_root_of_trust_page,
+    inv_dataset, inv_nvme_disk_firmware, inv_omicron_zone,
+    inv_omicron_zone_nic, inv_physical_disk, inv_root_of_trust,
+    inv_root_of_trust_page, inv_service_processor, inv_sled_agent,
+    inv_sled_omicron_zones, inv_zpool, sw_caboose, sw_root_of_trust_page,
 };
 use crate::typed_uuid::DbTypedUuid;
 use crate::PhysicalDiskKind;
@@ -33,7 +33,8 @@ use nexus_sled_agent_shared::inventory::{
     OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
 };
 use nexus_types::inventory::{
-    BaseboardId, Caboose, Collection, PowerState, RotPage, RotSlot,
+    BaseboardId, Caboose, Collection, NvmeFirmware, PowerState, RotPage,
+    RotSlot,
 };
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::zpool_name::ZpoolName;
@@ -885,16 +886,61 @@ impl InvPhysicalDisk {
     }
 }
 
-impl From<InvPhysicalDisk> for nexus_types::inventory::PhysicalDisk {
-    fn from(disk: InvPhysicalDisk) -> Self {
+/// See [`nexus_types::inventory::PhysicalDiskFirmware::Nvme`].
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_nvme_disk_firmware)]
+pub struct InvNvmeDiskFirmware {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub sled_id: DbTypedUuid<SledKind>,
+    pub slot: i64,
+    pub active_slot: SqlU8,
+    pub next_active_slot: Option<SqlU8>,
+    pub number_of_slots: SqlU8,
+    pub slot1_is_read_only: bool,
+    pub slot_firmware_versions: Vec<Option<String>>,
+}
+
+impl InvNvmeDiskFirmware {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        sled_id: SledUuid,
+        sled_slot: i64,
+        firmware: &NvmeFirmware,
+    ) -> Self {
         Self {
-            identity: omicron_common::disk::DiskIdentity {
-                vendor: disk.vendor,
-                serial: disk.serial,
-                model: disk.model,
-            },
-            variant: disk.variant.into(),
-            slot: disk.slot,
+            inv_collection_id: inv_collection_id.into(),
+            sled_id: sled_id.into(),
+            slot: sled_slot,
+            active_slot: firmware.active_slot.into(),
+            next_active_slot: firmware.next_active_slot.map(|nas| nas.into()),
+            number_of_slots: firmware.number_of_slots.into(),
+            slot1_is_read_only: firmware.slot1_is_read_only,
+            slot_firmware_versions: firmware.slot_firmware_versions.clone(),
+        }
+    }
+
+    /// Attempt to read the current firmware version.
+    pub fn current_version(&self) -> Option<&str> {
+        match self.active_slot.0 {
+            // be paranoid that we have a value within the NVMe spec
+            slot @ 1..=7 => self
+                .slot_firmware_versions
+                .get(usize::from(slot) - 1)
+                .and_then(|v| v.as_deref()),
+            _ => None,
+        }
+    }
+
+    /// Attempt to read the staged firmware version that will be active upon
+    /// next device reset.
+    pub fn next_version(&self) -> Option<&str> {
+        match self.next_active_slot {
+            // be paranoid that we have a value within the NVMe spec
+            Some(slot) if slot.0 <= 7 && slot.0 >= 1 => self
+                .slot_firmware_versions
+                .get(usize::from(slot.0) - 1)
+                .and_then(|v| v.as_deref()),
+            _ => None,
         }
     }
 }
@@ -1549,5 +1595,107 @@ impl InvOmicronZoneNic {
     ) -> Result<NetworkInterface, anyhow::Error> {
         let zone_nic = OmicronZoneNic::from(self);
         zone_nic.into_network_interface_for_zone(zone_id)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use omicron_uuid_kinds::TypedUuid;
+
+    use crate::{typed_uuid, InvNvmeDiskFirmware};
+
+    #[test]
+    fn test_inv_nvme_disk_firmware() {
+        // We can retrieve active_firmware with sane values
+        let inv_firmware = InvNvmeDiskFirmware {
+            inv_collection_id: typed_uuid::DbTypedUuid(TypedUuid::new_v4()),
+            sled_id: TypedUuid::new_v4().into(),
+            slot: 1,
+            active_slot: 1.into(),
+            next_active_slot: None,
+            number_of_slots: 1.into(),
+            slot1_is_read_only: true,
+            slot_firmware_versions: vec![Some("firmware".to_string())],
+        };
+        assert_eq!(inv_firmware.current_version(), Some("firmware"));
+        assert_eq!(inv_firmware.next_version(), None);
+
+        // We can retrieve active_firmware and next_active_firmware with sane
+        // values
+        let inv_firmware = InvNvmeDiskFirmware {
+            inv_collection_id: typed_uuid::DbTypedUuid(TypedUuid::new_v4()),
+            sled_id: TypedUuid::new_v4().into(),
+            slot: 1,
+            active_slot: 1.into(),
+            next_active_slot: Some(2.into()),
+            number_of_slots: 2.into(),
+            slot1_is_read_only: true,
+            slot_firmware_versions: vec![
+                Some("ONE".to_string()),
+                Some("TWO".to_string()),
+            ],
+        };
+        assert_eq!(inv_firmware.current_version(), Some("ONE"));
+        assert_eq!(inv_firmware.next_version(), Some("TWO"));
+
+        // A missing fw version string returns None (although technically
+        // invalid as a device _shouldn't_ report an empty slot as being
+        // activated upon reset)
+        let inv_firmware = InvNvmeDiskFirmware {
+            inv_collection_id: typed_uuid::DbTypedUuid(TypedUuid::new_v4()),
+            sled_id: TypedUuid::new_v4().into(),
+            slot: 1,
+            active_slot: 1.into(),
+            next_active_slot: Some(2.into()),
+            number_of_slots: 2.into(),
+            slot1_is_read_only: true,
+            slot_firmware_versions: vec![Some("ONE".to_string()), None],
+        };
+        assert_eq!(inv_firmware.current_version(), Some("ONE"));
+        assert_eq!(inv_firmware.next_version(), None);
+
+        // Number of slots and slot firmware versions disagreement returns None
+        let inv_firmware = InvNvmeDiskFirmware {
+            inv_collection_id: typed_uuid::DbTypedUuid(TypedUuid::new_v4()),
+            sled_id: TypedUuid::new_v4().into(),
+            slot: 1,
+            active_slot: 1.into(),
+            next_active_slot: Some(4.into()),
+            number_of_slots: 4.into(),
+            slot1_is_read_only: true,
+            // number_of_slots reports 4 but the device only gave us two slots
+            slot_firmware_versions: vec![Some("ONE".to_string()), None],
+        };
+        assert_eq!(inv_firmware.current_version(), Some("ONE"));
+        assert_eq!(inv_firmware.next_version(), None);
+
+        // Verify active_slot and next_active_slot  below 1 or above 7 results
+        // in `None`
+        for i in [0u8, 8] {
+            let inv_firmware = InvNvmeDiskFirmware {
+                inv_collection_id: typed_uuid::DbTypedUuid(TypedUuid::new_v4()),
+                sled_id: TypedUuid::new_v4().into(),
+                slot: 1,
+                active_slot: i.into(),
+                next_active_slot: Some(i.into()),
+                number_of_slots: 7.into(),
+                slot1_is_read_only: true,
+                slot_firmware_versions: vec![
+                    Some("ONE".to_string()),
+                    Some("TWO".to_string()),
+                    Some("THREE".to_string()),
+                    Some("FOUR".to_string()),
+                    Some("FIVE".to_string()),
+                    Some("SIX".to_string()),
+                    Some("SEVEN".to_string()),
+                    // Invalid in the spec but we are testing that the active
+                    // and next active slot can't reach this value
+                    Some("EIGHT".to_string()),
+                ],
+            };
+
+            assert_eq!(inv_firmware.current_version(), None);
+            assert_eq!(inv_firmware.next_version(), None);
+        }
     }
 }

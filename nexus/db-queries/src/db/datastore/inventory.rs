@@ -39,6 +39,7 @@ use nexus_db_model::InvCaboose;
 use nexus_db_model::InvCollection;
 use nexus_db_model::InvCollectionError;
 use nexus_db_model::InvDataset;
+use nexus_db_model::InvNvmeDiskFirmware;
 use nexus_db_model::InvOmicronZone;
 use nexus_db_model::InvOmicronZoneNic;
 use nexus_db_model::InvPhysicalDisk;
@@ -61,6 +62,7 @@ use nexus_db_model::SwCaboose;
 use nexus_db_model::SwRotPage;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::Collection;
+use nexus_types::inventory::PhysicalDiskFirmware;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::LookupType;
@@ -135,6 +137,25 @@ impl DataStore {
                 ))
             })
             .collect::<Result<Vec<_>, Error>>()?;
+
+        // Pull disk firmware out of sled agents
+        let mut nvme_disk_firmware = Vec::new();
+        for (sled_id, sled_agent) in &collection.sled_agents {
+            for disk in &sled_agent.disks {
+                match &disk.firmware {
+                    PhysicalDiskFirmware::Unknown => (),
+                    PhysicalDiskFirmware::Nvme(firmware) => {
+                        nvme_disk_firmware.push(InvNvmeDiskFirmware::new(
+                            collection_id,
+                            *sled_id,
+                            disk.slot,
+                            firmware,
+                        ));
+                    }
+                }
+            }
+        }
+
         // Pull disks out of all sled agents
         let disks: Vec<_> = collection
             .sled_agents
@@ -738,6 +759,27 @@ impl DataStore {
                 }
             }
 
+            // Insert rows for all the physical disk firmware we found.
+            {
+                use db::schema::inv_nvme_disk_firmware::dsl;
+
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut nvme_disk_firmware = nvme_disk_firmware.into_iter();
+                loop {
+                    let some_disk_firmware = nvme_disk_firmware
+                        .by_ref()
+                        .take(batch_size)
+                        .collect::<Vec<_>>();
+                    if some_disk_firmware.is_empty() {
+                        break;
+                    }
+                    let _ = diesel::insert_into(dsl::inv_nvme_disk_firmware)
+                        .values(some_disk_firmware)
+                        .execute_async(&conn)
+                        .await?;
+                }
+            }
+
             // Insert rows for all the zpools we found.
             {
                 use db::schema::inv_zpool::dsl;
@@ -1168,6 +1210,7 @@ impl DataStore {
             nrot_pages,
             nsled_agents,
             nphysical_disks,
+            nnvme_disk_disk_firmware,
             nsled_agent_zones,
             nzones,
             nnics,
@@ -1252,6 +1295,17 @@ impl DataStore {
                         .await?
                     };
 
+                // Remove rows for NVMe physical disk firmware found.
+                let nnvme_disk_firwmare =
+                    {
+                        use db::schema::inv_nvme_disk_firmware::dsl;
+                        diesel::delete(dsl::inv_nvme_disk_firmware.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
+
                 // Remove rows associated with Omicron zones
                 let nsled_agent_zones =
                     {
@@ -1312,6 +1366,7 @@ impl DataStore {
                     nrot_pages,
                     nsled_agents,
                     nphysical_disks,
+                    nnvme_disk_firwmare,
                     nsled_agent_zones,
                     nzones,
                     nnics,
@@ -1336,6 +1391,7 @@ impl DataStore {
             "nrot_pages" => nrot_pages,
             "nsled_agents" => nsled_agents,
             "nphysical_disks" => nphysical_disks,
+            "nnvme_disk_firmware" => nnvme_disk_disk_firmware,
             "nsled_agent_zones" => nsled_agent_zones,
             "nzones" => nzones,
             "nnics" => nnics,
@@ -1564,15 +1620,69 @@ impl DataStore {
             rows
         };
 
+        // Mapping of "Sled ID" -> "Mapping of physical slot -> disk firmware"
+        let disk_firmware: BTreeMap<
+            SledUuid,
+            BTreeMap<i64, nexus_types::inventory::PhysicalDiskFirmware>,
+        > = {
+            use db::schema::inv_nvme_disk_firmware::dsl;
+
+            let mut disk_firmware = BTreeMap::<
+                SledUuid,
+                BTreeMap<i64, nexus_types::inventory::PhysicalDiskFirmware>,
+            >::new();
+            let mut paginator = Paginator::new(batch_size);
+            while let Some(p) = paginator.next() {
+                let batch = paginated_multicolumn(
+                    dsl::inv_nvme_disk_firmware,
+                    (dsl::sled_id, dsl::slot),
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvNvmeDiskFirmware::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator =
+                    p.found_batch(&batch, &|row| (row.sled_id, row.slot));
+                for firmware in batch {
+                    disk_firmware
+                        .entry(firmware.sled_id.into())
+                        .or_default()
+                        .insert(
+                            firmware.slot,
+                            nexus_types::inventory::PhysicalDiskFirmware::Nvme(
+                                nexus_types::inventory::NvmeFirmware {
+                                    active_slot: firmware.active_slot.into(),
+                                    next_active_slot: firmware
+                                        .next_active_slot
+                                        .map(|nas| nas.into()),
+                                    number_of_slots: firmware
+                                        .number_of_slots
+                                        .into(),
+                                    slot1_is_read_only: firmware
+                                        .slot1_is_read_only,
+                                    slot_firmware_versions: firmware
+                                        .slot_firmware_versions,
+                                },
+                            ),
+                        );
+                }
+            }
+            disk_firmware
+        };
+
         // Mapping of "Sled ID" -> "All disks reported by that sled"
         let physical_disks: BTreeMap<
-            Uuid,
+            SledUuid,
             Vec<nexus_types::inventory::PhysicalDisk>,
         > = {
             use db::schema::inv_physical_disk::dsl;
 
             let mut disks = BTreeMap::<
-                Uuid,
+                SledUuid,
                 Vec<nexus_types::inventory::PhysicalDisk>,
             >::new();
             let mut paginator = Paginator::new(batch_size);
@@ -1592,10 +1702,24 @@ impl DataStore {
                 paginator =
                     p.found_batch(&batch, &|row| (row.sled_id, row.slot));
                 for disk in batch {
-                    disks
-                        .entry(disk.sled_id.into_untyped_uuid())
-                        .or_default()
-                        .push(disk.into());
+                    let sled_id = disk.sled_id.into();
+                    let firmware = disk_firmware
+                        .get(&sled_id)
+                        .and_then(|lookup| lookup.get(&disk.slot))
+                        .unwrap_or(&nexus_types::inventory::PhysicalDiskFirmware::Unknown);
+
+                    disks.entry(sled_id).or_default().push(
+                        nexus_types::inventory::PhysicalDisk {
+                            identity: omicron_common::disk::DiskIdentity {
+                                vendor: disk.vendor,
+                                model: disk.model,
+                                serial: disk.serial,
+                            },
+                            variant: disk.variant.into(),
+                            slot: disk.slot,
+                            firmware: firmware.clone(),
+                        },
+                    );
                 }
             }
             disks
@@ -1764,7 +1888,7 @@ impl DataStore {
                     usable_physical_ram: s.usable_physical_ram.into(),
                     reservoir_size: s.reservoir_size.into(),
                     disks: physical_disks
-                        .get(sled_id.as_untyped_uuid())
+                        .get(&sled_id)
                         .map(|disks| disks.to_vec())
                         .unwrap_or_default(),
                     zpools: zpools
@@ -2769,6 +2893,217 @@ mod test {
         assert_ne!(coll_counts.rot_pages, 0);
 
         // Clean up.
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    /// While other tests mostly exercise inserting [`PhysicalDisk`]s with
+    /// NVMe firmware we want additional checks on some constraints that the
+    /// `inv_nvme_disk_firwmare` table sets.
+    #[tokio::test]
+    async fn test_nvme_firmware_inventory_insert() {
+        use nexus_types::external_api::params::PhysicalDiskKind;
+        use nexus_types::inventory::{
+            Collection, NvmeFirmware, PhysicalDisk, PhysicalDiskFirmware,
+        };
+
+        fn add_disk_with_firmware_to_collection(
+            active_slot: u8,
+            next_active_slot: Option<u8>,
+            number_of_slots: u8,
+            slot1_is_read_only: bool,
+            slot_firmware_versions: Vec<Option<String>>,
+        ) -> Collection {
+            let Representative { builder, .. } = representative();
+            let mut collection = builder.build();
+
+            let disk = PhysicalDisk {
+                identity: omicron_common::disk::DiskIdentity {
+                    vendor: "mike".to_string(),
+                    model: "buffalo".to_string(),
+                    serial: "716".to_string(),
+                },
+                variant: PhysicalDiskKind::U2,
+
+                slot: 1,
+                firmware: PhysicalDiskFirmware::Nvme(NvmeFirmware {
+                    active_slot,
+                    next_active_slot,
+                    number_of_slots,
+                    slot1_is_read_only,
+                    slot_firmware_versions,
+                }),
+            };
+
+            // Remove all disks on the first sled-agent and replace it with our
+            // new physical disk.
+            std::mem::swap(&mut collection
+                .sled_agents
+                .first_entry()
+                .expect("collection built from representative should have a sled agent")
+                .into_mut()
+                .disks,
+                &mut vec![disk]);
+
+            collection
+        }
+
+        let logctx = dev::test_setup_log("nvme_firmware_inventory_insert");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        // Verify we don't allow firmware with no firmware slots
+        let collection = add_disk_with_firmware_to_collection(
+            1,
+            None,
+            0,
+            true,
+            vec![Some("TEST".to_string())],
+        );
+        datastore
+            .inventory_insert_collection(&opctx, &collection)
+            .await
+            .expect_err("cannot insert firmware with 0 slots");
+
+        // Verify we don't allow firmware with too many slots
+        let collection = add_disk_with_firmware_to_collection(
+            1,
+            None,
+            8,
+            true,
+            vec![Some("TEST".to_string())],
+        );
+        datastore
+            .inventory_insert_collection(&opctx, &collection)
+            .await
+            .expect_err("cannot insert firmware with 8 slots");
+
+        // Verify we don't allow an active_slot of 0
+        let collection = add_disk_with_firmware_to_collection(
+            0,
+            None,
+            1,
+            true,
+            vec![Some("TEST".to_string())],
+        );
+        datastore
+            .inventory_insert_collection(&opctx, &collection)
+            .await
+            .expect_err("cannot insert firmware with active_slot 0");
+
+        // Verify we don't allow an active_slot larger than 7
+        let collection = add_disk_with_firmware_to_collection(
+            8,
+            None,
+            1,
+            true,
+            vec![Some("TEST".to_string())],
+        );
+        datastore
+            .inventory_insert_collection(&opctx, &collection)
+            .await
+            .expect_err("cannot insert firmware with active_slot 8");
+
+        // Verify we don't allow an next_active_slot of 0
+        let collection = add_disk_with_firmware_to_collection(
+            1,
+            Some(0),
+            1,
+            true,
+            vec![Some("TEST".to_string())],
+        );
+        datastore
+            .inventory_insert_collection(&opctx, &collection)
+            .await
+            .expect_err("cannot insert firmware with next_active_slot 0");
+
+        // Verify we don't allow an next_active_slot larger than 7
+        let collection = add_disk_with_firmware_to_collection(
+            1,
+            Some(8),
+            1,
+            true,
+            vec![Some("TEST".to_string())],
+        );
+        datastore
+            .inventory_insert_collection(&opctx, &collection)
+            .await
+            .expect_err("cannot insert firmware with next_active_slot 8");
+
+        // XXX omicron#6514
+        // - We would like to deny insertion when a firmware version string is
+        // larger than the NVMe spec would allow but we have discoverd that our
+        // version of CRDB will silently truncate a string to size bound rather
+        // than erroring.
+        // - The NVMe spec defines the firmware versions as an array of 7
+        // entries made up of 8 characters (ascii data) so unless the device
+        // firmware has a bug or the rust libnvme binding has a bug the worst we
+        // should see is the truncated value.
+        // - The CRDB STRING type is checking unicode length rather than byte
+        // length. However, CRDB won't let us use the BYTES type with an ARRAY.
+        let collection = add_disk_with_firmware_to_collection(
+            1,
+            None,
+            1,
+            true,
+            vec![Some("FIRMWARETOOLARGE".to_string())],
+        );
+        datastore
+            .inventory_insert_collection(&opctx, &collection)
+            .await
+            .expect("firmware inserted modulo version string truncation");
+        let collection_read = datastore
+            .inventory_collection_read(&opctx, collection.id)
+            .await
+            .expect("failed to read collection back");
+        let (_, value) = &collection_read
+            .sled_agents
+            .first_key_value()
+            .expect("we have a sled-agent in the collection");
+        let disk =
+            value.disks.first().expect("sled-agent has the disk we inserted");
+        let PhysicalDiskFirmware::Nvme(ref firmware) = disk.firmware else {
+            panic!(
+                "Didn't find the expected NVMe firmware that we just inserted"
+            )
+        };
+        assert_eq!(
+            firmware.slot_firmware_versions,
+            vec![Some("FIRMWARE".to_string())],
+            "Firmware versions contains the truncated string"
+        );
+
+        // Finally lets actually insert a valid configuration and assert that we
+        // can pull it back out correctly.
+        //
+        // - 3 slots
+        // - 1st slot is active
+        // - 1st slot is marked read-only
+        // - 2nd slot is marked active on next reset
+        // - 3rd slot has no firmware uploaded into it
+        let collection = add_disk_with_firmware_to_collection(
+            1,
+            Some(2),
+            3,
+            true,
+            vec![Some("FOO".to_string()), Some("BAR".to_string()), None],
+        );
+        datastore
+            .inventory_insert_collection(&opctx, &collection)
+            .await
+            .expect("firmware inserted");
+        let collection_read = datastore
+            .inventory_collection_read(&opctx, collection.id)
+            .await
+            .expect("failed to read collection back");
+        assert_eq!(collection, collection_read);
+
+        // NOTE that there is no validation that the bounds checked values
+        // in the database make sense. For example a device that reports
+        // a next_active_slot of 2 but only has a value of 1 in the
+        // number_of_slots field. These configurations are guarded against by
+        // the `InvNvmeDiskFirmware` type itself.
+
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
