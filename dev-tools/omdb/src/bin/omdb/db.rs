@@ -85,6 +85,7 @@ use nexus_db_model::Vmm;
 use nexus_db_model::Volume;
 use nexus_db_model::VpcSubnet;
 use nexus_db_model::Zpool;
+use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::datastore::read_only_resources_associated_with_volume;
@@ -119,6 +120,7 @@ use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::MacAddr;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::SledUuid;
 use sled_agent_client::types::VolumeConstructionRequest;
@@ -310,8 +312,10 @@ enum DbCommands {
     RegionSnapshotReplacement(RegionSnapshotReplacementArgs),
     /// Print information about sleds
     Sleds(SledsArgs),
-    /// Print information about customer instances
-    Instances(InstancesOptions),
+    /// Print information about customer instances.
+    Instance(InstanceArgs),
+    /// Alias to `omdb instances list`.
+    Instances(InstanceListArgs),
     /// Print information about the network
     Network(NetworkArgs),
     /// Print information about migrations
@@ -406,10 +410,36 @@ impl CliDnsGroup {
 }
 
 #[derive(Debug, Args)]
-struct InstancesOptions {
+struct InstanceArgs {
+    #[command(subcommand)]
+    command: InstanceCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum InstanceCommands {
+    /// list instances
+    #[clap(alias = "ls")]
+    List(InstanceListArgs),
+    /// show detailed output for the selected instance.
+    ///
+    /// instances can be selected either by their UUID or by the instance and
+    /// project name.
+    #[clap(alias = "show")]
+    Info(InstanceInfoArgs),
+}
+
+#[derive(Debug, Args)]
+struct InstanceListArgs {
     /// Only show the running instances
     #[arg(short, long, action=ArgAction::SetTrue)]
     running: bool,
+}
+
+#[derive(Debug, Args)]
+struct InstanceInfoArgs {
+    /// the UUID of the instance to show details for
+    #[clap(value_name = "UUID")]
+    id: InstanceUuid,
 }
 
 #[derive(Debug, Args)]
@@ -873,6 +903,23 @@ impl DbArgs {
             }
             DbCommands::Sleds(args) => {
                 cmd_db_sleds(&opctx, &datastore, &self.fetch_opts, args).await
+            }
+            DbCommands::Instance(InstanceArgs {
+                command: InstanceCommands::List(args),
+            }) => {
+                cmd_db_instances(
+                    &opctx,
+                    &datastore,
+                    &self.fetch_opts,
+                    args.running,
+                )
+                .await
+            }
+            DbCommands::Instance(InstanceArgs {
+                command: InstanceCommands::Info(args),
+            }) => {
+                cmd_db_instance_info(&opctx, &datastore, &self.fetch_opts, args)
+                    .await
             }
             DbCommands::Instances(instances_options) => {
                 cmd_db_instances(
@@ -2819,6 +2866,95 @@ async fn cmd_db_sleds(
         .to_string();
 
     println!("{}", table);
+
+    Ok(())
+}
+
+// INSTANCES
+
+/// Run `omdb db instance info`: show details about a customer VM.
+async fn cmd_db_instance_info(
+    _: &OpContext,
+    datastore: &DataStore,
+    _: &DbFetchOptions,
+    args: &InstanceInfoArgs,
+) -> Result<(), anyhow::Error> {
+    use nexus_db_queries::db::datastore::instance::InstanceGestalt;
+    let InstanceInfoArgs { id } = args;
+
+    // Destructure this exhaustively so that the OMDB command breaks and must be
+    // updated if new fields are added.
+    let InstanceGestalt { instance, active_vmm, target_vmm, migration } =
+        // use the super-special unauthorized version of this method just for OMDB
+        datastore
+            .instance_fetch_all_on_connection(
+                &*datastore.pool_connection_for_tests().await?,
+                &id,
+            )
+            .await
+            .with_context(|| {
+                format!("failed to fetch details for instance {id}")
+            })?;
+
+    // We *could* print this information in a nicer-looking format if we printed
+    // the various structs' fields manually. However, using the derived
+    // `fmt::Debug` implementation has the advantage that if any new fields are
+    // added to the `nexus_db_model` crate's `Instance`, `Vmm`, and `Migration`
+    // types in the future, the OMDB command's output will always include them,
+    // without having to be manually updated.
+
+    // This seems like a more important property for an internal debugging tool
+    // than a nicer-looking output format.
+
+    // TODO(eliza): this prints the entire user-data field one byte per line,
+    // which is horrible. i think we actually do need to format it ourselves...
+    println!("instance: {instance:#?}\n");
+
+    if let Some(ref vmm) = active_vmm {
+        println!("active VMM: {vmm:#?}\n");
+    }
+    if let Some(ref vmm) = target_vmm {
+        println!("migration target VMM: {vmm:#?}\n");
+    }
+    if let Some(ref migration) = migration {
+        println!("migration status: {migration:#?}\n");
+    }
+
+    // Check for weirdness.
+    fn check_for_dangling_key<T>(
+        what: &str,
+        id: &Option<Uuid>,
+        tgt: &Option<T>,
+    ) {
+        if let Some(ref id) = id {
+            if tgt.is_none() {
+                println!(
+                    "BAD: dangling {what} foreign key! {id} points to a \
+                     {what} that seems to have been deleted!",
+                );
+            }
+        }
+    }
+    check_for_dangling_key(
+        "active VMM",
+        &instance.runtime_state.propolis_id,
+        &active_vmm,
+    );
+    check_for_dangling_key(
+        "migration target VMM",
+        &instance.runtime_state.dst_propolis_id,
+        &target_vmm,
+    );
+    check_for_dangling_key(
+        "migration record",
+        &instance.runtime_state.migration_id,
+        &migration,
+    );
+    match (target_vmm, migration) {
+        (Some(_), None) => println!("WEIRD: instance has a migration target VMM, but no active migration record"),
+        (None, Some(_)) => println!("WEIRD: instance has a migration record, but no active VMM record"),
+        (_, _) => {},
+    }
 
     Ok(())
 }
