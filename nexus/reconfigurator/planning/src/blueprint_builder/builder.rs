@@ -1646,6 +1646,7 @@ pub mod test {
     pub const DEFAULT_N_SLEDS: usize = 3;
 
     /// Checks various conditions that should be true for all blueprints
+    #[track_caller]
     pub fn verify_blueprint(blueprint: &Blueprint) {
         // There should be no duplicate underlay IPs.
         let mut underlay_ips: BTreeMap<Ipv6Addr, &BlueprintZoneConfig> =
@@ -1696,6 +1697,28 @@ pub mod test {
         }
     }
 
+    #[track_caller]
+    pub fn assert_planning_makes_no_changes(
+        log: &Logger,
+        blueprint: &Blueprint,
+        input: &PlanningInput,
+        test_name: &'static str,
+    ) {
+        let builder =
+            BlueprintBuilder::new_based_on(&log, &blueprint, &input, test_name)
+                .expect("failed to create builder");
+        let child_blueprint = builder.build();
+        verify_blueprint(&child_blueprint);
+        let diff = child_blueprint.diff_since_blueprint(&blueprint);
+        println!(
+            "diff between blueprints (expected no changes):\n{}",
+            diff.display()
+        );
+        assert_eq!(diff.sleds_added.len(), 0);
+        assert_eq!(diff.sleds_removed.len(), 0);
+        assert_eq!(diff.sleds_modified.len(), 0);
+    }
+
     #[test]
     fn test_initial() {
         // Test creating a blueprint from a collection and verifying that it
@@ -1723,24 +1746,13 @@ pub mod test {
         assert_eq!(diff.sleds_removed.len(), 0);
         assert_eq!(diff.sleds_modified.len(), 0);
 
-        // Test a no-op blueprint.
-        let builder = BlueprintBuilder::new_based_on(
+        // Test a no-op planning iteration.
+        assert_planning_makes_no_changes(
             &logctx.log,
             &blueprint_initial,
             &input,
-            "test_basic",
-        )
-        .expect("failed to create builder");
-        let blueprint = builder.build();
-        verify_blueprint(&blueprint);
-        let diff = blueprint.diff_since_blueprint(&blueprint_initial);
-        println!(
-            "initial blueprint -> next blueprint (expected no changes):\n{}",
-            diff.display()
+            TEST_NAME,
         );
-        assert_eq!(diff.sleds_added.len(), 0);
-        assert_eq!(diff.sleds_removed.len(), 0);
-        assert_eq!(diff.sleds_modified.len(), 0);
 
         logctx.cleanup_successful();
     }
@@ -1887,6 +1899,14 @@ pub mod test {
                 .collect()
         );
 
+        // Test a no-op planning iteration.
+        assert_planning_makes_no_changes(
+            &logctx.log,
+            &blueprint3,
+            &input,
+            TEST_NAME,
+        );
+
         logctx.cleanup_successful();
     }
 
@@ -1962,6 +1982,14 @@ pub mod test {
         assert_eq!(
             blueprint3.sled_state.get(&decommision_sled_id).copied(),
             None,
+        );
+
+        // Test a no-op planning iteration.
+        assert_planning_makes_no_changes(
+            &logctx.log,
+            &blueprint3,
+            &input,
+            TEST_NAME,
         );
 
         logctx.cleanup_successful();
@@ -2469,6 +2497,14 @@ pub mod test {
                 })
                 .count(),
             num_sled_zpools
+        );
+
+        // Test a no-op planning iteration.
+        assert_planning_makes_no_changes(
+            &logctx.log,
+            &blueprint,
+            &input,
+            TEST_NAME,
         );
 
         // If we instead ask for one more zone than there are zpools, we should

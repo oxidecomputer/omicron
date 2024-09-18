@@ -2094,6 +2094,7 @@
           },
           "filesystem_pool": {
             "nullable": true,
+            "description": "zpool used for the zone's (transient) root filesystem",
             "allOf": [
               {
                 "$ref": "#/components/schemas/ZpoolName"
