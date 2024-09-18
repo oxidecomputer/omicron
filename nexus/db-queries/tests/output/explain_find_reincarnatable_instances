@@ -1,0 +1,25 @@
+distribution: local
+vectorized: true
+
+• top-k
+│ order: +column25
+│ k: 16
+│
+└── • render
+    │
+    └── • filter
+        │ filter: (((state = 'failed') AND (auto_restart_policy = 'best_effort')) AND (((time_last_auto_restarted IS NULL) OR ((auto_restart_cooldown IS NOT NULL) AND (time_last_auto_restarted <= ('2024-09-18 20:35:03.19219+00:00' - auto_restart_cooldown)))) OR ((auto_restart_cooldown IS NULL) AND (time_last_auto_restarted <= '2024-09-18 19:35:03.19219+00:00')))) AND (updater_id IS NULL)
+        │
+        └── • index join
+            │ table: instance@instance_pkey
+            │
+            └── • scan
+                  missing stats
+                  table: instance@lookup_instance_by_project (partial index)
+                  spans: FULL SCAN
+
+index recommendations: 2
+1. type: index creation
+   SQL command: CREATE INDEX ON instance (state) STORING (name, description, time_created, time_modified, time_deleted, project_id, user_data, time_state_updated, state_generation, active_propolis_id, target_propolis_id, migration_id, ncpus, memory, hostname, updater_id, updater_gen, time_last_auto_restarted, auto_restart_policy, auto_restart_cooldown);
+2. type: index creation
+   SQL command: CREATE INDEX ON instance (auto_restart_policy) STORING (name, description, time_created, time_modified, time_deleted, project_id, user_data, time_state_updated, state_generation, active_propolis_id, target_propolis_id, migration_id, ncpus, memory, hostname, updater_id, updater_gen, state, time_last_auto_restarted, auto_restart_cooldown);

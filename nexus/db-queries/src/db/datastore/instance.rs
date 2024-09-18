@@ -14,6 +14,7 @@ use crate::db::collection_detach_many::DetachManyError;
 use crate::db::collection_detach_many::DetachManyFromCollectionStatement;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
+use crate::db::datastore::RunnableQuery;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Resource;
@@ -60,6 +61,7 @@ use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::SledUuid;
 use ref_cast::RefCast;
+use std::num::NonZeroU32;
 use uuid::Uuid;
 
 /// Wraps a record of an `Instance` along with its active `Vmm`, if it has one.
@@ -497,8 +499,19 @@ impl DataStore {
     pub async fn find_reincarnatable_instances(
         &self,
         opctx: &OpContext,
-        n: std::num::NonZeroU32,
+        n: NonZeroU32,
     ) -> ListResultVec<Instance> {
+        Self::find_reincarnatable_instances_query(n)
+            .load_async::<Instance>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    pub(crate) fn find_reincarnatable_instances_query(
+        n: NonZeroU32,
+    ) -> impl RunnableQuery<Instance> {
         use db::schema::instance::dsl;
 
         define_sql_function!(fn random() -> sql_types::Float);
@@ -521,11 +534,6 @@ impl DataStore {
             .select(Instance::as_select())
             .order_by(random())
             .limit(i64::from(n.get()))
-            .load_async::<Instance>(
-                &*self.pool_connection_authorized(opctx).await?,
-            )
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Fetches information about an Instance that the caller has previously
@@ -1702,8 +1710,10 @@ mod tests {
     use super::*;
     use crate::db::datastore::sled;
     use crate::db::datastore::test_utils::datastore_test;
+    use crate::db::explain::ExplainableAsync;
     use crate::db::lookup::LookupPath;
     use crate::db::pagination::Paginator;
+    use expectorate::assert_contents;
     use nexus_db_model::InstanceState;
     use nexus_db_model::Project;
     use nexus_db_model::VmmRuntimeState;
@@ -2851,6 +2861,29 @@ mod tests {
         assert_eq!(expected_instances, found_instances);
 
         // Clean up.
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn explain_find_reincarnatable_instances() {
+        let logctx =
+            dev::test_setup_log("explain_find_reincarnatable_instances");
+        let mut db = test_setup_database(&logctx.log).await;
+        let cfg = db::Config { url: db.pg_config().clone() };
+        let pool = db::Pool::new_single_host(&logctx.log, &cfg);
+        let conn = pool.claim().await.unwrap();
+
+        let limit = NonZeroU32::new(16).expect("16 > 0");
+        let explanation = DataStore::find_reincarnatable_instances_query(limit)
+            .explain_async(&conn)
+            .await
+            .unwrap();
+
+        assert_contents(
+            "tests/output/explain_find_reincarnatable_instances",
+            &explanation,
+        );
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
