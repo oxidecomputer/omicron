@@ -87,8 +87,8 @@ pub(crate) enum Message {
     TrackOptePort { zone_name: String, name: String },
     /// Stop tracking the named OPTE port.
     UntrackOptePort { name: String },
-    /// Notify the task that a sled has been synced.
-    SyncedSled { sled_id: Uuid, synced: bool },
+    /// Notify the task that a sled has been synced with NTP.
+    TimeSynced { sled_id: Uuid },
     // TODO-completeness: We will probably want to track other kinds of
     // statistics here too. For example, we could send messages when a zone is
     // created / destroyed to track zonestats; we might also want to support
@@ -108,23 +108,6 @@ impl LinkKind {
 struct Target {
     id: TargetId,
     sled_datalink: SledDataLink,
-}
-
-impl Target {
-    /// Create a new target.
-    fn new(id: TargetId, sled_datalink: SledDataLink) -> Self {
-        Self { id, sled_datalink }
-    }
-
-    /// Return the target id associated with the kstat sampler.
-    fn id(&self) -> TargetId {
-        self.id
-    }
-
-    /// Return the sled datalink's Uuid identifier.
-    fn sled_id(&self) -> Uuid {
-        self.sled_datalink.target.sled_id
-    }
 }
 
 fn get_collection_details(kind: &str) -> CollectionDetails {
@@ -147,7 +130,7 @@ async fn metrics_task(
     mut rx: mpsc::Receiver<Message>,
 ) {
     let mut tracked_links: TrackedLinks = HashMap::new();
-    let mut sled_synced: bool = false;
+    let mut sled_time_synced: bool = false;
 
     // Main polling loop, waiting for messages from other pieces of the code to
     // track various statistics.
@@ -170,7 +153,7 @@ async fn metrics_task(
                     sled_serial: sled_identifiers.serial.clone().into(),
                     zone_name: zone_name.into(),
                 };
-                let link = SledDataLink::new(target, sled_synced);
+                let link = SledDataLink::new(target, sled_time_synced);
                 add_datalink(&log, &mut tracked_links, &kstat_sampler, link)
                     .await;
             }
@@ -185,7 +168,7 @@ async fn metrics_task(
                     sled_serial: sled_identifiers.serial.clone().into(),
                     zone_name: zone_name.into(),
                 };
-                let link = SledDataLink::new(target, sled_synced);
+                let link = SledDataLink::new(target, sled_time_synced);
                 add_datalink(&log, &mut tracked_links, &kstat_sampler, link)
                     .await;
             }
@@ -204,7 +187,7 @@ async fn metrics_task(
                     sled_serial: sled_identifiers.serial.clone().into(),
                     zone_name: zone_name.into(),
                 };
-                let link = SledDataLink::new(target, sled_synced);
+                let link = SledDataLink::new(target, sled_time_synced);
                 add_datalink(&log, &mut tracked_links, &kstat_sampler, link)
                     .await;
             }
@@ -212,14 +195,14 @@ async fn metrics_task(
                 remove_datalink(&log, &mut tracked_links, &kstat_sampler, name)
                     .await
             }
-            Message::SyncedSled { sled_id, synced } => {
-                if sled_id == sled_identifiers.sled_id && synced {
-                    sled_synced = true;
+            Message::TimeSynced { sled_id } => {
+                assert!(!sled_time_synced, "This message should only be sent once (on first synchronization with NTP)");
+                if sled_id == sled_identifiers.sled_id {
+                    sled_time_synced = true;
                     sync_sled_datalinks(
                         &log,
                         &mut tracked_links,
                         &kstat_sampler,
-                        sled_id,
                     )
                     .await
                 }
@@ -236,7 +219,7 @@ async fn remove_datalink(
     name: String,
 ) {
     match tracked_links.remove(&name) {
-        Some(target) => match kstat_sampler.remove_target(target.id()).await {
+        Some(target) => match kstat_sampler.remove_target(target.id).await {
             Ok(_) => {
                 debug!(
                     log,
@@ -285,7 +268,7 @@ async fn add_datalink(
                         "link_kind" => %link.kind(),
                         "zone_name" => %link.zone_name(),
                     );
-                    entry.insert(Target::new(id, link));
+                    entry.insert(Target { id, sled_datalink: link });
                 }
                 Err(err) => {
                     error!(
@@ -316,31 +299,28 @@ async fn sync_sled_datalinks(
     log: &Logger,
     tracked_links: &mut TrackedLinks,
     kstat_sampler: &KstatSampler,
-    sled_id: Uuid,
 ) {
     for (link_name, target) in tracked_links.iter_mut() {
-        if target.sled_id() == sled_id {
-            target.sled_datalink.synced = true;
-            let details = get_collection_details(target.sled_datalink.kind());
-            match kstat_sampler
-                .update_target(target.sled_datalink.clone(), details)
-                .await
-            {
-                Ok(_) => {
-                    debug!(
-                        log,
-                        "Updated link already tracked by kstat sampler";
-                        "link_name" => link_name,
-                    );
-                }
-                Err(err) => {
-                    error!(
-                        log,
-                        "Failed to update link already tracked by kstat sampler";
-                        "link_name" => link_name,
-                        "error" => ?err,
-                    );
-                }
+        target.sled_datalink.time_synced = true;
+        let details = get_collection_details(target.sled_datalink.kind());
+        match kstat_sampler
+            .update_target(target.sled_datalink.clone(), details)
+            .await
+        {
+            Ok(_) => {
+                debug!(
+                    log,
+                    "Updated link already tracked by kstat sampler";
+                    "link_name" => link_name,
+                );
+            }
+            Err(err) => {
+                error!(
+                    log,
+                    "Failed to update link already tracked by kstat sampler";
+                    "link_name" => link_name,
+                    "error" => ?err,
+                );
             }
         }
     }
@@ -521,12 +501,9 @@ impl MetricsRequestQueue {
         success
     }
 
-    /// Notify the task that a sled's synced value has changed.
-    ///
-    /// Typically, this is used to notify the task that a sled has *indeed* been
-    /// synced with NTP.
-    pub async fn synced_sled(&self, sled_id: Uuid, synced: bool) -> bool {
-        self.0.send(Message::SyncedSled { sled_id, synced }).await.is_ok()
+    /// Notify the task that a sled's state has been synchronized with NTP.
+    pub async fn notify_time_synced_sled(&self, sled_id: Uuid) -> bool {
+        self.0.send(Message::TimeSynced { sled_id }).await.is_ok()
     }
 }
 

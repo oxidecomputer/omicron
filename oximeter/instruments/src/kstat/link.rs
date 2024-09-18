@@ -89,21 +89,22 @@ fn extract_link_kstats(
 pub struct SledDataLink {
     /// The target for this link.
     pub target: SledDataLinkTarget,
-    /// Flag indicating whether the sled associated with this link is synced.
-    pub synced: bool,
+    /// Flag indicating whether the sled associated with this link is synced with
+    /// NTP.
+    pub time_synced: bool,
 }
 
 impl SledDataLink {
     /// Create a new `SledDataLink` with the given target and synchronization
     /// flag.
-    pub fn new(target: SledDataLinkTarget, synced: bool) -> Self {
-        Self { target, synced }
+    pub fn new(target: SledDataLinkTarget, time_synced: bool) -> Self {
+        Self { target, time_synced }
     }
 
-    /// Create a new `SledDataLink` with the given target and no synchronization
-    /// flag set to `false` by default.
-    pub fn fresh(target: SledDataLinkTarget) -> Self {
-        Self { target, synced: false }
+    /// Create a new `SledDataLink` with the given target .
+    #[cfg(test)]
+    pub fn unsynced(target: SledDataLinkTarget) -> Self {
+        Self { target, time_synced: false }
     }
 
     /// Return the name of the link.
@@ -129,7 +130,7 @@ impl SledDataLink {
 
 impl KstatTarget for SledDataLink {
     fn interested(&self, kstat: &Kstat<'_>) -> bool {
-        self.synced
+        self.time_synced
             && kstat.ks_module == "link"
             && kstat.ks_instance == 0
             && kstat.ks_name == self.link_name()
@@ -289,7 +290,7 @@ mod tests {
             zone_name: ZONE_NAME.into(),
         };
         // not with a synced sled (by default)
-        let mut dl = SledDataLink::fresh(target);
+        let mut dl = SledDataLink::unsynced(target);
 
         let ctl = Ctl::new().unwrap();
         let ctl = ctl.update().unwrap();
@@ -301,7 +302,7 @@ mod tests {
         assert!(!dl.interested(&kstat));
 
         // with a synced sled
-        dl.synced = true;
+        dl.time_synced = true;
         assert!(dl.interested(&kstat));
     }
 

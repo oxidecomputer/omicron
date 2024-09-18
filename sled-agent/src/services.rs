@@ -971,12 +971,7 @@ impl ServiceManager {
 
     /// Returns the metrics queue for the sled agent.
     fn metrics_queue(&self) -> &MetricsRequestQueue {
-        &self
-            .inner
-            .sled_info
-            .get()
-            .expect("Sled agent should have started")
-            .metrics_queue
+        &self.maybe_metrics_queue().expect("Sled agent should have started")
     }
 
     // Advertise the /64 prefix of `address`, unless we already have.
@@ -3734,7 +3729,7 @@ impl ServiceManager {
     }
 
     /// Adjust the system boot time to the latest boot time of all zones.
-    pub fn boottime_rewrite(&self) {
+    fn boottime_rewrite(&self) {
         // Call out to the 'tmpx' utility program which will rewrite the wtmpx
         // and utmpx databases in every zone, including the global zone, to
         // reflect the adjusted system boot time.
@@ -3766,7 +3761,7 @@ impl ServiceManager {
 
         if skip_timesync {
             info!(self.inner.log, "Configured to skip timesync checks");
-            self.if_timesynced().await;
+            self.on_time_sync().await;
             return Ok(TimeSync {
                 sync: true,
                 ref_id: 0,
@@ -3821,7 +3816,7 @@ impl ServiceManager {
                         && correction.abs() <= 0.05;
 
                     if sync {
-                        self.if_timesynced().await;
+                        self.on_time_sync().await;
                     }
 
                     Ok(TimeSync {
@@ -3843,30 +3838,36 @@ impl ServiceManager {
         }
     }
 
-    /// Check if the system time is synchronized and if so, execute the
-    /// boottime_rewrite function and send messages.
-    async fn if_timesynced(&self) {
-        match self.inner.time_synced.compare_exchange(
-            false,
-            true,
-            Ordering::Acquire,
-            Ordering::Relaxed,
-        ) {
-            Err(_) => {
-                debug!(self.inner.log, "Time was already synchronized");
-            }
-            Ok(_) => {
-                debug!(self.inner.log, "Time is now synchronized");
-                // We only want to rewrite the boot time once, so we do it here
-                // when we know the time is synchronized.
-                self.boottime_rewrite();
+    /// Check if the synchronization state of the sled has shifted to true and
+    /// if so, execute the any out-of-band actions that need to be taken.
+    ///
+    /// This function only executes the out-of-band actions once, once the
+    /// synchronization state has shifted to true.
+    async fn on_time_sync(&self) {
+        if self
+            .inner
+            .time_synced
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_ok()
+        {
+            debug!(self.inner.log, "Time is now synchronized");
+            // We only want to rewrite the boot time once, so we do it here
+            // when we know the time is synchronized.
+            self.boottime_rewrite();
 
-                // We expect to have a metrics queue by this point, so
-                // we can safely send a message on it to say the sled has
-                // been synchronized.
-                let queue = self.metrics_queue();
-                queue.synced_sled(self.sled_id(), true).await;
+            // We expect to have a metrics queue by this point, so
+            // we can safely send a message on it to say the sled has
+            // been synchronized.
+            let queue = self.metrics_queue();
+            if !queue.notify_time_synced_sled(self.sled_id()).await {
+                error!(
+                    self.inner.log,
+                    "Failed to notify metrics queue of sled \
+                     time synchronization, metrics may not be produced."
+                );
             }
+        } else {
+            debug!(self.inner.log, "Time was already synchronized");
         }
     }
 
@@ -5094,10 +5095,7 @@ mod test {
             .expect("Should have received a message about the sled being synced");
         assert_eq!(
             synced_message,
-            metrics::Message::SyncedSled {
-                sled_id: mgr.sled_id(),
-                synced: true
-            },
+            metrics::Message::TimeSynced { sled_id: mgr.sled_id() },
         );
 
         // Then, check that we received a message about the zone's VNIC.
@@ -5250,10 +5248,7 @@ mod test {
             .expect("Should have received a message about the sled being synced");
         assert_eq!(
             synced_message,
-            metrics::Message::SyncedSled {
-                sled_id: mgr.sled_id(),
-                synced: true
-            }
+            metrics::Message::TimeSynced { sled_id: mgr.sled_id() }
         );
 
         // In this case, the manager creates the zone once, and then "ensuring"
@@ -5324,10 +5319,7 @@ mod test {
             metrics_rx.recv(),
         ).await.expect("Should have received a message about the sled being synced within the timeout")
             .expect("Should have received a message about the sled being synced");
-        assert_eq!(
-            synced_message,
-            metrics::Message::SyncedSled { sled_id, synced: true }
-        );
+        assert_eq!(synced_message, metrics::Message::TimeSynced { sled_id });
 
         // Check that we received a message about the zone's VNIC. Since the
         // manager is being dropped, it should also send a message about the
