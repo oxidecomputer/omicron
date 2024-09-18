@@ -279,7 +279,22 @@ impl<'a> BuilderExternalNetworking<'a> {
 // Helper to validate that the system hasn't gone off the rails. There should
 // never be any external networking resources in the planning input (which is
 // derived from the contents of CRDB) that we don't know about from the parent
-// blueprint.
+// blueprint. It's possible a given planning iteration could see such a state
+// there have been intermediate changes made by other Nexus instances; e.g.,
+//
+// 1. Nexus A generates a `PlanningInput` by reading from CRDB
+// 2. Nexus B executes on a target blueprint that removes IPs/NICs from
+//    CRDB
+// 3. Nexus B regenerates a new blueprint and prunes the zone(s) associated
+//    with the IPs/NICs from step 2
+// 4. Nexus B makes this new blueprint the target
+// 5. Nexus A attempts to run planning with its `PlanningInput` from step 1 but
+//    the target blueprint from step 4; this will fail the following checks
+//    because the input contains records that were removed in step 3
+//
+// We do not need to handle this class of error; it's a transient failure that
+// will clear itself up when Nexus A repeats its planning loop from the top and
+// generates a new `PlanningInput`.
 //
 // There may still be database records corresponding to _expunged_ zones, but
 // that's okay: it just means we haven't yet realized a blueprint where those
