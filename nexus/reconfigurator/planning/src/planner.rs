@@ -1544,6 +1544,14 @@ mod test {
             "wrong addresses for new external DNS zones"
         );
 
+        // Test a no-op planning iteration.
+        assert_planning_makes_no_changes(
+            &logctx.log,
+            &blueprint4,
+            &input,
+            TEST_NAME,
+        );
+
         logctx.cleanup_successful();
     }
 

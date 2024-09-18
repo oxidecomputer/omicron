@@ -424,6 +424,7 @@ fn ensure_input_records_appear_in_parent_blueprint(
     let mut all_macs: HashSet<MacAddr> = HashSet::new();
     let mut all_nexus_nic_ips: HashSet<IpAddr> = HashSet::new();
     let mut all_boundary_ntp_nic_ips: HashSet<IpAddr> = HashSet::new();
+    let mut all_external_dns_nic_ips: HashSet<IpAddr> = HashSet::new();
     let mut all_external_ips: HashSet<OmicronZoneExternalIp> = HashSet::new();
 
     // Unlike the construction of the external IP allocator and existing IPs
@@ -439,7 +440,9 @@ fn ensure_input_records_appear_in_parent_blueprint(
             BlueprintZoneType::Nexus(nexus) => {
                 all_nexus_nic_ips.insert(nexus.nic.ip);
             }
-            // TODO: external-dns
+            BlueprintZoneType::ExternalDns(dns) => {
+                all_external_dns_nic_ips.insert(dns.nic.ip);
+            }
             _ => (),
         }
 
@@ -490,7 +493,12 @@ fn ensure_input_records_appear_in_parent_blueprint(
                 }
             }
             IpAddr::V4(ip) if DNS_OPTE_IPV4_SUBNET.contains(ip) => {
-                // TODO check all_dns_nic_ips, once it exists
+                if !all_external_dns_nic_ips.contains(&ip.into()) {
+                    bail!(
+                        "planning input contains unexpected NIC \
+                         (IP not found in parent blueprint): {nic_entry:?}"
+                    );
+                }
             }
             IpAddr::V6(ip) if NEXUS_OPTE_IPV6_SUBNET.contains(ip) => {
                 if !all_nexus_nic_ips.contains(&ip.into()) {
@@ -509,7 +517,12 @@ fn ensure_input_records_appear_in_parent_blueprint(
                 }
             }
             IpAddr::V6(ip) if DNS_OPTE_IPV6_SUBNET.contains(ip) => {
-                // TODO check all_dns_nic_ips, once it exists
+                if !all_external_dns_nic_ips.contains(&ip.into()) {
+                    bail!(
+                        "planning input contains unexpected NIC \
+                         (IP not found in parent blueprint): {nic_entry:?}"
+                    );
+                }
             }
             _ => {
                 bail!(
