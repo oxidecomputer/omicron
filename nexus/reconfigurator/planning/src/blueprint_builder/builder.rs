@@ -732,22 +732,19 @@ impl<'a> BlueprintBuilder<'a> {
         };
         let pool_name =
             self.sled_select_zpool(sled_id, ZoneKind::ExternalDns)?;
-        let dataset = OmicronZoneDataset { pool_name };
         let zone_type =
             BlueprintZoneType::ExternalDns(blueprint_zone_type::ExternalDns {
-                dataset,
+                dataset: OmicronZoneDataset { pool_name: pool_name.clone() },
                 http_address,
                 dns_address,
                 nic,
             });
-        let filesystem_pool =
-            Some(self.sled_select_zpool(sled_id, zone_type.kind())?);
 
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id,
             underlay_address,
-            filesystem_pool,
+            filesystem_pool: Some(pool_name),
             zone_type,
         };
         self.sled_add_zone(sled_id, zone)?;
