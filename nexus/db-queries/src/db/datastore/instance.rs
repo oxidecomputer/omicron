@@ -500,17 +500,6 @@ impl DataStore {
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<Instance> {
-        Self::find_reincarnatable_instances_query(pagparams)
-            .load_async::<Instance>(
-                &*self.pool_connection_authorized(opctx).await?,
-            )
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
-    }
-
-    pub(crate) fn find_reincarnatable_instances_query(
-        pagparams: &DataPageParams<'_, Uuid>,
-    ) -> impl RunnableQuery<Instance> {
         use db::schema::instance::dsl;
 
         define_sql_function!(fn random() -> sql_types::Float);
@@ -531,6 +520,11 @@ impl DataStore {
             // (SagaUnwound) would require joining with the VMM table, so let's
             // not bother.
             .select(Instance::as_select())
+            .load_async::<Instance>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Fetches information about an Instance that the caller has previously
@@ -2858,36 +2852,6 @@ mod tests {
         assert_eq!(expected_instances, found_instances);
 
         // Clean up.
-        db.cleanup().await.unwrap();
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn explain_find_reincarnatable_instances() {
-        let logctx =
-            dev::test_setup_log("explain_find_reincarnatable_instances");
-        let mut db = test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new_single_host(&logctx.log, &cfg);
-        let conn = pool.claim().await.unwrap();
-
-        let limit = std::num::NonZeroU32::new(16).expect("16 > 0");
-        let pagparams = DataPageParams {
-            marker: None,
-            direction:
-                omicron_common::api::external::PaginationOrder::Ascending,
-            limit,
-        };
-        let explanation =
-            DataStore::find_reincarnatable_instances_query(&pagparams)
-                .explain_async(&conn)
-                .await
-                .unwrap();
-
-        assert_contents(
-            "tests/output/explain_find_reincarnatable_instances",
-            &explanation,
-        );
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
