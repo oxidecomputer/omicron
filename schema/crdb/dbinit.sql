@@ -3655,12 +3655,12 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_clickhouse_cluster_config (
     -- Clickhouse server and keeper ids can never be reused. We hand them out
     -- monotonically and keep track of the last one used here.
     max_used_server_id INT8 NOT NULL,
-    max_used_keeper_id INT8 NOT NULL
+    max_used_keeper_id INT8 NOT NULL,
 
     -- Each clickhouse cluster has a unique name and secret value. These are set
     -- once and shared among all nodes for the lifetime of the fleet.
-    cluster_name TEXT NOT NULL
-    cluster_secret TEXT NOT NULL
+    cluster_name TEXT NOT NULL,
+    cluster_secret TEXT NOT NULL,
 
     -- A recording of an inventory value that serves as a marker to inform the
     -- reconfigurator when a collection of a raft configuration is recent.

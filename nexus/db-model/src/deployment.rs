@@ -40,10 +40,10 @@ use nexus_types::deployment::{
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::zpool_name::ZpoolName;
-use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use omicron_uuid_kinds::{ExternalIpKind, SledKind, ZpoolKind};
 use omicron_uuid_kinds::{ExternalIpUuid, GenericUuid, OmicronZoneUuid};
+use omicron_uuid_kinds::{OmicronZoneKind, SledUuid};
 use std::net::{IpAddr, SocketAddrV6};
 use uuid::Uuid;
 
@@ -850,7 +850,7 @@ impl BpClickhouseClusterConfig {
 #[diesel(table_name = bp_clickhouse_keeper_zone_id_to_node_id)]
 pub struct BpClickhouseKeeperZoneIdToNodeId {
     pub blueprint_id: Uuid,
-    pub omicron_zone_id: Uuid,
+    pub omicron_zone_id: DbTypedUuid<OmicronZoneKind>,
     pub keeper_id: i64,
 }
 
@@ -862,7 +862,7 @@ impl BpClickhouseKeeperZoneIdToNodeId {
     ) -> anyhow::Result<BpClickhouseKeeperZoneIdToNodeId> {
         Ok(BpClickhouseKeeperZoneIdToNodeId {
             blueprint_id,
-            omicron_zone_id: omicron_zone_id.into_untyped_uuid(),
+            omicron_zone_id: omicron_zone_id.into(),
             keeper_id: keeper_id
                 .0
                 .try_into()
@@ -875,7 +875,7 @@ impl BpClickhouseKeeperZoneIdToNodeId {
 #[diesel(table_name = bp_clickhouse_server_zone_id_to_node_id)]
 pub struct BpClickhouseServerZoneIdToNodeId {
     pub blueprint_id: Uuid,
-    pub omicron_zone_id: Uuid,
+    pub omicron_zone_id: DbTypedUuid<OmicronZoneKind>,
     pub server_id: i64,
 }
 
@@ -887,7 +887,7 @@ impl BpClickhouseServerZoneIdToNodeId {
     ) -> anyhow::Result<BpClickhouseServerZoneIdToNodeId> {
         Ok(BpClickhouseServerZoneIdToNodeId {
             blueprint_id,
-            omicron_zone_id: omicron_zone_id.into_untyped_uuid(),
+            omicron_zone_id: omicron_zone_id.into(),
             server_id: server_id
                 .0
                 .try_into()
