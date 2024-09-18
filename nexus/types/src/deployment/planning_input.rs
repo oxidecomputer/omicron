@@ -737,6 +737,12 @@ pub struct Policy {
 /// Policy for replicated clickhouse setups
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClickhousePolicy {
+    /// Should we run the single-node cluster alongside the replicated cluster?
+    /// This is stage 1 of our deployment plan as laid out in RFD 468
+    ///
+    /// If this is set to false, then we will only deploy replicated clusters.
+    pub deploy_with_standalone: bool,
+
     /// Desired number of clickhouse servers
     pub target_servers: usize,
 
