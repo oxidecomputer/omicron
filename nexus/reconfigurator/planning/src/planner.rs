@@ -1297,7 +1297,6 @@ mod test {
         // the service IP pool. This will force reuse of the IP that was
         // allocated to the expunged Nexus zone.
         let mut builder = input.into_builder();
-        builder.update_network_resources_from_blueprint(&blueprint2).unwrap();
         assert_eq!(builder.policy_mut().service_ip_pool_ranges.len(), 1);
         builder.policy_mut().target_nexus_zone_count =
             builder.policy_mut().service_ip_pool_ranges[0]
@@ -1697,10 +1696,6 @@ mod test {
         };
         println!("1 -> 2: decommissioned {decommissioned_sled_id}");
 
-        // Because we marked zones as expunged, we need to update the networking
-        // config in the planning input.
-        builder.update_network_resources_from_blueprint(&blueprint1).unwrap();
-
         // Now run the planner with a high number of target Nexus zones. The
         // number (9) is chosen such that:
         //
@@ -1975,7 +1970,6 @@ mod test {
 
         // Remove the now-decommissioned sled from the planning input.
         let mut builder = input.into_builder();
-        builder.update_network_resources_from_blueprint(&blueprint2).unwrap();
         builder.sleds_mut().remove(&expunged_sled_id);
         let input = builder.build();
 
