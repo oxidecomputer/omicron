@@ -312,10 +312,8 @@ fn ensure_input_records_appear_in_parent_blueprint(
     input: &PlanningInput,
 ) -> anyhow::Result<()> {
     let mut all_macs: HashSet<MacAddr> = HashSet::new();
-    let mut all_nexus_v4_ips: HashSet<Ipv4Addr> = HashSet::new();
-    let mut all_nexus_v6_ips: HashSet<Ipv6Addr> = HashSet::new();
-    let mut all_boundary_ntp_v4_ips: HashSet<Ipv4Addr> = HashSet::new();
-    let mut all_boundary_ntp_v6_ips: HashSet<Ipv6Addr> = HashSet::new();
+    let mut all_nexus_nic_ips: HashSet<IpAddr> = HashSet::new();
+    let mut all_boundary_ntp_nic_ips: HashSet<IpAddr> = HashSet::new();
     let mut all_external_ips: HashSet<OmicronZoneExternalIp> = HashSet::new();
 
     // Unlike the construction of the external IP allocator and existing IPs
@@ -325,22 +323,12 @@ fn ensure_input_records_appear_in_parent_blueprint(
     for (_, z) in parent_blueprint.all_omicron_zones(BlueprintZoneFilter::All) {
         let zone_type = &z.zone_type;
         match zone_type {
-            BlueprintZoneType::BoundaryNtp(ntp) => match ntp.nic.ip {
-                IpAddr::V4(ip) => {
-                    all_boundary_ntp_v4_ips.insert(ip);
-                }
-                IpAddr::V6(ip) => {
-                    all_boundary_ntp_v6_ips.insert(ip);
-                }
-            },
-            BlueprintZoneType::Nexus(nexus) => match nexus.nic.ip {
-                IpAddr::V4(ip) => {
-                    all_nexus_v4_ips.insert(ip);
-                }
-                IpAddr::V6(ip) => {
-                    all_nexus_v6_ips.insert(ip);
-                }
-            },
+            BlueprintZoneType::BoundaryNtp(ntp) => {
+                all_boundary_ntp_nic_ips.insert(ntp.nic.ip);
+            }
+            BlueprintZoneType::Nexus(nexus) => {
+                all_nexus_nic_ips.insert(nexus.nic.ip);
+            }
             // TODO: external-dns
             _ => (),
         }
@@ -363,7 +351,7 @@ fn ensure_input_records_appear_in_parent_blueprint(
         if !all_external_ips.contains(&external_ip_entry.ip) {
             bail!(
                 "planning input contains unexpected external IP \
-                     (IP not found in parent blueprint): {external_ip_entry:?}"
+                 (IP not found in parent blueprint): {external_ip_entry:?}"
             );
         }
     }
@@ -371,53 +359,53 @@ fn ensure_input_records_appear_in_parent_blueprint(
         if !all_macs.contains(&nic_entry.nic.mac) {
             bail!(
                 "planning input contains unexpected NIC \
-                     (MAC not found in parent blueprint): {nic_entry:?}"
+                 (MAC not found in parent blueprint): {nic_entry:?}"
             );
         }
         match nic_entry.nic.ip {
             IpAddr::V4(ip) if NEXUS_OPTE_IPV4_SUBNET.contains(ip) => {
-                if !all_nexus_v4_ips.contains(&ip) {
+                if !all_nexus_nic_ips.contains(&ip.into()) {
                     bail!(
                         "planning input contains unexpected NIC \
-                             (IP not found in parent blueprint): {nic_entry:?}"
+                         (IP not found in parent blueprint): {nic_entry:?}"
                     );
                 }
             }
             IpAddr::V4(ip) if NTP_OPTE_IPV4_SUBNET.contains(ip) => {
-                if !all_boundary_ntp_v4_ips.contains(&ip) {
+                if !all_boundary_ntp_nic_ips.contains(&ip.into()) {
                     bail!(
                         "planning input contains unexpected NIC \
-                             (IP not found in parent blueprint): {nic_entry:?}"
+                         (IP not found in parent blueprint): {nic_entry:?}"
                     );
                 }
             }
             IpAddr::V4(ip) if DNS_OPTE_IPV4_SUBNET.contains(ip) => {
-                // TODO check all_dns_v4_ips, once it exists
+                // TODO check all_dns_nic_ips, once it exists
             }
             IpAddr::V6(ip) if NEXUS_OPTE_IPV6_SUBNET.contains(ip) => {
-                if !all_nexus_v6_ips.contains(&ip) {
+                if !all_nexus_nic_ips.contains(&ip.into()) {
                     bail!(
                         "planning input contains unexpected NIC \
-                             (IP not found in parent blueprint): {nic_entry:?}"
+                         (IP not found in parent blueprint): {nic_entry:?}"
                     );
                 }
             }
             IpAddr::V6(ip) if NTP_OPTE_IPV6_SUBNET.contains(ip) => {
-                if !all_boundary_ntp_v6_ips.contains(&ip) {
+                if !all_boundary_ntp_nic_ips.contains(&ip.into()) {
                     bail!(
                         "planning input contains unexpected NIC \
-                             (IP not found in parent blueprint): {nic_entry:?}"
+                         (IP not found in parent blueprint): {nic_entry:?}"
                     );
                 }
             }
             IpAddr::V6(ip) if DNS_OPTE_IPV6_SUBNET.contains(ip) => {
-                // TODO check all_dns_v6_ips, once it exists
+                // TODO check all_dns_nic_ips, once it exists
             }
             _ => {
                 bail!(
-                        "planning input contains unexpected NIC \
-                         (IP not contained in known OPTE subnet): {nic_entry:?}"
-                    )
+                    "planning input contains unexpected NIC \
+                    (IP not contained in known OPTE subnet): {nic_entry:?}"
+                )
             }
         }
     }
