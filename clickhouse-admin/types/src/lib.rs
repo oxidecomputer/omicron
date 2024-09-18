@@ -225,7 +225,7 @@ macro_rules! define_struct_and_set_values {
         pub struct $name {
             $(
                 #[$doc_field]
-                $field_name: $field_type
+                pub $field_name: $field_type
             ),*
         }
 
