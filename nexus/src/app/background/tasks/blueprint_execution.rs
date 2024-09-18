@@ -409,6 +409,33 @@ mod test {
         )
         .await;
 
+        // The only sled-agent endpoint we care about in this test is `PUT
+        // /omicron-zones`. Add a closure to avoid repeating it multiple times
+        // below. We don't do a careful check of the _contents_ of what's being
+        // sent; for that, see the tests in nexus-reconfigurator-execution.
+        let match_put_omicron_zones =
+            || request::method_path("PUT", "/omicron-zones");
+
+        // Helper for our mock sled-agent http servers to blanket ignore and
+        // return 200 OK for anything _except_ `PUT /omciron-zones`, which is
+        // the endpoint we care about in this test.
+        //
+        // Other Nexus background tasks created by our test context may notice
+        // the sled-agent records we're about to insert into CRDB and query them
+        // (e.g., for inventory, vpc routing info, ...). We don't want those to
+        // cause spurious test failures, so just tell our sled-agents to accept
+        // any number of them.
+        let mock_server_ignore_spurious_http_requests =
+            |s: &mut httptest::Server| {
+                s.expect(
+                    Expectation::matching(not(match_put_omicron_zones()))
+                        .times(..)
+                        .respond_with(status_code(200)),
+                );
+            };
+        mock_server_ignore_spurious_http_requests(&mut s1);
+        mock_server_ignore_spurious_http_requests(&mut s2);
+
         // Insert records for the zpools backing the datasets in these zones.
         for (sled_id, config) in
             blueprint.1.all_omicron_zones(BlueprintZoneFilter::All)
@@ -430,31 +457,6 @@ mod test {
         }
 
         blueprint_tx.send(Some(Arc::new(blueprint.clone()))).unwrap();
-
-        // The only sled-agent endpoint we care about in this test is `PUT
-        // /omicron-zones`. Add a closure to avoid repeating it multiple times
-        // below. We don't do a careful check of the _contents_ of what's being
-        // sent; for that, see the tests in nexus-reconfigurator-execution.
-        let match_put_omicron_zones =
-            || request::method_path("PUT", "/omicron-zones");
-
-        // Helper for our mock sled-agent http servers to blanket ignore and
-        // return 200 OK for anything _except_ `PUT /omciron-zones`, which is
-        // the endpoint we care about in this test.
-        //
-        // Other Nexus background tasks created by our test context may notice
-        // the sled-agent records we created and query them (e.g., for
-        // inventory, vpc routing info, ...). We don't want those to cause
-        // spurious test failures, so just tell our sled-agents to accept any
-        // number of them.
-        let mock_server_ignore_spurious_http_requests =
-            |s: &mut httptest::Server| {
-                s.expect(
-                    Expectation::matching(not(match_put_omicron_zones()))
-                        .times(..)
-                        .respond_with(status_code(200)),
-                );
-            };
 
         // Make sure that requests get made to the sled agent.
         for s in [&mut s1, &mut s2] {
@@ -484,11 +486,16 @@ mod test {
         s1.verify_and_clear();
         s2.verify_and_clear();
 
+        // Immediately reapply our blanket ignores.
+        //
+        // TODO-cleanup Is there a tiny race window between verify_and_clear()
+        // and these calls where other bg tasks can cause spurious failures?
+        mock_server_ignore_spurious_http_requests(&mut s1);
+        mock_server_ignore_spurious_http_requests(&mut s2);
+
         // Now, disable the target and make sure that we _don't_ invoke the sled
         // agent. It's enough to just not set expectations on
         // match_put_omicron_zones().
-        mock_server_ignore_spurious_http_requests(&mut s1);
-        mock_server_ignore_spurious_http_requests(&mut s2);
         blueprint.1.internal_dns_version =
             blueprint.1.internal_dns_version.next();
         blueprint.0.enabled = false;
@@ -505,6 +512,13 @@ mod test {
         s1.verify_and_clear();
         s2.verify_and_clear();
 
+        // Immediately reapply our blanket ignores.
+        //
+        // TODO-cleanup Is there a tiny race window between verify_and_clear()
+        // and these calls where other bg tasks can cause spurious failures?
+        mock_server_ignore_spurious_http_requests(&mut s1);
+        mock_server_ignore_spurious_http_requests(&mut s2);
+
         // Do it all again, but configure one of the servers to fail so we can
         // verify the task's returned summary of what happened.
         blueprint.0.enabled = true;
@@ -517,8 +531,6 @@ mod test {
             Expectation::matching(match_put_omicron_zones())
                 .respond_with(status_code(500)),
         );
-        mock_server_ignore_spurious_http_requests(&mut s1);
-        mock_server_ignore_spurious_http_requests(&mut s2);
 
         #[derive(Deserialize)]
         struct ErrorResult {
