@@ -2879,6 +2879,7 @@ async fn cmd_db_instance_info(
     _: &DbFetchOptions,
     args: &InstanceInfoArgs,
 ) -> Result<(), anyhow::Error> {
+    use nexus_db_model::InstanceRuntimeState;
     use nexus_db_queries::db::datastore::instance::InstanceGestalt;
     let InstanceInfoArgs { id } = args;
 
@@ -2896,28 +2897,57 @@ async fn cmd_db_instance_info(
                 format!("failed to fetch details for instance {id}")
             })?;
 
-    // We *could* print this information in a nicer-looking format if we printed
-    // the various structs' fields manually. However, using the derived
-    // `fmt::Debug` implementation has the advantage that if any new fields are
-    // added to the `nexus_db_model` crate's `Instance`, `Vmm`, and `Migration`
-    // types in the future, the OMDB command's output will always include them,
-    // without having to be manually updated.
-
-    // This seems like a more important property for an internal debugging tool
-    // than a nicer-looking output format.
-
-    // TODO(eliza): this prints the entire user-data field one byte per line,
-    // which is horrible. i think we actually do need to format it ourselves...
-    println!("instance: {instance:#?}\n");
-
+    // Manually format the instance struct because using its `fmt::Debug` impl
+    // will print out the user-data array one byte per line, which is horrible.
+    //
+    // /!\ WARNING /!\
+    // This does mean that anyone who adds new fields to the
+    // `nexus_db_model::Instance` type will want to make sure to update this
+    // code as well. Unfortunately, we can't just destructure the struct here to
+    // make sure this code breaks, since the `identity` field isn't public.
+    // So...just don't forget to do that, I  guess.
+    println!("instance: {}", instance.id());
+    println!("name: {}", instance.name());
+    println!("description: {}", instance.description());
+    println!("created: {}", instance.time_created());
+    println!("last modified: {}", instance.time_modified());
+    println!("configuration:");
+    println!("  vCPUs: {}", instance.ncpus.0 .0);
+    println!("  memory: {}", instance.memory.0);
+    println!("  hostname: {}", instance.hostname);
+    println!("  auto-restart policy: {:?}", instance.auto_restart_policy);
+    println!("runtime state:");
+    let InstanceRuntimeState {
+        time_updated,
+        propolis_id,
+        dst_propolis_id,
+        migration_id,
+        nexus_state,
+        r#gen,
+    } = instance.runtime();
+    println!("  state: {nexus_state:?}");
+    println!("  generation: {}", r#gen.0);
+    println!("  last updated: {time_updated:?}\n");
+    println!("  active VMM ID: {propolis_id:?}");
     if let Some(ref vmm) = active_vmm {
-        println!("active VMM: {vmm:#?}\n");
+        println!(
+            "    |\n{}\n",
+            textwrap::indent("    ", &format!("+---> {vmm:#?}"))
+        );
     }
+    println!("  migration target VMM ID: {dst_propolis_id:?}");
     if let Some(ref vmm) = target_vmm {
-        println!("migration target VMM: {vmm:#?}\n");
+        println!(
+            "    |\n{}\n",
+            textwrap::indent("    ", &format!("+---> {vmm:#?}"))
+        );
     }
+    println!("  migration ID: {migration_id:?}");
     if let Some(ref migration) = migration {
-        println!("migration status: {migration:#?}\n");
+        println!(
+            "    |\n{}\n",
+            textwrap::indent("    ", &format!("+---> {migration:#?}"))
+        );
     }
 
     // Check for weirdness.
@@ -2929,7 +2959,7 @@ async fn cmd_db_instance_info(
         if let Some(ref id) = id {
             if tgt.is_none() {
                 println!(
-                    "BAD: dangling {what} foreign key! {id} points to a \
+                    "/!\\ BAD: dangling {what} foreign key! {id} points to a \
                      {what} that seems to have been deleted!",
                 );
             }
@@ -2951,9 +2981,15 @@ async fn cmd_db_instance_info(
         &migration,
     );
     match (target_vmm, migration) {
-        (Some(_), None) => println!("WEIRD: instance has a migration target VMM, but no active migration record"),
-        (None, Some(_)) => println!("WEIRD: instance has a migration record, but no active VMM record"),
-        (_, _) => {},
+        (Some(_), None) => println!(
+            "/!\\ WEIRD: instance has a migration target VMM, but no active \
+             migration record",
+        ),
+        (None, Some(_)) => println!(
+            "/!\\ WEIRD: instance has a migration record, but no target \
+             VMM record"
+        ),
+        (_, _) => {}
     }
 
     Ok(())
