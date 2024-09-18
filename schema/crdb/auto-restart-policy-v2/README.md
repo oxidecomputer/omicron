@@ -6,8 +6,9 @@ automatically restarted (`Never`, `AllFailures`, and `SledFailuresOnly`) to a
 more general description of the desired quality of service (currently `Never`
 and `BestEffort`).
 
-This change is mechanically because Postgres and/or CRDB don't support all the schema change primitives we
-might use to deprecate the old state column. Specifically:
+This change is mechanically complicated because Postgres and/or CRDB don't
+support all the schema change primitives we might use to deprecate the old state
+column. Specifically:
 
 * CockroachDB doesn't support altering column types without enabling an
   experimental flag
