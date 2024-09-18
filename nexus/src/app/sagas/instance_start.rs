@@ -56,10 +56,6 @@ pub(crate) enum Reason {
 declare_saga_actions! {
     instance_start;
 
-    SET_AUTO_RESTART_TIMESTAMP -> "set_auto_restart_timestamp" {
-        + sis_set_auto_restart_timestamp
-    }
-
     GENERATE_PROPOLIS_ID -> "propolis_id" {
         + sis_generate_propolis_id
     }
@@ -133,13 +129,9 @@ impl NexusSaga for SagaInstanceStart {
     }
 
     fn make_saga_dag(
-        params: &Self::Params,
+        _params: &Self::Params,
         mut builder: steno::DagBuilder,
     ) -> Result<steno::Dag, SagaInitError> {
-        if params.reason == Reason::AutoRestart {
-            builder.append(set_auto_restart_timestamp_action());
-        }
-
         builder.append(generate_propolis_id_action());
         builder.append(alloc_server_action());
         builder.append(alloc_propolis_ip_action());
@@ -158,87 +150,6 @@ async fn sis_generate_propolis_id(
     _sagactx: NexusActionContext,
 ) -> Result<PropolisUuid, ActionError> {
     Ok(PropolisUuid::new_v4())
-}
-
-async fn sis_set_auto_restart_timestamp(
-    sagactx: NexusActionContext,
-) -> Result<(), ActionError> {
-    let params = sagactx.saga_params::<Params>()?;
-    let osagactx = sagactx.user_data();
-    let datastore = osagactx.datastore();
-    let instance_id = params.db_instance.id();
-    if params.reason != Reason::AutoRestart {
-        warn!(
-            osagactx.log(),
-            "sis_set_auto_restart_timestamp() should only be executed if a \
-             start saga is automatically restarting a Failed instance";
-            "instance_id" => %instance_id,
-            "start_reason" => ?params.reason,
-        );
-        return Ok(());
-    }
-
-    let opctx = crate::context::op_context_for_saga_action(
-        &sagactx,
-        &params.serialized_authn,
-    );
-
-    // Make sure the instance is actually in a state where it can be
-    // automatically restarted before we set its auto-start timestamp.
-    let (_, _, authz_instance, ..) = LookupPath::new(&opctx, &datastore)
-        .instance_id(instance_id)
-        .fetch_for(authz::Action::Modify)
-        .await
-        .map_err(ActionError::action_failed)?;
-    let instance = datastore
-        .instance_refetch(&opctx, &authz_instance)
-        .await
-        .map_err(ActionError::action_failed)?;
-    let state = instance.runtime_state;
-
-    const CHANGED_STATE: &'static str =
-        "Failed instance changed state before it could be \
-         automatically restarted";
-
-    // TODO(eliza): if we also add reincarnation for `SagaUnwound` instances in
-    // the future, we'll need to handle that case here, as well.
-    if state.nexus_state != db::model::InstanceState::Failed {
-        info!(
-            osagactx.log(),
-            "start saga: {CHANGED_STATE}";
-            "instance_id" => %instance_id,
-            "start_reason" => ?params.reason,
-            "state" => ?state,
-        );
-        return Err(ActionError::action_failed(Error::conflict(CHANGED_STATE)));
-    }
-
-    let new_runtime = db::model::InstanceRuntimeState {
-        time_last_auto_restarted: Some(Utc::now()),
-        r#gen: db::model::Generation(state.r#gen.next()),
-        ..state
-    };
-
-    debug!(
-        osagactx.log(),
-        "start saga: setting instance auto-restart timestamp";
-        "instance_id" => %instance_id,
-        "start_reason" => ?params.reason,
-        "state" => ?new_runtime,
-    );
-
-    if !datastore
-        .instance_update_runtime(
-            &InstanceUuid::from_untyped_uuid(instance_id),
-            &new_runtime,
-        )
-        .await
-        .map_err(ActionError::action_failed)?
-    {
-        return Err(ActionError::action_failed(Error::conflict(CHANGED_STATE)));
-    }
-
-    Ok(())
 }
 
 async fn sis_alloc_server(
@@ -406,11 +317,21 @@ async fn sis_move_to_starting(
         None => {}
     }
 
-    let new_runtime = db::model::InstanceRuntimeState {
-        nexus_state: db::model::InstanceState::Vmm,
-        propolis_id: Some(propolis_id.into_untyped_uuid()),
-        gen: db_instance.runtime().gen.next().into(),
-        ..db_instance.runtime_state
+    let new_runtime = {
+        // If we are performing an automated restart of a Failed instance,
+        // remember to update the timestamp.
+        let time_last_auto_restarted = if params.reason == Reason::AutoRestart {
+            Some(Utc::now())
+        } else {
+            db_instance.runtime().time_last_auto_restarted
+        };
+        db::model::InstanceRuntimeState {
+            nexus_state: db::model::InstanceState::Vmm,
+            propolis_id: Some(propolis_id.into_untyped_uuid()),
+            r#gen: db_instance.runtime().r#gen.next().into(),
+            time_last_auto_restarted,
+            ..db_instance.runtime_state
+        }
     };
 
     // Bail if another actor managed to update the instance's state in
