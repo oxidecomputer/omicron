@@ -1107,7 +1107,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
      * by the control plane.
      */
     auto_restart_policy omicron.public.instance_auto_restart_v2,
-    
+
     /*
      * The cooldown period that must elapse between consecutive auto restart
      * attempts. If this is NULL, no cooldown period is explicitly configured
@@ -1127,6 +1127,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_instance_by_project ON omicron.public.i
     project_id,
     name
 ) WHERE
+    time_deleted IS NULL;
+
+-- Many control plane operations wish to select all the instances in particular
+-- states.
+CREATE INDEX IF NOT EXISTS lookup_instance_by_state
+ON
+    omicron.public.instance (state)
+WHERE
     time_deleted IS NULL;
 
 /*
@@ -4308,7 +4316,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '101.0.0', NULL)
+    (TRUE, NOW(), NOW(), '102.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
