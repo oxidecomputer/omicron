@@ -104,6 +104,26 @@ impl ClickHousePorts {
     fn any_zero(&self) -> bool {
         self.http == 0 || self.native == 0
     }
+
+    // Assert that if the ports in self are non-zero, they match those in
+    // `new_ports`. This is used to check that we recover the exact same ports
+    // from a logfile that were specifically requested.
+    fn assert_consistent(&self, new_ports: &ClickHousePorts) {
+        assert!(
+            self.http == 0 || self.http == new_ports.http,
+            "ClickHouse HTTP port was specified, but did not match the \
+            value recovered from the log file. Specified {}, found {}.",
+            self.http,
+            new_ports.http,
+        );
+        assert!(
+            self.native == 0 || self.native == new_ports.native,
+            "ClickHouse native port was specified, but did not match the \
+            value recovered from the log file. Specified {}, found {}.",
+            self.native,
+            new_ports.native,
+        );
+    }
 }
 
 impl ClickHouseDeployment {
@@ -422,9 +442,13 @@ impl ClickHouseProcess {
         // NOTE: Always extract the ports, even if they're specified, to ensure
         // that we don't return from this until the server is actually ready to
         // accept connections.
-        let new_ports = wait_for_ports(data_dir.log_path()).await?;
-        assert_eq!(new_ports, ports);
-        let ports = new_ports;
+        let ports = {
+            let new_ports = wait_for_ports(data_dir.log_path()).await?;
+            // If either port was specified, add an additional check that we
+            // recovered exactly that port.
+            ports.assert_consistent(&new_ports);
+            new_ports
+        };
         let http_address = ipv6_localhost_on(ports.http);
         let native_address = ipv6_localhost_on(ports.native);
         Ok(ClickHouseReplica {
@@ -1553,5 +1577,28 @@ mod tests {
             }
         };
         reader_result
+    }
+
+    #[test]
+    fn test_clickhouse_ports_assert_consistent() {
+        let second = ClickHousePorts { http: 1, native: 1 };
+        ClickHousePorts { http: 0, native: 0 }.assert_consistent(&second);
+        ClickHousePorts { http: 1, native: 0 }.assert_consistent(&second);
+        ClickHousePorts { http: 0, native: 1 }.assert_consistent(&second);
+        ClickHousePorts { http: 1, native: 1 }.assert_consistent(&second);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_clickhouse_ports_assert_consistent_panics_one_specified() {
+        let second = ClickHousePorts { http: 1, native: 1 };
+        ClickHousePorts { http: 0, native: 2 }.assert_consistent(&second);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_clickhouse_ports_assert_consistent_panics_both_specified() {
+        let second = ClickHousePorts { http: 1, native: 1 };
+        ClickHousePorts { http: 2, native: 2 }.assert_consistent(&second);
     }
 }
