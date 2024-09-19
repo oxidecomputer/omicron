@@ -93,6 +93,7 @@ use omicron_common::backoff::{
 use omicron_common::disk::{DatasetKind, DatasetName};
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
+use omicron_uuid_kinds::GenericUuid;
 use once_cell::sync::OnceCell;
 use rand::prelude::SliceRandom;
 use sled_agent_types::{
@@ -1522,7 +1523,8 @@ impl ServiceManager {
             Some(dir) => ZoneBuilderFactory::fake(Some(dir)).builder(),
         };
         if let Some(uuid) = unique_name {
-            zone_builder = zone_builder.with_unique_name(uuid);
+            zone_builder =
+                zone_builder.with_unique_name(uuid.into_untyped_uuid());
         }
         if let Some(vnic) = bootstrap_vnic {
             zone_builder = zone_builder.with_bootstrap_vnic(vnic);
@@ -4611,6 +4613,7 @@ mod test {
         zone::MockZones,
     };
 
+    use omicron_uuid_kinds::OmicronZoneUuid;
     use sled_storage::manager_test_harness::StorageManagerTestHarness;
     use std::os::unix::process::ExitStatusExt;
     use std::{
@@ -4812,7 +4815,7 @@ mod test {
     // Prepare to call "ensure" for a new service, then actually call "ensure".
     async fn ensure_new_service(
         mgr: &ServiceManager,
-        id: Uuid,
+        id: OmicronZoneUuid,
         generation: Generation,
         tmp_dir: String,
     ) {
@@ -4836,7 +4839,7 @@ mod test {
 
     async fn try_new_service_of_type(
         mgr: &ServiceManager,
-        id: Uuid,
+        id: OmicronZoneUuid,
         generation: Generation,
         zone_type: OmicronZoneType,
         tmp_dir: String,
@@ -4865,7 +4868,7 @@ mod test {
     // return the service without actually installing a new zone.
     async fn ensure_existing_service(
         mgr: &ServiceManager,
-        id: Uuid,
+        id: OmicronZoneUuid,
         generation: Generation,
         tmp_dir: String,
     ) {
@@ -5072,7 +5075,7 @@ mod test {
         assert!(found.zones.is_empty());
 
         let v2 = v1.next();
-        let id = Uuid::new_v4();
+        let id = OmicronZoneUuid::new_v4();
         ensure_new_service(
             &mgr,
             id,
@@ -5151,7 +5154,7 @@ mod test {
         assert!(found.zones.is_empty());
 
         let v2 = v1.next();
-        let id = Uuid::new_v4();
+        let id = OmicronZoneUuid::new_v4();
 
         // Should fail: time has not yet synchronized.
         let address =
@@ -5229,7 +5232,7 @@ mod test {
         .await;
 
         let v2 = Generation::new().next();
-        let id = Uuid::new_v4();
+        let id = OmicronZoneUuid::new_v4();
         let dir = String::from(test_config.config_dir.path().as_str());
         ensure_new_service(&mgr, id, v2, dir.clone()).await;
         let v3 = v2.next();
@@ -5301,7 +5304,7 @@ mod test {
         .await;
 
         let v2 = Generation::new().next();
-        let id = Uuid::new_v4();
+        let id = OmicronZoneUuid::new_v4();
         ensure_new_service(
             &mgr,
             id,
@@ -5405,7 +5408,7 @@ mod test {
 
         let v1 = Generation::new();
         let v2 = v1.next();
-        let id = Uuid::new_v4();
+        let id = OmicronZoneUuid::new_v4();
         ensure_new_service(
             &mgr,
             id,
@@ -5465,7 +5468,7 @@ mod test {
         // Like the normal tests, set up a generation with one zone in it.
         let v1 = Generation::new();
         let v2 = v1.next();
-        let id1 = Uuid::new_v4();
+        let id1 = OmicronZoneUuid::new_v4();
 
         let _expectations = expect_new_services();
         let address =
@@ -5498,7 +5501,7 @@ mod test {
 
         // Make a new list of zones that we're going to try with a bunch of
         // different generation numbers.
-        let id2 = Uuid::new_v4();
+        let id2 = OmicronZoneUuid::new_v4();
         zones.push(OmicronZoneConfig {
             id: id2,
             underlay_address: Ipv6Addr::LOCALHOST,

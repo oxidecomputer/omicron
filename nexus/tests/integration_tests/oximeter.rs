@@ -42,7 +42,7 @@ async fn test_oximeter_database_records(context: &ControlPlaneTestContext) {
     // Kind of silly, but let's wait until the producer is actually registered
     // with Oximeter.
     let producer_id = nexus_test_utils::PRODUCER_UUID.parse().unwrap();
-    wait_for_producer(&context.oximeter, &producer_id).await;
+    wait_for_producer(&context.oximeter, producer_id).await;
 
     // Verify that the producer lives in the DB.
     let results = conn

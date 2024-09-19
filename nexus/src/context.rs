@@ -19,6 +19,7 @@ use nexus_db_queries::context::{OpContext, OpKind};
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::{authn, authz, db};
 use omicron_common::address::{Ipv6Subnet, AZ_PREFIX};
+use omicron_uuid_kinds::GenericUuid;
 use oximeter::types::ProducerRegistry;
 use oximeter_instruments::http::{HttpService, LatencyTracker};
 use slog::Logger;
@@ -144,7 +145,7 @@ impl ServerContext {
         let create_tracker = |name: &str| {
             let target = HttpService {
                 name: name.to_string().into(),
-                id: config.deployment.id,
+                id: config.deployment.id.into_untyped_uuid(),
             };
             // Start at 1 microsecond == 1e3 nanoseconds.
             const LATENCY_START_POWER: u16 = 3;
@@ -159,7 +160,8 @@ impl ServerContext {
         };
         let internal_latencies = create_tracker("nexus-internal");
         let external_latencies = create_tracker("nexus-external");
-        let producer_registry = ProducerRegistry::with_id(config.deployment.id);
+        let producer_registry =
+            ProducerRegistry::with_id(config.deployment.id.into_untyped_uuid());
         producer_registry
             .register_producer(internal_latencies.clone())
             .unwrap();

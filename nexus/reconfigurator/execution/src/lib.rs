@@ -20,6 +20,7 @@ use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
 use omicron_physical_disks::DeployDisksDone;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use overridables::Overridables;
 use slog::info;
@@ -29,7 +30,6 @@ use std::net::SocketAddrV6;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use update_engine::merge_anyhow_list;
-use uuid::Uuid;
 
 mod cockroachdb;
 mod datasets;
@@ -96,7 +96,7 @@ pub async fn realize_blueprint(
     datastore: &DataStore,
     resolver: &Resolver,
     blueprint: &Blueprint,
-    nexus_id: Uuid,
+    nexus_id: OmicronZoneUuid,
     sender: mpsc::Sender<Event>,
 ) -> Result<RealizeBlueprintOutput, anyhow::Error> {
     realize_blueprint_with_overrides(
@@ -116,7 +116,7 @@ pub async fn realize_blueprint_with_overrides(
     datastore: &DataStore,
     resolver: &Resolver,
     blueprint: &Blueprint,
-    nexus_id: Uuid,
+    nexus_id: OmicronZoneUuid,
     overrides: &Overridables,
     sender: mpsc::Sender<Event>,
 ) -> Result<RealizeBlueprintOutput, anyhow::Error> {
@@ -406,7 +406,7 @@ fn register_dns_records_step<'a>(
     opctx: &'a OpContext,
     datastore: &'a DataStore,
     blueprint: &'a Blueprint,
-    nexus_id: Uuid,
+    nexus_id: OmicronZoneUuid,
     overrides: &'a Overridables,
     sleds: SharedStepHandle<Arc<BTreeMap<SledUuid, Sled>>>,
 ) {
@@ -530,7 +530,7 @@ fn register_reassign_sagas_step<'a>(
     opctx: &'a OpContext,
     datastore: &'a DataStore,
     blueprint: &'a Blueprint,
-    nexus_id: Uuid,
+    nexus_id: OmicronZoneUuid,
 ) -> StepHandle<ReassignSagaOutput> {
     // For this and subsequent steps, we'll assume that any errors that we
     // encounter do *not* require stopping execution.  We'll just accumulate
@@ -545,7 +545,7 @@ fn register_reassign_sagas_step<'a>(
                 // For any expunged Nexus zones, re-assign in-progress sagas to
                 // some other Nexus.  If this fails for some reason, it doesn't
                 // affect anything else.
-                let sec_id = nexus_db_model::SecId(nexus_id);
+                let sec_id = nexus_db_model::SecId::from(nexus_id);
                 let reassigned = sagas::reassign_sagas_from_expunged(
                     &opctx, datastore, blueprint, sec_id,
                 )

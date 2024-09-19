@@ -184,7 +184,7 @@ pub fn load_test_config() -> NexusConfig {
     let config_file_path = Utf8Path::new("tests/config.test.toml");
     let mut config = NexusConfig::from_file(config_file_path)
         .expect("failed to load config.test.toml");
-    config.deployment.id = Uuid::new_v4();
+    config.deployment.id = OmicronZoneUuid::new_v4();
     config
 }
 
@@ -663,8 +663,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .expect("ran out of MAC addresses");
         let external_address =
             self.config.deployment.dropshot_external.dropshot.bind_address.ip();
-        let nexus_id =
-            OmicronZoneUuid::from_untyped_uuid(self.config.deployment.id);
+        let nexus_id = self.config.deployment.id;
         self.rack_init_builder.add_service_to_dns(
             nexus_id,
             address,

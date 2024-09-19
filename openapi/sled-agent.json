@@ -3899,8 +3899,7 @@
             ]
           },
           "id": {
-            "type": "string",
-            "format": "uuid"
+            "$ref": "#/components/schemas/TypedUuidForOmicronZoneKind"
           },
           "underlay_address": {
             "type": "string",
@@ -5080,6 +5079,10 @@
         "format": "uuid"
       },
       "TypedUuidForInstanceKind": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "TypedUuidForOmicronZoneKind": {
         "type": "string",
         "format": "uuid"
       },

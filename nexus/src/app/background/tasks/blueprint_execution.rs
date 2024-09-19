@@ -14,11 +14,11 @@ use nexus_reconfigurator_execution::RealizeBlueprintOutput;
 use nexus_types::deployment::{
     execution::EventBuffer, Blueprint, BlueprintTarget,
 };
+use omicron_uuid_kinds::OmicronZoneUuid;
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::watch;
 use update_engine::NestedError;
-use uuid::Uuid;
 
 /// Background task that takes a [`Blueprint`] and realizes the change to
 /// the state of the system based on the `Blueprint`.
@@ -26,7 +26,7 @@ pub struct BlueprintExecutor {
     datastore: Arc<DataStore>,
     resolver: Resolver,
     rx_blueprint: watch::Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
-    nexus_id: Uuid,
+    nexus_id: OmicronZoneUuid,
     tx: watch::Sender<usize>,
     saga_recovery: Activator,
 }
@@ -38,7 +38,7 @@ impl BlueprintExecutor {
         rx_blueprint: watch::Receiver<
             Option<Arc<(BlueprintTarget, Blueprint)>>,
         >,
-        nexus_id: Uuid,
+        nexus_id: OmicronZoneUuid,
         saga_recovery: Activator,
     ) -> BlueprintExecutor {
         let (tx, _) = watch::channel(0);
@@ -318,7 +318,7 @@ mod test {
             datastore.clone(),
             resolver.clone(),
             blueprint_rx,
-            Uuid::new_v4(),
+            OmicronZoneUuid::new_v4(),
             Activator::new(),
         );
 

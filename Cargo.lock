@@ -5454,6 +5454,7 @@ dependencies = [
  "expectorate",
  "libc",
  "omicron-common",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "schemars",
  "serde",

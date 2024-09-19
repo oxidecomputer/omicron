@@ -56,7 +56,7 @@ use omicron_common::disk::{
     OmicronPhysicalDisksConfig,
 };
 use omicron_ddm_admin_client::Client as DdmAdminClient;
-use omicron_uuid_kinds::PropolisUuid;
+use omicron_uuid_kinds::{GenericUuid, PropolisUuid};
 use sled_agent_api::Zpool;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::EarlyNetworkConfig;
@@ -934,7 +934,7 @@ impl SledAgent {
             };
 
             // First, ensure the dataset exists
-            let dataset_id = zone.id;
+            let dataset_id = zone.id.into_untyped_uuid();
             self.inner
                 .storage
                 .upsert_filesystem(dataset_id, dataset_name)

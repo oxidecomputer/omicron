@@ -14,8 +14,8 @@ use omicron_common::{
     disk::DiskVariant,
     zpool_name::ZpoolName,
 };
-use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use omicron_uuid_kinds::{DatasetUuid, OmicronZoneUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 // Export this type for convenience -- this way, dependents don't have to
@@ -142,7 +142,7 @@ impl OmicronZonesConfig {
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]
 pub struct OmicronZoneConfig {
-    pub id: Uuid,
+    pub id: OmicronZoneUuid,
     pub underlay_address: Ipv6Addr,
 
     /// The pool on which we'll place this zone's root filesystem.
