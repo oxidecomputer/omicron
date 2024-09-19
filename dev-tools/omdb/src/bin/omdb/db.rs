@@ -2906,11 +2906,11 @@ async fn cmd_db_instance_info(
     // code as well. Unfortunately, we can't just destructure the struct here to
     // make sure this code breaks, since the `identity` field isn't public.
     // So...just don't forget to do that, I  guess.
-    println!("instance: {}", instance.id());
-    println!("name: {}", instance.name());
-    println!("description: {}", instance.description());
-    println!("created: {}", instance.time_created());
-    println!("last modified: {}", instance.time_modified());
+    println!("\ninstance: {}", instance.id());
+    println!("  name: {}", instance.name());
+    println!("  description: {}", instance.description());
+    println!("  created: {}", instance.time_created());
+    println!("  last modified: {}", instance.time_modified());
     println!("configuration:");
     println!("  vCPUs: {}", instance.ncpus.0 .0);
     println!("  memory: {}", instance.memory.0);
@@ -2927,27 +2927,21 @@ async fn cmd_db_instance_info(
     } = instance.runtime();
     println!("  state: {nexus_state:?}");
     println!("  generation: {}", r#gen.0);
-    println!("  last updated: {time_updated:?}\n");
+    println!("  last updated: {time_updated:?}");
     println!("  active VMM ID: {propolis_id:?}");
-    if let Some(ref vmm) = active_vmm {
-        println!(
-            "    |\n{}\n",
-            textwrap::indent("    ", &format!("+---> {vmm:#?}"))
-        );
-    }
     println!("  migration target VMM ID: {dst_propolis_id:?}");
-    if let Some(ref vmm) = target_vmm {
-        println!(
-            "    |\n{}\n",
-            textwrap::indent("    ", &format!("+---> {vmm:#?}"))
-        );
-    }
     println!("  migration ID: {migration_id:?}");
+
+    if let Some(ref vmm) = active_vmm {
+        println!("\nactive VMM: {vmm:#?}");
+    }
+
+    if let Some(ref vmm) = target_vmm {
+        println!("\nmigration target VMM: {vmm:#?}");
+    }
+
     if let Some(ref migration) = migration {
-        println!(
-            "    |\n{}\n",
-            textwrap::indent("    ", &format!("+---> {migration:#?}"))
-        );
+        println!("\ncurrent active migration: {migration:#?}");
     }
 
     // Check for weirdness.
