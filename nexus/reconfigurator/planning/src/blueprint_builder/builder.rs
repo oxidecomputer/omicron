@@ -97,6 +97,8 @@ pub enum Error {
     NoNexusZonesInParentBlueprint,
     #[error("no Boundary NTP zones exist in parent blueprint")]
     NoBoundaryNtpZonesInParentBlueprint,
+    #[error("no external DNS IP addresses are available")]
+    NoExternalDnsIpAvailable,
     #[error("no external service IP addresses are available")]
     NoExternalServiceIpAvailable,
     #[error("no system MAC addresses are available")]
@@ -119,6 +121,8 @@ pub enum Error {
         "can only have {MAX_INTERNAL_DNS_REDUNDANCY} internal DNS servers"
     )]
     TooManyDnsServers,
+    #[error("planner produced too many {kind:?} zones")]
+    TooManyZones { kind: ZoneKind },
 }
 
 /// Describes whether an idempotent "ensure" operation resulted in action taken
@@ -756,7 +760,7 @@ impl<'a> BlueprintBuilder<'a> {
         sled_id: SledUuid,
         desired_zone_count: usize,
     ) -> Result<EnsureMultiple, Error> {
-        // How many external DNS zones do we need to add?
+        // How many external DNS zones do we want to add?
         let count =
             self.sled_num_running_zones_of_kind(sled_id, ZoneKind::ExternalDns);
         let to_add = match desired_zone_count.checked_sub(count) {
@@ -771,11 +775,23 @@ impl<'a> BlueprintBuilder<'a> {
             }
         };
 
+        // Running out of DNS addresses is not a fatal error. This happens,
+        // for instance, when a sled is first marked expunged, since the
+        // available addresses are collected before planning, but the
+        // zones on the sled aren't marked expunged until after planning
+        // has begun. The *next* round of planning will add them back in,
+        // since it will see the zones as expunged and recycle their
+        // addresses.
+        let mut added = 0;
         for _ in 0..to_add {
-            self.sled_add_zone_external_dns(sled_id)?;
+            match self.sled_add_zone_external_dns(sled_id) {
+                Ok(_) => added += 1,
+                Err(Error::NoExternalDnsIpAvailable) => break,
+                Err(e) => return Err(e),
+            }
         }
 
-        Ok(EnsureMultiple::Changed { added: to_add, removed: 0 })
+        Ok(EnsureMultiple::Changed { added, removed: 0 })
     }
 
     pub fn sled_ensure_zone_ntp(
@@ -1352,15 +1368,21 @@ impl<'a> BlueprintBuilder<'a> {
         })
     }
 
-    /// Determine the number of external DNS zones (and therefore addresses)
-    /// by examining the parent blueprint.
+    /// Determine the number of desired external DNS zones by counting
+    /// unique addresses in the parent blueprint.
     ///
     /// TODO-cleanup: Remove when external DNS addresses are in the policy.
     pub fn count_parent_external_dns_zones(&self) -> usize {
         self.parent_blueprint
-            .all_omicron_zones(BlueprintZoneFilter::Expunged)
-            .filter(|(_id, zone)| zone.zone_type.is_external_dns())
-            .count()
+            .all_omicron_zones(BlueprintZoneFilter::All)
+            .filter_map(|(_id, zone)| match &zone.zone_type {
+                BlueprintZoneType::ExternalDns(dns) => {
+                    Some(dns.dns_address.addr.ip())
+                }
+                _ => None,
+            })
+            .collect::<HashSet<IpAddr>>()
+            .len()
     }
 
     /// Allow a test to manually add an external DNS address, which could
@@ -1368,10 +1390,7 @@ impl<'a> BlueprintBuilder<'a> {
     ///
     /// TODO-cleanup: Remove when external DNS addresses are in the policy.
     #[cfg(test)]
-    pub fn add_external_dns_ip(
-        &mut self,
-        addr: OmicronZoneExternalFloatingAddr,
-    ) {
+    pub fn add_external_dns_ip(&mut self, addr: IpAddr) {
         self.external_networking.add_external_dns_ip(addr);
     }
 }

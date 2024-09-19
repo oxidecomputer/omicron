@@ -30,6 +30,7 @@ use nexus_types::inventory::Collection;
 use omicron_uuid_kinds::SledUuid;
 use slog::error;
 use slog::{info, warn, Logger};
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::hash::Hash;
@@ -437,6 +438,8 @@ impl<'a> Planner<'a> {
                 self.input.target_internal_dns_zone_count()
             }
             DiscretionaryOmicronZone::ExternalDns => {
+                // TODO-cleanup: When external DNS addresses are
+                // in the policy, this can use the input, too.
                 self.blueprint.count_parent_external_dns_zones()
             }
             DiscretionaryOmicronZone::Nexus => {
@@ -560,15 +563,21 @@ impl<'a> Planner<'a> {
             }
         }
 
-        // Double check that we didn't make any arithmetic mistakes. If we've
-        // arrived here, we think we've added the number of Nexus zones we
-        // needed to.
-        assert_eq!(
-            new_zones_added, num_zones_to_add,
-            "internal error counting {kind:?} zones"
-        );
-
-        Ok(())
+        // Double check that we didn't make any arithmetic mistakes.
+        // It's not an error to place fewer zones than requested;
+        // maybe they'll be added in the next round of planning.
+        match new_zones_added.cmp(&num_zones_to_add) {
+            Ordering::Less => {
+                warn!(
+                    self.log, "added fewer {kind:?} zones than requested";
+                    "added" => new_zones_added,
+                    "requested" => num_zones_to_add
+                );
+                Ok(())
+            }
+            Ordering::Equal => Ok(()),
+            Ordering::Greater => Err(Error::TooManyZones { kind: kind.into() }),
+        }
     }
 
     fn do_plan_cockroachdb_settings(&mut self) {
@@ -737,6 +746,7 @@ mod test {
     use crate::blueprint_builder::test::verify_blueprint;
     use crate::blueprint_builder::test::DEFAULT_N_SLEDS;
     use crate::blueprint_builder::BlueprintBuilder;
+    use crate::blueprint_builder::EnsureMultiple;
     use crate::example::example;
     use crate::example::ExampleSystem;
     use crate::system::SledBuilder;
@@ -754,7 +764,6 @@ mod test {
     use nexus_types::deployment::CockroachDbClusterVersion;
     use nexus_types::deployment::CockroachDbPreserveDowngrade;
     use nexus_types::deployment::CockroachDbSettings;
-    use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
     use nexus_types::deployment::OmicronZoneNetworkResources;
     use nexus_types::deployment::SledDisk;
     use nexus_types::external_api::views::PhysicalDiskPolicy;
@@ -763,7 +772,6 @@ mod test {
     use nexus_types::external_api::views::SledProvisionPolicy;
     use nexus_types::external_api::views::SledState;
     use nexus_types::inventory::OmicronZonesFound;
-    use omicron_common::address::DNS_PORT;
     use omicron_common::api::external::Generation;
     use omicron_common::disk::DiskIdentity;
     use omicron_common::policy::MAX_INTERNAL_DNS_REDUNDANCY;
@@ -775,7 +783,6 @@ mod test {
     use std::collections::HashMap;
     use std::mem;
     use std::net::IpAddr;
-    use std::net::SocketAddr;
     use typed_rng::TypedUuidRng;
 
     /// Runs through a basic sequence of blueprints for adding a sled
@@ -1393,7 +1400,7 @@ mod test {
 
         // We should not be able to add any external DNS zones yet,
         // because we haven't give it any addresses (which currently
-        // come only from RSS).
+        // come only from RSS). This is not an error, though.
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
@@ -1402,9 +1409,12 @@ mod test {
         )
         .expect("failed to build blueprint builder");
         let sled_id = builder.sled_ids_with_zones().next().expect("no sleds");
-        builder
-            .sled_ensure_zone_multiple_external_dns(sled_id, 3)
-            .expect_err("shouldn't have any external DNS IP addresses");
+        assert_eq!(
+            builder
+                .sled_ensure_zone_multiple_external_dns(sled_id, 3)
+                .expect("can't add external DNS zones"),
+            EnsureMultiple::Changed { added: 0, removed: 0 },
+        );
 
         // Build a builder for a modfied blueprint that will include
         // some external DNS addresses.
@@ -1424,23 +1434,32 @@ mod test {
                 addr.parse::<IpAddr>()
                     .expect("can't parse external DNS IP address")
             });
-        let mut external_ip_rng =
-            TypedUuidRng::from_seed(TEST_NAME, "ExternalIp");
         for addr in external_dns_ips {
-            blueprint_builder.add_external_dns_ip(
-                OmicronZoneExternalFloatingAddr {
-                    id: external_ip_rng.next(),
-                    addr: SocketAddr::new(addr, DNS_PORT),
-                },
-            );
+            blueprint_builder.add_external_dns_ip(addr);
         }
 
-        // Now we can add external DNS zones. We'll add three to the first sled.
-        let sled_id =
-            blueprint_builder.sled_ids_with_zones().next().expect("no sleds");
-        blueprint_builder
-            .sled_ensure_zone_multiple_external_dns(sled_id, 3)
-            .expect("can't build blueprint with external DNS IP addresses");
+        // Now we can add external DNS zones. We'll add two to the first
+        // sled and one to the second.
+        let (sled_1, sled_2) = {
+            let mut sleds = blueprint_builder.sled_ids_with_zones();
+            (
+                sleds.next().expect("no first sled"),
+                sleds.next().expect("no second sled"),
+            )
+        };
+        assert!(matches!(
+            blueprint_builder
+                .sled_ensure_zone_multiple_external_dns(sled_1, 2)
+                .expect("can't add external DNS zones to blueprint"),
+            EnsureMultiple::Changed { added: 2, removed: 0 }
+        ));
+        assert!(matches!(
+            blueprint_builder
+                .sled_ensure_zone_multiple_external_dns(sled_2, 1)
+                .expect("can't add external DNS zones to blueprint"),
+            EnsureMultiple::Changed { added: 1, removed: 0 }
+        ));
+
         let blueprint1a = blueprint_builder.build();
         assert_eq!(
             blueprint1a
@@ -1448,7 +1467,7 @@ mod test {
                 .filter(|(_, zone)| zone.zone_type.is_external_dns())
                 .count(),
             3,
-            "can't find external DNS zones in edited blueprint"
+            "can't find external DNS zones in new blueprint"
         );
 
         // Plan with external DNS.
@@ -1479,7 +1498,7 @@ mod test {
             "can't find external DNS zones in planned blueprint"
         );
 
-        // Expunge the first sled and re-plan. That gets us three expunged
+        // Expunge the first sled and re-plan. That gets us two expunged
         // external DNS zones ...
         let mut input_builder = input.into_builder();
         let (&sled_id, details) =
@@ -1509,7 +1528,7 @@ mod test {
                         && zone.zone_type.is_external_dns()
                 })
                 .count(),
-            3
+            2
         );
 
         // ... which we can pick up after one more round of planning.
@@ -1528,7 +1547,7 @@ mod test {
         let diff = blueprint4.diff_since_blueprint(&blueprint3);
         println!("3 -> 4 (expunged zones):\n{}", diff.display());
 
-        // And the IP addresses of the new external DNS zones should be the
+        // The IP addresses of the new external DNS zones should be the
         // same as the original set that we "found".
         let mut ips = blueprint4
             .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
