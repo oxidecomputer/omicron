@@ -27,16 +27,22 @@ These limitations make it hard to change the schema idempotently. To get around
 this, the change uses the following general procedure to change a column's type
 from one enum to another:
 
-1. Create a new enum with the new variants.
-2. Create a new temporary column to hold the old object state. (Adding a column
-  supports `IF NOT EXISTS`).
-3. Copy the old object state to the temporary column.
-4. Drop the old column (this supports `IF EXISTS`).
-5. Recreate the state column with the new type.
-6. Populate the column's values using the data saved in the temporary column.
-7. Drop the temporary column.
-8. Drop the old enum type.
+1. Create a new temporary enum with the new variants, and a different name as
+   the old type.
+2. Create a new temporary column with the temporary enum type. (Adding a column
+   supports `IF NOT EXISTS`).
+3. Set the values of the temporary column based on the value of the old column.
+4. Drop the old column.
+5. Drop the old type.
+6. Create a new enum with the new variants, and the same name as the original
+   enum type (which we can now do, as the old type has been dropped).
+7. Create a new column with the same name as the original column, and the new
+   type --- again, we can do this now as the original column has been dropped.
+8. Set the values of the new column based on the temporary column.
+9. Drop the temporary column.
+10. Drop the temporary type.
 
 This is broadly similar to the approach used in the
 [`separate-instance-and-vmm-states`](../separate-instance-and-vmm-states/)
-migration. 
+migration, but using this technique allows the new enum to have the same name as
+the old one.

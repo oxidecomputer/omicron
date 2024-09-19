@@ -1024,7 +1024,7 @@ CREATE TYPE IF NOT EXISTS omicron.public.vmm_state AS ENUM (
     'saga_unwound'
 );
 
-CREATE TYPE IF NOT EXISTS omicron.public.instance_auto_restart_v2 AS ENUM (
+CREATE TYPE IF NOT EXISTS omicron.public.instance_auto_restart AS ENUM (
     /*
      * The instance should not, under any circumstances, be automatically
      * rebooted by the control plane.
@@ -1106,7 +1106,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
      * What failures should result in an instance being automatically restarted
      * by the control plane.
      */
-    auto_restart_policy omicron.public.instance_auto_restart_v2,
+    auto_restart_policy omicron.public.instance_auto_restart,
 
     /*
      * The cooldown period that must elapse between consecutive auto restart

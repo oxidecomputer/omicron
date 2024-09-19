@@ -1,2 +1,1 @@
-ALTER TABLE omicron.public.instance
-    ADD COLUMN IF NOT EXISTS auto_restart_policy omicron.public.instance_auto_restart_v2;
+DROP TYPE IF EXISTS omicron.public.instance_auto_restart;

@@ -10,7 +10,7 @@ use std::fmt;
 
 impl_enum_type!(
     #[derive(SqlType, Debug)]
-    #[diesel(postgres_type(name = "instance_auto_restart_v2", schema = "public"))]
+    #[diesel(postgres_type(name = "instance_auto_restart", schema = "public"))]
     pub struct InstanceAutoRestartPolicyEnum;
 
     #[derive(Copy, Clone, Debug, PartialEq, AsExpression, FromSqlRow, Serialize, Deserialize)]
