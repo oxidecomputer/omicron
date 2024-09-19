@@ -667,7 +667,7 @@ impl DataStore {
                 }
 
                 // Skip inserting this record if we found an existing region
-                // snapshot replacement step for it
+                // snapshot replacement step for it in a non-complete state.
 
                 let maybe_record = dsl::region_snapshot_replacement_step
                     .filter(dsl::volume_id.eq(request.volume_id))
@@ -676,9 +676,22 @@ impl DataStore {
                     .optional()?;
 
                 if let Some(found_record) = maybe_record {
-                    return Ok(InsertRegionSnapshotReplacementStepResult::AlreadyHandled {
-                        existing_step_id: found_record.id,
-                    });
+                    match found_record.replacement_state {
+                        RegionSnapshotReplacementStepState::Complete |
+                        RegionSnapshotReplacementStepState::VolumeDeleted => {
+                            // Ok, we can insert another record with a matching
+                            // volume ID because the volume_repair record would
+                            // have been deleted during the transition to
+                            // Complete.
+                        }
+
+                        RegionSnapshotReplacementStepState::Requested |
+                        RegionSnapshotReplacementStepState::Running => {
+                            return Ok(InsertRegionSnapshotReplacementStepResult::AlreadyHandled {
+                                existing_step_id: found_record.id,
+                            });
+                        }
+                    }
                 }
 
                 // The region snapshot replacement step saga could invoke a
@@ -1330,10 +1343,18 @@ mod test {
         let step =
             RegionSnapshotReplacementStep::new(Uuid::new_v4(), volume_id);
 
-        datastore
+        let result = datastore
             .insert_region_snapshot_replacement_step(&opctx, step.clone())
             .await
-            .unwrap_err();
+            .unwrap();
+
+        let InsertRegionSnapshotReplacementStepResult::AlreadyHandled {
+            existing_step_id,
+        } = result
+        else {
+            panic!("wrong return type");
+        };
+        assert_eq!(existing_step_id, first_request_id);
 
         // Ensure that transitioning the first step to running doesn't change
         // things.
@@ -1349,10 +1370,18 @@ mod test {
             .await
             .unwrap();
 
-        datastore
+        let result = datastore
             .insert_region_snapshot_replacement_step(&opctx, step.clone())
             .await
-            .unwrap_err();
+            .unwrap();
+
+        let InsertRegionSnapshotReplacementStepResult::AlreadyHandled {
+            existing_step_id,
+        } = result
+        else {
+            panic!("wrong return type");
+        };
+        assert_eq!(existing_step_id, first_request_id);
 
         // Ensure that transitioning the first step to complete means another
         // can be added.
@@ -1372,10 +1401,12 @@ mod test {
             .await
             .unwrap();
 
-        assert!(matches!(
-            result,
-            InsertRegionSnapshotReplacementStepResult::Inserted { .. }
-        ));
+        let InsertRegionSnapshotReplacementStepResult::Inserted { step_id } =
+            result
+        else {
+            panic!("wrong return type");
+        };
+        assert_eq!(step_id, step.id);
 
         // Ensure that transitioning the first step to volume deleted still
         // works.
