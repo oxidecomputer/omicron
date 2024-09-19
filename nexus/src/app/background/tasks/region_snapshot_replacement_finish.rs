@@ -167,6 +167,7 @@ mod test {
     use nexus_db_model::RegionSnapshotReplacement;
     use nexus_db_model::RegionSnapshotReplacementStep;
     use nexus_db_model::RegionSnapshotReplacementStepState;
+    use nexus_db_queries::db::datastore::InsertRegionSnapshotReplacementStepResult;
     use nexus_test_utils_macros::nexus_test;
     use uuid::Uuid;
 
@@ -277,14 +278,25 @@ mod test {
         step_2.operating_saga_id = Some(operating_saga_id);
         let step_2_id = step_2.id;
 
-        datastore
+        let result = datastore
             .insert_region_snapshot_replacement_step(&opctx, step_1)
             .await
             .unwrap();
-        datastore
+
+        assert!(matches!(
+            result,
+            InsertRegionSnapshotReplacementStepResult::Inserted { .. }
+        ));
+
+        let result = datastore
             .insert_region_snapshot_replacement_step(&opctx, step_2)
             .await
             .unwrap();
+
+        assert!(matches!(
+            result,
+            InsertRegionSnapshotReplacementStepResult::Inserted { .. }
+        ));
 
         // Activate the task, it should do nothing yet
 

@@ -23,12 +23,22 @@ use crate::db::pagination::Paginator;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
 use crate::db::TransactionError;
-use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::prelude::*;
 use omicron_common::api::external::Error;
 use uuid::Uuid;
+
+#[must_use]
+#[derive(Debug, PartialEq)]
+pub enum InsertRegionSnapshotReplacementStepResult {
+    /// A new region snapshot replacement step was inserted.
+    Inserted { step_id: Uuid },
+
+    /// A region snapshot replacement step exists already that references this
+    /// volume id, so no new record is inserted.
+    AlreadyHandled { existing_step_id: Uuid },
+}
 
 impl DataStore {
     /// Create and insert a region snapshot replacement request for a
@@ -614,28 +624,23 @@ impl DataStore {
         opctx: &OpContext,
         request_id: Uuid,
         volume_id: Uuid,
-    ) -> Result<Uuid, Error> {
+    ) -> Result<InsertRegionSnapshotReplacementStepResult, Error> {
         let request = RegionSnapshotReplacementStep::new(request_id, volume_id);
-        let request_id = request.id;
 
-        self.insert_region_snapshot_replacement_step(opctx, request).await?;
-
-        Ok(request_id)
+        self.insert_region_snapshot_replacement_step(opctx, request).await
     }
 
     pub async fn insert_region_snapshot_replacement_step(
         &self,
         opctx: &OpContext,
         request: RegionSnapshotReplacementStep,
-    ) -> Result<(), Error> {
+    ) -> Result<InsertRegionSnapshotReplacementStepResult, Error> {
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        let err = OptionalError::new();
         self.transaction_retry_wrapper(
             "insert_region_snapshot_replacement_step",
         )
         .transaction(&conn, |conn| {
-            let err = err.clone();
             let request = request.clone();
 
             async move {
@@ -656,11 +661,24 @@ impl DataStore {
                     .optional()?;
 
                 if let Some(found_record) = maybe_record {
-                    return Err(err.bail(Error::conflict(format!(
-                        "{:?} already referenced in old snapshot volume for \
-                            request {:?}",
-                        request.volume_id, found_record.id,
-                    ))));
+                    return Ok(InsertRegionSnapshotReplacementStepResult::AlreadyHandled {
+                        existing_step_id: found_record.id,
+                    });
+                }
+
+                // Skip inserting this record if we found an existing region
+                // snapshot replacement step for it
+
+                let maybe_record = dsl::region_snapshot_replacement_step
+                    .filter(dsl::volume_id.eq(request.volume_id))
+                    .get_result_async::<RegionSnapshotReplacementStep>(&conn)
+                    .await
+                    .optional()?;
+
+                if let Some(found_record) = maybe_record {
+                    return Ok(InsertRegionSnapshotReplacementStepResult::AlreadyHandled {
+                        existing_step_id: found_record.id,
+                    });
                 }
 
                 // The region snapshot replacement step saga could invoke a
@@ -675,22 +693,18 @@ impl DataStore {
                     .execute_async(&conn)
                     .await?;
 
+                let request_id = request.id;
+
                 diesel::insert_into(dsl::region_snapshot_replacement_step)
                     .values(request)
                     .execute_async(&conn)
                     .await?;
 
-                Ok(())
+                Ok(InsertRegionSnapshotReplacementStepResult::Inserted { step_id: request_id })
             }
         })
         .await
-        .map_err(|e| {
-            if let Some(err) = err.take() {
-                return err;
-            }
-
-            public_error_from_diesel(e, ErrorHandler::Server)
-        })
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     pub async fn get_region_snapshot_replacement_step_by_id(
@@ -1173,10 +1187,15 @@ mod test {
                 Uuid::new_v4(), // volume id
             );
 
-            datastore
+            let result = datastore
                 .insert_region_snapshot_replacement_step(&opctx, step)
                 .await
                 .unwrap();
+
+            assert!(matches!(
+                result,
+                InsertRegionSnapshotReplacementStepResult::Inserted { .. }
+            ));
         }
 
         assert_eq!(
@@ -1207,10 +1226,15 @@ mod test {
             step.replacement_state =
                 RegionSnapshotReplacementStepState::Running;
 
-            datastore
+            let result = datastore
                 .insert_region_snapshot_replacement_step(&opctx, step)
                 .await
                 .unwrap();
+
+            assert!(matches!(
+                result,
+                InsertRegionSnapshotReplacementStepResult::Inserted { .. }
+            ));
         }
 
         assert_eq!(
@@ -1242,10 +1266,15 @@ mod test {
             step.replacement_state =
                 RegionSnapshotReplacementStepState::VolumeDeleted;
 
-            datastore
+            let result = datastore
                 .insert_region_snapshot_replacement_step(&opctx, step)
                 .await
                 .unwrap();
+
+            assert!(matches!(
+                result,
+                InsertRegionSnapshotReplacementStepResult::Inserted { .. }
+            ));
         }
 
         assert_eq!(
@@ -1288,10 +1317,15 @@ mod test {
             RegionSnapshotReplacementStep::new(Uuid::new_v4(), volume_id);
         let first_request_id = step.id;
 
-        datastore
+        let result = datastore
             .insert_region_snapshot_replacement_step(&opctx, step)
             .await
             .unwrap();
+
+        assert!(matches!(
+            result,
+            InsertRegionSnapshotReplacementStepResult::Inserted { .. }
+        ));
 
         let step =
             RegionSnapshotReplacementStep::new(Uuid::new_v4(), volume_id);
@@ -1333,10 +1367,15 @@ mod test {
             .await
             .unwrap();
 
-        datastore
+        let result = datastore
             .insert_region_snapshot_replacement_step(&opctx, step.clone())
             .await
             .unwrap();
+
+        assert!(matches!(
+            result,
+            InsertRegionSnapshotReplacementStepResult::Inserted { .. }
+        ));
 
         // Ensure that transitioning the first step to volume deleted still
         // works.
@@ -1388,18 +1427,30 @@ mod test {
         let mut step =
             RegionSnapshotReplacementStep::new(request_id, Uuid::new_v4());
         step.replacement_state = RegionSnapshotReplacementStepState::Complete;
-        datastore
+
+        let result = datastore
             .insert_region_snapshot_replacement_step(&opctx, step)
             .await
             .unwrap();
 
+        assert!(matches!(
+            result,
+            InsertRegionSnapshotReplacementStepResult::Inserted { .. }
+        ));
+
         let mut step =
             RegionSnapshotReplacementStep::new(request_id, Uuid::new_v4());
         step.replacement_state = RegionSnapshotReplacementStepState::Complete;
-        datastore
+
+        let result = datastore
             .insert_region_snapshot_replacement_step(&opctx, step)
             .await
             .unwrap();
+
+        assert!(matches!(
+            result,
+            InsertRegionSnapshotReplacementStepResult::Inserted { .. }
+        ));
 
         assert_eq!(
             2,
@@ -1435,19 +1486,35 @@ mod test {
             RegionSnapshotReplacementStep::new(request_id, volume_id);
         step.replacement_state = RegionSnapshotReplacementStepState::Complete;
         step.old_snapshot_volume_id = Some(old_snapshot_volume_id);
-        datastore
+
+        let first_step_id = step.id;
+
+        let result = datastore
             .insert_region_snapshot_replacement_step(&opctx, step)
             .await
             .unwrap();
+
+        assert!(matches!(
+            result,
+            InsertRegionSnapshotReplacementStepResult::Inserted { .. }
+        ));
 
         let step = RegionSnapshotReplacementStep::new(
             request_id,
             old_snapshot_volume_id,
         );
-        datastore
+
+        let result = datastore
             .insert_region_snapshot_replacement_step(&opctx, step)
             .await
-            .unwrap_err();
+            .unwrap();
+
+        assert_eq!(
+            result,
+            InsertRegionSnapshotReplacementStepResult::AlreadyHandled {
+                existing_step_id: first_step_id
+            }
+        );
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
@@ -1468,6 +1535,7 @@ mod test {
         let volume_id = Uuid::new_v4();
 
         let request = RegionReplacement::new(Uuid::new_v4(), volume_id);
+
         datastore
             .insert_region_replacement_request(&opctx, request)
             .await
@@ -1475,6 +1543,7 @@ mod test {
 
         let request =
             RegionSnapshotReplacementStep::new(Uuid::new_v4(), volume_id);
+
         datastore
             .insert_region_snapshot_replacement_step(&opctx, request)
             .await

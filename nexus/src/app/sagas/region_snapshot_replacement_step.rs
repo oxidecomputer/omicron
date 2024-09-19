@@ -49,6 +49,7 @@ use super::{
 };
 use crate::app::db::datastore::ExistingTarget;
 use crate::app::db::datastore::ReplacementTarget;
+use crate::app::db::datastore::VolumeReplaceResult;
 use crate::app::db::datastore::VolumeToDelete;
 use crate::app::db::datastore::VolumeWithTarget;
 use crate::app::db::lookup::LookupPath;
@@ -90,7 +91,7 @@ declare_saga_actions! {
         + rssrs_create_fake_volume
         - rssrs_create_fake_volume_undo
     }
-    REPLACE_SNAPSHOT_IN_VOLUME -> "unused_3" {
+    REPLACE_SNAPSHOT_IN_VOLUME -> "volume_replace_snapshot_result" {
         + rsrss_replace_snapshot_in_volume
         - rsrss_replace_snapshot_in_volume_undo
     }
@@ -340,9 +341,10 @@ async fn rssrs_create_fake_volume_undo(
 
 async fn rsrss_replace_snapshot_in_volume(
     sagactx: NexusActionContext,
-) -> Result<(), ActionError> {
+) -> Result<VolumeReplaceResult, ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
+    let log = sagactx.user_data().log();
 
     let replace_params = sagactx.lookup::<ReplaceParams>("replace_params")?;
 
@@ -350,7 +352,8 @@ async fn rsrss_replace_snapshot_in_volume(
 
     // `volume_replace_snapshot` will swap the old snapshot for the new region.
     // No repair or reconcilation needs to occur after this.
-    osagactx
+
+    let volume_replace_snapshot_result = osagactx
         .datastore()
         .volume_replace_snapshot(
             VolumeWithTarget(params.request.volume_id),
@@ -361,7 +364,23 @@ async fn rsrss_replace_snapshot_in_volume(
         .await
         .map_err(ActionError::action_failed)?;
 
-    Ok(())
+    info!(
+        &log,
+        "volume_replace_snapshot returned {:?}", volume_replace_snapshot_result,
+    );
+
+    match volume_replace_snapshot_result {
+        VolumeReplaceResult::AlreadyHappened | VolumeReplaceResult::Done => {
+            // This transaction occurred on the non-deleted volume, so proceed
+            // with the saga.
+        }
+
+        VolumeReplaceResult::ExistingVolumeDeleted => {
+            // Proceed with the saga but skip the notification step.
+        }
+    }
+
+    Ok(volume_replace_snapshot_result)
 }
 
 async fn rsrss_replace_snapshot_in_volume_undo(
@@ -369,12 +388,16 @@ async fn rsrss_replace_snapshot_in_volume_undo(
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
+    let log = sagactx.user_data().log();
 
     let replace_params = sagactx.lookup::<ReplaceParams>("replace_params")?;
 
     let new_volume_id = sagactx.lookup::<Uuid>("new_volume_id")?;
 
-    osagactx
+    // It's ok if this function returned ExistingVolumeDeleted, don't cause the
+    // saga to get stuck unwinding!
+
+    let volume_replace_snapshot_result = osagactx
         .datastore()
         .volume_replace_snapshot(
             VolumeWithTarget(params.request.volume_id),
@@ -383,6 +406,12 @@ async fn rsrss_replace_snapshot_in_volume_undo(
             VolumeToDelete(new_volume_id),
         )
         .await?;
+
+    info!(
+        &log,
+        "undo: volume_replace_snapshot returned {:?}",
+        volume_replace_snapshot_result,
+    );
 
     Ok(())
 }
