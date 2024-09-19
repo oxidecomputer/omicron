@@ -313,7 +313,7 @@ enum DbCommands {
     Sleds(SledsArgs),
     /// Print information about customer instances.
     Instance(InstanceArgs),
-    /// Alias to `omdb instances list`.
+    /// Alias to `omdb instance list`.
     Instances(InstanceListArgs),
     /// Print information about the network
     Network(NetworkArgs),
