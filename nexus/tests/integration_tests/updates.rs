@@ -51,7 +51,7 @@ async fn test_update_uninitialized() -> Result<()> {
     args.exec(&logctx.log).await.context("error executing assemble command")?;
 
     let cptestctx = test_setup_with_config::<omicron_nexus::Server>(
-        "test_update_end_to_end",
+        "test_update_uninitialized",
         &mut config,
         sim::SimMode::Explicit,
         None,
