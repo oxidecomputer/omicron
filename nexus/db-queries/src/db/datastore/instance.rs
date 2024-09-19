@@ -1700,10 +1700,8 @@ mod tests {
     use super::*;
     use crate::db::datastore::sled;
     use crate::db::datastore::test_utils::datastore_test;
-    use crate::db::explain::ExplainableAsync;
     use crate::db::lookup::LookupPath;
     use crate::db::pagination::Paginator;
-    use expectorate::assert_contents;
     use nexus_db_model::InstanceState;
     use nexus_db_model::Project;
     use nexus_db_model::VmmRuntimeState;
