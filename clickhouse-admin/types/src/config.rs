@@ -294,7 +294,17 @@ impl KeeperConfigsForReplica {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Deserialize,
+    PartialOrd,
+    Ord,
+    Serialize,
+    JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ClickhouseHost {
     Ipv6(Ipv6Addr),

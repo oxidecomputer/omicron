@@ -9,6 +9,7 @@ use derive_more::{Add, AddAssign, Display, From};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use slog::{info, Logger};
+use std::collections::BTreeSet;
 use std::fs::create_dir;
 use std::io::{ErrorKind, Write};
 use std::net::Ipv6Addr;
@@ -313,6 +314,166 @@ impl Lgif {
     }
 }
 
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Deserialize,
+    Ord,
+    PartialOrd,
+    Serialize,
+    JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+enum KeeperServerType {
+    Participant,
+    Learner,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Deserialize,
+    PartialOrd,
+    Ord,
+    Serialize,
+    JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub struct KeeperServerInfo {
+    /// Unique, immutable ID of the keeper server
+    server_id: KeeperId,
+    /// Host of the keeper server
+    host: ClickhouseHost,
+    /// Keeper server raft port
+    raft_port: u16,
+    /// A keeper server either participant or learner (learner does not participate in leader elections).
+    server_type: KeeperServerType,
+    /// non-negative integer telling which nodes should be prioritised on leader elections.
+    /// Priority of 0 means server will never be a leader.
+    priority: u16,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Deserialize,
+    PartialOrd,
+    Ord,
+    Serialize,
+    JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+/// Keeper raft configuration information
+pub struct RaftConfig {
+    keeper_servers: BTreeSet<KeeperServerInfo>,
+}
+
+impl RaftConfig {
+    pub fn parse(log: &Logger, data: &[u8]) -> Result<Self> {
+        // The response we get from `$ clickhouse keeper-client -h {HOST} --q 'get /keeper/config'
+        // is a format unique to ClickHouse, where the data for each server is separated by a colon
+        //
+        // ```console
+        // $ clickhouse keeper-client -h localhost --q 'get /keeper/config'
+        // server.1=::1:21001;participant;1
+        // server.2=::1:21002;participant;1
+        // server.3=::1:21003;participant;1
+        //```
+        let s = String::from_utf8_lossy(data);
+        info!(
+            log,
+            "Retrieved data from `clickhouse keeper-config --q 'get /keeper/config'`";
+            "output" => ?s
+        );
+
+        let mut keeper_servers = BTreeSet::new();
+        for line in s.lines() {
+            let mut split = line.split('=');
+            let Some(server) = split.next() else {
+                bail!("Returned None while attempting to retrieve server ID");
+            };
+
+            // Retrieve server ID
+            let mut split_server = server.split(".");
+            let Some(s) = split_server.next() else {
+                // Test this error
+                bail!("Nothing")
+            };
+
+            if s != "server" {
+                bail!(
+                    "Output is not as expected. \
+                Server identifier: '{server}' \
+                Expected server identifier: 'server.{{SERVER_ID}}'"
+                )
+            };
+
+            let Some(id) = split_server.next() else {
+                // Test this error
+                bail!("no ID")
+            };
+
+            // Retrieve server information
+            let Some(info) = split.next() else {
+                bail!("Returned None while attempting to retrieve server info");
+            };
+
+            let mut split_info = info.split(";");
+
+            // Retrieve port
+            let Some(address) = split_info.next() else {
+                // Test this error
+                bail!("no address")
+            };
+
+            let Some(port) = address.split(':').last() else {
+                // Test this error
+                bail!("A port could not be extracted from {address}")
+            };
+
+            let u16_port = match u16::from_str(port) {
+                Ok(v) => v,
+                Err(e) => {
+                    bail!("Unable to convert value {port:?} into u16: {e}")
+                }
+            };
+
+            // Retrieve host
+            let p = format!(":{}", port);
+            let Some(host) = address.split(&p).next() else {
+                // Test this error
+                bail!("A host could not be extracted from {address}")
+            };
+
+            let mut h = ClickhouseHost::DomainName(host.to_string());
+            if let Ok(ipv6) = host.parse() {
+                h = ClickhouseHost::Ipv6(ipv6)
+            } else if let Ok(ipv4) = host.parse() {
+                h = ClickhouseHost::Ipv4(ipv4)
+            };
+
+            // TODO parse server type and priority
+
+            keeper_servers.insert(KeeperServerInfo {
+                server_id: KeeperId(u64::from_str(id).unwrap()),
+                host: h,
+                raft_port: u16_port,
+                // TODO
+                server_type: KeeperServerType::Participant,
+                priority: 1,
+            });
+        }
+
+        Ok(RaftConfig { keeper_servers })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use camino::Utf8PathBuf;
@@ -323,8 +484,9 @@ mod tests {
     use std::str::FromStr;
 
     use crate::{
-        ClickhouseHost, KeeperId, KeeperSettings, Lgif, RaftServerSettings,
-        ServerId, ServerSettings,
+        ClickhouseHost, KeeperId, KeeperServerInfo, KeeperServerType,
+        KeeperSettings, Lgif, RaftConfig, RaftServerSettings, ServerId,
+        ServerSettings,
     };
 
     fn log() -> slog::Logger {
@@ -539,6 +701,67 @@ mod tests {
            "Output from the Keeper differs to the expected output keys \
            Output: \"\" \
            Expected output keys: [\"first_log_idx\", \"first_log_term\", \"last_log_idx\", \"last_log_term\", \"last_committed_log_idx\", \"leader_committed_log_idx\", \"target_committed_log_idx\", \"last_snapshot_idx\"]",
+        );
+    }
+
+    #[test]
+    fn test_full_raft_config_parse_success() {
+        let log = log();
+        let data =
+            "server.1=::1:21001;participant;1\nserver.2=oxide.com:21002;participant;1\nserver.3=127.0.0.1:21003;participant;1\n"
+            .as_bytes();
+        let raft_config = RaftConfig::parse(&log, data).unwrap();
+
+        assert!(raft_config.keeper_servers.contains(&KeeperServerInfo {
+            server_id: KeeperId(1),
+            host: ClickhouseHost::Ipv6("::1".parse().unwrap()),
+            raft_port: 21001,
+            server_type: KeeperServerType::Participant,
+            priority: 1,
+        },));
+        assert!(raft_config.keeper_servers.contains(&KeeperServerInfo {
+            server_id: KeeperId(2),
+            host: ClickhouseHost::DomainName("oxide.com".to_string()),
+            raft_port: 21002,
+            server_type: KeeperServerType::Participant,
+            priority: 1,
+        },));
+        assert!(raft_config.keeper_servers.contains(&KeeperServerInfo {
+            server_id: KeeperId(3),
+            host: ClickhouseHost::Ipv4("127.0.0.1".parse().unwrap()),
+            raft_port: 21003,
+            server_type: KeeperServerType::Participant,
+            priority: 1,
+        },));
+    }
+
+    #[test]
+    fn test_misshapen_id_raft_config_parse_fail() {
+        let log = log();
+        let data = "serv.1=::1:21001;participant;1\n".as_bytes();
+        let result = RaftConfig::parse(&log, data);
+
+        let error = result.unwrap_err();
+        let root_cause = error.root_cause();
+
+        assert_eq!(
+            format!("{}", root_cause),
+           "Output is not as expected. Server identifier: 'serv.1' Expected server identifier: 'server.{SERVER_ID}'",
+        );
+    }
+
+    #[test]
+    fn test_misshapen_port_raft_config_parse_fail() {
+        let log = log();
+        let data = "server.1=::1:BOB;participant;1".as_bytes();
+        let result = RaftConfig::parse(&log, data);
+
+        let error = result.unwrap_err();
+        let root_cause = error.root_cause();
+
+        assert_eq!(
+            format!("{}", root_cause),
+           "Unable to convert value \"BOB\" into u16: invalid digit found in string",
         );
     }
 }
