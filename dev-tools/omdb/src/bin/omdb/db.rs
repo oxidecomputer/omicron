@@ -420,9 +420,6 @@ enum InstanceCommands {
     #[clap(alias = "ls")]
     List(InstanceListArgs),
     /// show detailed output for the selected instance.
-    ///
-    /// instances can be selected either by their UUID or by the instance and
-    /// project name.
     #[clap(alias = "show")]
     Info(InstanceInfoArgs),
 }
