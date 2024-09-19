@@ -203,16 +203,7 @@ pub struct OmicronZoneExternalFloatingIp {
 
 /// Floating external address with port allocated to an Omicron-managed zone.
 #[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    JsonSchema,
-    Serialize,
-    Deserialize,
+    Debug, Clone, Copy, PartialEq, Eq, JsonSchema, Serialize, Deserialize,
 )]
 pub struct OmicronZoneExternalFloatingAddr {
     pub id: ExternalIpUuid,
