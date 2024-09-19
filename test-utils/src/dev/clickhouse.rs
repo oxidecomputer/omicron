@@ -5,6 +5,7 @@
 //! Tools for managing ClickHouse during development
 
 use std::collections::BTreeMap;
+use std::num::NonZeroU8;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
@@ -68,7 +69,7 @@ pub enum ClickHouseDeployment {
 }
 
 /// Port numbers that a ClickHouse replica listens on.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ClickHousePorts {
     http: u16,
     native: u16,
@@ -83,12 +84,12 @@ impl Default for ClickHousePorts {
 impl ClickHousePorts {
     /// Create ports for ClickHouse to listen on.
     ///
-    /// This returns None if both ports are the same and non-zero.
-    pub fn new(http: u16, native: u16) -> Option<Self> {
+    /// This returns an error if both ports are the same and non-zero.
+    pub fn new(http: u16, native: u16) -> Result<Self, ClickHouseError> {
         if http == native && http != 0 {
-            return None;
+            return Err(ClickHouseError::ReplicaPortsMustBeDifferent);
         }
-        Some(Self { http, native })
+        Ok(Self { http, native })
     }
 
     /// Use ports of 0, to let the OS assign them for us.
@@ -114,9 +115,7 @@ impl ClickHouseDeployment {
     pub async fn new_single_node(
         logctx: &LogContext,
     ) -> Result<Self, anyhow::Error> {
-        ClickHouseProcess::new_single_node(logctx, ClickHousePorts::zero())
-            .await
-            .map(Self::SingleNode)
+        Self::new_single_node_with_ports(logctx, ClickHousePorts::zero()).await
     }
 
     /// Create a single-node deployment, listening on specifc ports.
@@ -208,6 +207,10 @@ impl ClickHouseDeployment {
     pub async fn cleanup(&mut self) -> Result<(), anyhow::Error> {
         match self {
             ClickHouseDeployment::SingleNode(instance) => {
+                // NOTE: We need to access the `process` field directly,
+                // because intentionally do not implement `DerefMut`. That is to
+                // avoid letting users manipulate individual processes, except
+                // through the `ClickHouseDeployment` type.
                 instance.process.cleanup().await
             }
             ClickHouseDeployment::Cluster(cluster) => cluster.cleanup().await,
@@ -347,6 +350,9 @@ pub enum ClickHouseError {
     #[error("Failed to open ClickHouse log file")]
     Io(#[from] std::io::Error),
 
+    #[error("ClickHouse replica HTTP and native TCP ports must be different")]
+    ReplicaPortsMustBeDifferent,
+
     #[error("Invalid ClickHouse port number")]
     InvalidPort,
 
@@ -416,7 +422,9 @@ impl ClickHouseProcess {
         // NOTE: Always extract the ports, even if they're specified, to ensure
         // that we don't return from this until the server is actually ready to
         // accept connections.
-        let ports = wait_for_ports(data_dir.log_path()).await?;
+        let new_ports = wait_for_ports(data_dir.log_path()).await?;
+        assert_eq!(new_ports, ports);
+        let ports = new_ports;
         let http_address = ipv6_localhost_on(ports.http);
         let native_address = ipv6_localhost_on(ports.native);
         Ok(ClickHouseReplica {
@@ -864,10 +872,10 @@ impl Drop for ClickHouseProcess {
 }
 
 /// Number of data replicas in our test cluster.
-pub const N_REPLICAS: u8 = 2;
+pub const N_REPLICAS: NonZeroU8 = unsafe { NonZeroU8::new_unchecked(2) };
 
 /// Number of ClickHouse Keepers in our test cluster.
-pub const N_KEEPERS: u8 = 3;
+pub const N_KEEPERS: NonZeroU8 = unsafe { NonZeroU8::new_unchecked(3) };
 
 /// A `ClickHouseCluster` is used to start and manage a 2 replica 3 keeper ClickHouse cluster.
 #[derive(Debug)]
@@ -900,12 +908,12 @@ impl ClickHouseCluster {
     /// Create the set of ClickHouse Keepers for the cluster.
     async fn new_keeper_set(
         logctx: &LogContext,
-        n_keepers: u8,
+        n_keepers: NonZeroU8,
         config_path: &PathBuf,
     ) -> Result<Vec<ClickHouseKeeper>, anyhow::Error> {
-        let mut keepers = Vec::with_capacity(usize::from(n_keepers));
+        let mut keepers = Vec::with_capacity(usize::from(n_keepers.get()));
 
-        for i in 1..=u16::from(n_keepers) {
+        for i in 1..=u16::from(n_keepers.get()) {
             let k_port = 9180 + i;
             let k_id = i;
 
@@ -928,12 +936,12 @@ impl ClickHouseCluster {
     /// Create the set of ClickHouse replicas for the cluster.
     async fn new_replica_set(
         logctx: &LogContext,
-        n_replicas: u8,
+        n_replicas: NonZeroU8,
         config_path: &PathBuf,
     ) -> Result<Vec<ClickHouseReplica>, anyhow::Error> {
-        let mut replicas = Vec::with_capacity(usize::from(n_replicas));
+        let mut replicas = Vec::with_capacity(usize::from(n_replicas.get()));
 
-        for i in 1..=u16::from(n_replicas) {
+        for i in 1..=u16::from(n_replicas.get()) {
             let r_port = 8122 + i;
             let r_tcp_port = 9000 + i;
             let r_interserver_port = 9008 + i;

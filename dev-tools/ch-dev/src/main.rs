@@ -82,9 +82,7 @@ async fn start_single_node(
     let mut signal_stream = signals.fuse();
 
     // Start the database server process, possibly on a specific port
-    let ports = ClickHousePorts::new(http_port, native_port).context(
-        "Replica HTTP and native protocol ports must not be the same",
-    )?;
+    let ports = ClickHousePorts::new(http_port, native_port)?;
     let mut deployment =
         dev::clickhouse::ClickHouseDeployment::new_single_node_with_ports(
             logctx, ports,
@@ -116,10 +114,7 @@ async fn start_single_node(
         "ch-dev: ClickHouse Native server listening on port {}",
         db_instance.native_address.port()
     );
-    println!(
-        "ch-dev: ClickHouse data stored in: [{}]",
-        db_instance.data_path()
-    );
+    println!("ch-dev: ClickHouse data stored in: {}", db_instance.data_path());
 
     // Wait for the DB to exit itself (an error), or for SIGINT
     tokio::select! {
