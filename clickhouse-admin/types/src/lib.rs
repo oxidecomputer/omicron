@@ -9,7 +9,6 @@ use derive_more::{Add, AddAssign, Display, From};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use slog::{info, Logger};
-use std::collections::HashMap;
 use std::fs::create_dir;
 use std::io::{ErrorKind, Write};
 use std::net::Ipv6Addr;
@@ -209,81 +208,29 @@ impl KeeperSettings {
     }
 }
 
-macro_rules! define_struct_and_set_values {
-    (
-        #[$doc_struct:meta]
-        struct $name:ident {
-            $(
-                #[$doc_field:meta]
-                $field_name:ident: $field_type:ty
-            ),* $(,)?
-        }
-    ) => {
-        #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
-        #[serde(rename_all = "snake_case")]
-        #[$doc_struct]
-        pub struct $name {
-            $(
-                #[$doc_field]
-                pub $field_name: $field_type
-            ),*
-        }
-
-        impl $name {
-            // Check if a field name matches a given key and set its value.
-            // Since the struct will be serialised into JSON for the reponse.
-            // we want to make sure the keys are exactly the same.
-            pub fn set_field_value(&mut self, key: &str, value: u64) -> Result<()> {
-                match key {
-                    $(
-                        stringify!($field_name) => {
-                            self.$field_name = value;
-                            Ok(())
-                        },
-                    )*
-                    _ => bail!("Key '{}' is not part of the expected keys.", key),
-                }
-            }
-        }
-    };
-}
-
-define_struct_and_set_values! {
-    /// Logically grouped information file from a keeper node
-    struct Lgif {
-        /// Index of the first log entry in the current log segment
-        first_log_idx: u64,
-        /// Term of the leader when the first log entry was created
-        first_log_term: u64,
-        /// Index of the last log entry in the current log segment
-        last_log_idx: u64,
-        /// Term of the leader when the last log entry was created
-        last_log_term: u64,
-        /// Index of the last committed log entry
-        last_committed_log_idx: u64,
-        /// Index of the last committed log entry from the leader's perspective
-        leader_committed_log_idx: u64,
-        /// Target index for log commitment during replication or recovery
-        target_committed_log_idx: u64,
-        /// Index of the most recent snapshot taken
-        last_snapshot_idx: u64,
-    }
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+/// Logically grouped information file from a keeper node
+pub struct Lgif {
+    /// Index of the first log entry in the current log segment
+    pub first_log_idx: u64,
+    /// Term of the leader when the first log entry was created
+    pub first_log_term: u64,
+    /// Index of the last log entry in the current log segment
+    pub last_log_idx: u64,
+    /// Term of the leader when the last log entry was created
+    pub last_log_term: u64,
+    /// Index of the last committed log entry
+    pub last_committed_log_idx: u64,
+    /// Index of the last committed log entry from the leader's perspective
+    pub leader_committed_log_idx: u64,
+    /// Target index for log commitment during replication or recovery
+    pub target_committed_log_idx: u64,
+    /// Index of the most recent snapshot taken
+    pub last_snapshot_idx: u64,
 }
 
 impl Lgif {
-    pub fn new() -> Self {
-        Self {
-            first_log_idx: 0,
-            first_log_term: 0,
-            last_log_idx: 0,
-            last_log_term: 0,
-            last_committed_log_idx: 0,
-            leader_committed_log_idx: 0,
-            target_committed_log_idx: 0,
-            last_snapshot_idx: 0,
-        }
-    }
-
     pub fn parse(log: &Logger, data: &[u8]) -> Result<Self> {
         // The reponse we get from running `clickhouse keeper-client -h {HOST} --q lgif`
         // isn't in any known format (e.g. JSON), but rather a series of lines with key-value
@@ -300,87 +247,68 @@ impl Lgif {
         // target_committed_log_idx	10889
         // last_snapshot_idx	9465
         // ```
-        //
-        // To parse the data we follow these steps:
-        //
-        // 1. Create an iterator over the lines of a string. These are split at newlines.
-        // 2. Each line is split by the tab, and we make sure that the key and value are
-        //    valid.
-        // 3. Once we have a HashMap of valid key-value pairs, we set the fields of the
-        //    Lgif struct with the retrieved data. To do this we make sure that the name
-        //    of each HashMap key matches one of the field names and then we set the
-        //    corresponding value.
-        let binding = String::from_utf8_lossy(data);
+        let s = String::from_utf8_lossy(data);
         info!(
             log,
             "Retrieved data from `clickhouse keeper-config lgif`";
-            "output" => ?binding
+            "output" => ?s
         );
-        let lines = binding.lines();
-        let mut lgif: HashMap<String, u64> = HashMap::new();
 
-        for line in lines {
-            let line = line.trim();
-            if !line.is_empty() {
-                let l: Vec<&str> = line.split('\t').collect();
+        let expected = Lgif::expected_keys();
 
-                if l.len() != 2 {
-                    bail!(
-                        "Command output has a line that does not contain a key-value pair: {l:?}"
-                    );
-                }
-
-                let key = l[0].to_string();
-                let raw_value = l[1];
-                let value = match u64::from_str(raw_value) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        bail!(
-                            "Unable to convert value {raw_value:?} into u64 for key {key}: {e}"
-                        );
-                    }
-                };
-
-                lgif.insert(key, value);
-            }
-        }
-
-        let mut keys: Vec<String> = lgif.keys().cloned().collect();
-        let mut expected_keys = Lgif::expected_keys();
-        keys.sort();
-        expected_keys.sort();
-        if !keys.eq(&expected_keys) {
+        // Verify the output contains the same amount of lines as the expected keys.
+        // This will ensure we catch any new key-value pairs appended to the lgif output.
+        let lines = s.trim().lines();
+        if expected.len() != lines.count() {
             bail!(
-                "Command output contains different keys to those expected. \
-                Keys: {keys:?} Expected keys: {expected_keys:?}"
+                "Output from the Keeper differs to the expected output keys \
+                Output: {s:?} \
+                Expected output keys: {expected:?}"
             );
         }
 
-        let mut parsed_data = Lgif::new();
-        for (key, value) in lgif {
-            match parsed_data.set_field_value(&key, value) {
-                Ok(()) => (),
-                Err(e) => {
-                    bail!(
-                        "Unable to set Lgif struct field with key value pair: {e}"
-                    );
-                }
+        let mut vals: Vec<u64> = Vec::new();
+        for (line, expected_key) in s.lines().zip(expected.clone()) {
+            let mut split = line.split('\t');
+            let Some(key) = split.next() else {
+                bail!("Returned None while attempting to retrieve key");
             };
+            if key != expected_key {
+                bail!("Extracted key `{key:?}` from output differs from expected key `{expected_key}`");
+            }
+            let Some(val) = split.next() else {
+                bail!("Command output has a line that does not contain a key-value pair: {key:?}");
+            };
+            let val = match u64::from_str(val) {
+                Ok(v) => v,
+                Err(e) => bail!("Unable to convert value {val:?} into u64 for key {key}: {e}"),
+            };
+            vals.push(val);
         }
 
-        Ok(parsed_data)
+        let mut iter = vals.into_iter();
+        Ok(Lgif {
+            first_log_idx: iter.next().unwrap(),
+            first_log_term: iter.next().unwrap(),
+            last_log_idx: iter.next().unwrap(),
+            last_log_term: iter.next().unwrap(),
+            last_committed_log_idx: iter.next().unwrap(),
+            leader_committed_log_idx: iter.next().unwrap(),
+            target_committed_log_idx: iter.next().unwrap(),
+            last_snapshot_idx: iter.next().unwrap(),
+        })
     }
 
-    fn expected_keys() -> Vec<String> {
+    fn expected_keys() -> Vec<&'static str> {
         vec![
-            "first_log_idx".to_string(),
-            "first_log_term".to_string(),
-            "last_log_idx".to_string(),
-            "last_log_term".to_string(),
-            "last_committed_log_idx".to_string(),
-            "leader_committed_log_idx".to_string(),
-            "target_committed_log_idx".to_string(),
-            "last_snapshot_idx".to_string(),
+            "first_log_idx",
+            "first_log_term",
+            "last_log_idx",
+            "last_log_term",
+            "last_committed_log_idx",
+            "leader_committed_log_idx",
+            "target_committed_log_idx",
+            "last_snapshot_idx",
         ]
     }
 }
@@ -500,8 +428,7 @@ mod tests {
     fn test_full_lgif_parse_success() {
         let log = log();
         let data =
-            "first_log_idx\t1\nfirst_log_term\t1\nlast_log_idx\t4386\nlast_log_term\t1\nlast_committed_log_idx\t4386
-            \nleader_committed_log_idx\t4386\ntarget_committed_log_idx\t4386\nlast_snapshot_idx\t0\n\n"
+            "first_log_idx\t1\nfirst_log_term\t1\nlast_log_idx\t4386\nlast_log_term\t1\nlast_committed_log_idx\t4386\nleader_committed_log_idx\t4386\ntarget_committed_log_idx\t4386\nlast_snapshot_idx\t0\n\n"
             .as_bytes();
         let lgif = Lgif::parse(&log, data).unwrap();
 
@@ -519,8 +446,7 @@ mod tests {
     fn test_missing_keys_lgif_parse_fail() {
         let log = log();
         let data =
-            "first_log_idx\t1\nlast_log_idx\t4386\nlast_log_term\t1\nlast_committed_log_idx\t4386
-            \nleader_committed_log_idx\t4386\ntarget_committed_log_idx\t4386\nlast_snapshot_idx\t0\n\n"
+            "first_log_idx\t1\nlast_log_idx\t4386\nlast_log_term\t1\nlast_committed_log_idx\t4386\nleader_committed_log_idx\t4386\ntarget_committed_log_idx\t4386\nlast_snapshot_idx\t0\n\n"
             .as_bytes();
         let result = Lgif::parse(&log, data);
         let error = result.unwrap_err();
@@ -528,9 +454,9 @@ mod tests {
 
         assert_eq!(
             format!("{}", root_cause),
-            "Command output contains different keys to those expected. \
-            Keys: [\"first_log_idx\", \"last_committed_log_idx\", \"last_log_idx\", \"last_log_term\", \"last_snapshot_idx\", \"leader_committed_log_idx\", \"target_committed_log_idx\"] \
-            Expected keys: [\"first_log_idx\", \"first_log_term\", \"last_committed_log_idx\", \"last_log_idx\", \"last_log_term\", \"last_snapshot_idx\", \"leader_committed_log_idx\", \"target_committed_log_idx\"]"
+            "Output from the Keeper differs to the expected output keys \
+            Output: \"first_log_idx\\t1\\nlast_log_idx\\t4386\\nlast_log_term\\t1\\nlast_committed_log_idx\\t4386\\nleader_committed_log_idx\\t4386\\ntarget_committed_log_idx\\t4386\\nlast_snapshot_idx\\t0\\n\\n\" \
+            Expected output keys: [\"first_log_idx\", \"first_log_term\", \"last_log_idx\", \"last_log_term\", \"last_committed_log_idx\", \"leader_committed_log_idx\", \"target_committed_log_idx\", \"last_snapshot_idx\"]"
         );
     }
 
@@ -538,8 +464,7 @@ mod tests {
     fn test_empty_value_lgif_parse_fail() {
         let log = log();
         let data =
-            "first_log_idx\nfirst_log_term\t1\nlast_log_idx\t4386\nlast_log_term\t1\nlast_committed_log_idx\t4386
-            \nleader_committed_log_idx\t4386\ntarget_committed_log_idx\t4386\nlast_snapshot_idx\t0\n\n"
+            "first_log_idx\nfirst_log_term\t1\nlast_log_idx\t4386\nlast_log_term\t1\nlast_committed_log_idx\t4386\nleader_committed_log_idx\t4386\ntarget_committed_log_idx\t4386\nlast_snapshot_idx\t0\n\n"
             .as_bytes();
         let result = Lgif::parse(&log, data);
         let error = result.unwrap_err();
@@ -547,7 +472,7 @@ mod tests {
 
         assert_eq!(
             format!("{}", root_cause),
-            "Command output has a line that does not contain a key-value pair: [\"first_log_idx\"]"
+            "Command output has a line that does not contain a key-value pair: \"first_log_idx\""
         );
     }
 
@@ -555,8 +480,7 @@ mod tests {
     fn test_non_u64_value_lgif_parse_fail() {
         let log = log();
         let data =
-            "first_log_idx\t1\nfirst_log_term\tBOB\nlast_log_idx\t4386\nlast_log_term\t1\nlast_committed_log_idx\t4386
-            \nleader_committed_log_idx\t4386\ntarget_committed_log_idx\t4386\nlast_snapshot_idx\t0\n\n"
+            "first_log_idx\t1\nfirst_log_term\tBOB\nlast_log_idx\t4386\nlast_log_term\t1\nlast_committed_log_idx\t4386\nleader_committed_log_idx\t4386\ntarget_committed_log_idx\t4386\nlast_snapshot_idx\t0\n\n"
             .as_bytes();
         let result = Lgif::parse(&log, data);
         let error = result.unwrap_err();
@@ -572,8 +496,7 @@ mod tests {
     fn test_non_existent_key_with_correct_value_lgif_parse_fail() {
         let log = log();
         let data =
-            "first_log_idx\t1\nfirst_log\t1\nlast_log_idx\t4386\nlast_log_term\t1\nlast_committed_log_idx\t4386
-            \nleader_committed_log_idx\t4386\ntarget_committed_log_idx\t4386\nlast_snapshot_idx\t0\n\n"
+            "first_log_idx\t1\nfirst_log\t1\nlast_log_idx\t4386\nlast_log_term\t1\nlast_committed_log_idx\t4386\nleader_committed_log_idx\t4386\ntarget_committed_log_idx\t4386\nlast_snapshot_idx\t0\n\n"
             .as_bytes();
         let result = Lgif::parse(&log, data);
         let error = result.unwrap_err();
@@ -581,24 +504,41 @@ mod tests {
 
         assert_eq!(
             format!("{}", root_cause),
-            "Command output contains different keys to those expected. \
-            Keys: [\"first_log\", \"first_log_idx\", \"last_committed_log_idx\", \"last_log_idx\", \"last_log_term\", \"last_snapshot_idx\", \"leader_committed_log_idx\", \"target_committed_log_idx\"] \
-            Expected keys: [\"first_log_idx\", \"first_log_term\", \"last_committed_log_idx\", \"last_log_idx\", \"last_log_term\", \"last_snapshot_idx\", \"leader_committed_log_idx\", \"target_committed_log_idx\"]"
+            "Extracted key `\"first_log\"` from output differs from expected key `first_log_term`"
         );
     }
 
     #[test]
-    fn test_all_nonsense_lgif_parse_fail() {
+    fn test_additional_key_value_pairs_in_output_parse_fail() {
         let log = log();
-        let data = "Mmmbop, ba duba dop ba\nDu bop, ba du dop ba\nYeah, yeah"
+        let data = "first_log_idx\t1\nfirst_log_term\t1\nlast_log_idx\t4386\nlast_log_term\t1\nlast_committed_log_idx\t4386\nleader_committed_log_idx\t4386\ntarget_committed_log_idx\t4386\nlast_snapshot_idx\t0\nlast_snapshot_idx\t3\n\n"
             .as_bytes();
+
         let result = Lgif::parse(&log, data);
         let error = result.unwrap_err();
         let root_cause = error.root_cause();
 
         assert_eq!(
             format!("{}", root_cause),
-            "Command output has a line that does not contain a key-value pair: [\"Mmmbop, ba duba dop ba\"]",
+            "Output from the Keeper differs to the expected output keys \
+            Output: \"first_log_idx\\t1\\nfirst_log_term\\t1\\nlast_log_idx\\t4386\\nlast_log_term\\t1\\nlast_committed_log_idx\\t4386\\nleader_committed_log_idx\\t4386\\ntarget_committed_log_idx\\t4386\\nlast_snapshot_idx\\t0\\nlast_snapshot_idx\\t3\\n\\n\" \
+            Expected output keys: [\"first_log_idx\", \"first_log_term\", \"last_log_idx\", \"last_log_term\", \"last_committed_log_idx\", \"leader_committed_log_idx\", \"target_committed_log_idx\", \"last_snapshot_idx\"]",
+        );
+    }
+
+    #[test]
+    fn test_empty_output_parse_fail() {
+        let log = log();
+        let data = "".as_bytes();
+        let result = Lgif::parse(&log, data);
+        let error = result.unwrap_err();
+        let root_cause = error.root_cause();
+
+        assert_eq!(
+            format!("{}", root_cause),
+           "Output from the Keeper differs to the expected output keys \
+           Output: \"\" \
+           Expected output keys: [\"first_log_idx\", \"first_log_term\", \"last_log_idx\", \"last_log_term\", \"last_committed_log_idx\", \"leader_committed_log_idx\", \"target_committed_log_idx\", \"last_snapshot_idx\"]",
         );
     }
 }
