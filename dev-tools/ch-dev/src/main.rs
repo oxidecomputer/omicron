@@ -9,6 +9,7 @@ use clap::{Args, Parser, Subcommand};
 use dropshot::test_util::LogContext;
 use futures::StreamExt;
 use libc::SIGINT;
+use omicron_common::address::{CLICKHOUSE_HTTP_PORT, CLICKHOUSE_TCP_PORT};
 use omicron_test_utils::dev::{self, clickhouse::ClickHousePorts};
 use signal_hook_tokio::Signals;
 
@@ -43,10 +44,10 @@ enum ChDevCmd {
 #[derive(Clone, Debug, Args)]
 struct ChRunArgs {
     /// The HTTP port on which the server will listen
-    #[clap(short = 'H', long, default_value_t = 8123, action)]
+    #[clap(short = 'H', long, default_value_t = CLICKHOUSE_HTTP_PORT, action)]
     http_port: u16,
     /// The port on which the native protocol server will listen
-    #[clap(short, long, default_value_t = 9000, action)]
+    #[clap(short, long, default_value_t = CLICKHOUSE_TCP_PORT, action)]
     native_port: u16,
     /// Starts a ClickHouse replicated cluster of 2 replicas and 3 keeper nodes
     #[clap(long, conflicts_with_all = ["http_port", "native_port"], action)]
@@ -178,31 +179,31 @@ async fn start_replicated_cluster(
         cluster.replica_config_path().unwrap().display(),
         cluster.keeper_config_path().unwrap().display()
     );
-    for instance in cluster.replicas() {
+    for replica in cluster.replicas() {
         println!(
             "ch-dev: running ClickHouse replica with full command:\
             \n\"clickhouse {}\"",
-            instance.cmdline().join(" ")
+            replica.cmdline().join(" ")
         );
         println!("ch-dev: ClickHouse replica environment:");
-        for (k, v) in instance.environment() {
+        for (k, v) in replica.environment() {
             println!("\t{k}={v}");
         }
         println!(
             "ch-dev: ClickHouse replica PID is {}",
-            instance.pid().context("Failed to get instance PID")?
+            replica.pid().context("Failed to get instance PID")?
         );
         println!(
             "ch-dev: ClickHouse replica data path is {}",
-            instance.data_path(),
+            replica.data_path(),
         );
         println!(
             "ch-dev: ClickHouse replica HTTP server is listening on port {}",
-            instance.http_address.port(),
+            replica.http_address.port(),
         );
         println!(
             "ch-dev: ClickHouse replica Native server is listening on port {}",
-            instance.native_address.port(),
+            replica.native_address.port(),
         );
     }
     for keeper in cluster.keepers() {

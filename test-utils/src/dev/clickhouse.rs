@@ -183,16 +183,24 @@ impl ClickHouseDeployment {
     /// If you'd like all of them, you can use `all_native_addresses().`
     pub fn native_address(&self) -> SocketAddrV6 {
         match self {
-            ClickHouseDeployment::SingleNode(_) => todo!(),
-            ClickHouseDeployment::Cluster(_) => todo!(),
+            ClickHouseDeployment::SingleNode(instance) => {
+                instance.native_address
+            }
+            ClickHouseDeployment::Cluster(cluster) => {
+                cluster.replicas.first().unwrap().native_address
+            }
         }
     }
 
     /// Return all native addresses for a deployment's replicas.
     pub fn all_native_addresses(&self) -> Vec<SocketAddrV6> {
         match self {
-            ClickHouseDeployment::SingleNode(_) => vec![],
-            ClickHouseDeployment::Cluster(_) => vec![],
+            ClickHouseDeployment::SingleNode(instance) => {
+                vec![instance.native_address]
+            }
+            ClickHouseDeployment::Cluster(cluster) => {
+                cluster.replicas().map(|rep| rep.native_address).collect()
+            }
         }
     }
 
@@ -827,10 +835,21 @@ impl ClickHouseDataDir {
 impl Drop for ClickHouseProcess {
     fn drop(&mut self) {
         if self.child.is_some() || self.data_dir.is_some() {
+            let maybe_pid = self
+                .child
+                .as_ref()
+                .and_then(|child| child.id())
+                .map(|id| format!("(PID {})", id))
+                .unwrap_or_else(String::new);
+            let maybe_dir = self
+                .data_dir
+                .as_ref()
+                .map(|dir| format!(", {}", dir.root_path()))
+                .unwrap_or_else(String::new);
             eprintln!(
                 "WARN: dropped ClickHouse process without cleaning it up first \
-                (there may still be a child process running and a \
-                temporary directory leaked)"
+                (there may still be a child process running {maybe_pid} and a \
+                temporary directory leaked{maybe_dir})"
             );
             if let Some(child) = self.child.as_mut() {
                 let _ = child.start_kill();
