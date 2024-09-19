@@ -911,14 +911,14 @@ pub enum InvNvmeDiskFirmwareError {
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_nvme_disk_firmware)]
 pub struct InvNvmeDiskFirmware {
-    pub inv_collection_id: DbTypedUuid<CollectionKind>,
-    pub sled_id: DbTypedUuid<SledKind>,
-    pub slot: i64,
-    pub active_slot: SqlU8,
-    pub next_active_slot: Option<SqlU8>,
-    pub number_of_slots: SqlU8,
-    pub slot1_is_read_only: bool,
-    pub slot_firmware_versions: Vec<Option<String>>,
+    inv_collection_id: DbTypedUuid<CollectionKind>,
+    sled_id: DbTypedUuid<SledKind>,
+    slot: i64,
+    active_slot: SqlU8,
+    next_active_slot: Option<SqlU8>,
+    number_of_slots: SqlU8,
+    slot1_is_read_only: bool,
+    slot_firmware_versions: Vec<Option<String>>,
 }
 
 impl InvNvmeDiskFirmware {
@@ -928,6 +928,10 @@ impl InvNvmeDiskFirmware {
         sled_slot: i64,
         firmware: &NvmeFirmware,
     ) -> Result<Self, InvNvmeDiskFirmwareError> {
+        // NB: We first validate that the data given to us from an NVMe disk
+        // actually makes sense. For the purposes of testing we ensure that
+        // number of slots is validated first before any other field.
+
         // Valid NVMe slots are between 1 and 7.
         let valid_slot = 1..=7;
         if !valid_slot.contains(&firmware.number_of_slots) {
@@ -950,10 +954,10 @@ impl InvNvmeDiskFirmware {
                 firmware.active_slot,
             ));
         }
-        // next_active_slot maps to a populated version
+        // active_slot maps to a populated version
         let Some(Some(_fw_string)) = firmware
             .slot_firmware_versions
-            .get(usize::from(firmware.active_slot))
+            .get(usize::from(firmware.active_slot) - 1)
         else {
             return Err(InvNvmeDiskFirmwareError::InvalidActiveSlotFirmware(
                 firmware.active_slot,
@@ -969,7 +973,7 @@ impl InvNvmeDiskFirmware {
             // next_active_slot maps to a populated version
             let Some(Some(_fw_string)) = firmware
                 .slot_firmware_versions
-                .get(usize::from(next_active_slot))
+                .get(usize::from(next_active_slot) - 1)
             else {
                 return Err(
                     InvNvmeDiskFirmwareError::InvalidNextActiveSlotFirmware(
@@ -979,22 +983,16 @@ impl InvNvmeDiskFirmware {
             };
         }
         // slot fw strings must be a max of 8 bytes and must be ascii characters
-        for fw in &firmware.slot_firmware_versions {
-            if let Some(fw_string) = fw {
-                if !fw_string.is_ascii() {
-                    return Err(
-                        InvNvmeDiskFirmwareError::FirmwareVersionNotAscii(
-                            fw_string.clone(),
-                        ),
-                    );
-                }
-                if fw_string.len() > 8 {
-                    return Err(
-                        InvNvmeDiskFirmwareError::FirmwareVersionTooLong(
-                            fw_string.clone(),
-                        ),
-                    );
-                }
+        for fw_string in firmware.slot_firmware_versions.iter().flatten() {
+            if !fw_string.is_ascii() {
+                return Err(InvNvmeDiskFirmwareError::FirmwareVersionNotAscii(
+                    fw_string.clone(),
+                ));
+            }
+            if fw_string.len() > 8 {
+                return Err(InvNvmeDiskFirmwareError::FirmwareVersionTooLong(
+                    fw_string.clone(),
+                ));
             }
         }
 
@@ -1033,6 +1031,60 @@ impl InvNvmeDiskFirmware {
                 .and_then(|v| v.as_deref()),
             _ => None,
         }
+    }
+
+    pub fn inv_collection_id(&self) -> DbTypedUuid<CollectionKind> {
+        self.inv_collection_id
+    }
+
+    pub fn sled_id(&self) -> DbTypedUuid<SledKind> {
+        self.sled_id
+    }
+
+    pub fn slot(&self) -> i64 {
+        self.slot
+    }
+
+    pub fn number_of_slots(&self) -> SqlU8 {
+        self.number_of_slots
+    }
+
+    pub fn active_slot(&self) -> SqlU8 {
+        self.active_slot
+    }
+
+    pub fn next_active_slot(&self) -> Option<SqlU8> {
+        self.next_active_slot
+    }
+
+    pub fn slot1_is_read_only(&self) -> bool {
+        self.slot1_is_read_only
+    }
+
+    pub fn slot_firmware_versions(&self) -> &[Option<String>] {
+        &self.slot_firmware_versions
+    }
+}
+
+impl From<InvNvmeDiskFirmware>
+    for nexus_types::inventory::PhysicalDiskFirmware
+{
+    fn from(
+        nvme_firmware: InvNvmeDiskFirmware,
+    ) -> nexus_types::inventory::PhysicalDiskFirmware {
+        use nexus_types::inventory as nexus_inventory;
+
+        nexus_inventory::PhysicalDiskFirmware::Nvme(
+            nexus_inventory::NvmeFirmware {
+                active_slot: nvme_firmware.active_slot.0,
+                next_active_slot: nvme_firmware
+                    .next_active_slot
+                    .map(|nas| nas.0),
+                number_of_slots: nvme_firmware.number_of_slots.0,
+                slot1_is_read_only: nvme_firmware.slot1_is_read_only,
+                slot_firmware_versions: nvme_firmware.slot_firmware_versions,
+            },
+        )
     }
 }
 
@@ -1691,102 +1743,215 @@ impl InvOmicronZoneNic {
 
 #[cfg(test)]
 mod test {
-    use omicron_uuid_kinds::TypedUuid;
+    use nexus_types::inventory::NvmeFirmware;
+    use omicron_uuid_kinds::{CollectionKind, SledUuid, TypedUuid};
 
-    use crate::{typed_uuid, InvNvmeDiskFirmware};
+    use crate::{typed_uuid, InvNvmeDiskFirmware, InvNvmeDiskFirmwareError};
 
     #[test]
     fn test_inv_nvme_disk_firmware() {
-        // We can retrieve active_firmware with sane values
-        let inv_firmware = InvNvmeDiskFirmware {
-            inv_collection_id: typed_uuid::DbTypedUuid(TypedUuid::new_v4()),
-            sled_id: TypedUuid::new_v4().into(),
-            slot: 1,
-            active_slot: 1.into(),
+        let inv_collection_id: TypedUuid<CollectionKind> =
+            typed_uuid::DbTypedUuid(TypedUuid::new_v4()).into();
+        let sled_id: SledUuid = TypedUuid::new_v4();
+        let slot = 1;
+
+        // NB: We are testing these error cases with only one value that
+        // is out of spec so that we don't have to worry about what order
+        // `InvNvmeDiskFirmware::new` is validating fields in.  The only test
+        // dependent on position is the number of slots test, but that is always
+        // processed first in the implementation
+
+        // Invalid active slot
+        for i in [0u8, 8] {
+            let firmware = &NvmeFirmware {
+                active_slot: i,
+                next_active_slot: None,
+                number_of_slots: 1,
+                slot1_is_read_only: true,
+                slot_firmware_versions: vec![Some("firmware".to_string())],
+            };
+            let err = InvNvmeDiskFirmware::new(
+                inv_collection_id,
+                sled_id,
+                slot,
+                firmware,
+            )
+            .unwrap_err();
+            assert!(matches!(
+                err,
+                InvNvmeDiskFirmwareError::InvalidActiveSlot(_)
+            ));
+        }
+
+        // Invalid next active slot
+        for i in [0u8, 8] {
+            let firmware = &NvmeFirmware {
+                active_slot: 1,
+                next_active_slot: Some(i),
+                number_of_slots: 2,
+                slot1_is_read_only: true,
+                slot_firmware_versions: vec![
+                    Some("firmware".to_string()),
+                    Some("firmware".to_string()),
+                ],
+            };
+            let err = InvNvmeDiskFirmware::new(
+                inv_collection_id,
+                sled_id,
+                slot,
+                firmware,
+            )
+            .unwrap_err();
+            assert!(matches!(
+                err,
+                InvNvmeDiskFirmwareError::InvalidNextActiveSlot(_)
+            ));
+        }
+
+        // Invalid number of slots
+        for i in [0u8, 8] {
+            let firmware = &NvmeFirmware {
+                active_slot: i,
+                next_active_slot: None,
+                number_of_slots: i,
+                slot1_is_read_only: true,
+                slot_firmware_versions: vec![
+                    Some("firmware".to_string());
+                    i as usize
+                ],
+            };
+            let err = InvNvmeDiskFirmware::new(
+                inv_collection_id,
+                sled_id,
+                slot,
+                firmware,
+            )
+            .unwrap_err();
+            assert!(matches!(
+                err,
+                InvNvmeDiskFirmwareError::InvalidNumberOfSlots(_)
+            ));
+        }
+
+        // Mismatch between number of slots and firmware versions
+        let firmware = &NvmeFirmware {
+            active_slot: 1,
             next_active_slot: None,
-            number_of_slots: 1.into(),
+            number_of_slots: 2,
             slot1_is_read_only: true,
             slot_firmware_versions: vec![Some("firmware".to_string())],
         };
-        assert_eq!(inv_firmware.current_version(), Some("firmware"));
-        assert_eq!(inv_firmware.next_version(), None);
+        let err = InvNvmeDiskFirmware::new(
+            inv_collection_id,
+            sled_id,
+            slot,
+            firmware,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            InvNvmeDiskFirmwareError::SlotFirmwareVersionsLengthMismatch { .. }
+        ));
 
-        // We can retrieve active_firmware and next_active_firmware with sane
-        // values
-        let inv_firmware = InvNvmeDiskFirmware {
-            inv_collection_id: typed_uuid::DbTypedUuid(TypedUuid::new_v4()),
-            sled_id: TypedUuid::new_v4().into(),
-            slot: 1,
-            active_slot: 1.into(),
-            next_active_slot: Some(2.into()),
-            number_of_slots: 2.into(),
+        // Firmware version string contains non ascii characters
+        let firmware = &NvmeFirmware {
+            active_slot: 1,
+            next_active_slot: None,
+            number_of_slots: 1,
+            slot1_is_read_only: true,
+            slot_firmware_versions: vec![Some("💾".to_string())],
+        };
+        let err = InvNvmeDiskFirmware::new(
+            inv_collection_id,
+            sled_id,
+            slot,
+            firmware,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            InvNvmeDiskFirmwareError::FirmwareVersionNotAscii(_)
+        ));
+
+        // Firmware version string is too long
+        let firmware = &NvmeFirmware {
+            active_slot: 1,
+            next_active_slot: None,
+            number_of_slots: 1,
+            slot1_is_read_only: true,
+            slot_firmware_versions: vec![Some(
+                "somereallylongstring".to_string(),
+            )],
+        };
+        let err = InvNvmeDiskFirmware::new(
+            inv_collection_id,
+            sled_id,
+            slot,
+            firmware,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            InvNvmeDiskFirmwareError::FirmwareVersionTooLong(_)
+        ));
+
+        // Active firmware version slot is in the vec but is empty
+        let firmware = &NvmeFirmware {
+            active_slot: 1,
+            next_active_slot: None,
+            number_of_slots: 1,
+            slot1_is_read_only: true,
+            slot_firmware_versions: vec![None],
+        };
+        let err = InvNvmeDiskFirmware::new(
+            inv_collection_id,
+            sled_id,
+            slot,
+            firmware,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            InvNvmeDiskFirmwareError::InvalidActiveSlotFirmware(_)
+        ));
+
+        // Next active firmware version slot is in the vec but is empty
+        let firmware = &NvmeFirmware {
+            active_slot: 1,
+            next_active_slot: Some(2),
+            number_of_slots: 2,
+            slot1_is_read_only: true,
+            slot_firmware_versions: vec![Some("1234".to_string()), None],
+        };
+        let err = InvNvmeDiskFirmware::new(
+            inv_collection_id,
+            sled_id,
+            slot,
+            firmware,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            InvNvmeDiskFirmwareError::InvalidNextActiveSlotFirmware(_)
+        ));
+
+        // Actually construct a valid value
+        let firmware = &NvmeFirmware {
+            active_slot: 1,
+            next_active_slot: Some(2),
+            number_of_slots: 2,
             slot1_is_read_only: true,
             slot_firmware_versions: vec![
-                Some("ONE".to_string()),
-                Some("TWO".to_string()),
+                Some("1234".to_string()),
+                Some("4567".to_string()),
             ],
         };
-        assert_eq!(inv_firmware.current_version(), Some("ONE"));
-        assert_eq!(inv_firmware.next_version(), Some("TWO"));
-
-        // A missing fw version string returns None (although technically
-        // invalid as a device _shouldn't_ report an empty slot as being
-        // activated upon reset)
-        let inv_firmware = InvNvmeDiskFirmware {
-            inv_collection_id: typed_uuid::DbTypedUuid(TypedUuid::new_v4()),
-            sled_id: TypedUuid::new_v4().into(),
-            slot: 1,
-            active_slot: 1.into(),
-            next_active_slot: Some(2.into()),
-            number_of_slots: 2.into(),
-            slot1_is_read_only: true,
-            slot_firmware_versions: vec![Some("ONE".to_string()), None],
-        };
-        assert_eq!(inv_firmware.current_version(), Some("ONE"));
-        assert_eq!(inv_firmware.next_version(), None);
-
-        // Number of slots and slot firmware versions disagreement returns None
-        let inv_firmware = InvNvmeDiskFirmware {
-            inv_collection_id: typed_uuid::DbTypedUuid(TypedUuid::new_v4()),
-            sled_id: TypedUuid::new_v4().into(),
-            slot: 1,
-            active_slot: 1.into(),
-            next_active_slot: Some(4.into()),
-            number_of_slots: 4.into(),
-            slot1_is_read_only: true,
-            // number_of_slots reports 4 but the device only gave us two slots
-            slot_firmware_versions: vec![Some("ONE".to_string()), None],
-        };
-        assert_eq!(inv_firmware.current_version(), Some("ONE"));
-        assert_eq!(inv_firmware.next_version(), None);
-
-        // Verify active_slot and next_active_slot  below 1 or above 7 results
-        // in `None`
-        for i in [0u8, 8] {
-            let inv_firmware = InvNvmeDiskFirmware {
-                inv_collection_id: typed_uuid::DbTypedUuid(TypedUuid::new_v4()),
-                sled_id: TypedUuid::new_v4().into(),
-                slot: 1,
-                active_slot: i.into(),
-                next_active_slot: Some(i.into()),
-                number_of_slots: 7.into(),
-                slot1_is_read_only: true,
-                slot_firmware_versions: vec![
-                    Some("ONE".to_string()),
-                    Some("TWO".to_string()),
-                    Some("THREE".to_string()),
-                    Some("FOUR".to_string()),
-                    Some("FIVE".to_string()),
-                    Some("SIX".to_string()),
-                    Some("SEVEN".to_string()),
-                    // Invalid in the spec but we are testing that the active
-                    // and next active slot can't reach this value
-                    Some("EIGHT".to_string()),
-                ],
-            };
-
-            assert_eq!(inv_firmware.current_version(), None);
-            assert_eq!(inv_firmware.next_version(), None);
-        }
+        assert!(InvNvmeDiskFirmware::new(
+            inv_collection_id,
+            sled_id,
+            slot,
+            firmware,
+        )
+        .is_ok())
     }
 }
