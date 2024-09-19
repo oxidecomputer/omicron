@@ -49,11 +49,28 @@ pub struct SwitchConfig {
     #[serde(default = "default_udp_listen_port")]
     pub udp_listen_port: u16,
     pub local_ignition_controller_interface: String,
-    pub rpc_max_attempts_general: usize,
-    pub rpc_max_attempts_reset: usize,
-    pub rpc_per_attempt_timeout_millis: u64,
+    pub rpc_retry_config: RetryConfig,
     pub location: LocationConfig,
     pub port: Vec<SwitchPortDescription>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct RetryConfig {
+    pub per_attempt_timeout_millis: u64,
+    pub max_attempts_reset: usize,
+    pub max_attempts_general: usize,
+}
+
+impl From<RetryConfig> for SpRetryConfig {
+    fn from(config: RetryConfig) -> Self {
+        Self {
+            per_attempt_timeout: Duration::from_millis(
+                config.per_attempt_timeout_millis,
+            ),
+            max_attempts_reset: config.max_attempts_reset,
+            max_attempts_general: config.max_attempts_general,
+        }
+    }
 }
 
 fn default_udp_listen_port() -> u16 {
@@ -214,13 +231,7 @@ impl ManagementSwitch {
         let mut port_to_desc = Vec::with_capacity(config.port.len());
         let mut port_to_ignition_target = Vec::with_capacity(config.port.len());
         let mut interface_to_port = HashMap::with_capacity(config.port.len());
-        let retry_config = SpRetryConfig {
-            per_attempt_timeout: Duration::from_millis(
-                config.rpc_per_attempt_timeout_millis,
-            ),
-            max_attempts_reset: config.rpc_max_attempts_reset,
-            max_attempts_general: config.rpc_max_attempts_general,
-        };
+        let retry_config = config.rpc_retry_config.into();
         for (i, port_desc) in config.port.into_iter().enumerate() {
             let single_sp = match &port_desc.config {
                 SwitchPortConfig::SwitchZoneInterface { interface } => {
