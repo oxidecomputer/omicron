@@ -1185,6 +1185,7 @@ dependencies = [
  "dropshot 0.10.2-dev",
  "futures",
  "libc",
+ "omicron-common",
  "omicron-rpaths",
  "omicron-test-utils",
  "omicron-workspace-hack",

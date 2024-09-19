@@ -5,6 +5,7 @@
 //! Tools for managing ClickHouse during development
 
 use std::collections::BTreeMap;
+use std::num::NonZeroU8;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
@@ -15,6 +16,7 @@ use camino_tempfile::{Builder, Utf8TempDir};
 use dropshot::test_util::{log_prefix_for_test, LogContext};
 use futures::stream::FuturesUnordered;
 use futures::StreamExt as _;
+use omicron_common::address::{CLICKHOUSE_HTTP_PORT, CLICKHOUSE_TCP_PORT};
 use std::net::{Ipv6Addr, SocketAddrV6};
 use thiserror::Error;
 use tokio::{
@@ -40,9 +42,15 @@ const KEEPER_READY: &'static str = "Server initialized, waiting for quorum";
 const CLICKHOUSE_READY: &'static str =
     "<Information> Application: Ready for connections";
 
-// The string to look for in a clickhouse log file when trying to determine the
-// port number on which it is listening.
-const CLICKHOUSE_PORT: &'static str = "Application: Listening for http://[::1]";
+// The string to look for in a ClickHouse log file when trying to determine the
+// HTTP port number on which it is listening.
+const CLICKHOUSE_HTTP_PORT_NEEDLE: &'static str =
+    "Application: Listening for http://[::1]";
+
+// The string to look for in a ClickHouse log file when trying to determine the
+// native TCP protocol port number on which it is listening.
+const CLICKHOUSE_TCP_PORT_NEEDLE: &'static str =
+    "Application: Listening for native protocol (tcp): [::1]";
 
 /// A ClickHouse deployment, either single-node or a cluster.
 #[derive(Debug)]
@@ -51,7 +59,7 @@ pub enum ClickHouseDeployment {
     ///
     /// This starts a single replica on one server. It is expected to work with
     /// the non-replicated version of the `oximeter` database.
-    SingleNode(ClickHouseInstance),
+    SingleNode(ClickHouseReplica),
     /// A replicated ClickHouse cluster.
     ///
     /// This starts several replica servers, and the required ClickHouse Keeper
@@ -60,13 +68,83 @@ pub enum ClickHouseDeployment {
     Cluster(ClickHouseCluster),
 }
 
+/// Port numbers that a ClickHouse replica listens on.
+#[derive(Clone, Copy, Debug)]
+pub struct ClickHousePorts {
+    http: u16,
+    native: u16,
+}
+
+impl Default for ClickHousePorts {
+    fn default() -> Self {
+        Self { http: CLICKHOUSE_HTTP_PORT, native: CLICKHOUSE_TCP_PORT }
+    }
+}
+
+impl ClickHousePorts {
+    /// Create ports for ClickHouse to listen on.
+    ///
+    /// This returns an error if both ports are the same and non-zero.
+    pub fn new(http: u16, native: u16) -> Result<Self, ClickHouseError> {
+        if http == native && http != 0 {
+            return Err(ClickHouseError::ReplicaPortsMustBeDifferent);
+        }
+        Ok(Self { http, native })
+    }
+
+    /// Use ports of 0, to let the OS assign them for us.
+    pub fn zero() -> Self {
+        Self { http: 0, native: 0 }
+    }
+
+    // Return true if any of the port numbers are zero.
+    //
+    // This is used to determine when we've learned the ports from reading the
+    // log files.
+    fn any_zero(&self) -> bool {
+        self.http == 0 || self.native == 0
+    }
+
+    // Assert that if the ports in self are non-zero, they match those in
+    // `new_ports`. This is used to check that we recover the exact same ports
+    // from a logfile that were specifically requested.
+    #[track_caller]
+    fn assert_consistent(&self, new_ports: &ClickHousePorts) {
+        assert!(
+            self.http == 0 || self.http == new_ports.http,
+            "ClickHouse HTTP port was specified, but did not match the \
+            value recovered from the log file. Specified {}, found {}.",
+            self.http,
+            new_ports.http,
+        );
+        assert!(
+            self.native == 0 || self.native == new_ports.native,
+            "ClickHouse native port was specified, but did not match the \
+            value recovered from the log file. Specified {}, found {}.",
+            self.native,
+            new_ports.native,
+        );
+    }
+}
+
 impl ClickHouseDeployment {
     /// Create a single-node deployment.
+    ///
+    /// This spawns a single replica, listening on any available port. To choose
+    /// the ports explicitly, use
+    /// `ClickHouseDeployment::new_single_node_with_ports()`.
     pub async fn new_single_node(
         logctx: &LogContext,
-        http_port: u16,
     ) -> Result<Self, anyhow::Error> {
-        ClickHouseInstance::new_single_node(logctx, http_port)
+        Self::new_single_node_with_ports(logctx, ClickHousePorts::zero()).await
+    }
+
+    /// Create a single-node deployment, listening on specifc ports.
+    pub async fn new_single_node_with_ports(
+        logctx: &LogContext,
+        ports: ClickHousePorts,
+    ) -> Result<Self, anyhow::Error> {
+        ClickHouseProcess::new_single_node(logctx, ports)
             .await
             .map(Self::SingleNode)
     }
@@ -93,13 +171,55 @@ impl ClickHouseDeployment {
     /// cluster deployment, this returns an HTTP address to one of them, but
     /// it's not specified which.
     ///
-    /// If one cares about a specific server, one can iterate over them and get
-    /// their exact addresses.
+    /// If you'd like all of them, you can use `all_http_addresses()`.
     pub fn http_address(&self) -> SocketAddrV6 {
         match self {
-            ClickHouseDeployment::SingleNode(instance) => instance.address,
+            ClickHouseDeployment::SingleNode(instance) => instance.http_address,
             ClickHouseDeployment::Cluster(cluster) => {
-                cluster.replicas.first().unwrap().address
+                cluster.replicas.first().unwrap().http_address
+            }
+        }
+    }
+
+    /// Return all HTTP addresses for a deployment's replicas.
+    pub fn all_http_addresses(&self) -> Vec<SocketAddrV6> {
+        match self {
+            ClickHouseDeployment::SingleNode(instance) => {
+                vec![instance.http_address]
+            }
+            ClickHouseDeployment::Cluster(cluster) => {
+                cluster.replicas.iter().map(|rep| rep.http_address).collect()
+            }
+        }
+    }
+
+    /// Return an address speaking the native TCP protocol for any instance in
+    /// the deployment.
+    ///
+    /// If this is a single-node, there's only one of these. For a replicated
+    /// cluster deployment, this returns an address to one of them, but it's not
+    /// specified which.
+    ///
+    /// If you'd like all of them, you can use `all_native_addresses().`
+    pub fn native_address(&self) -> SocketAddrV6 {
+        match self {
+            ClickHouseDeployment::SingleNode(instance) => {
+                instance.native_address
+            }
+            ClickHouseDeployment::Cluster(cluster) => {
+                cluster.replicas.first().unwrap().native_address
+            }
+        }
+    }
+
+    /// Return all native addresses for a deployment's replicas.
+    pub fn all_native_addresses(&self) -> Vec<SocketAddrV6> {
+        match self {
+            ClickHouseDeployment::SingleNode(instance) => {
+                vec![instance.native_address]
+            }
+            ClickHouseDeployment::Cluster(cluster) => {
+                cluster.replicas().map(|rep| rep.native_address).collect()
             }
         }
     }
@@ -108,7 +228,11 @@ impl ClickHouseDeployment {
     pub async fn cleanup(&mut self) -> Result<(), anyhow::Error> {
         match self {
             ClickHouseDeployment::SingleNode(instance) => {
-                instance.cleanup().await
+                // NOTE: We need to access the `process` field directly,
+                // because intentionally do not implement `DerefMut`. That is to
+                // avoid letting users manipulate individual processes, except
+                // through the `ClickHouseDeployment` type.
+                instance.process.cleanup().await
             }
             ClickHouseDeployment::Cluster(cluster) => cluster.cleanup().await,
         }
@@ -146,7 +270,7 @@ impl ClickHouseDeployment {
     ) -> Result<ClusterNode, anyhow::Error> {
         match self {
             ClickHouseDeployment::SingleNode(instance) => {
-                instance.wait_for_shutdown().await
+                instance.process.wait_for_shutdown().await
             }
             ClickHouseDeployment::Cluster(cluster) => {
                 cluster.wait_for_shutdown().await
@@ -158,7 +282,7 @@ impl ClickHouseDeployment {
     pub async fn wait_for_all_shutdown(&mut self) -> Result<(), anyhow::Error> {
         match self {
             ClickHouseDeployment::SingleNode(instance) => {
-                instance.wait_for_shutdown().await.map(|_| ())
+                instance.process.wait_for_shutdown().await.map(|_| ())
             }
             ClickHouseDeployment::Cluster(cluster) => {
                 cluster.wait_for_all_shutdown().await
@@ -167,15 +291,15 @@ impl ClickHouseDeployment {
     }
 
     /// Return an iterator over all the replicas in the deployment.
-    pub fn instances(
+    pub fn replicas(
         &self,
-    ) -> Box<dyn Iterator<Item = &ClickHouseInstance> + '_> {
+    ) -> Box<dyn Iterator<Item = &ClickHouseReplica> + '_> {
         match self {
             ClickHouseDeployment::SingleNode(instance) => {
                 Box::new(std::iter::once(instance))
             }
             ClickHouseDeployment::Cluster(cluster) => {
-                Box::new(cluster.instances())
+                Box::new(cluster.replicas())
             }
         }
     }
@@ -191,36 +315,48 @@ impl ClickHouseDeployment {
     }
 }
 
-/// A ClickHouse Keeper, which forms a quorum with others to manage replicas.
+/// A ClickHouse data replica, which manages the actual database and tables.
 #[derive(Debug)]
-pub struct ClickHouseKeeper(ClickHouseInstance);
+pub struct ClickHouseReplica {
+    pub http_address: SocketAddrV6,
+    pub native_address: SocketAddrV6,
+    process: ClickHouseProcess,
+}
 
-impl std::ops::Deref for ClickHouseKeeper {
-    type Target = ClickHouseInstance;
+impl std::ops::Deref for ClickHouseReplica {
+    type Target = ClickHouseProcess;
 
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.process
     }
 }
 
-impl std::ops::DerefMut for ClickHouseKeeper {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
-/// A `ClickHouseInstance` is used to start and manage one ClickHouse server.
-/// process.
-///
-/// Note that this only refers to ClickHouse _replicas_ or data servers. The
-/// Keepers in a cluster are managed through `ClickHouseKeeper` objects.
+/// A ClickHouse Keeper, which forms a quorum with others to manage replicas.
 #[derive(Debug)]
-pub struct ClickHouseInstance {
+pub struct ClickHouseKeeper {
+    pub address: SocketAddrV6,
+    process: ClickHouseProcess,
+}
+
+impl std::ops::Deref for ClickHouseKeeper {
+    type Target = ClickHouseProcess;
+
+    fn deref(&self) -> &Self::Target {
+        &self.process
+    }
+}
+
+/// A `ClickHouseProcess` is used to start and manage one ClickHouse process.
+///
+/// This can be either a data replica or a ClickHouse Keeper. This object is
+/// used to manage the child process and its data directories, and the objects
+/// `ClickHouseInstance` and `ClickHouseKeeper` are used to access things like
+/// network ports on those.
+#[derive(Debug)]
+pub struct ClickHouseProcess {
     // Directory in which all data, logs, etc are stored.
     data_dir: Option<ClickHouseDataDir>,
     data_path: Utf8PathBuf,
-    // The address the server is listening on
-    pub address: SocketAddrV6,
     // Full list of command-line arguments
     args: Vec<String>,
     // Subprocess handle
@@ -235,6 +371,9 @@ pub enum ClickHouseError {
     #[error("Failed to open ClickHouse log file")]
     Io(#[from] std::io::Error),
 
+    #[error("ClickHouse replica HTTP and native TCP ports must be different")]
+    ReplicaPortsMustBeDifferent,
+
     #[error("Invalid ClickHouse port number")]
     InvalidPort,
 
@@ -248,12 +387,13 @@ pub enum ClickHouseError {
     Timeout,
 }
 
-impl ClickHouseInstance {
-    /// Start a new single node ClickHouse server on the given IPv6 port.
+impl ClickHouseProcess {
+    /// Start a new single node ClickHouse server listening on the provided
+    /// ports.
     async fn new_single_node(
         logctx: &LogContext,
-        port: u16,
-    ) -> Result<Self, anyhow::Error> {
+        ports: ClickHousePorts,
+    ) -> Result<ClickHouseReplica, anyhow::Error> {
         let data_dir = ClickHouseDataDir::new(logctx)?;
         let args = vec![
             "server".to_string(),
@@ -262,8 +402,10 @@ impl ClickHouseInstance {
             "--errorlog-file".to_string(),
             data_dir.err_log_path().to_string(),
             "--".to_string(),
+            "--tcp_port".to_string(),
+            ports.native.to_string(),
             "--http_port".to_string(),
-            format!("{}", port),
+            ports.http.to_string(),
             "--path".to_string(),
             data_dir.datastore_path().to_string(),
         ];
@@ -298,15 +440,28 @@ impl ClickHouseInstance {
             );
         }
         let data_path = data_dir.root_path().to_path_buf();
-        let port = wait_for_port(data_dir.log_path()).await?;
-        let address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, port, 0, 0);
-        Ok(Self {
-            data_dir: Some(data_dir),
-            data_path,
-            address,
-            args,
-            child: Some(child),
-            env,
+        // NOTE: Always extract the ports, even if they're specified, to ensure
+        // that we don't return from this until the server is actually ready to
+        // accept connections.
+        let ports = {
+            let new_ports = wait_for_ports(data_dir.log_path()).await?;
+            // If either port was specified, add an additional check that we
+            // recovered exactly that port.
+            ports.assert_consistent(&new_ports);
+            new_ports
+        };
+        let http_address = ipv6_localhost_on(ports.http);
+        let native_address = ipv6_localhost_on(ports.native);
+        Ok(ClickHouseReplica {
+            http_address,
+            native_address,
+            process: ClickHouseProcess {
+                data_dir: Some(data_dir),
+                data_path,
+                args,
+                child: Some(child),
+                env,
+            },
         })
     }
 
@@ -319,7 +474,7 @@ impl ClickHouseInstance {
         name: String,
         r_number: String,
         config_path: PathBuf,
-    ) -> Result<Self, anyhow::Error> {
+    ) -> Result<ClickHouseReplica, anyhow::Error> {
         let data_dir = ClickHouseDataDir::new(logctx)?;
         let args = vec![
             "server".to_string(),
@@ -385,24 +540,22 @@ impl ClickHouseInstance {
             );
         }
         let data_path = data_dir.root_path().to_path_buf();
-        let address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, port, 0, 0);
-        let result = wait_for_ready(
+        wait_for_ready(
             data_dir.log_path(),
             CLICKHOUSE_TIMEOUT,
             CLICKHOUSE_READY,
         )
-        .await;
-        match result {
-            Ok(()) => Ok(Self {
-                data_dir: Some(data_dir),
-                data_path,
-                address,
-                args,
-                child: Some(child),
-                env,
-            }),
-            Err(e) => Err(e),
-        }
+        .await?;
+        let process = ClickHouseProcess {
+            data_dir: Some(data_dir),
+            data_path,
+            args,
+            child: Some(child),
+            env,
+        };
+        let http_address = ipv6_localhost_on(port);
+        let native_address = ipv6_localhost_on(tcp_port);
+        Ok(ClickHouseReplica { http_address, native_address, process })
     }
 
     /// Start a new ClickHouse keeper on the given IPv6 port.
@@ -411,7 +564,7 @@ impl ClickHouseInstance {
         port: u16,
         k_id: u16,
         config_path: PathBuf,
-    ) -> Result<Self, anyhow::Error> {
+    ) -> Result<ClickHouseKeeper, anyhow::Error> {
         // We assume that only 3 keepers will be run, and the ID of the keeper
         // can only be one of "1", "2" or "3". This is to avoid having to pass
         // the IDs of the other keepers as part of the function's parameters.
@@ -477,24 +630,21 @@ impl ClickHouseInstance {
             );
         }
         let data_path = data_dir.root_path().to_path_buf();
-        let address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, port, 0, 0);
-        let result = wait_for_ready(
+        let address = ipv6_localhost_on(port);
+        wait_for_ready(
             data_dir.keeper_log_path(),
             CLICKHOUSE_KEEPER_TIMEOUT,
             KEEPER_READY,
         )
-        .await;
-        match result {
-            Ok(()) => Ok(Self {
-                data_dir: Some(data_dir),
-                data_path,
-                address,
-                args,
-                child: Some(child),
-                env,
-            }),
-            Err(e) => Err(e),
-        }
+        .await?;
+        let process = ClickHouseProcess {
+            data_dir: Some(data_dir),
+            data_path,
+            args,
+            child: Some(child),
+            env,
+        };
+        Ok(ClickHouseKeeper { address, process })
     }
 
     /// Wait for the ClickHouse server process to shutdown, after it's been killed.
@@ -544,11 +694,6 @@ impl ClickHouseInstance {
     /// Return the child PID, if any
     pub fn pid(&self) -> Option<u32> {
         self.child.as_ref().and_then(|child| child.id())
-    }
-
-    /// Return the HTTP port the server is listening on.
-    pub fn port(&self) -> u16 {
-        self.address.port()
     }
 }
 
@@ -720,13 +865,24 @@ impl ClickHouseDataDir {
     }
 }
 
-impl Drop for ClickHouseInstance {
+impl Drop for ClickHouseProcess {
     fn drop(&mut self) {
         if self.child.is_some() || self.data_dir.is_some() {
+            let maybe_pid = self
+                .child
+                .as_ref()
+                .and_then(|child| child.id())
+                .map(|id| format!("(PID {})", id))
+                .unwrap_or_else(String::new);
+            let maybe_dir = self
+                .data_dir
+                .as_ref()
+                .map(|dir| format!(", {}", dir.root_path()))
+                .unwrap_or_else(String::new);
             eprintln!(
-                "WARN: dropped ClickHouseInstance without cleaning it up first \
-                (there may still be a child process running and a \
-                temporary directory leaked)"
+                "WARN: dropped ClickHouse process without cleaning it up first \
+                (there may still be a child process running {maybe_pid} and a \
+                temporary directory leaked{maybe_dir})"
             );
             if let Some(child) = self.child.as_mut() {
                 let _ = child.start_kill();
@@ -741,15 +897,15 @@ impl Drop for ClickHouseInstance {
 }
 
 /// Number of data replicas in our test cluster.
-pub const N_REPLICAS: u8 = 2;
+pub const N_REPLICAS: NonZeroU8 = unsafe { NonZeroU8::new_unchecked(2) };
 
 /// Number of ClickHouse Keepers in our test cluster.
-pub const N_KEEPERS: u8 = 3;
+pub const N_KEEPERS: NonZeroU8 = unsafe { NonZeroU8::new_unchecked(3) };
 
 /// A `ClickHouseCluster` is used to start and manage a 2 replica 3 keeper ClickHouse cluster.
 #[derive(Debug)]
 pub struct ClickHouseCluster {
-    replicas: Vec<ClickHouseInstance>,
+    replicas: Vec<ClickHouseReplica>,
     keepers: Vec<ClickHouseKeeper>,
     replica_config_path: PathBuf,
     keeper_config_path: PathBuf,
@@ -777,16 +933,16 @@ impl ClickHouseCluster {
     /// Create the set of ClickHouse Keepers for the cluster.
     async fn new_keeper_set(
         logctx: &LogContext,
-        n_keepers: u8,
+        n_keepers: NonZeroU8,
         config_path: &PathBuf,
     ) -> Result<Vec<ClickHouseKeeper>, anyhow::Error> {
-        let mut keepers = Vec::with_capacity(usize::from(n_keepers));
+        let mut keepers = Vec::with_capacity(usize::from(n_keepers.get()));
 
-        for i in 1..=u16::from(n_keepers) {
+        for i in 1..=u16::from(n_keepers.get()) {
             let k_port = 9180 + i;
             let k_id = i;
 
-            let k = ClickHouseInstance::new_keeper(
+            let keeper = ClickHouseProcess::new_keeper(
                 logctx,
                 k_port,
                 k_id,
@@ -796,7 +952,7 @@ impl ClickHouseCluster {
             .map_err(|e| {
                 anyhow!("Failed to start ClickHouse keeper {}: {}", i, e)
             })?;
-            keepers.push(ClickHouseKeeper(k));
+            keepers.push(keeper);
         }
 
         Ok(keepers)
@@ -805,18 +961,18 @@ impl ClickHouseCluster {
     /// Create the set of ClickHouse replicas for the cluster.
     async fn new_replica_set(
         logctx: &LogContext,
-        n_replicas: u8,
+        n_replicas: NonZeroU8,
         config_path: &PathBuf,
-    ) -> Result<Vec<ClickHouseInstance>, anyhow::Error> {
-        let mut replicas = Vec::with_capacity(usize::from(n_replicas));
+    ) -> Result<Vec<ClickHouseReplica>, anyhow::Error> {
+        let mut replicas = Vec::with_capacity(usize::from(n_replicas.get()));
 
-        for i in 1..=u16::from(n_replicas) {
+        for i in 1..=u16::from(n_replicas.get()) {
             let r_port = 8122 + i;
             let r_tcp_port = 9000 + i;
             let r_interserver_port = 9008 + i;
             let r_name = format!("oximeter_cluster node {}", i);
             let r_number = format!("0{}", i);
-            let r = ClickHouseInstance::new_replicated(
+            let r = ClickHouseProcess::new_replicated(
                 logctx,
                 r_port,
                 r_tcp_port,
@@ -914,8 +1070,8 @@ impl ClickHouseCluster {
         res
     }
 
-    /// Return an iterator over all the ClickHouse instances in the cluster.
-    fn instances(&self) -> impl Iterator<Item = &ClickHouseInstance> {
+    /// Return an iterator over all the ClickHouse replicas in the cluster.
+    fn replicas(&self) -> impl Iterator<Item = &ClickHouseReplica> {
         self.replicas.iter()
     }
 
@@ -931,9 +1087,9 @@ impl ClickHouseCluster {
     // kind.
     fn children_mut(&mut self) -> impl Iterator<Item = ChildWaitInfo> {
         let keepers =
-            self.keepers.iter_mut().enumerate().map(|(index, child)| {
+            self.keepers.iter_mut().enumerate().map(|(index, keeper)| {
                 ChildWaitInfo {
-                    child,
+                    child: &mut keeper.process,
                     node: ClusterNode {
                         kind: NodeKind::Keeper,
                         index: index + 1,
@@ -943,19 +1099,24 @@ impl ClickHouseCluster {
         self.replicas
             .iter_mut()
             .enumerate()
-            .map(|(index, child)| ChildWaitInfo {
-                child,
+            .map(|(index, replica)| ChildWaitInfo {
+                child: &mut replica.process,
                 node: ClusterNode { kind: NodeKind::Keeper, index: index + 1 },
             })
             .chain(keepers)
     }
 }
 
+/// Return a socket address for localhost with the provided port.
+fn ipv6_localhost_on(port: u16) -> SocketAddrV6 {
+    SocketAddrV6::new(Ipv6Addr::LOCALHOST, port, 0, 0)
+}
+
 /// Helper type to wait for any child to exit.
 ///
 /// See `ClickHouseCluster::children_mut`;
 struct ChildWaitInfo<'a> {
-    child: &'a mut ClickHouseInstance,
+    child: &'a mut ClickHouseProcess,
     node: ClusterNode,
 }
 
@@ -978,25 +1139,25 @@ pub enum NodeKind {
 }
 
 // Wait for the ClickHouse log file to become available, including the
-// port number.
+// HTTP and native protocol port numbers.
 //
-// We extract the port number from the log-file regardless of whether we
+// We extract the port numbers from the log-file regardless of whether we
 // know it already, as this is a more reliable check that the server is
 // up and listening. Previously we only did this in the case we need to
 // _learn_ the port, which introduces the possibility that we return
 // from this function successfully, but the server itself is not yet
 // ready to accept connections.
-pub async fn wait_for_port(
+pub async fn wait_for_ports(
     log_path: Utf8PathBuf,
-) -> Result<u16, anyhow::Error> {
+) -> Result<ClickHousePorts, anyhow::Error> {
     let p = poll::wait_for_condition(
         || async {
             let result =
-                discover_local_listening_port(&log_path, CLICKHOUSE_TIMEOUT)
+                discover_local_listening_ports(&log_path, CLICKHOUSE_TIMEOUT)
                     .await;
             match result {
-                // Successfully extracted the port, return it.
-                Ok(port) => Ok(port),
+                // Successfully extracted the ports, return them.
+                Ok(ports) => Ok(ports),
                 Err(e) => {
                     match e {
                         ClickHouseError::Io(ref inner) => {
@@ -1017,47 +1178,49 @@ pub async fn wait_for_port(
         &CLICKHOUSE_TIMEOUT,
     )
     .await
-    .context("waiting to discover ClickHouse port")?;
+    .context("waiting to discover ClickHouse ports")?;
     Ok(p)
 }
 
 // Parse the ClickHouse log file at the given path, looking for a line
-// reporting the port number of the HTTP server. This is only used if the port
-// is chosen by the OS, not the caller.
-async fn discover_local_listening_port(
+// reporting the port number of the HTTP and native TCP servers.
+async fn discover_local_listening_ports(
     path: &Utf8Path,
     timeout: Duration,
-) -> Result<u16, ClickHouseError> {
+) -> Result<ClickHousePorts, ClickHouseError> {
     let timeout = Instant::now() + timeout;
-    tokio::time::timeout_at(timeout, find_clickhouse_port_in_log(path))
+    tokio::time::timeout_at(timeout, find_clickhouse_ports_in_log(path))
         .await
         .map_err(|_| ClickHouseError::Timeout)?
 }
 
-// Parse the clickhouse log for a port number.
+// Parse the ClickHouse log for the HTTP and native TCP port numbers.
 //
-// NOTE: This function loops forever until the expected line is found. It
+// NOTE: This function loops forever until the expected lines are found. It
 // should be run under a timeout, or some other mechanism for cancelling it.
-async fn find_clickhouse_port_in_log(
+async fn find_clickhouse_ports_in_log(
     path: &Utf8Path,
-) -> Result<u16, ClickHouseError> {
+) -> Result<ClickHousePorts, ClickHouseError> {
     let mut reader = BufReader::new(File::open(path).await?);
     let mut lines = reader.lines();
-    loop {
+    let mut ports = ClickHousePorts::zero();
+    'line_search: loop {
         let line = lines.next_line().await?;
         match line {
             Some(line) => {
-                if let Some(needle_start) = line.find(CLICKHOUSE_PORT) {
-                    // Our needle ends with `http://[::1]`; we'll split on the
-                    // colon we expect to follow it to find the port.
-                    let address_start = needle_start + CLICKHOUSE_PORT.len();
-                    return line[address_start..]
-                        .trim()
-                        .split(':')
-                        .last()
-                        .ok_or_else(|| ClickHouseError::InvalidAddress)?
-                        .parse()
-                        .map_err(|_| ClickHouseError::InvalidPort);
+                if let Some(http_port) =
+                    find_port_after_needle(&line, CLICKHOUSE_HTTP_PORT_NEEDLE)?
+                {
+                    ports.http = http_port;
+                } else if let Some(native_port) =
+                    find_port_after_needle(&line, CLICKHOUSE_TCP_PORT_NEEDLE)?
+                {
+                    ports.native = native_port;
+                } else {
+                    continue 'line_search;
+                }
+                if !ports.any_zero() {
+                    return Ok(ports);
                 }
             }
             None => {
@@ -1071,6 +1234,33 @@ async fn find_clickhouse_port_in_log(
             }
         }
     }
+}
+
+// Match the provided needle, if possible, and parse a port number immediately
+// following it.
+//
+// If the needle is not found in the line, return `Ok(None)`. If the needle is
+// found, but the port number cannot be parsed out of the line, return `Err(_)`.
+// If the port is successfully parsed, return `Ok(Some(port))`.
+fn find_port_after_needle(
+    line: &str,
+    needle: &str,
+) -> Result<Option<u16>, ClickHouseError> {
+    line.find(needle)
+        .map(|needle_start| {
+            // Our needle ends with something like `http://[::1]`;
+            // we'll split on the colon we expect to follow it to find
+            // the port.
+            let address_start = needle_start + needle.len();
+            return line[address_start..]
+                .trim()
+                .split(':')
+                .last()
+                .ok_or_else(|| ClickHouseError::InvalidAddress)?
+                .parse()
+                .map_err(|_| ClickHouseError::InvalidPort);
+        })
+        .transpose()
 }
 
 // Wait for the ClickHouse log file to report it is ready to receive connections
@@ -1154,16 +1344,20 @@ async fn clickhouse_ready_from_log(
 
 #[cfg(test)]
 mod tests {
+    use crate::dev::clickhouse::CLICKHOUSE_TCP_PORT_NEEDLE;
+
     use super::{
-        discover_local_listening_port, discover_ready, ClickHouseError,
-        CLICKHOUSE_PORT, CLICKHOUSE_READY, CLICKHOUSE_TIMEOUT,
+        discover_local_listening_ports, discover_ready, ClickHouseError,
+        ClickHousePorts, CLICKHOUSE_HTTP_PORT_NEEDLE, CLICKHOUSE_READY,
+        CLICKHOUSE_TIMEOUT,
     };
     use camino_tempfile::NamedUtf8TempFile;
     use std::process::Stdio;
     use std::{io::Write, sync::Arc, time::Duration};
     use tokio::{sync::Mutex, task::spawn, time::sleep};
 
-    const EXPECTED_PORT: u16 = 12345;
+    const EXPECTED_HTTP_PORT: u16 = 12345;
+    const EXPECTED_TCP_PORT: u16 = 12346;
 
     #[tokio::test]
     async fn test_clickhouse_in_path() {
@@ -1177,25 +1371,28 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_discover_local_listening_port() {
+    async fn test_discover_local_listening_ports() {
         // Write some data to a fake log file
         let mut file = NamedUtf8TempFile::new().unwrap();
         writeln!(file, "A garbage line").unwrap();
         writeln!(
             file,
-            "<Information> Application: Listening for http://[::1]:{}",
-            EXPECTED_PORT
+            "{}:{}",
+            CLICKHOUSE_HTTP_PORT_NEEDLE, EXPECTED_HTTP_PORT,
         )
         .unwrap();
         writeln!(file, "Another garbage line").unwrap();
+        writeln!(file, "{}:{}", CLICKHOUSE_TCP_PORT_NEEDLE, EXPECTED_TCP_PORT,)
+            .unwrap();
+        writeln!(file, "Yet another garbage line").unwrap();
         file.flush().unwrap();
 
-        assert_eq!(
-            discover_local_listening_port(file.path(), CLICKHOUSE_TIMEOUT)
+        let ports =
+            discover_local_listening_ports(file.path(), CLICKHOUSE_TIMEOUT)
                 .await
-                .unwrap(),
-            EXPECTED_PORT
-        );
+                .unwrap();
+        assert_eq!(ports.http, EXPECTED_HTTP_PORT);
+        assert_eq!(ports.native, EXPECTED_TCP_PORT);
     }
 
     #[tokio::test]
@@ -1244,24 +1441,24 @@ mod tests {
 
     // A regression test for #131.
     //
-    // The function `discover_local_listening_port` initially read from the log
+    // The function `discover_local_listening_ports` initially read from the log
     // file until EOF, but there's no guarantee that ClickHouse has written the
     // port we're searching for before the reader consumes the whole file. This
     // test confirms that the file is read until the line is found, ignoring
     // EOF, at least until the timeout is hit.
     #[tokio::test]
-    async fn test_discover_local_listening_port_slow_write() {
+    async fn test_discover_local_listening_ports_slow_write() {
         // In this case the writer is slightly "slower" than the reader.
         let writer_interval = Duration::from_millis(20);
-        assert_eq!(
-            read_log_file(CLICKHOUSE_TIMEOUT, writer_interval).await.unwrap(),
-            EXPECTED_PORT
-        );
+        let ports =
+            read_log_file(CLICKHOUSE_TIMEOUT, writer_interval).await.unwrap();
+        assert_eq!(ports.http, EXPECTED_HTTP_PORT);
+        assert_eq!(ports.native, EXPECTED_TCP_PORT);
     }
 
     // An extremely slow write test, to verify the timeout handling.
     #[tokio::test]
-    async fn test_discover_local_listening_port_timeout() {
+    async fn test_discover_local_listening_ports_timeout() {
         // In this case, the writer is _much_ slower than the reader, so that the reader times out
         // entirely before finding the desired line.
         let reader_timeout = Duration::from_millis(1);
@@ -1277,7 +1474,7 @@ mod tests {
     async fn read_log_file(
         reader_timeout: Duration,
         writer_interval: Duration,
-    ) -> Result<u16, ClickHouseError> {
+    ) -> Result<ClickHousePorts, ClickHouseError> {
         async fn write_and_wait(
             file: &mut NamedUtf8TempFile,
             line: String,
@@ -1320,26 +1517,44 @@ mod tests {
             // (https://github.com/oxidecomputer/omicron/issues/3580).
             write_and_wait(
                 &mut file,
-                (&CLICKHOUSE_PORT[..30]).to_string(),
+                (&CLICKHOUSE_HTTP_PORT_NEEDLE[..30]).to_string(),
                 writer_interval,
             )
             .await;
             write_and_wait(
                 &mut file,
-                format!("{}:{}\n", &CLICKHOUSE_PORT[30..], EXPECTED_PORT),
+                format!(
+                    "{}:{}\n",
+                    &CLICKHOUSE_HTTP_PORT_NEEDLE[30..],
+                    EXPECTED_HTTP_PORT
+                ),
                 writer_interval,
             )
             .await;
-
             write_and_wait(
                 &mut file,
                 "Another garbage line\n".to_string(),
                 writer_interval,
             )
             .await;
+            write_and_wait(
+                &mut file,
+                format!(
+                    "{}:{}\n",
+                    &CLICKHOUSE_TCP_PORT_NEEDLE, EXPECTED_TCP_PORT
+                ),
+                writer_interval,
+            )
+            .await;
+            write_and_wait(
+                &mut file,
+                "Yet another line of junk\n".to_string(),
+                writer_interval,
+            )
+            .await;
         });
         println!("Starting reader task");
-        let reader_task = discover_local_listening_port(&path, reader_timeout);
+        let reader_task = discover_local_listening_ports(&path, reader_timeout);
 
         // "Run" the test.
         //
@@ -1363,5 +1578,28 @@ mod tests {
             }
         };
         reader_result
+    }
+
+    #[test]
+    fn test_clickhouse_ports_assert_consistent() {
+        let second = ClickHousePorts { http: 1, native: 1 };
+        ClickHousePorts { http: 0, native: 0 }.assert_consistent(&second);
+        ClickHousePorts { http: 1, native: 0 }.assert_consistent(&second);
+        ClickHousePorts { http: 0, native: 1 }.assert_consistent(&second);
+        ClickHousePorts { http: 1, native: 1 }.assert_consistent(&second);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_clickhouse_ports_assert_consistent_panics_one_specified() {
+        let second = ClickHousePorts { http: 1, native: 1 };
+        ClickHousePorts { http: 0, native: 2 }.assert_consistent(&second);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_clickhouse_ports_assert_consistent_panics_both_specified() {
+        let second = ClickHousePorts { http: 1, native: 1 };
+        ClickHousePorts { http: 2, native: 2 }.assert_consistent(&second);
     }
 }

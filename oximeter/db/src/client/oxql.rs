@@ -1236,7 +1236,7 @@ mod tests {
 
     async fn setup_oxql_test(name: &str) -> TestContext {
         let logctx = test_setup_log(name);
-        let db = ClickHouseDeployment::new_single_node(&logctx, 0)
+        let db = ClickHouseDeployment::new_single_node(&logctx)
             .await
             .expect("Failed to start ClickHouse");
         let client = Client::new(db.http_address().into(), &logctx.log);
