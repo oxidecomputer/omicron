@@ -365,8 +365,18 @@ impl InstanceAutoRestart {
 }
 
 /// It's just a type with the same representation as a `TimeDelta` that
-/// implements `Serialize` and `Deserialize`, because chrono apparently doesn't.
+/// implements `Serialize` and `Deserialize`, because `chrono`'s `Deserialize`
+/// implementation for this type is not actually for `TimeDelta`, but for the
+/// `rkyv::Archived` wrapper type (see [here]). While `chrono` *does* provide a
+/// `Serialize` implementation that we could use with this type, it's preferable
+/// to provide our own `Serialize` as well as `Deserialize`, since a future
+/// semver-compatible change in `chrono` could change the struct's internal
+/// representation, quietly breaking our ability to round-trip it. So, let's
+/// just derive both traits for this thing, which we control.
+///
 /// If you feel like this is unfortunate...yeah, I do too.
+///
+/// [here]: https://docs.rs/chrono/latest/chrono/struct.TimeDelta.html#impl-Deserialize%3CTimeDelta,+__D%3E-for-%3CTimeDelta+as+Archive%3E::Archived
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 struct SerdeTimeDelta {
     secs: i64,
