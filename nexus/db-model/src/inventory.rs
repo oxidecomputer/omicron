@@ -47,6 +47,7 @@ use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolKind;
 use omicron_uuid_kinds::ZpoolUuid;
 use std::net::{IpAddr, SocketAddrV6};
+use thiserror::Error;
 use uuid::Uuid;
 
 // See [`nexus_types::inventory::PowerState`].
@@ -886,6 +887,26 @@ impl InvPhysicalDisk {
     }
 }
 
+#[derive(Clone, Debug, Error)]
+pub enum InvNvmeDiskFirmwareError {
+    #[error("active slot must be between 1 and 7, found `{0}`")]
+    InvalidActiveSlot(u8),
+    #[error("next active slot must be between 1 and 7, found `{0}`")]
+    InvalidNextActiveSlot(u8),
+    #[error("number of slots must be between 1 and 7, found `{0}`")]
+    InvalidNumberOfSlots(u8),
+    #[error("`{slots}` slots should match `{len}` firmware version entries")]
+    SlotFirmwareVersionsLengthMismatch { slots: u8, len: usize },
+    #[error("firmware version string `{0}` contains non ascii characters")]
+    FirmwareVersionNotAscii(String),
+    #[error("firmware version string `{0}` must be 8 bytes or less")]
+    FirmwareVersionTooLong(String),
+    #[error("active firmware at slot `{0}` maps to empty slot")]
+    InvalidActiveSlotFirmware(u8),
+    #[error("next active firmware at slot `{0}` maps to empty slot")]
+    InvalidNextActiveSlotFirmware(u8),
+}
+
 /// See [`nexus_types::inventory::PhysicalDiskFirmware::Nvme`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_nvme_disk_firmware)]
@@ -906,8 +927,78 @@ impl InvNvmeDiskFirmware {
         sled_id: SledUuid,
         sled_slot: i64,
         firmware: &NvmeFirmware,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, InvNvmeDiskFirmwareError> {
+        // Valid NVMe slots are between 1 and 7.
+        let valid_slot = 1..=7;
+        if !valid_slot.contains(&firmware.number_of_slots) {
+            return Err(InvNvmeDiskFirmwareError::InvalidNumberOfSlots(
+                firmware.number_of_slots,
+            ));
+        }
+        if usize::from(firmware.number_of_slots)
+            != firmware.slot_firmware_versions.len()
+        {
+            return Err(
+                InvNvmeDiskFirmwareError::SlotFirmwareVersionsLengthMismatch {
+                    slots: firmware.number_of_slots,
+                    len: firmware.slot_firmware_versions.len(),
+                },
+            );
+        }
+        if !valid_slot.contains(&firmware.active_slot) {
+            return Err(InvNvmeDiskFirmwareError::InvalidActiveSlot(
+                firmware.active_slot,
+            ));
+        }
+        // next_active_slot maps to a populated version
+        let Some(Some(_fw_string)) = firmware
+            .slot_firmware_versions
+            .get(usize::from(firmware.active_slot))
+        else {
+            return Err(InvNvmeDiskFirmwareError::InvalidActiveSlotFirmware(
+                firmware.active_slot,
+            ));
+        };
+        if let Some(next_active_slot) = firmware.next_active_slot {
+            if !valid_slot.contains(&next_active_slot) {
+                return Err(InvNvmeDiskFirmwareError::InvalidNextActiveSlot(
+                    next_active_slot,
+                ));
+            }
+
+            // next_active_slot maps to a populated version
+            let Some(Some(_fw_string)) = firmware
+                .slot_firmware_versions
+                .get(usize::from(next_active_slot))
+            else {
+                return Err(
+                    InvNvmeDiskFirmwareError::InvalidNextActiveSlotFirmware(
+                        next_active_slot,
+                    ),
+                );
+            };
+        }
+        // slot fw strings must be a max of 8 bytes and must be ascii characters
+        for fw in &firmware.slot_firmware_versions {
+            if let Some(fw_string) = fw {
+                if !fw_string.is_ascii() {
+                    return Err(
+                        InvNvmeDiskFirmwareError::FirmwareVersionNotAscii(
+                            fw_string.clone(),
+                        ),
+                    );
+                }
+                if fw_string.len() > 8 {
+                    return Err(
+                        InvNvmeDiskFirmwareError::FirmwareVersionTooLong(
+                            fw_string.clone(),
+                        ),
+                    );
+                }
+            }
+        }
+
+        Ok(Self {
             inv_collection_id: inv_collection_id.into(),
             sled_id: sled_id.into(),
             slot: sled_slot,
@@ -916,7 +1007,7 @@ impl InvNvmeDiskFirmware {
             number_of_slots: firmware.number_of_slots.into(),
             slot1_is_read_only: firmware.slot1_is_read_only,
             slot_firmware_versions: firmware.slot_firmware_versions.clone(),
-        }
+        })
     }
 
     /// Attempt to read the current firmware version.

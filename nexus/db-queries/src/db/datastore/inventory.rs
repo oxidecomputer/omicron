@@ -144,14 +144,18 @@ impl DataStore {
             for disk in &sled_agent.disks {
                 match &disk.firmware {
                     PhysicalDiskFirmware::Unknown => (),
-                    PhysicalDiskFirmware::Nvme(firmware) => {
-                        nvme_disk_firmware.push(InvNvmeDiskFirmware::new(
-                            collection_id,
-                            *sled_id,
-                            disk.slot,
-                            firmware,
-                        ));
-                    }
+                    PhysicalDiskFirmware::Nvme(firmware) => nvme_disk_firmware
+                        .push(
+                            InvNvmeDiskFirmware::new(
+                                collection_id,
+                                *sled_id,
+                                disk.slot,
+                                firmware,
+                            )
+                            .map_err(|e| {
+                                Error::internal_error(&e.to_string())
+                            })?,
+                        ),
                 }
             }
         }
