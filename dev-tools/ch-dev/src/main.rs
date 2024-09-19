@@ -76,13 +76,21 @@ async fn start_single_node(
     let mut signal_stream = signals.fuse();
 
     // Start the database server process, possibly on a specific port
-    let mut db_instance =
-        dev::clickhouse::ClickHouseInstance::new_single_node(logctx, port)
+    let mut deployment =
+        dev::clickhouse::ClickHouseDeployment::new_single_node(logctx, port)
             .await?;
+    let db_instance = deployment
+        .instances()
+        .next()
+        .expect("Should have launched a ClickHouse instance");
     println!(
         "ch-dev: running ClickHouse with full command:\n\"clickhouse {}\"",
         db_instance.cmdline().join(" ")
     );
+    println!("ch-dev: ClickHouse environment:");
+    for (k, v) in db_instance.environment() {
+        println!("\t{k}={v}");
+    }
     println!(
         "ch-dev: ClickHouse is running with PID {}",
         db_instance
@@ -94,14 +102,14 @@ async fn start_single_node(
         db_instance.port()
     );
     println!(
-        "ch-dev: using {} for ClickHouse data storage",
+        "ch-dev: ClickHouse data stored in: [{}]",
         db_instance.data_path()
     );
 
     // Wait for the DB to exit itself (an error), or for SIGINT
     tokio::select! {
-        _ = db_instance.wait_for_shutdown() => {
-            db_instance.cleanup().await.context("clean up after shutdown")?;
+        _ = deployment.wait_for_shutdown() => {
+            deployment.cleanup().await.context("clean up after shutdown")?;
             bail!("ch-dev: ClickHouse shutdown unexpectedly");
         }
         caught_signal = signal_stream.next() => {
@@ -115,7 +123,7 @@ async fn start_single_node(
             );
 
             // Remove the data directory.
-            db_instance
+            deployment
                 .wait_for_shutdown()
                 .await
                 .context("clean up after SIGINT shutdown")?;
@@ -135,12 +143,16 @@ async fn start_replicated_cluster(
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let replica_config = manifest_dir
         .as_path()
-        .join("../../oximeter/db/src/configs/replica_config.xml");
+        .join("../../oximeter/db/src/configs/replica_config.xml")
+        .canonicalize()
+        .context("Failed to canonicalize replica config path")?;
     let keeper_config = manifest_dir
         .as_path()
-        .join("../../oximeter/db/src/configs/keeper_config.xml");
+        .join("../../oximeter/db/src/configs/keeper_config.xml")
+        .canonicalize()
+        .context("Failed to canonicalize keeper config path")?;
 
-    let mut cluster = dev::clickhouse::ClickHouseCluster::new(
+    let mut cluster = dev::clickhouse::ClickHouseDeployment::new_cluster(
         logctx,
         replica_config,
         keeper_config,
@@ -149,61 +161,75 @@ async fn start_replicated_cluster(
     println!(
         "ch-dev: running ClickHouse cluster with configuration files:\n \
         replicas: {}\n keepers: {}",
-        cluster.replica_config_path().display(),
-        cluster.keeper_config_path().display()
+        cluster.replica_config_path().unwrap().display(),
+        cluster.keeper_config_path().unwrap().display()
     );
-    let pid_error_msg = "Failed to get process PID, it may not have started";
-    println!(
-        "ch-dev: ClickHouse cluster is running with: server PIDs = [{}, {}] \
-        and keeper PIDs = [{}, {}, {}]",
-        cluster.replica_1.pid().expect(pid_error_msg),
-        cluster.replica_2.pid().expect(pid_error_msg),
-        cluster.keeper_1.pid().expect(pid_error_msg),
-        cluster.keeper_2.pid().expect(pid_error_msg),
-        cluster.keeper_3.pid().expect(pid_error_msg),
-    );
-    println!(
-        "ch-dev: ClickHouse HTTP servers listening on ports: {}, {}",
-        cluster.replica_1.port(),
-        cluster.replica_2.port()
-    );
-    println!(
-        "ch-dev: using {} and {} for ClickHouse data storage",
-        cluster.replica_1.data_path(),
-        cluster.replica_2.data_path()
-    );
+    for instance in cluster.instances() {
+        println!(
+            "ch-dev: running ClickHouse replica with full command:\
+            \n\"clickhouse {}\"",
+            instance.cmdline().join(" ")
+        );
+        println!("ch-dev: ClickHouse replica environment:");
+        for (k, v) in instance.environment() {
+            println!("\t{k}={v}");
+        }
+        println!(
+            "ch-dev: ClickHouse replica PID is {}",
+            instance.pid().context("Failed to get instance PID")?
+        );
+        println!(
+            "ch-dev: ClickHouse replica data path is {}",
+            instance.data_path(),
+        );
+        println!(
+            "ch-dev: ClickHouse replica HTTP server is listening on port {}",
+            instance.address.port(),
+        );
+    }
+    for keeper in cluster.keepers() {
+        println!(
+            "ch-dev: running ClickHouse Keeper with full command:\
+            \n\"clickhouse {}\"",
+            keeper.cmdline().join(" ")
+        );
+        println!("ch-dev: ClickHouse Keeper environment:");
+        for (k, v) in keeper.environment() {
+            println!("\t{k}={v}");
+        }
+        println!(
+            "ch-dev: ClickHouse Keeper PID is {}",
+            keeper.pid().context("Failed to get Keeper PID")?
+        );
+        println!(
+            "ch-dev: ClickHouse Keeper data path is {}",
+            keeper.data_path(),
+        );
+        println!(
+            "ch-dev: ClickHouse Keeper HTTP server is listening on port {}",
+            keeper.address.port(),
+        );
+    }
 
     // Wait for the replicas and keepers to exit themselves (an error), or for SIGINT
     tokio::select! {
-        _ = cluster.replica_1.wait_for_shutdown() => {
-            cluster.replica_1.cleanup().await.context(
-                format!("clean up {} after shutdown", cluster.replica_1.data_path())
-            )?;
-            bail!("ch-dev: ClickHouse replica 1 shutdown unexpectedly");
-        }
-        _ = cluster.replica_2.wait_for_shutdown() => {
-            cluster.replica_2.cleanup().await.context(
-                format!("clean up {} after shutdown", cluster.replica_2.data_path())
-            )?;
-            bail!("ch-dev: ClickHouse replica 2 shutdown unexpectedly");
-        }
-        _ = cluster.keeper_1.wait_for_shutdown() => {
-            cluster.keeper_1.cleanup().await.context(
-                format!("clean up {} after shutdown", cluster.keeper_1.data_path())
-            )?;
-            bail!("ch-dev: ClickHouse keeper 1 shutdown unexpectedly");
-        }
-        _ = cluster.keeper_2.wait_for_shutdown() => {
-            cluster.keeper_2.cleanup().await.context(
-                format!("clean up {} after shutdown", cluster.keeper_2.data_path())
-            )?;
-            bail!("ch-dev: ClickHouse keeper 2 shutdown unexpectedly");
-        }
-        _ = cluster.keeper_3.wait_for_shutdown() => {
-            cluster.keeper_3.cleanup().await.context(
-                format!("clean up {} after shutdown", cluster.keeper_3.data_path())
-            )?;
-            bail!("ch-dev: ClickHouse keeper 3 shutdown unexpectedly");
+        res = cluster.wait_for_shutdown() => {
+            cluster.cleanup().await.context("cleaning up after shutdown")?;
+            match res {
+                Ok(node) => {
+                    bail!(
+                        "ch-dev: ClickHouse cluster {:?} node {} shutdown unexpectedly",
+                        node.kind,
+                        node.index,
+                    );
+                }
+                Err(e) => {
+                    bail!(
+                        "ch-dev: Failed to wait for cluster node: {}",
+                        e,
+                    );
+                }
+            }
         }
         caught_signal = signal_stream.next() => {
             assert_eq!(caught_signal.unwrap(), SIGINT);
@@ -211,21 +237,10 @@ async fn start_replicated_cluster(
                 "ch-dev: caught signal, shutting down and removing \
                 temporary directories"
             );
-
-            // Remove the data directories.
-            let mut instances = vec![
-                cluster.replica_1,
-                cluster.replica_2,
-                cluster.keeper_1,
-                cluster.keeper_2,
-                cluster.keeper_3,
-            ];
-            for instance in instances.iter_mut() {
-                instance
-                .wait_for_shutdown()
+            cluster
+                .cleanup()
                 .await
-                .context(format!("clean up {} after SIGINT shutdown", instance.data_path()))?;
-            };
+                .context("clean up after SIGINT shutdown")?;
         }
     }
     Ok(())
