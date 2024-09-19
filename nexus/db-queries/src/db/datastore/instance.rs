@@ -517,7 +517,7 @@ impl DataStore {
         let conn = self.pool_connection_authorized(opctx).await?;
 
         self.instance_fetch_all_on_connection(
-            conn,
+            &conn,
             &InstanceUuid::from_untyped_uuid(authz_instance.id()),
         )
         .await
