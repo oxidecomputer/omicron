@@ -167,11 +167,11 @@ impl Collection {
     /// there is one.
     pub fn latest_clickhouse_keeper_membership(
         &self,
-    ) -> Option<(OmicronZoneUuid, ClickhouseKeeperClusterMembership)> {
+    ) -> Option<ClickhouseKeeperClusterMembership> {
         self.clickhouse_keeper_cluster_membership
             .iter()
             .max_by_key(|(_, membership)| membership.leader_committed_log_index)
-            .map(|(zone_id, membership)| (*zone_id, membership.clone()))
+            .map(|(_, membership)| (membership.clone()))
     }
 }
 

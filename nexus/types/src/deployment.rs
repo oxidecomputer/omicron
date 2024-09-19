@@ -164,6 +164,10 @@ pub struct Blueprint {
     /// Whether to set `cluster.preserve_downgrade_option` and what to set it to
     pub cockroachdb_setting_preserve_downgrade: CockroachDbPreserveDowngrade,
 
+    /// Allocation of Clickhouse Servers and Keepers for replicated clickhouse
+    /// setups. This is set to `None` if replicated clickhouse is not in use.
+    pub clickhouse_cluster_config: Option<ClickhouseClusterConfig>,
+
     /// when this blueprint was generated (for debugging)
     pub time_created: chrono::DateTime<chrono::Utc>,
     /// identity of the component that generated the blueprint (for debugging)

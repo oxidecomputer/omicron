@@ -353,6 +353,8 @@ impl<'a> Planner<'a> {
 
         for zone_kind in [
             DiscretionaryOmicronZone::BoundaryNtp,
+            DiscretionaryOmicronZone::ClickhouseKeeper,
+            DiscretionaryOmicronZone::ClickhouseServer,
             DiscretionaryOmicronZone::CockroachDb,
             DiscretionaryOmicronZone::InternalDns,
             DiscretionaryOmicronZone::Nexus,
@@ -429,6 +431,12 @@ impl<'a> Planner<'a> {
         let target_count = match zone_kind {
             DiscretionaryOmicronZone::BoundaryNtp => {
                 self.input.target_boundary_ntp_zone_count()
+            }
+            DiscretionaryOmicronZone::ClickhouseKeeper => {
+                self.input.target_clickhouse_keeper_zone_count()
+            }
+            DiscretionaryOmicronZone::ClickhouseServer => {
+                self.input.target_clickhouse_server_zone_count()
             }
             DiscretionaryOmicronZone::CockroachDb => {
                 self.input.target_cockroachdb_zone_count()
@@ -512,6 +520,18 @@ impl<'a> Planner<'a> {
                 DiscretionaryOmicronZone::BoundaryNtp => self
                     .blueprint
                     .sled_promote_internal_ntp_to_boundary_ntp(sled_id)?,
+                DiscretionaryOmicronZone::ClickhouseKeeper => {
+                    self.blueprint.sled_ensure_zone_multiple_clickhouse_keeper(
+                        sled_id,
+                        new_total_zone_count,
+                    )?
+                }
+                DiscretionaryOmicronZone::ClickhouseServer => {
+                    self.blueprint.sled_ensure_zone_multiple_clickhouse_server(
+                        sled_id,
+                        new_total_zone_count,
+                    )?
+                }
                 DiscretionaryOmicronZone::CockroachDb => {
                     self.blueprint.sled_ensure_zone_multiple_cockroachdb(
                         sled_id,

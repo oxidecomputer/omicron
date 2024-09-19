@@ -15,6 +15,8 @@ use std::mem;
 #[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub(crate) enum DiscretionaryOmicronZone {
     BoundaryNtp,
+    ClickhouseKeeper,
+    ClickhouseServer,
     CockroachDb,
     InternalDns,
     Nexus,
@@ -27,13 +29,17 @@ impl DiscretionaryOmicronZone {
     ) -> Option<Self> {
         match zone_type {
             BlueprintZoneType::BoundaryNtp(_) => Some(Self::BoundaryNtp),
+            BlueprintZoneType::ClickhouseKeeper(_) => {
+                Some(Self::ClickhouseKeeper)
+            }
+            BlueprintZoneType::ClickhouseServer(_) => {
+                Some(Self::ClickhouseServer)
+            }
             BlueprintZoneType::CockroachDb(_) => Some(Self::CockroachDb),
             BlueprintZoneType::InternalDns(_) => Some(Self::InternalDns),
             BlueprintZoneType::Nexus(_) => Some(Self::Nexus),
             // Zones that we should place but don't yet.
             BlueprintZoneType::Clickhouse(_)
-            | BlueprintZoneType::ClickhouseKeeper(_)
-            | BlueprintZoneType::ClickhouseServer(_)
             | BlueprintZoneType::CruciblePantry(_)
             | BlueprintZoneType::ExternalDns(_)
             | BlueprintZoneType::Oximeter(_) => None,
@@ -50,6 +56,12 @@ impl From<DiscretionaryOmicronZone> for ZoneKind {
     fn from(zone: DiscretionaryOmicronZone) -> Self {
         match zone {
             DiscretionaryOmicronZone::BoundaryNtp => Self::BoundaryNtp,
+            DiscretionaryOmicronZone::ClickhouseKeeper => {
+                Self::ClickhouseKeeper
+            }
+            DiscretionaryOmicronZone::ClickhouseServer => {
+                Self::ClickhouseServer
+            }
             DiscretionaryOmicronZone::CockroachDb => Self::CockroachDb,
             DiscretionaryOmicronZone::InternalDns => Self::InternalDns,
             DiscretionaryOmicronZone::Nexus => Self::Nexus,

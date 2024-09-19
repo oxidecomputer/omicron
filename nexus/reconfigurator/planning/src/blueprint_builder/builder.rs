@@ -8,6 +8,7 @@ use crate::ip_allocator::IpAllocator;
 use crate::planner::zone_needs_expungement;
 use crate::planner::ZoneExpungeReason;
 use anyhow::anyhow;
+use clickhouse_admin_types::OXIMETER_CLUSTER;
 use internal_dns::config::Host;
 use internal_dns::config::Zone;
 use ipnet::IpAdd;
@@ -23,6 +24,7 @@ use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::BlueprintZonesConfig;
+use nexus_types::deployment::ClickhouseClusterConfig;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::DiskFilter;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
@@ -75,6 +77,7 @@ use thiserror::Error;
 use typed_rng::TypedUuidRng;
 use typed_rng::UuidRng;
 
+use super::clickhouse::ClickhouseAllocator;
 use super::external_networking::BuilderExternalNetworking;
 use super::external_networking::ExternalNetworkingChoice;
 use super::external_networking::ExternalSnatNetworkingChoice;
@@ -214,6 +217,7 @@ pub struct BlueprintBuilder<'a> {
     sled_ip_allocators: BTreeMap<SledUuid, IpAllocator>,
     external_networking: BuilderExternalNetworking<'a>,
     internal_dns_subnets: DnsSubnetAllocator,
+    clickhouse_allocator: Option<ClickhouseAllocator>,
 
     // These fields will become part of the final blueprint.  See the
     // corresponding fields in `Blueprint`.
@@ -276,6 +280,7 @@ impl<'a> BlueprintBuilder<'a> {
             .copied()
             .map(|sled_id| (sled_id, SledState::Active))
             .collect();
+
         Blueprint {
             id: rng.blueprint_rng.next(),
             blueprint_zones,
@@ -287,6 +292,7 @@ impl<'a> BlueprintBuilder<'a> {
             cockroachdb_fingerprint: String::new(),
             cockroachdb_setting_preserve_downgrade:
                 CockroachDbPreserveDowngrade::DoNotModify,
+            clickhouse_cluster_config: None,
             time_created: now_db_precision(),
             creator: creator.to_owned(),
             comment: format!("starting blueprint with {num_sleds} empty sleds"),
@@ -337,6 +343,25 @@ impl<'a> BlueprintBuilder<'a> {
                 || commissioned_sled_ids.contains(sled_id)
         });
 
+        // If we have the clickhouse cluster setup enabled via policy and we
+        // don't yet have a `ClickhouseClusterConfiguration`then we must create
+        // one and feed it to our `ClickhouseAllocator`
+        let clickhouse_allocator = if input.clickhouse_cluster_enabled() {
+            let parent_config = parent_blueprint
+                .clickhouse_cluster_config
+                .clone()
+                .unwrap_or_else(|| {
+                    ClickhouseClusterConfig::new(OXIMETER_CLUSTER.to_string())
+                });
+            Some(ClickhouseAllocator::new(
+                log.clone(),
+                parent_config,
+                inventory.latest_clickhouse_keeper_membership(),
+            ))
+        } else {
+            None
+        };
+
         Ok(BlueprintBuilder {
             log,
             parent_blueprint,
@@ -350,6 +375,7 @@ impl<'a> BlueprintBuilder<'a> {
             sled_state,
             cockroachdb_setting_preserve_downgrade: parent_blueprint
                 .cockroachdb_setting_preserve_downgrade,
+            clickhouse_allocator,
             creator: creator.to_owned(),
             operations: Vec::new(),
             comments: Vec::new(),
@@ -382,6 +408,18 @@ impl<'a> BlueprintBuilder<'a> {
         let blueprint_disks = self
             .disks
             .into_disks_map(self.input.all_sled_ids(SledFilter::InService));
+
+        // If we have an allocator, use it to generate a new config. If an error
+        // is returned then log it and carry over the parent_config.
+        let clickhouse_cluster_config = self.clickhouse_allocator.map(|a| {
+            match a.plan(&(&blueprint_zones).into()) {
+                Ok(config) => config,
+                Err(e) => {
+                    error!(self.log, "{e}");
+                    a.parent_config().clone()
+                }
+            }
+        });
         Blueprint {
             id: self.rng.blueprint_rng.next(),
             blueprint_zones,
@@ -397,6 +435,7 @@ impl<'a> BlueprintBuilder<'a> {
                 .clone(),
             cockroachdb_setting_preserve_downgrade: self
                 .cockroachdb_setting_preserve_downgrade,
+            clickhouse_cluster_config,
             time_created: now_db_precision(),
             creator: self.creator,
             comment: self
@@ -1014,6 +1053,117 @@ impl<'a> BlueprintBuilder<'a> {
         }
 
         Ok(EnsureMultiple::Changed { added: num_crdb_to_add, removed: 0 })
+    }
+
+    pub fn sled_ensure_zone_multiple_clickhouse_server(
+        &mut self,
+        sled_id: SledUuid,
+        desired_zone_count: usize,
+    ) -> Result<EnsureMultiple, Error> {
+        //  How many clickhouse server zones do we want to add?
+        let clickhouse_server_count = self.sled_num_running_zones_of_kind(
+            sled_id,
+            ZoneKind::ClickhouseServer,
+        );
+        let num_clickhouse_servers_to_add =
+            match desired_zone_count.checked_sub(clickhouse_server_count) {
+                Some(0) => return Ok(EnsureMultiple::NotNeeded),
+                Some(n) => n,
+                None => {
+                    return Err(Error::Planner(anyhow!(
+                        "removing a ClickhouseServer zone not yet supported \
+                     (sled {sled_id} has {clickhouse_server_count}; \
+                     planner wants {desired_zone_count})"
+                    )));
+                }
+            };
+        for _ in 0..num_clickhouse_servers_to_add {
+            let zone_id = self.rng.zone_rng.next();
+            let underlay_ip = self.sled_alloc_ip(sled_id)?;
+            let pool_name =
+                self.sled_select_zpool(sled_id, ZoneKind::ClickhouseServer)?;
+            let port = omicron_common::address::CLICKHOUSE_HTTP_PORT;
+            let address = SocketAddrV6::new(underlay_ip, port, 0, 0);
+            let zone_type = BlueprintZoneType::ClickhouseServer(
+                blueprint_zone_type::ClickhouseServer {
+                    address,
+                    dataset: OmicronZoneDataset {
+                        pool_name: pool_name.clone(),
+                    },
+                },
+            );
+            let filesystem_pool = pool_name;
+
+            let zone = BlueprintZoneConfig {
+                disposition: BlueprintZoneDisposition::InService,
+                id: zone_id,
+                underlay_address: underlay_ip,
+                filesystem_pool: Some(filesystem_pool),
+                zone_type,
+            };
+            self.sled_add_zone(sled_id, zone)?;
+        }
+
+        Ok(EnsureMultiple::Changed {
+            added: num_clickhouse_servers_to_add,
+            removed: 0,
+        })
+    }
+
+    pub fn sled_ensure_zone_multiple_clickhouse_keeper(
+        &mut self,
+        sled_id: SledUuid,
+        desired_zone_count: usize,
+    ) -> Result<EnsureMultiple, Error> {
+        //  How many clickhouse keeper zones do we want to add?
+        let clickhouse_keeper_count = self.sled_num_running_zones_of_kind(
+            sled_id,
+            ZoneKind::ClickhouseKeeper,
+        );
+        let num_clickhouse_keepers_to_add =
+            match desired_zone_count.checked_sub(clickhouse_keeper_count) {
+                Some(0) => return Ok(EnsureMultiple::NotNeeded),
+                Some(n) => n,
+                None => {
+                    return Err(Error::Planner(anyhow!(
+                        "removing a ClickhouseKeeper zone not yet supported \
+                     (sled {sled_id} has {clickhouse_keeper_count}; \
+                     planner wants {desired_zone_count})"
+                    )));
+                }
+            };
+
+        for _ in 0..num_clickhouse_keepers_to_add {
+            let zone_id = self.rng.zone_rng.next();
+            let underlay_ip = self.sled_alloc_ip(sled_id)?;
+            let pool_name =
+                self.sled_select_zpool(sled_id, ZoneKind::ClickhouseKeeper)?;
+            let port = omicron_common::address::CLICKHOUSE_KEEPER_TCP_PORT;
+            let address = SocketAddrV6::new(underlay_ip, port, 0, 0);
+            let zone_type = BlueprintZoneType::ClickhouseKeeper(
+                blueprint_zone_type::ClickhouseKeeper {
+                    address,
+                    dataset: OmicronZoneDataset {
+                        pool_name: pool_name.clone(),
+                    },
+                },
+            );
+            let filesystem_pool = pool_name;
+
+            let zone = BlueprintZoneConfig {
+                disposition: BlueprintZoneDisposition::InService,
+                id: zone_id,
+                underlay_address: underlay_ip,
+                filesystem_pool: Some(filesystem_pool),
+                zone_type,
+            };
+            self.sled_add_zone(sled_id, zone)?;
+        }
+
+        Ok(EnsureMultiple::Changed {
+            added: num_clickhouse_keepers_to_add,
+            removed: 0,
+        })
     }
 
     pub fn sled_promote_internal_ntp_to_boundary_ntp(

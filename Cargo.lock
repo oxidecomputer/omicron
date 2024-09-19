@@ -5594,6 +5594,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "chrono",
+ "clickhouse-admin-types",
  "const_format",
  "db-macros",
  "diesel",

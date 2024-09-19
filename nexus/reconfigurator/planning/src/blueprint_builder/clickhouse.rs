@@ -22,7 +22,7 @@ use thiserror::Error;
 // Will be removed once the planner starts using this code
 // See: https://github.com/oxidecomputer/omicron/issues/6577
 #[allow(unused)]
-struct ClickhouseZonesThatShouldBeRunning {
+pub struct ClickhouseZonesThatShouldBeRunning {
     keepers: BTreeSet<OmicronZoneUuid>,
     servers: BTreeSet<OmicronZoneUuid>,
 }
@@ -64,7 +64,6 @@ impl From<&BTreeMap<SledUuid, BlueprintZonesConfig>>
 #[allow(unused)]
 pub struct ClickhouseAllocator {
     log: Logger,
-    active_clickhouse_zones: ClickhouseZonesThatShouldBeRunning,
     parent_config: ClickhouseClusterConfig,
     // The latest clickhouse cluster membership from inventory
     inventory: Option<ClickhouseKeeperClusterMembership>,
@@ -77,10 +76,6 @@ pub struct ClickhouseAllocator {
 #[allow(unused)]
 #[derive(Debug, Error)]
 pub enum KeeperAllocationError {
-    #[error("a clickhouse cluster configuration has not been created")]
-    NoConfig,
-    #[error("failed to retrieve clickhouse keeper membership from inventory")]
-    NoInventory,
     #[error("cannot add more than one keeper at a time: {added_keepers:?}")]
     BadMembershipChange { added_keepers: BTreeSet<KeeperId> },
 }
@@ -91,13 +86,11 @@ pub enum KeeperAllocationError {
 impl ClickhouseAllocator {
     pub fn new(
         log: Logger,
-        zones_by_sled_id: &BTreeMap<SledUuid, BlueprintZonesConfig>,
         clickhouse_cluster_config: ClickhouseClusterConfig,
         inventory: Option<ClickhouseKeeperClusterMembership>,
     ) -> ClickhouseAllocator {
         ClickhouseAllocator {
             log,
-            active_clickhouse_zones: zones_by_sled_id.into(),
             parent_config: clickhouse_cluster_config,
             inventory,
         }
@@ -107,6 +100,7 @@ impl ClickhouseAllocator {
     /// on the parent blueprint and inventory
     pub fn plan(
         &self,
+        active_clickhouse_zones: &ClickhouseZonesThatShouldBeRunning,
     ) -> Result<ClickhouseClusterConfig, KeeperAllocationError> {
         let mut new_config = self.parent_config.clone();
 
@@ -122,10 +116,10 @@ impl ClickhouseAllocator {
 
         // First, remove the clickhouse servers that are no longer in service
         new_config.servers.retain(|zone_id, _| {
-            self.active_clickhouse_zones.servers.contains(zone_id)
+            active_clickhouse_zones.servers.contains(zone_id)
         });
         // Next, add any new clickhouse servers
-        for zone_id in &self.active_clickhouse_zones.servers {
+        for zone_id in &active_clickhouse_zones.servers {
             if !new_config.servers.contains_key(zone_id) {
                 // Allocate a new `ServerId` and map it to the server zone
                 new_config.max_used_server_id += 1.into();
@@ -219,7 +213,7 @@ impl ClickhouseAllocator {
 
             // Let's ensure that this zone has not been expunged yet. If it has that means
             // that adding the keeper will never succeed.
-            if !self.active_clickhouse_zones.keepers.contains(added_zone_id) {
+            if !active_clickhouse_zones.keepers.contains(added_zone_id) {
                 // The zone has been expunged, so we must remove it from our configuration.
                 new_config.keepers.remove(added_zone_id);
 
@@ -245,7 +239,7 @@ impl ClickhouseAllocator {
         // We remove first, because the zones are already gone and therefore
         // don't help our quorum.
         for (zone_id, _) in &self.parent_config.keepers {
-            if !self.active_clickhouse_zones.keepers.contains(&zone_id) {
+            if !active_clickhouse_zones.keepers.contains(&zone_id) {
                 // Remove the keeper for the first expunged zone we see.
                 // Remember, we only do one keeper membership change at time.
                 new_config.keepers.remove(zone_id);
@@ -254,7 +248,7 @@ impl ClickhouseAllocator {
         }
 
         // Do we need to add any nodes to in service zones that don't have them
-        for zone_id in &self.active_clickhouse_zones.keepers {
+        for zone_id in &active_clickhouse_zones.keepers {
             if !new_config.keepers.contains_key(zone_id) {
                 // Allocate a new `KeeperId` and map it to the server zone
                 new_config.max_used_keeper_id += 1.into();
@@ -267,6 +261,10 @@ impl ClickhouseAllocator {
 
         // We possibly added or removed clickhouse servers, but not keepers.
         bump_gen_if_necessary(new_config)
+    }
+
+    pub fn parent_config(&self) -> &ClickhouseClusterConfig {
+        &self.parent_config
     }
 }
 
@@ -363,13 +361,12 @@ pub mod test {
 
         let mut allocator = ClickhouseAllocator {
             log: logctx.log.clone(),
-            active_clickhouse_zones,
             parent_config: parent_config.clone(),
             inventory,
         };
 
         // Our clickhouse cluster config should not have changed
-        let new_config = allocator.plan().unwrap();
+        let new_config = allocator.plan(&active_clickhouse_zones).unwrap();
 
         // Note that we cannot directly check equality here and
         // in a bunch of the test cases below, because we bump the
@@ -380,7 +377,7 @@ pub mod test {
 
         // Running again without changing the inventory should be idempotent
         allocator.parent_config = new_config;
-        let new_config = allocator.plan().unwrap();
+        let new_config = allocator.plan(&active_clickhouse_zones).unwrap();
         assert_eq!(new_config, allocator.parent_config);
 
         logctx.cleanup_successful();
@@ -412,13 +409,12 @@ pub mod test {
         // allocator should allocate one more keeper.
         let mut allocator = ClickhouseAllocator {
             log: logctx.log.clone(),
-            active_clickhouse_zones,
             parent_config: parent_config.clone(),
             inventory,
         };
 
         // Did our new config change as we expect?
-        let new_config = allocator.plan().unwrap();
+        let new_config = allocator.plan(&active_clickhouse_zones).unwrap();
         assert_eq!(new_config.generation, Generation::from_u32(2));
         assert_eq!(new_config.generation, parent_config.generation.next());
         assert_eq!(new_config.max_used_keeper_id, 4.into());
@@ -440,14 +436,14 @@ pub mod test {
         // itself does not modify  the allocator and a new one is created by the
         // `BlueprintBuilder` on each planning round.
         allocator.parent_config = new_config;
-        let new_config = allocator.plan().unwrap();
+        let new_config = allocator.plan(&active_clickhouse_zones).unwrap();
         assert_eq!(new_config, allocator.parent_config);
 
         // Now let's update our inventory to reflect the new keeper. This should
         // trigger the planner to add a 5th keeper.
         allocator.inventory.as_mut().unwrap().raft_config.insert(4.into());
         allocator.inventory.as_mut().unwrap().leader_committed_log_index += 1;
-        let new_config = allocator.plan().unwrap();
+        let new_config = allocator.plan(&active_clickhouse_zones).unwrap();
         assert_eq!(new_config.generation, Generation::from_u32(3));
         assert_eq!(
             new_config.generation,
@@ -473,7 +469,7 @@ pub mod test {
         // inventory raft config. We should end up with the same config.
         allocator.parent_config = new_config;
         allocator.inventory.as_mut().unwrap().leader_committed_log_index += 1;
-        let new_config = allocator.plan().unwrap();
+        let new_config = allocator.plan(&active_clickhouse_zones).unwrap();
         assert!(!new_config.needs_generation_bump(&allocator.parent_config));
 
         // Now let's modify the inventory to reflect that the 5th keeper node
@@ -483,7 +479,7 @@ pub mod test {
         // our keeper zones have a keeper that is part of the cluster.
         allocator.inventory.as_mut().unwrap().raft_config.insert(5.into());
         allocator.inventory.as_mut().unwrap().leader_committed_log_index += 1;
-        let new_config = allocator.plan().unwrap();
+        let new_config = allocator.plan(&active_clickhouse_zones).unwrap();
         assert!(!new_config.needs_generation_bump(&allocator.parent_config));
 
         logctx.cleanup_successful();
@@ -497,7 +493,7 @@ pub mod test {
         let (n_keeper_zones, n_server_zones, n_keepers, n_servers) =
             (5, 2, 5, 2);
 
-        let (active_clickhouse_zones, parent_config) = initial_config(
+        let (mut active_clickhouse_zones, parent_config) = initial_config(
             n_keeper_zones,
             n_server_zones,
             n_keepers,
@@ -512,23 +508,22 @@ pub mod test {
 
         let mut allocator = ClickhouseAllocator {
             log: logctx.log.clone(),
-            active_clickhouse_zones,
             parent_config: parent_config.clone(),
             inventory,
         };
 
         // Our clickhouse cluster config should not have changed
         // We have 5 keepers and 5 zones and all of them are in the inventory
-        let new_config = allocator.plan().unwrap();
+        let new_config = allocator.plan(&active_clickhouse_zones).unwrap();
         assert!(!new_config.needs_generation_bump(&parent_config));
 
         // Now expunge 2 of the 5 keeper zones by removing them from the
         // in-service zones
-        allocator.active_clickhouse_zones.keepers.pop_first();
-        allocator.active_clickhouse_zones.keepers.pop_first();
+        active_clickhouse_zones.keepers.pop_first();
+        active_clickhouse_zones.keepers.pop_first();
 
         // Running the planner should remove one of the keepers from the new config
-        let new_config = allocator.plan().unwrap();
+        let new_config = allocator.plan(&active_clickhouse_zones).unwrap();
         assert_eq!(new_config.generation, Generation::from_u32(2));
         assert_eq!(
             new_config.generation,
@@ -554,14 +549,14 @@ pub mod test {
         // since the inventory hasn't reflected the change
         allocator.parent_config = new_config;
         allocator.inventory.as_mut().unwrap().leader_committed_log_index += 1;
-        let new_config = allocator.plan().unwrap();
+        let new_config = allocator.plan(&active_clickhouse_zones).unwrap();
         assert!(!new_config.needs_generation_bump(&allocator.parent_config));
 
         // Reflecting the new config in inventory should remove another keeper
         allocator.inventory.as_mut().unwrap().raft_config =
             new_config.keepers.values().cloned().collect();
         allocator.inventory.as_mut().unwrap().leader_committed_log_index += 1;
-        let new_config = allocator.plan().unwrap();
+        let new_config = allocator.plan(&active_clickhouse_zones).unwrap();
 
         assert_eq!(new_config.generation, Generation::from_u32(3));
         assert_eq!(
@@ -588,7 +583,7 @@ pub mod test {
         // change, because the inventory doesn't reflect the removed keeper
         allocator.parent_config = new_config;
         allocator.inventory.as_mut().unwrap().leader_committed_log_index += 1;
-        let new_config = allocator.plan().unwrap();
+        let new_config = allocator.plan(&&active_clickhouse_zones).unwrap();
         assert!(!new_config.needs_generation_bump(&allocator.parent_config));
 
         // Reflecting the keeper removal in inventory should also result in no
@@ -597,7 +592,7 @@ pub mod test {
             new_config.keepers.values().cloned().collect();
         allocator.inventory.as_mut().unwrap().leader_committed_log_index += 1;
         allocator.parent_config = new_config;
-        let new_config = allocator.plan().unwrap();
+        let new_config = allocator.plan(&active_clickhouse_zones).unwrap();
         assert!(!new_config.needs_generation_bump(&allocator.parent_config));
 
         logctx.cleanup_successful();
@@ -612,7 +607,7 @@ pub mod test {
         let (n_keeper_zones, n_server_zones, n_keepers, n_servers) =
             (5, 2, 4, 2);
 
-        let (active_clickhouse_zones, parent_config) = initial_config(
+        let (mut active_clickhouse_zones, parent_config) = initial_config(
             n_keeper_zones,
             n_server_zones,
             n_keepers,
@@ -627,14 +622,13 @@ pub mod test {
 
         let mut allocator = ClickhouseAllocator {
             log: logctx.log.clone(),
-            active_clickhouse_zones,
             parent_config,
             inventory,
         };
 
         // First run the planner to add a 5th keeper to our config
         assert_eq!(allocator.parent_config.keepers.len(), 4);
-        let new_config = allocator.plan().unwrap();
+        let new_config = allocator.plan(&active_clickhouse_zones).unwrap();
         assert_eq!(new_config.keepers.len(), 5);
 
         // Pick one of the keepers currently in our inventory, find the zone
@@ -654,7 +648,7 @@ pub mod test {
             .find(|(_, &keeper_id)| keeper_id == keeper_to_expunge)
             .map(|(zone_id, _)| *zone_id)
             .unwrap();
-        allocator.active_clickhouse_zones.keepers.remove(&zone_to_expunge);
+        active_clickhouse_zones.keepers.remove(&zone_to_expunge);
 
         // Bump the inventory commit index so we guarantee we perform the keeper
         // checks
@@ -666,7 +660,7 @@ pub mod test {
         // Run the plan. Our configuration should stay the same because we can
         // only add or remove one keeper node from the cluster at a time and we
         // are already in the process of adding a node.
-        let new_config = allocator.plan().unwrap();
+        let new_config = allocator.plan(&active_clickhouse_zones).unwrap();
         assert!(!new_config.needs_generation_bump(&allocator.parent_config));
 
         // Now we change the inventory to reflect the addition of the node to
@@ -675,7 +669,7 @@ pub mod test {
         allocator.parent_config = new_config;
         allocator.inventory.as_mut().unwrap().leader_committed_log_index += 1;
         allocator.inventory.as_mut().unwrap().raft_config.insert(5.into());
-        let new_config = allocator.plan().unwrap();
+        let new_config = allocator.plan(&active_clickhouse_zones).unwrap();
         assert_eq!(new_config.keepers.len(), 4);
 
         // Let's make sure that the right keeper was expunged.
@@ -694,8 +688,8 @@ pub mod test {
             .raft_config
             .remove(&keeper_to_expunge);
         let new_zone_id = OmicronZoneUuid::new_v4();
-        allocator.active_clickhouse_zones.keepers.insert(new_zone_id);
-        let new_config = allocator.plan().unwrap();
+        active_clickhouse_zones.keepers.insert(new_zone_id);
+        let new_config = allocator.plan(&active_clickhouse_zones).unwrap();
         assert_eq!(new_config.keepers.len(), 5);
         assert_eq!(*new_config.keepers.get(&new_zone_id).unwrap(), KeeperId(6));
         assert_eq!(new_config.max_used_keeper_id, 6.into());
@@ -712,7 +706,7 @@ pub mod test {
         let (n_keeper_zones, n_server_zones, n_keepers, n_servers) =
             (5, 2, 4, 2);
 
-        let (active_clickhouse_zones, parent_config) = initial_config(
+        let (mut active_clickhouse_zones, parent_config) = initial_config(
             n_keeper_zones,
             n_server_zones,
             n_keepers,
@@ -727,14 +721,13 @@ pub mod test {
 
         let mut allocator = ClickhouseAllocator {
             log: logctx.log.clone(),
-            active_clickhouse_zones,
             parent_config,
             inventory,
         };
 
         // First run the planner to add a 5th keeper to our config
         assert_eq!(allocator.parent_config.keepers.len(), 4);
-        let new_config = allocator.plan().unwrap();
+        let new_config = allocator.plan(&active_clickhouse_zones).unwrap();
         assert_eq!(new_config.keepers.len(), 5);
 
         // Find the zone for our new keeper and expunge it before it is
@@ -749,12 +742,12 @@ pub mod test {
             .map(|(zone_id, _)| *zone_id)
             .unwrap();
         allocator.parent_config = new_config;
-        allocator.active_clickhouse_zones.keepers.remove(&zone_to_expunge);
+        active_clickhouse_zones.keepers.remove(&zone_to_expunge);
 
         // Bump the inventory commit index so we guarantee we perform the keeper
         // checks
         allocator.inventory.as_mut().unwrap().leader_committed_log_index += 1;
-        let new_config = allocator.plan().unwrap();
+        let new_config = allocator.plan(&active_clickhouse_zones).unwrap();
         assert_eq!(new_config.keepers.len(), 4);
         assert!(!new_config.keepers.contains_key(&zone_to_expunge));
 
@@ -770,7 +763,7 @@ pub mod test {
         let (n_keeper_zones, n_server_zones, n_keepers, n_servers) =
             (3, 5, 3, 2);
 
-        let (active_clickhouse_zones, parent_config) = initial_config(
+        let (mut active_clickhouse_zones, parent_config) = initial_config(
             n_keeper_zones,
             n_server_zones,
             n_keepers,
@@ -785,7 +778,6 @@ pub mod test {
 
         let mut allocator = ClickhouseAllocator {
             log: logctx.log.clone(),
-            active_clickhouse_zones,
             parent_config,
             inventory,
         };
@@ -793,12 +785,12 @@ pub mod test {
         let zone_to_expunge =
             *allocator.parent_config.servers.keys().next().unwrap();
 
-        allocator.active_clickhouse_zones.servers.remove(&zone_to_expunge);
+        active_clickhouse_zones.servers.remove(&zone_to_expunge);
 
         // After running the planner we should see 4 servers:
         // Start with 2, expunge 1, add 3 to reach the number of zones we have.
         assert_eq!(allocator.parent_config.servers.len(), 2);
-        let new_config = allocator.plan().unwrap();
+        let new_config = allocator.plan(&active_clickhouse_zones).unwrap();
         assert_eq!(new_config.servers.len(), 4);
         assert_eq!(new_config.max_used_server_id, 5.into());
         assert_eq!(new_config.generation, Generation::from_u32(2));
@@ -810,11 +802,11 @@ pub mod test {
         // We can add a new keeper and server at the same time
         let new_keeper_zone = OmicronZoneUuid::new_v4();
         let new_server_id = OmicronZoneUuid::new_v4();
-        allocator.active_clickhouse_zones.keepers.insert(new_keeper_zone);
-        allocator.active_clickhouse_zones.servers.insert(new_server_id);
+        active_clickhouse_zones.keepers.insert(new_keeper_zone);
+        active_clickhouse_zones.servers.insert(new_server_id);
         allocator.parent_config = new_config;
         allocator.inventory.as_mut().unwrap().leader_committed_log_index += 1;
-        let new_config = allocator.plan().unwrap();
+        let new_config = allocator.plan(&active_clickhouse_zones).unwrap();
         assert_eq!(new_config.generation, Generation::from_u32(3));
         assert_eq!(new_config.max_used_server_id, 6.into());
         assert_eq!(new_config.max_used_keeper_id, 4.into());
@@ -850,7 +842,6 @@ pub mod test {
 
         let allocator = ClickhouseAllocator {
             log: logctx.log.clone(),
-            active_clickhouse_zones,
             parent_config,
             inventory,
         };
@@ -858,7 +849,7 @@ pub mod test {
         // We expect to get an error back. This can be used by higher level
         // software to trigger alerts, etc... In practice the `BlueprintBuilder`
         // should not change it's config when it receives an error.
-        assert!(allocator.plan().is_err());
+        assert!(allocator.plan(&active_clickhouse_zones).is_err());
 
         logctx.cleanup_successful();
     }
