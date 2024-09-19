@@ -69,7 +69,7 @@ pub enum ClickHouseDeployment {
 }
 
 /// Port numbers that a ClickHouse replica listens on.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug)]
 pub struct ClickHousePorts {
     http: u16,
     native: u16,
@@ -108,6 +108,7 @@ impl ClickHousePorts {
     // Assert that if the ports in self are non-zero, they match those in
     // `new_ports`. This is used to check that we recover the exact same ports
     // from a logfile that were specifically requested.
+    #[track_caller]
     fn assert_consistent(&self, new_ports: &ClickHousePorts) {
         assert!(
             self.http == 0 || self.http == new_ports.http,
