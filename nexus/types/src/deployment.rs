@@ -41,12 +41,14 @@ use uuid::Uuid;
 
 mod blueprint_diff;
 mod blueprint_display;
+mod clickhouse;
 pub mod execution;
 mod network_resources;
 mod planning_input;
 mod tri_map;
 mod zone_type;
 
+pub use clickhouse::ClickhouseClusterConfig;
 pub use network_resources::AddNetworkResourceError;
 pub use network_resources::OmicronZoneExternalFloatingAddr;
 pub use network_resources::OmicronZoneExternalFloatingIp;
@@ -196,7 +198,19 @@ impl Blueprint {
         &self,
         filter: BlueprintZoneFilter,
     ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)> {
-        self.blueprint_zones.iter().flat_map(move |(sled_id, z)| {
+        Blueprint::filtered_zones(&self.blueprint_zones, filter)
+    }
+
+    /// Iterate over the [`BlueprintZoneConfig`] instances that match the
+    /// provided filter, along with the associated sled id.
+    //
+    // This is a scoped function so that it can be used in the
+    // `BlueprintBuilder` during planning as well as in the `Blueprint`.
+    pub fn filtered_zones(
+        zones_by_sled_id: &BTreeMap<SledUuid, BlueprintZonesConfig>,
+        filter: BlueprintZoneFilter,
+    ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)> {
+        zones_by_sled_id.iter().flat_map(move |(sled_id, z)| {
             z.zones
                 .iter()
                 .filter(move |z| z.disposition.matches(filter))
@@ -233,18 +247,20 @@ impl Blueprint {
     pub fn diff_since_blueprint(&self, before: &Blueprint) -> BlueprintDiff {
         BlueprintDiff::new(
             DiffBeforeMetadata::Blueprint(Box::new(before.metadata())),
+            before.sled_state.clone(),
             before
                 .blueprint_zones
                 .iter()
                 .map(|(sled_id, zones)| (*sled_id, zones.clone().into()))
                 .collect(),
-            self.metadata(),
-            self.blueprint_zones.clone(),
             before
                 .blueprint_disks
                 .iter()
                 .map(|(sled_id, disks)| (*sled_id, disks.clone().into()))
                 .collect(),
+            self.metadata(),
+            self.sled_state.clone(),
+            self.blueprint_zones.clone(),
             self.blueprint_disks.clone(),
         )
     }
@@ -259,6 +275,14 @@ impl Blueprint {
     /// disposition, so it is assumed that all zones in the collection have the
     /// [`InService`](BlueprintZoneDisposition::InService) disposition.
     pub fn diff_since_collection(&self, before: &Collection) -> BlueprintDiff {
+        // We'll assume any sleds present in a collection were active; if they
+        // were decommissioned they wouldn't be present.
+        let before_state = before
+            .sled_agents
+            .keys()
+            .map(|sled_id| (*sled_id, SledState::Active))
+            .collect();
+
         let before_zones = before
             .omicron_zones
             .iter()
@@ -287,10 +311,12 @@ impl Blueprint {
 
         BlueprintDiff::new(
             DiffBeforeMetadata::Collection { id: before.id },
+            before_state,
             before_zones,
-            self.metadata(),
-            self.blueprint_zones.clone(),
             before_disks,
+            self.metadata(),
+            self.sled_state.clone(),
+            self.blueprint_zones.clone(),
             self.blueprint_disks.clone(),
         )
     }
@@ -437,6 +463,16 @@ impl<'a> fmt::Display for BlueprintDisplay<'a> {
                 disks.rows(BpDiffState::Unchanged).collect(),
             );
 
+            // Look up the sled state
+            let sled_state = self
+                .blueprint
+                .sled_state
+                .get(sled_id)
+                .map(|state| state.to_string())
+                .unwrap_or_else(|| {
+                    "blueprint error: unknown sled state".to_string()
+                });
+
             // Construct the zones subtable
             match self.blueprint.blueprint_zones.get(sled_id) {
                 Some(zones) => {
@@ -449,10 +485,13 @@ impl<'a> fmt::Display for BlueprintDisplay<'a> {
                     );
                     writeln!(
                         f,
-                        "\n  sled: {sled_id}\n\n{disks_table}\n\n{zones_tab}\n"
+                        "\n  sled: {sled_id} ({sled_state})\n\n{disks_table}\n\n{zones_tab}\n"
                     )?;
                 }
-                None => writeln!(f, "\n  sled: {sled_id}\n\n{disks_table}\n")?,
+                None => writeln!(
+                    f,
+                    "\n  sled: {sled_id} ({sled_state})\n\n{disks_table}\n"
+                )?,
             }
             seen_sleds.insert(sled_id);
         }
@@ -602,6 +641,7 @@ pub struct BlueprintZoneConfig {
 
     pub id: OmicronZoneUuid,
     pub underlay_address: Ipv6Addr,
+    /// zpool used for the zone's (transient) root filesystem
     pub filesystem_pool: Option<ZpoolName>,
     pub zone_type: BlueprintZoneType,
 }

@@ -39,15 +39,14 @@ use omicron_common::address::{
     get_sled_address, get_switch_zone_address, Ipv6Subnet, SLED_PREFIX,
 };
 use omicron_common::api::external::{ByteCount, ByteCountRangeError, Vni};
-use omicron_common::api::internal::nexus::{SledVmmState, VmmRuntimeState};
+use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_common::api::internal::shared::{
     HostPortConfig, RackNetworkConfig, ResolvedVpcFirewallRule,
     ResolvedVpcRouteSet, ResolvedVpcRouteState, SledIdentifiers,
     VirtualNetworkInterfaceHost,
 };
 use omicron_common::api::{
-    internal::nexus::DiskRuntimeState, internal::nexus::InstanceRuntimeState,
-    internal::nexus::UpdateArtifactId,
+    internal::nexus::DiskRuntimeState, internal::nexus::UpdateArtifactId,
 };
 use omicron_common::backoff::{
     retry_notify, retry_policy_internal_service_aggressive, BackoffError,
@@ -57,13 +56,13 @@ use omicron_common::disk::{
     OmicronPhysicalDisksConfig,
 };
 use omicron_ddm_admin_client::Client as DdmAdminClient;
-use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid};
+use omicron_uuid_kinds::{GenericUuid, PropolisUuid};
 use sled_agent_api::Zpool;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::EarlyNetworkConfig;
 use sled_agent_types::instance::{
-    InstanceExternalIpBody, InstanceHardware, InstanceMetadata,
-    VmmPutStateResponse, VmmStateRequested, VmmUnregisterResponse,
+    InstanceEnsureBody, InstanceExternalIpBody, VmmPutStateResponse,
+    VmmStateRequested, VmmUnregisterResponse,
 };
 use sled_agent_types::sled::{BaseboardId, StartSledAgentRequest};
 use sled_agent_types::time_sync::TimeSync;
@@ -78,7 +77,7 @@ use sled_storage::dataset::{CRYPT_DATASET, ZONE_DATASET};
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use std::collections::BTreeMap;
-use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6};
+use std::net::{Ipv6Addr, SocketAddrV6};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -981,29 +980,14 @@ impl SledAgent {
     /// Idempotently ensures that a given instance is registered with this sled,
     /// i.e., that it can be addressed by future calls to
     /// [`Self::instance_ensure_state`].
-    #[allow(clippy::too_many_arguments)]
     pub async fn instance_ensure_registered(
         &self,
-        instance_id: InstanceUuid,
         propolis_id: PropolisUuid,
-        hardware: InstanceHardware,
-        instance_runtime: InstanceRuntimeState,
-        vmm_runtime: VmmRuntimeState,
-        propolis_addr: SocketAddr,
-        metadata: InstanceMetadata,
+        instance: InstanceEnsureBody,
     ) -> Result<SledVmmState, Error> {
         self.inner
             .instances
-            .ensure_registered(
-                instance_id,
-                propolis_id,
-                hardware,
-                instance_runtime,
-                vmm_runtime,
-                propolis_addr,
-                self.sled_identifiers(),
-                metadata,
-            )
+            .ensure_registered(propolis_id, instance, self.sled_identifiers())
             .await
             .map_err(|e| Error::Instance(e))
     }

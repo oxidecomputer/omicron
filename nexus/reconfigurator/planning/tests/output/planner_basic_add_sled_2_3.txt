@@ -3,7 +3,7 @@ to:   blueprint 4171ad05-89dd-474b-846b-b007e4346366
 
  UNCHANGED SLEDS:
 
-  sled 41f45d9f-766e-4ca6-a881-61ee45c80f57:
+  sled 41f45d9f-766e-4ca6-a881-61ee45c80f57 (active):
 
     physical disks at generation 1:
     ----------------------------------------------------------------------
@@ -40,7 +40,7 @@ to:   blueprint 4171ad05-89dd-474b-846b-b007e4346366
     nexus          cc816cfe-3869-4dde-b596-397d41198628   in service    fd00:1122:3344:103::22
 
 
-  sled 43677374-8d2f-4deb-8a41-eeea506db8e0:
+  sled 43677374-8d2f-4deb-8a41-eeea506db8e0 (active):
 
     physical disks at generation 1:
     ----------------------------------------------------------------------
@@ -77,7 +77,7 @@ to:   blueprint 4171ad05-89dd-474b-846b-b007e4346366
     nexus          3eda924f-22a9-4f3e-9a1b-91d1c47601ab   in service    fd00:1122:3344:101::22
 
 
-  sled 590e3034-d946-4166-b0e5-2d0034197a07:
+  sled 590e3034-d946-4166-b0e5-2d0034197a07 (active):
 
     physical disks at generation 1:
     ----------------------------------------------------------------------
@@ -116,7 +116,7 @@ to:   blueprint 4171ad05-89dd-474b-846b-b007e4346366
 
  ADDED SLEDS:
 
-  sled b59ec570-2abb-4017-80ce-129d94e7a025:
+  sled b59ec570-2abb-4017-80ce-129d94e7a025 (active):
 
     physical disks at generation 1:
     ----------------------------------------------------------------------

@@ -152,74 +152,17 @@ impl<'a> BuilderExternalNetworking<'a> {
         // Check the planning input: there shouldn't be any external networking
         // resources in the database (the source of `input`) that we don't know
         // about from the parent blueprint.
-        for external_ip_entry in
-            input.network_resources().omicron_zone_external_ips()
-        {
-            // As above, ignore localhost (used by the test suite).
-            if external_ip_entry.ip.ip().is_loopback() {
-                continue;
-            }
-            if !external_ip_alloc.contains(&external_ip_entry.ip)? {
-                bail!(
-                    "planning input contains unexpected external IP \
-                     (IP not found in parent blueprint): {external_ip_entry:?}"
-                );
-            }
-        }
-        for nic_entry in input.network_resources().omicron_zone_nics() {
-            if !used_macs.contains(&nic_entry.nic.mac) {
-                bail!(
-                    "planning input contains unexpected NIC \
-                     (MAC not found in parent blueprint): {nic_entry:?}"
-                );
-            }
-            match nic_entry.nic.ip {
-                IpAddr::V4(ip) if NEXUS_OPTE_IPV4_SUBNET.contains(ip) => {
-                    if !existing_nexus_v4_ips.contains(&ip) {
-                        bail!(
-                            "planning input contains unexpected NIC \
-                             (IP not found in parent blueprint): {nic_entry:?}"
-                        );
-                    }
-                }
-                IpAddr::V4(ip) if NTP_OPTE_IPV4_SUBNET.contains(ip) => {
-                    if !existing_boundary_ntp_v4_ips.contains(&ip) {
-                        bail!(
-                            "planning input contains unexpected NIC \
-                             (IP not found in parent blueprint): {nic_entry:?}"
-                        );
-                    }
-                }
-                IpAddr::V4(ip) if DNS_OPTE_IPV4_SUBNET.contains(ip) => {
-                    // TODO check existing_dns_v4_ips, once it exists
-                }
-                IpAddr::V6(ip) if NEXUS_OPTE_IPV6_SUBNET.contains(ip) => {
-                    if !existing_nexus_v6_ips.contains(&ip) {
-                        bail!(
-                            "planning input contains unexpected NIC \
-                             (IP not found in parent blueprint): {nic_entry:?}"
-                        );
-                    }
-                }
-                IpAddr::V6(ip) if NTP_OPTE_IPV6_SUBNET.contains(ip) => {
-                    if !existing_boundary_ntp_v6_ips.contains(&ip) {
-                        bail!(
-                            "planning input contains unexpected NIC \
-                             (IP not found in parent blueprint): {nic_entry:?}"
-                        );
-                    }
-                }
-                IpAddr::V6(ip) if DNS_OPTE_IPV6_SUBNET.contains(ip) => {
-                    // TODO check existing_dns_v6_ips, once it exists
-                }
-                _ => {
-                    bail!(
-                        "planning input contains unexpected NIC \
-                         (IP not contained in known OPTE subnet): {nic_entry:?}"
-                    )
-                }
-            }
-        }
+        //
+        // Logically this could be the first thing we do in this function, but
+        // we have some tests that check error cases in the above block that
+        // would also fail these checks (so reordering the checks would require
+        // those tests to do more work to construct valid `input`s), and we
+        // never expect this to fail in practice, so there's no use in "failing
+        // fast".
+        ensure_input_records_appear_in_parent_blueprint(
+            parent_blueprint,
+            input,
+        )?;
 
         // TODO-performance Building these iterators as "walk through the list
         // and skip anything we've used already" is fine as long as we're
@@ -333,6 +276,142 @@ impl<'a> BuilderExternalNetworking<'a> {
     }
 }
 
+// Helper to validate that the system hasn't gone off the rails. There should
+// never be any external networking resources in the planning input (which is
+// derived from the contents of CRDB) that we don't know about from the parent
+// blueprint. It's possible a given planning iteration could see such a state
+// there have been intermediate changes made by other Nexus instances; e.g.,
+//
+// 1. Nexus A generates a `PlanningInput` by reading from CRDB
+// 2. Nexus B executes on a target blueprint that removes IPs/NICs from
+//    CRDB
+// 3. Nexus B regenerates a new blueprint and prunes the zone(s) associated
+//    with the IPs/NICs from step 2
+// 4. Nexus B makes this new blueprint the target
+// 5. Nexus A attempts to run planning with its `PlanningInput` from step 1 but
+//    the target blueprint from step 4; this will fail the following checks
+//    because the input contains records that were removed in step 3
+//
+// We do not need to handle this class of error; it's a transient failure that
+// will clear itself up when Nexus A repeats its planning loop from the top and
+// generates a new `PlanningInput`.
+//
+// There may still be database records corresponding to _expunged_ zones, but
+// that's okay: it just means we haven't yet realized a blueprint where those
+// zones are expunged. And those should should still be in the blueprint (not
+// pruned) until their database records are cleaned up.
+//
+// It's also possible that there may be networking records in the database
+// assigned to zones that have been expunged, and our parent blueprint uses
+// those same records for new zones. This is also fine and expected, and is a
+// similar case to the previous paragraph: a zone with networking resources was
+// expunged, the database doesn't realize it yet, but can still move forward and
+// make planning decisions that reuse those resources for new zones.
+fn ensure_input_records_appear_in_parent_blueprint(
+    parent_blueprint: &Blueprint,
+    input: &PlanningInput,
+) -> anyhow::Result<()> {
+    let mut all_macs: HashSet<MacAddr> = HashSet::new();
+    let mut all_nexus_nic_ips: HashSet<IpAddr> = HashSet::new();
+    let mut all_boundary_ntp_nic_ips: HashSet<IpAddr> = HashSet::new();
+    let mut all_external_ips: HashSet<OmicronZoneExternalIp> = HashSet::new();
+
+    // Unlike the construction of the external IP allocator and existing IPs
+    // constructed above in `BuilderExternalNetworking::new()`, we do not
+    // check for duplicates here: we could very well see reuse of IPs
+    // between expunged zones or between expunged -> running zones.
+    for (_, z) in parent_blueprint.all_omicron_zones(BlueprintZoneFilter::All) {
+        let zone_type = &z.zone_type;
+        match zone_type {
+            BlueprintZoneType::BoundaryNtp(ntp) => {
+                all_boundary_ntp_nic_ips.insert(ntp.nic.ip);
+            }
+            BlueprintZoneType::Nexus(nexus) => {
+                all_nexus_nic_ips.insert(nexus.nic.ip);
+            }
+            // TODO: external-dns
+            _ => (),
+        }
+
+        if let Some((external_ip, nic)) = zone_type.external_networking() {
+            // As above, ignore localhost (used by the test suite).
+            if !external_ip.ip().is_loopback() {
+                all_external_ips.insert(external_ip);
+            }
+            all_macs.insert(nic.mac);
+        }
+    }
+    for external_ip_entry in
+        input.network_resources().omicron_zone_external_ips()
+    {
+        // As above, ignore localhost (used by the test suite).
+        if external_ip_entry.ip.ip().is_loopback() {
+            continue;
+        }
+        if !all_external_ips.contains(&external_ip_entry.ip) {
+            bail!(
+                "planning input contains unexpected external IP \
+                 (IP not found in parent blueprint): {external_ip_entry:?}"
+            );
+        }
+    }
+    for nic_entry in input.network_resources().omicron_zone_nics() {
+        if !all_macs.contains(&nic_entry.nic.mac) {
+            bail!(
+                "planning input contains unexpected NIC \
+                 (MAC not found in parent blueprint): {nic_entry:?}"
+            );
+        }
+        match nic_entry.nic.ip {
+            IpAddr::V4(ip) if NEXUS_OPTE_IPV4_SUBNET.contains(ip) => {
+                if !all_nexus_nic_ips.contains(&ip.into()) {
+                    bail!(
+                        "planning input contains unexpected NIC \
+                         (IP not found in parent blueprint): {nic_entry:?}"
+                    );
+                }
+            }
+            IpAddr::V4(ip) if NTP_OPTE_IPV4_SUBNET.contains(ip) => {
+                if !all_boundary_ntp_nic_ips.contains(&ip.into()) {
+                    bail!(
+                        "planning input contains unexpected NIC \
+                         (IP not found in parent blueprint): {nic_entry:?}"
+                    );
+                }
+            }
+            IpAddr::V4(ip) if DNS_OPTE_IPV4_SUBNET.contains(ip) => {
+                // TODO check all_dns_nic_ips, once it exists
+            }
+            IpAddr::V6(ip) if NEXUS_OPTE_IPV6_SUBNET.contains(ip) => {
+                if !all_nexus_nic_ips.contains(&ip.into()) {
+                    bail!(
+                        "planning input contains unexpected NIC \
+                         (IP not found in parent blueprint): {nic_entry:?}"
+                    );
+                }
+            }
+            IpAddr::V6(ip) if NTP_OPTE_IPV6_SUBNET.contains(ip) => {
+                if !all_boundary_ntp_nic_ips.contains(&ip.into()) {
+                    bail!(
+                        "planning input contains unexpected NIC \
+                         (IP not found in parent blueprint): {nic_entry:?}"
+                    );
+                }
+            }
+            IpAddr::V6(ip) if DNS_OPTE_IPV6_SUBNET.contains(ip) => {
+                // TODO check all_dns_nic_ips, once it exists
+            }
+            _ => {
+                bail!(
+                    "planning input contains unexpected NIC \
+                    (IP not contained in known OPTE subnet): {nic_entry:?}"
+                )
+            }
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy)]
 pub(super) struct ExternalNetworkingChoice {
     pub(super) external_ip: IpAddr,
@@ -440,6 +519,7 @@ impl<'a> ExternalIpAllocator<'a> {
     // Returns `Ok(true)` if we contain this IP exactly, `Ok(false)` if we do
     // not contain this IP, and an error if we contain a matching IP address but
     // a mismatched exclusiveness / SNAT-ness.
+    #[cfg(test)]
     fn contains(
         &self,
         external_ip: &OmicronZoneExternalIp,

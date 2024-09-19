@@ -723,6 +723,7 @@ pub(crate) enum ZoneExpungeReason {
 #[cfg(test)]
 mod test {
     use super::Planner;
+    use crate::blueprint_builder::test::assert_planning_makes_no_changes;
     use crate::blueprint_builder::test::verify_blueprint;
     use crate::blueprint_builder::test::DEFAULT_N_SLEDS;
     use crate::example::example;
@@ -931,24 +932,12 @@ mod test {
         verify_blueprint(&blueprint5);
 
         // Check that there are no more steps.
-        let blueprint6 = Planner::new_based_on(
-            logctx.log.clone(),
+        assert_planning_makes_no_changes(
+            &logctx.log,
             &blueprint5,
             &input,
-            "test: no-op?",
-            &collection,
-        )
-        .expect("failed to create planner")
-        .with_rng_seed((TEST_NAME, "bp6"))
-        .plan()
-        .expect("failed to plan");
-
-        let diff = blueprint6.diff_since_blueprint(&blueprint5);
-        println!("5 -> 6 (expect no changes):\n{}", diff.display());
-        assert_eq!(diff.sleds_added.len(), 0);
-        assert_eq!(diff.sleds_removed.len(), 0);
-        assert_eq!(diff.sleds_modified.len(), 0);
-        verify_blueprint(&blueprint6);
+            TEST_NAME,
+        );
 
         logctx.cleanup_successful();
     }
@@ -1062,7 +1051,6 @@ mod test {
         assert_eq!(diff.sleds_modified.len(), 1);
         let changed_sled_id = diff.sleds_modified.first().unwrap();
 
-        // TODO-cleanup use `TypedUuid` everywhere
         assert_eq!(*changed_sled_id, sled_id);
         assert_eq!(diff.zones.removed.len(), 0);
         assert_eq!(diff.zones.modified.len(), 0);
@@ -1076,6 +1064,14 @@ mod test {
                 panic!("unexpectedly added a non-Nexus zone: {zone:?}");
             }
         }
+
+        // Test a no-op planning iteration.
+        assert_planning_makes_no_changes(
+            &logctx.log,
+            &blueprint2,
+            &input,
+            TEST_NAME,
+        );
 
         logctx.cleanup_successful();
     }
@@ -1151,6 +1147,14 @@ mod test {
         }
         assert_eq!(total_new_nexus_zones, 11);
 
+        // Test a no-op planning iteration.
+        assert_planning_makes_no_changes(
+            &logctx.log,
+            &blueprint2,
+            &input,
+            TEST_NAME,
+        );
+
         logctx.cleanup_successful();
     }
 
@@ -1196,13 +1200,16 @@ mod test {
         );
 
         // Try again with a reasonable number.
-        let mut builder = input.into_builder();
-        builder.policy_mut().target_internal_dns_zone_count =
-            MAX_INTERNAL_DNS_REDUNDANCY;
+        let input = {
+            let mut builder = input.into_builder();
+            builder.policy_mut().target_internal_dns_zone_count =
+                MAX_INTERNAL_DNS_REDUNDANCY;
+            builder.build()
+        };
         let blueprint2 = Planner::new_based_on(
             logctx.log.clone(),
             &blueprint1,
-            &builder.build(),
+            &input,
             "test_blueprint2",
             &collection,
         )
@@ -1245,6 +1252,14 @@ mod test {
             }
         }
         assert_eq!(total_new_zones, 2);
+
+        // Test a no-op planning iteration.
+        assert_planning_makes_no_changes(
+            &logctx.log,
+            &blueprint2,
+            &input,
+            TEST_NAME,
+        );
 
         logctx.cleanup_successful();
     }
@@ -1297,7 +1312,6 @@ mod test {
         // the service IP pool. This will force reuse of the IP that was
         // allocated to the expunged Nexus zone.
         let mut builder = input.into_builder();
-        builder.update_network_resources_from_blueprint(&blueprint2).unwrap();
         assert_eq!(builder.policy_mut().service_ip_pool_ranges.len(), 1);
         builder.policy_mut().target_nexus_zone_count =
             builder.policy_mut().service_ip_pool_ranges[0]
@@ -1337,6 +1351,14 @@ mod test {
         println!(
             "zone {} reused external IP {} from expunged zone {}",
             new_zone.id, expunged_ip, zone.id
+        );
+
+        // Test a no-op planning iteration.
+        assert_planning_makes_no_changes(
+            &logctx.log,
+            &blueprint3,
+            &input,
+            TEST_NAME,
         );
 
         logctx.cleanup_successful();
@@ -1422,6 +1444,14 @@ mod test {
             NEW_IN_SERVICE_DISKS
         );
         assert!(!diff.zones.removed.contains_key(sled_id));
+
+        // Test a no-op planning iteration.
+        assert_planning_makes_no_changes(
+            &logctx.log,
+            &blueprint2,
+            &input,
+            TEST_NAME,
+        );
 
         logctx.cleanup_successful();
     }
@@ -1511,6 +1541,14 @@ mod test {
             modified_zone.disposition(),
             BlueprintZoneDisposition::Expunged,
             "Should have expunged this zone"
+        );
+
+        // Test a no-op planning iteration.
+        assert_planning_makes_no_changes(
+            &logctx.log,
+            &blueprint2,
+            &input,
+            TEST_NAME,
         );
 
         logctx.cleanup_successful();
@@ -1627,6 +1665,14 @@ mod test {
             );
         }
 
+        // Test a no-op planning iteration.
+        assert_planning_makes_no_changes(
+            &logctx.log,
+            &blueprint2,
+            &input,
+            TEST_NAME,
+        );
+
         logctx.cleanup_successful();
     }
 
@@ -1696,10 +1742,6 @@ mod test {
             *sled_id
         };
         println!("1 -> 2: decommissioned {decommissioned_sled_id}");
-
-        // Because we marked zones as expunged, we need to update the networking
-        // config in the planning input.
-        builder.update_network_resources_from_blueprint(&blueprint1).unwrap();
 
         // Now run the planner with a high number of target Nexus zones. The
         // number (9) is chosen such that:
@@ -1861,6 +1903,7 @@ mod test {
         expunged_zones.generation = expunged_zones.generation.next();
 
         blueprint2a.blueprint_zones.remove(&decommissioned_sled_id);
+        blueprint2a.sled_state.remove(&decommissioned_sled_id);
 
         blueprint2a.external_dns_version =
             blueprint2a.external_dns_version.next();
@@ -1877,6 +1920,7 @@ mod test {
         logctx.cleanup_successful();
     }
 
+    #[track_caller]
     fn assert_all_zones_expunged(
         diff: &BlueprintDiff,
         expunged_sled_id: SledUuid,
@@ -1974,7 +2018,6 @@ mod test {
 
         // Remove the now-decommissioned sled from the planning input.
         let mut builder = input.into_builder();
-        builder.update_network_resources_from_blueprint(&blueprint2).unwrap();
         builder.sleds_mut().remove(&expunged_sled_id);
         let input = builder.build();
 
@@ -2003,6 +2046,14 @@ mod test {
         assert_eq!(diff.sleds_removed.len(), 0);
         assert_eq!(diff.sleds_modified.len(), 0);
         assert_eq!(diff.sleds_unchanged.len(), DEFAULT_N_SLEDS);
+
+        // Test a no-op planning iteration.
+        assert_planning_makes_no_changes(
+            &logctx.log,
+            &blueprint3,
+            &input,
+            TEST_NAME,
+        );
 
         logctx.cleanup_successful();
     }

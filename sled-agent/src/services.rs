@@ -955,6 +955,26 @@ impl ServiceManager {
         self.inner.sled_mode
     }
 
+    /// Returns the sled's identifier
+    fn sled_id(&self) -> Uuid {
+        self.inner
+            .sled_info
+            .get()
+            .expect("sled agent not started")
+            .config
+            .sled_id
+    }
+
+    /// Returns the metrics queue for the sled agent if it is running.
+    fn maybe_metrics_queue(&self) -> Option<&MetricsRequestQueue> {
+        self.inner.sled_info.get().map(|info| &info.metrics_queue)
+    }
+
+    /// Returns the metrics queue for the sled agent.
+    fn metrics_queue(&self) -> &MetricsRequestQueue {
+        &self.maybe_metrics_queue().expect("Sled agent should have started")
+    }
+
     // Advertise the /64 prefix of `address`, unless we already have.
     //
     // This method only blocks long enough to check our HashSet of
@@ -3107,9 +3127,7 @@ impl ServiceManager {
         // point. The only exception is the switch zone, during bootstrapping
         // but before we've either run RSS or unlocked the rack. In both those
         // cases, we have a `StartSledAgentRequest`, and so a metrics queue.
-        if let Some(queue) =
-            self.inner.sled_info.get().map(|sa| &sa.metrics_queue)
-        {
+        if let Some(queue) = self.maybe_metrics_queue() {
             if !queue.track_zone_links(&running_zone).await {
                 error!(
                     self.inner.log,
@@ -3486,9 +3504,7 @@ impl ServiceManager {
         };
         // Ensure that the sled agent's metrics task is not tracking the zone's
         // VNICs or OPTE ports.
-        if let Some(queue) =
-            self.inner.sled_info.get().map(|sa| &sa.metrics_queue)
-        {
+        if let Some(queue) = self.maybe_metrics_queue() {
             queue.untrack_zone_links(&zone.runtime).await;
         }
         debug!(
@@ -3714,17 +3730,8 @@ impl ServiceManager {
         Ok(())
     }
 
-    pub fn boottime_rewrite(&self) {
-        if self
-            .inner
-            .time_synced
-            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-            .is_err()
-        {
-            // Already done.
-            return;
-        }
-
+    /// Adjust the system boot time to the latest boot time of all zones.
+    fn boottime_rewrite(&self) {
         // Call out to the 'tmpx' utility program which will rewrite the wtmpx
         // and utmpx databases in every zone, including the global zone, to
         // reflect the adjusted system boot time.
@@ -3756,7 +3763,7 @@ impl ServiceManager {
 
         if skip_timesync {
             info!(self.inner.log, "Configured to skip timesync checks");
-            self.boottime_rewrite();
+            self.on_time_sync().await;
             return Ok(TimeSync {
                 sync: true,
                 ref_id: 0,
@@ -3811,7 +3818,7 @@ impl ServiceManager {
                         && correction.abs() <= 0.05;
 
                     if sync {
-                        self.boottime_rewrite();
+                        self.on_time_sync().await;
                     }
 
                     Ok(TimeSync {
@@ -3830,6 +3837,39 @@ impl ServiceManager {
                 error!(self.inner.log, "chronyc command failed: {}", e);
                 Err(Error::NtpZoneNotReady)
             }
+        }
+    }
+
+    /// Check if the synchronization state of the sled has shifted to true and
+    /// if so, execute the any out-of-band actions that need to be taken.
+    ///
+    /// This function only executes the out-of-band actions once, once the
+    /// synchronization state has shifted to true.
+    async fn on_time_sync(&self) {
+        if self
+            .inner
+            .time_synced
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_ok()
+        {
+            debug!(self.inner.log, "Time is now synchronized");
+            // We only want to rewrite the boot time once, so we do it here
+            // when we know the time is synchronized.
+            self.boottime_rewrite();
+
+            // We expect to have a metrics queue by this point, so
+            // we can safely send a message on it to say the sled has
+            // been synchronized.
+            let queue = self.metrics_queue();
+            if !queue.notify_time_synced_sled(self.sled_id()).await {
+                error!(
+                    self.inner.log,
+                    "Failed to notify metrics queue of sled \
+                     time synchronization, metrics may not be produced."
+                );
+            }
+        } else {
+            debug!(self.inner.log, "Time was already synchronized");
         }
     }
 
@@ -4870,7 +4910,7 @@ mod test {
 
         // Also send a message to the metrics task that the VNIC has been
         // deleted.
-        let queue = &mgr.inner.sled_info.get().unwrap().metrics_queue;
+        let queue = mgr.metrics_queue();
         for zone in mgr.inner.zones.lock().await.values() {
             queue.untrack_zone_links(&zone.runtime).await;
         }
@@ -5050,8 +5090,19 @@ mod test {
         assert_eq!(found.zones.len(), 1);
         assert_eq!(found.zones[0].id, id);
 
-        // Check that we received a message about the zone's VNIC.
-        let message = tokio::time::timeout(
+        // First check that we received the synced sled notification
+        let synced_message = tokio::time::timeout(
+            LINK_NOTIFICATION_TIMEOUT,
+            metrics_rx.recv(),
+        ).await.expect("Should have received a message about the sled being synced within the timeout")
+            .expect("Should have received a message about the sled being synced");
+        assert_eq!(
+            synced_message,
+            metrics::Message::TimeSynced { sled_id: mgr.sled_id() },
+        );
+
+        // Then, check that we received a message about the zone's VNIC.
+        let vnic_message = tokio::time::timeout(
             LINK_NOTIFICATION_TIMEOUT,
             metrics_rx.recv(),
         )
@@ -5062,7 +5113,7 @@ mod test {
             .expect("Should have received a message about the zone's VNIC");
         let zone_name = format!("oxz_ntp_{}", id);
         assert_eq!(
-            message,
+            vnic_message,
             metrics::Message::TrackVnic {
                 zone_name,
                 name: "oxControlService0".into()
@@ -5192,10 +5243,21 @@ mod test {
         assert_eq!(found.zones.len(), 1);
         assert_eq!(found.zones[0].id, id);
 
+        // First, we will get a message about the sled being synced.
+        let synced_message = tokio::time::timeout(
+            LINK_NOTIFICATION_TIMEOUT,
+            metrics_rx.recv(),
+        ).await.expect("Should have received a message about the sled being synced within the timeout")
+            .expect("Should have received a message about the sled being synced");
+        assert_eq!(
+            synced_message,
+            metrics::Message::TimeSynced { sled_id: mgr.sled_id() }
+        );
+
         // In this case, the manager creates the zone once, and then "ensuring"
         // it a second time is a no-op. So we simply expect the same message
         // sequence as starting a zone for the first time.
-        let message = tokio::time::timeout(
+        let vnic_message = tokio::time::timeout(
             LINK_NOTIFICATION_TIMEOUT,
             metrics_rx.recv(),
         )
@@ -5206,7 +5268,7 @@ mod test {
             .expect("Should have received a message about the zone's VNIC");
         let zone_name = format!("oxz_ntp_{}", id);
         assert_eq!(
-            message,
+            vnic_message,
             metrics::Message::TrackVnic {
                 zone_name,
                 name: "oxControlService0".into()
@@ -5250,21 +5312,33 @@ mod test {
             String::from(test_config.config_dir.path().as_str()),
         )
         .await;
+
+        let sled_id = mgr.sled_id();
         drop_service_manager(mgr).await;
+
+        // First, we will get a message about the sled being synced.
+        let synced_message = tokio::time::timeout(
+            LINK_NOTIFICATION_TIMEOUT,
+            metrics_rx.recv(),
+        ).await.expect("Should have received a message about the sled being synced within the timeout")
+            .expect("Should have received a message about the sled being synced");
+        assert_eq!(synced_message, metrics::Message::TimeSynced { sled_id });
 
         // Check that we received a message about the zone's VNIC. Since the
         // manager is being dropped, it should also send a message about the
         // VNIC being deleted.
         let zone_name = format!("oxz_ntp_{}", id);
-        for expected_message in [
+        for expected_vnic_message in [
             metrics::Message::TrackVnic {
                 zone_name,
                 name: "oxControlService0".into(),
             },
             metrics::Message::UntrackVnic { name: "oxControlService0".into() },
         ] {
-            println!("Expecting message from manager: {expected_message:#?}");
-            let message = tokio::time::timeout(
+            println!(
+                "Expecting message from manager: {expected_vnic_message:#?}"
+            );
+            let vnic_message = tokio::time::timeout(
                 LINK_NOTIFICATION_TIMEOUT,
                 metrics_rx.recv(),
             )
@@ -5273,7 +5347,7 @@ mod test {
                     "Should have received a message about the zone's VNIC within the timeout"
                 )
                 .expect("Should have received a message about the zone's VNIC");
-            assert_eq!(message, expected_message,);
+            assert_eq!(vnic_message, expected_vnic_message,);
         }
         // Note that the manager has been dropped, so we should get
         // disconnected, not empty.

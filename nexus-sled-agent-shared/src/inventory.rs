@@ -145,11 +145,10 @@ pub struct OmicronZoneConfig {
     pub id: OmicronZoneUuid,
     pub underlay_address: Ipv6Addr,
 
-    /// The pool on which we'll place this zone's filesystem.
+    /// The pool on which we'll place this zone's root filesystem.
     ///
-    /// Note that this is transient -- the sled agent is permitted to
-    /// destroy the zone's dataset on this pool each time the zone is
-    /// initialized.
+    /// Note that the root filesystem is transient -- the sled agent is
+    /// permitted to destroy this dataset each time the zone is initialized.
     pub filesystem_pool: Option<ZpoolName>,
     pub zone_type: OmicronZoneType,
 }

@@ -323,10 +323,10 @@ cookie = "0.18"
 criterion = { version = "0.5.1", features = [ "async_tokio" ] }
 crossbeam = "0.8"
 crossterm = { version = "0.28.1", features = ["event-stream"] }
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "b026dd82779eb2c2f87164e30feb7dd7f4b6e677"}
-crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "b026dd82779eb2c2f87164e30feb7dd7f4b6e677"}
-crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "b026dd82779eb2c2f87164e30feb7dd7f4b6e677"}
-crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "b026dd82779eb2c2f87164e30feb7dd7f4b6e677"}
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "a551f245e8a26f52098382903ccf0a982b7c54fa"}
+crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "a551f245e8a26f52098382903ccf0a982b7c54fa"}
+crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "a551f245e8a26f52098382903ccf0a982b7c54fa"}
+crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "a551f245e8a26f52098382903ccf0a982b7c54fa"}
 csv = "1.3.0"
 curve25519-dalek = "4"
 datatest-stable = "0.2.9"
@@ -365,8 +365,8 @@ gateway-client = { path = "clients/gateway-client" }
 # is "fine", because SP/MGS communication maintains forwards and backwards
 # compatibility, but will mean that faux-mgs might be missing new
 # functionality.)
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "319e7b92db69792ab8efa4c68554ad0cf83adf93", default-features = false, features = ["std"] }
-gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "319e7b92db69792ab8efa4c68554ad0cf83adf93" }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "ca9f20e32acade9d15fb8d70405a6ef406c719cc", default-features = false, features = ["std"] }
+gateway-sp-comms = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "ca9f20e32acade9d15fb8d70405a6ef406c719cc" }
 gateway-test-utils = { path = "gateway-test-utils" }
 gateway-types = { path = "gateway-types" }
 gethostname = "0.5.0"
@@ -383,6 +383,7 @@ hickory-server = "0.24.1"
 highway = "1.2.0"
 hkdf = "0.12.4"
 http = "0.2.12"
+httpmock = "0.8.0-alpha.1"
 httptest = "0.15.5"
 hubtools = { git = "https://github.com/oxidecomputer/hubtools.git", branch = "main" }
 humantime = "2.1.0"
@@ -504,8 +505,8 @@ proc-macro2 = "1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "24a74d0c76b6a63961ecef76acb1516b6e66c5c9" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "5267be82e10d851a64196a8148893691b0b9f8ad" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "5267be82e10d851a64196a8148893691b0b9f8ad" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "a9c5fdac442fa6fd5a65e413ea874fe3c62c3fd9" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "a9c5fdac442fa6fd5a65e413ea874fe3c62c3fd9" }
 proptest = "1.5.0"
 qorb = { git = "https://github.com/oxidecomputer/qorb", branch = "master" }
 quote = "1.0"
@@ -528,7 +529,7 @@ rustfmt-wrapper = "0.2"
 rustls = "0.22.2"
 rustls-pemfile = "2.1.3"
 rustyline = "14.0.0"
-samael = { version = "0.0.15", features = ["xmlsec"] }
+samael = { version = "0.0.17", features = ["xmlsec"] }
 schemars = "0.8.21"
 secrecy = "0.8.0"
 semver = { version = "1.0.23", features = ["std", "serde"] }
