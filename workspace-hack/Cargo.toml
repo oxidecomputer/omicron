@@ -53,7 +53,7 @@ futures-io = { version = "0.3.30" }
 futures-sink = { version = "0.3.30" }
 futures-task = { version = "0.3.30", default-features = false, features = ["std"] }
 futures-util = { version = "0.3.30", features = ["channel", "io", "sink"] }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "ca9f20e32acade9d15fb8d70405a6ef406c719cc", features = ["std"] }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "9bbac475dcaac88286c07a20b6bd3e94fc81d7f0", features = ["std"] }
 generic-array = { version = "0.14.7", default-features = false, features = ["more_lengths", "zeroize"] }
 getrandom = { version = "0.2.14", default-features = false, features = ["js", "rdrand", "std"] }
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
@@ -163,7 +163,7 @@ futures-io = { version = "0.3.30" }
 futures-sink = { version = "0.3.30" }
 futures-task = { version = "0.3.30", default-features = false, features = ["std"] }
 futures-util = { version = "0.3.30", features = ["channel", "io", "sink"] }
-gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "ca9f20e32acade9d15fb8d70405a6ef406c719cc", features = ["std"] }
+gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "9bbac475dcaac88286c07a20b6bd3e94fc81d7f0", features = ["std"] }
 generic-array = { version = "0.14.7", default-features = false, features = ["more_lengths", "zeroize"] }
 getrandom = { version = "0.2.14", default-features = false, features = ["js", "rdrand", "std"] }
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
