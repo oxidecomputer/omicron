@@ -1350,6 +1350,9 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "slog",
+ "slog-async",
+ "slog-term",
 ]
 
 [[package]]
@@ -6299,6 +6302,7 @@ dependencies = [
  "clap",
  "clickhouse-admin-api",
  "clickhouse-admin-types",
+ "clickward",
  "dropshot 0.10.2-dev",
  "expectorate",
  "http 0.2.12",
@@ -6310,6 +6314,8 @@ dependencies = [
  "omicron-workspace-hack",
  "openapi-lint",
  "openapiv3",
+ "oximeter-db",
+ "oximeter-test-utils",
  "schemars",
  "serde",
  "serde_json",
@@ -7608,10 +7614,14 @@ dependencies = [
 name = "oximeter-test-utils"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "chrono",
+ "clickward",
+ "omicron-test-utils",
  "omicron-workspace-hack",
  "oximeter-macro-impl",
  "oximeter-types",
+ "slog",
  "uuid",
 ]
 
