@@ -2926,11 +2926,18 @@ async fn cmd_db_instance_info(
         r#gen,
     } = instance.runtime();
     println!("  state: {nexus_state:?}");
-    println!("  generation: {}", r#gen.0);
+    println!("  at generation: {}", r#gen.0);
     println!("  last updated: {time_updated:?}");
     println!("  active VMM ID: {propolis_id:?}");
     println!("  migration target VMM ID: {dst_propolis_id:?}");
     println!("  migration ID: {migration_id:?}");
+    println!("updater lock:");
+    if let Some(id) = instance.updater_id {
+        println!("  state: LOCKED by {id}")
+    } else {
+        println!("  state: UNLOCKED");
+    }
+    println!("  at generation: {}", instance.updater_gen.0);
 
     if let Some(ref vmm) = active_vmm {
         println!("\nactive VMM: {vmm:#?}");
