@@ -2905,17 +2905,54 @@ async fn cmd_db_instance_info(
     // code as well. Unfortunately, we can't just destructure the struct here to
     // make sure this code breaks, since the `identity` field isn't public.
     // So...just don't forget to do that, I  guess.
-    println!("\ninstance: {}", instance.id());
-    println!("  name: {}", instance.name());
-    println!("  description: {}", instance.description());
-    println!("  created: {}", instance.time_created());
-    println!("  last modified: {}", instance.time_modified());
-    println!("configuration:");
-    println!("  vCPUs: {}", instance.ncpus.0 .0);
-    println!("  memory: {}", instance.memory.0);
-    println!("  hostname: {}", instance.hostname);
-    println!("  auto-restart policy: {:?}", instance.auto_restart_policy);
-    println!("runtime state:");
+    const ID: &'static str = "ID";
+    const NAME: &'static str = "name";
+    const DESCRIPTION: &'static str = "description";
+    const CREATED: &'static str = "created at";
+    const VCPUS: &'static str = "vCPUs";
+    const MEMORY: &'static str = "memory";
+    const HOSTNAME: &'static str = "hostname";
+    const AUTO_RESTART: &'static str = "auto-restart policy";
+    const STATE: &'static str = "state";
+    const LAST_MODIFIED: &'static str = "last modified at";
+    const LAST_UPDATED: &'static str = "last updated at";
+    const ACTIVE_VMM: &'static str = "active VMM ID";
+    const TARGET_VMM: &'static str = "target VMM ID";
+    const MIGRATION_ID: &'static str = "migration ID";
+    const UPDATER_LOCK: &'static str = "updater lock";
+    const ACTIVE_VMM_RECORD: &'static str = "active VMM record";
+    const MIGRATION_RECORD: &'static str = "migration record";
+    const TARGET_VMM_RECORD: &'static str = "target VMM record";
+    const WIDTH: usize = 1 + // breathing room
+        crate::helpers::const_max_len(&[
+        ID,
+        NAME,
+        DESCRIPTION,
+        CREATED,
+        VCPUS,
+        MEMORY,
+        HOSTNAME,
+        AUTO_RESTART,
+        STATE,
+        LAST_UPDATED,
+        LAST_MODIFIED,
+        ACTIVE_VMM,
+        TARGET_VMM,
+        MIGRATION_ID,
+        UPDATER_LOCK,
+    ]);
+    println!("\nINSTANCE\n");
+    println!("{ID:>WIDTH$}: {}", instance.id());
+    println!("{NAME:>WIDTH$}: {}", instance.name());
+    println!("{DESCRIPTION:>WIDTH$}: {}", instance.description());
+    println!("{CREATED:>WIDTH$}: {}", instance.time_created());
+    println!("{LAST_MODIFIED:>WIDTH$}: {}", instance.time_modified());
+    println!("\nCONFIGURATION\n");
+    println!("{VCPUS:>WIDTH$}: {}", instance.ncpus.0 .0);
+    println!("{MEMORY:>WIDTH$}: {}", instance.memory.0);
+    println!("{HOSTNAME:>WIDTH$}: {}", instance.hostname);
+    println!("{AUTO_RESTART:>WIDTH$}: {:?}", instance.auto_restart_policy);
+    println!("\nRUNTIME STATE\n");
     let InstanceRuntimeState {
         time_updated,
         propolis_id,
@@ -2924,30 +2961,50 @@ async fn cmd_db_instance_info(
         nexus_state,
         r#gen,
     } = instance.runtime();
-    println!("  state: {nexus_state:?}");
-    println!("  at generation: {}", r#gen.0);
-    println!("  last updated: {time_updated:?}");
-    println!("  active VMM ID: {propolis_id:?}");
-    println!("  migration target VMM ID: {dst_propolis_id:?}");
-    println!("  migration ID: {migration_id:?}");
-    println!("updater lock:");
+    println!("{STATE:>WIDTH$}: {nexus_state:?}");
+    println!(
+        "{LAST_UPDATED:>WIDTH$}: {time_updated:?} (generation {})",
+        r#gen.0
+    );
+    println!("{ACTIVE_VMM:>WIDTH$}: {propolis_id:?}");
+    println!("{TARGET_VMM:>WIDTH$}: {dst_propolis_id:?}");
+    println!("{MIGRATION_ID:>WIDTH$}: {migration_id:?}");
+    print!("{UPDATER_LOCK:>WIDTH$}: ");
     if let Some(id) = instance.updater_id {
-        println!("  state: LOCKED by {id}")
+        print!("LOCKED by {id}")
     } else {
-        println!("  state: UNLOCKED");
+        print!("UNLOCKED");
     }
-    println!("  at generation: {}", instance.updater_gen.0);
+    println!(" at generation: {}", instance.updater_gen.0);
 
     if let Some(ref vmm) = active_vmm {
-        println!("\nactive VMM: {vmm:#?}");
-    }
-
-    if let Some(ref vmm) = target_vmm {
-        println!("\nmigration target VMM: {vmm:#?}");
+        println!(
+            "\n{ACTIVE_VMM_RECORD:>WIDTH$}:\n{}",
+            textwrap::indent(
+                &format!("{vmm:#?}"),
+                &" ".repeat(WIDTH - ACTIVE_VMM_RECORD.len() + 4)
+            )
+        );
     }
 
     if let Some(ref migration) = migration {
-        println!("\ncurrent active migration: {migration:#?}");
+        println!(
+            "\n{MIGRATION_RECORD:>WIDTH$}:\n{}",
+            textwrap::indent(
+                &format!("{migration:#?}"),
+                &" ".repeat(WIDTH - MIGRATION_RECORD.len() + 4)
+            )
+        );
+    }
+
+    if let Some(ref vmm) = target_vmm {
+        println!(
+            "\n{TARGET_VMM_RECORD:>WIDTH$}:\n{}",
+            textwrap::indent(
+                &format!("{vmm:#?}"),
+                &" ".repeat(WIDTH - TARGET_VMM_RECORD.len() + 4)
+            )
+        );
     }
 
     // Check for weirdness.
