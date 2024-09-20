@@ -276,7 +276,7 @@ impl InstanceAutoRestart {
     /// The default policy used when an instance does not override the
     /// reincarnation policy.
     pub const DEFAULT_POLICY: InstanceAutoRestartPolicy =
-        InstanceAutoRestartPolicy::Never;
+        InstanceAutoRestartPolicy::BestEffort;
 
     /// Returns `true` if `self` permits an instance to reincarnate given the
     /// provided `state`.
