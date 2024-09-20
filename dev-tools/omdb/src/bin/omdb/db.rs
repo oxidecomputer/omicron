@@ -2970,7 +2970,7 @@ async fn cmd_db_instance_info(
         MIGRATION_RECORD,
         TARGET_VMM_RECORD,
     ]);
-    println!("\nINSTANCE");
+    println!("\n{:=<80}", "== INSTANCE ");
     println!("    {ID:>WIDTH$}: {}", instance.id());
     println!("    {PROJECT_ID:>WIDTH$}: {}", instance.project_id);
     println!("    {NAME:>WIDTH$}: {}", instance.name());
@@ -2981,12 +2981,12 @@ async fn cmd_db_instance_info(
         println!("/!\\ {DELETED:>WIDTH$}: {deleted}");
     }
 
-    println!("\nCONFIGURATION");
+    println!("\n{:=<80}", "== CONFIGURATION ");
     println!("    {VCPUS:>WIDTH$}: {}", instance.ncpus.0 .0);
     println!("    {MEMORY:>WIDTH$}: {}", instance.memory.0);
     println!("    {HOSTNAME:>WIDTH$}: {}", instance.hostname);
     println!("    {AUTO_RESTART:>WIDTH$}: {:?}", instance.auto_restart_policy);
-    println!("\nRUNTIME STATE");
+    println!("\n{:=<80}", "== RUNTIME STATE ");
     let InstanceRuntimeState {
         time_updated,
         propolis_id,
@@ -3132,7 +3132,7 @@ async fn cmd_db_instance_info(
             .with(tabled::settings::Padding::new(4, 1, 0, 0))
             .to_string();
 
-        println!("\nMIGRATION HISTORY\n\n{table}");
+        println!("\n{:=<80}\n\n{table}", "== MIGRATION HISTORY");
     }
 
     Ok(())
