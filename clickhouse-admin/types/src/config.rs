@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::{KeeperId, ServerId, OXIMETER_CLUSTER};
+use anyhow::{bail, Error};
 use camino::Utf8PathBuf;
 use omicron_common::address::{
     CLICKHOUSE_HTTP_PORT, CLICKHOUSE_INTERSERVER_PORT,
@@ -15,8 +16,8 @@ use schemars::{
     JsonSchema,
 };
 use serde::{Deserialize, Serialize};
-use std::fmt::Display;
 use std::net::{Ipv4Addr, Ipv6Addr};
+use std::{fmt::Display, str::FromStr};
 
 // Used for schemars to be able to be used with camino:
 // See https://github.com/camino-rs/camino/issues/91#issuecomment-2027908513
@@ -310,6 +311,27 @@ pub enum ClickhouseHost {
     Ipv6(Ipv6Addr),
     Ipv4(Ipv4Addr),
     DomainName(String),
+}
+
+impl FromStr for ClickhouseHost {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if let Ok(ipv6) = s.parse() {
+            Ok(ClickhouseHost::Ipv6(ipv6))
+        } else if let Ok(ipv4) = s.parse() {
+            Ok(ClickhouseHost::Ipv4(ipv4))
+        // Validating whether a string is a valid domain or
+        // not is a complex process that isn't necessary for
+        // this function. In the case of ClickhouseHost, we wil
+        // only be dealing with our in internal DNS service
+        // which provides names that always end with `.internal`.
+        } else if s.ends_with(".internal") {
+            Ok(ClickhouseHost::DomainName(s.to_string()))
+        } else {
+            bail!("{s} is not a valid address or domain name")
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, JsonSchema, Serialize, Deserialize)]

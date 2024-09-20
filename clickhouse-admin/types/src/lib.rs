@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Context, Error, Result};
 use atomicwrites::AtomicFile;
 use camino::Utf8PathBuf;
 use derive_more::{Add, AddAssign, Display, From};
@@ -331,6 +331,18 @@ enum KeeperServerType {
     Learner,
 }
 
+impl FromStr for KeeperServerType {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<KeeperServerType, Self::Err> {
+        match s {
+            "participant" => Ok(KeeperServerType::Participant),
+            "learner" => Ok(KeeperServerType::Learner),
+            _ => bail!("{s} is not a valid keeper server type"),
+        }
+    }
+}
+
 #[derive(
     Debug,
     Clone,
@@ -405,7 +417,6 @@ impl RaftConfig {
                 // Test this error
                 bail!("Nothing")
             };
-
             if s != "server" {
                 bail!(
                     "Output is not as expected. \
@@ -413,7 +424,6 @@ impl RaftConfig {
                 Expected server identifier: 'server.{{SERVER_ID}}'"
                 )
             };
-
             let Some(id) = split_server.next() else {
                 // Test this error
                 bail!("no ID")
@@ -423,7 +433,6 @@ impl RaftConfig {
             let Some(info) = split.next() else {
                 bail!("Returned None while attempting to retrieve server info");
             };
-
             let mut split_info = info.split(";");
 
             // Retrieve port
@@ -431,12 +440,10 @@ impl RaftConfig {
                 // Test this error
                 bail!("no address")
             };
-
             let Some(port) = address.split(':').last() else {
                 // Test this error
                 bail!("A port could not be extracted from {address}")
             };
-
             let u16_port = match u16::from_str(port) {
                 Ok(v) => v,
                 Err(e) => {
@@ -448,25 +455,40 @@ impl RaftConfig {
             let p = format!(":{}", port);
             let Some(host) = address.split(&p).next() else {
                 // Test this error
-                bail!("A host could not be extracted from {address}")
+                bail!("A host could not be extracted from {address}. Missing port {port}")
             };
+            // The ouput we get from running the clickhouse keeper-client
+            // command does not add square brackets to an IPv6 address
+            // that cointains a port:
+            // server.1=::1:21001;participant;1
+            // Because of this, we can parse `host` directly into an Ipv6Addr
+            let h = ClickhouseHost::from_str(host)?;
 
-            let mut h = ClickhouseHost::DomainName(host.to_string());
-            if let Ok(ipv6) = host.parse() {
-                h = ClickhouseHost::Ipv6(ipv6)
-            } else if let Ok(ipv4) = host.parse() {
-                h = ClickhouseHost::Ipv4(ipv4)
+            // Retrieve server_type
+            let Some(server_type) = split_info.next() else {
+                // Test this error
+                bail!("no server type")
             };
+            let s_type = KeeperServerType::from_str(server_type)?;
 
-            // TODO parse server type and priority
+            // Retrieve priority
+            let Some(priority) = split_info.next() else {
+                // Test this error
+                bail!("no priority")
+            };
+            let u16_priority = match u16::from_str(priority) {
+                Ok(v) => v,
+                Err(e) => {
+                    bail!("Unable to convert value {priority:?} into u16: {e}")
+                }
+            };
 
             keeper_servers.insert(KeeperServerInfo {
                 server_id: KeeperId(u64::from_str(id).unwrap()),
                 host: h,
                 raft_port: u16_port,
-                // TODO
-                server_type: KeeperServerType::Participant,
-                priority: 1,
+                server_type: s_type,
+                priority: u16_priority,
             });
         }
 
@@ -708,7 +730,7 @@ mod tests {
     fn test_full_raft_config_parse_success() {
         let log = log();
         let data =
-            "server.1=::1:21001;participant;1\nserver.2=oxide.com:21002;participant;1\nserver.3=127.0.0.1:21003;participant;1\n"
+            "server.1=::1:21001;participant;1\nserver.2=oxide.internal:21002;participant;1\nserver.3=127.0.0.1:21003;learner;0\n"
             .as_bytes();
         let raft_config = RaftConfig::parse(&log, data).unwrap();
 
@@ -721,7 +743,7 @@ mod tests {
         },));
         assert!(raft_config.keeper_servers.contains(&KeeperServerInfo {
             server_id: KeeperId(2),
-            host: ClickhouseHost::DomainName("oxide.com".to_string()),
+            host: ClickhouseHost::DomainName("oxide.internal".to_string()),
             raft_port: 21002,
             server_type: KeeperServerType::Participant,
             priority: 1,
@@ -730,8 +752,8 @@ mod tests {
             server_id: KeeperId(3),
             host: ClickhouseHost::Ipv4("127.0.0.1".parse().unwrap()),
             raft_port: 21003,
-            server_type: KeeperServerType::Participant,
-            priority: 1,
+            server_type: KeeperServerType::Learner,
+            priority: 0,
         },));
     }
 
