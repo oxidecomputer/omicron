@@ -71,6 +71,7 @@ impl<'a> Planner<'a> {
             &log,
             parent_blueprint,
             input,
+            inventory,
             creator,
         )?;
         Ok(Planner { log, input, blueprint, inventory })
