@@ -379,7 +379,7 @@ impl DataStore {
                             if collection.runtime_state.propolis_id.is_some() {
                                 return Err(
                                     Error::invalid_request(
-                                        "cannot attach disk: instance is not \
+                                        "cannot detach disk: instance is not \
                                         fully stopped"
                                     )
                                 );

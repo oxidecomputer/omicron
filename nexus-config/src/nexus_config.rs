@@ -14,6 +14,7 @@ use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::NEXUS_TECHPORT_EXTERNAL_PORT;
 use omicron_common::address::RACK_PREFIX;
 use omicron_common::api::internal::shared::SwitchLocation;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
@@ -150,7 +151,7 @@ pub enum InternalDns {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
 pub struct DeploymentConfig {
     /// Uuid of the Nexus instance
-    pub id: Uuid,
+    pub id: OmicronZoneUuid,
     /// Uuid of the Rack where Nexus is executing.
     pub rack_id: Uuid,
     /// Port on which the "techport external" dropshot server should listen.

@@ -28,8 +28,11 @@
     },
     "id": {
       "description": "Uuid of the Nexus instance",
-      "type": "string",
-      "format": "uuid"
+      "allOf": [
+        {
+          "$ref": "#/definitions/TypedUuidForOmicronZoneKind"
+        }
+      ]
     },
     "internal_dns": {
       "description": "Describes how Nexus should find internal DNS servers for bootstrapping.",
@@ -150,6 +153,10 @@
           "$ref": "#/definitions/Ipv6Net"
         }
       }
+    },
+    "TypedUuidForOmicronZoneKind": {
+      "type": "string",
+      "format": "uuid"
     }
   }
 }

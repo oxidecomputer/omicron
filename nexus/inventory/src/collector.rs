@@ -384,6 +384,7 @@ mod test {
     use omicron_common::api::external::Generation;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_sled_agent::sim;
+    use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use std::fmt::Write;
     use std::net::Ipv6Addr;
@@ -532,7 +533,7 @@ mod test {
     async fn sim_sled_agent(
         log: slog::Logger,
         sled_id: Uuid,
-        zone_id: Uuid,
+        zone_id: OmicronZoneUuid,
     ) -> sim::Server {
         // Start a simulated sled agent.
         let config = sim::Config::for_testing(
