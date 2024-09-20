@@ -62,6 +62,7 @@ use nexus_db_model::InvPhysicalDisk;
 use nexus_db_model::IpAttachState;
 use nexus_db_model::IpKind;
 use nexus_db_model::Migration;
+use nexus_db_model::MigrationState;
 use nexus_db_model::NetworkInterface;
 use nexus_db_model::NetworkInterfaceKind;
 use nexus_db_model::PhysicalDisk;
@@ -2873,7 +2874,7 @@ async fn cmd_db_sleds(
 async fn cmd_db_instance_info(
     _: &OpContext,
     datastore: &DataStore,
-    _: &DbFetchOptions,
+    fetch_opts: &DbFetchOptions,
     args: &InstanceInfoArgs,
 ) -> Result<(), anyhow::Error> {
     use nexus_db_model::schema::{
@@ -3095,6 +3096,35 @@ async fn cmd_db_instance_info(
         print_vmm(datastore, TARGET_VMM_RECORD, "target", id).await;
     }
 
+    let past_migrations = migration_dsl::migration
+        .filter(migration_dsl::instance_id.eq(id.into_untyped_uuid()))
+        .limit(i64::from(u32::from(fetch_opts.fetch_limit)))
+        .order_by(migration_dsl::time_created)
+        // This is just to prove to CRDB that it can use the
+        // migrations-by-time-created index, it doesn't actually do anything.
+        .filter(migration_dsl::time_created.gt(chrono::DateTime::UNIX_EPOCH))
+        .select(Migration::as_select())
+        .load_async(&*datastore.pool_connection_for_tests().await?)
+        .await
+        .context("listing migrations")?;
+
+    check_limit(&past_migrations, fetch_opts.fetch_limit, || {
+        "listing migrations"
+    });
+
+    if !past_migrations.is_empty() {
+        let rows =
+            past_migrations.into_iter().map(|m| SingleInstanceMigrationRow {
+                created: m.time_created,
+                vmms: MigrationVmms::from(&m),
+            });
+
+        let table = tabled::Table::new(rows)
+            .with(tabled::settings::Style::empty())
+            .with(tabled::settings::Padding::new(4, 1, 0, 0))
+            .to_string();
+
+        println!("\nMIGRATION HISTORY\n\n{table}");
     }
 
     Ok(())
@@ -5169,8 +5199,6 @@ async fn cmd_db_migrations_list(
     fetch_opts: &DbFetchOptions,
     args: &MigrationsListArgs,
 ) -> Result<(), anyhow::Error> {
-    use db::model::Migration;
-    use db::model::MigrationState;
     use db::schema::migration::dsl;
     use omicron_common::api::internal::nexus;
 
@@ -5220,34 +5248,6 @@ async fn cmd_db_migrations_list(
 
     check_limit(&migrations, fetch_opts.fetch_limit, || "listing migrations");
 
-    #[derive(Tabled)]
-    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-    struct Vmms {
-        src_state: MigrationState,
-        tgt_state: MigrationState,
-        src_vmm: Uuid,
-        tgt_vmm: Uuid,
-    }
-
-    impl From<&'_ Migration> for Vmms {
-        fn from(
-            &Migration {
-                source_propolis_id,
-                target_propolis_id,
-                source_state,
-                target_state,
-                ..
-            }: &Migration,
-        ) -> Self {
-            Self {
-                src_state: source_state,
-                tgt_state: target_state,
-                src_vmm: source_propolis_id,
-                tgt_vmm: target_propolis_id,
-            }
-        }
-    }
-
     let table = if args.verbose {
         // If verbose mode is enabled, include the migration's ID as well as the
         // source and target updated timestamps.
@@ -5258,7 +5258,7 @@ async fn cmd_db_migrations_list(
             id: Uuid,
             instance: Uuid,
             #[tabled(inline)]
-            vmms: Vmms,
+            vmms: MigrationVmms,
             #[tabled(display_with = "display_option_blank")]
             src_updated: Option<chrono::DateTime<Utc>>,
             #[tabled(display_with = "display_option_blank")]
@@ -5270,7 +5270,7 @@ async fn cmd_db_migrations_list(
         let rows = migrations.into_iter().map(|m| VerboseMigrationRow {
             id: m.id,
             instance: m.instance_id,
-            vmms: Vmms::from(&m),
+            vmms: MigrationVmms::from(&m),
             src_updated: m.time_source_updated,
             tgt_updated: m.time_target_updated,
             created: m.time_created,
@@ -5284,16 +5284,9 @@ async fn cmd_db_migrations_list(
     } else if args.instance_ids.len() == 1 {
         // If only the migrations for a single instance are shown, we omit the
         // instance ID row for conciseness sake.
-        #[derive(Tabled)]
-        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-        struct SingleInstanceMigrationRow {
-            created: chrono::DateTime<Utc>,
-            #[tabled(inline)]
-            vmms: Vmms,
-        }
         let rows = migrations.into_iter().map(|m| SingleInstanceMigrationRow {
             created: m.time_created,
-            vmms: Vmms::from(&m),
+            vmms: MigrationVmms::from(&m),
         });
 
         tabled::Table::new(rows)
@@ -5309,13 +5302,13 @@ async fn cmd_db_migrations_list(
             created: chrono::DateTime<Utc>,
             instance: Uuid,
             #[tabled(inline)]
-            vmms: Vmms,
+            vmms: MigrationVmms,
         }
 
         let rows = migrations.into_iter().map(|m| MigrationRow {
             created: m.time_created,
             instance: m.instance_id,
-            vmms: Vmms::from(&m),
+            vmms: MigrationVmms::from(&m),
         });
 
         tabled::Table::new(rows)
@@ -5327,6 +5320,41 @@ async fn cmd_db_migrations_list(
     println!("{table}");
 
     Ok(())
+}
+
+#[derive(Tabled)]
+#[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+struct SingleInstanceMigrationRow {
+    created: chrono::DateTime<Utc>,
+    #[tabled(inline)]
+    vmms: MigrationVmms,
+}
+#[derive(Tabled)]
+#[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+struct MigrationVmms {
+    src_state: MigrationState,
+    tgt_state: MigrationState,
+    src_vmm: Uuid,
+    tgt_vmm: Uuid,
+}
+
+impl From<&'_ Migration> for MigrationVmms {
+    fn from(
+        &Migration {
+            source_propolis_id,
+            target_propolis_id,
+            source_state,
+            target_state,
+            ..
+        }: &Migration,
+    ) -> Self {
+        Self {
+            src_state: source_state,
+            tgt_state: target_state,
+            src_vmm: source_propolis_id,
+            tgt_vmm: target_propolis_id,
+        }
+    }
 }
 
 // Display an empty cell for an Option<T> if it's None.
