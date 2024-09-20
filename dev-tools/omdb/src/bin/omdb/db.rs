@@ -2943,22 +2943,12 @@ async fn cmd_db_instance_info(
         MIGRATION_ID,
         UPDATER_LOCK,
     ]);
-    let mut has_conditions = false;
 
     if instance.time_deleted().is_some() {
-        println!("(i) instance has been deleted");
-        has_conditions = true;
-    }
-    if instance.runtime_state.migration_id.is_some() {
-        println!("(i) instance is migrating");
-        has_conditions = true;
+        println!("\n (i) instance has been deleted");
     }
     if instance.updater_id.is_some() {
-        println!("(i) instance is being updated...");
-        has_conditions = true;
-    }
-    if has_conditions {
-        println!();
+        println!("\n (i) instance is being updated...");
     }
 
     println!("\nINSTANCE\n");
