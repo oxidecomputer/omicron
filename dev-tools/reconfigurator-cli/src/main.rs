@@ -12,6 +12,7 @@ use clap::ValueEnum;
 use clap::{Args, Parser, Subcommand};
 use dns_service_client::DnsDiff;
 use indexmap::IndexMap;
+use nexus_inventory::CollectionBuilder;
 use nexus_reconfigurator_execution::blueprint_external_dns_config;
 use nexus_reconfigurator_execution::blueprint_internal_dns_config;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
@@ -736,10 +737,17 @@ fn cmd_blueprint_edit(
     let blueprint = sim.blueprint_lookup(blueprint_id)?;
     let creator = args.creator.as_deref().unwrap_or("reconfigurator-cli");
     let planning_input = sim.planning_input(blueprint)?;
+    let latest_collection = sim
+        .collections
+        .iter()
+        .min_by_key(|(_, c)| c.time_started)
+        .map(|(_, c)| c.clone())
+        .unwrap_or_else(|| CollectionBuilder::new("sim").build());
     let mut builder = BlueprintBuilder::new_based_on(
         &sim.log,
         blueprint,
         &planning_input,
+        &latest_collection,
         creator,
     )
     .context("creating blueprint builder")?;
