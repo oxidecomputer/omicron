@@ -61,7 +61,7 @@ pub async fn shell() -> anyhow::Result<()> {
                 if query.is_empty() {
                     continue;
                 }
-                match conn.query(query, None).await {
+                match conn.query(query).await {
                     Ok(result) => print_query_result(result),
                     Err(e) => {
                         eprintln!(

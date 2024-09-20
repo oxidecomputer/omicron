@@ -12,7 +12,6 @@ use super::packets::{
     server::Progress,
 };
 use super::{
-    block::Block,
     io::packet::{client::Encoder, server::Decoder},
     packets::{
         client::{OXIMETER_HELLO, VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH},
@@ -127,22 +126,31 @@ impl Connection {
         }
     }
 
-    /// Cancel a running query, if one exists.
-    pub async fn cancel(&mut self) -> Result<(), Error> {
+    // Cancel a running query, if one exists.
+    async fn cancel(&mut self) -> Result<(), Error> {
         if self.outstanding_query {
             self.writer.send(ClientPacket::Cancel).await?;
-            // TODO(ben) await EOS packet anyway
+            // Await EOS, throwing everything else away except errors.
+            let res = loop {
+                match self.reader.next().await {
+                    Some(Ok(ServerPacket::EndOfStream)) => break Ok(()),
+                    Some(Ok(other_packet)) => {
+                        probes::unexpected__server__packet!(
+                            || other_packet.kind()
+                        );
+                    }
+                    Some(Err(e)) => break Err(e),
+                    None => break Err(Error::Disconnected),
+                };
+            };
             self.outstanding_query = false;
+            return res;
         }
         Ok(())
     }
 
     /// Send a SQL query, possibly with data.
-    pub async fn query(
-        &mut self,
-        query: &str,
-        _data: Option<Block>,
-    ) -> Result<QueryResult, Error> {
+    pub async fn query(&mut self, query: &str) -> Result<QueryResult, Error> {
         let mut query_result = QueryResult {
             id: Uuid::new_v4(),
             progress: Progress::default(),
@@ -203,24 +211,24 @@ impl Connection {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use crate::native::{
         block::{DataType, ValueArray},
         connection::Connection,
     };
-    use omicron_common::address::CLICKHOUSE_TCP_PORT;
     use omicron_test_utils::dev::{
-        clickhouse::ClickHouseInstance, test_setup_log,
+        clickhouse::ClickHouseDeployment, test_setup_log,
     };
-    use std::net::SocketAddr;
+    use tokio::sync::{oneshot, Mutex};
 
     #[tokio::test]
     async fn test_exchange_hello() {
         let logctx = test_setup_log("test_exchange_hello");
-        let mut db = ClickHouseInstance::new_single_node(&logctx, 0)
+        let mut db = ClickHouseDeployment::new_single_node(&logctx)
             .await
             .expect("Failed to start ClickHouse");
-        let address = SocketAddr::new(db.address.ip(), CLICKHOUSE_TCP_PORT);
-        let _ = Connection::new(address).await.unwrap();
+        let _ = Connection::new(db.native_address().into()).await.unwrap();
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -228,13 +236,13 @@ mod tests {
     #[tokio::test]
     async fn test_basic_select_query() {
         let logctx = test_setup_log("test_basic_select_query");
-        let mut db = ClickHouseInstance::new_single_node(&logctx, 0)
+        let mut db = ClickHouseDeployment::new_single_node(&logctx)
             .await
             .expect("Failed to start ClickHouse");
-        let address = SocketAddr::new(db.address.ip(), CLICKHOUSE_TCP_PORT);
-        let mut conn = Connection::new(address).await.unwrap();
+        let mut conn =
+            Connection::new(db.native_address().into()).await.unwrap();
         let data = conn
-            .query("SELECT number FROM system.numbers LIMIT 10;", None)
+            .query("SELECT number FROM system.numbers LIMIT 10;")
             .await
             .expect("Should have run query");
         println!("{data:#?}");
@@ -255,14 +263,13 @@ mod tests {
     #[tokio::test]
     async fn test_select_nullable_column() {
         let logctx = test_setup_log("test_select_nullable_column");
-        let mut db = ClickHouseInstance::new_single_node(&logctx, 0)
+        let mut db = ClickHouseDeployment::new_single_node(&logctx)
             .await
             .expect("Failed to start ClickHouse");
-        let address = SocketAddr::new(db.address.ip(), CLICKHOUSE_TCP_PORT);
-        let mut conn = Connection::new(address).await.unwrap();
-        conn.ping().await.unwrap();
+        let mut conn =
+            Connection::new(db.native_address().into()).await.unwrap();
         let data = conn
-            .query("SELECT toNullable(number) as number FROM system.numbers LIMIT 10;", None)
+            .query("SELECT toNullable(number) as number FROM system.numbers LIMIT 10;")
             .await
             .expect("Should have run query");
         println!("{data:#?}");
@@ -292,14 +299,13 @@ mod tests {
     #[tokio::test]
     async fn test_select_array_column() {
         let logctx = test_setup_log("test_select_array_column");
-        let mut db = ClickHouseInstance::new_single_node(&logctx, 0)
+        let mut db = ClickHouseDeployment::new_single_node(&logctx)
             .await
             .expect("Failed to start ClickHouse");
-        let address = SocketAddr::new(db.address.ip(), CLICKHOUSE_TCP_PORT);
-        let mut conn = Connection::new(address).await.unwrap();
-        conn.ping().await.unwrap();
+        let mut conn =
+            Connection::new(db.native_address().into()).await.unwrap();
         let data = conn
-            .query("SELECT arrayJoin([[4, 5, 6], [7, 8]]) AS arr;", None)
+            .query("SELECT arrayJoin([[4, 5, 6], [7, 8]]) AS arr;")
             .await
             .expect("Should have run query");
         println!("{data:#?}");
@@ -330,14 +336,13 @@ mod tests {
     #[tokio::test]
     async fn test_select_array_of_nullable_column() {
         let logctx = test_setup_log("test_select_array_of_nullable_column");
-        let mut db = ClickHouseInstance::new_single_node(&logctx, 0)
+        let mut db = ClickHouseDeployment::new_single_node(&logctx)
             .await
             .expect("Failed to start ClickHouse");
-        let address = SocketAddr::new(db.address.ip(), CLICKHOUSE_TCP_PORT);
-        let mut conn = Connection::new(address).await.unwrap();
-        conn.ping().await.unwrap();
+        let mut conn =
+            Connection::new(db.native_address().into()).await.unwrap();
         let data = conn
-            .query("SELECT [1, NULL] AS arr;", None)
+            .query("SELECT [1, NULL] AS arr;")
             .await
             .expect("Should have run query");
         println!("{data:#?}");
@@ -365,6 +370,103 @@ mod tests {
             panic!("Expected each array to have UInt8 type");
         };
         assert_eq!(arr, &[1, 0]);
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_send_cancel_with_no_query() {
+        let logctx = test_setup_log("test_send_cancel");
+        let mut db = ClickHouseDeployment::new_single_node(&logctx)
+            .await
+            .expect("Failed to start ClickHouse");
+        let mut conn =
+            Connection::new(db.native_address().into()).await.unwrap();
+        tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            conn.cancel(),
+        )
+        .await
+        .expect(
+            "Should not timeout when sending cancel with no outstanding query",
+        )
+        .expect("Should succeed when sending cancel with no outstanding query");
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    // Smoke test that we _can_ cancel a running query.
+    //
+    // The existing `Connection::cancel()` method takes `&mut self`, which means
+    // you can't easily use it to cancel a query you're running, since
+    // `Connection::query()` also takes `&mut self`. This test is intended to
+    // prove that the cancellation method itself works, and to serve as a
+    // strawman for how one _could_ cancel a running query. We'll wait until we
+    // have more experience to see if that's an important feature to support,
+    // and how best to do that.
+    #[tokio::test]
+    async fn test_can_cancel_query() {
+        let logctx = test_setup_log("test_send_cancel");
+        let mut db = ClickHouseDeployment::new_single_node(&logctx)
+            .await
+            .expect("Failed to start ClickHouse");
+        let conn = Connection::new(db.native_address().into()).await.unwrap();
+
+        // All methods on `Connection` take an exclusive reference to self,
+        // which means you can't really cancel a query without a bit of
+        // ceremony. That's shown here.
+        //
+        // We basically put a mutex around the connection, and create a
+        // cancellation channel. Then both the connection and the receive-side
+        // go into a task, which `tokio::select!`s between the query completion
+        // and the cancellation token. It returns a result if that completed
+        // first, or None if it was cancelled.
+        let conn = Arc::new(Mutex::new(conn));
+        let (cancel_tx, cancel_rx) = oneshot::channel::<()>();
+        let conn_ = conn.clone();
+        println!("Spawning task to run a cancellable query");
+        let task = tokio::spawn(async move {
+            let mut conn = conn_.lock().await;
+            const QUERY: &str = "select count(*) from system.numbers";
+            println!("query task: unning query: '{QUERY}'");
+            let res = conn.query(QUERY);
+            tokio::select! {
+                query_result = res => {
+                    println!("query task: uery future awaited");
+                    Some(query_result)
+                }
+                _ = cancel_rx => {
+                    println!("query task: ancel rx awaited, cancelling the query");
+                    conn.cancel().await.unwrap();
+                    println!("query task: uery cancelled");
+                    None
+                }
+            }
+        });
+
+        println!("test task: sleeping");
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        println!("test task: awoken, sending cancel tx");
+        cancel_tx.send(()).unwrap();
+        println!("test task: cancel tx sent");
+        let mut c = conn.lock().await;
+        println!("test task: acquired conn lock again");
+        let result = task.await;
+        println!("test task: query task awaited: {result:?}");
+        const QUERY: &str = "select now() as timestamp";
+        println!("test task: running '{QUERY}'");
+        let result = c
+            .query(QUERY)
+            .await
+            .expect("New query after cancel should have worked");
+        let Some(block) = &result.data else {
+            panic!("Should have received data, but found None");
+        };
+        assert_eq!(block.n_columns, 1);
+        assert_eq!(block.n_rows, 1);
+        let (name, col) = block.columns.first().unwrap();
+        assert_eq!(name, "timestamp");
+        assert_eq!(col.data_type, DataType::DateTime);
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

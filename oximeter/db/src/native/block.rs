@@ -346,7 +346,7 @@ impl ValueArray {
                 ValueArray::Array { values: us, .. },
                 ValueArray::Array { values: mut them, .. },
             ) => us.append(&mut them),
-            (_, _) => unreachable!(),
+            (_, _) => panic!("ValueArrays must have the same type"),
         }
     }
 }
@@ -685,6 +685,22 @@ mod tests {
         ] {
             assert_eq!(type_.to_string(), as_str);
             assert_eq!(type_, as_str.parse().unwrap());
+        }
+    }
+
+    #[test]
+    fn test_parse_invalid_data_type() {
+        for each in
+            ["xxx", "DateTime64(-1)", "DateTime64(1", "Array(Array(UInt8)"]
+        {
+            let dt = each.parse::<DataType>();
+            assert!(
+                dt.is_err(),
+                "Should not successfully parse '{}' into a DataType, \
+                but it was parsed as: {:?}",
+                each,
+                dt.unwrap(),
+            );
         }
     }
 
