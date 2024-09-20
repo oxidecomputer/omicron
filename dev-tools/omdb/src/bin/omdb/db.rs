@@ -61,6 +61,7 @@ use nexus_db_model::InvCollection;
 use nexus_db_model::InvPhysicalDisk;
 use nexus_db_model::IpAttachState;
 use nexus_db_model::IpKind;
+use nexus_db_model::Migration;
 use nexus_db_model::NetworkInterface;
 use nexus_db_model::NetworkInterfaceKind;
 use nexus_db_model::PhysicalDisk;
@@ -2875,23 +2876,23 @@ async fn cmd_db_instance_info(
     _: &DbFetchOptions,
     args: &InstanceInfoArgs,
 ) -> Result<(), anyhow::Error> {
-    use nexus_db_model::InstanceRuntimeState;
-    use nexus_db_queries::db::datastore::instance::InstanceGestalt;
+    use nexus_db_model::schema::{
+        instance::dsl as instance_dsl, migration::dsl as migration_dsl,
+        vmm::dsl as vmm_dsl,
+    };
+    use nexus_db_model::{Instance, InstanceRuntimeState, Migration, Vmm};
     let InstanceInfoArgs { id } = args;
 
-    // Destructure this exhaustively so that the OMDB command breaks and must be
-    // updated if new fields are added.
-    let InstanceGestalt { instance, active_vmm, target_vmm, migration } =
-        // use the super-special unauthorized version of this method just for OMDB
-        datastore
-            .instance_fetch_all_on_connection(
-                &*datastore.pool_connection_for_tests().await?,
-                &id,
-            )
-            .await
-            .with_context(|| {
-                format!("failed to fetch details for instance {id}")
-            })?;
+    let instance = instance_dsl::instance
+        .filter(instance_dsl::id.eq(id.into_untyped_uuid()))
+        .select(Instance::as_select())
+        .limit(1)
+        .load_async(&*datastore.pool_connection_for_tests().await?)
+        .await
+        .with_context(|| format!("failed to fetch instance record for {id}"))?
+        .into_iter()
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("no instance found with ID {id}"))?;
 
     // Manually format the instance struct because using its `fmt::Debug` impl
     // will print out the user-data array one byte per line, which is horrible.
@@ -2903,9 +2904,11 @@ async fn cmd_db_instance_info(
     // make sure this code breaks, since the `identity` field isn't public.
     // So...just don't forget to do that, I  guess.
     const ID: &'static str = "ID";
+    const PROJECT_ID: &'static str = "project ID";
     const NAME: &'static str = "name";
     const DESCRIPTION: &'static str = "description";
     const CREATED: &'static str = "created at";
+    const DELETED: &'static str = "deleted at";
     const VCPUS: &'static str = "vCPUs";
     const MEMORY: &'static str = "memory";
     const HOSTNAME: &'static str = "hostname";
@@ -2926,6 +2929,7 @@ async fn cmd_db_instance_info(
         NAME,
         DESCRIPTION,
         CREATED,
+        DELETED,
         VCPUS,
         MEMORY,
         HOSTNAME,
@@ -2938,12 +2942,34 @@ async fn cmd_db_instance_info(
         MIGRATION_ID,
         UPDATER_LOCK,
     ]);
+    let mut has_conditions = false;
+
+    if instance.time_deleted().is_some() {
+        println!("(i) instance has been deleted");
+        has_conditions = true;
+    }
+    if instance.runtime_state.migration_id.is_some() {
+        println!("(i) instance is migrating");
+        has_conditions = true;
+    }
+    if instance.updater_id.is_some() {
+        println!("(i) instance is being updated...");
+        has_conditions = true;
+    }
+    if has_conditions {
+        println!();
+    }
+
     println!("\nINSTANCE\n");
     println!("{ID:>WIDTH$}: {}", instance.id());
+    println!("{PROJECT_ID:>WIDTH$}: {}", instance.project_id);
     println!("{NAME:>WIDTH$}: {}", instance.name());
     println!("{DESCRIPTION:>WIDTH$}: {}", instance.description());
     println!("{CREATED:>WIDTH$}: {}", instance.time_created());
     println!("{LAST_MODIFIED:>WIDTH$}: {}", instance.time_modified());
+    if let Some(deleted) = instance.time_deleted() {
+        println!("{DELETED:>WIDTH$}: {deleted}");
+    }
     println!("\nCONFIGURATION\n");
     println!("{VCPUS:>WIDTH$}: {}", instance.ncpus.0 .0);
     println!("{MEMORY:>WIDTH$}: {}", instance.memory.0);
@@ -2957,7 +2983,7 @@ async fn cmd_db_instance_info(
         migration_id,
         nexus_state,
         r#gen,
-    } = instance.runtime();
+    } = instance.runtime_state;
     println!("{STATE:>WIDTH$}: {nexus_state:?}");
     println!(
         "{LAST_UPDATED:>WIDTH$}: {time_updated:?} (generation {})",
@@ -2974,76 +3000,101 @@ async fn cmd_db_instance_info(
     }
     println!(" at generation: {}", instance.updater_gen.0);
 
-    if let Some(ref vmm) = active_vmm {
-        println!(
-            "\n{ACTIVE_VMM_RECORD:>WIDTH$}:\n{}",
-            textwrap::indent(
-                &format!("{vmm:#?}"),
-                &" ".repeat(WIDTH - ACTIVE_VMM_RECORD.len() + 4)
-            )
-        );
-    }
-
-    if let Some(ref migration) = migration {
-        println!(
-            "\n{MIGRATION_RECORD:>WIDTH$}:\n{}",
-            textwrap::indent(
-                &format!("{migration:#?}"),
-                &" ".repeat(WIDTH - MIGRATION_RECORD.len() + 4)
-            )
-        );
-    }
-
-    if let Some(ref vmm) = target_vmm {
-        println!(
-            "\n{TARGET_VMM_RECORD:>WIDTH$}:\n{}",
-            textwrap::indent(
-                &format!("{vmm:#?}"),
-                &" ".repeat(WIDTH - TARGET_VMM_RECORD.len() + 4)
-            )
-        );
-    }
-
-    // Check for weirdness.
-    fn check_for_dangling_key<T>(
-        what: &str,
-        id: &Option<Uuid>,
-        tgt: &Option<T>,
+    async fn print_vmm(
+        datastore: &DataStore,
+        slug: &str,
+        kind: &str,
+        id: Uuid,
     ) {
-        if let Some(ref id) = id {
-            if tgt.is_none() {
+        let conn = match datastore.pool_connection_for_tests().await {
+            Ok(conn) => conn,
+            Err(e) => {
+                eprintln!("could not connect to CRDB: {e}");
+                return;
+            }
+        };
+        let fetch_result = vmm_dsl::vmm
+            .filter(vmm_dsl::id.eq(id))
+            .select(Vmm::as_select())
+            .limit(1)
+            .load_async(&*conn)
+            .await;
+        let vmm = match fetch_result {
+            Ok(mut rs) => rs.pop(),
+            Err(e) => {
+                eprintln!("error looking up {kind} VMM record {id}: {e}");
+                return;
+            }
+        };
+        match vmm {
+            Some(vmm) => {
                 println!(
-                    "/!\\ BAD: dangling {what} foreign key! {id} points to a \
-                     {what} that seems to have been deleted!",
+                    "\n{slug:>WIDTH$}:\n{}",
+                    textwrap::indent(
+                        &format!("{vmm:#?}"),
+                        &" ".repeat(WIDTH - slug.len() + 4)
+                    )
+                );
+                if vmm.time_deleted.is_some() {
+                    eprintln!(
+                        "/!\\ BAD: dangling foreign key to deleted {kind} \
+                         VMM {id}"
+                    );
+                }
+            }
+            None => {
+                eprintln!(
+                    "/!\\ BAD: instance has a {kind} VMM with ID {id}, \
+                     but no such VMM record exists in the database!"
                 );
             }
         }
     }
-    check_for_dangling_key(
-        "active VMM",
-        &instance.runtime_state.propolis_id,
-        &active_vmm,
-    );
-    check_for_dangling_key(
-        "migration target VMM",
-        &instance.runtime_state.dst_propolis_id,
-        &target_vmm,
-    );
-    check_for_dangling_key(
-        "migration record",
-        &instance.runtime_state.migration_id,
-        &migration,
-    );
-    match (target_vmm, migration) {
-        (Some(_), None) => println!(
-            "/!\\ WEIRD: instance has a migration target VMM, but no active \
-             migration record",
-        ),
-        (None, Some(_)) => println!(
-            "/!\\ WEIRD: instance has a migration record, but no target \
-             VMM record"
-        ),
-        (_, _) => {}
+
+    if let Some(id) = propolis_id {
+        print_vmm(datastore, ACTIVE_VMM_RECORD, "active", id).await;
+    }
+
+    if let Some(id) = migration_id {
+        let fetch_result = migration_dsl::migration
+            .filter(migration_dsl::id.eq(id))
+            .select(Migration::as_select())
+            .limit(1)
+            .load_async(&*datastore.pool_connection_for_tests().await?)
+            .await;
+        match fetch_result.map(|mut rs| rs.pop()) {
+            Ok(Some(migration)) => {
+                println!(
+                    "\n{MIGRATION_RECORD:>WIDTH$}:\n{}",
+                    textwrap::indent(
+                        &format!("{migration:#?}"),
+                        &" ".repeat(WIDTH - MIGRATION_RECORD.len() + 4)
+                    )
+                );
+                if migration.time_deleted.is_some() {
+                    eprintln!(
+                        "/!\\ BAD: dangling foreign key to deleted active \
+                         migration {id}"
+                    );
+                }
+            }
+            Ok(None) => {
+                eprintln!(
+                    "/!\\ BAD: instance has a current migration with ID \
+                    {id}, but no such migration exists in the database!"
+                );
+            }
+
+            Err(e) => {
+                eprintln!("error looking up migration record {id}: {e}");
+            }
+        }
+    }
+
+    if let Some(id) = dst_propolis_id {
+        print_vmm(datastore, TARGET_VMM_RECORD, "target", id).await;
+    }
+
     }
 
     Ok(())
