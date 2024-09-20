@@ -444,11 +444,9 @@ impl RaftConfig {
 
             // Retrieve port
             let Some(address) = split_info.next() else {
-                // Test this error
                 bail!("Returned None while attempting to retrieve address")
             };
             let Some(port) = address.split(':').last() else {
-                // Test this error
                 bail!("A port could not be extracted from {address}")
             };
             let raft_port = match u16::from_str(port) {
@@ -461,7 +459,6 @@ impl RaftConfig {
             // Retrieve host
             let p = format!(":{}", port);
             let Some(h) = address.split(&p).next() else {
-                // Test this error
                 bail!("A host could not be extracted from {address}. Missing port {port}")
             };
             // The ouput we get from running the clickhouse keeper-client
@@ -472,14 +469,12 @@ impl RaftConfig {
 
             // Retrieve server_type
             let Some(s_type) = split_info.next() else {
-                // Test this error
                 bail!("Returned None while attempting to retrieve server type")
             };
             let server_type = KeeperServerType::from_str(s_type)?;
 
             // Retrieve priority
             let Some(s_priority) = split_info.next() else {
-                // Test this error
                 bail!("Returned None while attempting to retrieve priority")
             };
             let priority = match u16::from_str(s_priority) {
