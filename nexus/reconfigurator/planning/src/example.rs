@@ -55,11 +55,18 @@ impl ExampleSystem {
             (test_name, "ExampleSystem initial"),
         );
 
+        // Start with an empty collection
+        let collection = system
+            .to_collection_builder()
+            .expect("failed to build collection")
+            .build();
+
         // Now make a blueprint and collection with some zones on each sled.
         let mut builder = BlueprintBuilder::new_based_on(
             log,
             &initial_blueprint,
             &base_input,
+            &collection,
             "test suite",
         )
         .unwrap();
