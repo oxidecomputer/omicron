@@ -24,10 +24,12 @@ use crate::db::model::UpstairsRepairProgress;
 use crate::db::model::Volume;
 use crate::db::pagination::paginated;
 use crate::db::pagination::Paginator;
-use crate::db::queries::volume::DecreaseCrucibleResourceCountAndSoftDeleteVolume;
+use crate::db::queries::volume::*;
+use crate::db::DbConnection;
 use crate::transaction_retry::OptionalError;
 use anyhow::bail;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use chrono::Utc;
 use diesel::prelude::*;
 use diesel::OptionalExtension;
 use nexus_types::identity::Resource;
@@ -848,41 +850,82 @@ impl DataStore {
 
         Ok(crucible_targets)
     }
+}
 
-    /// Decrease the usage count for Crucible resources according to the
-    /// contents of the volume. Call this when deleting a volume (but before the
-    /// volume record has been hard deleted).
-    ///
-    /// Returns a list of Crucible resources to clean up, and soft-deletes the
-    /// volume. Note this function must be idempotent, it is called from a saga
-    /// node.
-    pub async fn decrease_crucible_resource_count_and_soft_delete_volume(
-        &self,
+#[derive(Debug, thiserror::Error)]
+enum SoftDeleteTransactionError {
+    #[error("Serde error decreasing Crucible resources: {0}")]
+    SerdeError(#[from] serde_json::Error),
+
+    #[error("Updated {0} database rows, expected 1")]
+    UnexpectedDatabaseUpdate(usize),
+}
+
+impl DataStore {
+    // See comment for `soft_delete_volume`
+    async fn soft_delete_volume_txn(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
         volume_id: Uuid,
-    ) -> Result<CrucibleResources, Error> {
-        // Grab all the targets that the volume construction request references.
-        // Do this outside the transaction, as the data inside volume doesn't
-        // change and this would simply add to the transaction time.
-        let crucible_targets = {
-            let volume =
-                if let Some(volume) = self.volume_get(volume_id).await? {
-                    volume
-                } else {
-                    // The volume was hard-deleted, return an empty
-                    // CrucibleResources
-                    return Ok(CrucibleResources::V1(
-                        CrucibleResourcesV1::default(),
-                    ));
+        err: OptionalError<SoftDeleteTransactionError>,
+    ) -> Result<CrucibleResources, diesel::result::Error> {
+        // Grab the volume, and check if the volume was already soft-deleted.
+        // We have to guard against the case where this function is called
+        // multiple times, and that is done by soft-deleting the volume during
+        // the transaction, and returning the previously serialized list of
+        // resources to clean up.
+        let volume = {
+            use db::schema::volume::dsl;
+
+            let volume = dsl::volume
+                .filter(dsl::id.eq(volume_id))
+                .select(Volume::as_select())
+                .get_result_async(conn)
+                .await
+                .optional()?;
+
+            let volume = if let Some(v) = volume {
+                v
+            } else {
+                // The volume was hard-deleted
+                return Ok(CrucibleResources::V1(
+                    CrucibleResourcesV1::default(),
+                ));
+            };
+
+            if volume.time_deleted.is_some() {
+                // this volume was already soft-deleted, return the existing
+                // serialized CrucibleResources
+                let existing_resources = match volume
+                    .resources_to_clean_up
+                    .as_ref()
+                {
+                    Some(v) => serde_json::from_str(v)
+                        .map_err(|e| err.bail(e.into()))?,
+
+                    None => {
+                        // Even volumes with nothing to clean up should have a
+                        // serialized CrucibleResources that contains empty
+                        // vectors instead of None. Instead of panicing here
+                        // though, just return the default (nothing to clean
+                        // up).
+                        CrucibleResources::V1(CrucibleResourcesV1::default())
+                    }
                 };
 
-            let vcr: VolumeConstructionRequest =
-                serde_json::from_str(&volume.data()).map_err(|e| {
-                    Error::internal_error(&format!(
-                        "serde_json::from_str error in volume_create: {}",
-                        e
-                    ))
-                })?;
+                return Ok(existing_resources);
+            }
 
+            volume
+        };
+
+        let vcr: VolumeConstructionRequest =
+            serde_json::from_str(&volume.data())
+                .map_err(|e| err.bail(e.into()))?;
+
+        // Grab all the targets that the volume construction request references.
+        // Do this _inside_ the transaction, as the read-only parent data inside
+        // volume can change as a result of region snapshot replacement.
+        let crucible_targets = {
             let mut crucible_targets = CrucibleTargets::default();
             read_only_resources_associated_with_volume(
                 &vcr,
@@ -891,63 +934,110 @@ impl DataStore {
             crucible_targets
         };
 
-        // Call a CTE that will:
-        //
-        // 1. decrease the number of references for each region snapshot that
-        //    this Volume references
-        // 2. soft-delete the volume
-        // 3. record the resources to clean up as a serialized CrucibleResources
-        //    struct in volume's `resources_to_clean_up` column.
-        //
-        // Step 3 is important because this function is called from a saga node.
-        // If saga execution crashes after steps 1 and 2, but before serializing
-        // the resources to be cleaned up as part of the saga node context, then
-        // that list of resources will be lost.
-        //
-        // We also have to guard against the case where this function is called
-        // multiple times, and that is done by soft-deleting the volume during
-        // the CTE, and returning the previously serialized list of resources to
-        // clean up if a soft-delete has already occurred.
+        // Decrease the number of references for each region snapshot that a
+        // volume references, returning the updated rows.
+        let updated_region_snapshots = ConditionallyDecreaseReferences::new(
+            crucible_targets.read_only_targets,
+        )
+        .get_results_async::<RegionSnapshot>(conn)
+        .await?;
 
-        let _old_volume: Vec<Volume> =
-            DecreaseCrucibleResourceCountAndSoftDeleteVolume::new(
-                volume_id,
-                crucible_targets.read_only_targets.clone(),
-            )
-            .get_results_async::<Volume>(
-                &*self.pool_connection_unauthorized().await?,
-            )
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+        // Return all regions for the volume to be cleaned up.
+        let regions: Vec<Uuid> = {
+            use db::schema::region::dsl as region_dsl;
+            use db::schema::region_snapshot::dsl as region_snapshot_dsl;
 
-        // Get the updated Volume to get the resources to clean up
-        let resources_to_clean_up: CrucibleResources = match self
-            .volume_get(volume_id)
-            .await?
-        {
-            Some(volume) => {
-                match volume.resources_to_clean_up.as_ref() {
-                    Some(v) => serde_json::from_str(v)?,
-
-                    None => {
-                        // Even volumes with nothing to clean up should have
-                        // a serialized CrucibleResources that contains
-                        // empty vectors instead of None. Instead of
-                        // panicing here though, just return the default
-                        // (nothing to clean up).
-                        CrucibleResources::V1(CrucibleResourcesV1::default())
-                    }
-                }
-            }
-
-            None => {
-                // If the volume was hard-deleted already, return the
-                // default (nothing to clean up).
-                CrucibleResources::V1(CrucibleResourcesV1::default())
-            }
+            region_dsl::region
+                .left_join(
+                    region_snapshot_dsl::region_snapshot
+                        .on(region_snapshot_dsl::region_id.eq(region_dsl::id)),
+                )
+                .filter(
+                    region_snapshot_dsl::volume_references
+                        .eq(0)
+                        .or(region_snapshot_dsl::volume_references.is_null()),
+                )
+                .filter(region_dsl::volume_id.eq(volume_id))
+                .select(Region::as_select())
+                .get_results_async(conn)
+                .await?
+                .into_iter()
+                .map(|region| region.id())
+                .collect()
         };
 
-        Ok(resources_to_clean_up)
+        // Return the region snapshots that had their volume_references updated
+        // to 0 (and had the deleting flag set) to be cleaned up.
+        let region_snapshots = updated_region_snapshots
+            .into_iter()
+            .filter(|region_snapshot| {
+                region_snapshot.volume_references == 0
+                    && region_snapshot.deleting
+            })
+            .map(|region_snapshot| RegionSnapshotV3 {
+                dataset: region_snapshot.dataset_id,
+                region: region_snapshot.region_id,
+                snapshot: region_snapshot.snapshot_id,
+            })
+            .collect();
+
+        let resources_to_delete = CrucibleResources::V3(CrucibleResourcesV3 {
+            regions,
+            region_snapshots,
+        });
+
+        // Soft-delete the volume, and serialize the resources to delete.
+        let serialized_resources = serde_json::to_string(&resources_to_delete)
+            .map_err(|e| err.bail(e.into()))?;
+
+        {
+            use db::schema::volume::dsl;
+            let updated_rows = diesel::update(dsl::volume)
+                .filter(dsl::id.eq(volume_id))
+                .set((
+                    dsl::time_deleted.eq(Utc::now()),
+                    dsl::resources_to_clean_up.eq(Some(serialized_resources)),
+                ))
+                .execute_async(conn)
+                .await?;
+
+            if updated_rows != 1 {
+                return Err(err.bail(
+                    SoftDeleteTransactionError::UnexpectedDatabaseUpdate(
+                        updated_rows,
+                    ),
+                ));
+            }
+        }
+
+        Ok(resources_to_delete)
+    }
+
+    /// Decrease the usage count for Crucible resources according to the
+    /// contents of the volume, soft-delete the volume, and return a list of
+    /// Crucible resources to clean up. Note this function must be idempotent,
+    /// it is called from a saga node.
+    pub async fn soft_delete_volume(
+        &self,
+        volume_id: Uuid,
+    ) -> Result<CrucibleResources, Error> {
+        let err = OptionalError::new();
+        let conn = self.pool_connection_unauthorized().await?;
+        self.transaction_retry_wrapper("soft_delete_volume")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                async move {
+                    Self::soft_delete_volume_txn(&conn, volume_id, err).await
+                }
+            })
+            .await
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    Error::internal_error(&format!("{err}"))
+                } else {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
+            })
     }
 
     // Here we remove the read only parent from volume_id, and attach it
@@ -2741,18 +2831,18 @@ mod tests {
 
             diesel::update(dsl::volume)
                 .filter(dsl::id.eq(volume_id))
-                .set(dsl::resources_to_clean_up.eq(resources_to_clean_up))
+                .set((
+                    dsl::resources_to_clean_up.eq(resources_to_clean_up),
+                    dsl::time_deleted.eq(Utc::now()),
+                ))
                 .execute_async(&*conn)
                 .await
                 .unwrap();
         }
 
-        // Soft delete the volume, which runs the CTE
+        // Soft delete the volume
 
-        let cr = db_datastore
-            .decrease_crucible_resource_count_and_soft_delete_volume(volume_id)
-            .await
-            .unwrap();
+        let cr = db_datastore.soft_delete_volume(volume_id).await.unwrap();
 
         // Assert the contents of the returned CrucibleResources
 
