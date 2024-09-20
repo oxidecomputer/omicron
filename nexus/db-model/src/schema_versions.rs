@@ -25,7 +25,8 @@ pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(104, 0, 0);
 static KNOWN_VERSIONS: Lazy<Vec<KnownVersion>> = Lazy::new(|| {
     vec![
         // +- The next version goes here!  Duplicate this line, uncomment
-        // |  the *second* copy, then update that copy for
+        // |  the *second* copy, then update that copy for your version,
+        // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
         KnownVersion::new(104, "lookup-bgp-config-by-name"),

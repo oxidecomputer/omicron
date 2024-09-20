@@ -1004,8 +1004,10 @@ mod tests {
     use omicron_test_utils::dev;
 
     #[tokio::test]
-    async fn test_delete_bgp_config_delete_by_name() {
-        let logctx = dev::test_setup_log("test_delete_bgp_config_by_name");
+    async fn test_delete_bgp_config_and_announce_set_by_name() {
+        let logctx = dev::test_setup_log(
+            "test_delete_bgp_config_and_announce_set_by_name",
+        );
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
