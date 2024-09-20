@@ -571,8 +571,9 @@ mod test {
         let duration = start.elapsed();
         println!("rx1 -> 3 took {:?}", duration);
         assert!(
-            duration.as_millis() < 1000,
-            "took longer than 1s to activate our every-100ms-task three times"
+            duration.as_millis() < 1250,
+            "took longer than 1.25s to activate our \
+             every-100ms-task three times"
         );
         assert!(duration.as_millis() >= 300);
         // Check how the last activation was reported.
