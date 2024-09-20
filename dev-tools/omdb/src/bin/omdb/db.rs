@@ -2895,6 +2895,29 @@ async fn cmd_db_instance_info(
         .next()
         .ok_or_else(|| anyhow::anyhow!("no instance found with ID {id}"))?;
 
+    let active_vmm = if let Some(id) = instance.runtime_state.propolis_id {
+        let fetch_result = vmm_dsl::vmm
+            .filter(vmm_dsl::id.eq(id))
+            .select(Vmm::as_select())
+            .limit(1)
+            .load_async(&*datastore.pool_connection_for_tests().await?)
+            .await;
+        let vmm = match fetch_result {
+            Ok(rs) => rs.into_iter().next(),
+            Err(e) => {
+                eprintln!(
+                    "warning: failed to look up active VMM record {id}: {e}"
+                );
+                None
+            }
+        };
+        if vmm.is_none() {
+            eprintln!(" /!\\ BAD: instance has an active VMM ({id}) but no matching VMM record was found!");
+        }
+        vmm
+    } else {
+        None
+    };
     // Manually format the instance struct because using its `fmt::Debug` impl
     // will print out the user-data array one byte per line, which is horrible.
     //
@@ -2910,11 +2933,12 @@ async fn cmd_db_instance_info(
     const DESCRIPTION: &'static str = "description";
     const CREATED: &'static str = "created at";
     const DELETED: &'static str = "deleted at";
+    const API_STATE: &'static str = "external API state";
     const VCPUS: &'static str = "vCPUs";
     const MEMORY: &'static str = "memory";
     const HOSTNAME: &'static str = "hostname";
     const AUTO_RESTART: &'static str = "auto-restart policy";
-    const STATE: &'static str = "state";
+    const STATE: &'static str = "nexus state";
     const LAST_MODIFIED: &'static str = "last modified at";
     const LAST_UPDATED: &'static str = "last updated at";
     const ACTIVE_VMM: &'static str = "active VMM ID";
@@ -2924,8 +2948,7 @@ async fn cmd_db_instance_info(
     const ACTIVE_VMM_RECORD: &'static str = "active VMM record";
     const MIGRATION_RECORD: &'static str = "migration record";
     const TARGET_VMM_RECORD: &'static str = "target VMM record";
-    const WIDTH: usize = 1 + // breathing room
-        crate::helpers::const_max_len(&[
+    const WIDTH: usize = crate::helpers::const_max_len(&[
         ID,
         NAME,
         DESCRIPTION,
@@ -2936,37 +2959,34 @@ async fn cmd_db_instance_info(
         HOSTNAME,
         AUTO_RESTART,
         STATE,
+        API_STATE,
         LAST_UPDATED,
         LAST_MODIFIED,
         ACTIVE_VMM,
         TARGET_VMM,
         MIGRATION_ID,
         UPDATER_LOCK,
+        ACTIVE_VMM_RECORD,
+        MIGRATION_RECORD,
+        TARGET_VMM_RECORD,
     ]);
-
-    if instance.time_deleted().is_some() {
-        println!("\n (i) instance has been deleted");
-    }
-    if instance.updater_id.is_some() {
-        println!("\n (i) instance is being updated...");
-    }
-
-    println!("\nINSTANCE\n");
-    println!("{ID:>WIDTH$}: {}", instance.id());
-    println!("{PROJECT_ID:>WIDTH$}: {}", instance.project_id);
-    println!("{NAME:>WIDTH$}: {}", instance.name());
-    println!("{DESCRIPTION:>WIDTH$}: {}", instance.description());
-    println!("{CREATED:>WIDTH$}: {}", instance.time_created());
-    println!("{LAST_MODIFIED:>WIDTH$}: {}", instance.time_modified());
+    println!("\nINSTANCE");
+    println!("    {ID:>WIDTH$}: {}", instance.id());
+    println!("    {PROJECT_ID:>WIDTH$}: {}", instance.project_id);
+    println!("    {NAME:>WIDTH$}: {}", instance.name());
+    println!("    {DESCRIPTION:>WIDTH$}: {}", instance.description());
+    println!("    {CREATED:>WIDTH$}: {}", instance.time_created());
+    println!("    {LAST_MODIFIED:>WIDTH$}: {}", instance.time_modified());
     if let Some(deleted) = instance.time_deleted() {
-        println!("{DELETED:>WIDTH$}: {deleted}");
+        println!("/!\\ {DELETED:>WIDTH$}: {deleted}");
     }
-    println!("\nCONFIGURATION\n");
-    println!("{VCPUS:>WIDTH$}: {}", instance.ncpus.0 .0);
-    println!("{MEMORY:>WIDTH$}: {}", instance.memory.0);
-    println!("{HOSTNAME:>WIDTH$}: {}", instance.hostname);
-    println!("{AUTO_RESTART:>WIDTH$}: {:?}", instance.auto_restart_policy);
-    println!("\nRUNTIME STATE\n");
+
+    println!("\nCONFIGURATION");
+    println!("    {VCPUS:>WIDTH$}: {}", instance.ncpus.0 .0);
+    println!("    {MEMORY:>WIDTH$}: {}", instance.memory.0);
+    println!("    {HOSTNAME:>WIDTH$}: {}", instance.hostname);
+    println!("    {AUTO_RESTART:>WIDTH$}: {:?}", instance.auto_restart_policy);
+    println!("\nRUNTIME STATE");
     let InstanceRuntimeState {
         time_updated,
         propolis_id,
@@ -2975,67 +2995,52 @@ async fn cmd_db_instance_info(
         nexus_state,
         r#gen,
     } = instance.runtime_state;
-    println!("{STATE:>WIDTH$}: {nexus_state:?}");
+    println!("    {STATE:>WIDTH$}: {nexus_state:?}");
+    let effective_state = InstanceAndActiveVmm::determine_effective_state(
+        &instance,
+        active_vmm.as_ref(),
+    );
     println!(
-        "{LAST_UPDATED:>WIDTH$}: {time_updated:?} (generation {})",
+        "{} {API_STATE:>WIDTH$}: {effective_state:?}",
+        if effective_state == InstanceState::Failed { "/!\\" } else { "(i)" }
+    );
+    println!(
+        "    {LAST_UPDATED:>WIDTH$}: {time_updated:?} (generation {})",
         r#gen.0
     );
-    println!("{ACTIVE_VMM:>WIDTH$}: {propolis_id:?}");
-    println!("{TARGET_VMM:>WIDTH$}: {dst_propolis_id:?}");
-    println!("{MIGRATION_ID:>WIDTH$}: {migration_id:?}");
-    print!("{UPDATER_LOCK:>WIDTH$}: ");
+    println!("    {ACTIVE_VMM:>WIDTH$}: {propolis_id:?}");
+    println!("    {TARGET_VMM:>WIDTH$}: {dst_propolis_id:?}");
+    println!(
+        "{}{MIGRATION_ID:>WIDTH$}: {migration_id:?}",
+        if migration_id.is_some() { "(i) " } else { "    " },
+    );
     if let Some(id) = instance.updater_id {
-        print!("LOCKED by {id}")
+        print!("(i) {UPDATER_LOCK:>WIDTH$}: LOCKED by {id}")
     } else {
-        print!("UNLOCKED");
+        print!("    {UPDATER_LOCK:>WIDTH$}: UNLOCKED");
     }
     println!(" at generation: {}", instance.updater_gen.0);
 
-    async fn print_vmm(
-        datastore: &DataStore,
-        slug: &str,
-        kind: &str,
-        id: Uuid,
-    ) {
-        let conn = match datastore.pool_connection_for_tests().await {
-            Ok(conn) => conn,
-            Err(e) => {
-                eprintln!("could not connect to CRDB: {e}");
-                return;
-            }
-        };
-        let fetch_result = vmm_dsl::vmm
-            .filter(vmm_dsl::id.eq(id))
-            .select(Vmm::as_select())
-            .limit(1)
-            .load_async(&*conn)
-            .await;
-        let vmm = match fetch_result {
-            Ok(mut rs) => rs.pop(),
-            Err(e) => {
-                eprintln!("error looking up {kind} VMM record {id}: {e}");
-                return;
-            }
-        };
+    fn print_vmm(slug: &str, kind: &str, id: Uuid, vmm: Option<&Vmm>) {
         match vmm {
             Some(vmm) => {
                 println!(
-                    "\n{slug:>WIDTH$}:\n{}",
+                    "\n    {slug:>WIDTH$}:\n{}",
                     textwrap::indent(
                         &format!("{vmm:#?}"),
-                        &" ".repeat(WIDTH - slug.len() + 4)
+                        &" ".repeat(WIDTH - slug.len() + 8)
                     )
                 );
                 if vmm.time_deleted.is_some() {
                     eprintln!(
-                        "/!\\ BAD: dangling foreign key to deleted {kind} \
+                        "\n/!\\ BAD: dangling foreign key to deleted {kind} \
                          VMM {id}"
                     );
                 }
             }
             None => {
                 eprintln!(
-                    "/!\\ BAD: instance has a {kind} VMM with ID {id}, \
+                    "\n/!\\ BAD: instance has a {kind} VMM with ID {id}, \
                      but no such VMM record exists in the database!"
                 );
             }
@@ -3043,7 +3048,25 @@ async fn cmd_db_instance_info(
     }
 
     if let Some(id) = propolis_id {
-        print_vmm(datastore, ACTIVE_VMM_RECORD, "active", id).await;
+        print_vmm(ACTIVE_VMM_RECORD, "active", id, active_vmm.as_ref());
+    }
+
+    if let Some(id) = dst_propolis_id {
+        let fetch_result = vmm_dsl::vmm
+            .filter(vmm_dsl::id.eq(id))
+            .select(Vmm::as_select())
+            .limit(1)
+            .load_async(&*datastore.pool_connection_for_tests().await?)
+            .await;
+        match fetch_result {
+            Ok(rs) => {
+                let vmm = rs.into_iter().next();
+                print_vmm(TARGET_VMM_RECORD, "target", id, vmm.as_ref());
+            }
+            Err(e) => {
+                eprintln!("error looking up target VMM record {id}: {e}");
+            }
+        }
     }
 
     if let Some(id) = migration_id {
@@ -3056,22 +3079,22 @@ async fn cmd_db_instance_info(
         match fetch_result.map(|mut rs| rs.pop()) {
             Ok(Some(migration)) => {
                 println!(
-                    "\n{MIGRATION_RECORD:>WIDTH$}:\n{}",
+                    "\n    {MIGRATION_RECORD:>WIDTH$}:\n{}",
                     textwrap::indent(
                         &format!("{migration:#?}"),
-                        &" ".repeat(WIDTH - MIGRATION_RECORD.len() + 4)
+                        &" ".repeat(WIDTH - MIGRATION_RECORD.len() + 8)
                     )
                 );
                 if migration.time_deleted.is_some() {
                     eprintln!(
-                        "/!\\ BAD: dangling foreign key to deleted active \
+                        "\n/!\\ BAD: dangling foreign key to deleted active \
                          migration {id}"
                     );
                 }
             }
             Ok(None) => {
                 eprintln!(
-                    "/!\\ BAD: instance has a current migration with ID \
+                    "\n/!\\ BAD: instance has a current migration with ID \
                     {id}, but no such migration exists in the database!"
                 );
             }
@@ -3081,11 +3104,6 @@ async fn cmd_db_instance_info(
             }
         }
     }
-
-    if let Some(id) = dst_propolis_id {
-        print_vmm(datastore, TARGET_VMM_RECORD, "target", id).await;
-    }
-
     let past_migrations = migration_dsl::migration
         .filter(migration_dsl::instance_id.eq(id.into_untyped_uuid()))
         .limit(i64::from(u32::from(fetch_opts.fetch_limit)))
