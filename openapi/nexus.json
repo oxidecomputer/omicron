@@ -15099,7 +15099,7 @@
             "format": "date-time"
           },
           "auto_restart_enabled": {
-            "description": "`true` if this instance's auto-restart policy will permit the control plane is permitted to automatically restart it if it enters the `Failed` state.",
+            "description": "`true` if this instance's auto-restart policy will permit the control plane to automatically restart it if it enters the `Failed` state.",
             "type": "boolean"
           },
           "description": {
