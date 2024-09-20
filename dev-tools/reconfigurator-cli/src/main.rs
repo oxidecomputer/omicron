@@ -740,7 +740,7 @@ fn cmd_blueprint_edit(
     let latest_collection = sim
         .collections
         .iter()
-        .min_by_key(|(_, c)| c.time_started)
+        .max_by_key(|(_, c)| c.time_started)
         .map(|(_, c)| c.clone())
         .unwrap_or_else(|| CollectionBuilder::new("sim").build());
     let mut builder = BlueprintBuilder::new_based_on(
