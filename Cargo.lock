@@ -527,6 +527,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "attest-data"
+version = "0.3.0"
+source = "git+https://github.com/oxidecomputer/dice-util?rev=3cc953c8d0ace2f20cbcf3920b0771d25301960a#3cc953c8d0ace2f20cbcf3920b0771d25301960a"
+dependencies = [
+ "getrandom",
+ "hubpack",
+ "salty",
+ "serde",
+ "serde_with",
+ "sha3",
+ "static_assertions",
+ "thiserror",
+]
+
+[[package]]
 name = "atty"
 version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -698,7 +713,7 @@ dependencies = [
  "bitflags 2.6.0",
  "cexpr",
  "clang-sys",
- "itertools 0.12.1",
+ "itertools 0.10.5",
  "lazy_static",
  "lazycell",
  "log",
@@ -2196,6 +2211,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a7993efb860416547839c115490d4951c6d0f8ec04a3594d9dd99d50ed7ec170"
 
 [[package]]
+name = "dice-verifier"
+version = "0.2.0"
+source = "git+https://github.com/oxidecomputer/dice-util?rev=3cc953c8d0ace2f20cbcf3920b0771d25301960a#3cc953c8d0ace2f20cbcf3920b0771d25301960a"
+dependencies = [
+ "anyhow",
+ "attest-data",
+ "const-oid",
+ "ed25519-dalek",
+ "env_logger 0.11.5",
+ "log",
+ "p384",
+ "pem-rfc7468",
+ "sha3",
+ "x509-cert",
+]
+
+[[package]]
 name = "diesel"
 version = "2.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2622,6 +2654,7 @@ dependencies = [
  "rand_core",
  "serde",
  "sha2",
+ "signature",
  "subtle",
  "zeroize",
 ]
@@ -2750,6 +2783,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "env_filter"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f2c92ceda6ceec50f43169f9ee8424fe2db276791afde7b2cd8bc084cb376ab"
+dependencies = [
+ "log",
+]
+
+[[package]]
 name = "env_logger"
 version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2771,6 +2813,16 @@ dependencies = [
  "is-terminal",
  "log",
  "termcolor",
+]
+
+[[package]]
+name = "env_logger"
+version = "0.11.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e13fa619b91fb2381732789fc5de83b45675e882f66623b7d8cb4f643017018d"
+dependencies = [
+ "env_filter",
+ "log",
 ]
 
 [[package]]
@@ -4054,7 +4106,7 @@ dependencies = [
  "httpdate",
  "itoa",
  "pin-project-lite",
- "socket2 0.5.7",
+ "socket2 0.4.10",
  "tokio",
  "tower-service",
  "tracing",
@@ -4149,9 +4201,9 @@ dependencies = [
 
 [[package]]
 name = "hyper-util"
-version = "0.1.3"
+version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca38ef113da30126bbff9cd1705f9273e15d45498615d138b0c20279ac7a76aa"
+checksum = "cde7055719c54e36e95e8719f95883f22072a48ede39db7fc17a4e1d5281e9b9"
 dependencies = [
  "bytes",
  "futures-channel",
@@ -6932,6 +6984,7 @@ dependencies = [
  "slog-error-chain",
  "slog-term",
  "smf",
+ "sprockets-tls",
  "static_assertions",
  "strum",
  "subprocess",
@@ -7022,13 +7075,14 @@ dependencies = [
  "clap",
  "clap_builder",
  "console",
- "const-oid",
  "crossbeam-epoch",
  "crossbeam-utils",
  "crypto-common",
- "der",
+ "curve25519-dalek",
  "digest",
  "dof",
+ "ecdsa",
+ "ed25519-dalek",
  "either",
  "elliptic-curve",
  "ff",
@@ -7097,6 +7151,7 @@ dependencies = [
  "similar",
  "slog",
  "smallvec 1.13.2",
+ "socket2 0.5.7",
  "spin 0.9.8",
  "string_cache",
  "subtle",
@@ -7119,6 +7174,7 @@ dependencies = [
  "usdt",
  "usdt-impl",
  "uuid",
+ "x509-cert",
  "zerocopy 0.7.34",
  "zeroize",
 ]
@@ -9484,6 +9540,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustls"
+version = "0.23.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "05cff451f60db80f490f3c182b77c35260baace73209e9cdbbe526bfe3a4d402"
+dependencies = [
+ "log",
+ "once_cell",
+ "ring 0.17.8",
+ "rustls-pki-types",
+ "rustls-webpki 0.102.4",
+ "subtle",
+ "zeroize",
+]
+
+[[package]]
 name = "rustls-native-certs"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9613,6 +9684,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97a22f5af31f73a954c10289c93e8a50cc23d971e80ee446f1f6f7137a088213"
 dependencies = [
  "cipher",
+]
+
+[[package]]
+name = "salty"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b947325a585e90733e0e9ec097228f40b637cc346f9bd68f84d5c6297d0fcfef"
+dependencies = [
+ "subtle",
+ "zeroize",
 ]
 
 [[package]]
@@ -10576,6 +10657,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "sprockets-tls"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/sprockets.git?rev=cc13773832df1e38257cdc511adfaad72954bbe1#cc13773832df1e38257cdc511adfaad72954bbe1"
+dependencies = [
+ "anyhow",
+ "attest-data",
+ "camino",
+ "cfg-if",
+ "clap",
+ "dice-verifier",
+ "ed25519-dalek",
+ "libipcc",
+ "pem-rfc7468",
+ "rustls 0.23.10",
+ "secrecy",
+ "serde",
+ "sha2",
+ "sha3",
+ "slog",
+ "slog-async",
+ "slog-term",
+ "thiserror",
+ "tokio",
+ "tokio-rustls 0.26.0",
+ "toml 0.8.19",
+ "x509-cert",
+ "zeroize",
+]
+
+[[package]]
 name = "sqlformat"
 version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11350,6 +11461,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "tokio-rustls"
+version = "0.26.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0c7bc40d0e5a97695bb96e27995cd3a08538541b0a846f65bba7a359f36700d4"
+dependencies = [
+ "rustls 0.23.10",
+ "rustls-pki-types",
+ "tokio",
+]
+
+[[package]]
 name = "tokio-stream"
 version = "0.1.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11546,7 +11668,6 @@ dependencies = [
  "tokio",
  "tower-layer",
  "tower-service",
- "tracing",
 ]
 
 [[package]]
@@ -12965,9 +13086,9 @@ dependencies = [
 
 [[package]]
 name = "zeroize"
-version = "1.7.0"
+version = "1.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "525b4ec142c6b68a2d10f01f7bbf6755599ca3f81ea53b8431b7dd348f5fdb2d"
+checksum = "ced3678a2879b30306d323f4542626697a464a97c0a07c9aebf7ebca65cd4dde"
 dependencies = [
  "zeroize_derive",
 ]
