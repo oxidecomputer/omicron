@@ -33,6 +33,7 @@ use crate::db::model::Vmm;
 use crate::db::model::VmmState;
 use crate::db::pagination::paginated;
 use crate::db::pagination::paginated_multicolumn;
+use crate::db::pool::DbConnection;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateAndQueryResult;
 use crate::db::update_and_check::UpdateStatus;
@@ -605,10 +606,29 @@ impl DataStore {
         authz_instance: &authz::Instance,
     ) -> LookupResult<InstanceGestalt> {
         opctx.authorize(authz::Action::Read, authz_instance).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
 
+        self.instance_fetch_all_on_connection(
+            &conn,
+            &InstanceUuid::from_untyped_uuid(authz_instance.id()),
+        )
+        .await
+    }
+
+    /// The inner workings of `instance_fetch_all`, unauthorized version for
+    /// OMDB use.
+    ///
+    /// The rest of Nexus should use [`DataStore::instance_fetch_all`] instead.
+    pub async fn instance_fetch_all_on_connection(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        instance_id: &InstanceUuid,
+    ) -> LookupResult<InstanceGestalt> {
         use db::schema::instance::dsl as instance_dsl;
         use db::schema::migration::dsl as migration_dsl;
         use db::schema::vmm;
+
+        let id = instance_id.into_untyped_uuid();
 
         // Create a Diesel alias to allow us to LEFT JOIN the `instance` table
         // with the `vmm` table twice; once on the `active_propolis_id` and once
@@ -619,7 +639,7 @@ impl DataStore {
             <Vmm as Selectable<diesel::pg::Pg>>::construct_selection();
 
         let query = instance_dsl::instance
-            .filter(instance_dsl::id.eq(authz_instance.id()))
+            .filter(instance_dsl::id.eq(id))
             .filter(instance_dsl::time_deleted.is_null())
             .left_join(
                 active_vmm.on(active_vmm
@@ -656,7 +676,7 @@ impl DataStore {
                     Option<Vmm>,
                     Option<Migration>,
                 )>(
-                    &*self.pool_connection_authorized(opctx).await?
+                    conn,
                 )
                 .await
                 .map_err(|e| {
@@ -664,7 +684,7 @@ impl DataStore {
                         e,
                         ErrorHandler::NotFoundByLookup(
                             ResourceType::Instance,
-                            LookupType::ById(authz_instance.id()),
+                            LookupType::ById(id),
                         ),
                     )
                 })?;

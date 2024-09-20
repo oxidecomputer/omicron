@@ -18,3 +18,16 @@ pub(crate) fn should_colorize(color: ColorChoice, stream: Stream) -> bool {
         ColorChoice::Never => false,
     }
 }
+
+pub(crate) const fn const_max_len(strs: &[&str]) -> usize {
+    let mut max = 0;
+    let mut i = 0;
+    while i < strs.len() {
+        let len = strs[i].len();
+        if len > max {
+            max = len;
+        }
+        i += 1;
+    }
+    max
+}

@@ -61,6 +61,8 @@ use nexus_db_model::InvCollection;
 use nexus_db_model::InvPhysicalDisk;
 use nexus_db_model::IpAttachState;
 use nexus_db_model::IpKind;
+use nexus_db_model::Migration;
+use nexus_db_model::MigrationState;
 use nexus_db_model::NetworkInterface;
 use nexus_db_model::NetworkInterfaceKind;
 use nexus_db_model::PhysicalDisk;
@@ -119,6 +121,7 @@ use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::MacAddr;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::InstanceUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use omicron_uuid_kinds::SledUuid;
 use sled_agent_client::types::VolumeConstructionRequest;
@@ -310,8 +313,10 @@ enum DbCommands {
     RegionSnapshotReplacement(RegionSnapshotReplacementArgs),
     /// Print information about sleds
     Sleds(SledsArgs),
-    /// Print information about customer instances
-    Instances(InstancesOptions),
+    /// Print information about customer instances.
+    Instance(InstanceArgs),
+    /// Alias to `omdb instance list`.
+    Instances(InstanceListArgs),
     /// Print information about the network
     Network(NetworkArgs),
     /// Print information about migrations
@@ -406,10 +411,33 @@ impl CliDnsGroup {
 }
 
 #[derive(Debug, Args)]
-struct InstancesOptions {
+struct InstanceArgs {
+    #[command(subcommand)]
+    command: InstanceCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum InstanceCommands {
+    /// list instances
+    #[clap(alias = "ls")]
+    List(InstanceListArgs),
+    /// show detailed output for the selected instance.
+    #[clap(alias = "show")]
+    Info(InstanceInfoArgs),
+}
+
+#[derive(Debug, Args)]
+struct InstanceListArgs {
     /// Only show the running instances
     #[arg(short, long, action=ArgAction::SetTrue)]
     running: bool,
+}
+
+#[derive(Debug, Args)]
+struct InstanceInfoArgs {
+    /// the UUID of the instance to show details for
+    #[clap(value_name = "UUID")]
+    id: InstanceUuid,
 }
 
 #[derive(Debug, Args)]
@@ -873,6 +901,23 @@ impl DbArgs {
             }
             DbCommands::Sleds(args) => {
                 cmd_db_sleds(&opctx, &datastore, &self.fetch_opts, args).await
+            }
+            DbCommands::Instance(InstanceArgs {
+                command: InstanceCommands::List(args),
+            }) => {
+                cmd_db_instances(
+                    &opctx,
+                    &datastore,
+                    &self.fetch_opts,
+                    args.running,
+                )
+                .await
+            }
+            DbCommands::Instance(InstanceArgs {
+                command: InstanceCommands::Info(args),
+            }) => {
+                cmd_db_instance_info(&opctx, &datastore, &self.fetch_opts, args)
+                    .await
             }
             DbCommands::Instances(instances_options) => {
                 cmd_db_instances(
@@ -2819,6 +2864,276 @@ async fn cmd_db_sleds(
         .to_string();
 
     println!("{}", table);
+
+    Ok(())
+}
+
+// INSTANCES
+
+/// Run `omdb db instance info`: show details about a customer VM.
+async fn cmd_db_instance_info(
+    _: &OpContext,
+    datastore: &DataStore,
+    fetch_opts: &DbFetchOptions,
+    args: &InstanceInfoArgs,
+) -> Result<(), anyhow::Error> {
+    use nexus_db_model::schema::{
+        instance::dsl as instance_dsl, migration::dsl as migration_dsl,
+        vmm::dsl as vmm_dsl,
+    };
+    use nexus_db_model::{Instance, InstanceRuntimeState, Migration, Vmm};
+    let InstanceInfoArgs { id } = args;
+
+    let instance = instance_dsl::instance
+        .filter(instance_dsl::id.eq(id.into_untyped_uuid()))
+        .select(Instance::as_select())
+        .limit(1)
+        .load_async(&*datastore.pool_connection_for_tests().await?)
+        .await
+        .with_context(|| format!("failed to fetch instance record for {id}"))?
+        .into_iter()
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("no instance found with ID {id}"))?;
+
+    let active_vmm = if let Some(id) = instance.runtime_state.propolis_id {
+        let fetch_result = vmm_dsl::vmm
+            .filter(vmm_dsl::id.eq(id))
+            .select(Vmm::as_select())
+            .limit(1)
+            .load_async(&*datastore.pool_connection_for_tests().await?)
+            .await;
+        let vmm = match fetch_result {
+            Ok(rs) => rs.into_iter().next(),
+            Err(e) => {
+                eprintln!(
+                    "warning: failed to look up active VMM record {id}: {e}"
+                );
+                None
+            }
+        };
+        if vmm.is_none() {
+            eprintln!(" /!\\ BAD: instance has an active VMM ({id}) but no matching VMM record was found!");
+        }
+        vmm
+    } else {
+        None
+    };
+    // Manually format the instance struct because using its `fmt::Debug` impl
+    // will print out the user-data array one byte per line, which is horrible.
+    //
+    // /!\ WARNING /!\
+    // This does mean that anyone who adds new fields to the
+    // `nexus_db_model::Instance` type will want to make sure to update this
+    // code as well. Unfortunately, we can't just destructure the struct here to
+    // make sure this code breaks, since the `identity` field isn't public.
+    // So...just don't forget to do that, I  guess.
+    const ID: &'static str = "ID";
+    const PROJECT_ID: &'static str = "project ID";
+    const NAME: &'static str = "name";
+    const DESCRIPTION: &'static str = "description";
+    const CREATED: &'static str = "created at";
+    const DELETED: &'static str = "deleted at";
+    const API_STATE: &'static str = "external API state";
+    const VCPUS: &'static str = "vCPUs";
+    const MEMORY: &'static str = "memory";
+    const HOSTNAME: &'static str = "hostname";
+    const AUTO_RESTART: &'static str = "auto-restart policy";
+    const STATE: &'static str = "nexus state";
+    const LAST_MODIFIED: &'static str = "last modified at";
+    const LAST_UPDATED: &'static str = "last updated at";
+    const ACTIVE_VMM: &'static str = "active VMM ID";
+    const TARGET_VMM: &'static str = "target VMM ID";
+    const MIGRATION_ID: &'static str = "migration ID";
+    const UPDATER_LOCK: &'static str = "updater lock";
+    const ACTIVE_VMM_RECORD: &'static str = "active VMM record";
+    const MIGRATION_RECORD: &'static str = "migration record";
+    const TARGET_VMM_RECORD: &'static str = "target VMM record";
+    const WIDTH: usize = crate::helpers::const_max_len(&[
+        ID,
+        NAME,
+        DESCRIPTION,
+        CREATED,
+        DELETED,
+        VCPUS,
+        MEMORY,
+        HOSTNAME,
+        AUTO_RESTART,
+        STATE,
+        API_STATE,
+        LAST_UPDATED,
+        LAST_MODIFIED,
+        ACTIVE_VMM,
+        TARGET_VMM,
+        MIGRATION_ID,
+        UPDATER_LOCK,
+        ACTIVE_VMM_RECORD,
+        MIGRATION_RECORD,
+        TARGET_VMM_RECORD,
+    ]);
+    println!("\n{:=<80}", "== INSTANCE ");
+    println!("    {ID:>WIDTH$}: {}", instance.id());
+    println!("    {PROJECT_ID:>WIDTH$}: {}", instance.project_id);
+    println!("    {NAME:>WIDTH$}: {}", instance.name());
+    println!("    {DESCRIPTION:>WIDTH$}: {}", instance.description());
+    println!("    {CREATED:>WIDTH$}: {}", instance.time_created());
+    println!("    {LAST_MODIFIED:>WIDTH$}: {}", instance.time_modified());
+    if let Some(deleted) = instance.time_deleted() {
+        println!("/!\\ {DELETED:>WIDTH$}: {deleted}");
+    }
+
+    println!("\n{:=<80}", "== CONFIGURATION ");
+    println!("    {VCPUS:>WIDTH$}: {}", instance.ncpus.0 .0);
+    println!("    {MEMORY:>WIDTH$}: {}", instance.memory.0);
+    println!("    {HOSTNAME:>WIDTH$}: {}", instance.hostname);
+    println!("    {AUTO_RESTART:>WIDTH$}: {:?}", instance.auto_restart_policy);
+    println!("\n{:=<80}", "== RUNTIME STATE ");
+    let InstanceRuntimeState {
+        time_updated,
+        propolis_id,
+        dst_propolis_id,
+        migration_id,
+        nexus_state,
+        r#gen,
+    } = instance.runtime_state;
+    println!("    {STATE:>WIDTH$}: {nexus_state:?}");
+    let effective_state = InstanceAndActiveVmm::determine_effective_state(
+        &instance,
+        active_vmm.as_ref(),
+    );
+    println!(
+        "{} {API_STATE:>WIDTH$}: {effective_state:?}",
+        if effective_state == InstanceState::Failed { "/!\\" } else { "(i)" }
+    );
+    println!(
+        "    {LAST_UPDATED:>WIDTH$}: {time_updated:?} (generation {})",
+        r#gen.0
+    );
+    println!("    {ACTIVE_VMM:>WIDTH$}: {propolis_id:?}");
+    println!("    {TARGET_VMM:>WIDTH$}: {dst_propolis_id:?}");
+    println!(
+        "{}{MIGRATION_ID:>WIDTH$}: {migration_id:?}",
+        if migration_id.is_some() { "(i) " } else { "    " },
+    );
+    if let Some(id) = instance.updater_id {
+        print!("(i) {UPDATER_LOCK:>WIDTH$}: LOCKED by {id}")
+    } else {
+        print!("    {UPDATER_LOCK:>WIDTH$}: UNLOCKED");
+    }
+    println!(" at generation: {}", instance.updater_gen.0);
+
+    fn print_vmm(slug: &str, kind: &str, id: Uuid, vmm: Option<&Vmm>) {
+        match vmm {
+            Some(vmm) => {
+                println!(
+                    "\n    {slug:>WIDTH$}:\n{}",
+                    textwrap::indent(
+                        &format!("{vmm:#?}"),
+                        &" ".repeat(WIDTH - slug.len() + 8)
+                    )
+                );
+                if vmm.time_deleted.is_some() {
+                    eprintln!(
+                        "\n/!\\ BAD: dangling foreign key to deleted {kind} \
+                         VMM {id}"
+                    );
+                }
+            }
+            None => {
+                eprintln!(
+                    "\n/!\\ BAD: instance has a {kind} VMM with ID {id}, \
+                     but no such VMM record exists in the database!"
+                );
+            }
+        }
+    }
+
+    if let Some(id) = propolis_id {
+        print_vmm(ACTIVE_VMM_RECORD, "active", id, active_vmm.as_ref());
+    }
+
+    if let Some(id) = dst_propolis_id {
+        let fetch_result = vmm_dsl::vmm
+            .filter(vmm_dsl::id.eq(id))
+            .select(Vmm::as_select())
+            .limit(1)
+            .load_async(&*datastore.pool_connection_for_tests().await?)
+            .await;
+        match fetch_result {
+            Ok(rs) => {
+                let vmm = rs.into_iter().next();
+                print_vmm(TARGET_VMM_RECORD, "target", id, vmm.as_ref());
+            }
+            Err(e) => {
+                eprintln!("error looking up target VMM record {id}: {e}");
+            }
+        }
+    }
+
+    if let Some(id) = migration_id {
+        let fetch_result = migration_dsl::migration
+            .filter(migration_dsl::id.eq(id))
+            .select(Migration::as_select())
+            .limit(1)
+            .load_async(&*datastore.pool_connection_for_tests().await?)
+            .await;
+        match fetch_result.map(|mut rs| rs.pop()) {
+            Ok(Some(migration)) => {
+                println!(
+                    "\n    {MIGRATION_RECORD:>WIDTH$}:\n{}",
+                    textwrap::indent(
+                        &format!("{migration:#?}"),
+                        &" ".repeat(WIDTH - MIGRATION_RECORD.len() + 8)
+                    )
+                );
+                if migration.time_deleted.is_some() {
+                    eprintln!(
+                        "\n/!\\ BAD: dangling foreign key to deleted active \
+                         migration {id}"
+                    );
+                }
+            }
+            Ok(None) => {
+                eprintln!(
+                    "\n/!\\ BAD: instance has a current migration with ID \
+                    {id}, but no such migration exists in the database!"
+                );
+            }
+
+            Err(e) => {
+                eprintln!("error looking up migration record {id}: {e}");
+            }
+        }
+    }
+    let past_migrations = migration_dsl::migration
+        .filter(migration_dsl::instance_id.eq(id.into_untyped_uuid()))
+        .limit(i64::from(u32::from(fetch_opts.fetch_limit)))
+        .order_by(migration_dsl::time_created)
+        // This is just to prove to CRDB that it can use the
+        // migrations-by-time-created index, it doesn't actually do anything.
+        .filter(migration_dsl::time_created.gt(chrono::DateTime::UNIX_EPOCH))
+        .select(Migration::as_select())
+        .load_async(&*datastore.pool_connection_for_tests().await?)
+        .await
+        .context("listing migrations")?;
+
+    check_limit(&past_migrations, fetch_opts.fetch_limit, || {
+        "listing migrations"
+    });
+
+    if !past_migrations.is_empty() {
+        let rows =
+            past_migrations.into_iter().map(|m| SingleInstanceMigrationRow {
+                created: m.time_created,
+                vmms: MigrationVmms::from(&m),
+            });
+
+        let table = tabled::Table::new(rows)
+            .with(tabled::settings::Style::empty())
+            .with(tabled::settings::Padding::new(4, 1, 0, 0))
+            .to_string();
+
+        println!("\n{:=<80}\n\n{table}", "== MIGRATION HISTORY");
+    }
 
     Ok(())
 }
@@ -4892,8 +5207,6 @@ async fn cmd_db_migrations_list(
     fetch_opts: &DbFetchOptions,
     args: &MigrationsListArgs,
 ) -> Result<(), anyhow::Error> {
-    use db::model::Migration;
-    use db::model::MigrationState;
     use db::schema::migration::dsl;
     use omicron_common::api::internal::nexus;
 
@@ -4943,34 +5256,6 @@ async fn cmd_db_migrations_list(
 
     check_limit(&migrations, fetch_opts.fetch_limit, || "listing migrations");
 
-    #[derive(Tabled)]
-    #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-    struct Vmms {
-        src_state: MigrationState,
-        tgt_state: MigrationState,
-        src_vmm: Uuid,
-        tgt_vmm: Uuid,
-    }
-
-    impl From<&'_ Migration> for Vmms {
-        fn from(
-            &Migration {
-                source_propolis_id,
-                target_propolis_id,
-                source_state,
-                target_state,
-                ..
-            }: &Migration,
-        ) -> Self {
-            Self {
-                src_state: source_state,
-                tgt_state: target_state,
-                src_vmm: source_propolis_id,
-                tgt_vmm: target_propolis_id,
-            }
-        }
-    }
-
     let table = if args.verbose {
         // If verbose mode is enabled, include the migration's ID as well as the
         // source and target updated timestamps.
@@ -4981,7 +5266,7 @@ async fn cmd_db_migrations_list(
             id: Uuid,
             instance: Uuid,
             #[tabled(inline)]
-            vmms: Vmms,
+            vmms: MigrationVmms,
             #[tabled(display_with = "display_option_blank")]
             src_updated: Option<chrono::DateTime<Utc>>,
             #[tabled(display_with = "display_option_blank")]
@@ -4993,7 +5278,7 @@ async fn cmd_db_migrations_list(
         let rows = migrations.into_iter().map(|m| VerboseMigrationRow {
             id: m.id,
             instance: m.instance_id,
-            vmms: Vmms::from(&m),
+            vmms: MigrationVmms::from(&m),
             src_updated: m.time_source_updated,
             tgt_updated: m.time_target_updated,
             created: m.time_created,
@@ -5007,16 +5292,9 @@ async fn cmd_db_migrations_list(
     } else if args.instance_ids.len() == 1 {
         // If only the migrations for a single instance are shown, we omit the
         // instance ID row for conciseness sake.
-        #[derive(Tabled)]
-        #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
-        struct SingleInstanceMigrationRow {
-            created: chrono::DateTime<Utc>,
-            #[tabled(inline)]
-            vmms: Vmms,
-        }
         let rows = migrations.into_iter().map(|m| SingleInstanceMigrationRow {
             created: m.time_created,
-            vmms: Vmms::from(&m),
+            vmms: MigrationVmms::from(&m),
         });
 
         tabled::Table::new(rows)
@@ -5032,13 +5310,13 @@ async fn cmd_db_migrations_list(
             created: chrono::DateTime<Utc>,
             instance: Uuid,
             #[tabled(inline)]
-            vmms: Vmms,
+            vmms: MigrationVmms,
         }
 
         let rows = migrations.into_iter().map(|m| MigrationRow {
             created: m.time_created,
             instance: m.instance_id,
-            vmms: Vmms::from(&m),
+            vmms: MigrationVmms::from(&m),
         });
 
         tabled::Table::new(rows)
@@ -5050,6 +5328,41 @@ async fn cmd_db_migrations_list(
     println!("{table}");
 
     Ok(())
+}
+
+#[derive(Tabled)]
+#[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+struct SingleInstanceMigrationRow {
+    created: chrono::DateTime<Utc>,
+    #[tabled(inline)]
+    vmms: MigrationVmms,
+}
+#[derive(Tabled)]
+#[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
+struct MigrationVmms {
+    src_state: MigrationState,
+    tgt_state: MigrationState,
+    src_vmm: Uuid,
+    tgt_vmm: Uuid,
+}
+
+impl From<&'_ Migration> for MigrationVmms {
+    fn from(
+        &Migration {
+            source_propolis_id,
+            target_propolis_id,
+            source_state,
+            target_state,
+            ..
+        }: &Migration,
+    ) -> Self {
+        Self {
+            src_state: source_state,
+            tgt_state: target_state,
+            src_vmm: source_propolis_id,
+            tgt_vmm: target_propolis_id,
+        }
+    }
 }
 
 // Display an empty cell for an Option<T> if it's None.
