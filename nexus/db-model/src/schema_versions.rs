@@ -29,7 +29,7 @@ static KNOWN_VERSIONS: Lazy<Vec<KnownVersion>> = Lazy::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
-        KnownVersion::new(104, "lookup-bgp-config-by-name"),
+        KnownVersion::new(104, "lookup-bgp-config-indexes"),
         KnownVersion::new(103, "lookup-instances-by-state-index"),
         KnownVersion::new(102, "add-instance-auto-restart-cooldown"),
         KnownVersion::new(101, "auto-restart-policy-v2"),

@@ -287,15 +287,17 @@ impl DataStore {
                             }),
                     }?;
 
-                    let count: i64 =
-                        sps_bgp_peer_config_dsl::switch_port_settings_bgp_peer_config
-                        .filter(sps_bgp_peer_config::bgp_config_id.eq(id))
-                        .select(sps_bgp_peer_config::bgp_config_id)
-                        .count()
-                        .get_result_async(&conn)
+
+                    let in_use =
+                        diesel::dsl::select(diesel::dsl::exists(
+                            sps_bgp_peer_config_dsl::switch_port_settings_bgp_peer_config
+                                .filter(sps_bgp_peer_config::bgp_config_id.eq(id))
+                                .select(sps_bgp_peer_config::bgp_config_id)
+                        ))
+                        .get_result_async::<bool>(&conn)
                         .await?;
 
-                    if count > 0 {
+                    if in_use {
                         return Err(err.bail(Error::conflict("BGP Config is in use and cannot be deleted")));
                     }
 
@@ -763,14 +765,15 @@ impl DataStore {
                         }
                     }?;
 
-                    let count: i64 = bgp_config_dsl::bgp_config
-                        .filter(bgp_config::bgp_announce_set_id.eq(id))
-                        .filter(bgp_config::time_deleted.is_null())
-                        .count()
-                        .get_result_async(&conn)
-                        .await?;
+                    let in_use = diesel::dsl::select(diesel::dsl::exists(
+                        bgp_config_dsl::bgp_config
+                            .filter(bgp_config::bgp_announce_set_id.eq(id))
+                            .filter(bgp_config::time_deleted.is_null()),
+                    ))
+                    .get_result_async::<bool>(&conn)
+                    .await?;
 
-                    if count > 0 {
+                    if in_use {
                         return Err(
                             err.bail(Error::conflict("announce set in use"))
                         );
