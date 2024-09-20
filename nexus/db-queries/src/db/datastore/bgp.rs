@@ -243,6 +243,7 @@ impl DataStore {
                         NameOrId::Id(id) => bgp_config_dsl::bgp_config
                             .filter(bgp_config::id.eq(id))
                             .select(bgp_config::id)
+                            .filter(bgp_config::time_deleted.is_null())
                             .limit(1)
                             .first_async::<Uuid>(&conn)
                             .await
@@ -264,6 +265,7 @@ impl DataStore {
                         NameOrId::Name(name) =>
                             bgp_config_dsl::bgp_config
                             .filter(bgp_config::name.eq(name.to_string()))
+                            .filter(bgp_config::time_deleted.is_null())
                             .select(bgp_config::id)
                             .limit(1)
                             .first_async::<Uuid>(&conn)
@@ -285,11 +287,12 @@ impl DataStore {
                             }),
                     }?;
 
-                    let count =
+                    let count: i64 =
                         sps_bgp_peer_config_dsl::switch_port_settings_bgp_peer_config
                         .filter(sps_bgp_peer_config::bgp_config_id.eq(id))
+                        .select(sps_bgp_peer_config::bgp_config_id)
                         .count()
-                        .execute_async(&conn)
+                        .get_result_async(&conn)
                         .await?;
 
                     if count > 0 {
@@ -760,10 +763,11 @@ impl DataStore {
                         }
                     }?;
 
-                    let count = bgp_config_dsl::bgp_config
+                    let count: i64 = bgp_config_dsl::bgp_config
                         .filter(bgp_config::bgp_announce_set_id.eq(id))
+                        .filter(bgp_config::time_deleted.is_null())
                         .count()
-                        .execute_async(&conn)
+                        .get_result_async(&conn)
                         .await?;
 
                     if count > 0 {
@@ -987,5 +991,80 @@ impl DataStore {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 }
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::datastore::test_utils::datastore_test;
+    use nexus_test_utils::db::test_setup_database;
+    use omicron_common::api::external::IdentityMetadataCreateParams;
+    use omicron_common::api::external::Name;
+    use omicron_test_utils::dev;
+
+    #[tokio::test]
+    async fn test_delete_bgp_config_delete_by_name() {
+        let logctx = dev::test_setup_log("test_delete_bgp_config_by_name");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        let config_name: Name = "testconfig47".parse().unwrap();
+        let announce_name: Name = "testannounce47".parse().unwrap();
+
+        datastore
+            .bgp_create_announce_set(
+                &opctx,
+                &params::BgpAnnounceSetCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: announce_name.clone(),
+                        description: String::from("a test announce set"),
+                    },
+                    announcement: Vec::default(),
+                },
+            )
+            .await
+            .expect("create bgp announce set");
+
+        datastore
+            .bgp_config_create(
+                &opctx,
+                &params::BgpConfigCreate {
+                    identity: IdentityMetadataCreateParams {
+                        name: config_name.clone(),
+                        description: String::from("a test config"),
+                    },
+                    asn: 47,
+                    bgp_announce_set_id: NameOrId::Name(announce_name.clone()),
+                    vrf: None,
+                    shaper: None,
+                    checker: None,
+                },
+            )
+            .await
+            .expect("create bgp config");
+
+        datastore
+            .bgp_config_delete(
+                &opctx,
+                &params::BgpConfigSelector {
+                    name_or_id: NameOrId::Name(config_name),
+                },
+            )
+            .await
+            .expect("delete bgp config by name");
+
+        datastore
+            .bgp_delete_announce_set(
+                &opctx,
+                &params::BgpAnnounceSetSelector {
+                    announce_set: NameOrId::Name(announce_name),
+                },
+            )
+            .await
+            .expect("delete announce set by name");
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
     }
 }

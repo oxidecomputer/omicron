@@ -2814,6 +2814,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config (
     PRIMARY KEY (port_settings_id, interface_name, addr)
 );
 
+CREATE INDEX IF NOT EXISTS lookup_sps_bgp_peer_config_by_bgp_config_id on omicron.public.switch_port_settings_bgp_peer_config(
+    bgp_config_id
+);
+
 CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config_communities (
     port_settings_id UUID NOT NULL,
     interface_name TEXT NOT NULL,
@@ -4361,7 +4365,11 @@ CREATE INDEX IF NOT EXISTS lookup_region_snapshot_by_snapshot_id on omicron.publ
     snapshot_id
 );
 
-CREATE INDEX IF NOT EXISTS lookup_bgp_config_by_name on omicron.public.bgp_config(name);
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_bgp_config_by_bgp_announce_set_id ON omicron.public.bgp_config (
+    bgp_announce_set_id
+) WHERE
+    time_deleted IS NULL;
+
 
 /*
  * Keep this at the end of file so that the database does not contain a version
