@@ -1194,8 +1194,7 @@ pub struct Instance {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceAutoRestartStatus {
     /// `true` if this instance's auto-restart policy will permit the control
-    /// plane is permitted to automatically restart it if it enters the `Failed`
-    /// state.
+    /// plane to automatically restart it if it enters the `Failed` state.
     //
     // Rename this field, as the struct is `#[serde(flatten)]`ed into the
     // `Instance` type, and we would like the field to be prefixed with
