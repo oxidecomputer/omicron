@@ -1114,7 +1114,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
      * does not want our policy, and instead should be permitted control over
      * its boot-time fates.
      */
-    boot_device STRING(63),
+    boot_device UUID,
 
     CONSTRAINT vmm_iff_active_propolis CHECK (
         ((state = 'vmm') AND (active_propolis_id IS NOT NULL)) OR

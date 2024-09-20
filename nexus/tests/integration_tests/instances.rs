@@ -3273,7 +3273,7 @@ async fn test_instance_create_attach_disks_undo(
                 params::InstanceDiskAttach { name: faulted_disk.identity.name },
             ),
         ],
-        boot_device: Some(String::from("probablydata")),
+        boot_device: None,
         start: true,
     };
 
@@ -3732,6 +3732,159 @@ async fn test_disks_detached_when_instance_destroyed(
     for disk in &disks {
         assert!(matches!(disk.state, DiskState::Attached(_)));
     }
+}
+
+/// Attempt and fail to create an instance with a non-attached disk as its boot device.
+#[nexus_test]
+async fn test_cannot_have_nonexistent_boot_device(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let instance_name = "nifs";
+
+    // Test pre-reqs
+    DiskTest::new(&cptestctx).await;
+    create_project_and_pool(&client).await;
+
+    // Create the "probablydata" disk
+    create_disk(&client, PROJECT_NAME, "probablydata").await;
+
+    // Verify disk is there and currently detached
+    let disks: Vec<Disk> =
+        NexusRequest::iter_collection_authn(client, &get_disks_url(), "", None)
+            .await
+            .expect("failed to list disks")
+            .all_items;
+    assert_eq!(disks.len(), 1);
+    assert_eq!(disks[0].state, DiskState::Detached);
+
+    // Create the instance
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: instance_name.parse().unwrap(),
+            description: String::from("probably serving data"),
+        },
+        ncpus: InstanceCpuCount::try_from(2).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(4),
+        hostname: "nfs".parse().unwrap(),
+        user_data: vec![],
+        ssh_public_keys: None,
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![],
+        disks: vec![],
+        boot_device: Some(String::from("probablydata")),
+        start: true,
+    };
+
+    let builder =
+        RequestBuilder::new(client, http::Method::POST, &get_instances_url())
+            .body(Some(&instance_params))
+            .expect_status(Some(http::StatusCode::CONFLICT));
+    let response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("can attempt to create instance");
+
+    let err = response
+        .parsed_body::<HttpErrorResponseBody>()
+        .expect("Failed to parse error response body");
+    assert_eq!(err.message, "boot disk must be attached",);
+}
+
+/// Create an instance with a boot device, then fail to detach the disk while it is the boot device.
+#[nexus_test]
+async fn test_cannot_detach_boot_device(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let instance_name = "nifs";
+
+    // Test pre-reqs
+    DiskTest::new(&cptestctx).await;
+    create_project_and_pool(&client).await;
+
+    // Create the "probablydata" disk
+    create_disk(&client, PROJECT_NAME, "probablydata").await;
+
+    // Verify disk is there and currently detached
+    let disks: Vec<Disk> =
+        NexusRequest::iter_collection_authn(client, &get_disks_url(), "", None)
+            .await
+            .expect("failed to list disks")
+            .all_items;
+    assert_eq!(disks.len(), 1);
+    assert_eq!(disks[0].state, DiskState::Detached);
+
+    // Create the instance
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: instance_name.parse().unwrap(),
+            description: String::from("probably serving data"),
+        },
+        ncpus: InstanceCpuCount::try_from(2).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(4),
+        hostname: "nfs".parse().unwrap(),
+        user_data: vec![],
+        ssh_public_keys: None,
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![],
+        disks: vec![params::InstanceDiskAttachment::Attach(
+            params::InstanceDiskAttach {
+                name: Name::try_from(String::from("probablydata")).unwrap(),
+            },
+        )],
+        boot_device: Some(String::from("probablydata")),
+        start: false,
+    };
+
+    let builder =
+        RequestBuilder::new(client, http::Method::POST, &get_instances_url())
+            .body(Some(&instance_params))
+            .expect_status(Some(http::StatusCode::CREATED));
+    let response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Expected instance creation to work!");
+
+    let instance = response.parsed_body::<Instance>().unwrap();
+
+    // Verify disk is attached to the instance
+    let url_instance_disks =
+        format!("/v1/instances/{}/disks", instance.identity.id);
+    let disks: Vec<Disk> = NexusRequest::iter_collection_authn(
+        client,
+        &url_instance_disks,
+        "",
+        None,
+    )
+    .await
+    .expect("failed to list disks")
+    .all_items;
+    assert_eq!(disks.len(), 1);
+    assert_eq!(disks[0].state, DiskState::Attached(instance.identity.id));
+    assert_eq!(instance.boot_device, Some(disks[0].identity.id));
+
+    // Attempt to detach the instance's disk. This should fail because it is still the boot disk.
+    let url_instance_detach_disk =
+        format!("/v1/instances/{}/disks/detach", instance.identity.id);
+
+    let builder = RequestBuilder::new(
+        client,
+        http::Method::POST,
+        &url_instance_detach_disk,
+    )
+    .body(Some(&params::DiskPath { disk: disks[0].identity.id.into() }))
+    .expect_status(Some(http::StatusCode::CONFLICT));
+    let response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("can attempt to create instance");
+
+    let err = response
+        .parsed_body::<HttpErrorResponseBody>()
+        .expect("Failed to parse error response body");
+    assert_eq!(err.message, "boot disk cannot be detached");
 }
 
 // Tests that an instance is rejected if the memory is less than

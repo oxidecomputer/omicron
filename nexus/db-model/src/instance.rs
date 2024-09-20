@@ -65,7 +65,7 @@ pub struct Instance {
 
     /// The primary boot device for this instance.
     #[diesel(column_name = boot_device)]
-    pub boot_device: Option<String>,
+    pub boot_device: Option<Uuid>,
 
     #[diesel(embed)]
     pub runtime_state: InstanceRuntimeState,
@@ -117,7 +117,9 @@ impl Instance {
             // TODO(eliza): allow this to be configured via the instance-create
             // params...
             auto_restart_policy: None,
-            boot_device: params.boot_device.clone(),
+            // Intentionally ignore `params.boot_device` here: we can't set `boot_device` until the
+            // referenced device is attached,.
+            boot_device: None,
             runtime_state,
 
             updater_gen: Generation::new(),

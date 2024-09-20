@@ -100,6 +100,10 @@ declare_saga_actions! {
         + sic_attach_disk_to_instance
         - sic_attach_disk_to_instance_undo
     }
+    SET_BOOT_DEVICE -> "set_boot_device" {
+        + sic_set_boot_device
+        - sic_set_boot_device_undo
+    }
     MOVE_TO_STOPPED -> "stopped_instance" {
         + sic_move_to_stopped
     }
@@ -292,6 +296,7 @@ impl NexusSaga for SagaInstanceCreate {
             )?;
         }
 
+        builder.append(set_boot_device_action());
         builder.append(move_to_stopped_action());
         Ok(builder.build()?)
     }
@@ -1017,6 +1022,83 @@ async fn sic_delete_instance_record(
 
     // Actually delete the record.
     datastore.project_delete_instance(&opctx, &authz_instance).await?;
+
+    Ok(())
+}
+
+async fn sic_set_boot_device(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let datastore = osagactx.datastore();
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    let Some(boot_device) = params.create_params.boot_device.as_ref() else {
+        return Ok(());
+    };
+
+    let instance_id = sagactx.lookup::<InstanceUuid>("instance_id")?;
+
+    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+        .instance_id(instance_id.into_untyped_uuid())
+        .lookup_for(authz::Action::Modify)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    let nameorid: NameOrId = boot_device
+        .to_owned()
+        .try_into()
+        .expect("TODO: make the param NameOrId");
+    let (.., authz_disk) = match nameorid.clone() {
+        NameOrId::Name(name) => LookupPath::new(&opctx, datastore)
+            .project_id(params.project_id)
+            .disk_name_owned(name.into())
+            .fetch()
+            .await
+            .map_err(ActionError::action_failed)?,
+        NameOrId::Id(id) => LookupPath::new(&opctx, datastore)
+            .disk_id(id)
+            .fetch()
+            .await
+            .map_err(ActionError::action_failed)?,
+    };
+
+    // Whatever the reason we failed to set the boot device, it's fatal to instance creation.
+    datastore
+        .set_boot_device(&opctx, &authz_instance, &authz_disk)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    Ok(())
+}
+
+async fn sic_set_boot_device_undo(
+    sagactx: NexusActionContext,
+) -> Result<(), anyhow::Error> {
+    let osagactx = sagactx.user_data();
+    let params = sagactx.saga_params::<Params>()?;
+    let datastore = osagactx.datastore();
+    let opctx = crate::context::op_context_for_saga_action(
+        &sagactx,
+        &params.serialized_authn,
+    );
+
+    let instance_id = sagactx.lookup::<InstanceUuid>("instance_id")?;
+
+    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+        .instance_id(instance_id.into_untyped_uuid())
+        .lookup_for(authz::Action::Modify)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    datastore
+        .clear_boot_device(&opctx, &authz_instance)
+        .await
+        .map_err(ActionError::action_failed)?;
 
     Ok(())
 }

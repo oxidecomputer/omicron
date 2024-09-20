@@ -33,6 +33,7 @@ use crate::db::pagination::paginated_multicolumn;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateAndQueryResult;
 use crate::db::update_and_check::UpdateStatus;
+use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
@@ -204,6 +205,7 @@ impl From<InstanceAndActiveVmm> for external::Instance {
                 .hostname
                 .parse()
                 .expect("found invalid hostname in the database"),
+            boot_device: value.instance.boot_device.into(),
             runtime: external::InstanceRuntimeState {
                 run_state: value.effective_state(),
                 time_run_state_updated,
@@ -325,6 +327,83 @@ impl DataStore {
             instance.runtime().gen
         );
         Ok(instance)
+    }
+
+    pub async fn set_boot_device(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+        disk: &Disk,
+    ) -> Result<(), Error> {
+        opctx.authorize(authz::Action::Modify, authz_instance).await?;
+
+        use db::schema::instance::dsl as instance_dsl;
+        use db::schema::disk::dsl as disk_dsl;
+
+        let err = OptionalError::new();
+        let conn = self.pool_connection_authorized(opctx).await?;
+        self
+            .transaction_retry_wrapper("set_boot_device")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                async move {
+                    // Ensure the disk is currently attached.
+                    let expected_state = api::external::DiskState::Attached(authz_instance.id());
+
+                    let attached_disk: Vec<Uuid> = disk_dsl::disk
+                        .filter(disk_dsl::id.eq(disk.id()))
+                        .filter(disk_dsl::attach_instance_id.eq(authz_instance.id()))
+                        .filter(disk_dsl::disk_state.eq(expected_state.label()))
+                        .select(disk_dsl::id)
+                        .load_async(&conn)
+                        .await?;
+
+                    if attached_disk.is_empty() {
+                        return Err(err.bail(Error::conflict("boot disk must be attached")));
+                    }
+
+                    // TODO: i think this returns the whole row? i don't want the whole row!
+                    let _updated = diesel::update(instance_dsl::instance)
+                        .filter(instance_dsl::id.eq(authz_instance.id()))
+                        .set(instance_dsl::boot_device.eq(disk.id()))
+                        .execute_async(&conn)
+                        .await?;
+
+                    Ok(())
+                }
+            })
+        .await
+        .map_err(|e| {
+            if let Some(err) = err.take() {
+                return err;
+            }
+
+            public_error_from_diesel(e, ErrorHandler::Server)
+        })
+    }
+
+    pub async fn clear_boot_device(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+    ) -> Result<(), Error> {
+        opctx.authorize(authz::Action::Modify, authz_instance).await?;
+
+        use db::schema::instance::dsl as instance_dsl;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        // TODO: i think this returns the whole row? i don't want the whole row!
+        let _updated = diesel::update(instance_dsl::instance)
+            .filter(instance_dsl::id.eq(authz_instance.id()))
+            .set(instance_dsl::boot_device.eq(None::<Uuid>))
+            .execute_async(&*conn)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(e, ErrorHandler::Server)
+            })?;
+
+        Ok(())
     }
 
     pub async fn instance_list(

@@ -431,6 +431,13 @@ impl super::Nexus {
             }
         }
 
+        // It is deceptively inconvenient to do an early check that the boot device is valid here!
+        // We accept boot device by name or ID, but disk creation and attachment requests as part
+        // of instance creation all require the disk name. So if the boot device is an ID, we would
+        // need to look up all attachment requests to compare the named device and to-be-attached
+        // devices. Instead, leave this for the other end of the saga when we'd go to set the boot
+        // device.
+
         let saga_params = sagas::instance_create::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
             project_id: authz_project.id(),
@@ -973,6 +980,8 @@ impl super::Nexus {
             )
             .await?;
 
+        let mut boot_device_name = None;
+
         let mut disk_reqs = vec![];
         for disk in &disks {
             // Disks that are attached to an instance should always have a slot
@@ -1007,6 +1016,12 @@ impl super::Nexus {
                 )
                 .await?;
 
+            // Propolis wants the name of the boot disk rather than ID, because we send names
+            // rather than IDs in the disk requsts as assembled below.
+            if db_instance.boot_device == Some(disk.id()) {
+                boot_device_name = Some(disk.name().to_string());
+            }
+
             disk_reqs.push(sled_agent_client::types::DiskRequest {
                 name: disk.name().to_string(),
                 slot: sled_agent_client::types::Slot(slot.0),
@@ -1019,13 +1034,26 @@ impl super::Nexus {
             });
         }
 
-        let boot_order = match db_instance.boot_device.as_ref() {
-            Some(device) => {
-                // TODO: ensure that one of the disk request is backed by this name
-                Some(vec![device.to_owned()])
+        // This should never occur: when setting the boot disk we ensure it is attached, and when
+        // detaching a disk we ensure it is not the boot disk. If this error is seen, the instance
+        // somehow had a boot device that was not an attached disk anyway.
+        //
+        // When Propolis accepts an ID rather than name, and we don't need to look up a name when
+        // assembling the Propolis request, we might as well remove this check; we can just pass
+        // the ID and rely on Propolis' own check that the boot device is attached.
+        if let Some(instance_boot_device) = db_instance.boot_device.as_ref() {
+            if boot_device_name.is_none() {
+                error!(self.log, "instance boot device is not attached";
+                   "boot_device" => ?instance_boot_device,
+                   "instance id" => %db_instance.id());
+
+                return Err(InstanceStateChangeError::Other(Error::internal_error(&format!(
+                    "instance {} has boot device {:?} but it is not an attached disk",
+                    db_instance.id(),
+                    db_instance.boot_device.as_ref(),
+                ))));
             }
-            None => None,
-        };
+        }
 
         let nics = self
             .db_datastore
@@ -1174,7 +1202,7 @@ impl super::Nexus {
                 search_domains: Vec::new(),
             },
             disks: disk_reqs,
-            boot_order,
+            boot_order: boot_device_name.map(|v| vec![v]),
             cloud_init_bytes: Some(base64::Engine::encode(
                 &base64::engine::general_purpose::STANDARD,
                 db_instance.generate_cidata(&ssh_keys)?,

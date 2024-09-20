@@ -496,17 +496,6 @@ pub async fn create_instance_with(
     start: bool,
 ) -> Instance {
     let url = format!("/v1/instances?project={}", project_name);
-    let boot_device = disks.get(0).map(|disk| {
-        let name = match disk {
-            params::InstanceDiskAttachment::Create(create) => {
-                create.identity.name.as_str()
-            }
-            params::InstanceDiskAttachment::Attach(attach) => {
-                attach.name.as_str()
-            }
-        };
-        name.to_string()
-    });
 
     object_create(
         client,
@@ -526,7 +515,7 @@ pub async fn create_instance_with(
             network_interfaces: nics.clone(),
             external_ips,
             disks,
-            boot_device,
+            boot_device: None,
             start,
         },
     )
