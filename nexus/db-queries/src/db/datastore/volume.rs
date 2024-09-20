@@ -1896,13 +1896,28 @@ pub struct ReplacementTarget(pub SocketAddrV6);
 #[derive(Debug, Clone, Copy)]
 pub struct VolumeToDelete(pub Uuid);
 
+// The result type returned from both `volume_replace_region` and
+// `volume_replace_snapshot`
+#[must_use]
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+pub enum VolumeReplaceResult {
+    // based on the VCRs, seems like the replacement already happened
+    AlreadyHappened,
+
+    // this call performed the replacement
+    Done,
+
+    // the "existing" volume was deleted
+    ExistingVolumeDeleted,
+}
+
 impl DataStore {
     /// Replace a read-write region in a Volume with a new region.
     pub async fn volume_replace_region(
         &self,
         existing: VolumeReplacementParams,
         replacement: VolumeReplacementParams,
-    ) -> Result<(), Error> {
+    ) -> Result<VolumeReplaceResult, Error> {
         // In a single transaction:
         //
         // - set the existing region's volume id to the replacement's volume id
@@ -2001,9 +2016,6 @@ impl DataStore {
             #[error("Serde error during Volume region replacement: {0}")]
             SerdeError(#[from] serde_json::Error),
 
-            #[error("Target Volume deleted")]
-            TargetVolumeDeleted,
-
             #[error("Region replacement error: {0}")]
             RegionReplacementError(#[from] anyhow::Error),
         }
@@ -2037,9 +2049,11 @@ impl DataStore {
                     let old_volume = if let Some(old_volume) = maybe_old_volume {
                         old_volume
                     } else {
-                        // Existing volume was deleted, so return an error. We
-                        // can't perform the region replacement now!
-                        return Err(err.bail(VolumeReplaceRegionError::TargetVolumeDeleted));
+                        // Existing volume was deleted, so return here. We can't
+                        // perform the region replacement now, and this will
+                        // short-circuit the rest of the process.
+
+                        return Ok(VolumeReplaceResult::ExistingVolumeDeleted);
                     };
 
                     let old_vcr: VolumeConstructionRequest =
@@ -2066,7 +2080,7 @@ impl DataStore {
 
                     if !old_region_in_vcr && new_region_in_vcr {
                         // It does seem like the replacement happened
-                        return Ok(());
+                        return Ok(VolumeReplaceResult::AlreadyHappened);
                     }
 
                     use db::schema::region::dsl as region_dsl;
@@ -2151,7 +2165,7 @@ impl DataStore {
                             })
                         })?;
 
-                    Ok(())
+                    Ok(VolumeReplaceResult::Done)
                 }
             })
             .await
@@ -2161,10 +2175,6 @@ impl DataStore {
                         VolumeReplaceRegionError::Public(e) => e,
 
                         VolumeReplaceRegionError::SerdeError(_) => {
-                            Error::internal_error(&err.to_string())
-                        }
-
-                        VolumeReplaceRegionError::TargetVolumeDeleted => {
                             Error::internal_error(&err.to_string())
                         }
 
@@ -2200,7 +2210,7 @@ impl DataStore {
         existing: ExistingTarget,
         replacement: ReplacementTarget,
         volume_to_delete_id: VolumeToDelete,
-    ) -> Result<(), Error> {
+    ) -> Result<VolumeReplaceResult, Error> {
         #[derive(Debug, thiserror::Error)]
         enum VolumeReplaceSnapshotError {
             #[error("Error from Volume snapshot replacement: {0}")]
@@ -2208,9 +2218,6 @@ impl DataStore {
 
             #[error("Serde error during Volume snapshot replacement: {0}")]
             SerdeError(#[from] serde_json::Error),
-
-            #[error("Target Volume deleted")]
-            TargetVolumeDeleted,
 
             #[error("Snapshot replacement error: {0}")]
             SnapshotReplacementError(#[from] anyhow::Error),
@@ -2253,11 +2260,11 @@ impl DataStore {
                     let old_volume = if let Some(old_volume) = maybe_old_volume {
                         old_volume
                     } else {
-                        // Existing volume was deleted, so return an error. We
-                        // can't perform the snapshot replacement now!
-                        return Err(err.bail(
-                            VolumeReplaceSnapshotError::TargetVolumeDeleted
-                        ));
+                        // Existing volume was deleted, so return here. We can't
+                        // perform the region snapshot replacement now, and this
+                        // will short-circuit the rest of the process.
+
+                        return Ok(VolumeReplaceResult::ExistingVolumeDeleted);
                     };
 
                     let old_vcr: VolumeConstructionRequest =
@@ -2291,7 +2298,7 @@ impl DataStore {
 
                     if !old_target_in_vcr && new_target_in_vcr {
                         // It does seem like the replacement happened
-                        return Ok(());
+                        return Ok(VolumeReplaceResult::AlreadyHappened);
                     }
 
                     // Update the existing volume's construction request to
@@ -2402,7 +2409,7 @@ impl DataStore {
                         ));
                     }
 
-                    Ok(())
+                    Ok(VolumeReplaceResult::Done)
                 }
             })
             .await
@@ -2412,10 +2419,6 @@ impl DataStore {
                         VolumeReplaceSnapshotError::Public(e) => e,
 
                         VolumeReplaceSnapshotError::SerdeError(_) => {
-                            Error::internal_error(&err.to_string())
-                        }
-
-                        VolumeReplaceSnapshotError::TargetVolumeDeleted => {
                             Error::internal_error(&err.to_string())
                         }
 
@@ -2952,7 +2955,7 @@ mod tests {
         let target = region_and_volume_ids[0];
         let replacement = region_and_volume_ids[3];
 
-        db_datastore
+        let volume_replace_region_result = db_datastore
             .volume_replace_region(
                 /* target */
                 db::datastore::VolumeReplacementParams {
@@ -2973,6 +2976,8 @@ mod tests {
             )
             .await
             .unwrap();
+
+        assert_eq!(volume_replace_region_result, VolumeReplaceResult::Done);
 
         let vcr: VolumeConstructionRequest = serde_json::from_str(
             db_datastore.volume_get(volume_id).await.unwrap().unwrap().data(),
@@ -3012,7 +3017,7 @@ mod tests {
         );
 
         // Now undo the replacement. Note volume ID is not swapped.
-        db_datastore
+        let volume_replace_region_result = db_datastore
             .volume_replace_region(
                 /* target */
                 db::datastore::VolumeReplacementParams {
@@ -3033,6 +3038,8 @@ mod tests {
             )
             .await
             .unwrap();
+
+        assert_eq!(volume_replace_region_result, VolumeReplaceResult::Done);
 
         let vcr: VolumeConstructionRequest = serde_json::from_str(
             db_datastore.volume_get(volume_id).await.unwrap().unwrap().data(),
@@ -3164,7 +3171,7 @@ mod tests {
 
         // Do the replacement
 
-        db_datastore
+        let volume_replace_snapshot_result = db_datastore
             .volume_replace_snapshot(
                 VolumeWithTarget(volume_id),
                 ExistingTarget("[fd00:1122:3344:104::1]:400".parse().unwrap()),
@@ -3175,6 +3182,8 @@ mod tests {
             )
             .await
             .unwrap();
+
+        assert_eq!(volume_replace_snapshot_result, VolumeReplaceResult::Done,);
 
         // Ensure the shape of the resulting VCRs
 
@@ -3280,7 +3289,7 @@ mod tests {
 
         // Now undo the replacement. Note volume ID is not swapped.
 
-        db_datastore
+        let volume_replace_snapshot_result = db_datastore
             .volume_replace_snapshot(
                 VolumeWithTarget(volume_id),
                 ExistingTarget("[fd55:1122:3344:101::1]:111".parse().unwrap()),
@@ -3291,6 +3300,8 @@ mod tests {
             )
             .await
             .unwrap();
+
+        assert_eq!(volume_replace_snapshot_result, VolumeReplaceResult::Done,);
 
         let vcr: VolumeConstructionRequest = serde_json::from_str(
             db_datastore.volume_get(volume_id).await.unwrap().unwrap().data(),
