@@ -3891,7 +3891,7 @@
         "properties": {
           "filesystem_pool": {
             "nullable": true,
-            "description": "The pool on which we'll place this zone's filesystem.\n\nNote that this is transient -- the sled agent is permitted to destroy the zone's dataset on this pool each time the zone is initialized.",
+            "description": "The pool on which we'll place this zone's root filesystem.\n\nNote that the root filesystem is transient -- the sled agent is permitted to destroy this dataset each time the zone is initialized.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/ZpoolName"
@@ -3899,8 +3899,7 @@
             ]
           },
           "id": {
-            "type": "string",
-            "format": "uuid"
+            "$ref": "#/components/schemas/TypedUuidForOmicronZoneKind"
           },
           "underlay_address": {
             "type": "string",
@@ -5080,6 +5079,10 @@
         "format": "uuid"
       },
       "TypedUuidForInstanceKind": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "TypedUuidForOmicronZoneKind": {
         "type": "string",
         "format": "uuid"
       },

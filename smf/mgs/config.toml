@@ -18,12 +18,17 @@ request_body_max_bytes = 536870912
 # as our contact to the ignition controller)?
 local_ignition_controller_interface = "sidecar0"
 
-# When sending UDP RPC packets to an SP, how many total attempts do we make
-# before giving up?
-rpc_max_attempts = 5
+[switch.rpc_retry_config]
+# When sending UDP RPC packets to an SP (other than to reset it), how many total
+# attempts do we make before giving up?
+max_attempts_general = 5
 
-# sleep time between UDP RPC resends (up to `rpc_max_attempts`)
-rpc_per_attempt_timeout_millis = 2000
+# When sending UDP RPC packets to an SP (to reset it), how many total attempts
+# do we make before giving up?
+max_attempts_reset = 30
+
+# sleep time between UDP RPC resends (up to `max_attempts_*`)
+per_attempt_timeout_millis = 2000
 
 [switch.location]
 # possible locations where MGS could be running; these names appear in logs and

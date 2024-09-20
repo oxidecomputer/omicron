@@ -14,11 +14,11 @@ use nexus_reconfigurator_execution::RealizeBlueprintOutput;
 use nexus_types::deployment::{
     execution::EventBuffer, Blueprint, BlueprintTarget,
 };
+use omicron_uuid_kinds::OmicronZoneUuid;
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::watch;
 use update_engine::NestedError;
-use uuid::Uuid;
 
 /// Background task that takes a [`Blueprint`] and realizes the change to
 /// the state of the system based on the `Blueprint`.
@@ -26,7 +26,7 @@ pub struct BlueprintExecutor {
     datastore: Arc<DataStore>,
     resolver: Resolver,
     rx_blueprint: watch::Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
-    nexus_id: Uuid,
+    nexus_id: OmicronZoneUuid,
     tx: watch::Sender<usize>,
     saga_recovery: Activator,
 }
@@ -38,7 +38,7 @@ impl BlueprintExecutor {
         rx_blueprint: watch::Receiver<
             Option<Arc<(BlueprintTarget, Blueprint)>>,
         >,
-        nexus_id: Uuid,
+        nexus_id: OmicronZoneUuid,
         saga_recovery: Activator,
     ) -> BlueprintExecutor {
         let (tx, _) = watch::channel(0);
@@ -168,7 +168,7 @@ impl BackgroundTask for BlueprintExecutor {
 mod test {
     use super::BlueprintExecutor;
     use crate::app::background::{Activator, BackgroundTask};
-    use httptest::matchers::{all_of, request};
+    use httptest::matchers::{not, request};
     use httptest::responders::status_code;
     use httptest::Expectation;
     use nexus_db_model::{
@@ -318,7 +318,7 @@ mod test {
             datastore.clone(),
             resolver.clone(),
             blueprint_rx,
-            Uuid::new_v4(),
+            OmicronZoneUuid::new_v4(),
             Activator::new(),
         );
 
@@ -409,6 +409,33 @@ mod test {
         )
         .await;
 
+        // The only sled-agent endpoint we care about in this test is `PUT
+        // /omicron-zones`. Add a closure to avoid repeating it multiple times
+        // below. We don't do a careful check of the _contents_ of what's being
+        // sent; for that, see the tests in nexus-reconfigurator-execution.
+        let match_put_omicron_zones =
+            || request::method_path("PUT", "/omicron-zones");
+
+        // Helper for our mock sled-agent http servers to blanket ignore and
+        // return 200 OK for anything _except_ `PUT /omciron-zones`, which is
+        // the endpoint we care about in this test.
+        //
+        // Other Nexus background tasks created by our test context may notice
+        // the sled-agent records we're about to insert into CRDB and query them
+        // (e.g., for inventory, vpc routing info, ...). We don't want those to
+        // cause spurious test failures, so just tell our sled-agents to accept
+        // any number of them.
+        let mock_server_ignore_spurious_http_requests =
+            |s: &mut httptest::Server| {
+                s.expect(
+                    Expectation::matching(not(match_put_omicron_zones()))
+                        .times(..)
+                        .respond_with(status_code(200)),
+                );
+            };
+        mock_server_ignore_spurious_http_requests(&mut s1);
+        mock_server_ignore_spurious_http_requests(&mut s2);
+
         // Insert records for the zpools backing the datasets in these zones.
         for (sled_id, config) in
             blueprint.1.all_omicron_zones(BlueprintZoneFilter::All)
@@ -431,17 +458,13 @@ mod test {
 
         blueprint_tx.send(Some(Arc::new(blueprint.clone()))).unwrap();
 
-        // Make sure that requests get made to the sled agent.  This is not a
-        // careful check of exactly what gets sent.  For that, see the tests in
-        // nexus-reconfigurator-execution.
+        // Make sure that requests get made to the sled agent.
         for s in [&mut s1, &mut s2] {
             s.expect(
-                Expectation::matching(all_of![request::method_path(
-                    "PUT",
-                    "/omicron-zones"
-                ),])
-                .respond_with(status_code(204)),
+                Expectation::matching(match_put_omicron_zones())
+                    .respond_with(status_code(204)),
             );
+            mock_server_ignore_spurious_http_requests(s);
         }
 
         // Activate the task to trigger zone configuration on the sled-agents
@@ -463,8 +486,16 @@ mod test {
         s1.verify_and_clear();
         s2.verify_and_clear();
 
+        // Immediately reapply our blanket ignores.
+        //
+        // TODO-cleanup Is there a tiny race window between verify_and_clear()
+        // and these calls where other bg tasks can cause spurious failures?
+        mock_server_ignore_spurious_http_requests(&mut s1);
+        mock_server_ignore_spurious_http_requests(&mut s2);
+
         // Now, disable the target and make sure that we _don't_ invoke the sled
-        // agent.  It's enough to just not set expectations.
+        // agent. It's enough to just not set expectations on
+        // match_put_omicron_zones().
         blueprint.1.internal_dns_version =
             blueprint.1.internal_dns_version.next();
         blueprint.0.enabled = false;
@@ -481,23 +512,24 @@ mod test {
         s1.verify_and_clear();
         s2.verify_and_clear();
 
+        // Immediately reapply our blanket ignores.
+        //
+        // TODO-cleanup Is there a tiny race window between verify_and_clear()
+        // and these calls where other bg tasks can cause spurious failures?
+        mock_server_ignore_spurious_http_requests(&mut s1);
+        mock_server_ignore_spurious_http_requests(&mut s2);
+
         // Do it all again, but configure one of the servers to fail so we can
         // verify the task's returned summary of what happened.
         blueprint.0.enabled = true;
         blueprint_tx.send(Some(Arc::new(blueprint))).unwrap();
         s1.expect(
-            Expectation::matching(request::method_path(
-                "PUT",
-                "/omicron-zones",
-            ))
-            .respond_with(status_code(204)),
+            Expectation::matching(match_put_omicron_zones())
+                .respond_with(status_code(204)),
         );
         s2.expect(
-            Expectation::matching(request::method_path(
-                "PUT",
-                "/omicron-zones",
-            ))
-            .respond_with(status_code(500)),
+            Expectation::matching(match_put_omicron_zones())
+                .respond_with(status_code(500)),
         );
 
         #[derive(Deserialize)]

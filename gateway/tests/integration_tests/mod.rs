@@ -5,5 +5,6 @@
 // Copyright 2022 Oxide Computer Company
 
 mod component_list;
+mod config;
 mod location_discovery;
 mod serial_console;
