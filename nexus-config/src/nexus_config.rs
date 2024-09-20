@@ -597,6 +597,15 @@ pub struct InstanceReincarnationConfig {
     /// period (in seconds) for periodic activations of this background task
     #[serde_as(as = "DurationSeconds<u64>")]
     pub period_secs: Duration,
+
+    /// disable background checks for instances in need of updates.
+    ///
+    /// This is an emergency lever for support / operations. It should only be
+    /// necessary if something has gone extremely wrong.
+    ///
+    /// Default: Off
+    #[serde(default)]
+    pub disable: bool,
 }
 
 #[serde_as]
@@ -1079,6 +1088,7 @@ mod test {
                         },
                         instance_reincarnation: InstanceReincarnationConfig {
                             period_secs: Duration::from_secs(67),
+                            disable: false,
                         },
                         service_firewall_propagation:
                             ServiceFirewallPropagationConfig {

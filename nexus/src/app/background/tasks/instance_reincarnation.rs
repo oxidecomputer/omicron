@@ -24,6 +24,7 @@ pub struct InstanceReincarnation {
     sagas: Arc<dyn StartSaga>,
     /// The maximum number of concurrently executing instance-start sagas.
     concurrency_limit: NonZeroU32,
+    disabled: bool,
 }
 
 const DEFAULT_MAX_CONCURRENT_REINCARNATIONS: NonZeroU32 =
@@ -39,27 +40,40 @@ impl BackgroundTask for InstanceReincarnation {
     ) -> BoxFuture<'a, serde_json::Value> {
         Box::pin(async move {
             let mut status = InstanceReincarnationStatus::default();
-            self.actually_activate(opctx, &mut status).await;
-            if !status.restart_errors.is_empty() || status.query_error.is_some()
-            {
-                error!(
-                    &opctx.log,
-                    "instance reincarnation completed with errors!";
-                    "instances_found" => status.instances_found,
-                    "instances_reincarnated" => status.instances_reincarnated.len(),
-                    "instances_changed_state" => status.changed_state.len(),
-                    "query_error" => ?status.query_error,
-                    "restart_errors" => status.restart_errors.len(),
-                );
-            } else {
-                info!(
-                    &opctx.log,
-                    "instance reincarnation completed";
-                    "instances_found" => status.instances_found,
-                    "instances_reincarnated" => status.instances_reincarnated.len(),
-                    "instances_changed_state" => status.changed_state.len(),
-                );
+            match self.actually_activate(opctx, &mut status).await {
+                Err(error) => {
+                    error!(
+                        &opctx.log,
+                        "instance reincarnation failed!";
+                        "instances_found" => status.instances_found,
+                        "instances_reincarnated" => status.instances_reincarnated.len(),
+                        "instances_changed_state" => status.changed_state.len(),
+                        "error" => %error,
+                        "restart_errors" => status.restart_errors.len(),
+                    );
+                    status.query_error = Some(error.to_string());
+                }
+                Ok(()) if !status.restart_errors.is_empty() => {
+                    warn!(
+                        &opctx.log,
+                        "instance reincarnation completed with saga errors";
+                        "instances_found" => status.instances_found,
+                        "instances_reincarnated" => status.instances_reincarnated.len(),
+                        "instances_changed_state" => status.changed_state.len(),
+                        "restart_errors" => status.restart_errors.len(),
+                    );
+                }
+                Ok(()) => {
+                    info!(
+                        &opctx.log,
+                        "instance reincarnation completed successfully";
+                        "instances_found" => status.instances_found,
+                        "instances_reincarnated" => status.instances_reincarnated.len(),
+                        "instances_changed_state" => status.changed_state.len(),
+                    );
+                }
             }
+
             serde_json::json!(status)
         })
     }
@@ -69,11 +83,13 @@ impl InstanceReincarnation {
     pub(crate) fn new(
         datastore: Arc<DataStore>,
         sagas: Arc<dyn StartSaga>,
+        disabled: bool,
     ) -> Self {
         Self {
             datastore,
             sagas,
             concurrency_limit: DEFAULT_MAX_CONCURRENT_REINCARNATIONS,
+            disabled,
         }
     }
 
@@ -81,7 +97,13 @@ impl InstanceReincarnation {
         &mut self,
         opctx: &OpContext,
         status: &mut InstanceReincarnationStatus,
-    ) {
+    ) -> anyhow::Result<()> {
+        // /!\ BREAK GLASS IN CASE OF EMERGENCY /!\
+        anyhow::ensure!(
+            !self.disabled,
+            "instance reincarnation explicitly disabled by config"
+        );
+
         let mut total_sagas_started = 0;
         let mut running_sagas =
             Vec::with_capacity(self.concurrency_limit.get() as usize);
@@ -89,22 +111,10 @@ impl InstanceReincarnation {
 
         let mut paginator = Paginator::new(self.concurrency_limit);
         while let Some(p) = paginator.next() {
-            let maybe_batch = self
+            let batch = self
                 .datastore
                 .find_reincarnatable_instances(opctx, &p.current_pagparams())
-                .await;
-            let batch = match maybe_batch {
-                Ok(batch) => batch,
-                Err(error) => {
-                    error!(
-                        opctx.log,
-                        "failed to list instances in need of reincarnation";
-                        "error" => &error,
-                    );
-                    status.query_error = Some(error.to_string());
-                    break;
-                }
-            };
+                .await?;
 
             paginator = p.found_batch(&batch, &|instance| instance.id());
 
@@ -230,6 +240,8 @@ impl InstanceReincarnation {
                 }
             }
         }
+
+        Ok(())
     }
 }
 
@@ -371,6 +383,24 @@ mod test {
             .expect("instance runtime state should update");
     }
 
+    // Boilerplate reducer.
+    //
+    // This is a macro so that the `dbg!` has the line number of the place where
+    // the task was activated, rather than the line where we invoke `dbg!` --- it
+    // turns out that a `#[track_caller]` function only affects panic locations,
+    // and not `dbg!`. Ah well.
+    macro_rules! assert_activation_ok {
+        ($result:expr) => {{
+            let activation =
+                serde_json::from_value::<InstanceReincarnationStatus>($result)
+                    .expect("JSON must be correctly shaped");
+            let status = dbg!(activation);
+            assert_eq!(status.query_error, None);
+            assert_eq!(status.restart_errors, HashMap::new());
+            status
+        }};
+    }
+
     #[nexus_test(server = crate::Server)]
     async fn test_reincarnates_failed_instances(
         cptestctx: &ControlPlaneTestContext,
@@ -384,19 +414,17 @@ mod test {
 
         setup_test_project(&cptestctx, &opctx).await;
 
-        let mut task =
-            InstanceReincarnation::new(datastore.clone(), nexus.sagas.clone());
+        let mut task = InstanceReincarnation::new(
+            datastore.clone(),
+            nexus.sagas.clone(),
+            false,
+        );
 
         // Noop test
-        let result = task.activate(&opctx).await;
-        let status =
-            serde_json::from_value::<InstanceReincarnationStatus>(result)
-                .expect("JSON must be correctly shaped");
+        let status = assert_activation_ok!(task.activate(&opctx).await);
         assert_eq!(status.instances_found, 0);
         assert_eq!(status.instances_reincarnated, Vec::new());
         assert_eq!(status.changed_state, Vec::new());
-        assert_eq!(status.query_error, None);
-        assert_eq!(status.restart_errors, HashMap::new());
 
         // Create an instance in the `Failed` state that's eligible to be
         // restarted.
@@ -411,20 +439,13 @@ mod test {
 
         // Activate the task again, and check that our instance had an
         // instance-start saga started.
-        let result = task.activate(&opctx).await;
-        let status =
-            serde_json::from_value::<InstanceReincarnationStatus>(result)
-                .expect("JSON must be correctly shaped");
-        eprintln!("activation: {status:#?}");
-
+        let status = assert_activation_ok!(task.activate(&opctx).await);
         assert_eq!(status.instances_found, 1);
         assert_eq!(
             status.instances_reincarnated,
             vec![instance_id.into_untyped_uuid()]
         );
         assert_eq!(status.changed_state, Vec::new());
-        assert_eq!(status.query_error, None);
-        assert_eq!(status.restart_errors, HashMap::new());
 
         test_helpers::instance_wait_for_state(
             &cptestctx,
@@ -447,8 +468,11 @@ mod test {
 
         setup_test_project(&cptestctx, &opctx).await;
 
-        let mut task =
-            InstanceReincarnation::new(datastore.clone(), nexus.sagas.clone());
+        let mut task = InstanceReincarnation::new(
+            datastore.clone(),
+            nexus.sagas.clone(),
+            false,
+        );
 
         // Create instances in the `Failed` state that are eligible to be
         // restarted.
@@ -501,12 +525,7 @@ mod test {
 
         // Activate the task again, and check that our instance had an
         // instance-start saga started.
-        let result = task.activate(&opctx).await;
-        let status =
-            serde_json::from_value::<InstanceReincarnationStatus>(result)
-                .expect("JSON must be correctly shaped");
-        eprintln!("activation: {status:#?}");
-
+        let status = assert_activation_ok!(task.activate(&opctx).await);
         assert_eq!(status.instances_found, will_reincarnate.len());
         assert_eq!(status.instances_reincarnated.len(), will_reincarnate.len());
         assert_eq!(status.changed_state, Vec::new());
@@ -551,8 +570,11 @@ mod test {
 
         setup_test_project(&cptestctx, &opctx).await;
 
-        let mut task =
-            InstanceReincarnation::new(datastore.clone(), nexus.sagas.clone());
+        let mut task = InstanceReincarnation::new(
+            datastore.clone(),
+            nexus.sagas.clone(),
+            false,
+        );
 
         let instance1_id = create_instance(
             &cptestctx,
@@ -585,20 +607,13 @@ mod test {
         .await;
 
         // On the first activation, instance 1 should be restarted.
-        let result = task.activate(&opctx).await;
-        let status =
-            serde_json::from_value::<InstanceReincarnationStatus>(result)
-                .expect("JSON must be correctly shaped");
-        eprintln!("activation: {status:#?}");
-
+        let status = assert_activation_ok!(task.activate(&opctx).await);
         assert_eq!(status.instances_found, 1);
         assert_eq!(
             status.instances_reincarnated,
             &[instance1_id.into_untyped_uuid()]
         );
         assert_eq!(status.changed_state, Vec::new());
-        assert_eq!(status.query_error, None);
-        assert_eq!(status.restart_errors, HashMap::new());
 
         // Now, let's do some state changes:
         // Pretend instance 1 restarted, and then failed again.
@@ -627,20 +642,13 @@ mod test {
 
         // Activate the background task again. Now, only instance 2 should be
         // restarted.
-        let result = task.activate(&opctx).await;
-        let status =
-            serde_json::from_value::<InstanceReincarnationStatus>(result)
-                .expect("JSON must be correctly shaped");
-        eprintln!("activation: {status:#?}");
-
+        let status = assert_activation_ok!(task.activate(&opctx).await);
         assert_eq!(status.instances_found, 1);
         assert_eq!(
             status.instances_reincarnated,
             &[instance2_id.into_untyped_uuid()]
         );
         assert_eq!(status.changed_state, Vec::new());
-        assert_eq!(status.query_error, None);
-        assert_eq!(status.restart_errors, HashMap::new());
 
         // Instance 2 should be started
         test_helpers::instance_wait_for_state(
@@ -654,20 +662,13 @@ mod test {
         // 1 should be restarted again.
         tokio::time::sleep(Duration::from_secs(COOLDOWN_SECS + 1)).await;
 
-        let result = task.activate(&opctx).await;
-        let status =
-            serde_json::from_value::<InstanceReincarnationStatus>(result)
-                .expect("JSON must be correctly shaped");
-        eprintln!("activation: {status:#?}");
-
+        let status = assert_activation_ok!(task.activate(&opctx).await);
         assert_eq!(status.instances_found, 1);
         assert_eq!(
             status.instances_reincarnated,
             &[instance1_id.into_untyped_uuid()]
         );
         assert_eq!(status.changed_state, Vec::new());
-        assert_eq!(status.query_error, None);
-        assert_eq!(status.restart_errors, HashMap::new());
 
         // Instance 1 should be started.
         test_helpers::instance_wait_for_state(
