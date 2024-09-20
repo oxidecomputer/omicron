@@ -467,7 +467,6 @@ mod test {
     use internal_dns::resolver::Resolver;
     use internal_dns::ServiceName;
     use internal_dns::DNS_ZONE;
-    use newtype_uuid::GenericUuid;
     use nexus_db_model::DnsGroup;
     use nexus_db_model::Silo;
     use nexus_db_queries::authn;
@@ -745,7 +744,7 @@ mod test {
         };
         Ok(BlueprintZoneConfig {
             disposition,
-            id: OmicronZoneUuid::from_untyped_uuid(config.id),
+            id: config.id,
             underlay_address: config.underlay_address,
             filesystem_pool: config.filesystem_pool,
             zone_type,

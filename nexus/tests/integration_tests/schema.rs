@@ -1381,7 +1381,7 @@ fn after_95_0_0(client: &Client) -> BoxFuture<'_, ()> {
     })
 }
 
-fn before_100_0_0(client: &Client) -> BoxFuture<'_, ()> {
+fn before_101_0_0(client: &Client) -> BoxFuture<'_, ()> {
     Box::pin(async {
         // Make a new instance with an explicit 'sled_failures_only' v1 auto-restart
         // policy
@@ -1414,7 +1414,7 @@ fn before_100_0_0(client: &Client) -> BoxFuture<'_, ()> {
     })
 }
 
-fn after_100_0_0(client: &Client) -> BoxFuture<'_, ()> {
+fn after_101_0_0(client: &Client) -> BoxFuture<'_, ()> {
     const BEST_EFFORT: &'static str = "best_effort";
     Box::pin(async {
         let rows = client
@@ -1492,8 +1492,8 @@ fn get_migration_checks() -> BTreeMap<SemverVersion, DataMigrationFns> {
     );
 
     map.insert(
-        SemverVersion(semver::Version::parse("100.0.0").unwrap()),
-        DataMigrationFns { before: Some(before_100_0_0), after: after_100_0_0 },
+        SemverVersion(semver::Version::parse("101.0.0").unwrap()),
+        DataMigrationFns { before: Some(before_101_0_0), after: after_101_0_0 },
     );
 
     map

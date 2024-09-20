@@ -129,6 +129,7 @@ use nexus_config::DnsTasksConfig;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use oximeter::types::ProducerRegistry;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -744,7 +745,7 @@ impl BackgroundTasksInitializer {
         {
             let task_impl = Box::new(saga_recovery::SagaRecovery::new(
                 datastore.clone(),
-                nexus_db_model::SecId(args.nexus_id),
+                nexus_db_model::SecId::from(args.nexus_id),
                 args.saga_recovery,
             ));
 
@@ -845,7 +846,7 @@ pub struct BackgroundTasksData {
     /// rack identifier
     pub rack_id: Uuid,
     /// nexus identifier
-    pub nexus_id: Uuid,
+    pub nexus_id: OmicronZoneUuid,
     /// internal DNS DNS resolver, used when tasks need to contact other
     /// internal services
     pub resolver: internal_dns::resolver::Resolver,

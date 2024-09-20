@@ -23,6 +23,7 @@ use omicron_common::api::external::InstanceState;
 use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use oximeter::types::ProducerRegistry;
 use sled_agent_client::Client as SledAgentClient;
@@ -286,7 +287,7 @@ impl InstanceWatcher {
 /// (rather than positional arguments) and can't be swapped accidentally.
 #[derive(Copy, Clone)]
 pub struct WatcherIdentity {
-    pub nexus_id: Uuid,
+    pub nexus_id: OmicronZoneUuid,
     pub rack_id: Uuid,
 }
 
@@ -301,7 +302,7 @@ impl VirtualMachine {
         let addr = sled.address();
         Self {
             rack_id,
-            nexus_id,
+            nexus_id: nexus_id.into_untyped_uuid(),
             instance_id: instance.id(),
             silo_id: project.silo_id,
             project_id: project.id(),

@@ -433,6 +433,28 @@ pub async fn create_disk(
     .await
 }
 
+pub async fn create_disk_from_snapshot(
+    client: &ClientTestContext,
+    project_name: &str,
+    disk_name: &str,
+    snapshot_id: Uuid,
+) -> Disk {
+    let url = format!("/v1/disks?project={}", project_name);
+    object_create(
+        client,
+        &url,
+        &params::DiskCreate {
+            identity: IdentityMetadataCreateParams {
+                name: disk_name.parse().unwrap(),
+                description: String::from("sells rainsticks"),
+            },
+            disk_source: params::DiskSource::Snapshot { snapshot_id },
+            size: ByteCount::from_gibibytes_u32(1),
+        },
+    )
+    .await
+}
+
 pub async fn create_snapshot(
     client: &ClientTestContext,
     project_name: &str,
@@ -1220,6 +1242,10 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
     }
 
     /// Returns true if all Crucible resources were cleaned up, false otherwise.
+    ///
+    /// Note: be careful performing this test when also peforming physical disk
+    /// expungement, as Nexus will consider resources on those physical disks
+    /// gone and will not attempt to clean them up!
     pub async fn crucible_resources_deleted(&self) -> bool {
         for (sled_id, state) in &self.sleds {
             for zpool in &state.zpools {
@@ -1236,5 +1262,18 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
         }
 
         true
+    }
+
+    /// Drop all of a zpool's resources
+    ///
+    /// Call this before checking `crucible_resources_deleted` if the test has
+    /// also performed a physical disk policy change to "expunged". Nexus will
+    /// _not_ clean up crucible resources on an expunged disk (due to the "gone"
+    /// check that it performs), but it's useful for tests to be able to assert
+    /// all crucible resources are cleaned up.
+    pub async fn remove_zpool(&mut self, zpool_id: Uuid) {
+        for sled in self.sleds.values_mut() {
+            sled.zpools.retain(|zpool| *zpool.id.as_untyped_uuid() != zpool_id);
+        }
     }
 }

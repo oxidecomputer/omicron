@@ -725,7 +725,7 @@ async fn test_mgs_metrics(
     }
 
     // Wait until the MGS registers as a producer with Oximeter.
-    wait_for_producer(&cptestctx.oximeter, &mgs.gateway_id).await;
+    wait_for_producer(&cptestctx.oximeter, mgs.gateway_id).await;
 
     check_all_timeseries_present(&cptestctx, "temperature", temp_sensors).await;
     check_all_timeseries_present(&cptestctx, "voltage", voltage_sensors).await;
@@ -755,9 +755,18 @@ async fn test_mgs_metrics(
 ///
 /// This blocks until the producer is registered, for up to 60s. It panics if
 /// the retry loop hits a permanent error.
-pub async fn wait_for_producer(
+pub async fn wait_for_producer<G: GenericUuid>(
     oximeter: &oximeter_collector::Oximeter,
-    producer_id: &Uuid,
+    producer_id: G,
+) {
+    wait_for_producer_impl(oximeter, producer_id.into_untyped_uuid()).await;
+}
+
+// This function is outlined from wait_for_producer to avoid unnecessary
+// monomorphization.
+async fn wait_for_producer_impl(
+    oximeter: &oximeter_collector::Oximeter,
+    producer_id: Uuid,
 ) {
     wait_for_condition(
         || async {
@@ -765,7 +774,7 @@ pub async fn wait_for_producer(
                 .list_producers(None, usize::MAX)
                 .await
                 .iter()
-                .any(|p| &p.id == producer_id)
+                .any(|p| p.id == producer_id)
             {
                 Ok(())
             } else {

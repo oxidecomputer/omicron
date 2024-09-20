@@ -173,6 +173,12 @@ enum Request {
         id: TargetId,
         reply_tx: oneshot::Sender<Result<TargetStatus, Error>>,
     },
+    /// Update a target.
+    UpdateTarget {
+        target: Box<dyn KstatTarget>,
+        details: CollectionDetails,
+        reply_tx: oneshot::Sender<Result<TargetId, Error>>,
+    },
     /// Remove a target.
     RemoveTarget { id: TargetId, reply_tx: oneshot::Sender<Result<(), Error>> },
     /// Return the creation times of all tracked / extant kstats.
@@ -549,6 +555,45 @@ impl KstatSamplerWorker {
                                     }
                                 }
                             }
+                        }
+                        Request::UpdateTarget { target, details, reply_tx } => {
+                            match self.update_target(target, details) {
+                                Ok(id) => {
+                                    let timeout = YieldIdAfter::new(id, details.interval);
+                                    sample_timeouts.push(timeout);
+                                    trace!(
+                                        self.log,
+                                        "updated target with timeout";
+                                        "id" => ?id,
+                                        "details" => ?details,
+                                    );
+                                    match reply_tx.send(Ok(id)) {
+                                        Ok(_) => trace!(self.log, "sent reply"),
+                                        Err(e) => error!(
+                                            self.log,
+                                            "failed to send reply";
+                                            "id" => ?id,
+                                            "error" => ?e,
+                                        )
+                                    }
+                                }
+                                Err(e) => {
+                                    error!(
+                                        self.log,
+                                        "failed to update target";
+                                        "error" => ?e,
+                                    );
+                                    match reply_tx.send(Err(e)) {
+                                        Ok(_) => trace!(self.log, "sent reply"),
+                                        Err(e) => error!(
+                                            self.log,
+                                            "failed to send reply";
+                                            "error" => ?e,
+                                        )
+                                    }
+                                }
+                            }
+
                         }
                         Request::RemoveTarget { id, reply_tx } => {
                             self.targets.remove(&id);
@@ -966,6 +1011,52 @@ impl KstatSamplerWorker {
             }
             None => {}
         }
+
+        self.insert_target(id, target, details)
+    }
+
+    fn update_target(
+        &mut self,
+        target: Box<dyn KstatTarget>,
+        details: CollectionDetails,
+    ) -> Result<TargetId, Error> {
+        let id = hash_target(&*target);
+        match self.targets.get(&id) {
+            // If the target is already expired, we'll replace it with the new
+            // target and start sampling it again.
+            Some(SampledObject::Expired(e)) => {
+                warn!(
+                    self.log,
+                    "replacing expired kstat target";
+                    "id" => ?id,
+                    "expiration_reason" => ?e.reason,
+                    "error" => ?e.error,
+                    "expired_at" => ?e.expired_at,
+                );
+            }
+            Some(_) => {}
+            None => return Err(Error::NoSuchTarget),
+        }
+
+        self.insert_target(id, target, details)
+    }
+
+    fn update_chain(&mut self) -> Result<(), Error> {
+        let new_ctl = match self.ctl.take() {
+            None => Ctl::new(),
+            Some(old) => old.update(),
+        }
+        .map_err(Error::Kstat)?;
+        let _ = self.ctl.insert(new_ctl);
+        Ok(())
+    }
+
+    fn insert_target(
+        &mut self,
+        id: TargetId,
+        target: Box<dyn KstatTarget>,
+        details: CollectionDetails,
+    ) -> Result<TargetId, Error> {
         self.ensure_creation_times_for_target(&*target)?;
         let item = SampledKstat {
             target,
@@ -995,17 +1086,8 @@ impl KstatSamplerWorker {
                 "n_samples" => n,
             ),
         }
-        Ok(id)
-    }
 
-    fn update_chain(&mut self) -> Result<(), Error> {
-        let new_ctl = match self.ctl.take() {
-            None => Ctl::new(),
-            Some(old) => old.update(),
-        }
-        .map_err(Error::Kstat)?;
-        let _ = self.ctl.insert(new_ctl);
-        Ok(())
+        Ok(id)
     }
 }
 
@@ -1090,6 +1172,22 @@ impl KstatSampler {
     pub async fn remove_target(&self, id: TargetId) -> Result<(), Error> {
         let (reply_tx, reply_rx) = oneshot::channel();
         let request = Request::RemoveTarget { id, reply_tx };
+        self.outbox.send(request).await.map_err(|_| Error::SendError)?;
+        reply_rx.await.map_err(|_| Error::RecvError)?
+    }
+
+    /// Update the details for a target.
+    pub async fn update_target(
+        &self,
+        target: impl KstatTarget,
+        details: CollectionDetails,
+    ) -> Result<TargetId, Error> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        let request = Request::UpdateTarget {
+            target: Box::new(target),
+            details,
+            reply_tx,
+        };
         self.outbox.send(request).await.map_err(|_| Error::SendError)?;
         reply_rx.await.map_err(|_| Error::RecvError)?
     }

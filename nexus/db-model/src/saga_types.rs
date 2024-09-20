@@ -20,6 +20,7 @@ use diesel::serialize::{self, ToSql};
 use diesel::sql_types;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
+use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid};
 use std::convert::TryFrom;
 use std::io::Write;
 use std::sync::Arc;
@@ -63,6 +64,12 @@ where
 NewtypeDebug! { () pub struct SecId(Uuid); }
 NewtypeDisplay! { () pub struct SecId(Uuid); }
 NewtypeFrom! { () pub struct SecId(Uuid); }
+
+impl From<OmicronZoneUuid> for SecId {
+    fn from(g: OmicronZoneUuid) -> Self {
+        g.into_untyped_uuid().into()
+    }
+}
 
 impl From<&SecId> for Uuid {
     fn from(g: &SecId) -> Self {
