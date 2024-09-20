@@ -1655,7 +1655,7 @@ impl DataStore {
     /// This method returns `Error::Conflict` if the auto-restart cooldown
     /// period has already been set.
     ///
-    ///At present, this is only used for tests. If a future
+    /// At present, this is only used for tests. If a future
     /// external API for configuring this and other instance properties is
     /// added, tests using this should be updated to use that instead.
     pub async fn instance_set_auto_restart_cooldown(
