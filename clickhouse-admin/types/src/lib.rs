@@ -404,18 +404,21 @@ impl RaftConfig {
             "output" => ?s
         );
 
+        if s.is_empty() {
+            bail!("Cannot parse an empty response");
+        }
+
         let mut keeper_servers = BTreeSet::new();
         for line in s.lines() {
             let mut split = line.split('=');
             let Some(server) = split.next() else {
-                bail!("Returned None while attempting to retrieve server ID");
+                bail!("Returned None while attempting to retrieve raft configuration");
             };
 
             // Retrieve server ID
             let mut split_server = server.split(".");
             let Some(s) = split_server.next() else {
-                // Test this error
-                bail!("Nothing")
+                bail!("Returned None while attempting to retrieve server identifier")
             };
             if s != "server" {
                 bail!(
@@ -425,9 +428,13 @@ impl RaftConfig {
                 )
             };
             let Some(id) = split_server.next() else {
-                // Test this error
-                bail!("no ID")
+                bail!("Returned None while attempting to retrieve server ID");
             };
+            let u64_id = match u64::from_str(id) {
+                Ok(v) => v,
+                Err(e) => bail!("Unable to convert value {id:?} into u64: {e}"),
+            };
+            let server_id = KeeperId(u64_id);
 
             // Retrieve server information
             let Some(info) = split.next() else {
@@ -438,13 +445,13 @@ impl RaftConfig {
             // Retrieve port
             let Some(address) = split_info.next() else {
                 // Test this error
-                bail!("no address")
+                bail!("Returned None while attempting to retrieve address")
             };
             let Some(port) = address.split(':').last() else {
                 // Test this error
                 bail!("A port could not be extracted from {address}")
             };
-            let u16_port = match u16::from_str(port) {
+            let raft_port = match u16::from_str(port) {
                 Ok(v) => v,
                 Err(e) => {
                     bail!("Unable to convert value {port:?} into u16: {e}")
@@ -453,42 +460,43 @@ impl RaftConfig {
 
             // Retrieve host
             let p = format!(":{}", port);
-            let Some(host) = address.split(&p).next() else {
+            let Some(h) = address.split(&p).next() else {
                 // Test this error
                 bail!("A host could not be extracted from {address}. Missing port {port}")
             };
             // The ouput we get from running the clickhouse keeper-client
             // command does not add square brackets to an IPv6 address
-            // that cointains a port:
-            // server.1=::1:21001;participant;1
-            // Because of this, we can parse `host` directly into an Ipv6Addr
-            let h = ClickhouseHost::from_str(host)?;
+            // that cointains a port: server.1=::1:21001;participant;1
+            // Because of this, we can parse `h` directly into an Ipv6Addr
+            let host = ClickhouseHost::from_str(h)?;
 
             // Retrieve server_type
-            let Some(server_type) = split_info.next() else {
+            let Some(s_type) = split_info.next() else {
                 // Test this error
-                bail!("no server type")
+                bail!("Returned None while attempting to retrieve server type")
             };
-            let s_type = KeeperServerType::from_str(server_type)?;
+            let server_type = KeeperServerType::from_str(s_type)?;
 
             // Retrieve priority
-            let Some(priority) = split_info.next() else {
+            let Some(s_priority) = split_info.next() else {
                 // Test this error
-                bail!("no priority")
+                bail!("Returned None while attempting to retrieve priority")
             };
-            let u16_priority = match u16::from_str(priority) {
+            let priority = match u16::from_str(s_priority) {
                 Ok(v) => v,
                 Err(e) => {
-                    bail!("Unable to convert value {priority:?} into u16: {e}")
+                    bail!(
+                        "Unable to convert value {s_priority:?} into u16: {e}"
+                    )
                 }
             };
 
             keeper_servers.insert(KeeperServerInfo {
-                server_id: KeeperId(u64::from_str(id).unwrap()),
-                host: h,
-                raft_port: u16_port,
-                server_type: s_type,
-                priority: u16_priority,
+                server_id,
+                host,
+                raft_port,
+                server_type,
+                priority,
             });
         }
 
@@ -784,6 +792,175 @@ mod tests {
         assert_eq!(
             format!("{}", root_cause),
            "Unable to convert value \"BOB\" into u16: invalid digit found in string",
+        );
+    }
+
+    #[test]
+    fn test_empty_output_raft_config_parse_fail() {
+        let log = log();
+        let data = "".as_bytes();
+        let result = RaftConfig::parse(&log, data);
+
+        let error = result.unwrap_err();
+        let root_cause = error.root_cause();
+
+        assert_eq!(format!("{}", root_cause), "Cannot parse an empty response",);
+    }
+
+    #[test]
+    fn test_missing_server_id_raft_config_parse_fail() {
+        let log = log();
+        let data = "server.=::1:21001;participant;1".as_bytes();
+        let result = RaftConfig::parse(&log, data);
+
+        let error = result.unwrap_err();
+        let root_cause = error.root_cause();
+
+        assert_eq!(
+            format!("{}", root_cause),
+           "Unable to convert value \"\" into u64: cannot parse integer from empty string",
+        );
+    }
+
+    #[test]
+    fn test_missing_address_raft_config_parse_fail() {
+        let log = log();
+        let data = "server.1=:21001;participant;1".as_bytes();
+        let result = RaftConfig::parse(&log, data);
+
+        let error = result.unwrap_err();
+        let root_cause = error.root_cause();
+
+        assert_eq!(
+            format!("{}", root_cause),
+            " is not a valid address or domain name",
+        );
+    }
+
+    #[test]
+    fn test_invalid_address_raft_config_parse_fail() {
+        let log = log();
+        let data = "server.1=oxide.com:21001;participant;1".as_bytes();
+        let result = RaftConfig::parse(&log, data);
+
+        let error = result.unwrap_err();
+        let root_cause = error.root_cause();
+
+        assert_eq!(
+            format!("{}", root_cause),
+            "oxide.com is not a valid address or domain name",
+        );
+    }
+
+    #[test]
+    fn test_missing_port_raft_config_parse_fail() {
+        let log = log();
+        let data = "server.1=::1:;participant;1".as_bytes();
+        let result = RaftConfig::parse(&log, data);
+
+        let error = result.unwrap_err();
+        let root_cause = error.root_cause();
+
+        assert_eq!(
+            format!("{}", root_cause),
+           "Unable to convert value \"\" into u16: cannot parse integer from empty string",
+        );
+    }
+
+    #[test]
+    fn test_missing_participant_raft_config_parse_fail() {
+        let log = log();
+        let data = "server.1=::1:21001;1".as_bytes();
+        let result = RaftConfig::parse(&log, data);
+
+        let error = result.unwrap_err();
+        let root_cause = error.root_cause();
+
+        assert_eq!(
+            format!("{}", root_cause),
+            "1 is not a valid keeper server type",
+        );
+
+        let data = "server.1=::1:21001;;1".as_bytes();
+        let result = RaftConfig::parse(&log, data);
+
+        let error = result.unwrap_err();
+        let root_cause = error.root_cause();
+
+        assert_eq!(
+            format!("{}", root_cause),
+            " is not a valid keeper server type",
+        );
+    }
+
+    #[test]
+    fn test_misshapen_participant_raft_config_parse_fail() {
+        let log = log();
+        let data = "server.1=::1:21001;runner;1\n".as_bytes();
+        let result = RaftConfig::parse(&log, data);
+
+        let error = result.unwrap_err();
+        let root_cause = error.root_cause();
+
+        assert_eq!(
+            format!("{}", root_cause),
+            "runner is not a valid keeper server type",
+        );
+    }
+
+    #[test]
+    fn test_missing_priority_raft_config_parse_fail() {
+        let log = log();
+        let data = "server.1=::1:21001;learner;\n".as_bytes();
+        let result = RaftConfig::parse(&log, data);
+
+        let error = result.unwrap_err();
+        let root_cause = error.root_cause();
+
+        assert_eq!(
+            format!("{}", root_cause),
+           "Unable to convert value \"\" into u16: cannot parse integer from empty string",
+        );
+
+        let data = "server.1=::1:21001;learner\n".as_bytes();
+        let result = RaftConfig::parse(&log, data);
+
+        let error = result.unwrap_err();
+        let root_cause = error.root_cause();
+
+        assert_eq!(
+            format!("{}", root_cause),
+            "Returned None while attempting to retrieve priority",
+        );
+    }
+
+    #[test]
+    fn test_misshapen_priority_raft_config_parse_fail() {
+        let log = log();
+        let data = "server.1=::1:21001;learner;BOB\n".as_bytes();
+        let result = RaftConfig::parse(&log, data);
+
+        let error = result.unwrap_err();
+        let root_cause = error.root_cause();
+
+        assert_eq!(
+            format!("{}", root_cause),
+           "Unable to convert value \"BOB\" into u16: invalid digit found in string",
+        );
+    }
+
+    #[test]
+    fn test_misshapen_raft_config_parse_fail() {
+        let log = log();
+        let data = "=;;\n".as_bytes();
+        let result = RaftConfig::parse(&log, data);
+
+        let error = result.unwrap_err();
+        let root_cause = error.root_cause();
+
+        assert_eq!(
+            format!("{}", root_cause),
+           "Output is not as expected. Server identifier: '' Expected server identifier: 'server.{SERVER_ID}'",
         );
     }
 }
