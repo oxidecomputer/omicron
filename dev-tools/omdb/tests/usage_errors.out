@@ -124,7 +124,7 @@ Commands:
                                manually triggering one
   sleds                        Print information about sleds
   instance                     Print information about customer instances
-  instances                    Alias to `omdb instances list`
+  instances                    Alias to `omdb instance list`
   network                      Print information about the network
   migrations                   Print information about migrations
   snapshots                    Print information about snapshots
@@ -172,7 +172,7 @@ Commands:
                                manually triggering one
   sleds                        Print information about sleds
   instance                     Print information about customer instances
-  instances                    Alias to `omdb instances list`
+  instances                    Alias to `omdb instance list`
   network                      Print information about the network
   migrations                   Print information about migrations
   snapshots                    Print information about snapshots
