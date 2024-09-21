@@ -206,7 +206,7 @@ impl From<InstanceAndActiveVmm> for external::Instance {
                 .hostname
                 .parse()
                 .expect("found invalid hostname in the database"),
-            boot_device: value.instance.boot_device.into(),
+            boot_device_id: value.instance.boot_device.into(),
             runtime: external::InstanceRuntimeState {
                 run_state: value.effective_state(),
                 time_run_state_updated,
@@ -903,8 +903,17 @@ impl DataStore {
                 let err = err.clone();
                 let update = update.clone();
                 async move {
-                    let ok_to_reconfigure_instance_states =
-                        vec![InstanceState::NoVmm, InstanceState::Failed];
+                    // Allow reconfiguration in NoVmm because there is no VMM to contend with.
+                    // Allow reconfiguration in Failed because users may want to change the boot
+                    // device of a failed instance and detach the instance's boot disk.  Allow
+                    // reconfiguration in Creating because one of the last steps of instance
+                    // creation, while the instance is still in Creating, is to reconfigure the
+                    // instance to the desired boot device.
+                    let ok_to_reconfigure_instance_states = vec![
+                        InstanceState::NoVmm,
+                        InstanceState::Failed,
+                        InstanceState::Creating,
+                    ];
 
                     let updatable = instance_dsl::instance
                         .filter(instance_dsl::id.eq(authz_instance.id()))

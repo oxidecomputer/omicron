@@ -3856,7 +3856,7 @@ async fn test_cannot_detach_boot_device(cptestctx: &ControlPlaneTestContext) {
     .all_items;
     assert_eq!(disks.len(), 1);
     assert_eq!(disks[0].state, DiskState::Attached(instance.identity.id));
-    assert_eq!(instance.boot_device, Some(disks[0].identity.id));
+    assert_eq!(instance.boot_device_id, Some(disks[0].identity.id));
 
     // Attempt to detach the instance's boot disk. This should fail.
     let url_instance_detach_disk =
@@ -3895,7 +3895,7 @@ async fn test_cannot_detach_boot_device(cptestctx: &ControlPlaneTestContext) {
         .expect("can attempt to reconfigure the instance");
 
     let instance = response.parsed_body::<Instance>().unwrap();
-    assert_eq!(instance.boot_device, None);
+    assert_eq!(instance.boot_device_id, None);
 
     // Now try to detach `disks[0]` again. This should succeed.
     let builder = RequestBuilder::new(
@@ -3980,7 +3980,7 @@ async fn test_boot_device_can_be_changed(cptestctx: &ControlPlaneTestContext) {
 
     let instance = response.parsed_body::<Instance>().unwrap();
 
-    assert_eq!(instance.boot_device, Some(disks[0].identity.id.clone()));
+    assert_eq!(instance.boot_device_id, Some(disks[0].identity.id.clone()));
 
     // Change the instance's boot disk.
     let url_instance_update =
@@ -4000,7 +4000,10 @@ async fn test_boot_device_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         .expect("can attempt to reconfigure the instance");
 
     let instance = response.parsed_body::<Instance>().unwrap();
-    assert_eq!(instance.boot_device, Some(disks[1].identity.id.clone().into()));
+    assert_eq!(
+        instance.boot_device_id,
+        Some(disks[1].identity.id.clone().into())
+    );
 }
 
 // Create an instance without a boot device, fail to set the boot device to a
@@ -4103,7 +4106,7 @@ async fn test_boot_device_must_be_attached(
         .expect("can attempt to reconfigure the instance");
 
     let instance = response.parsed_body::<Instance>().unwrap();
-    assert_eq!(instance.boot_device, Some(disks[0].identity.id.into()));
+    assert_eq!(instance.boot_device_id, Some(disks[0].identity.id.into()));
 }
 
 // Tests that an instance is rejected if the memory is less than

@@ -1068,8 +1068,6 @@ async fn sic_set_boot_device(
     let initial_configuration =
         nexus_db_model::InstanceUpdate { boot_device: Some(authz_disk.id()) };
 
-    // Whatever the reason we failed to set the boot device, it's fatal to
-    // instance creation.
     datastore
         .reconfigure_instance(&opctx, &authz_instance, initial_configuration)
         .await
@@ -1102,8 +1100,6 @@ async fn sic_set_boot_device_undo(
     let undo_configuration =
         nexus_db_model::InstanceUpdate { boot_device: None };
 
-    // Whatever the reason we failed to clear the boot device, it's fatal to
-    // instance creation.
     datastore
         .reconfigure_instance(&opctx, &authz_instance, undo_configuration)
         .await
