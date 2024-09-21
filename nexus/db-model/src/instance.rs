@@ -266,6 +266,20 @@ pub struct InstanceAutoRestart {
     pub cooldown: Option<TimeDelta>,
 }
 
+/// Describes whether or not an instance can reincarnate.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum InstanceKarmicStatus {
+    /// The instance is ready to reincarnate.
+    Ready,
+    /// The instance does not need reincarnation, as it is not currently in the
+    /// `Failed` state.
+    NotFailed,
+    /// The instance cannot reincarnate again until the specified time.
+    CoolingDown(TimeDelta),
+    /// The instance's auto-restart policy forbids it from reincarnating.
+    Forbidden,
+}
+
 impl InstanceAutoRestart {
     /// The default cooldown used when an instance has no overridden cooldown.
     pub const DEFAULT_COOLDOWN: TimeDelta = match TimeDelta::try_hours(1) {
@@ -280,18 +294,18 @@ impl InstanceAutoRestart {
 
     /// Returns `true` if `self` permits an instance to reincarnate given the
     /// provided `state`.
-    pub fn can_reincarnate(&self, state: &InstanceRuntimeState) -> bool {
+    pub fn status(&self, state: &InstanceRuntimeState) -> InstanceKarmicStatus {
         // Instances only need to be automatically restarted if they are in the
         // `Failed` state.
         if state.nexus_state != InstanceState::Failed {
-            return false;
+            return InstanceKarmicStatus::NotFailed;
         }
 
         // Check if the instance's configured auto-restart policy permits the
         // control plane to automatically restart it.
         let policy = self.policy.unwrap_or(Self::DEFAULT_POLICY);
         if policy == InstanceAutoRestartPolicy::Never {
-            return false;
+            return InstanceKarmicStatus::Forbidden;
         }
 
         // If the instance is permitted to reincarnate, ensure that its last
@@ -301,10 +315,17 @@ impl InstanceAutoRestart {
             // Eventually, we may also allow a project-level default, so we will
             // need to consider that as well.
             let cooldown = self.cooldown.unwrap_or(Self::DEFAULT_COOLDOWN);
-            Utc::now().signed_duration_since(last) >= cooldown
-        } else {
-            true
+            let time_since_last = Utc::now().signed_duration_since(last);
+            if time_since_last >= cooldown {
+                return InstanceKarmicStatus::Ready;
+            } else {
+                return InstanceKarmicStatus::CoolingDown(
+                    cooldown - time_since_last,
+                );
+            }
         }
+
+        InstanceKarmicStatus::Ready
     }
 
     /// Filters a database query to include only instances whose auto-restart
