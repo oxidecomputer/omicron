@@ -309,6 +309,32 @@ async fn srrd_drive_region_replacement_check(
         &params.serialized_authn,
     );
 
+    // It doesn't make sense to perform any of this saga if the volume was soft
+    // or hard deleted: for example, this happens if the higher level resource
+    // like the disk was deleted. Volume deletion potentially results in the
+    // clean-up of Crucible resources, so it wouldn't even be valid to attempt
+    // to drive forward any type of live repair or reconciliation.
+    //
+    // Setting Done here will cause this saga to transition the replacement
+    // request to ReplacementDone.
+
+    let volume_deleted = osagactx
+        .datastore()
+        .volume_deleted(params.request.volume_id)
+        .await
+        .map_err(ActionError::action_failed)?;
+
+    if volume_deleted {
+        info!(
+            log,
+            "volume was soft or hard deleted!";
+            "region replacement id" => %params.request.id,
+            "volume id" => %params.request.volume_id,
+        );
+
+        return Ok(DriveCheck::Done);
+    }
+
     let last_request_step = osagactx
         .datastore()
         .current_region_replacement_request_step(&opctx, params.request.id)

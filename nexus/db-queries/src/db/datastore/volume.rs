@@ -1572,6 +1572,14 @@ impl DataStore {
             .optional()
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
+
+    /// Return true if a volume was soft-deleted or hard-deleted
+    pub async fn volume_deleted(&self, volume_id: Uuid) -> Result<bool, Error> {
+        match self.volume_get(volume_id).await? {
+            Some(v) => Ok(v.time_deleted.is_some()),
+            None => Ok(true),
+        }
+    }
 }
 
 #[derive(Default, Clone, Debug, Serialize, Deserialize)]

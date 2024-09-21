@@ -170,7 +170,78 @@ impl BackgroundTask for RegionReplacementDetector {
             };
 
             for request in requests {
+                // If the replacement request is in the `requested` state and
+                // the request's volume was soft-deleted or hard-deleted, avoid
+                // sending the start request and instead transition the request
+                // to completed
+
+                let volume_deleted = match self
+                    .datastore
+                    .volume_deleted(request.volume_id)
+                    .await
+                {
+                    Ok(volume_deleted) => volume_deleted,
+
+                    Err(e) => {
+                        let s = format!(
+                            "error checking if volume id {} was deleted: {e}",
+                            request.volume_id,
+                        );
+                        error!(&log, "{s}");
+
+                        status.errors.push(s);
+                        continue;
+                    }
+                };
+
                 let request_id = request.id;
+
+                if volume_deleted {
+                    // Volume was soft or hard deleted, so proceed with clean
+                    // up, which if this is in state Requested there won't be
+                    // any additional associated state, so transition the record
+                    // to Completed.
+
+                    info!(
+                        &log,
+                        "request {} volume {} was soft or hard deleted!",
+                        request_id,
+                        request.volume_id,
+                    );
+
+                    let result = self
+                        .datastore
+                        .set_region_replacement_complete_from_requested(
+                            opctx, request,
+                        )
+                        .await;
+
+                    match result {
+                        Ok(()) => {
+                            let s = format!(
+                                "request {} transitioned from requested to \
+                                complete",
+                                request_id,
+                            );
+
+                            info!(&log, "{s}");
+                            status.requests_completed_ok.push(s);
+                        }
+
+                        Err(e) => {
+                            let s = format!(
+                                "error transitioning {} from requested to \
+                                complete: {e}",
+                                request_id,
+                            );
+
+                            error!(&log, "{s}");
+                            status.errors.push(s);
+                        }
+                    }
+
+                    continue;
+                }
 
                 let result = self
                     .send_start_request(

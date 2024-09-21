@@ -11,6 +11,7 @@ use nexus_client::types::CurrentStatus;
 use nexus_client::types::CurrentStatusRunning;
 use nexus_client::types::LastResult;
 use nexus_client::types::LastResultCompleted;
+use nexus_types::internal_api::background::*;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use std::time::Duration;
 
@@ -83,4 +84,199 @@ pub async fn activate_background_task(
     .unwrap();
 
     last_task_poll
+}
+
+/// Run the region_replacement background task, returning how many actions
+/// were taken
+pub async fn run_region_replacement(
+    internal_client: &ClientTestContext,
+) -> usize {
+    let last_background_task =
+        activate_background_task(&internal_client, "region_replacement").await;
+
+    let LastResult::Completed(last_result_completed) =
+        last_background_task.last
+    else {
+        panic!();
+    };
+
+    let status = serde_json::from_value::<RegionReplacementStatus>(
+        last_result_completed.details,
+    )
+    .unwrap();
+
+    assert!(status.errors.is_empty());
+
+    status.requests_created_ok.len()
+        + status.start_invoked_ok.len()
+        + status.requests_completed_ok.len()
+}
+
+/// Run the region_replacement_driver background task, returning how many actions
+/// were taken
+pub async fn run_region_replacement_driver(
+    internal_client: &ClientTestContext,
+) -> usize {
+    let last_background_task =
+        activate_background_task(&internal_client, "region_replacement_driver")
+            .await;
+
+    let LastResult::Completed(last_result_completed) =
+        last_background_task.last
+    else {
+        panic!();
+    };
+
+    let status = serde_json::from_value::<RegionReplacementDriverStatus>(
+        last_result_completed.details,
+    )
+    .unwrap();
+
+    assert!(status.errors.is_empty());
+
+    status.drive_invoked_ok.len() + status.finish_invoked_ok.len()
+}
+
+/// Run the region_snapshot_replacement_start background task, returning how many
+/// actions were taken
+pub async fn run_region_snapshot_replacement_start(
+    internal_client: &ClientTestContext,
+) -> usize {
+    let last_background_task = activate_background_task(
+        &internal_client,
+        "region_snapshot_replacement_start",
+    )
+    .await;
+
+    let LastResult::Completed(last_result_completed) =
+        last_background_task.last
+    else {
+        panic!();
+    };
+
+    let status =
+        serde_json::from_value::<RegionSnapshotReplacementStartStatus>(
+            last_result_completed.details,
+        )
+        .unwrap();
+
+    assert!(status.errors.is_empty());
+
+    status.requests_created_ok.len() + status.start_invoked_ok.len()
+}
+
+/// Run the region_snapshot_replacement_garbage_collection background task,
+/// returning how many actions were taken
+pub async fn run_region_snapshot_replacement_garbage_collection(
+    internal_client: &ClientTestContext,
+) -> usize {
+    let last_background_task = activate_background_task(
+        &internal_client,
+        "region_snapshot_replacement_garbage_collection",
+    )
+    .await;
+
+    let LastResult::Completed(last_result_completed) =
+        last_background_task.last
+    else {
+        panic!();
+    };
+
+    let status = serde_json::from_value::<
+        RegionSnapshotReplacementGarbageCollectStatus,
+    >(last_result_completed.details)
+    .unwrap();
+
+    assert!(status.errors.is_empty());
+
+    status.garbage_collect_requested.len()
+}
+
+/// Run the region_snapshot_replacement_step background task, returning how many
+/// actions were taken
+pub async fn run_region_snapshot_replacement_step(
+    internal_client: &ClientTestContext,
+) -> usize {
+    let last_background_task = activate_background_task(
+        &internal_client,
+        "region_snapshot_replacement_step",
+    )
+    .await;
+
+    let LastResult::Completed(last_result_completed) =
+        last_background_task.last
+    else {
+        panic!();
+    };
+
+    let status = serde_json::from_value::<RegionSnapshotReplacementStepStatus>(
+        last_result_completed.details,
+    )
+    .unwrap();
+
+    eprintln!("{:?}", &status.errors);
+
+    assert!(status.errors.is_empty());
+
+    status.step_records_created_ok.len()
+        + status.step_garbage_collect_invoked_ok.len()
+        + status.step_invoked_ok.len()
+}
+
+/// Run the region_snapshot_replacement_finish background task, returning how many
+/// actions were taken
+pub async fn run_region_snapshot_replacement_finish(
+    internal_client: &ClientTestContext,
+) -> usize {
+    let last_background_task = activate_background_task(
+        &internal_client,
+        "region_snapshot_replacement_finish",
+    )
+    .await;
+
+    let LastResult::Completed(last_result_completed) =
+        last_background_task.last
+    else {
+        panic!();
+    };
+
+    let status =
+        serde_json::from_value::<RegionSnapshotReplacementFinishStatus>(
+            last_result_completed.details,
+        )
+        .unwrap();
+
+    assert!(status.errors.is_empty());
+
+    status.records_set_to_done.len()
+}
+
+/// Run all replacement related background tasks until they aren't doing
+/// anything anymore.
+pub async fn run_replacement_tasks_to_completion(
+    internal_client: &ClientTestContext,
+) {
+    wait_for_condition(
+        || async {
+            let actions_taken =
+                // region replacement related
+                run_region_replacement(internal_client).await +
+                run_region_replacement_driver(internal_client).await +
+                // region snapshot replacement related
+                run_region_snapshot_replacement_start(internal_client).await +
+                run_region_snapshot_replacement_garbage_collection(internal_client).await +
+                run_region_snapshot_replacement_step(internal_client).await +
+                run_region_snapshot_replacement_finish(internal_client).await;
+
+            if actions_taken > 0 {
+                Err(CondCheckError::<()>::NotYet)
+            } else {
+                Ok(())
+            }
+        },
+        &Duration::from_secs(1),
+        &Duration::from_secs(10),
+    )
+    .await
+    .unwrap();
 }
