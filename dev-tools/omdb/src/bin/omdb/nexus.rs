@@ -6,6 +6,7 @@
 
 use crate::check_allow_destructive::DestructiveOperationToken;
 use crate::db::DbUrlOptions;
+use crate::helpers::const_max_len;
 use crate::helpers::should_colorize;
 use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::Omdb;
@@ -2663,17 +2664,4 @@ async fn cmd_nexus_sled_expunge_disk(
         .context("expunging disk")?;
     eprintln!("expunged disk {}", args.physical_disk_id);
     Ok(())
-}
-
-const fn const_max_len(strs: &[&str]) -> usize {
-    let mut max = 0;
-    let mut i = 0;
-    while i < strs.len() {
-        let len = strs[i].len();
-        if len > max {
-            max = len;
-        }
-        i += 1;
-    }
-    max
 }

@@ -8,6 +8,7 @@ use anyhow::{ensure, Context};
 use nexus_client::types::BlueprintTargetSet;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_types::deployment::{Blueprint, PlanningInput};
+use nexus_types::inventory::Collection;
 use slog::{debug, info};
 
 /// Modify the system by editing the current target blueprint
@@ -35,6 +36,7 @@ use slog::{debug, info};
 pub async fn blueprint_edit_current_target(
     log: &slog::Logger,
     planning_input: &PlanningInput,
+    collection: &Collection,
     nexus: &nexus_client::Client,
     edit_fn: &dyn Fn(&mut BlueprintBuilder) -> Result<(), anyhow::Error>,
 ) -> Result<(Blueprint, Blueprint), anyhow::Error> {
@@ -68,6 +70,7 @@ pub async fn blueprint_edit_current_target(
         log,
         &blueprint1,
         &planning_input,
+        &collection,
         "test-suite",
     )
     .context("creating BlueprintBuilder")?;
