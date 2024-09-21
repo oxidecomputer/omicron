@@ -1066,7 +1066,7 @@ async fn sic_set_boot_disk(
     };
 
     let initial_configuration =
-        nexus_db_model::InstanceUpdate { boot_disk: Some(authz_disk.id()) };
+        nexus_db_model::InstanceUpdate { boot_disk_id: Some(authz_disk.id()) };
 
     datastore
         .reconfigure_instance(&opctx, &authz_instance, initial_configuration)
@@ -1098,7 +1098,7 @@ async fn sic_set_boot_disk_undo(
     // If there was a boot disk, clear it. If there was not a boot disk,
     // this is a no-op.
     let undo_configuration =
-        nexus_db_model::InstanceUpdate { boot_disk: None };
+        nexus_db_model::InstanceUpdate { boot_disk_id: None };
 
     datastore
         .reconfigure_instance(&opctx, &authz_instance, undo_configuration)

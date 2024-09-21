@@ -304,7 +304,7 @@ impl super::Nexus {
         let (.., authz_project, authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
 
-        let boot_disk = match params.boot_disk.clone() {
+        let boot_disk_id = match params.boot_disk.clone() {
             Some(disk) => {
                 let selector = params::DiskSelector {
                     project: match &disk {
@@ -323,7 +323,7 @@ impl super::Nexus {
             None => None,
         };
 
-        let update = InstanceUpdate { boot_disk };
+        let update = InstanceUpdate { boot_disk_id };
         self.datastore()
             .reconfigure_instance(opctx, &authz_instance, update)
             .await
@@ -1054,7 +1054,7 @@ impl super::Nexus {
 
             // Propolis wants the name of the boot disk rather than ID, because we send names
             // rather than IDs in the disk requsts as assembled below.
-            if db_instance.boot_disk == Some(disk.id()) {
+            if db_instance.boot_disk_id == Some(disk.id()) {
                 boot_disk_name = Some(disk.name().to_string());
             }
 
@@ -1079,16 +1079,16 @@ impl super::Nexus {
         // look up a name when assembling the Propolis request, we might as well
         // remove this check; we can just pass the ID and rely on Propolis' own
         // check that the boot disk is attached.
-        if let Some(instance_boot_disk) = db_instance.boot_disk.as_ref() {
+        if let Some(instance_boot_disk_id) = db_instance.boot_disk_id.as_ref() {
             if boot_disk_name.is_none() {
                 error!(self.log, "instance boot disk is not attached";
-                   "boot_disk" => ?instance_boot_disk,
+                   "boot_disk_id" => ?instance_boot_disk_id,
                    "instance id" => %db_instance.id());
 
                 return Err(InstanceStateChangeError::Other(Error::internal_error(&format!(
                     "instance {} has boot disk {:?} but it is not attached",
                     db_instance.id(),
-                    db_instance.boot_disk.as_ref(),
+                    db_instance.boot_disk_id.as_ref(),
                 ))));
             }
         }

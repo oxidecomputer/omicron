@@ -206,7 +206,7 @@ impl From<InstanceAndActiveVmm> for external::Instance {
                 .hostname
                 .parse()
                 .expect("found invalid hostname in the database"),
-            boot_disk_id: value.instance.boot_disk.into(),
+            boot_disk_id: value.instance.boot_disk_id.into(),
             runtime: external::InstanceRuntimeState {
                 run_state: value.effective_state(),
                 time_run_state_updated,
@@ -940,7 +940,7 @@ impl DataStore {
                         }
                     }
 
-                    if let Some(disk_id) = update.boot_disk.clone() {
+                    if let Some(disk_id) = update.boot_disk_id.clone() {
                         // Ensure the disk is currently attached before updating
                         // the database.
                         let expected_state = api::external::DiskState::Attached(
@@ -972,7 +972,7 @@ impl DataStore {
                     // here.
                     //
                     // NOTE: from this point forward it is OK if we update the
-                    // instance's `boot_disk` column with the updated value
+                    // instance's `boot_disk_id` column with the updated value
                     // again. It will have already been assigned with constraint
                     // checking performed above, so updates will just be
                     // repetitive, not harmful.
@@ -1774,7 +1774,7 @@ mod tests {
                             params::InstanceNetworkInterfaceAttachment::None,
                         external_ips: Vec::new(),
                         disks: Vec::new(),
-                        boot_disk: None,
+                        boot_disk_id: None,
                         ssh_public_keys: None,
                         start: false,
                     },

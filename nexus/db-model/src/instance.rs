@@ -64,8 +64,8 @@ pub struct Instance {
     pub auto_restart_policy: Option<InstanceAutoRestart>,
 
     /// The primary boot disk for this instance.
-    #[diesel(column_name = boot_disk)]
-    pub boot_disk: Option<Uuid>,
+    #[diesel(column_name = boot_disk_id)]
+    pub boot_disk_id: Option<Uuid>,
 
     #[diesel(embed)]
     pub runtime_state: InstanceRuntimeState,
@@ -117,9 +117,9 @@ impl Instance {
             // TODO(eliza): allow this to be configured via the instance-create
             // params...
             auto_restart_policy: None,
-            // Intentionally ignore `params.boot_disk` here: we can't set
-            // `boot_disk` until the referenced disk is attached.
-            boot_disk: None,
+            // Intentionally ignore `params.boot_disk_id` here: we can't set
+            // `boot_disk_id` until the referenced disk is attached.
+            boot_disk_id: None,
             runtime_state,
 
             updater_gen: Generation::new(),
@@ -235,6 +235,6 @@ impl InstanceRuntimeState {
 #[derive(Clone, Debug, AsChangeset, Serialize, Deserialize)]
 #[diesel(table_name = instance, treat_none_as_null = true)]
 pub struct InstanceUpdate {
-    #[diesel(column_name = boot_disk)]
-    pub boot_disk: Option<Uuid>,
+    #[diesel(column_name = boot_disk_id)]
+    pub boot_disk_id: Option<Uuid>,
 }
