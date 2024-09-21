@@ -935,38 +935,24 @@ impl DataStore {
                             authz_instance.id(),
                         );
 
-                        let attached_disk: Option<Option<Uuid>> =
-                            disk_dsl::disk
-                                .filter(disk_dsl::id.eq(disk_id))
-                                .filter(
-                                    disk_dsl::attach_instance_id
-                                        .eq(authz_instance.id()),
-                                )
-                                .filter(
-                                    disk_dsl::disk_state
-                                        .eq(expected_state.label()),
-                                )
-                                .select(disk_dsl::attach_instance_id)
-                                .first_async::<Option<Uuid>>(&conn)
-                                .await
-                                .optional()?;
+                        let attached_disk: Option<Uuid> = disk_dsl::disk
+                            .filter(disk_dsl::id.eq(disk_id))
+                            .filter(
+                                disk_dsl::attach_instance_id
+                                    .eq(authz_instance.id()),
+                            )
+                            .filter(
+                                disk_dsl::disk_state.eq(expected_state.label()),
+                            )
+                            .select(disk_dsl::id)
+                            .first_async::<Uuid>(&conn)
+                            .await
+                            .optional()?;
 
-                        match attached_disk {
-                            None => {
-                                return Err(err.bail(Error::not_found_by_id(
-                                    ResourceType::Disk,
-                                    &disk_id,
-                                )));
-                            }
-                            Some(None) => {
-                                return Err(err.bail(Error::conflict(
-                                    "boot disk must be attached",
-                                )));
-                            }
-                            Some(Some(_)) => {
-                                // The disk exists and is attached, we can make
-                                // it the boot device.
-                            }
+                        if attached_disk.is_none() {
+                            return Err(err.bail(Error::conflict(
+                                "boot disk must be attached",
+                            )));
                         }
                     }
 
