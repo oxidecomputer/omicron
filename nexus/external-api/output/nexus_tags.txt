@@ -62,7 +62,7 @@ instance_serial_console_stream           GET      /v1/instances/{instance}/seria
 instance_ssh_public_key_list             GET      /v1/instances/{instance}/ssh-public-keys
 instance_start                           POST     /v1/instances/{instance}/start
 instance_stop                            POST     /v1/instances/{instance}/stop
-instance_update                          PUT      /v1/instances/{instance}/update
+instance_update                          PUT      /v1/instances/{instance}
 instance_view                            GET      /v1/instances/{instance}
 
 API operations found with tag "login"

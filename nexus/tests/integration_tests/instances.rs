@@ -3881,8 +3881,7 @@ async fn test_cannot_detach_boot_device(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(err.message, "boot disk cannot be detached");
 
     // Change the instance's boot disk.
-    let url_instance_update =
-        format!("/v1/instances/{}/update", instance.identity.id);
+    let url_instance_update = format!("/v1/instances/{}", instance.identity.id);
 
     let builder =
         RequestBuilder::new(client, http::Method::PUT, &url_instance_update)
@@ -3983,8 +3982,7 @@ async fn test_boot_device_can_be_changed(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(instance.boot_device_id, Some(disks[0].identity.id.clone()));
 
     // Change the instance's boot disk.
-    let url_instance_update =
-        format!("/v1/instances/{}/update", instance.identity.id);
+    let url_instance_update = format!("/v1/instances/{}", instance.identity.id);
 
     let builder =
         RequestBuilder::new(client, http::Method::PUT, &url_instance_update)
@@ -4060,8 +4058,7 @@ async fn test_boot_device_must_be_attached(
 
     // Update the instance's boot device to the unattached disk. This should
     // fail.
-    let url_instance_update =
-        format!("/v1/instances/{}/update", instance.identity.id);
+    let url_instance_update = format!("/v1/instances/{}", instance.identity.id);
 
     let builder =
         RequestBuilder::new(client, http::Method::PUT, &url_instance_update)

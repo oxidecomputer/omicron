@@ -1949,6 +1949,50 @@
             "$ref": "#/components/responses/Error"
           }
         }
+      },
+      "put": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "Update instance configuration",
+        "operationId": "instance_update",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "instance",
+            "description": "Name or ID of the instance",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Instance"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
       }
     },
     "/v1/instances/{instance}/disks": {
@@ -2605,52 +2649,6 @@
         "responses": {
           "202": {
             "description": "successfully enqueued operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Instance"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      }
-    },
-    "/v1/instances/{instance}/update": {
-      "put": {
-        "tags": [
-          "instances"
-        ],
-        "summary": "Update instance configuration",
-        "operationId": "instance_update",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "project",
-            "description": "Name or ID of the project",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "path",
-            "name": "instance",
-            "description": "Name or ID of the instance",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
             "content": {
               "application/json": {
                 "schema": {

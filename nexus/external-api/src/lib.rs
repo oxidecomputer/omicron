@@ -1120,7 +1120,7 @@ pub trait NexusExternalApi {
     /// Update instance
     #[endpoint {
         method = PUT,
-        path = "/v1/instances/{instance}/update",
+        path = "/v1/instances/{instance}",
         tags = ["instances"],
     }]
     async fn instance_update(
