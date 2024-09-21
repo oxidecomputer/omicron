@@ -903,12 +903,15 @@ impl DataStore {
                 let err = err.clone();
                 let update = update.clone();
                 async move {
-                    // Allow reconfiguration in NoVmm because there is no VMM to contend with.
-                    // Allow reconfiguration in Failed because users may want to change the boot
-                    // device of a failed instance and detach the instance's boot disk.  Allow
-                    // reconfiguration in Creating because one of the last steps of instance
-                    // creation, while the instance is still in Creating, is to reconfigure the
-                    // instance to the desired boot device.
+                    // * Allow reconfiguration in NoVmm because there is no VMM
+                    //   to contend with.
+                    // * Allow reconfiguration in Failed to allow changing the
+                    //   boot device of a failed instance and free its boot disk
+                    //   for detach.
+                    // * Allow reconfiguration in Creating because one of the
+                    //   last steps of instance creation, while the instance is
+                    //   still in Creating, is to reconfigure the instance to
+                    //   the desired boot device.
                     let ok_to_reconfigure_instance_states = vec![
                         InstanceState::NoVmm,
                         InstanceState::Failed,
