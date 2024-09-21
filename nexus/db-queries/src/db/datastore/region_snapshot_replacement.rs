@@ -30,8 +30,8 @@ use omicron_common::api::external::Error;
 use uuid::Uuid;
 
 #[must_use]
-#[derive(Debug, PartialEq)]
-pub enum InsertRegionSnapshotReplacementStepResult {
+#[derive(Debug, PartialEq, Eq)]
+pub enum InsertStepResult {
     /// A new region snapshot replacement step was inserted.
     Inserted { step_id: Uuid },
 
@@ -624,7 +624,7 @@ impl DataStore {
         opctx: &OpContext,
         request_id: Uuid,
         volume_id: Uuid,
-    ) -> Result<InsertRegionSnapshotReplacementStepResult, Error> {
+    ) -> Result<InsertStepResult, Error> {
         let request = RegionSnapshotReplacementStep::new(request_id, volume_id);
 
         self.insert_region_snapshot_replacement_step(opctx, request).await
@@ -634,7 +634,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         request: RegionSnapshotReplacementStep,
-    ) -> Result<InsertRegionSnapshotReplacementStepResult, Error> {
+    ) -> Result<InsertStepResult, Error> {
         let conn = self.pool_connection_authorized(opctx).await?;
 
         self.transaction_retry_wrapper(
@@ -661,7 +661,7 @@ impl DataStore {
                     .optional()?;
 
                 if let Some(found_record) = maybe_record {
-                    return Ok(InsertRegionSnapshotReplacementStepResult::AlreadyHandled {
+                    return Ok(InsertStepResult::AlreadyHandled {
                         existing_step_id: found_record.id,
                     });
                 }
@@ -677,17 +677,17 @@ impl DataStore {
 
                 if let Some(found_record) = maybe_record {
                     match found_record.replacement_state {
-                        RegionSnapshotReplacementStepState::Complete |
-                        RegionSnapshotReplacementStepState::VolumeDeleted => {
+                        RegionSnapshotReplacementStepState::Complete
+                        | RegionSnapshotReplacementStepState::VolumeDeleted => {
                             // Ok, we can insert another record with a matching
                             // volume ID because the volume_repair record would
                             // have been deleted during the transition to
                             // Complete.
                         }
 
-                        RegionSnapshotReplacementStepState::Requested |
-                        RegionSnapshotReplacementStepState::Running => {
-                            return Ok(InsertRegionSnapshotReplacementStepResult::AlreadyHandled {
+                        RegionSnapshotReplacementStepState::Requested
+                        | RegionSnapshotReplacementStepState::Running => {
+                            return Ok(InsertStepResult::AlreadyHandled {
                                 existing_step_id: found_record.id,
                             });
                         }
@@ -713,7 +713,7 @@ impl DataStore {
                     .execute_async(&conn)
                     .await?;
 
-                Ok(InsertRegionSnapshotReplacementStepResult::Inserted { step_id: request_id })
+                Ok(InsertStepResult::Inserted { step_id: request_id })
             }
         })
         .await
@@ -1205,10 +1205,7 @@ mod test {
                 .await
                 .unwrap();
 
-            assert!(matches!(
-                result,
-                InsertRegionSnapshotReplacementStepResult::Inserted { .. }
-            ));
+            assert!(matches!(result, InsertStepResult::Inserted { .. }));
         }
 
         assert_eq!(
@@ -1244,10 +1241,7 @@ mod test {
                 .await
                 .unwrap();
 
-            assert!(matches!(
-                result,
-                InsertRegionSnapshotReplacementStepResult::Inserted { .. }
-            ));
+            assert!(matches!(result, InsertStepResult::Inserted { .. }));
         }
 
         assert_eq!(
@@ -1284,10 +1278,7 @@ mod test {
                 .await
                 .unwrap();
 
-            assert!(matches!(
-                result,
-                InsertRegionSnapshotReplacementStepResult::Inserted { .. }
-            ));
+            assert!(matches!(result, InsertStepResult::Inserted { .. }));
         }
 
         assert_eq!(
@@ -1335,10 +1326,7 @@ mod test {
             .await
             .unwrap();
 
-        assert!(matches!(
-            result,
-            InsertRegionSnapshotReplacementStepResult::Inserted { .. }
-        ));
+        assert!(matches!(result, InsertStepResult::Inserted { .. }));
 
         let step =
             RegionSnapshotReplacementStep::new(Uuid::new_v4(), volume_id);
@@ -1348,11 +1336,9 @@ mod test {
             .await
             .unwrap();
 
-        let InsertRegionSnapshotReplacementStepResult::AlreadyHandled {
-            existing_step_id,
-        } = result
+        let InsertStepResult::AlreadyHandled { existing_step_id } = result
         else {
-            panic!("wrong return type");
+            panic!("wrong return type: {result:?}");
         };
         assert_eq!(existing_step_id, first_request_id);
 
@@ -1375,11 +1361,9 @@ mod test {
             .await
             .unwrap();
 
-        let InsertRegionSnapshotReplacementStepResult::AlreadyHandled {
-            existing_step_id,
-        } = result
+        let InsertStepResult::AlreadyHandled { existing_step_id } = result
         else {
-            panic!("wrong return type");
+            panic!("wrong return type: {result:?}");
         };
         assert_eq!(existing_step_id, first_request_id);
 
@@ -1401,10 +1385,8 @@ mod test {
             .await
             .unwrap();
 
-        let InsertRegionSnapshotReplacementStepResult::Inserted { step_id } =
-            result
-        else {
-            panic!("wrong return type");
+        let InsertStepResult::Inserted { step_id } = result else {
+            panic!("wrong return type: {result:?}");
         };
         assert_eq!(step_id, step.id);
 
@@ -1464,10 +1446,7 @@ mod test {
             .await
             .unwrap();
 
-        assert!(matches!(
-            result,
-            InsertRegionSnapshotReplacementStepResult::Inserted { .. }
-        ));
+        assert!(matches!(result, InsertStepResult::Inserted { .. }));
 
         let mut step =
             RegionSnapshotReplacementStep::new(request_id, Uuid::new_v4());
@@ -1478,10 +1457,7 @@ mod test {
             .await
             .unwrap();
 
-        assert!(matches!(
-            result,
-            InsertRegionSnapshotReplacementStepResult::Inserted { .. }
-        ));
+        assert!(matches!(result, InsertStepResult::Inserted { .. }));
 
         assert_eq!(
             2,
@@ -1525,10 +1501,7 @@ mod test {
             .await
             .unwrap();
 
-        assert!(matches!(
-            result,
-            InsertRegionSnapshotReplacementStepResult::Inserted { .. }
-        ));
+        assert!(matches!(result, InsertStepResult::Inserted { .. }));
 
         let step = RegionSnapshotReplacementStep::new(
             request_id,
@@ -1542,7 +1515,7 @@ mod test {
 
         assert_eq!(
             result,
-            InsertRegionSnapshotReplacementStepResult::AlreadyHandled {
+            InsertStepResult::AlreadyHandled {
                 existing_step_id: first_step_id
             }
         );

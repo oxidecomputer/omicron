@@ -32,7 +32,7 @@ use futures::future::BoxFuture;
 use futures::FutureExt;
 use nexus_db_model::RegionSnapshotReplacementStep;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::datastore::InsertRegionSnapshotReplacementStepResult;
+use nexus_db_queries::db::datastore::region_snapshot_replacement;
 use nexus_db_queries::db::DataStore;
 use nexus_types::identity::Asset;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStepStatus;
@@ -316,7 +316,7 @@ impl RegionSnapshotReplacementFindAffected {
                     .await
                 {
                     Ok(insertion_result) => match insertion_result {
-                        InsertRegionSnapshotReplacementStepResult::Inserted { step_id } => {
+                        region_snapshot_replacement::InsertStepResult::Inserted { step_id } => {
                             let s = format!("created {step_id}");
                             info!(
                                 log,
@@ -327,7 +327,7 @@ impl RegionSnapshotReplacementFindAffected {
                             status.step_records_created_ok.push(s);
                         }
 
-                        InsertRegionSnapshotReplacementStepResult::AlreadyHandled { .. } => {
+                        region_snapshot_replacement::InsertStepResult::AlreadyHandled { .. } => {
                             info!(
                                 log,
                                 "step already exists for volume id";
@@ -725,7 +725,7 @@ mod test {
 
         assert!(matches!(
             result,
-            InsertRegionSnapshotReplacementStepResult::Inserted { .. }
+            region_snapshot_replacement::InsertStepResult::Inserted { .. }
         ));
 
         let result = datastore
@@ -746,7 +746,7 @@ mod test {
 
         assert!(matches!(
             result,
-            InsertRegionSnapshotReplacementStepResult::Inserted { .. }
+            region_snapshot_replacement::InsertStepResult::Inserted { .. }
         ));
 
         // Activate the task - it should pick the complete steps up and try to

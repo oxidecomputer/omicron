@@ -364,7 +364,7 @@ async fn rsrss_replace_snapshot_in_volume(
         .await
         .map_err(ActionError::action_failed)?;
 
-    info!(
+    debug!(
         &log,
         "volume_replace_snapshot returned {:?}", volume_replace_snapshot_result,
     );

@@ -555,7 +555,7 @@ async fn srrs_replace_region_in_volume(
         .await
         .map_err(ActionError::action_failed)?;
 
-    info!(log, "replacement returned {:?}", volume_replace_region_result);
+    debug!(log, "replacement returned {:?}", volume_replace_region_result);
 
     match volume_replace_region_result {
         VolumeReplaceResult::AlreadyHappened | VolumeReplaceResult::Done => {
@@ -573,10 +573,10 @@ async fn srrs_replace_region_in_volume(
             // this saga. The associated background task will transition this
             // request's state to Completed.
 
-            Err(ActionError::action_failed(format!(
+            Err(ActionError::action_failed(Error::conflict(format!(
                 "existing volume {} deleted",
                 old_volume_id
-            )))
+            ))))
         }
     }
 }
