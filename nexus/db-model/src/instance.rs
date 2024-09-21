@@ -118,7 +118,7 @@ impl Instance {
             // params...
             auto_restart_policy: None,
             // Intentionally ignore `params.boot_device` here: we can't set `boot_device` until the
-            // referenced device is attached,.
+            // referenced device is attached.
             boot_device: None,
             runtime_state,
 
@@ -232,13 +232,7 @@ impl InstanceRuntimeState {
 }
 
 /// The parts of an Instance that can be directly updated after creation.
-#[derive(
-    Clone,
-    Debug,
-    AsChangeset,
-    Serialize,
-    Deserialize,
-)]
+#[derive(Clone, Debug, AsChangeset, Serialize, Deserialize)]
 #[diesel(table_name = instance, treat_none_as_null = true)]
 pub struct InstanceUpdate {
     #[diesel(column_name = boot_device)]

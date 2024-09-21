@@ -903,60 +903,81 @@ impl DataStore {
                 let err = err.clone();
                 let update = update.clone();
                 async move {
-                    let ok_to_reconfigure_instance_states = vec![
-                        InstanceState::NoVmm,
-                        InstanceState::Failed,
-                    ];
+                    let ok_to_reconfigure_instance_states =
+                        vec![InstanceState::NoVmm, InstanceState::Failed];
 
                     let updatable = instance_dsl::instance
                         .filter(instance_dsl::id.eq(authz_instance.id()))
-                        .filter(instance_dsl::state
-                                .eq_any(ok_to_reconfigure_instance_states))
-                        .filter(instance_dsl::active_propolis_id.is_null()) // CRDB constraint says this should be impossible, but other queries include it as a ward against bad state so it's copied here too.
+                        .filter(
+                            instance_dsl::state
+                                .eq_any(ok_to_reconfigure_instance_states),
+                        )
                         .filter(instance_dsl::time_deleted.is_null())
                         .select(instance_dsl::id)
-                        .execute_async(&conn)
-                        .await;
+                        .first_async(&conn)
+                        .await?;
 
                     if let Err(e) = updatable {
-                        panic!("err: {}", e);
-                    }
-
-                    if let Some(disk_id) = update.boot_device.clone() {
-                        // Ensure the disk is currently attached before updating the database.
-                        let expected_state = api::external::DiskState::Attached(authz_instance.id());
-
-                        let attached_disk: Vec<Uuid> = disk_dsl::disk
-                            .filter(disk_dsl::id.eq(disk_id))
-                            .filter(disk_dsl::attach_instance_id.eq(authz_instance.id()))
-                            .filter(disk_dsl::disk_state.eq(expected_state.label()))
-                            .select(disk_dsl::id)
-                            .load_async(&conn)
-                            .await?;
-
-                        if attached_disk.is_empty() {
-                            return Err(err.bail(Error::conflict("boot disk must be attached")));
+                        if e == NotFound {
+                            return Err(err.bail(Error::not_found_by_id(
+                                ResourceType::Instance,
+                                &authz_instance.id(),
+                            )));
+                        } else {
+                            return Err(e);
                         }
                     }
 
-                    // if and when `Update` can update other fields, set them here.
+                    if let Some(disk_id) = update.boot_device.clone() {
+                        // Ensure the disk is currently attached before updating
+                        // the database.
+                        let expected_state = api::external::DiskState::Attached(
+                            authz_instance.id(),
+                        );
+
+                        let attached_disk: Option<Uuid> = disk_dsl::disk
+                            .filter(disk_dsl::id.eq(disk_id))
+                            .filter(
+                                disk_dsl::attach_instance_id
+                                    .eq(authz_instance.id()),
+                            )
+                            .filter(
+                                disk_dsl::disk_state.eq(expected_state.label()),
+                            )
+                            .select(disk_dsl::id)
+                            .first_async(&conn)
+                            .await?;
+
+                        if attached_disk.is_none() {
+                            return Err(err.bail(Error::conflict(
+                                "boot disk must be attached",
+                            )));
+                        }
+                    }
+
+                    // if and when `Update` can update other fields, set them
+                    // here.
                     //
-                    // NOTE: from this point forward it is OK if we update the instance's
-                    // `boot_device` column with the updated value again. It will have already been
-                    // assigned with constraint checking performed above, so updates will just be
+                    // NOTE: from this point forward it is OK if we update the
+                    // instance's `boot_device` column with the updated value
+                    // again. It will have already been assigned with constraint
+                    // checking performed above, so updates will just be
                     // repetitive, not harmful.
 
-                    // TODO: i think this returns the whole row? i don't want the whole row!
-                    let _updated = diesel::update(instance_dsl::instance)
+                    // Update the row. We don't care about the returned
+                    // UpdateStatus, either way the database has been updated
+                    // with the state we're setting.
+                    diesel::update(instance_dsl::instance)
                         .filter(instance_dsl::id.eq(authz_instance.id()))
                         .set(update)
                         .execute_async(&conn)
                         .await?;
 
-                    // TODO: dedupe this query and  `instance_fetch_with_vmm`
-                    // At the moment, we're only allowing instance reconfiguration in states that
-                    // would have no VMM, but load it anyway so that we return correct data if this
-                    // is relaxed in the future...
+                    // TODO: dedupe this query and  `instance_fetch_with_vmm` At
+                    // the moment, we're only allowing instance reconfiguration
+                    // in states that would have no VMM, but load it anyway so
+                    // that we return correct data if this is relaxed in the
+                    // future...
                     let (instance, vmm) = instance_dsl::instance
                         .filter(instance_dsl::id.eq(authz_instance.id()))
                         .filter(instance_dsl::time_deleted.is_null())
@@ -966,13 +987,17 @@ impl DataStore {
                                 .eq(instance_dsl::active_propolis_id)
                                 .and(vmm_dsl::time_deleted.is_null())),
                         )
-                        .select((Instance::as_select(), Option::<Vmm>::as_select()))
+                        .select((
+                            Instance::as_select(),
+                            Option::<Vmm>::as_select(),
+                        ))
                         .get_result_async(&conn)
                         .await?;
 
                     Ok((instance, vmm))
                 }
-            }).await
+            })
+            .await
             .map_err(|e| {
                 if let Some(err) = err.take() {
                     return err;

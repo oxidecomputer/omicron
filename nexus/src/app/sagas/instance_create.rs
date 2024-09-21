@@ -1045,12 +1045,11 @@ async fn sic_set_boot_device(
 
     let instance_id = sagactx.lookup::<InstanceUuid>("instance_id")?;
 
-    let (.., authz_instance) =
-        LookupPath::new(&opctx, &datastore)
-            .instance_id(instance_id.into_untyped_uuid())
-            .lookup_for(authz::Action::Modify)
-            .await
-            .map_err(ActionError::action_failed)?;
+    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+        .instance_id(instance_id.into_untyped_uuid())
+        .lookup_for(authz::Action::Modify)
+        .await
+        .map_err(ActionError::action_failed)?;
 
     let (.., authz_disk) = match boot_device.clone() {
         NameOrId::Name(name) => LookupPath::new(&opctx, datastore)
