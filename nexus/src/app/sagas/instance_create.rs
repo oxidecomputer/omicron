@@ -1045,14 +1045,14 @@ async fn sic_set_boot_device(
 
     let instance_id = sagactx.lookup::<InstanceUuid>("instance_id")?;
 
-    let (.., authz_project, authz_instance) =
+    let (.., authz_instance) =
         LookupPath::new(&opctx, &datastore)
             .instance_id(instance_id.into_untyped_uuid())
             .lookup_for(authz::Action::Modify)
             .await
             .map_err(ActionError::action_failed)?;
 
-    let (.., authz_project_disk, authz_disk) = match boot_device.clone() {
+    let (.., authz_disk) = match boot_device.clone() {
         NameOrId::Name(name) => LookupPath::new(&opctx, datastore)
             .project_id(params.project_id)
             .disk_name_owned(name.into())
@@ -1066,12 +1066,9 @@ async fn sic_set_boot_device(
             .map_err(ActionError::action_failed)?,
     };
 
-    // TODO: does this have the same issue as in `fn instance_attach_disk`?
-    //
-    // or by setting `.project_id` on the lookup in both arms, is this not an issue?
-
     let initial_configuration =
         nexus_db_model::InstanceUpdate { boot_device: Some(authz_disk.id()) };
+
     // Whatever the reason we failed to set the boot device, it's fatal to instance creation.
     datastore
         .reconfigure_instance(&opctx, &authz_instance, initial_configuration)
