@@ -1023,7 +1023,7 @@ pub struct InstanceCreate {
 
     /// Choice of which disk this instance should boot from.
     #[serde(default)]
-    pub boot_device: Option<String>,
+    pub boot_device: Option<NameOrId>,
 
     /// An allowlist of SSH public keys to be transferred to the instance via
     /// cloud-init during instance creation.
@@ -1036,6 +1036,12 @@ pub struct InstanceCreate {
     /// Should this instance be started upon creation; true by default.
     #[serde(default = "bool_true")]
     pub start: bool,
+}
+
+/// Parameters of an `Instance` that can be reconfigured after creation.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InstanceUpdate {
+    pub boot_device: Option<NameOrId>,
 }
 
 #[inline]

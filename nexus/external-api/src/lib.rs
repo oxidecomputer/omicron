@@ -1117,6 +1117,19 @@ pub trait NexusExternalApi {
         path_params: Path<params::InstancePath>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
+    /// Update instance
+    #[endpoint {
+        method = PUT,
+        path = "/v1/instances/{instance}/update",
+        tags = ["instances"],
+    }]
+    async fn instance_update(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::OptionalProjectSelector>,
+        path_params: Path<params::InstancePath>,
+        instance_config: TypedBody<params::InstanceUpdate>,
+    ) -> Result<HttpResponseOk<Instance>, HttpError>;
+
     /// Reboot an instance
     #[endpoint {
         method = POST,

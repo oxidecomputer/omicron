@@ -2143,6 +2143,42 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    async fn instance_update(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<params::OptionalProjectSelector>,
+        path_params: Path<params::InstancePath>,
+        reconfigure_params: TypedBody<params::InstanceUpdate>,
+    ) -> Result<HttpResponseOk<Instance>, HttpError> {
+        let apictx = rqctx.context();
+        let nexus = &apictx.context.nexus;
+        let path = path_params.into_inner();
+        let query = query_params.into_inner();
+        let reconfigure_params = reconfigure_params.into_inner();
+        let instance_selector = params::InstanceSelector {
+            project: query.project,
+            instance: path.instance,
+        };
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let instance_lookup =
+                nexus.instance_lookup(&opctx, instance_selector)?;
+            let instance = nexus
+                .reconfigure_instance(
+                    &opctx,
+                    &instance_lookup,
+                    &reconfigure_params,
+                )
+                .await?;
+            Ok(HttpResponseOk(instance.into()))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     async fn instance_reboot(
         rqctx: RequestContext<ApiContext>,
         query_params: Query<params::OptionalProjectSelector>,

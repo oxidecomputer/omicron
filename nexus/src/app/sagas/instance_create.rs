@@ -1037,39 +1037,44 @@ async fn sic_set_boot_device(
         &params.serialized_authn,
     );
 
+    // TODO: instead of taking this from create_params, if this is a name, take it from the ID we
+    // get when creating the named disk.
     let Some(boot_device) = params.create_params.boot_device.as_ref() else {
         return Ok(());
     };
 
     let instance_id = sagactx.lookup::<InstanceUuid>("instance_id")?;
 
-    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
-        .instance_id(instance_id.into_untyped_uuid())
-        .lookup_for(authz::Action::Modify)
-        .await
-        .map_err(ActionError::action_failed)?;
+    let (.., authz_project, authz_instance) =
+        LookupPath::new(&opctx, &datastore)
+            .instance_id(instance_id.into_untyped_uuid())
+            .lookup_for(authz::Action::Modify)
+            .await
+            .map_err(ActionError::action_failed)?;
 
-    let nameorid: NameOrId = boot_device
-        .to_owned()
-        .try_into()
-        .expect("TODO: make the param NameOrId");
-    let (.., authz_disk) = match nameorid.clone() {
+    let (.., authz_project_disk, authz_disk) = match boot_device.clone() {
         NameOrId::Name(name) => LookupPath::new(&opctx, datastore)
             .project_id(params.project_id)
             .disk_name_owned(name.into())
-            .fetch()
+            .lookup_for(authz::Action::Read)
             .await
             .map_err(ActionError::action_failed)?,
         NameOrId::Id(id) => LookupPath::new(&opctx, datastore)
             .disk_id(id)
-            .fetch()
+            .lookup_for(authz::Action::Read)
             .await
             .map_err(ActionError::action_failed)?,
     };
 
+    // TODO: does this have the same issue as in `fn instance_attach_disk`?
+    //
+    // or by setting `.project_id` on the lookup in both arms, is this not an issue?
+
+    let initial_configuration =
+        nexus_db_model::InstanceUpdate { boot_device: Some(authz_disk.id()) };
     // Whatever the reason we failed to set the boot device, it's fatal to instance creation.
     datastore
-        .set_boot_device(&opctx, &authz_instance, &authz_disk)
+        .reconfigure_instance(&opctx, &authz_instance, initial_configuration)
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -1095,8 +1100,13 @@ async fn sic_set_boot_device_undo(
         .await
         .map_err(ActionError::action_failed)?;
 
+    // If there was a boot device, clear it. If there was not a boot device, this is a no-op.
+    let undo_configuration =
+        nexus_db_model::InstanceUpdate { boot_device: None };
+
+    // Whatever the reason we failed to set the boot device, it's fatal to instance creation.
     datastore
-        .clear_boot_device(&opctx, &authz_instance)
+        .reconfigure_instance(&opctx, &authz_instance, undo_configuration)
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -1207,7 +1217,7 @@ pub mod test {
                         name: DISK_NAME.parse().unwrap(),
                     },
                 )],
-                boot_device: Some(String::from(DISK_NAME)),
+                boot_device: Some(DISK_NAME.parse().unwrap()),
                 start: false,
             },
             boundary_switches: HashSet::from([SwitchLocation::Switch0]),

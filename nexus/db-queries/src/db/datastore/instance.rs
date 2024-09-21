@@ -21,6 +21,7 @@ use crate::db::lookup::LookupPath;
 use crate::db::model::Generation;
 use crate::db::model::Instance;
 use crate::db::model::InstanceRuntimeState;
+use crate::db::model::InstanceUpdate;
 use crate::db::model::Migration;
 use crate::db::model::MigrationState;
 use crate::db::model::Name;
@@ -327,83 +328,6 @@ impl DataStore {
             instance.runtime().gen
         );
         Ok(instance)
-    }
-
-    pub async fn set_boot_device(
-        &self,
-        opctx: &OpContext,
-        authz_instance: &authz::Instance,
-        disk: &Disk,
-    ) -> Result<(), Error> {
-        opctx.authorize(authz::Action::Modify, authz_instance).await?;
-
-        use db::schema::instance::dsl as instance_dsl;
-        use db::schema::disk::dsl as disk_dsl;
-
-        let err = OptionalError::new();
-        let conn = self.pool_connection_authorized(opctx).await?;
-        self
-            .transaction_retry_wrapper("set_boot_device")
-            .transaction(&conn, |conn| {
-                let err = err.clone();
-                async move {
-                    // Ensure the disk is currently attached.
-                    let expected_state = api::external::DiskState::Attached(authz_instance.id());
-
-                    let attached_disk: Vec<Uuid> = disk_dsl::disk
-                        .filter(disk_dsl::id.eq(disk.id()))
-                        .filter(disk_dsl::attach_instance_id.eq(authz_instance.id()))
-                        .filter(disk_dsl::disk_state.eq(expected_state.label()))
-                        .select(disk_dsl::id)
-                        .load_async(&conn)
-                        .await?;
-
-                    if attached_disk.is_empty() {
-                        return Err(err.bail(Error::conflict("boot disk must be attached")));
-                    }
-
-                    // TODO: i think this returns the whole row? i don't want the whole row!
-                    let _updated = diesel::update(instance_dsl::instance)
-                        .filter(instance_dsl::id.eq(authz_instance.id()))
-                        .set(instance_dsl::boot_device.eq(disk.id()))
-                        .execute_async(&conn)
-                        .await?;
-
-                    Ok(())
-                }
-            })
-        .await
-        .map_err(|e| {
-            if let Some(err) = err.take() {
-                return err;
-            }
-
-            public_error_from_diesel(e, ErrorHandler::Server)
-        })
-    }
-
-    pub async fn clear_boot_device(
-        &self,
-        opctx: &OpContext,
-        authz_instance: &authz::Instance,
-    ) -> Result<(), Error> {
-        opctx.authorize(authz::Action::Modify, authz_instance).await?;
-
-        use db::schema::instance::dsl as instance_dsl;
-
-        let conn = self.pool_connection_authorized(opctx).await?;
-
-        // TODO: i think this returns the whole row? i don't want the whole row!
-        let _updated = diesel::update(instance_dsl::instance)
-            .filter(instance_dsl::id.eq(authz_instance.id()))
-            .set(instance_dsl::boot_device.eq(None::<Uuid>))
-            .execute_async(&*conn)
-            .await
-            .map_err(|e| {
-                public_error_from_diesel(e, ErrorHandler::Server)
-            })?;
-
-        Ok(())
     }
 
     pub async fn instance_list(
@@ -955,6 +879,109 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         Ok(result)
+    }
+
+    pub async fn reconfigure_instance(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+        update: InstanceUpdate,
+    ) -> Result<InstanceAndActiveVmm, Error> {
+        opctx.authorize(authz::Action::Modify, authz_instance).await?;
+
+        use crate::db::model::InstanceState;
+
+        use db::schema::disk::dsl as disk_dsl;
+        use db::schema::instance::dsl as instance_dsl;
+        use db::schema::vmm::dsl as vmm_dsl;
+
+        let err = OptionalError::new();
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let (instance, vmm) = self
+            .transaction_retry_wrapper("reconfigure_instance")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                let update = update.clone();
+                async move {
+                    let ok_to_reconfigure_instance_states = vec![
+                        InstanceState::NoVmm,
+                        InstanceState::Failed,
+                    ];
+
+                    let updatable = instance_dsl::instance
+                        .filter(instance_dsl::id.eq(authz_instance.id()))
+                        .filter(instance_dsl::state
+                                .eq_any(ok_to_reconfigure_instance_states))
+                        .filter(instance_dsl::active_propolis_id.is_null()) // CRDB constraint says this should be impossible, but other queries include it as a ward against bad state so it's copied here too.
+                        .filter(instance_dsl::time_deleted.is_null())
+                        .select(instance_dsl::id)
+                        .execute_async(&conn)
+                        .await;
+
+                    if let Err(e) = updatable {
+                        panic!("err: {}", e);
+                    }
+
+                    if let Some(disk_id) = update.boot_device.clone() {
+                        // Ensure the disk is currently attached before updating the database.
+                        let expected_state = api::external::DiskState::Attached(authz_instance.id());
+
+                        let attached_disk: Vec<Uuid> = disk_dsl::disk
+                            .filter(disk_dsl::id.eq(disk_id))
+                            .filter(disk_dsl::attach_instance_id.eq(authz_instance.id()))
+                            .filter(disk_dsl::disk_state.eq(expected_state.label()))
+                            .select(disk_dsl::id)
+                            .load_async(&conn)
+                            .await?;
+
+                        if attached_disk.is_empty() {
+                            return Err(err.bail(Error::conflict("boot disk must be attached")));
+                        }
+                    }
+
+                    // if and when `Update` can update other fields, set them here.
+                    //
+                    // NOTE: from this point forward it is OK if we update the instance's
+                    // `boot_device` column with the updated value again. It will have already been
+                    // assigned with constraint checking performed above, so updates will just be
+                    // repetitive, not harmful.
+
+                    // TODO: i think this returns the whole row? i don't want the whole row!
+                    let _updated = diesel::update(instance_dsl::instance)
+                        .filter(instance_dsl::id.eq(authz_instance.id()))
+                        .set(update)
+                        .execute_async(&conn)
+                        .await?;
+
+                    // TODO: dedupe this query and  `instance_fetch_with_vmm`
+                    // At the moment, we're only allowing instance reconfiguration in states that
+                    // would have no VMM, but load it anyway so that we return correct data if this
+                    // is relaxed in the future...
+                    let (instance, vmm) = instance_dsl::instance
+                        .filter(instance_dsl::id.eq(authz_instance.id()))
+                        .filter(instance_dsl::time_deleted.is_null())
+                        .left_join(
+                            vmm_dsl::vmm.on(vmm_dsl::id
+                                .nullable()
+                                .eq(instance_dsl::active_propolis_id)
+                                .and(vmm_dsl::time_deleted.is_null())),
+                        )
+                        .select((Instance::as_select(), Option::<Vmm>::as_select()))
+                        .get_result_async(&conn)
+                        .await?;
+
+                    Ok((instance, vmm))
+                }
+            }).await
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    return err;
+                }
+
+                public_error_from_diesel(e, ErrorHandler::Server)
+            })?;
+
+        Ok(InstanceAndActiveVmm { instance, vmm })
     }
 
     pub async fn project_delete_instance(

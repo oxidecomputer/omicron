@@ -3083,6 +3083,8 @@ async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(disks.len(), 1);
     assert_eq!(disks[0].state, DiskState::Detached);
 
+    let disk_name = Name::try_from(String::from("probablydata")).unwrap();
+
     // Create the instance
     let instance_params = params::InstanceCreate {
         identity: IdentityMetadataCreateParams {
@@ -3097,11 +3099,9 @@ async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![params::InstanceDiskAttachment::Attach(
-            params::InstanceDiskAttach {
-                name: Name::try_from(String::from("probablydata")).unwrap(),
-            },
+            params::InstanceDiskAttach { name: disk_name.clone() },
         )],
-        boot_device: Some(String::from("probablydata")),
+        boot_device: Some(disk_name.into()),
         start: true,
     };
 
@@ -3172,11 +3172,11 @@ async fn test_instance_create_attach_disks(
             }),
             params::InstanceDiskAttachment::Attach(
                 params::InstanceDiskAttach {
-                    name: attachable_disk.identity.name,
+                    name: attachable_disk.identity.name.clone(),
                 },
             ),
         ],
-        boot_device: Some(String::from("created-disk")),
+        boot_device: Some(attachable_disk.identity.name.into()),
         start: true,
     };
 
@@ -3351,7 +3351,7 @@ async fn test_attach_eight_disks_to_instance(
                 )
             })
             .collect(),
-        boot_device: Some(String::from("probablydata0")),
+        boot_device: Some("probablydata0".parse().unwrap()),
         start: true,
     };
 
@@ -3433,7 +3433,7 @@ async fn test_cannot_attach_nine_disks_to_instance(
                 )
             })
             .collect(),
-        boot_device: Some(String::from("probablydata0")),
+        boot_device: Some("probablydata0".parse().unwrap()),
         start: true,
     };
 
@@ -3529,7 +3529,7 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
                 )
             })
             .collect(),
-        boot_device: Some(String::from("probablydata0")),
+        boot_device: Some("probablydata0".parse().unwrap()),
         start: true,
     };
 
@@ -3614,7 +3614,7 @@ async fn test_disks_detached_when_instance_destroyed(
                 )
             })
             .collect(),
-        boot_device: Some(String::from("probablydata0")),
+        boot_device: Some("probablydata0".parse().unwrap()),
         start: true,
     };
 
@@ -3706,7 +3706,7 @@ async fn test_disks_detached_when_instance_destroyed(
                 )
             })
             .collect(),
-        boot_device: Some(String::from("probablydata0")),
+        boot_device: Some("probablydata0".parse().unwrap()),
         start: true,
     };
 
@@ -3772,7 +3772,7 @@ async fn test_cannot_have_nonexistent_boot_device(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![],
-        boot_device: Some(String::from("probablydata")),
+        boot_device: Some("probablydata".parse().unwrap()),
         start: true,
     };
 
@@ -3792,7 +3792,6 @@ async fn test_cannot_have_nonexistent_boot_device(
     assert_eq!(err.message, "boot disk must be attached",);
 }
 
-/// Create an instance with a boot device, then fail to detach the disk while it is the boot device.
 #[nexus_test]
 async fn test_cannot_detach_boot_device(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
@@ -3803,16 +3802,7 @@ async fn test_cannot_detach_boot_device(cptestctx: &ControlPlaneTestContext) {
     create_project_and_pool(&client).await;
 
     // Create the "probablydata" disk
-    create_disk(&client, PROJECT_NAME, "probablydata").await;
-
-    // Verify disk is there and currently detached
-    let disks: Vec<Disk> =
-        NexusRequest::iter_collection_authn(client, &get_disks_url(), "", None)
-            .await
-            .expect("failed to list disks")
-            .all_items;
-    assert_eq!(disks.len(), 1);
-    assert_eq!(disks[0].state, DiskState::Detached);
+    create_disk(&client, PROJECT_NAME, "probablydata0").await;
 
     // Create the instance
     let instance_params = params::InstanceCreate {
@@ -3829,10 +3819,10 @@ async fn test_cannot_detach_boot_device(cptestctx: &ControlPlaneTestContext) {
         external_ips: vec![],
         disks: vec![params::InstanceDiskAttachment::Attach(
             params::InstanceDiskAttach {
-                name: Name::try_from(String::from("probablydata")).unwrap(),
+                name: Name::try_from(String::from("probablydata0")).unwrap(),
             },
         )],
-        boot_device: Some(String::from("probablydata")),
+        boot_device: Some("probablydata0".parse().unwrap()),
         start: false,
     };
 
@@ -3864,7 +3854,7 @@ async fn test_cannot_detach_boot_device(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(disks[0].state, DiskState::Attached(instance.identity.id));
     assert_eq!(instance.boot_device, Some(disks[0].identity.id));
 
-    // Attempt to detach the instance's disk. This should fail because it is still the boot disk.
+    // Attempt to detach the instance's boot disk. This should fail.
     let url_instance_detach_disk =
         format!("/v1/instances/{}/disks/detach", instance.identity.id);
 
@@ -3879,12 +3869,235 @@ async fn test_cannot_detach_boot_device(cptestctx: &ControlPlaneTestContext) {
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
-        .expect("can attempt to create instance");
+        .expect("can attempt to detach boot disk");
 
     let err = response
         .parsed_body::<HttpErrorResponseBody>()
         .expect("Failed to parse error response body");
     assert_eq!(err.message, "boot disk cannot be detached");
+
+    // Change the instance's boot disk.
+    let url_instance_update =
+        format!("/v1/instances/{}/update", instance.identity.id);
+
+    let builder =
+        RequestBuilder::new(client, http::Method::PUT, &url_instance_update)
+            .body(Some(&params::InstanceUpdate { boot_device: None }))
+            .expect_status(Some(http::StatusCode::OK));
+    let response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("can attempt to reconfigure the instance");
+
+    let instance = response.parsed_body::<Instance>().unwrap();
+    assert_eq!(instance.boot_device, None);
+
+    // Now try to detach `disks[0]` again. This should succeed.
+    let builder = RequestBuilder::new(
+        client,
+        http::Method::POST,
+        &url_instance_detach_disk,
+    )
+    .body(Some(&params::DiskPath { disk: disks[0].identity.id.into() }))
+    .expect_status(Some(http::StatusCode::ACCEPTED));
+    NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("can attempt to detach boot disk");
+}
+
+#[nexus_test]
+async fn test_boot_device_can_be_changed(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let instance_name = "nifs";
+
+    // Test pre-reqs
+    DiskTest::new(&cptestctx).await;
+    create_project_and_pool(&client).await;
+
+    // Create the "probablydata" disk
+    create_disk(&client, PROJECT_NAME, "probablydata0").await;
+    create_disk(&client, PROJECT_NAME, "probablydata1").await;
+
+    // Verify disks are there and currently detached
+    let disks: Vec<Disk> =
+        NexusRequest::iter_collection_authn(client, &get_disks_url(), "", None)
+            .await
+            .expect("failed to list disks")
+            .all_items;
+    assert_eq!(disks.len(), 2);
+    assert_eq!(disks[0].state, DiskState::Detached);
+    assert_eq!(disks[1].state, DiskState::Detached);
+
+    // Create the instance
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: instance_name.parse().unwrap(),
+            description: String::from("probably serving data"),
+        },
+        ncpus: InstanceCpuCount::try_from(2).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(4),
+        hostname: "nfs".parse().unwrap(),
+        user_data: vec![],
+        ssh_public_keys: None,
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![],
+        disks: vec![
+            params::InstanceDiskAttachment::Attach(
+                params::InstanceDiskAttach {
+                    name: Name::try_from(String::from("probablydata0"))
+                        .unwrap(),
+                },
+            ),
+            params::InstanceDiskAttachment::Attach(
+                params::InstanceDiskAttach {
+                    name: Name::try_from(String::from("probablydata1"))
+                        .unwrap(),
+                },
+            ),
+        ],
+        boot_device: Some("probablydata0".parse().unwrap()),
+        start: false,
+    };
+
+    let builder =
+        RequestBuilder::new(client, http::Method::POST, &get_instances_url())
+            .body(Some(&instance_params))
+            .expect_status(Some(http::StatusCode::CREATED));
+    let response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Expected instance creation to work!");
+
+    let instance = response.parsed_body::<Instance>().unwrap();
+
+    assert_eq!(instance.boot_device, Some(disks[0].identity.id.clone()));
+
+    // Change the instance's boot disk.
+    let url_instance_update =
+        format!("/v1/instances/{}/update", instance.identity.id);
+
+    let builder =
+        RequestBuilder::new(client, http::Method::PUT, &url_instance_update)
+            .body(Some(&params::InstanceUpdate {
+                boot_device: Some(disks[1].identity.id.clone().into()),
+            }))
+            .expect_status(Some(http::StatusCode::OK));
+
+    let response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("can attempt to reconfigure the instance");
+
+    let instance = response.parsed_body::<Instance>().unwrap();
+    assert_eq!(instance.boot_device, Some(disks[1].identity.id.clone().into()));
+}
+
+#[nexus_test]
+async fn test_boot_device_must_be_attached(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let instance_name = "nifs";
+
+    // Test pre-reqs
+    DiskTest::new(&cptestctx).await;
+    create_project_and_pool(&client).await;
+
+    // Create the "probablydata" disk
+    create_disk(&client, PROJECT_NAME, "probablydata0").await;
+
+    let disks: Vec<Disk> =
+        NexusRequest::iter_collection_authn(client, &get_disks_url(), "", None)
+            .await
+            .expect("failed to list disks")
+            .all_items;
+
+    // Create the instance
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: instance_name.parse().unwrap(),
+            description: String::from("probably serving data"),
+        },
+        ncpus: InstanceCpuCount::try_from(2).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(4),
+        hostname: "nfs".parse().unwrap(),
+        user_data: vec![],
+        ssh_public_keys: None,
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![],
+        disks: vec![],
+        boot_device: None,
+        start: false,
+    };
+
+    let builder =
+        RequestBuilder::new(client, http::Method::POST, &get_instances_url())
+            .body(Some(&instance_params))
+            .expect_status(Some(http::StatusCode::CREATED));
+    let response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Expected instance creation to work!");
+
+    let instance = response.parsed_body::<Instance>().unwrap();
+
+    // Update the instance's boot device to the unattached disk. This should fail.
+    let url_instance_update =
+        format!("/v1/instances/{}/update", instance.identity.id);
+
+    let builder =
+        RequestBuilder::new(client, http::Method::PUT, &url_instance_update)
+            .body(Some(&params::InstanceUpdate {
+                boot_device: Some(disks[0].identity.id.clone().into()),
+            }))
+            .expect_status(Some(http::StatusCode::CONFLICT));
+    let response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("can attempt to reconfigure the instance");
+
+    let instance = response.parsed_body::<Instance>().unwrap();
+    assert_eq!(instance.boot_device, Some(disks[0].identity.id.clone().into()));
+
+    // Now attach the disk.
+    let url_instance_detach_disk =
+        format!("/v1/instances/{}/disks/attach", instance.identity.id);
+
+    let builder = RequestBuilder::new(
+        client,
+        http::Method::POST,
+        &url_instance_detach_disk,
+    )
+    .body(Some(&params::DiskPath { disk: disks[0].identity.id.into() }))
+    .expect_status(Some(http::StatusCode::ACCEPTED));
+    NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("can attempt to detach boot disk");
+
+    // And now it can be made the boot device.
+    let builder =
+        RequestBuilder::new(client, http::Method::PUT, &url_instance_update)
+            .body(Some(&params::InstanceUpdate {
+                boot_device: Some(disks[0].identity.id.into()),
+            }))
+            .expect_status(Some(http::StatusCode::OK));
+    let response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("can attempt to reconfigure the instance");
+
+    let instance = response.parsed_body::<Instance>().unwrap();
+    assert_eq!(instance.boot_device, Some(disks[0].identity.id.into()));
 }
 
 // Tests that an instance is rejected if the memory is less than

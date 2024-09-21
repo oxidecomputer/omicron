@@ -230,3 +230,17 @@ impl InstanceRuntimeState {
         }
     }
 }
+
+/// The parts of an Instance that can be directly updated after creation.
+#[derive(
+    Clone,
+    Debug,
+    AsChangeset,
+    Serialize,
+    Deserialize,
+)]
+#[diesel(table_name = instance, treat_none_as_null = true)]
+pub struct InstanceUpdate {
+    #[diesel(column_name = boot_device)]
+    pub boot_device: Option<Uuid>,
+}

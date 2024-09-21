@@ -19,6 +19,7 @@ use crate::external_api::params;
 use cancel_safe_futures::prelude::*;
 use futures::future::Fuse;
 use futures::{FutureExt, SinkExt, StreamExt};
+use nexus_db_model::InstanceUpdate;
 use nexus_db_model::IpAttachState;
 use nexus_db_model::IpKind;
 use nexus_db_model::Vmm as DbVmm;
@@ -292,6 +293,45 @@ impl super::Nexus {
                 ))
             }
         }
+    }
+
+    pub(crate) async fn reconfigure_instance(
+        self: &Arc<Self>,
+        opctx: &OpContext,
+        instance_lookup: &lookup::Instance<'_>,
+        params: &params::InstanceUpdate,
+    ) -> UpdateResult<InstanceAndActiveVmm> {
+        let (.., authz_project, authz_instance) =
+            instance_lookup.lookup_for(authz::Action::Modify).await?;
+
+        let boot_device = match params.boot_device.clone() {
+            Some(disk) => {
+                let (.., authz_project_disk, authz_disk) = self
+                    .disk_lookup(
+                        opctx,
+                        params::DiskSelector {
+                            project: match &disk {
+                                NameOrId::Name(_) => {
+                                    Some(authz_project.id().into())
+                                }
+                                NameOrId::Id(_) => None,
+                            },
+                            disk,
+                        },
+                    )?
+                    .lookup_for(authz::Action::Modify)
+                    .await?;
+
+                // TODO: does this have the same issue as in `fn instance_attach_disk`? (yes)
+                Some(authz_disk.id())
+            }
+            None => None,
+        };
+
+        let update = InstanceUpdate { boot_device };
+        self.datastore()
+            .reconfigure_instance(opctx, &authz_instance, update)
+            .await
     }
 
     pub(crate) async fn project_create_instance(
