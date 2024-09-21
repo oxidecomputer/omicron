@@ -313,7 +313,7 @@ impl super::Nexus {
                     },
                     disk,
                 };
-                let (.., authz_project_disk, authz_disk) = self
+                let (.., authz_disk) = self
                     .disk_lookup(opctx, selector)?
                     .lookup_for(authz::Action::Modify)
                     .await?;

@@ -914,11 +914,11 @@ impl DataStore {
                         )
                         .filter(instance_dsl::time_deleted.is_null())
                         .select(instance_dsl::id)
-                        .first_async(&conn)
-                        .await?;
+                        .first_async::<Uuid>(&conn)
+                        .await;
 
                     if let Err(e) = updatable {
-                        if e == NotFound {
+                        if e == diesel::NotFound {
                             return Err(err.bail(Error::not_found_by_id(
                                 ResourceType::Instance,
                                 &authz_instance.id(),
@@ -935,23 +935,38 @@ impl DataStore {
                             authz_instance.id(),
                         );
 
-                        let attached_disk: Option<Uuid> = disk_dsl::disk
-                            .filter(disk_dsl::id.eq(disk_id))
-                            .filter(
-                                disk_dsl::attach_instance_id
-                                    .eq(authz_instance.id()),
-                            )
-                            .filter(
-                                disk_dsl::disk_state.eq(expected_state.label()),
-                            )
-                            .select(disk_dsl::id)
-                            .first_async(&conn)
-                            .await?;
+                        let attached_disk: Option<Option<Uuid>> =
+                            disk_dsl::disk
+                                .filter(disk_dsl::id.eq(disk_id))
+                                .filter(
+                                    disk_dsl::attach_instance_id
+                                        .eq(authz_instance.id()),
+                                )
+                                .filter(
+                                    disk_dsl::disk_state
+                                        .eq(expected_state.label()),
+                                )
+                                .select(disk_dsl::attach_instance_id)
+                                .first_async::<Option<Uuid>>(&conn)
+                                .await
+                                .optional()?;
 
-                        if attached_disk.is_none() {
-                            return Err(err.bail(Error::conflict(
-                                "boot disk must be attached",
-                            )));
+                        match attached_disk {
+                            None => {
+                                return Err(err.bail(Error::not_found_by_id(
+                                    ResourceType::Disk,
+                                    &disk_id,
+                                )));
+                            }
+                            Some(None) => {
+                                return Err(err.bail(Error::conflict(
+                                    "boot disk must be attached",
+                                )));
+                            }
+                            Some(Some(_)) => {
+                                // The disk exists and is attached, we can make
+                                // it the boot device.
+                            }
                         }
                     }
 
