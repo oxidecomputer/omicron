@@ -1837,7 +1837,7 @@ mod tests {
                 search_domains: vec![],
             },
             disks: vec![],
-            boot_device: None,
+            boot_disk: None,
             cloud_init_bytes: None,
         };
 

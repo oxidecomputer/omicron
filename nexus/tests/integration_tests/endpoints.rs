@@ -429,11 +429,11 @@ pub static DEMO_INSTANCE_CREATE: Lazy<params::InstanceCreate> =
             pool: Some(DEMO_IP_POOL_NAME.clone().into()),
         }],
         disks: vec![],
-        boot_device: None,
+        boot_disk: None,
         start: true,
     });
 pub static DEMO_INSTANCE_UPDATE: Lazy<params::InstanceUpdate> =
-    Lazy::new(|| params::InstanceUpdate { boot_device: None });
+    Lazy::new(|| params::InstanceUpdate { boot_disk: None });
 
 // The instance needs a network interface, too.
 pub static DEMO_INSTANCE_NIC_NAME: Lazy<Name> =

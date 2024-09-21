@@ -766,7 +766,7 @@ mod test {
                     params::InstanceNetworkInterfaceAttachment::None,
                 external_ips: vec![],
                 disks: vec![],
-                boot_device: None,
+                boot_disk: None,
                 start: false,
             },
         )

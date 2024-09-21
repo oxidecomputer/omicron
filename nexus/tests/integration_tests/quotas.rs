@@ -86,7 +86,7 @@ impl ResourceAllocator {
                 network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
                 external_ips: Vec::<params::ExternalIpCreate>::new(),
                 disks: Vec::<params::InstanceDiskAttachment>::new(),
-                boot_device: None,
+                boot_disk: None,
                 start: false,
             },
         )

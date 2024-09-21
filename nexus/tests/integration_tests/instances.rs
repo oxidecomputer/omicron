@@ -225,7 +225,7 @@ async fn test_create_instance_with_bad_hostname_impl(
         network_interfaces: Default::default(),
         external_ips: vec![],
         disks: vec![],
-        boot_device: None,
+        boot_disk: None,
         start: false,
         ssh_public_keys: None,
     };
@@ -331,7 +331,7 @@ async fn test_instances_create_reboot_halt(
                     params::InstanceNetworkInterfaceAttachment::Default,
                 external_ips: vec![],
                 disks: vec![],
-                boot_device: None,
+                boot_disk: None,
                 start: true,
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
@@ -1790,7 +1790,7 @@ async fn test_instances_create_stopped_start(
                 params::InstanceNetworkInterfaceAttachment::Default,
             external_ips: vec![],
             disks: vec![],
-            boot_device: None,
+            boot_disk: None,
             start: false,
         },
     )
@@ -1970,7 +1970,7 @@ async fn test_instance_using_image_from_other_project_fails(
                         size: ByteCount::from_gibibytes_u32(4),
                     },
                 )],
-                boot_device: None,
+                boot_disk: None,
                 start: true,
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
@@ -2034,7 +2034,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
         network_interfaces: interface_params.clone(),
         external_ips: vec![],
         disks: vec![],
-        boot_device: None,
+        boot_disk: None,
         start: true,
     };
     let response = NexusRequest::objects_post(
@@ -2063,7 +2063,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
         network_interfaces: interface_params,
         external_ips: vec![],
         disks: vec![],
-        boot_device: None,
+        boot_disk: None,
         start: true,
     };
     let _ = NexusRequest::objects_post(
@@ -2153,7 +2153,7 @@ async fn test_instance_with_single_explicit_ip_address(
         network_interfaces: interface_params,
         external_ips: vec![],
         disks: vec![],
-        boot_device: None,
+        boot_disk: None,
         start: true,
     };
     let response = NexusRequest::objects_post(
@@ -2269,7 +2269,7 @@ async fn test_instance_with_new_custom_network_interfaces(
         network_interfaces: interface_params,
         external_ips: vec![],
         disks: vec![],
-        boot_device: None,
+        boot_disk: None,
         start: true,
     };
     let response = NexusRequest::objects_post(
@@ -2385,7 +2385,7 @@ async fn test_instance_create_delete_network_interface(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::None,
         external_ips: vec![],
         disks: vec![],
-        boot_device: None,
+        boot_disk: None,
         start: true,
     };
     let response = NexusRequest::objects_post(
@@ -2630,7 +2630,7 @@ async fn test_instance_update_network_interfaces(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::None,
         external_ips: vec![],
         disks: vec![],
-        boot_device: None,
+        boot_disk: None,
         start: true,
     };
     let response = NexusRequest::objects_post(
@@ -3030,7 +3030,7 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
         network_interfaces: interface_params,
         external_ips: vec![],
         disks: vec![],
-        boot_device: None,
+        boot_disk: None,
         start: true,
     };
     let builder =
@@ -3101,7 +3101,7 @@ async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
         disks: vec![params::InstanceDiskAttachment::Attach(
             params::InstanceDiskAttach { name: disk_name.clone() },
         )],
-        boot_device: Some(disk_name.into()),
+        boot_disk: Some(disk_name.into()),
         start: true,
     };
 
@@ -3176,7 +3176,7 @@ async fn test_instance_create_attach_disks(
                 },
             ),
         ],
-        boot_device: Some(attachable_disk.identity.name.into()),
+        boot_disk: Some(attachable_disk.identity.name.into()),
         start: true,
     };
 
@@ -3273,7 +3273,7 @@ async fn test_instance_create_attach_disks_undo(
                 params::InstanceDiskAttach { name: faulted_disk.identity.name },
             ),
         ],
-        boot_device: None,
+        boot_disk: None,
         start: true,
     };
 
@@ -3351,7 +3351,7 @@ async fn test_attach_eight_disks_to_instance(
                 )
             })
             .collect(),
-        boot_device: Some("probablydata0".parse().unwrap()),
+        boot_disk: Some("probablydata0".parse().unwrap()),
         start: true,
     };
 
@@ -3433,7 +3433,7 @@ async fn test_cannot_attach_nine_disks_to_instance(
                 )
             })
             .collect(),
-        boot_device: Some("probablydata0".parse().unwrap()),
+        boot_disk: Some("probablydata0".parse().unwrap()),
         start: true,
     };
 
@@ -3529,7 +3529,7 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
                 )
             })
             .collect(),
-        boot_device: Some("probablydata0".parse().unwrap()),
+        boot_disk: Some("probablydata0".parse().unwrap()),
         start: true,
     };
 
@@ -3614,7 +3614,7 @@ async fn test_disks_detached_when_instance_destroyed(
                 )
             })
             .collect(),
-        boot_device: Some("probablydata0".parse().unwrap()),
+        boot_disk: Some("probablydata0".parse().unwrap()),
         start: true,
     };
 
@@ -3706,7 +3706,7 @@ async fn test_disks_detached_when_instance_destroyed(
                 )
             })
             .collect(),
-        boot_device: Some("probablydata0".parse().unwrap()),
+        boot_disk: Some("probablydata0".parse().unwrap()),
         start: true,
     };
 
@@ -3737,7 +3737,7 @@ async fn test_disks_detached_when_instance_destroyed(
 // Attempt and fail to create an instance with a non-attached disk as its boot
 // device.
 #[nexus_test]
-async fn test_cannot_have_nonexistent_boot_device(
+async fn test_cannot_have_nonexistent_boot_disk(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
@@ -3773,7 +3773,7 @@ async fn test_cannot_have_nonexistent_boot_device(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![],
-        boot_device: Some("probablydata".parse().unwrap()),
+        boot_disk: Some("probablydata".parse().unwrap()),
         start: true,
     };
 
@@ -3793,11 +3793,11 @@ async fn test_cannot_have_nonexistent_boot_device(
     assert_eq!(err.message, "boot disk must be attached",);
 }
 
-// Create an instance with a boot device, try and fail to detach it, change the
-// boot device to something else, and succeed to detach the formerly-boot
+// Create an instance with a boot disk, try and fail to detach it, change the
+// boot disk to something else, and succeed to detach the formerly-boot
 // device.
 #[nexus_test]
-async fn test_cannot_detach_boot_device(cptestctx: &ControlPlaneTestContext) {
+async fn test_cannot_detach_boot_disk(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     let instance_name = "nifs";
 
@@ -3826,7 +3826,7 @@ async fn test_cannot_detach_boot_device(cptestctx: &ControlPlaneTestContext) {
                 name: Name::try_from(String::from("probablydata0")).unwrap(),
             },
         )],
-        boot_device: Some("probablydata0".parse().unwrap()),
+        boot_disk: Some("probablydata0".parse().unwrap()),
         start: false,
     };
 
@@ -3856,7 +3856,7 @@ async fn test_cannot_detach_boot_device(cptestctx: &ControlPlaneTestContext) {
     .all_items;
     assert_eq!(disks.len(), 1);
     assert_eq!(disks[0].state, DiskState::Attached(instance.identity.id));
-    assert_eq!(instance.boot_device_id, Some(disks[0].identity.id));
+    assert_eq!(instance.boot_disk_id, Some(disks[0].identity.id));
 
     // Attempt to detach the instance's boot disk. This should fail.
     let url_instance_detach_disk =
@@ -3885,7 +3885,7 @@ async fn test_cannot_detach_boot_device(cptestctx: &ControlPlaneTestContext) {
 
     let builder =
         RequestBuilder::new(client, http::Method::PUT, &url_instance_update)
-            .body(Some(&params::InstanceUpdate { boot_device: None }))
+            .body(Some(&params::InstanceUpdate { boot_disk: None }))
             .expect_status(Some(http::StatusCode::OK));
     let response = NexusRequest::new(builder)
         .authn_as(AuthnMode::PrivilegedUser)
@@ -3894,7 +3894,7 @@ async fn test_cannot_detach_boot_device(cptestctx: &ControlPlaneTestContext) {
         .expect("can attempt to reconfigure the instance");
 
     let instance = response.parsed_body::<Instance>().unwrap();
-    assert_eq!(instance.boot_device_id, None);
+    assert_eq!(instance.boot_disk_id, None);
 
     // Now try to detach `disks[0]` again. This should succeed.
     let builder = RequestBuilder::new(
@@ -3914,7 +3914,7 @@ async fn test_cannot_detach_boot_device(cptestctx: &ControlPlaneTestContext) {
 // Create an instance with boot disk set to one of its attached disks, then set
 // it to the other disk.
 #[nexus_test]
-async fn test_boot_device_can_be_changed(cptestctx: &ControlPlaneTestContext) {
+async fn test_boot_disk_can_be_changed(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     let instance_name = "nifs";
 
@@ -3963,7 +3963,7 @@ async fn test_boot_device_can_be_changed(cptestctx: &ControlPlaneTestContext) {
                 },
             ),
         ],
-        boot_device: Some("probablydata0".parse().unwrap()),
+        boot_disk: Some("probablydata0".parse().unwrap()),
         start: false,
     };
 
@@ -3979,7 +3979,7 @@ async fn test_boot_device_can_be_changed(cptestctx: &ControlPlaneTestContext) {
 
     let instance = response.parsed_body::<Instance>().unwrap();
 
-    assert_eq!(instance.boot_device_id, Some(disks[0].identity.id.clone()));
+    assert_eq!(instance.boot_disk_id, Some(disks[0].identity.id.clone()));
 
     // Change the instance's boot disk.
     let url_instance_update = format!("/v1/instances/{}", instance.identity.id);
@@ -3987,7 +3987,7 @@ async fn test_boot_device_can_be_changed(cptestctx: &ControlPlaneTestContext) {
     let builder =
         RequestBuilder::new(client, http::Method::PUT, &url_instance_update)
             .body(Some(&params::InstanceUpdate {
-                boot_device: Some(disks[1].identity.id.clone().into()),
+                boot_disk: Some(disks[1].identity.id.clone().into()),
             }))
             .expect_status(Some(http::StatusCode::OK));
 
@@ -3999,15 +3999,15 @@ async fn test_boot_device_can_be_changed(cptestctx: &ControlPlaneTestContext) {
 
     let instance = response.parsed_body::<Instance>().unwrap();
     assert_eq!(
-        instance.boot_device_id,
+        instance.boot_disk_id,
         Some(disks[1].identity.id.clone().into())
     );
 }
 
-// Create an instance without a boot device, fail to set the boot device to a
-// detached disk, then attach the disk and make it a boot device.
+// Create an instance without a boot disk, fail to set the boot disk to a
+// detached disk, then attach the disk and make it a boot disk.
 #[nexus_test]
-async fn test_boot_device_must_be_attached(
+async fn test_boot_disk_must_be_attached(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
@@ -4040,7 +4040,7 @@ async fn test_boot_device_must_be_attached(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![],
-        boot_device: None,
+        boot_disk: None,
         start: false,
     };
 
@@ -4056,14 +4056,13 @@ async fn test_boot_device_must_be_attached(
 
     let instance = response.parsed_body::<Instance>().unwrap();
 
-    // Update the instance's boot device to the unattached disk. This should
-    // fail.
+    // Update the instance's boot disk to the unattached disk. This should fail.
     let url_instance_update = format!("/v1/instances/{}", instance.identity.id);
 
     let builder =
         RequestBuilder::new(client, http::Method::PUT, &url_instance_update)
             .body(Some(&params::InstanceUpdate {
-                boot_device: Some(disks[0].identity.id.clone().into()),
+                boot_disk: Some(disks[0].identity.id.clone().into()),
             }))
             .expect_status(Some(http::StatusCode::CONFLICT));
     let response = NexusRequest::new(builder)
@@ -4089,11 +4088,11 @@ async fn test_boot_device_must_be_attached(
         .await
         .expect("can attempt to detach boot disk");
 
-    // And now it can be made the boot device.
+    // And now it can be made the boot disk.
     let builder =
         RequestBuilder::new(client, http::Method::PUT, &url_instance_update)
             .body(Some(&params::InstanceUpdate {
-                boot_device: Some(disks[0].identity.id.into()),
+                boot_disk: Some(disks[0].identity.id.into()),
             }))
             .expect_status(Some(http::StatusCode::OK));
     let response = NexusRequest::new(builder)
@@ -4103,7 +4102,7 @@ async fn test_boot_device_must_be_attached(
         .expect("can attempt to reconfigure the instance");
 
     let instance = response.parsed_body::<Instance>().unwrap();
-    assert_eq!(instance.boot_device_id, Some(disks[0].identity.id.into()));
+    assert_eq!(instance.boot_disk_id, Some(disks[0].identity.id.into()));
 }
 
 // Tests that an instance is rejected if the memory is less than
@@ -4132,7 +4131,7 @@ async fn test_instances_memory_rejected_less_than_min_memory_size(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![],
-        boot_device: None,
+        boot_disk: None,
         start: true,
     };
 
@@ -4183,7 +4182,7 @@ async fn test_instances_memory_not_divisible_by_min_memory_size(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![],
-        boot_device: None,
+        boot_disk: None,
         start: true,
     };
 
@@ -4234,7 +4233,7 @@ async fn test_instances_memory_greater_than_max_size(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![],
-        boot_device: None,
+        boot_disk: None,
         start: true,
     };
 
@@ -4318,7 +4317,7 @@ async fn test_instance_create_with_ssh_keys(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![],
-        boot_device: None,
+        boot_disk: None,
     };
 
     let builder =
@@ -4365,7 +4364,7 @@ async fn test_instance_create_with_ssh_keys(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![],
-        boot_device: None,
+        boot_disk: None,
     };
 
     let builder =
@@ -4411,7 +4410,7 @@ async fn test_instance_create_with_ssh_keys(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![],
-        boot_device: None,
+        boot_disk: None,
     };
 
     let builder =
@@ -4532,7 +4531,7 @@ async fn test_cannot_provision_instance_beyond_cpu_capacity(
                 params::InstanceNetworkInterfaceAttachment::Default,
             external_ips: vec![],
             disks: vec![],
-            boot_device: None,
+            boot_disk: None,
             start: false,
         };
 
@@ -4589,7 +4588,7 @@ async fn test_cannot_provision_instance_beyond_cpu_limit(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![],
-        boot_device: None,
+        boot_disk: None,
         start: false,
     };
     let url_instances = get_instances_url();
@@ -4643,7 +4642,7 @@ async fn test_cannot_provision_instance_beyond_ram_capacity(
                 params::InstanceNetworkInterfaceAttachment::Default,
             external_ips: vec![],
             disks: vec![],
-            boot_device: None,
+            boot_disk: None,
             start: false,
         };
 
@@ -4942,7 +4941,7 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
         }],
         ssh_public_keys: None,
         disks: vec![],
-        boot_device: None,
+        boot_disk: None,
         start: true,
     };
     let error = object_create_error(
@@ -5010,7 +5009,7 @@ async fn test_instance_ephemeral_ip_from_orphan_pool(
         }],
         ssh_public_keys: None,
         disks: vec![],
-        boot_device: None,
+        boot_disk: None,
         start: true,
     };
 
@@ -5072,7 +5071,7 @@ async fn test_instance_ephemeral_ip_no_default_pool_error(
         }],
         ssh_public_keys: None,
         disks: vec![],
-        boot_device: None,
+        boot_disk: None,
         start: true,
     };
 
@@ -5207,7 +5206,7 @@ async fn test_instance_allow_only_one_ephemeral_ip(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![ephemeral_create.clone(), ephemeral_create],
         disks: vec![],
-        boot_device: None,
+        boot_disk: None,
         start: true,
     };
     let error = object_create_error(
@@ -5338,7 +5337,7 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
             pool: Some("default".parse::<Name>().unwrap().into()),
         }],
         disks: vec![],
-        boot_device: None,
+        boot_disk: None,
         start: true,
     };
     let url_instances = format!("/v1/instances?project={}", PROJECT_NAME);

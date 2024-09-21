@@ -100,9 +100,9 @@ declare_saga_actions! {
         + sic_attach_disk_to_instance
         - sic_attach_disk_to_instance_undo
     }
-    SET_BOOT_DEVICE -> "set_boot_device" {
-        + sic_set_boot_device
-        - sic_set_boot_device_undo
+    SET_BOOT_DISK -> "set_boot_disk" {
+        + sic_set_boot_disk
+        - sic_set_boot_disk_undo
     }
     MOVE_TO_STOPPED -> "stopped_instance" {
         + sic_move_to_stopped
@@ -296,7 +296,7 @@ impl NexusSaga for SagaInstanceCreate {
             )?;
         }
 
-        builder.append(set_boot_device_action());
+        builder.append(set_boot_disk_action());
         builder.append(move_to_stopped_action());
         Ok(builder.build()?)
     }
@@ -1026,7 +1026,7 @@ async fn sic_delete_instance_record(
     Ok(())
 }
 
-async fn sic_set_boot_device(
+async fn sic_set_boot_disk(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let osagactx = sagactx.user_data();
@@ -1039,7 +1039,7 @@ async fn sic_set_boot_device(
 
     // TODO: instead of taking this from create_params, if this is a name, take
     // it from the ID we get when creating the named disk.
-    let Some(boot_device) = params.create_params.boot_device.as_ref() else {
+    let Some(boot_disk) = params.create_params.boot_disk.as_ref() else {
         return Ok(());
     };
 
@@ -1051,7 +1051,7 @@ async fn sic_set_boot_device(
         .await
         .map_err(ActionError::action_failed)?;
 
-    let (.., authz_disk) = match boot_device.clone() {
+    let (.., authz_disk) = match boot_disk.clone() {
         NameOrId::Name(name) => LookupPath::new(&opctx, datastore)
             .project_id(params.project_id)
             .disk_name_owned(name.into())
@@ -1066,7 +1066,7 @@ async fn sic_set_boot_device(
     };
 
     let initial_configuration =
-        nexus_db_model::InstanceUpdate { boot_device: Some(authz_disk.id()) };
+        nexus_db_model::InstanceUpdate { boot_disk: Some(authz_disk.id()) };
 
     datastore
         .reconfigure_instance(&opctx, &authz_instance, initial_configuration)
@@ -1076,7 +1076,7 @@ async fn sic_set_boot_device(
     Ok(())
 }
 
-async fn sic_set_boot_device_undo(
+async fn sic_set_boot_disk_undo(
     sagactx: NexusActionContext,
 ) -> Result<(), anyhow::Error> {
     let osagactx = sagactx.user_data();
@@ -1095,10 +1095,10 @@ async fn sic_set_boot_device_undo(
         .await
         .map_err(ActionError::action_failed)?;
 
-    // If there was a boot device, clear it. If there was not a boot device,
+    // If there was a boot disk, clear it. If there was not a boot disk,
     // this is a no-op.
     let undo_configuration =
-        nexus_db_model::InstanceUpdate { boot_device: None };
+        nexus_db_model::InstanceUpdate { boot_disk: None };
 
     datastore
         .reconfigure_instance(&opctx, &authz_instance, undo_configuration)
@@ -1212,7 +1212,7 @@ pub mod test {
                         name: DISK_NAME.parse().unwrap(),
                     },
                 )],
-                boot_device: Some(DISK_NAME.parse().unwrap()),
+                boot_disk: Some(DISK_NAME.parse().unwrap()),
                 start: false,
             },
             boundary_switches: HashSet::from([SwitchLocation::Switch0]),

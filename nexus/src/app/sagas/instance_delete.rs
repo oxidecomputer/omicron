@@ -248,7 +248,7 @@ mod test {
             disks: vec![params::InstanceDiskAttachment::Attach(
                 params::InstanceDiskAttach { name: DISK_NAME.parse().unwrap() },
             )],
-            boot_device: Some(DISK_NAME.parse().unwrap()),
+            boot_disk: Some(DISK_NAME.parse().unwrap()),
             start: false,
         }
     }

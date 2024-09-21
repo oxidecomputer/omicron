@@ -304,7 +304,7 @@ impl super::Nexus {
         let (.., authz_project, authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
 
-        let boot_device = match params.boot_device.clone() {
+        let boot_disk = match params.boot_disk.clone() {
             Some(disk) => {
                 let selector = params::DiskSelector {
                     project: match &disk {
@@ -323,7 +323,7 @@ impl super::Nexus {
             None => None,
         };
 
-        let update = InstanceUpdate { boot_device };
+        let update = InstanceUpdate { boot_disk };
         self.datastore()
             .reconfigure_instance(opctx, &authz_instance, update)
             .await
@@ -467,12 +467,12 @@ impl super::Nexus {
         }
 
         // It is deceptively inconvenient to do an early check that the boot
-        // device is valid here! We accept boot device by name or ID, but disk
+        // disk is valid here! We accept boot disk by name or ID, but disk
         // creation and attachment requests as part of instance creation all
-        // require the disk name. So if the boot device is an ID, we would need
-        // to look up all attachment requests to compare the named device and
-        // to-be-attached devices. Instead, leave this for the other end of the
-        // saga when we'd go to set the boot device.
+        // require the disk name. So if the boot disk is an ID, we would need
+        // to look up all attachment requests to compare the named disk and
+        // to-be-attached disks. Instead, leave this for the other end of the
+        // saga when we'd go to set the boot disk.
 
         let saga_params = sagas::instance_create::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
@@ -1016,7 +1016,7 @@ impl super::Nexus {
             )
             .await?;
 
-        let mut boot_device_name = None;
+        let mut boot_disk_name = None;
 
         let mut disk_reqs = vec![];
         for disk in &disks {
@@ -1054,8 +1054,8 @@ impl super::Nexus {
 
             // Propolis wants the name of the boot disk rather than ID, because we send names
             // rather than IDs in the disk requsts as assembled below.
-            if db_instance.boot_device == Some(disk.id()) {
-                boot_device_name = Some(disk.name().to_string());
+            if db_instance.boot_disk == Some(disk.id()) {
+                boot_disk_name = Some(disk.name().to_string());
             }
 
             disk_reqs.push(sled_agent_client::types::DiskRequest {
@@ -1072,23 +1072,23 @@ impl super::Nexus {
 
         // This should never occur: when setting the boot disk we ensure it is
         // attached, and when detaching a disk we ensure it is not the boot
-        // disk. If this error is seen, the instance somehow had a boot device
-        // that was not an attached disk anyway.
+        // disk. If this error is seen, the instance somehow had a boot disk
+        // that was not attached anyway.
         //
         // When Propolis accepts an ID rather than name, and we don't need to
         // look up a name when assembling the Propolis request, we might as well
         // remove this check; we can just pass the ID and rely on Propolis' own
-        // check that the boot device is attached.
-        if let Some(instance_boot_device) = db_instance.boot_device.as_ref() {
-            if boot_device_name.is_none() {
-                error!(self.log, "instance boot device is not attached";
-                   "boot_device" => ?instance_boot_device,
+        // check that the boot disk is attached.
+        if let Some(instance_boot_disk) = db_instance.boot_disk.as_ref() {
+            if boot_disk_name.is_none() {
+                error!(self.log, "instance boot disk is not attached";
+                   "boot_disk" => ?instance_boot_disk,
                    "instance id" => %db_instance.id());
 
                 return Err(InstanceStateChangeError::Other(Error::internal_error(&format!(
-                    "instance {} has boot device {:?} but it is not an attached disk",
+                    "instance {} has boot disk {:?} but it is not attached",
                     db_instance.id(),
-                    db_instance.boot_device.as_ref(),
+                    db_instance.boot_disk.as_ref(),
                 ))));
             }
         }
@@ -1240,7 +1240,7 @@ impl super::Nexus {
                 search_domains: Vec::new(),
             },
             disks: disk_reqs,
-            boot_order: boot_device_name.map(|v| vec![v]),
+            boot_order: boot_disk_name.map(|v| vec![v]),
             cloud_init_bytes: Some(base64::Engine::encode(
                 &base64::engine::general_purpose::STANDARD,
                 db_instance.generate_cidata(&ssh_keys)?,
@@ -2321,7 +2321,7 @@ mod tests {
             network_interfaces: InstanceNetworkInterfaceAttachment::None,
             external_ips: vec![],
             disks: vec![],
-            boot_device: None,
+            boot_disk: None,
             ssh_public_keys: None,
             start: false,
         };

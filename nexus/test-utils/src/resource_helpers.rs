@@ -515,7 +515,7 @@ pub async fn create_instance_with(
             network_interfaces: nics.clone(),
             external_ips,
             disks,
-            boot_device: None,
+            boot_disk: None,
             start,
         },
     )

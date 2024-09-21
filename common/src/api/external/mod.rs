@@ -1187,8 +1187,8 @@ pub struct Instance {
     /// RFC1035-compliant hostname for the Instance.
     pub hostname: String,
 
-    /// the ID of the device used to boot this Instance, if a specific one is assigned.
-    pub boot_device_id: Option<Uuid>,
+    /// the ID of the disk used to boot this Instance, if a specific one is assigned.
+    pub boot_disk_id: Option<Uuid>,
 
     #[serde(flatten)]
     pub runtime: InstanceRuntimeState,

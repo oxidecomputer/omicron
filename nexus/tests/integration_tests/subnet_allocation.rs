@@ -62,7 +62,7 @@ async fn create_instance_expect_failure(
         network_interfaces,
         external_ips: vec![],
         disks: vec![],
-        boot_device: None,
+        boot_disk: None,
         start: true,
     };
 

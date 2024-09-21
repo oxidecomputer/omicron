@@ -206,7 +206,7 @@ impl From<InstanceAndActiveVmm> for external::Instance {
                 .hostname
                 .parse()
                 .expect("found invalid hostname in the database"),
-            boot_device_id: value.instance.boot_device.into(),
+            boot_disk_id: value.instance.boot_disk.into(),
             runtime: external::InstanceRuntimeState {
                 run_state: value.effective_state(),
                 time_run_state_updated,
@@ -906,12 +906,12 @@ impl DataStore {
                     // * Allow reconfiguration in NoVmm because there is no VMM
                     //   to contend with.
                     // * Allow reconfiguration in Failed to allow changing the
-                    //   boot device of a failed instance and free its boot disk
+                    //   boot disk of a failed instance and free its boot disk
                     //   for detach.
                     // * Allow reconfiguration in Creating because one of the
                     //   last steps of instance creation, while the instance is
                     //   still in Creating, is to reconfigure the instance to
-                    //   the desired boot device.
+                    //   the desired boot disk.
                     let ok_to_reconfigure_instance_states = vec![
                         InstanceState::NoVmm,
                         InstanceState::Failed,
@@ -940,7 +940,7 @@ impl DataStore {
                         }
                     }
 
-                    if let Some(disk_id) = update.boot_device.clone() {
+                    if let Some(disk_id) = update.boot_disk.clone() {
                         // Ensure the disk is currently attached before updating
                         // the database.
                         let expected_state = api::external::DiskState::Attached(
@@ -972,7 +972,7 @@ impl DataStore {
                     // here.
                     //
                     // NOTE: from this point forward it is OK if we update the
-                    // instance's `boot_device` column with the updated value
+                    // instance's `boot_disk` column with the updated value
                     // again. It will have already been assigned with constraint
                     // checking performed above, so updates will just be
                     // repetitive, not harmful.
@@ -1774,7 +1774,7 @@ mod tests {
                             params::InstanceNetworkInterfaceAttachment::None,
                         external_ips: Vec::new(),
                         disks: Vec::new(),
-                        boot_device: None,
+                        boot_disk: None,
                         ssh_public_keys: None,
                         start: false,
                     },

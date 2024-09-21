@@ -29,7 +29,7 @@ static KNOWN_VERSIONS: Lazy<Vec<KnownVersion>> = Lazy::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
-        KnownVersion::new(98, "add-instance-boot-device"),
+        KnownVersion::new(98, "add-instance-boot-disk"),
         KnownVersion::new(97, "lookup-region-snapshot-by-region-id"),
         KnownVersion::new(96, "inv-dataset"),
         KnownVersion::new(95, "turn-boot-on-fault-into-auto-restart"),
