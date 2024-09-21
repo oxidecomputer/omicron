@@ -1188,7 +1188,7 @@ pub struct Instance {
     pub hostname: String,
 
     /// the ID of the device used to boot this Instance, if a specific one is assigned.
-    pub boot_device: Option<Uuid>,
+    pub boot_device_id: Option<Uuid>,
 
     #[serde(flatten)]
     pub runtime: InstanceRuntimeState,
