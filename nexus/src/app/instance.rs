@@ -1085,11 +1085,13 @@ impl super::Nexus {
                    "boot_disk_id" => ?instance_boot_disk_id,
                    "instance id" => %db_instance.id());
 
-                return Err(InstanceStateChangeError::Other(Error::internal_error(&format!(
-                    "instance {} has boot disk {:?} but it is not attached",
-                    db_instance.id(),
-                    db_instance.boot_disk_id.as_ref(),
-                ))));
+                return Err(InstanceStateChangeError::Other(
+                    Error::internal_error(&format!(
+                        "instance {} has boot disk {:?} but it is not attached",
+                        db_instance.id(),
+                        db_instance.boot_disk_id.as_ref(),
+                    )),
+                ));
             }
         }
 

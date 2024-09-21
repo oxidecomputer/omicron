@@ -4007,9 +4007,7 @@ async fn test_boot_disk_can_be_changed(cptestctx: &ControlPlaneTestContext) {
 // Create an instance without a boot disk, fail to set the boot disk to a
 // detached disk, then attach the disk and make it a boot disk.
 #[nexus_test]
-async fn test_boot_disk_must_be_attached(
-    cptestctx: &ControlPlaneTestContext,
-) {
+async fn test_boot_disk_must_be_attached(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
     let instance_name = "nifs";
 
