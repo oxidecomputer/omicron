@@ -3734,7 +3734,8 @@ async fn test_disks_detached_when_instance_destroyed(
     }
 }
 
-/// Attempt and fail to create an instance with a non-attached disk as its boot device.
+// Attempt and fail to create an instance with a non-attached disk as its boot
+// device.
 #[nexus_test]
 async fn test_cannot_have_nonexistent_boot_device(
     cptestctx: &ControlPlaneTestContext,
@@ -3792,6 +3793,9 @@ async fn test_cannot_have_nonexistent_boot_device(
     assert_eq!(err.message, "boot disk must be attached",);
 }
 
+// Create an instance with a boot device, try and fail to detach it, change the
+// boot device to something else, and succeed to detach the formerly-boot
+// device.
 #[nexus_test]
 async fn test_cannot_detach_boot_device(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
@@ -3908,6 +3912,8 @@ async fn test_cannot_detach_boot_device(cptestctx: &ControlPlaneTestContext) {
         .expect("can attempt to detach boot disk");
 }
 
+// Create an instance with boot disk set to one of its attached disks, then set
+// it to the other disk.
 #[nexus_test]
 async fn test_boot_device_can_be_changed(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
@@ -3997,6 +4003,8 @@ async fn test_boot_device_can_be_changed(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(instance.boot_device, Some(disks[1].identity.id.clone().into()));
 }
 
+// Create an instance without a boot device, fail to set the boot device to a
+// detached disk, then attach the disk and make it a boot device.
 #[nexus_test]
 async fn test_boot_device_must_be_attached(
     cptestctx: &ControlPlaneTestContext,
@@ -4047,7 +4055,8 @@ async fn test_boot_device_must_be_attached(
 
     let instance = response.parsed_body::<Instance>().unwrap();
 
-    // Update the instance's boot device to the unattached disk. This should fail.
+    // Update the instance's boot device to the unattached disk. This should
+    // fail.
     let url_instance_update =
         format!("/v1/instances/{}/update", instance.identity.id);
 
@@ -4062,9 +4071,6 @@ async fn test_boot_device_must_be_attached(
         .execute()
         .await
         .expect("can attempt to reconfigure the instance");
-
-    let instance = response.parsed_body::<Instance>().unwrap();
-    assert_eq!(instance.boot_device, Some(disks[0].identity.id.clone().into()));
 
     // Now attach the disk.
     let url_instance_detach_disk =

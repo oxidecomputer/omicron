@@ -117,8 +117,8 @@ impl Instance {
             // TODO(eliza): allow this to be configured via the instance-create
             // params...
             auto_restart_policy: None,
-            // Intentionally ignore `params.boot_device` here: we can't set `boot_device` until the
-            // referenced device is attached.
+            // Intentionally ignore `params.boot_device` here: we can't set
+            // `boot_device` until the referenced device is attached.
             boot_device: None,
             runtime_state,
 

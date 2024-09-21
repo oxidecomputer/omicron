@@ -306,23 +306,18 @@ impl super::Nexus {
 
         let boot_device = match params.boot_device.clone() {
             Some(disk) => {
+                let selector = params::DiskSelector {
+                    project: match &disk {
+                        NameOrId::Name(_) => Some(authz_project.id().into()),
+                        NameOrId::Id(_) => None,
+                    },
+                    disk,
+                };
                 let (.., authz_project_disk, authz_disk) = self
-                    .disk_lookup(
-                        opctx,
-                        params::DiskSelector {
-                            project: match &disk {
-                                NameOrId::Name(_) => {
-                                    Some(authz_project.id().into())
-                                }
-                                NameOrId::Id(_) => None,
-                            },
-                            disk,
-                        },
-                    )?
+                    .disk_lookup(opctx, selector)?
                     .lookup_for(authz::Action::Modify)
                     .await?;
 
-                // TODO: does this have the same issue as in `fn instance_attach_disk`? (yes)
                 Some(authz_disk.id())
             }
             None => None,
@@ -471,12 +466,13 @@ impl super::Nexus {
             }
         }
 
-        // It is deceptively inconvenient to do an early check that the boot device is valid here!
-        // We accept boot device by name or ID, but disk creation and attachment requests as part
-        // of instance creation all require the disk name. So if the boot device is an ID, we would
-        // need to look up all attachment requests to compare the named device and to-be-attached
-        // devices. Instead, leave this for the other end of the saga when we'd go to set the boot
-        // device.
+        // It is deceptively inconvenient to do an early check that the boot
+        // device is valid here! We accept boot device by name or ID, but disk
+        // creation and attachment requests as part of instance creation all
+        // require the disk name. So if the boot device is an ID, we would need
+        // to look up all attachment requests to compare the named device and
+        // to-be-attached devices. Instead, leave this for the other end of the
+        // saga when we'd go to set the boot device.
 
         let saga_params = sagas::instance_create::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
@@ -1074,13 +1070,15 @@ impl super::Nexus {
             });
         }
 
-        // This should never occur: when setting the boot disk we ensure it is attached, and when
-        // detaching a disk we ensure it is not the boot disk. If this error is seen, the instance
-        // somehow had a boot device that was not an attached disk anyway.
+        // This should never occur: when setting the boot disk we ensure it is
+        // attached, and when detaching a disk we ensure it is not the boot
+        // disk. If this error is seen, the instance somehow had a boot device
+        // that was not an attached disk anyway.
         //
-        // When Propolis accepts an ID rather than name, and we don't need to look up a name when
-        // assembling the Propolis request, we might as well remove this check; we can just pass
-        // the ID and rely on Propolis' own check that the boot device is attached.
+        // When Propolis accepts an ID rather than name, and we don't need to
+        // look up a name when assembling the Propolis request, we might as well
+        // remove this check; we can just pass the ID and rely on Propolis' own
+        // check that the boot device is attached.
         if let Some(instance_boot_device) = db_instance.boot_device.as_ref() {
             if boot_device_name.is_none() {
                 error!(self.log, "instance boot device is not attached";
