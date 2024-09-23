@@ -14,6 +14,7 @@ use anyhow::{bail, Result};
 use serde::Deserialize;
 use std::borrow::Borrow;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 
 /// Describes the APIs in the system
 ///
@@ -25,6 +26,7 @@ pub struct AllApiMetadata {
     apis: BTreeMap<ClientPackageName, ApiMetadata>,
     deployment_units: BTreeMap<DeploymentUnitName, DeploymentUnitInfo>,
     dependency_rules: BTreeMap<ClientPackageName, Vec<DependencyFilterRule>>,
+    ignored_non_clients: BTreeSet<ClientPackageName>,
 }
 
 impl AllApiMetadata {
@@ -60,6 +62,12 @@ impl AllApiMetadata {
         P: ?Sized,
     {
         self.apis.get(pkgname)
+    }
+
+    /// Returns the set of packages that should *not* be treated as
+    /// Progenitor-based clients
+    pub fn ignored_non_clients(&self) -> &BTreeSet<ClientPackageName> {
+        &self.ignored_non_clients
     }
 
     /// Returns how we should filter the given dependency
@@ -112,6 +120,7 @@ struct RawApiMetadata {
     apis: Vec<ApiMetadata>,
     deployment_units: Vec<DeploymentUnitInfo>,
     dependency_filter_rules: Vec<DependencyFilterRule>,
+    ignored_non_clients: Vec<ClientPackageName>,
 }
 
 impl TryFrom<RawApiMetadata> for AllApiMetadata {
@@ -158,7 +167,22 @@ impl TryFrom<RawApiMetadata> for AllApiMetadata {
                 .push(rule);
         }
 
-        Ok(AllApiMetadata { apis, deployment_units, dependency_rules })
+        let mut ignored_non_clients = BTreeSet::new();
+        for client_pkg in raw.ignored_non_clients {
+            if !ignored_non_clients.insert(client_pkg.clone()) {
+                bail!(
+                    "entry in ignored_non_clients appearead twice: {:?}",
+                    &client_pkg
+                );
+            }
+        }
+
+        Ok(AllApiMetadata {
+            apis,
+            deployment_units,
+            dependency_rules,
+            ignored_non_clients,
+        })
     }
 }
 

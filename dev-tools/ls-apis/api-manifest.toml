@@ -33,6 +33,28 @@
 # TODO The metadata here overlaps with metadata hardcoded in `openapi-manager`.
 
 ################################################################################
+# Ignored non-client packages
+#
+# These are packages that may be flagged as clients because they directly depend
+# on Progenitor, but which are not really clients.
+#
+# These are cases that cannot be easily handled by the evaluation rules later in
+# this file because they need to be processed earlier.
+################################################################################
+
+ignored_non_clients = [
+    # omicron-common depends on progenitor so that it can define some generic
+    # error handling and a generic macro for defining clients.  omicron-common
+    # itself is not a progenitor-based client.
+    "omicron-common",
+
+    # propolis-mock-server uses Progenitor to generate types that are
+    # compatible with the real Propolis server.  It doesn't actually use the
+    # client and we don't really care about it for these purposes anyway.
+    "propolis-mock-server",
+]
+
+################################################################################
 # Deployment Units
 #
 # A deployment unit is a set of Rust packages that are always deployed together.

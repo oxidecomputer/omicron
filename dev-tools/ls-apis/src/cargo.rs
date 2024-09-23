@@ -14,19 +14,6 @@ use cargo_metadata::{DependencyKind, PackageId};
 use std::collections::BTreeSet;
 use std::collections::{BTreeMap, VecDeque};
 
-/// Packages that may be flagged as clients because they directly depend on
-/// Progenitor, but which are not really clients.
-const IGNORED_NON_CLIENTS: &[&str] = &[
-    // omicron-common depends on progenitor so that it can define some generic
-    // error handling and a generic macro for defining clients.  omicron-common
-    // itself is not a progenitor-based client.
-    "omicron-common",
-    // propolis-mock-server uses Progenitor to generate types that are
-    // compatible with the real Propolis server.  It doesn't actually use the
-    // client and we don't really care about it for these purposes anyway.
-    "propolis-mock-server",
-];
-
 /// Query package and dependency-related information about a Cargo workspace
 pub struct Workspace {
     /// human-readable label for the workspace
@@ -60,7 +47,11 @@ impl Workspace {
     /// If `workspace_manifest` is `None`, then information is loaded about the
     /// current workspace.  Otherwise, that path is used as the workspace
     /// manifest.
-    pub fn load(name: &str, manifest_path: Option<&Utf8Path>) -> Result<Self> {
+    pub fn load(
+        name: &str,
+        manifest_path: Option<&Utf8Path>,
+        ignored_non_clients: &BTreeSet<ClientPackageName>,
+    ) -> Result<Self> {
         eprintln!(
             "loading metadata for workspace {name} from {}",
             manifest_path
@@ -144,7 +135,7 @@ impl Workspace {
                 if pkg.name.ends_with("-client") {
                     progenitor_clients
                         .insert(ClientPackageName::from(pkg.name.clone()));
-                } else if !IGNORED_NON_CLIENTS.contains(&pkg.name.as_str()) {
+                } else if !ignored_non_clients.contains(pkg.name.as_str()) {
                     eprintln!(
                         "workspace {:?}: ignoring apparent non-client that \
                          uses progenitor: {}",

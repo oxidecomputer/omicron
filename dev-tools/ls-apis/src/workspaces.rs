@@ -6,6 +6,7 @@
 
 use crate::api_metadata::AllApiMetadata;
 use crate::cargo::Workspace;
+use crate::ClientPackageName;
 use anyhow::{anyhow, ensure, Context, Result};
 use camino::Utf8PathBuf;
 use cargo_metadata::Package;
@@ -33,7 +34,9 @@ impl Workspaces {
     ) -> Result<(Workspaces, Vec<anyhow::Error>)> {
         // First, load information about the "omicron" workspace.  This is the
         // current workspace so we don't need to provide the path to it.
-        let omicron = Arc::new(Workspace::load("omicron", None)?);
+        let ignored_non_clients = api_metadata.ignored_non_clients();
+        let omicron =
+            Arc::new(Workspace::load("omicron", None, ignored_non_clients)?);
 
         // In order to assemble this metadata, Cargo already has a clone of most
         // of the other workspaces that we care about.  We'll use those clones
@@ -60,8 +63,9 @@ impl Workspaces {
         .into_iter()
         .map(|(repo, omicron_pkg)| {
             let mine = omicron.clone();
+            let my_ignored = ignored_non_clients.clone();
             std::thread::spawn(move || {
-                load_dependent_repo(&mine, repo, omicron_pkg)
+                load_dependent_repo(&mine, repo, omicron_pkg, my_ignored)
             })
         })
         .collect();
@@ -89,7 +93,12 @@ impl Workspaces {
 
         workspaces.insert(
             String::from("dendrite"),
-            load_dependent_repo(&maghemite, "dendrite", "dpd-client")?,
+            load_dependent_repo(
+                &maghemite,
+                "dendrite",
+                "dpd-client",
+                ignored_non_clients.clone(),
+            )?,
         );
 
         // Validate the metadata against what we found in the workspaces.
@@ -222,6 +231,7 @@ fn load_dependent_repo(
     workspace: &Workspace,
     repo: &str,
     pkgname: &str,
+    ignored_non_clients: BTreeSet<ClientPackageName>,
 ) -> Result<Workspace> {
     // `Workspace` doesn't let us look up a non-workspace package by name
     // because there may be many of them.  So list all the pkgids and take any
@@ -266,5 +276,5 @@ fn load_dependent_repo(
         relative_path.components().take(2).collect();
     let workspace_manifest =
         git_checkouts.join(checkout_name).join("Cargo.toml");
-    Workspace::load(repo, Some(&workspace_manifest))
+    Workspace::load(repo, Some(&workspace_manifest), &ignored_non_clients)
 }
