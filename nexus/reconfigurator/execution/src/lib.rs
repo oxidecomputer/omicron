@@ -155,6 +155,13 @@ pub async fn realize_blueprint_with_overrides(
         sled_list.clone(),
     );
 
+    register_deploy_datasets_step(
+        &engine.for_component(ExecutionComponent::Datasets),
+        &opctx,
+        blueprint,
+        sled_list.clone(),
+    );
+
     register_deploy_zones_step(
         &engine.for_component(ExecutionComponent::OmicronZones),
         &opctx,
@@ -322,14 +329,14 @@ fn register_deploy_datasets_step<'a>(
     opctx: &'a OpContext,
     blueprint: &'a Blueprint,
     sleds: SharedStepHandle<Arc<BTreeMap<SledUuid, Sled>>>,
-) -> StepHandle<DeployDisksDone> {
+) {
     registrar
         .new_step(
             ExecutionStepId::Ensure,
             "Deploy datasets",
             move |cx| async move {
                 let sleds_by_id = sleds.into_value(cx.token()).await;
-                let done = omicron_physical_disks::deploy_datasets(
+                datasets::deploy_datasets(
                     &opctx,
                     &sleds_by_id,
                     &blueprint.blueprint_datasets,
@@ -337,10 +344,10 @@ fn register_deploy_datasets_step<'a>(
                 .await
                 .map_err(merge_anyhow_list)?;
 
-                StepSuccess::new(done).into()
+                StepSuccess::new(()).into()
             },
         )
-        .register()
+        .register();
 }
 
 fn register_deploy_zones_step<'a>(
