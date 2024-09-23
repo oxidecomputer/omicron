@@ -70,6 +70,31 @@
         }
       }
     },
+    "/keeper/raft-config": {
+      "get": {
+        "summary": "Retrieve information from ClickHouse virtual node /keeper/config which",
+        "description": "contains last committed cluster configuration.",
+        "operationId": "raft_config",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RaftConfig"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/server/config": {
       "put": {
         "summary": "Generate a ClickHouse configuration file for a server node on a specified",
@@ -335,6 +360,61 @@
           "port"
         ]
       },
+      "KeeperServerInfo": {
+        "type": "object",
+        "properties": {
+          "host": {
+            "description": "Host of the keeper server",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ClickhouseHost"
+              }
+            ]
+          },
+          "priority": {
+            "description": "non-negative integer telling which nodes should be prioritised on leader elections. Priority of 0 means server will never be a leader.",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "raft_port": {
+            "description": "Keeper server raft port",
+            "type": "integer",
+            "format": "uint16",
+            "minimum": 0
+          },
+          "server_id": {
+            "description": "Unique, immutable ID of the keeper server",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/KeeperId"
+              }
+            ]
+          },
+          "server_type": {
+            "description": "A keeper server either participant or learner (learner does not participate in leader elections).",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/KeeperServerType"
+              }
+            ]
+          }
+        },
+        "required": [
+          "host",
+          "priority",
+          "raft_port",
+          "server_id",
+          "server_type"
+        ]
+      },
+      "KeeperServerType": {
+        "type": "string",
+        "enum": [
+          "participant",
+          "learner"
+        ]
+      },
       "KeeperSettings": {
         "description": "Configurable settings for a ClickHouse keeper node.",
         "type": "object",
@@ -501,6 +581,22 @@
           "cluster",
           "replica",
           "shard"
+        ]
+      },
+      "RaftConfig": {
+        "description": "Keeper raft configuration information",
+        "type": "object",
+        "properties": {
+          "keeper_servers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KeeperServerInfo"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "keeper_servers"
         ]
       },
       "RaftServerConfig": {

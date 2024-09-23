@@ -20,7 +20,10 @@ use crate::db::identity::Resource;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Generation;
 use crate::db::model::Instance;
+use crate::db::model::InstanceAutoRestart;
+use crate::db::model::InstanceAutoRestartPolicy;
 use crate::db::model::InstanceRuntimeState;
+use crate::db::model::InstanceState;
 use crate::db::model::Migration;
 use crate::db::model::MigrationState;
 use crate::db::model::Name;
@@ -37,6 +40,7 @@ use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
+use diesel::sql_types;
 use nexus_db_model::Disk;
 use omicron_common::api;
 use omicron_common::api::external;
@@ -50,6 +54,7 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::MessagePair;
 use omicron_common::api::external::ResourceType;
+use omicron_common::api::external::UpdateResult;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
@@ -194,6 +199,39 @@ impl From<InstanceAndActiveVmm> for external::Instance {
             .as_ref()
             .map(|vmm| vmm.runtime.time_state_updated)
             .unwrap_or(value.instance.runtime_state.time_updated);
+        let auto_restart_status = {
+            let cooldown_expiration =
+                value.instance.runtime_state.time_last_auto_restarted.map(
+                    |t| {
+                        // The instance may or may not explicitly override the cooldown and
+                        // auto-restart policy settings. If it does not, return whatever
+                        // default values Nexus is currently using, so that they can be
+                        // displayed in the UI.
+                        //
+                        // Eventually, these fields may have project-level defaults, so if the
+                        // instance doesn't provide a value we'll have to use the
+                        // project's default if one exists. For now, though, fall back
+                        // to the hard- coded default if the instance hasn't overridden
+                        // it.
+                        let cooldown_duration =
+                            value.instance.auto_restart.cooldown.unwrap_or(
+                                InstanceAutoRestart::DEFAULT_COOLDOWN,
+                            );
+                        t + cooldown_duration
+                    },
+                );
+
+            let policy = value
+                .instance
+                .auto_restart
+                .policy
+                .unwrap_or(InstanceAutoRestart::DEFAULT_POLICY);
+            let enabled = match policy {
+                InstanceAutoRestartPolicy::Never => false,
+                InstanceAutoRestartPolicy::BestEffort => true,
+            };
+            external::InstanceAutoRestartStatus { enabled, cooldown_expiration }
+        };
 
         Self {
             identity: value.instance.identity(),
@@ -205,10 +243,17 @@ impl From<InstanceAndActiveVmm> for external::Instance {
                 .hostname
                 .parse()
                 .expect("found invalid hostname in the database"),
+
             runtime: external::InstanceRuntimeState {
                 run_state: value.effective_state(),
                 time_run_state_updated,
+                time_last_auto_restarted: value
+                    .instance
+                    .runtime_state
+                    .time_last_auto_restarted,
             },
+
+            auto_restart_status,
         }
     }
 }
@@ -427,6 +472,53 @@ impl DataStore {
                                 .eq_any(MigrationState::TERMINAL_STATES)),
                     )),
             )
+            .select(Instance::as_select())
+            .load_async::<Instance>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// List all instances in the [`Failed`](InstanceState::Failed) state with an
+    /// auto-restart policy that permits them to be automatically restarted by
+    /// the control plane.
+    ///
+    /// This is used by the `instance_reincarnation` RPW to ensure that that any
+    /// such instances are restarted.
+    ///
+    /// This query returns `n` randomly-ordered instances which are eligible for
+    /// reincarnation. Because reincarnating an instance changes its state so
+    /// that it no longer matches this query, it isn't necessary to use
+    /// pagination to avoid the query returning the same instance multiple
+    /// times: instead, we just actually reincarnate it to remove it from the
+    /// result set. Randomizing the order in which instances are returned allows
+    /// a nicer distribution of work across multiple Nexus replicas'
+    /// `instance_reincarnation` tasks.
+    pub async fn find_reincarnatable_instances(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<Instance> {
+        use db::schema::instance::dsl;
+
+        define_sql_function!(fn random() -> sql_types::Float);
+
+        paginated(dsl::instance, dsl::id, &pagparams)
+            // Select only those instances which may be reincarnated.
+            .filter(InstanceAutoRestart::filter_reincarnatable())
+            // Deleted instances may not be reincarnated.
+            .filter(dsl::time_deleted.is_null())
+            // If the instance is currently in the process of being updated,
+            // let's not mess with it for now and try to restart it on another
+            // pass.
+            .filter(dsl::updater_id.is_null())
+            // N.B. that it's tempting to also filter out instances that have no
+            // active VMM, since they're only valid targets for instance-start
+            // sagas once the active VMM is unlinked, *or* if the active VMM is
+            // `SagaUnwound`. However, checking for the second case
+            // (SagaUnwound) would require joining with the VMM table, so let's
+            // not bother.
             .select(Instance::as_select())
             .load_async::<Instance>(
                 &*self.pool_connection_authorized(opctx).await?,
@@ -909,12 +1001,11 @@ impl DataStore {
         // instance must be "stopped" or "failed" in order to delete it.  The
         // delete operation sets "time_deleted" (just like with other objects)
         // and also sets the state to "destroyed".
-        use db::model::InstanceState as DbInstanceState;
         use db::schema::{disk, instance};
 
-        let stopped = DbInstanceState::NoVmm;
-        let failed = DbInstanceState::Failed;
-        let destroyed = DbInstanceState::Destroyed;
+        let stopped = InstanceState::NoVmm;
+        let failed = InstanceState::Failed;
+        let destroyed = InstanceState::Destroyed;
         let ok_to_delete_instance_states = vec![stopped, failed];
 
         let detached_label = api::external::DiskState::Detached.label();
@@ -1577,6 +1668,51 @@ impl DataStore {
             },
         }
     }
+
+    /// Sets an instance's auto-restart cooldown period to the provided
+    /// `TimeDelta`.
+    ///
+    /// This method returns `Error::Conflict` if the auto-restart cooldown
+    /// period has already been set.
+    ///
+    /// At present, this is only used for tests. If a future
+    /// external API for configuring this and other instance properties is
+    /// added, tests using this should be updated to use that instead.
+    pub async fn instance_set_auto_restart_cooldown(
+        &self,
+        opctx: &OpContext,
+        instance_id: &InstanceUuid,
+        cooldown: chrono::TimeDelta,
+    ) -> UpdateResult<bool> {
+        use db::schema::instance::dsl;
+        let id = instance_id.into_untyped_uuid();
+
+        let r = diesel::update(dsl::instance)
+            .filter(dsl::id.eq(id))
+            .filter(dsl::auto_restart_cooldown.is_null())
+            .set(dsl::auto_restart_cooldown.eq(cooldown))
+            .check_if_exists::<Instance>(id)
+            .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Instance,
+                        LookupType::ById(id),
+                    ),
+                )
+            })?;
+        if r.status == UpdateStatus::Updated {
+            Ok(true)
+        } else if r.found.auto_restart.cooldown == Some(cooldown) {
+            Ok(false)
+        } else {
+            Err(Error::conflict(
+                "instance auto-restart cooldown is already set",
+            ))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1652,6 +1788,7 @@ mod tests {
                         disks: Vec::new(),
                         ssh_public_keys: None,
                         start: false,
+                        auto_restart_policy: Default::default(),
                     },
                 ),
             )
@@ -1933,6 +2070,7 @@ mod tests {
                     dst_propolis_id: None,
                     migration_id: None,
                     nexus_state: InstanceState::NoVmm,
+                    time_last_auto_restarted: None,
                 },
             )
             .await
@@ -1994,6 +2132,7 @@ mod tests {
             dst_propolis_id: None,
             migration_id: None,
             nexus_state: InstanceState::Vmm,
+            time_last_auto_restarted: None,
         };
 
         let updated = dbg!(
@@ -2095,6 +2234,7 @@ mod tests {
             dst_propolis_id: Some(Uuid::new_v4()),
             migration_id: Some(Uuid::new_v4()),
             nexus_state: InstanceState::Vmm,
+            time_last_auto_restarted: None,
         };
         let updated = dbg!(
             datastore
@@ -2123,6 +2263,7 @@ mod tests {
                         dst_propolis_id: None,
                         migration_id: None,
                         nexus_state: InstanceState::NoVmm,
+                        time_last_auto_restarted: None,
                     },
                 )
                 .await
@@ -2293,6 +2434,7 @@ mod tests {
                     propolis_id: Some(active_vmm.id),
                     dst_propolis_id: Some(target_vmm.id),
                     migration_id: Some(migration.id),
+                    time_last_auto_restarted: None,
                 },
             )
             .await
@@ -2663,6 +2805,7 @@ mod tests {
                             propolis_id: Some(vmm_id),
                             dst_propolis_id: None,
                             migration_id: None,
+                            time_last_auto_restarted: None,
                         },
                     )
                     .await
