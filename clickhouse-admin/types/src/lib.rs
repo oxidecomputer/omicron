@@ -326,7 +326,7 @@ impl Lgif {
     JsonSchema,
 )]
 #[serde(rename_all = "snake_case")]
-enum KeeperServerType {
+pub enum KeeperServerType {
     Participant,
     Learner,
 }
@@ -357,16 +357,16 @@ impl FromStr for KeeperServerType {
 #[serde(rename_all = "snake_case")]
 pub struct KeeperServerInfo {
     /// Unique, immutable ID of the keeper server
-    server_id: KeeperId,
+    pub server_id: KeeperId,
     /// Host of the keeper server
-    host: ClickhouseHost,
+    pub host: ClickhouseHost,
     /// Keeper server raft port
-    raft_port: u16,
+    pub raft_port: u16,
     /// A keeper server either participant or learner (learner does not participate in leader elections).
-    server_type: KeeperServerType,
+    pub server_type: KeeperServerType,
     /// non-negative integer telling which nodes should be prioritised on leader elections.
     /// Priority of 0 means server will never be a leader.
-    priority: u16,
+    pub priority: u16,
 }
 
 #[derive(
@@ -383,7 +383,7 @@ pub struct KeeperServerInfo {
 #[serde(rename_all = "snake_case")]
 /// Keeper raft configuration information
 pub struct RaftConfig {
-    keeper_servers: BTreeSet<KeeperServerInfo>,
+    pub keeper_servers: BTreeSet<KeeperServerInfo>,
 }
 
 impl RaftConfig {
