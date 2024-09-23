@@ -23,8 +23,15 @@ pub const DNS_ZONE_EXTERNAL_TESTING: &str = "oxide-dev.test";
 /// Names of services within the control plane
 #[derive(Clone, Copy, Debug, Hash, Eq, Ord, PartialEq, PartialOrd)]
 pub enum ServiceName {
+    /// The HTTP interface to a single-node ClickHouse server.
     Clickhouse,
+    /// The native TCP interface to a ClickHouse server.
+    ///
+    /// NOTE: This is used for either single-node or a replicated cluster.
+    ClickhouseNative,
+    /// The TCP interface to a ClickHouse Keeper server.
     ClickhouseKeeper,
+    /// The HTTP interface to a replicated ClickHouse server.
     ClickhouseServer,
     Cockroach,
     InternalDns,
@@ -48,6 +55,7 @@ impl ServiceName {
     fn service_kind(&self) -> &'static str {
         match self {
             ServiceName::Clickhouse => "clickhouse",
+            ServiceName::ClickhouseNative => "clickhouse-native",
             ServiceName::ClickhouseKeeper => "clickhouse-keeper",
             ServiceName::ClickhouseServer => "clickhouse-server",
             ServiceName::Cockroach => "cockroach",
@@ -74,6 +82,7 @@ impl ServiceName {
     pub fn dns_name(&self) -> String {
         match self {
             ServiceName::Clickhouse
+            | ServiceName::ClickhouseNative
             | ServiceName::ClickhouseKeeper
             | ServiceName::ClickhouseServer
             | ServiceName::Cockroach

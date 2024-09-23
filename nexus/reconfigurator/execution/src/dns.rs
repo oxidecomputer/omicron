@@ -259,7 +259,7 @@ pub fn blueprint_internal_dns_config(
     // the details.
     let mut dns_builder = DnsConfigBuilder::new();
 
-    for (_, zone) in
+    'all_zones: for (_, zone) in
         blueprint.all_omicron_zones(BlueprintZoneFilter::ShouldBeInInternalDns)
     {
         let (service_name, port) = match &zone.zone_type {
@@ -271,13 +271,38 @@ pub fn blueprint_internal_dns_config(
             ) => (ServiceName::InternalNtp, address.port()),
             BlueprintZoneType::Clickhouse(
                 blueprint_zone_type::Clickhouse { address, .. },
-            ) => (ServiceName::Clickhouse, address.port()),
+            )
+            | BlueprintZoneType::ClickhouseServer(
+                blueprint_zone_type::ClickhouseServer { address, .. },
+            ) => {
+                // Add the HTTP and native TCP interfaces for ClickHouse data
+                // replicas. This adds the zone itself, so we need to continue
+                // back up to the loop over all the Omicron zones, rather than
+                // falling through to call `host_zone_with_one_backend()`.
+                let http_service = if matches!(
+                    &zone.zone_type,
+                    BlueprintZoneType::Clickhouse(_)
+                ) {
+                    ServiceName::Clickhouse
+                } else {
+                    ServiceName::ClickhouseServer
+                };
+
+                // Safety: This only fails if we provide the same zone id more
+                // than once, which should not be possible here.
+                dns_builder
+                    .host_zone_clickhouse(
+                        zone.id,
+                        zone.underlay_address,
+                        http_service,
+                        address.port(),
+                    )
+                    .unwrap();
+                continue 'all_zones;
+            }
             BlueprintZoneType::ClickhouseKeeper(
                 blueprint_zone_type::ClickhouseKeeper { address, .. },
             ) => (ServiceName::ClickhouseKeeper, address.port()),
-            BlueprintZoneType::ClickhouseServer(
-                blueprint_zone_type::ClickhouseServer { address, .. },
-            ) => (ServiceName::ClickhouseServer, address.port()),
             BlueprintZoneType::CockroachDb(
                 blueprint_zone_type::CockroachDb { address, .. },
             ) => (ServiceName::Cockroach, address.port()),
@@ -1054,6 +1079,7 @@ mod test {
         // Tfport).
         let mut srv_kinds_expected = BTreeSet::from([
             ServiceName::Clickhouse,
+            ServiceName::ClickhouseNative,
             ServiceName::Cockroach,
             ServiceName::InternalDns,
             ServiceName::ExternalDns,
