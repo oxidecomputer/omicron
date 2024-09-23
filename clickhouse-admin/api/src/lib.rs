@@ -3,7 +3,9 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use clickhouse_admin_types::config::{KeeperConfig, ReplicaConfig};
-use clickhouse_admin_types::{KeeperSettings, Lgif, ServerSettings};
+use clickhouse_admin_types::{
+    KeeperSettings, Lgif, RaftConfig, ServerSettings,
+};
 use dropshot::{
     HttpError, HttpResponseCreated, HttpResponseOk, RequestContext, TypedBody,
 };
@@ -63,4 +65,14 @@ pub trait ClickhouseAdminApi {
     async fn lgif(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Lgif>, HttpError>;
+
+    /// Retrieve information from ClickHouse virtual node /keeper/config which
+    /// contains last committed cluster configuration.
+    #[endpoint {
+        method = GET,
+        path = "/keeper/raft-config",
+    }]
+    async fn raft_config(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<RaftConfig>, HttpError>;
 }
