@@ -6,6 +6,7 @@
 
 use crate::check_allow_destructive::DestructiveOperationToken;
 use crate::db::DbUrlOptions;
+use crate::helpers::const_max_len;
 use crate::helpers::should_colorize;
 use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::Omdb;
@@ -35,9 +36,11 @@ use nexus_db_queries::db::lookup::LookupPath;
 use nexus_saga_recovery::LastPass;
 use nexus_types::deployment::Blueprint;
 use nexus_types::internal_api::background::AbandonedVmmReaperStatus;
+use nexus_types::internal_api::background::InstanceReincarnationStatus;
 use nexus_types::internal_api::background::InstanceUpdaterStatus;
 use nexus_types::internal_api::background::LookupRegionPortStatus;
 use nexus_types::internal_api::background::RegionReplacementDriverStatus;
+use nexus_types::internal_api::background::RegionReplacementStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementFinishStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementGarbageCollectStatus;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStartStatus;
@@ -1102,29 +1105,34 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
             }
         };
     } else if name == "region_replacement" {
-        #[derive(Deserialize)]
-        struct TaskSuccess {
-            /// how many region replacements were started ok
-            region_replacement_started_ok: usize,
-
-            /// how many region replacements could not be started
-            region_replacement_started_err: usize,
-        }
-
-        match serde_json::from_value::<TaskSuccess>(details.clone()) {
+        match serde_json::from_value::<RegionReplacementStatus>(details.clone())
+        {
             Err(error) => eprintln!(
                 "warning: failed to interpret task details: {:?}: {:?}",
                 error, details
             ),
-            Ok(success) => {
+
+            Ok(status) => {
                 println!(
-                    "    number of region replacements started ok: {}",
-                    success.region_replacement_started_ok
+                    "    region replacement requests created ok: {}",
+                    status.requests_created_ok.len()
                 );
+                for line in &status.requests_created_ok {
+                    println!("    > {line}");
+                }
+
                 println!(
-                    "    number of region replacement start errors: {}",
-                    success.region_replacement_started_err
+                    "    region replacement start sagas started ok: {}",
+                    status.start_invoked_ok.len()
                 );
+                for line in &status.start_invoked_ok {
+                    println!("    > {line}");
+                }
+
+                println!("    errors: {}", status.errors.len());
+                for line in &status.errors {
+                    println!("    > {line}");
+                }
             }
         };
     } else if name == "instance_watcher" {
@@ -1303,7 +1311,7 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
 
             Ok(status) => {
                 println!(
-                    "    number of region replacement drive sagas started ok: {}",
+                    "    region replacement drive sagas started ok: {}",
                     status.drive_invoked_ok.len()
                 );
                 for line in &status.drive_invoked_ok {
@@ -1311,14 +1319,14 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 }
 
                 println!(
-                    "    number of region replacement finish sagas started ok: {}",
+                    "    region replacement finish sagas started ok: {}",
                     status.finish_invoked_ok.len()
                 );
                 for line in &status.finish_invoked_ok {
                     println!("    > {line}");
                 }
 
-                println!("    number of errors: {}", status.errors.len());
+                println!("    errors: {}", status.errors.len());
                 for line in &status.errors {
                     println!("    > {line}");
                 }
@@ -1774,6 +1782,80 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 }
             }
         }
+    } else if name == "instance_reincarnation" {
+        match serde_json::from_value::<InstanceReincarnationStatus>(
+            details.clone(),
+        ) {
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            ),
+            Ok(InstanceReincarnationStatus {
+                instances_found,
+                instances_reincarnated,
+                changed_state,
+                query_error,
+                restart_errors,
+            }) => {
+                const FOUND: &'static str =
+                    "instances eligible for reincarnation:";
+                const REINCARNATED: &'static str = "  instances reincarnated:";
+                const CHANGED_STATE: &'static str =
+                    "  instances which changed state before they could be reincarnated:";
+                const ERRORS: &'static str =
+                    "  instances which failed to be reincarnated:";
+                const COOLDOWN_PERIOD: &'static str =
+                    "default cooldown period:";
+                const WIDTH: usize = const_max_len(&[
+                    FOUND,
+                    REINCARNATED,
+                    CHANGED_STATE,
+                    ERRORS,
+                    COOLDOWN_PERIOD,
+                ]);
+                let n_restart_errors = restart_errors.len();
+                let n_restarted = instances_reincarnated.len();
+                let n_changed_state = changed_state.len();
+                println!("    {FOUND:<WIDTH$} {instances_found:>3}");
+                println!("    {REINCARNATED:<WIDTH$} {n_restarted:>3}");
+                println!("    {CHANGED_STATE:<WIDTH$} {n_changed_state:>3}",);
+                println!("    {ERRORS:<WIDTH$} {n_restart_errors:>3}");
+
+                if let Some(e) = query_error {
+                    println!(
+                        "    an error occurred while searching for instances \
+                         to reincarnate:\n      {e}",
+                    );
+                }
+
+                if n_restart_errors > 0 {
+                    println!(
+                        "    errors occurred while restarting the following \
+                         instances:"
+                    );
+                    for (id, error) in restart_errors {
+                        println!("    > {id}: {error}");
+                    }
+                }
+
+                if n_restarted > 0 {
+                    println!("    the following instances have reincarnated:");
+                    for id in instances_reincarnated {
+                        println!("    > {id}")
+                    }
+                }
+
+                if n_changed_state > 0 {
+                    println!(
+                        "    the following instances states changed before \
+                         they could be reincarnated:"
+                    );
+                    for id in changed_state {
+                        println!("    > {id}")
+                    }
+                }
+            }
+        };
     } else {
         println!(
             "warning: unknown background task: {:?} \
@@ -2642,10 +2724,10 @@ async fn cmd_nexus_sled_expunge_disk(
     }
 
     eprintln!(
-        "WARNING: This operation will PERMANENTLY and IRRECOVABLY mark physical disk \
-        {} ({}) expunged. To proceed, type the physical disk's serial number.",
-        args.physical_disk_id,
-        physical_disk.serial,
+        "WARNING: This operation will PERMANENTLY and IRRECOVABLY mark \
+        physical disk {} ({}) expunged. To proceed, type the physical disk's \
+        serial number.",
+        args.physical_disk_id, physical_disk.serial,
     );
     prompt.read_and_validate("disk serial number", &physical_disk.serial)?;
 
@@ -2657,17 +2739,4 @@ async fn cmd_nexus_sled_expunge_disk(
         .context("expunging disk")?;
     eprintln!("expunged disk {}", args.physical_disk_id);
     Ok(())
-}
-
-const fn const_max_len(strs: &[&str]) -> usize {
-    let mut max = 0;
-    let mut i = 0;
-    while i < strs.len() {
-        let len = strs[i].len();
-        if len > max {
-            max = len;
-        }
-        i += 1;
-    }
-    max
 }

@@ -23,6 +23,7 @@ nexus-client.workspace = true
 nexus-config.workspace = true
 nexus-db-model.workspace = true
 nexus-db-queries.workspace = true
+nexus-inventory.workspace = true
 nexus-reconfigurator-planning.workspace = true
 nexus-reconfigurator-preparation.workspace = true
 nexus-sled-agent-shared.workspace = true

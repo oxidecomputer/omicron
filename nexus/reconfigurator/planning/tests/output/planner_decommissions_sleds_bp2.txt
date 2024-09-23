@@ -1,7 +1,7 @@
 blueprint  1ac2d88f-27dd-4506-8585-6b2be832528e
 parent:    516e80a3-b362-4fac-bd3c-4559717120dd
 
-  sled: d67ce8f0-a691-4010-b414-420d82e80527
+  sled: d67ce8f0-a691-4010-b414-420d82e80527 (active)
 
     physical disks at generation 1:
     ----------------------------------------------------------------------
@@ -40,7 +40,7 @@ parent:    516e80a3-b362-4fac-bd3c-4559717120dd
 
 
 
-  sled: fefcf4cf-f7e7-46b3-b629-058526ce440e
+  sled: fefcf4cf-f7e7-46b3-b629-058526ce440e (active)
 
     physical disks at generation 1:
     ----------------------------------------------------------------------

@@ -37,6 +37,7 @@
           ]
         },
         "filesystem_pool": {
+          "description": "zpool used for the zone's (transient) root filesystem",
           "anyOf": [
             {
               "$ref": "#/definitions/ZpoolName"

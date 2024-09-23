@@ -16,6 +16,7 @@ clap.workspace = true
 dropshot.workspace = true
 futures.workspace = true
 libc.workspace = true
+omicron-common.workspace = true
 omicron-test-utils.workspace = true
 omicron-workspace-hack.workspace = true
 # See omicron-rpaths for more about the "pq-sys" dependency.

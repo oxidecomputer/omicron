@@ -112,7 +112,7 @@ pub struct ControlPlaneTestContext<N> {
     pub internal_client: ClientTestContext,
     pub server: N,
     pub database: dev::db::CockroachInstance,
-    pub clickhouse: dev::clickhouse::ClickHouseInstance,
+    pub clickhouse: dev::clickhouse::ClickHouseDeployment,
     pub logctx: LogContext,
     pub sled_agent_storage: camino_tempfile::Utf8TempDir,
     pub sled_agent: sim::Server,
@@ -184,7 +184,7 @@ pub fn load_test_config() -> NexusConfig {
     let config_file_path = Utf8Path::new("tests/config.test.toml");
     let mut config = NexusConfig::from_file(config_file_path)
         .expect("failed to load config.test.toml");
-    config.deployment.id = Uuid::new_v4();
+    config.deployment.id = OmicronZoneUuid::new_v4();
     config
 }
 
@@ -275,7 +275,7 @@ pub struct ControlPlaneTestContextBuilder<'a, N: NexusServer> {
 
     pub server: Option<N>,
     pub database: Option<dev::db::CockroachInstance>,
-    pub clickhouse: Option<dev::clickhouse::ClickHouseInstance>,
+    pub clickhouse: Option<dev::clickhouse::ClickHouseDeployment>,
     pub sled_agent_storage: Option<camino_tempfile::Utf8TempDir>,
     pub sled_agent: Option<sim::Server>,
     pub sled_agent2_storage: Option<camino_tempfile::Utf8TempDir>,
@@ -447,13 +447,13 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
     pub async fn start_clickhouse(&mut self) {
         let log = &self.logctx.log;
         debug!(log, "Starting Clickhouse");
-        let clickhouse = dev::clickhouse::ClickHouseInstance::new_single_node(
-            &self.logctx,
-            0,
-        )
-        .await
-        .unwrap();
-        let port = clickhouse.port();
+        let clickhouse =
+            dev::clickhouse::ClickHouseDeployment::new_single_node(
+                &self.logctx,
+            )
+            .await
+            .unwrap();
+        let port = clickhouse.http_address().port();
 
         let zpool_id = ZpoolUuid::new_v4();
         let dataset_id = Uuid::new_v4();
@@ -594,7 +594,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         let oximeter = start_oximeter(
             log.new(o!("component" => "oximeter")),
             nexus_internal_addr,
-            clickhouse.port(),
+            clickhouse.http_address().port(),
             collector_id,
         )
         .await
@@ -662,8 +662,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             .expect("ran out of MAC addresses");
         let external_address =
             self.config.deployment.dropshot_external.dropshot.bind_address.ip();
-        let nexus_id =
-            OmicronZoneUuid::from_untyped_uuid(self.config.deployment.id);
+        let nexus_id = self.config.deployment.id;
         self.rack_init_builder.add_service_to_dns(
             nexus_id,
             address,

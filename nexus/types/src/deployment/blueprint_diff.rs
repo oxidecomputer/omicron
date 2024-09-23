@@ -26,6 +26,7 @@ use crate::deployment::{
     BlueprintZoneDisposition, BlueprintZonesConfig, DiffBeforeMetadata,
     ZoneSortKey,
 };
+use crate::external_api::views::SledState;
 
 /// Diffs for omicron zones on a given sled with a given `BpDiffState`
 #[derive(Debug)]
@@ -557,6 +558,8 @@ impl BpDiffPhysicalDisks {
 pub struct BlueprintDiff {
     pub before_meta: DiffBeforeMetadata,
     pub after_meta: BlueprintMetadata,
+    pub before_state: BTreeMap<SledUuid, SledState>,
+    pub after_state: BTreeMap<SledUuid, SledState>,
     pub zones: BpDiffZones,
     pub physical_disks: BpDiffPhysicalDisks,
     pub sleds_added: BTreeSet<SledUuid>,
@@ -568,30 +571,63 @@ pub struct BlueprintDiff {
 impl BlueprintDiff {
     /// Build a diff with the provided contents, verifying that the provided
     /// data is valid.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         before_meta: DiffBeforeMetadata,
+        before_state: BTreeMap<SledUuid, SledState>,
         before_zones: BTreeMap<SledUuid, BlueprintOrCollectionZonesConfig>,
-        after_meta: BlueprintMetadata,
-        after_zones: BTreeMap<SledUuid, BlueprintZonesConfig>,
         before_disks: BTreeMap<SledUuid, BlueprintOrCollectionDisksConfig>,
+        after_meta: BlueprintMetadata,
+        mut after_state: BTreeMap<SledUuid, SledState>,
+        after_zones: BTreeMap<SledUuid, BlueprintZonesConfig>,
         after_disks: BTreeMap<SledUuid, BlueprintPhysicalDisksConfig>,
     ) -> Self {
-        let before_sleds: BTreeSet<_> =
-            before_zones.keys().chain(before_disks.keys()).collect();
-        let after_sleds: BTreeSet<_> =
-            after_zones.keys().chain(after_disks.keys()).collect();
+        // Work around a quirk of sled decommissioning. If a sled has a before
+        // state of `decommissioned`, it may or may not be present in
+        // `after_state` (presence will depend on whether or not the sled was
+        // present in the `PlanningInput`). However, we may still have entries
+        // in `after_zones` or `after_disks` due to expunged zones/disks that
+        // haven't been fully cleaned up yet. Without this workaround, this may
+        // produce confusing results: the sled might appear to be modified only
+        // because the state went from `decommissioned` to "missing entirely".
+        // We'll patch this up here: if we have a decommissioned sled that has
+        // no `after_state` entry but _does_ still have a corresponding zones or
+        // disks entry, we'll artificially insert `decommissioned` to avoid
+        // misleading output.
+        for (sled_id, _) in before_state
+            .iter()
+            .filter(|&(_, &state)| state == SledState::Decommissioned)
+        {
+            if !after_state.contains_key(sled_id)
+                && (after_zones.contains_key(sled_id)
+                    || after_disks.contains_key(sled_id))
+            {
+                after_state.insert(*sled_id, SledState::Decommissioned);
+            }
+        }
+
+        let before_sleds: BTreeSet<_> = before_state
+            .keys()
+            .chain(before_zones.keys())
+            .chain(before_disks.keys())
+            .collect();
+        let after_sleds: BTreeSet<_> = after_state
+            .keys()
+            .chain(after_zones.keys())
+            .chain(after_disks.keys())
+            .collect();
         let all_sleds: BTreeSet<_> =
             before_sleds.union(&after_sleds).map(|&sled_id| *sled_id).collect();
 
-        // All sleds that have zones or disks in `after_*`, but not `before_*`
-        // have been added.
+        // All sleds that have state, zones, or disks in `after_*`, but not
+        // `before_*` have been added.
         let sleds_added: BTreeSet<_> = after_sleds
             .difference(&before_sleds)
             .map(|&sled_id| *sled_id)
             .collect();
 
-        // All sleds that have zones or disks in `before_*`, but not `after_*`
-        // have been removed.
+        // All sleds that have state, zones, or disks in `before_*`, but not
+        // `after_*` have been removed.
         let sleds_removed: BTreeSet<_> = before_sleds
             .difference(&after_sleds)
             .map(|&sled_id| *sled_id)
@@ -612,11 +648,12 @@ impl BlueprintDiff {
             .map(|s| *s)
             .collect();
 
-        // Sleds are modified if any zones or disks on those sleds are anything
-        // other than unchanged.
+        // Sleds are modified if their state changed or any zones or disks on
+        // those sleds are anything other than unchanged.
         let mut sleds_modified = sleds_unchanged_or_modified.clone();
         sleds_modified.retain(|sled_id| {
-            physical_disks.added.contains_key(sled_id)
+            before_state.get(sled_id) != after_state.get(sled_id)
+                || physical_disks.added.contains_key(sled_id)
                 || physical_disks.removed.contains_key(sled_id)
                 || zones.added.contains_key(sled_id)
                 || zones.removed.contains_key(sled_id)
@@ -633,6 +670,8 @@ impl BlueprintDiff {
         BlueprintDiff {
             before_meta,
             after_meta,
+            before_state,
+            after_state,
             zones,
             physical_disks,
             sleds_added,
@@ -755,6 +794,70 @@ impl<'diff> BlueprintDiffDisplay<'diff> {
 
         Ok(())
     }
+
+    /// Helper methods to stringify sled states. These are separated by
+    /// diff section because each section has different expectations for what
+    /// before and after should be that can only be wrong if we have a bug
+    /// constructing the diff.
+    fn sled_state_unchanged(&self, sled_id: &SledUuid) -> String {
+        let before = self.diff.before_state.get(sled_id);
+        let after = self.diff.after_state.get(sled_id);
+        if before == after {
+            after
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "state unknown".to_string())
+        } else {
+            format!(
+                "blueprint diff error: unchanged sled changed state from \
+                 {before:?} to {after:?}"
+            )
+        }
+    }
+    fn sled_state_added(&self, sled_id: &SledUuid) -> String {
+        let before = self.diff.before_state.get(sled_id);
+        let after = self.diff.after_state.get(sled_id);
+        if before.is_none() {
+            after
+                .map(|s| format!("{s}"))
+                .unwrap_or_else(|| "unknown".to_string())
+        } else {
+            format!(
+                "blueprint diff error: added sled has old state \
+                 {before:?} (now {after:?})"
+            )
+        }
+    }
+    fn sled_state_removed(&self, sled_id: &SledUuid) -> String {
+        let before = self.diff.before_state.get(sled_id);
+        let after = self.diff.after_state.get(sled_id);
+        if after.is_none() {
+            before
+                .map(|s| format!("was {s}"))
+                .unwrap_or_else(|| "state was unknown".to_string())
+        } else {
+            format!(
+                "blueprint diff error: removed sled has new state \
+                 {after:?} (was {before:?})"
+            )
+        }
+    }
+    fn sled_state_modified(&self, sled_id: &SledUuid) -> String {
+        let before = self.diff.before_state.get(sled_id);
+        let after = self.diff.after_state.get(sled_id);
+        match (before, after) {
+            (Some(before), Some(after)) if before != after => {
+                format!("{before} -> {after}")
+            }
+            (Some(state), Some(_)) => {
+                // states are equal; the sled was presumably modified some other
+                // way
+                format!("{state}")
+            }
+            (None, Some(after)) => format!("unknown -> {after}"),
+            (Some(before), None) => format!("{before} -> unknown"),
+            (None, None) => "unknown".to_string(),
+        }
+    }
 }
 
 impl<'diff> fmt::Display for BlueprintDiffDisplay<'diff> {
@@ -802,7 +905,11 @@ impl<'diff> fmt::Display for BlueprintDiffDisplay<'diff> {
         if !diff.sleds_unchanged.is_empty() {
             writeln!(f, " UNCHANGED SLEDS:\n")?;
             for sled_id in &diff.sleds_unchanged {
-                writeln!(f, "  sled {sled_id}:\n")?;
+                writeln!(
+                    f,
+                    "  sled {sled_id} ({}):\n",
+                    self.sled_state_unchanged(sled_id)
+                )?;
                 self.write_tables(f, sled_id)?;
             }
         }
@@ -811,7 +918,11 @@ impl<'diff> fmt::Display for BlueprintDiffDisplay<'diff> {
         if !diff.sleds_removed.is_empty() {
             writeln!(f, " REMOVED SLEDS:\n")?;
             for sled_id in &diff.sleds_removed {
-                writeln!(f, "  sled {sled_id}:\n")?;
+                writeln!(
+                    f,
+                    "  sled {sled_id} ({}):\n",
+                    self.sled_state_removed(sled_id)
+                )?;
                 self.write_tables(f, sled_id)?;
             }
         }
@@ -820,7 +931,11 @@ impl<'diff> fmt::Display for BlueprintDiffDisplay<'diff> {
         if !diff.sleds_modified.is_empty() {
             writeln!(f, " MODIFIED SLEDS:\n")?;
             for sled_id in &diff.sleds_modified {
-                writeln!(f, "  sled {sled_id}:\n")?;
+                writeln!(
+                    f,
+                    "  sled {sled_id} ({}):\n",
+                    self.sled_state_modified(sled_id)
+                )?;
                 self.write_tables(f, sled_id)?;
             }
         }
@@ -829,7 +944,11 @@ impl<'diff> fmt::Display for BlueprintDiffDisplay<'diff> {
         if !diff.sleds_added.is_empty() {
             writeln!(f, " ADDED SLEDS:\n")?;
             for sled_id in &diff.sleds_added {
-                writeln!(f, "  sled {sled_id}:\n")?;
+                writeln!(
+                    f,
+                    "  sled {sled_id} ({}):\n",
+                    self.sled_state_added(sled_id)
+                )?;
                 self.write_tables(f, sled_id)?;
             }
         }

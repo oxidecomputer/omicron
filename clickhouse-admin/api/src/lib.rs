@@ -3,8 +3,12 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use clickhouse_admin_types::config::{KeeperConfig, ReplicaConfig};
-use clickhouse_admin_types::{KeeperSettings, ServerSettings};
-use dropshot::{HttpError, HttpResponseCreated, RequestContext, TypedBody};
+use clickhouse_admin_types::{
+    KeeperSettings, Lgif, RaftConfig, ServerSettings,
+};
+use dropshot::{
+    HttpError, HttpResponseCreated, HttpResponseOk, RequestContext, TypedBody,
+};
 use omicron_common::api::external::Generation;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -50,4 +54,25 @@ pub trait ClickhouseAdminApi {
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<KeeperConfigurableSettings>,
     ) -> Result<HttpResponseCreated<KeeperConfig>, HttpError>;
+
+    /// Retrieve a logically grouped information file from a keeper node.
+    /// This information is used internally by ZooKeeper to manage snapshots
+    /// and logs for consistency and recovery.
+    #[endpoint {
+        method = GET,
+        path = "/keeper/lgif",
+    }]
+    async fn lgif(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Lgif>, HttpError>;
+
+    /// Retrieve information from ClickHouse virtual node /keeper/config which
+    /// contains last committed cluster configuration.
+    #[endpoint {
+        method = GET,
+        path = "/keeper/raft-config",
+    }]
+    async fn raft_config(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<RaftConfig>, HttpError>;
 }

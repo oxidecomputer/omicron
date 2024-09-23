@@ -250,10 +250,10 @@
 //! required.
 //!
 //! The second mechanism for ensuring updates are performed in a timely manner
-//! is what I'm calling _saga chaining_. When the final action in an
-//! instance-update saga writes back the instance record and releases the
-//! updater lock, it will then perform a second query to read the instance, VMM,
-//! and migration records. If the current state of the instance indicates that
+//! is what I'm calling _saga chaining_. After the instance-update saga writes
+//! back the instance record and releases the  updater lock, the saga's final
+//! action  will then perform a second query to read the instance, VMM, and
+//! migration records. If the current state of the instance indicates that
 //! another update saga is needed, then the completing saga will execute a new
 //! start saga as its final action.
 //!
@@ -350,6 +350,7 @@ use crate::app::db::datastore::VmmStateUpdateResult;
 use crate::app::db::lookup::LookupPath;
 use crate::app::db::model::ByteCount;
 use crate::app::db::model::Generation;
+use crate::app::db::model::InstanceKarmicStatus;
 use crate::app::db::model::InstanceRuntimeState;
 use crate::app::db::model::InstanceState;
 use crate::app::db::model::MigrationState;
@@ -804,6 +805,21 @@ declare_saga_actions! {
         + siu_commit_instance_updates
     }
 
+    // Check if the VMM or migration state has changed while the update saga was
+    // running and whether an additional update saga is now required. If one is
+    // required, try to start it.
+    //
+    // Unlike other actions, this step is optional and allowed to fail without
+    // unwinding the saga. We attempt to start a successor saga only as an
+    // optimization to improve the latency with which instance states are
+    // reconciled with VMM and migration states. If another update saga is
+    // required, it will always be started eventually by other mechanisms
+    // regardless of whether this action succeeds, and a failure here does not
+    // invalidate any of the other work performed by this saga.
+    CHAIN_SUCCESSOR_SAGA -> "chain_successor_saga" {
+        + siu_chain_successor_saga
+    }
+
 }
 
 // instance update saga: definition
@@ -905,6 +921,11 @@ impl NexusSaga for SagaDoActualInstanceUpdate {
         if let Some(vmm_id) = params.update.destroy_target_vmm {
             append_destroyed_vmm_subsaga(vmm_id, "target")?;
         }
+
+        // Finally, check if any additional updates are required to reconcile
+        // the instance, VMM, and migration states, and attempt to start a new
+        // saga if needed.
+        builder.append(chain_successor_saga_action());
 
         Ok(builder.build()?)
     }
@@ -1179,24 +1200,136 @@ async fn siu_commit_instance_updates(
         nexus.vpc_needed_notify_sleds();
     }
 
-    // Check if the VMM or migration state has changed while the update saga was
-    // running and whether an additional update saga is now required. If one is
-    // required, try to start it.
+    Ok(())
+}
+
+/// Check if the VMM or migration state has changed while the update saga was
+/// running and whether an additional update saga is now required. If one is
+/// required, try to start it.
+///
+/// TODO(eliza): it would be nice if we didn't release the lock, determine
+/// the needed updates, and then start a new start-instance-update saga that
+/// re-locks the instance --- instead, perhaps we could keep the lock, and
+/// try to start a new "actual" instance update saga that inherits our lock.
+/// This way, we could also avoid computing updates required twice.
+/// But, I'm a bit sketched out by the implications of not committing update
+/// and dropping the lock in the same operation. This deserves more thought...
+async fn siu_chain_successor_saga(
+    sagactx: NexusActionContext,
+) -> Result<(), ActionError> {
+    let osagactx = sagactx.user_data();
+    let RealParams { serialized_authn, authz_instance, .. } =
+        sagactx.saga_params::<RealParams>()?;
+
+    let opctx =
+        crate::context::op_context_for_saga_action(&sagactx, &serialized_authn);
+    let log = osagactx.log();
+    let nexus = osagactx.nexus();
+
+    let instance_id = authz_instance.id();
+    // Note: unlike most other saga actions, we DO NOT return an error and
+    // unwind the update saga if this operation fails. The update saga has
+    // already committed the necessary changes to the instance record, so
+    // everything we needed to do here has already been done. Attempting to
+    // start a subsequent update saga if additional updates are required is only
+    // done as an optimization to ensure that updates are performed in a timely
+    // manner; the `instance-updater` background task will always eventually
+    // ensure that an instance's state is reconciled eventually.
     //
-    // TODO(eliza): it would be nice if we didn't release the lock, determine
-    // the needed updates, and then start a new start-instance-update saga that
-    // re-locks the instance --- instead, perhaps we could keep the lock, and
-    // try to start a new "actual" instance update saga that inherits our lock.
-    // This way, we could also avoid computing updates required twice.
-    // But, I'm a bit sketched out by the implications of not committing update
-    // and dropping the lock in the same operation. This deserves more thought...
-    if let Err(error) =
-        chain_update_saga(&sagactx, authz_instance, serialized_authn).await
-    {
-        // If starting the new update saga failed, DO NOT unwind this saga and
-        // undo all the work we've done successfully! Instead, just kick the
-        // instance-updater background task to try and start a new saga
-        // eventually, and log a warning.
+    // Therefore, we wrap the code that starts the successor saga in an `async`
+    // block to catch any errors it returns so that we can just log a warning
+    // and kick the instance-updater background task to try and start a new saga
+    // eventually.
+    let saga_started = async {
+        // Fetch the state from the database again to see if we should immediately
+        // run a new saga.
+        let new_state = osagactx
+            .datastore()
+            .instance_fetch_all(&opctx, &authz_instance)
+            .await
+            .context("failed to fetch latest snapshot for instance")?;
+
+        if let Some(update) = UpdatesRequired::for_instance(log, &new_state) {
+            debug!(
+                log,
+                "instance update: additional updates required, preparing a \
+                 successor update saga...";
+                "instance_id" => %instance_id,
+                "update.new_runtime_state" => ?update.new_runtime,
+                "update.network_config_update" => ?update.network_config,
+                "update.destroy_active_vmm" => ?update.destroy_active_vmm,
+                "update.destroy_target_vmm" => ?update.destroy_target_vmm,
+                "update.deprovision" => ?update.deprovision,
+            );
+            let saga_dag = SagaInstanceUpdate::prepare(&Params {
+                serialized_authn,
+                authz_instance,
+            })
+            .context("failed to build new update saga DAG")?;
+            let saga = osagactx
+                .nexus()
+                .sagas
+                .saga_prepare(saga_dag)
+                .await
+                .context("failed to prepare new update saga")?;
+            // N.B. that we don't wait for the successor update saga to *complete*
+            // here. We just want to make sure it starts.
+            saga.start()
+                .await
+                .context("failed to start successor update saga")?;
+            info!(
+                log,
+                "instance update: successor update saga started!";
+                "instance_id" => %instance_id,
+            );
+        } else {
+            // If the instance has transitioned to the `Failed` state and no
+            // additional update saga is required, check if the instance's
+            // auto-restart policy allows it to be automatically restarted. If
+            // it does, activate the instance-reincarnation background task to
+            // automatically restart it.
+            let auto_restart = new_state.instance.auto_restart;
+            match auto_restart.status(&new_state.instance.runtime_state) {
+                InstanceKarmicStatus::Ready => {
+                    info!(
+                        log,
+                        "instance update: instance transitioned to Failed, \
+                         but can be automatically restarted; activating \
+                         reincarnation.";
+                        "instance_id" => %instance_id,
+                        "auto_restart" => ?auto_restart,
+                        "runtime_state" => ?new_state.instance.runtime_state,
+                    );
+                    nexus
+                        .background_tasks
+                        .task_instance_reincarnation
+                        .activate();
+                }
+                InstanceKarmicStatus::CoolingDown(remaining) => {
+                    info!(
+                        log,
+                        "instance update: instance transitioned to Failed, \
+                         but is still in cooldown from a previous \
+                         reincarnation";
+                        "instance_id" => %instance_id,
+                        "auto_restart" => ?auto_restart,
+                        "cooldown_remaining" => ?remaining,
+                        "runtime_state" => ?new_state.instance.runtime_state,
+                    );
+                }
+                InstanceKarmicStatus::Forbidden
+                | InstanceKarmicStatus::NotFailed => {}
+            }
+        }
+
+        Ok::<(), anyhow::Error>(())
+    }
+    .await;
+
+    // If we were unable to start a successor saga (or determine whether we
+    // needed to do so), log a warning, and active the instance-updater
+    // background task in order to attempt to start a new saga again.
+    if let Err(error) = saga_started {
         warn!(
             log,
             "instance update: failed to start successor saga!";
@@ -1204,62 +1337,7 @@ async fn siu_commit_instance_updates(
             "error" => %error,
         );
         nexus.background_tasks.task_instance_updater.activate();
-    }
-
-    Ok(())
-}
-
-async fn chain_update_saga(
-    sagactx: &NexusActionContext,
-    authz_instance: authz::Instance,
-    serialized_authn: authn::saga::Serialized,
-) -> Result<(), anyhow::Error> {
-    let opctx =
-        crate::context::op_context_for_saga_action(sagactx, &serialized_authn);
-    let osagactx = sagactx.user_data();
-    let log = osagactx.log();
-
-    let instance_id = authz_instance.id();
-
-    // Fetch the state from the database again to see if we should immediately
-    // run a new saga.
-    let new_state = osagactx
-        .datastore()
-        .instance_fetch_all(&opctx, &authz_instance)
-        .await
-        .context("failed to fetch latest snapshot for instance")?;
-
-    if let Some(update) = UpdatesRequired::for_instance(log, &new_state) {
-        debug!(
-            log,
-            "instance update: additional updates required, preparing a \
-             successor update saga...";
-            "instance_id" => %instance_id,
-            "update.new_runtime_state" => ?update.new_runtime,
-            "update.network_config_update" => ?update.network_config,
-            "update.destroy_active_vmm" => ?update.destroy_active_vmm,
-            "update.destroy_target_vmm" => ?update.destroy_target_vmm,
-            "update.deprovision" => ?update.deprovision,
-        );
-        let saga_dag = SagaInstanceUpdate::prepare(&Params {
-            serialized_authn,
-            authz_instance,
-        })
-        .context("failed to build new update saga DAG")?;
-        let saga = osagactx
-            .nexus()
-            .sagas
-            .saga_prepare(saga_dag)
-            .await
-            .context("failed to prepare new update saga")?;
-        saga.start().await.context("failed to start successor update saga")?;
-        // N.B. that we don't wait for the successor update saga to *complete*
-        // here. We just want to make sure it starts.
-        info!(
-            log,
-            "instance update: successor update saga started!";
-            "instance_id" => %instance_id,
-        );
+        return Ok(());
     }
 
     Ok(())
@@ -1482,6 +1560,7 @@ mod test {
                 external_ips: vec![],
                 disks: vec![],
                 start: true,
+                auto_restart_policy: Default::default(),
             },
         )
         .await
@@ -1597,6 +1676,7 @@ mod test {
                     dst_propolis_id: None,
                     migration_id: None,
                     nexus_state: InstanceState::NoVmm,
+                    time_last_auto_restarted: None,
                 },
             )
             .await

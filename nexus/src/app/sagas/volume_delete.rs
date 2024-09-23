@@ -71,7 +71,7 @@ declare_saga_actions! {
     DELETE_FREED_CRUCIBLE_REGIONS -> "no_result_5" {
         + svd_delete_freed_crucible_regions
     }
-    HARD_DELETE_VOLUME_RECORD -> "final_no_result" {
+    HARD_DELETE_VOLUME_RECORD -> "volume_hard_deleted" {
         + svd_hard_delete_volume_record
     }
 }
@@ -130,14 +130,14 @@ async fn svd_decrease_crucible_resource_count(
 
     let crucible_resources = osagactx
         .datastore()
-        .decrease_crucible_resource_count_and_soft_delete_volume(
-            params.volume_id,
-        )
+        .soft_delete_volume(params.volume_id)
         .await
-        .map_err(|e| ActionError::action_failed(format!(
-            "failed to decrease_crucible_resource_count_and_soft_delete_volume: {:?}",
-            e,
-        )))?;
+        .map_err(|e| {
+            ActionError::action_failed(format!(
+                "failed to soft_delete_volume: {:?}",
+                e,
+            ))
+        })?;
 
     Ok(crucible_resources)
 }
@@ -512,7 +512,7 @@ async fn svd_delete_freed_crucible_regions(
 /// Hard delete the volume record
 async fn svd_hard_delete_volume_record(
     sagactx: NexusActionContext,
-) -> Result<(), ActionError> {
+) -> Result<bool, ActionError> {
     let osagactx = sagactx.user_data();
     let params = sagactx.saga_params::<Params>()?;
 
@@ -532,9 +532,22 @@ async fn svd_hard_delete_volume_record(
             ))
         })?;
 
+    let log = sagactx.user_data().log();
+
     if !allocated_regions.is_empty() {
-        return Ok(());
+        info!(
+            &log,
+            "allocated regions for {} is not-empty, skipping volume_hard_delete",
+            params.volume_id,
+        );
+        return Ok(false);
     }
+
+    info!(
+        &log,
+        "allocated regions for {} is empty, calling volume_hard_delete",
+        params.volume_id,
+    );
 
     osagactx.datastore().volume_hard_delete(params.volume_id).await.map_err(
         |e| {
@@ -545,5 +558,5 @@ async fn svd_hard_delete_volume_record(
         },
     )?;
 
-    Ok(())
+    Ok(true)
 }

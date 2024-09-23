@@ -302,6 +302,11 @@ task: "external_endpoints"
     on each one
 
 
+task: "instance_reincarnation"
+    schedules start sagas for failed instances that can be automatically
+    restarted
+
+
 task: "instance_updater"
     detects if instances require update sagas and schedules them
 
@@ -518,6 +523,16 @@ task: "external_endpoints"
 
     TLS certificates: 0
 
+task: "instance_reincarnation"
+  configured period: every 1m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    instances eligible for reincarnation:                                0
+      instances reincarnated:                                            0
+      instances which changed state before they could be reincarnated:   0
+      instances which failed to be reincarnated:                         0
+
 task: "instance_updater"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
@@ -589,17 +604,18 @@ task: "region_replacement"
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    number of region replacements started ok: 0
-    number of region replacement start errors: 0
+    region replacement requests created ok: 0
+    region replacement start sagas started ok: 0
+    errors: 0
 
 task: "region_replacement_driver"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    number of region replacement drive sagas started ok: 0
-    number of region replacement finish sagas started ok: 0
-    number of errors: 0
+    region replacement drive sagas started ok: 0
+    region replacement finish sagas started ok: 0
+    errors: 0
 
 task: "region_snapshot_replacement_finish"
   configured period: every <REDACTED_DURATION>s
@@ -947,6 +963,16 @@ task: "external_endpoints"
 
     TLS certificates: 0
 
+task: "instance_reincarnation"
+  configured period: every 1m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    instances eligible for reincarnation:                                0
+      instances reincarnated:                                            0
+      instances which changed state before they could be reincarnated:   0
+      instances which failed to be reincarnated:                         0
+
 task: "instance_updater"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
@@ -1018,17 +1044,18 @@ task: "region_replacement"
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    number of region replacements started ok: 0
-    number of region replacement start errors: 0
+    region replacement requests created ok: 0
+    region replacement start sagas started ok: 0
+    errors: 0
 
 task: "region_replacement_driver"
   configured period: every <REDACTED_DURATION>s
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    number of region replacement drive sagas started ok: 0
-    number of region replacement finish sagas started ok: 0
-    number of errors: 0
+    region replacement drive sagas started ok: 0
+    region replacement finish sagas started ok: 0
+    errors: 0
 
 task: "region_snapshot_replacement_finish"
   configured period: every <REDACTED_DURATION>s
@@ -1263,9 +1290,9 @@ to:   blueprint ......<REDACTED_BLUEPRINT_ID>.......
 
  UNCHANGED SLEDS:
 
-  sled ..........<REDACTED_UUID>...........:
+  sled ..........<REDACTED_UUID>........... (active):
 
-  sled ..........<REDACTED_UUID>...........:
+  sled ..........<REDACTED_UUID>........... (active):
 
     omicron zones at generation 2:
     ---------------------------------------------------------------------------------------

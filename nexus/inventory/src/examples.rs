@@ -321,8 +321,19 @@ pub fn representative() -> Representative {
             slot: 3,
         },
     ];
-    let zpools = vec![];
-    let datasets = vec![];
+    let zpools = vec![InventoryZpool {
+        id: "283f5475-2606-4e83-b001-9a025dbcb8a0".parse().unwrap(),
+        total_size: ByteCount::from(4096),
+    }];
+    let datasets = vec![InventoryDataset {
+        id: Some("afc00483-0d7b-4181-87d5-0def937d3cd7".parse().unwrap()),
+        name: "mydataset".to_string(),
+        available: ByteCount::from(1024),
+        used: ByteCount::from(0),
+        quota: None,
+        reservation: None,
+        compression: "lz4".to_string(),
+    }];
 
     builder
         .found_sled_inventory(
