@@ -2224,6 +2224,7 @@ mod test {
     use crate::db::datastore::DataStoreConnection;
     use crate::db::raw_query_builder::{QueryBuilder, TrustedStr};
     use crate::db::schema;
+    use crate::db::DataStore;
     use anyhow::Context;
     use async_bb8_diesel::AsyncConnection;
     use async_bb8_diesel::AsyncRunQueryDsl;
@@ -2794,45 +2795,12 @@ mod test {
         logctx.cleanup_successful();
     }
 
-    /// Creates a representative collection, deletes it, and walks through
-    /// tables to ensure that the subcomponents of the inventory have been
-    /// deleted.
-    ///
-    /// NOTE: This test depends on the naming convention "inv_" prefix name
-    /// to identify pieces of the inventory.
-    #[tokio::test]
-    async fn test_inventory_deletion() {
-        // Setup
-        let logctx = dev::test_setup_log("inventory_deletion");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+    enum AllInvTables {
+        AreEmpty,
+        ArePopulated,
+    }
 
-        // Create a representative collection and write it to the database.
-        let Representative { builder, .. } = representative();
-        let collection = builder.build();
-        datastore
-            .inventory_insert_collection(&opctx, &collection)
-            .await
-            .expect("failed to insert collection");
-
-        // Delete that collection we just added
-        datastore
-            .inventory_delete_collection(&opctx, collection.id)
-            .await
-            .expect("failed to prune collections");
-        assert_eq!(
-            datastore
-                .inventory_collections()
-                .await
-                .unwrap()
-                .iter()
-                .map(|c| c.id.into())
-                .collect::<Vec<CollectionUuid>>(),
-            &[]
-        );
-
-        // Read all "inv_" tables and ensure that they're empty
-
+    async fn check_all_inv_tables(datastore: &DataStore, status: AllInvTables) {
         let conn = datastore.pool_connection_for_tests().await.unwrap();
         let tables: Vec<String> = QueryBuilder::new().sql(
             "SELECT table_name FROM information_schema.tables WHERE table_name LIKE 'inv\\_%'"
@@ -2870,12 +2838,88 @@ mod test {
                     .get_result_async(&conn)
                     .await
                     .unwrap();
-                assert_eq!(count, 0, "Found deleted row(s) from table: {table}");
+
+                match status {
+                    AllInvTables::AreEmpty => {
+                        assert_eq!(count, 0, "Found deleted row(s) from table: {table}");
+                    },
+                    AllInvTables::ArePopulated => {
+                        assert_ne!(count, 0, "Found table without entries: {table}");
+                    },
+
+                }
             }
             Ok::<(), anyhow::Error>(())
         })
         .await
         .expect("Failed to check that tables were empty");
+    }
+
+    /// Creates a representative collection, deletes it, and walks through
+    /// tables to ensure that the subcomponents of the inventory have been
+    /// deleted.
+    ///
+    /// NOTE: This test depends on the naming convention "inv_" prefix name
+    /// to identify pieces of the inventory.
+    #[tokio::test]
+    async fn test_inventory_deletion() {
+        // Setup
+        let logctx = dev::test_setup_log("inventory_deletion");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        // Create a representative collection and write it to the database.
+        let Representative { builder, .. } = representative();
+        let collection = builder.build();
+        datastore
+            .inventory_insert_collection(&opctx, &collection)
+            .await
+            .expect("failed to insert collection");
+
+        // Read all "inv_" tables and ensure that they are populated.
+        check_all_inv_tables(&datastore, AllInvTables::ArePopulated).await;
+
+        // Delete that collection we just added
+        datastore
+            .inventory_delete_collection(&opctx, collection.id)
+            .await
+            .expect("failed to prune collections");
+        assert_eq!(
+            datastore
+                .inventory_collections()
+                .await
+                .unwrap()
+                .iter()
+                .map(|c| c.id.into())
+                .collect::<Vec<CollectionUuid>>(),
+            &[]
+        );
+
+        // Read all "inv_" tables and ensure that they're empty
+        check_all_inv_tables(&datastore, AllInvTables::AreEmpty).await;
+
+        // Clean up.
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_representative_collection_populates_database() {
+        // Setup
+        let logctx = dev::test_setup_log("inventory_deletion");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        // Create a representative collection and write it to the database.
+        let Representative { builder, .. } = representative();
+        let collection = builder.build();
+        datastore
+            .inventory_insert_collection(&opctx, &collection)
+            .await
+            .expect("failed to insert collection");
+
+        // Read all "inv_" tables and ensure that were populated.
+        check_all_inv_tables(&datastore, AllInvTables::ArePopulated).await;
 
         // Clean up.
         db.cleanup().await.unwrap();
