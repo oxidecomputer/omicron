@@ -28,6 +28,7 @@ use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
+use nexus_types::deployment::SledLookupErrorKind;
 use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
 use nexus_types::internal_api::params::DnsConfigParams;
 use nexus_types::inventory::Collection;
@@ -392,6 +393,10 @@ struct SledAddArgs {
 struct SledArgs {
     /// id of the sled
     sled_id: SledUuid,
+
+    /// Filter to match sled ID against
+    #[clap(short = 'F', long, value_enum, default_value_t = SledFilter::Commissioned)]
+    filter: SledFilter,
 }
 
 #[derive(Debug, Args)]
@@ -606,9 +611,8 @@ fn cmd_sled_show(
         .context("failed to generate planning_input builder")?
         .build();
     let sled_id = args.sled_id;
-    let sled_resources = planning_input
-        .sled_resources(&sled_id)
-        .ok_or_else(|| anyhow!("no sled with id {sled_id}"))?;
+    let sled_resources =
+        &planning_input.sled_lookup(args.filter, sled_id)?.resources;
     let mut s = String::new();
     swriteln!(s, "sled {}", sled_id);
     swriteln!(s, "subnet {}", sled_resources.subnet.net());
@@ -1124,14 +1128,32 @@ fn cmd_load(
     for (sled_id, sled_details) in
         loaded.planning_input.all_sleds(SledFilter::Commissioned)
     {
-        if current_planning_input.sled_resources(&sled_id).is_some() {
-            swriteln!(
-                s,
-                "sled {}: skipped (one with \
-                the same id is already loaded)",
-                sled_id
-            );
-            continue;
+        match current_planning_input
+            .sled_lookup(SledFilter::Commissioned, sled_id)
+        {
+            Ok(_) => {
+                swriteln!(
+                    s,
+                    "sled {}: skipped (one with \
+                     the same id is already loaded)",
+                    sled_id
+                );
+                continue;
+            }
+            Err(error) => match error.kind() {
+                SledLookupErrorKind::Filtered { .. } => {
+                    swriteln!(
+                        s,
+                        "error: load sled {}: turning a decommissioned sled \
+                         into a commissioned one is not supported",
+                        sled_id
+                    );
+                    continue;
+                }
+                SledLookupErrorKind::Missing => {
+                    // Only load details for sleds that are in the current
+                }
+            },
         }
 
         let Some(inventory_sled_agent) =

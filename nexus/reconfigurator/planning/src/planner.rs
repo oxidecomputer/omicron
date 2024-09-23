@@ -2017,9 +2017,14 @@ mod test {
             SledState::Decommissioned
         );
 
-        // Remove the now-decommissioned sled from the planning input.
+        // Set the state of the expunged sled to decommissioned, and run the
+        // planner again.
         let mut builder = input.into_builder();
-        builder.sleds_mut().remove(&expunged_sled_id);
+        let expunged = builder
+            .sleds_mut()
+            .get_mut(&expunged_sled_id)
+            .expect("expunged sled is present in input");
+        expunged.state = SledState::Decommissioned;
         let input = builder.build();
 
         let blueprint3 = Planner::new_based_on(
@@ -2032,7 +2037,7 @@ mod test {
         .expect("created planner")
         .with_rng_seed((TEST_NAME, "bp3"))
         .plan()
-        .expect("failed to plan");
+        .expect("succeeded in planner");
 
         // There should be no changes to the blueprint; we don't yet garbage
         // collect zones, so we should still have the sled's expunged zones
@@ -2052,6 +2057,43 @@ mod test {
         assert_planning_makes_no_changes(
             &logctx.log,
             &blueprint3,
+            &input,
+            TEST_NAME,
+        );
+
+        // Now remove the decommissioned sled from the input entirely. (This
+        // should not happen in practice at the moment -- entries in the sled
+        // table are kept forever -- but we need to test it.)
+        let mut builder = input.into_builder();
+        builder.sleds_mut().remove(&expunged_sled_id);
+        let input = builder.build();
+
+        let blueprint4 = Planner::new_based_on(
+            logctx.log.clone(),
+            &blueprint3,
+            &input,
+            "test_blueprint4",
+            &collection,
+        )
+        .expect("created planner")
+        .with_rng_seed((TEST_NAME, "bp4"))
+        .plan()
+        .expect("succeeded in planner");
+
+        let diff = blueprint4.diff_since_blueprint(&blueprint3);
+        println!(
+            "3 -> 4 (removed from input {expunged_sled_id}):\n{}",
+            diff.display()
+        );
+        assert_eq!(diff.sleds_added.len(), 0);
+        assert_eq!(diff.sleds_removed.len(), 0);
+        assert_eq!(diff.sleds_modified.len(), 0);
+        assert_eq!(diff.sleds_unchanged.len(), DEFAULT_N_SLEDS);
+
+        // Test a no-op planning iteration.
+        assert_planning_makes_no_changes(
+            &logctx.log,
+            &blueprint4,
             &input,
             TEST_NAME,
         );

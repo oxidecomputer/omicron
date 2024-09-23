@@ -80,8 +80,11 @@ impl PlanningInputFromDb<'_> {
         datastore: &DataStore,
     ) -> Result<PlanningInput, Error> {
         opctx.check_complex_operations_allowed()?;
+        // Note we list *all* rows here including the ones for decommissioned
+        // sleds, because parts of the system consult the input to determine
+        // whether a sled is decommissioned.
         let sled_rows = datastore
-            .sled_list_all_batched(opctx, SledFilter::Commissioned)
+            .sled_list_all_batched(opctx, SledFilter::All)
             .await
             .internal_context("fetching all sleds")?;
         let zpool_rows = datastore

@@ -1266,16 +1266,20 @@ impl<'a> BlueprintBuilder<'a> {
         Err(Error::NoAvailableZpool { sled_id, kind: zone_kind })
     }
 
+    /// Returns the resources for a sled that hasn't been decommissioned.
     fn sled_resources(
         &self,
         sled_id: SledUuid,
     ) -> Result<&SledResources, Error> {
-        self.input.sled_resources(&sled_id).ok_or_else(|| {
-            Error::Planner(anyhow!(
-                "attempted to use sled that is not currently known: {}",
-                sled_id
-            ))
-        })
+        let details = self
+            .input
+            .sled_lookup(SledFilter::Commissioned, sled_id)
+            .map_err(|error| {
+                Error::Planner(anyhow!(error).context(format!(
+                    "for sled {sled_id}, error looking up resources"
+                )))
+            })?;
+        Ok(&details.resources)
     }
 }
 
@@ -1722,8 +1726,10 @@ pub mod test {
         )
         .expect("failed to create builder");
         builder.sled_ensure_zone_ntp(new_sled_id).unwrap();
-        // TODO-cleanup use `TypedUuid` everywhere
-        let new_sled_resources = input.sled_resources(&new_sled_id).unwrap();
+        let new_sled_resources = &input
+            .sled_lookup(SledFilter::Commissioned, new_sled_id)
+            .unwrap()
+            .resources;
         for pool_id in new_sled_resources.zpools.keys() {
             builder.sled_ensure_zone_crucible(new_sled_id, *pool_id).unwrap();
         }
