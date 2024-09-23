@@ -4673,7 +4673,7 @@ impl ServiceManager {
 }
 
 #[cfg(all(test, target_os = "illumos"))]
-mod test {
+mod illumos_tests {
     use crate::metrics;
 
     use super::*;
@@ -5622,6 +5622,11 @@ mod test {
         helper.cleanup().await;
         logctx.cleanup_successful();
     }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
 
     #[test]
     fn test_bootstrap_addr_to_techport_prefixes() {
