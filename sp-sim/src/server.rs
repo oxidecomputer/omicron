@@ -8,8 +8,8 @@ use anyhow::bail;
 use anyhow::Context;
 use anyhow::Result;
 use gateway_messages::sp_impl;
+use gateway_messages::sp_impl::Sender;
 use gateway_messages::sp_impl::SpHandler;
-use gateway_messages::SpPort;
 use slog::debug;
 use slog::error;
 use slog::info;
@@ -129,8 +129,11 @@ pub(crate) async fn handle_request<'a, H: SimSpHandler>(
     recv: Result<(&[u8], SocketAddrV6)>,
     out: &'a mut [u8; gateway_messages::MAX_SERIALIZED_SIZE],
     responsiveness: Responsiveness,
-    port_num: SpPort,
-) -> Result<Option<(&'a [u8], SocketAddrV6)>> {
+    port_num: H::VLanId,
+) -> Result<Option<(&'a [u8], SocketAddrV6)>>
+where
+    H::VLanId: std::fmt::Debug,
+{
     match responsiveness {
         Responsiveness::Responsive => (), // proceed
         Responsiveness::Unresponsive => {
@@ -151,7 +154,8 @@ pub(crate) async fn handle_request<'a, H: SimSpHandler>(
         }));
     }
 
-    let response = sp_impl::handle_message(addr, port_num, data, handler, out)
+    let sender = Sender { addr, vid: port_num };
+    let response = sp_impl::handle_message(sender, data, handler, out)
         .map(|n| (&out[..n], addr));
 
     if should_respond.load(Ordering::SeqCst) {

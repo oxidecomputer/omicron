@@ -2190,8 +2190,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let instance_lookup =
                 nexus.instance_lookup(&opctx, instance_selector)?;
-            let instance =
-                nexus.instance_start(&opctx, &instance_lookup).await?;
+            let instance = nexus
+                .instance_start(
+                    &opctx,
+                    &instance_lookup,
+                    crate::app::sagas::instance_start::Reason::User,
+                )
+                .await?;
             Ok(HttpResponseAccepted(instance.into()))
         };
         apictx
@@ -2991,7 +2996,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn networking_bgp_config_list(
         rqctx: RequestContext<ApiContext>,
-        query_params: Query<PaginatedByNameOrId<params::BgpConfigListSelector>>,
+        query_params: Query<PaginatedByNameOrId>,
     ) -> Result<HttpResponseOk<ResultsPage<BgpConfig>>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {
@@ -3139,9 +3144,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
 
     async fn networking_bgp_announce_set_list(
         rqctx: RequestContext<ApiContext>,
-        query_params: Query<
-            PaginatedByNameOrId<params::OptionalBgpAnnounceSetSelector>,
-        >,
+        query_params: Query<PaginatedByNameOrId>,
     ) -> Result<HttpResponseOk<Vec<BgpAnnounceSet>>, HttpError> {
         let apictx = rqctx.context();
         let handler = async {

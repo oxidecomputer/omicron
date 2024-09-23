@@ -36,6 +36,8 @@
 use anyhow::anyhow;
 use anyhow::ensure;
 use anyhow::Context;
+use clap::Args;
+use clap::ColorChoice;
 use clap::Parser;
 use clap::Subcommand;
 use futures::StreamExt;
@@ -108,8 +110,18 @@ struct Omdb {
     )]
     allow_destructive: bool,
 
+    #[command(flatten)]
+    output: OutputOpts,
+
     #[command(subcommand)]
     command: OmdbCommands,
+}
+
+#[derive(Debug, Args)]
+struct OutputOpts {
+    /// Color output
+    #[arg(long, global = true, value_enum, default_value_t)]
+    color: ColorChoice,
 }
 
 mod check_allow_destructive {

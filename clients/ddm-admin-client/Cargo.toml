@@ -20,12 +20,3 @@ sled-hardware-types.workspace = true
 omicron-workspace-hack.workspace = true
 ddm-admin-client.workspace = true
 uuid.workspace = true
-
-[build-dependencies]
-anyhow.workspace = true
-omicron-zone-package.workspace = true
-progenitor.workspace = true
-quote.workspace = true
-rustfmt-wrapper.workspace = true
-serde_json.workspace = true
-toml.workspace = true

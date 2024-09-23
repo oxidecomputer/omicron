@@ -4,15 +4,19 @@
 
 //! A generic query for selecting a unique next item from a table.
 
+use crate::db::DbConnection;
 use diesel::associations::HasTable;
 use diesel::pg::Pg;
 use diesel::prelude::Column;
 use diesel::prelude::Expression;
 use diesel::query_builder::AstPass;
+use diesel::query_builder::Query;
 use diesel::query_builder::QueryFragment;
+use diesel::query_builder::QueryId;
 use diesel::serialize::ToSql;
 use diesel::sql_types;
 use diesel::sql_types::HasSqlType;
+use diesel::RunQueryDsl;
 use std::marker::PhantomData;
 use uuid::Uuid;
 
@@ -236,6 +240,8 @@ where
     }
 }
 
+const TIME_DELETED_COLUMN_IDENT: &str = "time_deleted";
+const NEXT_ITEM_COLUMN_IDENT: &str = "next_item";
 const SHIFT_COLUMN_IDENT: &str = "shift";
 const INDEX_COLUMN_IDENT: &str = "index";
 
@@ -286,6 +292,19 @@ where
 
         push_next_item_where_clause::<Table, ItemColumn>(out.reborrow())
     }
+}
+
+impl<Table, Item, ItemColumn, ScopeKey, ScopeColumn, Generator> QueryId
+    for NextItem<Table, Item, ItemColumn, ScopeKey, ScopeColumn, Generator>
+{
+    type QueryId = ();
+    const HAS_STATIC_QUERY_ID: bool = false;
+}
+
+impl<Table, Item, ItemColumn, ScopeKey, ScopeColumn, Generator>
+    RunQueryDsl<DbConnection>
+    for NextItem<Table, Item, ItemColumn, ScopeKey, ScopeColumn, Generator>
+{
 }
 
 impl<Table, Item, ItemColumn, Generator> QueryFragment<Pg>
@@ -584,6 +603,320 @@ impl<Item> ShiftGenerator<Item> for DefaultShiftGenerator<Item> {
     }
 }
 
+/// Select the next available item from a table, using a self-join.
+///
+/// This query is similar in spirit to the above `NextItem` query. However, it's
+/// implementation is different, and specifically designed to limit memory
+/// consumption of the overall query.
+///
+/// CockroachDB eagerly evaluates subqueries. This leads to high memory usage
+/// for the basic `NextItem` query, since that relies on a subquery that uses
+/// `generate_series()` to create the list of all possible items. That entire
+/// list must be materialized and held in memory.
+///
+/// In contrast, this query is implemented using a self-join between the
+/// existing table to be searched and the "next entry" (e.g., the value of the
+/// target column plus 1). This can result in lower memory consumption, since
+/// that series need not be stored in memory. Note that this relies on an index
+/// on the item column, which may be partial.
+///
+/// The full query looks like this:
+///
+/// ```sql
+/// SELECT IF(
+///     -- This condition detects if the table is empty.
+///     EXISTS(
+///         SELECT
+///             1
+///         FROM
+///             <table>
+///         WHERE
+///             <scope_column> = <scope_key> AND
+///             time_deleted IS NULL
+///         LIMIT 1
+///     ),
+///     -- If the table is _not_ empty, we do the self-join between `item` and
+///     -- `item + 1`, and take the first value where `item` is NULL, i.e., the
+///     -- smallest value of `item + 1` where there is no corresponding `item`
+///     -- in the table.
+///     (
+///         SELECT next_item AS <item_column>
+///         FROM (
+///             SELECT
+///                 <item_column> + 1 AS next_item
+///             FROM
+///                 <table>
+///             WHERE
+///                 <scope_column> = <scope_key> AND
+///                 time_deleted IS NULL
+///         )
+///         LEFT OUTER JOIN
+///             <table>
+///         ON
+///             (<scope_column>, next_item <= <max_item>, time_deleted IS NULL) =
+///             (<scope_key>, TRUE, TRUE)
+///         WHERE
+///             <item_column> IS NULL AND next_item <= <max_item>
+///         ORDER BY next_item
+///         LIMIT 1
+///     ),
+///     -- If the table _is_ empty, just insert the minimum value.
+///     <min_item>
+/// )
+/// ```
+///
+/// # Which one to use?
+///
+/// One should probably prefer to use this form of the query, if possible. Both
+/// queries appear to read roughly the same amount of data from disk, but the
+/// series-based implementation uses far more memory and runs more slowly.
+///
+/// One downside of this query is that it always allocates the next _smallest_
+/// item that's available. The `NextItem` query lets the caller choose a base
+/// from which to start the search, which is useful in situations where one
+/// would prefer to randomly distribute items rather than sequentially allocate
+/// them.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct NextItemSelfJoined<
+    Table,
+    Item,
+    ItemColumn,
+    ScopeKey = NoScopeKey,
+    ScopeColumn = NoScopeColumn,
+> {
+    table: Table,
+    _d: PhantomData<(Item, ItemColumn, ScopeColumn)>,
+    scope_key: ScopeKey,
+    item_min: Item,
+    item_max: Item,
+}
+
+impl<Table, Item, ItemColumn, ScopeKey, ScopeColumn>
+    NextItemSelfJoined<Table, Item, ItemColumn, ScopeKey, ScopeColumn>
+where
+    // Table is a database table whose name can be used in a query fragment
+    Table: diesel::Table + HasTable<Table = Table> + QueryFragment<Pg> + Copy,
+
+    // Item can be converted to the SQL type of the ItemColumn
+    Item: ToSql<<ItemColumn as Expression>::SqlType, Pg> + Copy,
+
+    // ItemColum is a column in the target table
+    ItemColumn: Column<Table = Table> + Copy,
+
+    // ScopeKey can be converted to the SQL type of the ScopeColumn
+    ScopeKey: ScopeKeyType + ToSql<<ScopeColumn as Expression>::SqlType, Pg>,
+
+    // ScopeColumn is a column on the target table
+    ScopeColumn: ScopeColumnType + Column<Table = Table>,
+
+    // The Postgres backend supports the SQL types of both columns
+    Pg: HasSqlType<<ScopeColumn as Expression>::SqlType>
+        + HasSqlType<<ItemColumn as Expression>::SqlType>,
+{
+    /// Create a new `NextItemSelfJoined` query, scoped to a particular key.
+    ///
+    /// Both `item_min` and `item_max` are _inclusive_.
+    pub(super) fn new_scoped(
+        scope_key: ScopeKey,
+        item_min: Item,
+        item_max: Item,
+    ) -> Self {
+        Self {
+            table: Table::table(),
+            _d: PhantomData,
+            scope_key,
+            item_min,
+            item_max,
+        }
+    }
+}
+
+impl<Table, Item, ItemColumn>
+    NextItemSelfJoined<Table, Item, ItemColumn, NoScopeKey, NoScopeColumn>
+where
+    Table: diesel::Table + HasTable<Table = Table> + QueryFragment<Pg> + Copy,
+    Item: ToSql<<ItemColumn as Expression>::SqlType, Pg> + Copy,
+    ItemColumn: Column<Table = Table> + Copy,
+    Pg: HasSqlType<<ItemColumn as Expression>::SqlType>,
+{
+    /// Create a new `NextItemSelfJoined` query, with a global scope.
+    #[cfg(test)]
+    fn new_unscoped(item_min: Item, item_max: Item) -> Self {
+        Self {
+            table: Table::table(),
+            _d: PhantomData,
+            scope_key: NoScopeKey,
+            item_min,
+            item_max,
+        }
+    }
+}
+
+impl<Table, Item, ItemColumn, ScopeKey, ScopeColumn> QueryFragment<Pg>
+    for NextItemSelfJoined<Table, Item, ItemColumn, ScopeKey, ScopeColumn>
+where
+    Table: diesel::Table + HasTable<Table = Table> + QueryFragment<Pg> + Copy,
+    Item: ToSql<<ItemColumn as Expression>::SqlType, Pg> + Copy,
+    ItemColumn: Column<Table = Table> + Copy,
+    ScopeKey: ToSql<<ScopeColumn as Expression>::SqlType, Pg>,
+    ScopeColumn: Column<Table = Table>,
+    Pg: HasSqlType<<ScopeColumn as Expression>::SqlType>
+        + HasSqlType<<ItemColumn as Expression>::SqlType>,
+{
+    fn walk_ast<'a>(
+        &'a self,
+        mut out: AstPass<'_, 'a, Pg>,
+    ) -> diesel::QueryResult<()> {
+        out.push_sql("SELECT IF(EXISTS(SELECT 1 FROM ");
+        self.table.walk_ast(out.reborrow())?;
+        out.push_sql(" WHERE ");
+        out.push_identifier(ScopeColumn::NAME)?;
+        out.push_sql(" = ");
+        out.push_bind_param::<<ScopeColumn as Expression>::SqlType, ScopeKey>(
+            &self.scope_key,
+        )?;
+        out.push_sql(" AND ");
+        out.push_identifier(TIME_DELETED_COLUMN_IDENT)?;
+        out.push_sql(" IS NULL LIMIT 1), (SELECT ");
+        out.push_identifier(NEXT_ITEM_COLUMN_IDENT)?;
+        out.push_sql(" AS ");
+        out.push_identifier(ItemColumn::NAME)?;
+        out.push_sql(" FROM (SELECT ");
+        out.push_identifier(ItemColumn::NAME)?;
+        out.push_sql(" + 1 AS ");
+        out.push_identifier(NEXT_ITEM_COLUMN_IDENT)?;
+        out.push_sql(" FROM ");
+        self.table.walk_ast(out.reborrow())?;
+        out.push_sql(" WHERE ");
+        out.push_identifier(ScopeColumn::NAME)?;
+        out.push_sql(" = ");
+        out.push_bind_param::<<ScopeColumn as Expression>::SqlType, ScopeKey>(
+            &self.scope_key,
+        )?;
+        out.push_sql(" AND ");
+        out.push_identifier(TIME_DELETED_COLUMN_IDENT)?;
+        out.push_sql(" IS NULL) LEFT OUTER JOIN ");
+        self.table.walk_ast(out.reborrow())?;
+        out.push_sql(" ON (");
+        out.push_identifier(ScopeColumn::NAME)?;
+        out.push_sql(", ");
+        out.push_identifier(NEXT_ITEM_COLUMN_IDENT)?;
+        out.push_sql(", ");
+        out.push_identifier(NEXT_ITEM_COLUMN_IDENT)?;
+        out.push_sql(" <= ");
+        out.push_bind_param::<<ItemColumn as Expression>::SqlType, Item>(
+            &self.item_max,
+        )?;
+        out.push_sql(", ");
+        out.push_identifier(TIME_DELETED_COLUMN_IDENT)?;
+        out.push_sql(" IS NULL) = (");
+        out.push_bind_param::<<ScopeColumn as Expression>::SqlType, ScopeKey>(
+            &self.scope_key,
+        )?;
+        out.push_sql(", ");
+        out.push_identifier(ItemColumn::NAME)?;
+        out.push_sql(", TRUE, TRUE) WHERE ");
+        out.push_identifier(ItemColumn::NAME)?;
+        out.push_sql(" IS NULL AND ");
+        out.push_identifier(NEXT_ITEM_COLUMN_IDENT)?;
+        out.push_sql(" <= ");
+        out.push_bind_param::<<ItemColumn as Expression>::SqlType, Item>(
+            &self.item_max,
+        )?;
+        out.push_sql(" ORDER BY ");
+        out.push_identifier(NEXT_ITEM_COLUMN_IDENT)?;
+        out.push_sql(" LIMIT 1), ");
+        out.push_bind_param::<<ItemColumn as Expression>::SqlType, Item>(
+            &self.item_min,
+        )?;
+        out.push_sql(")");
+        Ok(())
+    }
+}
+
+impl<Table, Item, ItemColumn, ScopeKey, ScopeColumn> QueryId
+    for NextItemSelfJoined<Table, Item, ItemColumn, ScopeKey, ScopeColumn>
+{
+    type QueryId = ();
+    const HAS_STATIC_QUERY_ID: bool = false;
+}
+
+impl<Table, Item, ItemColumn, ScopeKey, ScopeColumn> Query
+    for NextItemSelfJoined<Table, Item, ItemColumn, ScopeKey, ScopeColumn>
+where
+    Table: diesel::Table + HasTable<Table = Table> + QueryFragment<Pg> + Copy,
+    Item: ToSql<<ItemColumn as Expression>::SqlType, Pg> + Copy,
+    ItemColumn: Column<Table = Table> + Copy,
+{
+    type SqlType = <ItemColumn as Expression>::SqlType;
+}
+
+impl<Table, Item, ItemColumn, ScopeKey, ScopeColumn> RunQueryDsl<DbConnection>
+    for NextItemSelfJoined<Table, Item, ItemColumn, ScopeKey, ScopeColumn>
+{
+}
+
+impl<Table, Item, ItemColumn> QueryFragment<Pg>
+    for NextItemSelfJoined<Table, Item, ItemColumn, NoScopeKey, NoScopeColumn>
+where
+    Table: diesel::Table + HasTable<Table = Table> + QueryFragment<Pg> + Copy,
+    Item: ToSql<<ItemColumn as Expression>::SqlType, Pg> + Copy,
+    ItemColumn: Column<Table = Table> + Copy,
+    Pg: HasSqlType<<ItemColumn as Expression>::SqlType>,
+{
+    fn walk_ast<'a>(
+        &'a self,
+        mut out: AstPass<'_, 'a, Pg>,
+    ) -> diesel::QueryResult<()> {
+        out.push_sql("SELECT IF(EXISTS(SELECT 1 FROM ");
+        self.table.walk_ast(out.reborrow())?;
+        out.push_sql(" WHERE ");
+        out.push_identifier(TIME_DELETED_COLUMN_IDENT)?;
+        out.push_sql(" IS NULL LIMIT 1), (SELECT ");
+        out.push_identifier(NEXT_ITEM_COLUMN_IDENT)?;
+        out.push_sql(" AS ");
+        out.push_identifier(ItemColumn::NAME)?;
+        out.push_sql(" FROM (SELECT ");
+        out.push_identifier(ItemColumn::NAME)?;
+        out.push_sql(" + 1 AS ");
+        out.push_identifier(NEXT_ITEM_COLUMN_IDENT)?;
+        out.push_sql(" FROM ");
+        self.table.walk_ast(out.reborrow())?;
+        out.push_sql(" WHERE ");
+        out.push_identifier(TIME_DELETED_COLUMN_IDENT)?;
+        out.push_sql(" IS NULL) LEFT OUTER JOIN ");
+        self.table.walk_ast(out.reborrow())?;
+        out.push_sql(" ON (");
+        out.push_identifier(NEXT_ITEM_COLUMN_IDENT)?;
+        out.push_sql(", ");
+        out.push_identifier(NEXT_ITEM_COLUMN_IDENT)?;
+        out.push_sql(" <= ");
+        out.push_bind_param::<<ItemColumn as Expression>::SqlType, Item>(
+            &self.item_max,
+        )?;
+        out.push_sql(", ");
+        out.push_identifier(TIME_DELETED_COLUMN_IDENT)?;
+        out.push_sql(" IS NULL) = (");
+        out.push_identifier(ItemColumn::NAME)?;
+        out.push_sql(", TRUE, TRUE) WHERE ");
+        out.push_identifier(ItemColumn::NAME)?;
+        out.push_sql(" IS NULL AND ");
+        out.push_identifier(NEXT_ITEM_COLUMN_IDENT)?;
+        out.push_sql(" <= ");
+        out.push_bind_param::<<ItemColumn as Expression>::SqlType, Item>(
+            &self.item_max,
+        )?;
+        out.push_sql(" ORDER BY ");
+        out.push_identifier(NEXT_ITEM_COLUMN_IDENT)?;
+        out.push_sql(" LIMIT 1), ");
+        out.push_bind_param::<<ItemColumn as Expression>::SqlType, Item>(
+            &self.item_min,
+        )?;
+        out.push_sql(")");
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -591,6 +924,8 @@ mod tests {
     use super::NextItem;
     use super::ShiftIndices;
     use crate::db;
+    use crate::db::explain::ExplainableAsync as _;
+    use crate::db::queries::next_item::NextItemSelfJoined;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use async_bb8_diesel::AsyncSimpleConnection;
     use chrono::DateTime;
@@ -683,6 +1018,68 @@ mod tests {
     }
 
     impl QueryFragment<Pg> for NextItemQueryValues {
+        fn walk_ast<'a>(
+            &'a self,
+            mut out: AstPass<'_, 'a, Pg>,
+        ) -> diesel::QueryResult<()> {
+            out.push_sql("(");
+            out.push_identifier(item::dsl::id::NAME)?;
+            out.push_sql(", ");
+            out.push_identifier(item::dsl::value::NAME)?;
+            out.push_sql(", ");
+            out.push_identifier(item::dsl::time_deleted::NAME)?;
+            out.push_sql(") VALUES (gen_random_uuid(), (");
+            self.0.walk_ast(out.reborrow())?;
+            out.push_sql("), NULL)");
+            Ok(())
+        }
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    struct NextItemSelfJoinedQuery {
+        inner: NextItemSelfJoined<item::dsl::item, i32, item::dsl::value>,
+    }
+
+    // These implementations are needed to actually allow inserting the results
+    // of the `NextItemSelfJoinedQuery` itself.
+    impl NextItemSelfJoinedQuery {
+        fn new(min: i32, max: i32) -> Self {
+            let inner = NextItemSelfJoined::new_unscoped(min, max);
+            Self { inner }
+        }
+    }
+
+    delegate_query_fragment_impl!(NextItemSelfJoinedQuery);
+
+    impl QueryId for NextItemSelfJoinedQuery {
+        type QueryId = ();
+        const HAS_STATIC_QUERY_ID: bool = false;
+    }
+
+    impl Insertable<item::table> for NextItemSelfJoinedQuery {
+        type Values = NextItemQuerySelfJoinedValues;
+        fn values(self) -> Self::Values {
+            NextItemQuerySelfJoinedValues(self)
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    struct NextItemQuerySelfJoinedValues(NextItemSelfJoinedQuery);
+
+    impl QueryId for NextItemQuerySelfJoinedValues {
+        type QueryId = ();
+        const HAS_STATIC_QUERY_ID: bool = false;
+    }
+
+    impl diesel::insertable::CanInsertInSingleQuery<Pg>
+        for NextItemQuerySelfJoinedValues
+    {
+        fn rows_to_insert(&self) -> Option<usize> {
+            Some(1)
+        }
+    }
+
+    impl QueryFragment<Pg> for NextItemQuerySelfJoinedValues {
         fn walk_ast<'a>(
             &'a self,
             mut out: AstPass<'_, 'a, Pg>,
@@ -852,5 +1249,179 @@ mod tests {
         assert_eq!(indices.first_end, 0);
         assert_eq!(indices.second_start, 1);
         assert_eq!(indices.second_end, 10);
+    }
+
+    #[tokio::test]
+    async fn test_explain_next_item_self_joined() {
+        // Setup the test database
+        let logctx = dev::test_setup_log("test_explain_next_item_self_joined");
+        let log = logctx.log.new(o!());
+        let mut db = test_setup_database(&log).await;
+        let cfg = crate::db::Config { url: db.pg_config().clone() };
+        let pool =
+            Arc::new(crate::db::Pool::new_single_host(&logctx.log, &cfg));
+        let conn = pool.claim().await.unwrap();
+
+        // We're going to operate on a separate table, for simplicity.
+        setup_test_schema(&pool).await;
+
+        let query = NextItemSelfJoined::<
+            item::dsl::item,
+            _,
+            item::dsl::value,
+            _,
+            item::dsl::id,
+        >::new_scoped(Uuid::nil(), i32::MIN, i32::MAX);
+        let out = query.explain_async(&conn).await.unwrap();
+        println!("{out}");
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_next_item_self_joined() {
+        // Setup the test database
+        let logctx = dev::test_setup_log("test_next_item_self_joined");
+        let log = logctx.log.new(o!());
+        let mut db = test_setup_database(&log).await;
+        let cfg = crate::db::Config { url: db.pg_config().clone() };
+        let pool =
+            Arc::new(crate::db::Pool::new_single_host(&logctx.log, &cfg));
+        let conn = pool.claim().await.unwrap();
+
+        // We're going to operate on a separate table, for simplicity.
+        setup_test_schema(&pool).await;
+
+        for i in 0..10 {
+            let query = NextItemSelfJoinedQuery::new(0, 9);
+            let it = diesel::insert_into(item::dsl::item)
+                .values(query)
+                .returning(Item::as_returning())
+                .get_result_async(&*conn)
+                .await
+                .unwrap();
+            assert_eq!(it.value, i, "Should insert values in order");
+        }
+
+        let query = NextItemSelfJoinedQuery::new(0, 9);
+        diesel::insert_into(item::dsl::item)
+            .values(query)
+            .returning(Item::as_returning())
+            .get_result_async(&*conn)
+            .await
+            .expect_err("should not be able to insert after the query range is exhausted");
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_next_item_self_joined_with_gaps() {
+        // Setup the test database
+        let logctx =
+            dev::test_setup_log("test_next_item_self_joined_with_gaps");
+        let log = logctx.log.new(o!());
+        let mut db = test_setup_database(&log).await;
+        let cfg = crate::db::Config { url: db.pg_config().clone() };
+        let pool =
+            Arc::new(crate::db::Pool::new_single_host(&logctx.log, &cfg));
+        let conn = pool.claim().await.unwrap();
+
+        // We're going to operate on a separate table, for simplicity.
+        setup_test_schema(&pool).await;
+
+        // Insert mostly the same items, but leave some gaps.
+        const TO_SKIP: [i32; 2] = [3, 7];
+        let items: Vec<_> = (0..10)
+            .filter_map(|value| {
+                if TO_SKIP.contains(&value) {
+                    None
+                } else {
+                    Some(Item {
+                        id: Uuid::new_v4(),
+                        value: value as _,
+                        time_deleted: None,
+                    })
+                }
+            })
+            .collect();
+        diesel::insert_into(item::dsl::item)
+            .values(items.clone())
+            .execute_async(&*conn)
+            .await
+            .expect("Should be able to insert basic items");
+
+        // Next, let's ensure we get the items we skipped in the last round.
+        for i in TO_SKIP.iter() {
+            let query = NextItemSelfJoinedQuery::new(0, 9);
+            let it = diesel::insert_into(item::dsl::item)
+                .values(query)
+                .returning(Item::as_returning())
+                .get_result_async(&*conn)
+                .await
+                .unwrap();
+            assert_eq!(
+                it.value, *i,
+                "Should have inserted the next skipped value"
+            );
+        }
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[ignore]
+    #[tokio::test]
+    async fn print_next_item_query_forms() {
+        // Setup the test database
+        let logctx = dev::test_setup_log("print_next_item_query_forms");
+        let log = logctx.log.new(o!());
+        let db = test_setup_database(&log).await;
+        let cfg = crate::db::Config { url: db.pg_config().clone() };
+        let pool =
+            Arc::new(crate::db::Pool::new_single_host(&logctx.log, &cfg));
+        let conn = pool.claim().await.unwrap();
+
+        // We're going to operate on a separate table, for simplicity.
+        setup_test_schema(&pool).await;
+
+        // Insert a bunch of items, not using the next item machinery.
+        const N_ITEMS: usize = 10_000;
+        let items: Vec<_> = (0..N_ITEMS)
+            .map(|value| Item {
+                id: Uuid::new_v4(),
+                value: value as _,
+                time_deleted: None,
+            })
+            .collect();
+        diesel::insert_into(item::dsl::item)
+            .values(items.clone())
+            .execute_async(&*conn)
+            .await
+            .expect("Should be able to insert basic items");
+
+        // Create the SQL queries in the two forms, and print them.
+        let next_item_generate =
+            NextItem::<item::dsl::item, i32, item::dsl::value>::new_unscoped(
+                DefaultShiftGenerator::new(0, N_ITEMS as _, 0).unwrap(),
+            );
+        let next_item_join = NextItemSelfJoined::<
+            item::dsl::item,
+            i32,
+            item::dsl::value,
+        >::new_unscoped(0, N_ITEMS as _);
+        println!(
+            "Next-item using `generate_series()`:\n{}\n\
+            Next-item using self-join:\n{}\n",
+            diesel::debug_query(&next_item_generate),
+            diesel::debug_query(&next_item_join)
+        );
+        assert!(
+            false,
+            "This test fails intentionally. The above queries \
+            can be run in the database that has been left around and \
+            seeded with {N_ITEMS} items in the 'test_schema.item' table. \
+            Manually copy them and insert the bind parameters, and you \
+            can use EXPLAIN ANALYZE to show their runtime and \
+            memory consumption profile.\n",
+        );
     }
 }

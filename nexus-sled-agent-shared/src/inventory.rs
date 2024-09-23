@@ -16,6 +16,7 @@ use omicron_common::{
 };
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use omicron_uuid_kinds::{DatasetUuid, OmicronZoneUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 // Export this type for convenience -- this way, dependents don't have to
@@ -142,14 +143,13 @@ impl OmicronZonesConfig {
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
 )]
 pub struct OmicronZoneConfig {
-    pub id: Uuid,
+    pub id: OmicronZoneUuid,
     pub underlay_address: Ipv6Addr,
 
-    /// The pool on which we'll place this zone's filesystem.
+    /// The pool on which we'll place this zone's root filesystem.
     ///
-    /// Note that this is transient -- the sled agent is permitted to
-    /// destroy the zone's dataset on this pool each time the zone is
-    /// initialized.
+    /// Note that the root filesystem is transient -- the sled agent is
+    /// permitted to destroy this dataset each time the zone is initialized.
     pub filesystem_pool: Option<ZpoolName>,
     pub zone_type: OmicronZoneType,
 }

@@ -3137,14 +3137,6 @@
               }
             ]
           },
-          "instance_runtime": {
-            "description": "The instance runtime state for the instance being registered.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/InstanceRuntimeState"
-              }
-            ]
-          },
           "metadata": {
             "description": "Metadata used to track instance statistics.",
             "allOf": [
@@ -3152,6 +3144,12 @@
                 "$ref": "#/components/schemas/InstanceMetadata"
               }
             ]
+          },
+          "migration_id": {
+            "nullable": true,
+            "description": "The ID of the migration in to this VMM, if this VMM is being ensured is part of a migration in. If this is `None`, the VMM is not being created due to a migration.",
+            "type": "string",
+            "format": "uuid"
           },
           "propolis_addr": {
             "description": "The address at which this VMM should serve a Propolis server API.",
@@ -3169,7 +3167,6 @@
         "required": [
           "hardware",
           "instance_id",
-          "instance_runtime",
           "metadata",
           "propolis_addr",
           "vmm_runtime"
@@ -3337,53 +3334,6 @@
           "hostname",
           "memory",
           "ncpus"
-        ]
-      },
-      "InstanceRuntimeState": {
-        "description": "The dynamic runtime properties of an instance: its current VMM ID (if any), migration information (if any), and the instance state to report if there is no active VMM.",
-        "type": "object",
-        "properties": {
-          "dst_propolis_id": {
-            "nullable": true,
-            "description": "If a migration is active, the ID of the target VMM.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TypedUuidForPropolisKind"
-              }
-            ]
-          },
-          "gen": {
-            "description": "Generation number for this state.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/Generation"
-              }
-            ]
-          },
-          "migration_id": {
-            "nullable": true,
-            "description": "If a migration is active, the ID of that migration.",
-            "type": "string",
-            "format": "uuid"
-          },
-          "propolis_id": {
-            "nullable": true,
-            "description": "The instance's currently active VMM ID.",
-            "allOf": [
-              {
-                "$ref": "#/components/schemas/TypedUuidForPropolisKind"
-              }
-            ]
-          },
-          "time_updated": {
-            "description": "Timestamp for this information.",
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "gen",
-          "time_updated"
         ]
       },
       "Inventory": {
@@ -3941,7 +3891,7 @@
         "properties": {
           "filesystem_pool": {
             "nullable": true,
-            "description": "The pool on which we'll place this zone's filesystem.\n\nNote that this is transient -- the sled agent is permitted to destroy the zone's dataset on this pool each time the zone is initialized.",
+            "description": "The pool on which we'll place this zone's root filesystem.\n\nNote that the root filesystem is transient -- the sled agent is permitted to destroy this dataset each time the zone is initialized.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/ZpoolName"
@@ -3949,8 +3899,7 @@
             ]
           },
           "id": {
-            "type": "string",
-            "format": "uuid"
+            "$ref": "#/components/schemas/TypedUuidForOmicronZoneKind"
           },
           "underlay_address": {
             "type": "string",
@@ -5133,7 +5082,7 @@
         "type": "string",
         "format": "uuid"
       },
-      "TypedUuidForPropolisKind": {
+      "TypedUuidForOmicronZoneKind": {
         "type": "string",
         "format": "uuid"
       },
@@ -5769,6 +5718,10 @@
           "A",
           "B"
         ]
+      },
+      "TypedUuidForPropolisKind": {
+        "type": "string",
+        "format": "uuid"
       }
     },
     "responses": {

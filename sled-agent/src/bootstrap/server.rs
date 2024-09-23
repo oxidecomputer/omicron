@@ -211,6 +211,7 @@ impl Server {
             rss_access,
             updates: config.updates.clone(),
             sled_reset_tx,
+            sprockets: config.sprockets.clone(),
         };
         let bootstrap_http_server = start_dropshot_server(bootstrap_context)?;
 
@@ -230,6 +231,7 @@ impl Server {
                 0,
             ),
             sled_init_tx,
+            config.sprockets.clone(),
             &base_log,
         )
         .await

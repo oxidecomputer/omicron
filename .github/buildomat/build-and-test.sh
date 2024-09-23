@@ -4,12 +4,15 @@ set -o errexit
 set -o pipefail
 set -o xtrace
 
+# Color the output for easier readability.
+export CARGO_TERM_COLOR=always
+
 target_os=$1
 
 # NOTE: This version should be in sync with the recommended version in
 # .config/nextest.toml. (Maybe build an automated way to pull the recommended
 # version in the future.)
-NEXTEST_VERSION='0.9.77'
+NEXTEST_VERSION='0.9.78'
 
 cargo --version
 rustc --version

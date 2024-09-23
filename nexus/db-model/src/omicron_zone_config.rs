@@ -18,6 +18,7 @@ use ipnetwork::IpNetwork;
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
 use nexus_types::inventory::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
+use omicron_uuid_kinds::{GenericUuid, OmicronZoneUuid};
 use std::net::{IpAddr, SocketAddr, SocketAddrV6};
 use uuid::Uuid;
 
@@ -55,7 +56,7 @@ pub fn ntp_dns_servers_to_omicron_internal(
 /// immediately. The inner result represents an operational error and should
 /// only be unwrapped when the nic is used.
 pub fn nic_row_to_network_interface(
-    zone_id: Uuid,
+    zone_id: OmicronZoneUuid,
     nic_id: Option<Uuid>,
     nic_row: Option<OmicronZoneNic>,
 ) -> anyhow::Result<anyhow::Result<NetworkInterface>> {
@@ -133,7 +134,7 @@ pub(crate) struct OmicronZoneNic {
 
 impl OmicronZoneNic {
     pub(crate) fn new(
-        zone_id: Uuid,
+        zone_id: OmicronZoneUuid,
         nic: &nexus_types::inventory::NetworkInterface,
     ) -> anyhow::Result<Self> {
         // We do not bother storing the NIC's kind and associated id
@@ -142,7 +143,7 @@ impl OmicronZoneNic {
         ensure!(
             matches!(
                 nic.kind,
-                NetworkInterfaceKind::Service{ id } if id == zone_id
+                NetworkInterfaceKind::Service { id } if id == zone_id.into_untyped_uuid()
             ),
             "expected zone's NIC kind to be \"service\" and the \
                     id to match the zone's id ({zone_id})",
@@ -162,12 +163,14 @@ impl OmicronZoneNic {
 
     pub(crate) fn into_network_interface_for_zone(
         self,
-        zone_id: Uuid,
+        zone_id: OmicronZoneUuid,
     ) -> anyhow::Result<NetworkInterface> {
         Ok(NetworkInterface {
             id: self.id,
             ip: self.ip.ip(),
-            kind: NetworkInterfaceKind::Service { id: zone_id },
+            kind: NetworkInterfaceKind::Service {
+                id: zone_id.into_untyped_uuid(),
+            },
             mac: *self.mac,
             name: self.name.into(),
             primary: self.is_primary,

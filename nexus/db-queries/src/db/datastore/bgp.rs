@@ -444,7 +444,7 @@ impl DataStore {
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 async move {
-                    let name_or_id = sel.name_or_id.clone();
+                    let name_or_id = sel.announce_set.clone();
 
                     let announce_id: Uuid = match name_or_id {
                         NameOrId::Id(id) => announce_set_dsl::bgp_announce_set
@@ -700,7 +700,7 @@ impl DataStore {
         use db::schema::bgp_config::dsl as bgp_config_dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
-        let name_or_id = sel.name_or_id.clone();
+        let name_or_id = sel.announce_set.clone();
 
         let err = OptionalError::new();
         self.transaction_retry_wrapper("bgp_delete_announce_set")
