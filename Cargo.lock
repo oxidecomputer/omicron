@@ -7560,6 +7560,7 @@ dependencies = [
  "gethostname",
  "highway",
  "indexmap 2.4.0",
+ "internal-dns",
  "itertools 0.13.0",
  "libc",
  "num",

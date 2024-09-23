@@ -118,7 +118,10 @@ async fn test_oximeter_reregistration() {
 
     // ClickHouse client for verifying collection.
     let ch_address = context.clickhouse.http_address().into();
-    let client = oximeter_db::Client::new(ch_address, &context.logctx.log);
+    let client = oximeter_db::ClientBuilder::new(&context.logctx.log)
+        .address(ch_address)
+        .build()
+        .unwrap();
     client
         .init_single_node_db()
         .await

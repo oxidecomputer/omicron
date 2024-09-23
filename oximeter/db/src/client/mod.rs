@@ -25,10 +25,13 @@ use crate::Timeseries;
 use crate::TimeseriesPageSelector;
 use crate::TimeseriesScanParams;
 use crate::TimeseriesSchema;
+use anyhow::Context as _;
 use dropshot::EmptyScanParams;
 use dropshot::PaginationOrder;
 use dropshot::ResultsPage;
 use dropshot::WhichPage;
+use internal_dns::resolver::Resolver;
+use internal_dns::ServiceName;
 use omicron_common::backoff;
 use oximeter::schema::TimeseriesKey;
 use oximeter::types::Sample;
@@ -51,6 +54,7 @@ use std::num::NonZeroU32;
 use std::ops::Bound;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
 use std::time::Instant;
@@ -72,39 +76,114 @@ mod probes {
     fn sql__query__done(_: &usdt::UniqueId) {}
 }
 
+
+/// A builder for a ClickHouse `Client` object.
+pub struct ClientBuilder {
+    log: Logger,
+    id: Option<Uuid>,
+    timeout: Option<Duration>,
+    resolver: Option<Arc<Resolver>>,
+    address: Option<SocketAddr>,
+}
+
+impl ClientBuilder {
+    /// Construct a new builder, using the provided logger for the client.
+    pub fn new(log: &Logger) -> Self {
+        Self {
+            log: log.clone(),
+            id: None,
+            timeout: None,
+            resolver: None,
+            address: None,
+        }
+    }
+
+    /// Set the client's ID.
+    pub fn id(mut self, id: Uuid) -> Self {
+        let _ = self.id.replace(id);
+        self
+    }
+
+    /// Set the timeout on HTTP requests sent to ClickHouse.
+    pub fn timeout(mut self, timeout: Duration) -> Self {
+        let _ = self.timeout.replace(timeout);
+        self
+    }
+
+    /// Set the DNS resolver used to lookup ClickHouse.
+    ///
+    /// It is an error to specify both the resolver and an explicit address
+    pub fn resolver(mut self, resolver: Resolver) -> Self {
+        let _ = self.resolver.replace(Arc::new(resolver));
+        self
+    }
+
+    /// Set the socket address used to reach ClickHouse.
+    ///
+    /// It is an error to specify both the resolver and an explicit address
+    pub fn address(mut self, address: SocketAddr) -> Self {
+        let _ = self.address.replace(address);
+        self
+    }
+
+    /// Build the client with the current options.
+    ///
+    /// # Errors
+    ///
+    /// This fails if neither the resolver nor address is specified, or if both
+    /// are specified.
+    pub fn build(self) -> anyhow::Result<Client> {
+        let uuid = self.id.unwrap_or_else(Uuid::new_v4);
+        let id = uuid;
+        let log = self.log.new(slog::o!(
+            "component" => "clickhouse-client",
+            "id" => id.to_string(),
+        ));
+        let mut client_builder = reqwest::ClientBuilder::new();
+        let url = match (self.resolver, self.address) {
+            (None, None) => anyhow::bail!(
+                "Must provide either an IP address or resolver for the client"
+            ),
+            (None, Some(address)) => format!("http://{address}"),
+            (Some(resolver), None) => {
+                client_builder = client_builder.dns_resolver(resolver);
+                ServiceName::Clickhouse.srv_name()
+            }
+            (Some(_), Some(_)) => anyhow::bail!(
+                "Cannot provide both IP address and resolver for the client"
+            ),
+        };
+        let timeout = self.timeout.unwrap_or(DEFAULT_REQUEST_TIMEOUT);
+        client_builder = client_builder.timeout(timeout);
+        let client = client_builder.build().context("building reqwest client")?;
+        Ok(Client {
+            log,
+            url,
+            client,
+            schema: Mutex::new(BTreeMap::new()),
+        })
+    }
+}
+
 /// A `Client` to the ClickHouse metrics database.
 #[derive(Debug)]
 pub struct Client {
-    _id: Uuid,
     log: Logger,
     url: String,
     client: reqwest::Client,
     schema: Mutex<BTreeMap<TimeseriesName, TimeseriesSchema>>,
-    request_timeout: Duration,
 }
 
 impl Client {
     /// Construct a new ClickHouse client of the database at `address`.
+    ///
+    /// This uses the `ClientBuilder`, only specifying the explicit address. If
+    /// you'd like to use DNS, you'll need to use the builder directly.
     pub fn new(address: SocketAddr, log: &Logger) -> Self {
-        Self::new_with_request_timeout(address, log, DEFAULT_REQUEST_TIMEOUT)
-    }
-
-    /// Construct a new ClickHouse client of the database at `address`, and a
-    /// custom request timeout.
-    pub fn new_with_request_timeout(
-        address: SocketAddr,
-        log: &Logger,
-        request_timeout: Duration,
-    ) -> Self {
-        let id = Uuid::new_v4();
-        let log = log.new(slog::o!(
-            "component" => "clickhouse-client",
-            "id" => id.to_string(),
-        ));
-        let client = reqwest::Client::new();
-        let url = format!("http://{}", address);
-        let schema = Mutex::new(BTreeMap::new());
-        Self { _id: id, log, url, client, schema, request_timeout }
+        ClientBuilder::new(log)
+            .address(address)
+            .build()
+            .unwrap()
     }
 
     /// Return the url the client is trying to connect to
@@ -923,7 +1002,6 @@ impl Client {
         let response = self
             .client
             .post(&self.url)
-            .timeout(self.request_timeout)
             .query(&[
                 ("output_format_json_quote_64bit_integers", "0"),
                 // TODO-performance: This is needed to get the correct counts of

@@ -7,7 +7,7 @@ use clickward::{BasePorts, Deployment, DeploymentConfig, KeeperId};
 use dropshot::test_util::log_prefix_for_test;
 use omicron_test_utils::dev::poll;
 use omicron_test_utils::dev::test_setup_log;
-use oximeter_db::{Client, DbWrite, OxqlResult, Sample, TestDbWrite};
+use oximeter_db::{ClientBuilder, Client, DbWrite, OxqlResult, Sample, TestDbWrite};
 use oximeter_test_utils::wait_for_keepers;
 use slog::{info, Logger};
 use std::collections::BTreeSet;
@@ -62,11 +62,10 @@ async fn test_schemas_disjoint() -> anyhow::Result<()> {
         .context("failed to generate config")?;
     deployment.deploy().context("failed to deploy")?;
 
-    let client1 = Client::new_with_request_timeout(
-        deployment.http_addr(1.into())?,
-        log,
-        request_timeout,
-    );
+    let client1 = ClientBuilder::new(log)
+        .address(deployment.http_addr(1.into())?)
+        .timeout(request_timeout)
+        .build()?;
 
     wait_for_ping(log, &client1).await?;
     wait_for_keepers(log, &deployment, vec![KeeperId(1)]).await?;
@@ -157,16 +156,14 @@ async fn test_cluster() -> anyhow::Result<()> {
         .context("failed to generate config")?;
     deployment.deploy().context("failed to deploy")?;
 
-    let client1 = Client::new_with_request_timeout(
-        deployment.http_addr(1.into())?,
-        log,
-        request_timeout,
-    );
-    let client2 = Client::new_with_request_timeout(
-        deployment.http_addr(2.into())?,
-        log,
-        request_timeout,
-    );
+    let client1 = ClientBuilder::new(log)
+        .address(deployment.http_addr(1.into())?)
+        .timeout(request_timeout)
+        .build()?;
+    let client2 = ClientBuilder::new(log)
+        .address(deployment.http_addr(2.into())?)
+        .timeout(request_timeout)
+        .build()?;
     wait_for_ping(log, &client1).await?;
     wait_for_ping(log, &client2).await?;
     wait_for_keepers(
@@ -227,11 +224,10 @@ async fn test_cluster() -> anyhow::Result<()> {
 
     // Add a 3rd clickhouse server and wait for it to come up
     deployment.add_server().expect("failed to launch a 3rd clickhouse server");
-    let client3 = Client::new_with_request_timeout(
-        deployment.http_addr(3.into())?,
-        log,
-        request_timeout,
-    );
+    let client3 = ClientBuilder::new(log)
+        .address(deployment.http_addr(3.into())?)
+        .timeout(request_timeout)
+        .build()?;
     wait_for_ping(log, &client3).await?;
     info!(log, "successfully pinged client server 3");
 
@@ -328,11 +324,10 @@ async fn test_cluster() -> anyhow::Result<()> {
     // We are expecting a timeout here. Typical inserts take on the order of a
     // few hundred milliseconds. To shorten the length of our test, we create a
     // new client with a shorter timeout.
-    let client1_short_timeout = Client::new_with_request_timeout(
-        deployment.http_addr(1.into())?,
-        log,
-        Duration::from_secs(2),
-    );
+    let client1_short_timeout = ClientBuilder::new(log)
+        .address(deployment.http_addr(1.into())?)
+        .timeout(Duration::from_secs(2))
+        .build()?;
     // We have lost quorum and should not be able to insert
     client1_short_timeout
         .insert_samples(&samples)

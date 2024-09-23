@@ -8,7 +8,6 @@ use self::external_endpoints::NexusCertResolver;
 use self::saga::SagaExecutor;
 use crate::app::background::BackgroundTasksData;
 use crate::app::background::SagaRecoveryHelpers;
-use crate::app::oximeter::LazyTimeseriesClient;
 use crate::populate::populate_start;
 use crate::populate::PopulateArgs;
 use crate::populate::PopulateStatus;
@@ -162,7 +161,7 @@ pub struct Nexus {
     reqwest_client: reqwest::Client,
 
     /// Client to the timeseries database.
-    timeseries_client: LazyTimeseriesClient,
+    timeseries_client: oximeter_db::Client,
 
     /// Contents of the trusted root role for the TUF repository.
     #[allow(dead_code)]
@@ -395,16 +394,11 @@ impl Nexus {
             .build()
             .map_err(|e| e.to_string())?;
 
-        // Connect to clickhouse - but do so lazily.
-        // Clickhouse may not be executing when Nexus starts.
-        let timeseries_client = if let Some(address) =
-            &config.pkg.timeseries_db.address
-        {
-            // If an address was provided, use it instead of DNS.
-            LazyTimeseriesClient::new_from_address(log.clone(), *address)
-        } else {
-            LazyTimeseriesClient::new_from_dns(log.clone(), resolver.clone())
-        };
+        // Connect to ClickHouse, resolving it via DNS.
+        let timeseries_client = oximeter_db::ClientBuilder::new(&log)
+            .resolver(resolver.clone())
+            .build()
+            .expect("Only fails if both resolver and address provided");
 
         // TODO-cleanup We may want to make the populator a first-class
         // background task.

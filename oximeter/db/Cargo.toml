@@ -21,6 +21,7 @@ dropshot.workspace = true
 futures.workspace = true
 gethostname.workspace = true
 highway.workspace = true
+internal-dns.workspace = true
 libc.workspace = true
 num.workspace = true
 omicron-common.workspace = true
