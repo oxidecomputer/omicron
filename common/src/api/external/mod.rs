@@ -627,31 +627,31 @@ const GiB: u64 = MiB * 1024;
 const TiB: u64 = GiB * 1024;
 
 impl ByteCount {
-    pub fn from_kibibytes_u32(kibibytes: u32) -> ByteCount {
-        ByteCount::try_from(KiB * u64::from(kibibytes)).unwrap()
+    // None of these three constructors can create a value larger than
+    // `i64::MAX`. (Note that a `from_tebibytes_u32` could overflow u64.)
+    pub const fn from_kibibytes_u32(kibibytes: u32) -> ByteCount {
+        ByteCount(KiB * kibibytes as u64)
+    }
+    pub const fn from_mebibytes_u32(mebibytes: u32) -> ByteCount {
+        ByteCount(MiB * mebibytes as u64)
+    }
+    pub const fn from_gibibytes_u32(gibibytes: u32) -> ByteCount {
+        ByteCount(GiB * gibibytes as u64)
     }
 
-    pub fn from_mebibytes_u32(mebibytes: u32) -> ByteCount {
-        ByteCount::try_from(MiB * u64::from(mebibytes)).unwrap()
-    }
-
-    pub fn from_gibibytes_u32(gibibytes: u32) -> ByteCount {
-        ByteCount::try_from(GiB * u64::from(gibibytes)).unwrap()
-    }
-
-    pub fn to_bytes(&self) -> u64 {
+    pub const fn to_bytes(&self) -> u64 {
         self.0
     }
-    pub fn to_whole_kibibytes(&self) -> u64 {
+    pub const fn to_whole_kibibytes(&self) -> u64 {
         self.to_bytes() / KiB
     }
-    pub fn to_whole_mebibytes(&self) -> u64 {
+    pub const fn to_whole_mebibytes(&self) -> u64 {
         self.to_bytes() / MiB
     }
-    pub fn to_whole_gibibytes(&self) -> u64 {
+    pub const fn to_whole_gibibytes(&self) -> u64 {
         self.to_bytes() / GiB
     }
-    pub fn to_whole_tebibytes(&self) -> u64 {
+    pub const fn to_whole_tebibytes(&self) -> u64 {
         self.to_bytes() / TiB
     }
 }
@@ -3253,6 +3253,21 @@ mod test {
         // For good measure, let's check i64::MIN
         let bogus = ByteCount::try_from(i64::MIN).unwrap_err();
         assert_eq!(bogus.to_string(), "value is too small for a byte count");
+
+        // The largest input value to the `from_*_u32` methods do not create
+        // a value larger than i64::MAX.
+        assert!(
+            ByteCount::from_kibibytes_u32(u32::MAX).to_bytes()
+                <= u64::try_from(i64::MAX).unwrap()
+        );
+        assert!(
+            ByteCount::from_mebibytes_u32(u32::MAX).to_bytes()
+                <= u64::try_from(i64::MAX).unwrap()
+        );
+        assert!(
+            ByteCount::from_gibibytes_u32(u32::MAX).to_bytes()
+                <= u64::try_from(i64::MAX).unwrap()
+        );
 
         // We've now exhaustively tested both sides of all boundary conditions
         // for all three constructors (to the extent that that's possible).

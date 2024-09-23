@@ -27,7 +27,6 @@ use illumos_utils::zfs::{
 };
 use omicron_common::api::external::ByteCount;
 use omicron_common::disk::CompressionAlgorithm;
-use once_cell::sync::Lazy;
 use std::io;
 
 #[derive(Debug, thiserror::Error)]
@@ -102,19 +101,18 @@ const BACKING_FMD_DATASET: &'static str = "fmd";
 const BACKING_FMD_MOUNTPOINT: &'static str = "/var/fm/fmd";
 const BACKING_FMD_SUBDIRS: [&'static str; 3] = ["rsrc", "ckpt", "xprt"];
 const BACKING_FMD_SERVICE: &'static str = "svc:/system/fmd:default";
-const BACKING_FMD_QUOTA: u64 = 500 * (1 << 20); // 500 MiB
+const BACKING_FMD_QUOTA: ByteCount = ByteCount::from_mebibytes_u32(500);
 
 const BACKING_COMPRESSION: CompressionAlgorithm = CompressionAlgorithm::On;
 
 const BACKINGFS_COUNT: usize = 1;
-static BACKINGFS: Lazy<[BackingFs; BACKINGFS_COUNT]> = Lazy::new(|| {
+const BACKINGFS: [BackingFs; BACKINGFS_COUNT] =
     [BackingFs::new(BACKING_FMD_DATASET)
         .mountpoint(BACKING_FMD_MOUNTPOINT)
         .subdirs(&BACKING_FMD_SUBDIRS)
-        .quota(ByteCount::try_from(BACKING_FMD_QUOTA).unwrap())
+        .quota(BACKING_FMD_QUOTA)
         .compression(BACKING_COMPRESSION)
-        .service(BACKING_FMD_SERVICE)]
-});
+        .service(BACKING_FMD_SERVICE)];
 
 /// Ensure that the backing filesystems are mounted.
 /// If the underlying dataset for a backing fs does not exist on the specified
