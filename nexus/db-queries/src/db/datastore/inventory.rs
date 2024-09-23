@@ -2918,7 +2918,7 @@ mod test {
             .await
             .expect("failed to insert collection");
 
-        // Read all "inv_" tables and ensure that were populated.
+        // Read all "inv_" tables and ensure that they are populated.
         check_all_inv_tables(&datastore, AllInvTables::ArePopulated).await;
 
         // Clean up.
