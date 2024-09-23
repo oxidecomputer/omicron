@@ -362,9 +362,11 @@ pub struct KeeperServerInfo {
     pub host: ClickhouseHost,
     /// Keeper server raft port
     pub raft_port: u16,
-    /// A keeper server either participant or learner (learner does not participate in leader elections).
+    /// A keeper server either participant or learner
+    /// (learner does not participate in leader elections).
     pub server_type: KeeperServerType,
-    /// non-negative integer telling which nodes should be prioritised on leader elections.
+    /// non-negative integer telling which nodes should be
+    /// prioritised on leader elections.
     /// Priority of 0 means server will never be a leader.
     pub priority: u16,
 }

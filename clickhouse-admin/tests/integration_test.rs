@@ -25,8 +25,8 @@ async fn test_lgif_parsing() -> anyhow::Result<()> {
     let path = parent_dir.join(format!("{prefix}-oximeter-clickward-test"));
     std::fs::create_dir(&path)?;
 
-    // We use the default ports in `test_schemas_disjoint` and must use a
-    // separate set here in case the two tests run concurrently.
+    // We spin up several replicated clusters and must use a
+    // separate set of ports in case the tests run concurrently.
     let base_ports = BasePorts {
         keeper: 29000,
         raft: 29100,
@@ -80,8 +80,8 @@ async fn test_raft_config_parsing() -> anyhow::Result<()> {
     let path = parent_dir.join(format!("{prefix}-oximeter-clickward-test"));
     std::fs::create_dir(&path)?;
 
-    // We use the default ports in `test_schemas_disjoint` and must use a
-    // separate set here in case the two tests run concurrently.
+    // We spin up several replicated clusters and must use a
+    // separate set of ports in case the tests run concurrently.
     let base_ports = BasePorts {
         keeper: 39000,
         raft: 39100,
