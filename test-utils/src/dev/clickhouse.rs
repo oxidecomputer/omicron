@@ -1246,21 +1246,28 @@ fn find_port_after_needle(
     line: &str,
     needle: &str,
 ) -> Result<Option<u16>, ClickHouseError> {
-    line.find(needle)
-        .map(|needle_start| {
-            // Our needle ends with something like `http://[::1]`;
-            // we'll split on the colon we expect to follow it to find
-            // the port.
-            let address_start = needle_start + needle.len();
-            return line[address_start..]
-                .trim()
-                .split(':')
-                .last()
-                .ok_or_else(|| ClickHouseError::InvalidAddress)?
-                .parse()
-                .map_err(|_| ClickHouseError::InvalidPort);
-        })
-        .transpose()
+    let Some(needle_start) = line.find(needle) else {
+        return Ok(None);
+    };
+    // Our needle ends with something like `http://[::1]`;
+    // we'll split on the colon we expect to follow it to find
+    // the port.
+    let address_start = needle_start + needle.len();
+    // Despite finding the needle, the string following it may still not
+    // contain a port number, e.g. if last write ended immediately at
+    // the colon. Handle this case too.
+    let remainder = line[address_start..]
+        .trim()
+        .split(':')
+        .last()
+        .ok_or_else(|| ClickHouseError::InvalidAddress)?;
+    if remainder.is_empty() {
+        return Ok(None);
+    }
+    remainder
+        .parse()
+        .map(Option::Some)
+        .map_err(|_| ClickHouseError::InvalidPort)
 }
 
 // Wait for the ClickHouse log file to report it is ready to receive connections
