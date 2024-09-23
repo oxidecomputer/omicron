@@ -12,7 +12,7 @@
 //! state updates to each other without sending parameters that are useless to
 //! sled agent or that sled agent will never update (like the sled ID).
 
-use super::{Generation, VmmState};
+use super::{Generation, VmmFailureReason, VmmState};
 use crate::schema::vmm;
 use crate::SqlU16;
 use chrono::{DateTime, Utc};
@@ -86,6 +86,7 @@ impl Vmm {
                 state: VmmState::Creating,
                 time_state_updated: now,
                 gen: Generation::new(),
+                failure_reason: None,
             },
         }
     }
@@ -115,6 +116,10 @@ pub struct VmmRuntimeState {
     /// The state of this VMM. If this VMM is the active VMM for a given
     /// instance, this state is the instance's logical state.
     pub state: VmmState,
+
+    /// The cause of the most recent VMM failure, if the VMM is in
+    /// [`VmmState::Failed`].
+    pub failure_reason: Option<VmmFailureReason>,
 }
 
 impl From<omicron_common::api::internal::nexus::VmmRuntimeState>
@@ -127,6 +132,7 @@ impl From<omicron_common::api::internal::nexus::VmmRuntimeState>
             state: value.state.into(),
             time_state_updated: value.time_updated,
             gen: value.gen.into(),
+            failure_reason: value.failure_reason.map(Into::into),
         }
     }
 }
@@ -137,6 +143,7 @@ impl From<Vmm> for sled_agent_client::types::VmmRuntimeState {
             gen: s.runtime.gen.into(),
             state: s.runtime.state.into(),
             time_updated: s.runtime.time_state_updated,
+            failure_reason: s.runtime.failure_reason.map(Into::into),
         }
     }
 }

@@ -95,6 +95,16 @@ impl VmmState {
     }
 }
 
+/// An optional description of why a VMM was marked as [`VmmState::Failed`].
+#[derive(
+    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum VmmFailureReason {
+    /// The sled this VMM was on was expunged.
+    SledExpunged,
+}
+
 /// The dynamic runtime properties of an individual VMM process.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VmmRuntimeState {
@@ -104,6 +114,9 @@ pub struct VmmRuntimeState {
     pub gen: Generation,
     /// Timestamp for the VMM's state.
     pub time_updated: DateTime<Utc>,
+    /// If this VMM is in the `Failed` state, an optional reason describing why
+    /// it has been marked as `Failed`.
+    pub failure_reason: Option<VmmFailureReason>,
 }
 
 /// A wrapper type containing a sled's total knowledge of the state of a VMM.

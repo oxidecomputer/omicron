@@ -372,6 +372,7 @@ mod test {
             state: VmmState::Starting,
             gen: Generation::new(),
             time_updated: now,
+            failure_reason: None,
         };
 
         InstanceStates::new(vmm, None)
@@ -400,6 +401,7 @@ mod test {
             state: VmmState::Migrating,
             gen: Generation::new(),
             time_updated: now,
+            failure_reason: None,
         };
 
         InstanceStates::new(vmm, Some(Uuid::new_v4()))

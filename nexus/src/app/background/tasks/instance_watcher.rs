@@ -134,6 +134,9 @@ impl InstanceWatcher {
                         r#gen: vmm.runtime.r#gen.0.next(),
                         state: nexus::VmmState::Failed,
                         time_updated: chrono::Utc::now(),
+                        failure_reason: Some(
+                            nexus::VmmFailureReason::SledExpunged,
+                        ),
                     },
                     // It's fine to synthesize `None`s here because a `None`
                     // just means "don't update the migration state", not
@@ -167,12 +170,30 @@ impl InstanceWatcher {
                         check.outcome =
                             CheckOutcome::Failure(Failure::NoSuchInstance);
                         // TODO(eliza): it would be nicer if this used the same
-                        // code path as `mark_instance_failed`...
+                        // code path as `mark_vmm_failed`...
                         SledVmmState {
                             vmm_state: nexus::VmmRuntimeState {
                                 r#gen: vmm.runtime.r#gen.0.next(),
                                 state: nexus::VmmState::Failed,
                                 time_updated: chrono::Utc::now(),
+
+                                // TODO(eliza): We should set a failure reason
+                                // here. However, the thing is, the failure
+                                // reasons in the database record are intended
+                                // primarily to indicate whether a failure
+                                // effects only the individual VMM or the entire
+                                // sled, for use by auto-restart policies in
+                                // determining whether an instance is eligible
+                                // to be restarted. When a sled-agent returns a
+                                // `NO_SUCH_INSTANCE` error, we are not
+                                // currently able to determine whether that is
+                                // due to an VMM-level or sled-level fault. We
+                                // probably don't want to construct a failure
+                                // reason that just says "the sled agent said it
+                                // doesn't know about this VMM"; instead, we
+                                // should set a reason here if we can determine
+                                // *why*.
+                                failure_reason: None,
                             },
                             // It's fine to synthesize `None`s here because a `None`
                             // just means "don't update the migration state", not

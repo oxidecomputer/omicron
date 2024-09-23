@@ -42,6 +42,7 @@ use chrono::Utc;
 use diesel::prelude::*;
 use diesel::sql_types;
 use nexus_db_model::Disk;
+use nexus_db_model::VmmFailureReason;
 use omicron_common::api;
 use omicron_common::api::external;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -2071,6 +2072,7 @@ mod tests {
                     migration_id: None,
                     nexus_state: InstanceState::NoVmm,
                     time_last_auto_restarted: None,
+                    last_failure_reason: None,
                 },
             )
             .await
@@ -2133,6 +2135,7 @@ mod tests {
             migration_id: None,
             nexus_state: InstanceState::Vmm,
             time_last_auto_restarted: None,
+            last_failure_reason: None,
         };
 
         let updated = dbg!(
@@ -2235,6 +2238,7 @@ mod tests {
             migration_id: Some(Uuid::new_v4()),
             nexus_state: InstanceState::Vmm,
             time_last_auto_restarted: None,
+            last_failure_reason: None,
         };
         let updated = dbg!(
             datastore
@@ -2264,6 +2268,7 @@ mod tests {
                         migration_id: None,
                         nexus_state: InstanceState::NoVmm,
                         time_last_auto_restarted: None,
+                        last_failure_reason: None,
                     },
                 )
                 .await
@@ -2343,6 +2348,7 @@ mod tests {
                         time_state_updated: Utc::now(),
                         gen: Generation::new(),
                         state: VmmState::Running,
+                        failure_reason: None,
                     },
                 },
             )
@@ -2405,6 +2411,7 @@ mod tests {
                         time_state_updated: Utc::now(),
                         gen: Generation::new(),
                         state: VmmState::Running,
+                        failure_reason: None,
                     },
                 },
             )
@@ -2435,6 +2442,7 @@ mod tests {
                     dst_propolis_id: Some(target_vmm.id),
                     migration_id: Some(migration.id),
                     time_last_auto_restarted: None,
+                    last_failure_reason: None,
                 },
             )
             .await
@@ -2502,6 +2510,7 @@ mod tests {
                         time_state_updated: Utc::now(),
                         r#gen: Generation::new(),
                         state: VmmState::Stopped,
+                        failure_reason: None,
                     },
                 },
             )
@@ -2542,6 +2551,7 @@ mod tests {
                         time_state_updated: Utc::now(),
                         r#gen: Generation::new(),
                         state: VmmState::Running,
+                        failure_reason: None,
                     },
                 },
             )
@@ -2581,6 +2591,7 @@ mod tests {
                         time_state_updated: Utc::now(),
                         r#gen: Generation(vmm2.runtime.r#gen.0.next()),
                         state: VmmState::Running,
+                        failure_reason: None,
                     },
                 )
                 .await
@@ -2644,6 +2655,7 @@ mod tests {
                         time_state_updated: Utc::now(),
                         r#gen: Generation::new(),
                         state: VmmState::Running,
+                        failure_reason: None,
                     },
                 },
             )
@@ -2681,6 +2693,7 @@ mod tests {
                         time_state_updated: Utc::now(),
                         r#gen: Generation(vmm2.runtime.r#gen.0.next().next()),
                         state: VmmState::SagaUnwound,
+                        failure_reason: None,
                     },
                 )
                 .await
@@ -2789,6 +2802,7 @@ mod tests {
                                 time_state_updated: Utc::now(),
                                 r#gen: Generation::new(),
                                 state: VmmState::Running,
+                                failure_reason: None,
                             },
                         },
                     )
@@ -2806,6 +2820,7 @@ mod tests {
                             dst_propolis_id: None,
                             migration_id: None,
                             time_last_auto_restarted: None,
+                            last_failure_reason: None,
                         },
                     )
                     .await

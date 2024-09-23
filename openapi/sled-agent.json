@@ -5166,6 +5166,18 @@
           "vni"
         ]
       },
+      "VmmFailureReason": {
+        "description": "An optional description of why a VMM was marked as [`VmmState::Failed`].",
+        "oneOf": [
+          {
+            "description": "The sled this VMM was on was expunged.",
+            "type": "string",
+            "enum": [
+              "sled_expunged"
+            ]
+          }
+        ]
+      },
       "VmmIssueDiskSnapshotRequestBody": {
         "type": "object",
         "properties": {
@@ -5226,6 +5238,15 @@
         "description": "The dynamic runtime properties of an individual VMM process.",
         "type": "object",
         "properties": {
+          "failure_reason": {
+            "nullable": true,
+            "description": "If this VMM is in the `Failed` state, an optional reason describing why it has been marked as `Failed`.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/VmmFailureReason"
+              }
+            ]
+          },
           "gen": {
             "description": "The generation number for this VMM's state.",
             "allOf": [
