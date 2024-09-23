@@ -1167,6 +1167,7 @@ impl DataStore {
             ncabooses,
             nrot_pages,
             nsled_agents,
+            ndatasets,
             nphysical_disks,
             nsled_agent_zones,
             nzones,
@@ -1235,6 +1236,17 @@ impl DataStore {
                     {
                         use db::schema::inv_sled_agent::dsl;
                         diesel::delete(dsl::inv_sled_agent.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
+
+                // Remove rows for datasets
+                let ndatasets =
+                    {
+                        use db::schema::inv_dataset::dsl;
+                        diesel::delete(dsl::inv_dataset.filter(
                             dsl::inv_collection_id.eq(db_collection_id),
                         ))
                         .execute_async(&conn)
@@ -1311,6 +1323,7 @@ impl DataStore {
                     ncabooses,
                     nrot_pages,
                     nsled_agents,
+                    ndatasets,
                     nphysical_disks,
                     nsled_agent_zones,
                     nzones,
@@ -1335,6 +1348,7 @@ impl DataStore {
             "ncabooses" => ncabooses,
             "nrot_pages" => nrot_pages,
             "nsled_agents" => nsled_agents,
+            "ndatasets" => ndatasets,
             "nphysical_disks" => nphysical_disks,
             "nsled_agent_zones" => nsled_agent_zones,
             "nzones" => nzones,
@@ -2726,6 +2740,12 @@ mod test {
                     .unwrap();
             assert_eq!(0, count);
             let count = schema::inv_sled_agent::dsl::inv_sled_agent
+                .select(diesel::dsl::count_star())
+                .first_async::<i64>(&conn)
+                .await
+                .unwrap();
+            assert_eq!(0, count);
+            let count = schema::inv_physical_disk::dsl::inv_dataset
                 .select(diesel::dsl::count_star())
                 .first_async::<i64>(&conn)
                 .await
