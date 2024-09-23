@@ -11,6 +11,7 @@ use omicron_ls_apis::{
     AllApiMetadata, ApiDependencyFilter, LoadArgs, ServerComponentName,
     SystemApis,
 };
+use parse_display::{Display, FromStr};
 
 #[derive(Parser)]
 #[command(
@@ -52,9 +53,9 @@ pub struct ShowDepsArgs {
 
 #[derive(Args)]
 pub struct DotArgs {
-    /// Show output that can be fed to graphviz (dot)
+    /// What kind of output format to use
     #[arg(long)]
-    dot: bool,
+    output_format: OutputFormat,
     /// Show the Rust dependency path resulting in the API dependency
     #[arg(long)]
     show_deps: bool,
@@ -62,6 +63,14 @@ pub struct DotArgs {
     /// Show only API dependencies matching the filter
     #[arg(long, default_value_t)]
     filter: ApiDependencyFilter,
+}
+
+#[derive(Clone, Copy, Debug, Default, Display, FromStr)]
+#[display(style = "kebab-case")]
+pub enum OutputFormat {
+    Dot,
+    #[default]
+    Text,
 }
 
 fn main() -> Result<()> {
@@ -144,24 +153,25 @@ fn run_apis(apis: &SystemApis, args: ShowDepsArgs) -> Result<()> {
 }
 
 fn run_deployment_units(apis: &SystemApis, args: DotArgs) -> Result<()> {
-    if args.dot {
-        println!("{}", apis.dot_by_unit(args.filter)?);
-    } else {
-        let metadata = apis.api_metadata();
-        for unit in apis.deployment_units() {
-            let server_components = apis.deployment_unit_servers(unit)?;
-            println!("{}", unit);
-            print_server_components(
-                apis,
-                metadata,
-                server_components,
-                "    ",
-                args.show_deps,
-                args.filter,
-            )?;
-            println!("");
+    match &args.output_format {
+        OutputFormat::Dot => println!("{}", apis.dot_by_unit(args.filter)?),
+        OutputFormat::Text => {
+            let metadata = apis.api_metadata();
+            for unit in apis.deployment_units() {
+                let server_components = apis.deployment_unit_servers(unit)?;
+                println!("{}", unit);
+                print_server_components(
+                    apis,
+                    metadata,
+                    server_components,
+                    "    ",
+                    args.show_deps,
+                    args.filter,
+                )?;
+                println!("");
+            }
         }
-    }
+    };
 
     Ok(())
 }
@@ -203,19 +213,22 @@ fn print_server_components<'a>(
 }
 
 fn run_servers(apis: &SystemApis, args: DotArgs) -> Result<()> {
-    if args.dot {
-        println!("{}", apis.dot_by_server_component(args.filter)?)
-    } else {
-        let metadata = apis.api_metadata();
-        print_server_components(
-            apis,
-            metadata,
-            metadata.server_components(),
-            "",
-            args.show_deps,
-            args.filter,
-        )?;
-    }
+    match &args.output_format {
+        OutputFormat::Dot => {
+            println!("{}", apis.dot_by_server_component(args.filter)?)
+        }
+        OutputFormat::Text => {
+            let metadata = apis.api_metadata();
+            print_server_components(
+                apis,
+                metadata,
+                metadata.server_components(),
+                "",
+                args.show_deps,
+                args.filter,
+            )?;
+        }
+    };
     Ok(())
 }
 
