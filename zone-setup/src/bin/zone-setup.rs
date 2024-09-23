@@ -475,14 +475,6 @@ maxslewrate 2708.333
             .expect("write to String is infallible");
         }
     } else {
-        // TODO-cleanup: Remove specific boundary NTP servers after R10 is cut;
-        // once all racks are setting up the boundary NTP pool we can drop
-        // individual server lines:
-        // https://github.com/oxidecomputer/omicron/issues/6261
-        for s in servers {
-            writeln!(&mut new_config, "server {s} iburst minpoll 0 maxpoll 4")
-                .expect("write to String is infallible");
-        }
         writeln!(
             &mut new_config,
             "pool {boundary_pool} iburst maxdelay 0.1 maxsources 16",

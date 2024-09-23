@@ -2175,11 +2175,6 @@ impl ServiceManager {
                         format!("{BOUNDARY_NTP_DNS_NAME}.{DNS_ZONE}"),
                     );
 
-                for s in ntp_servers {
-                    chrony_config =
-                        chrony_config.add_property("server", "astring", s);
-                }
-
                 let dns_client_service;
                 if dns_servers.is_empty() {
                     dns_client_service = disabled_dns_client_service;
