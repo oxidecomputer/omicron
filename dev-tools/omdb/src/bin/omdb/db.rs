@@ -4777,7 +4777,14 @@ fn inv_collection_print_sleds(collection: &Collection) {
                 reservation,
                 compression,
             } = dataset;
-            println!("      {name} - id: {id:?}, compression: {compression}");
+
+            let id = if let Some(id) = id {
+                id.to_string()
+            } else {
+                String::from("none")
+            };
+
+            println!("      {name} - id: {id}, compression: {compression}");
             println!("        available: {available}, used: {used}");
             println!("        reservation: {reservation:?}, quota: {quota:?}");
         }
