@@ -811,7 +811,7 @@ declare_saga_actions! {
     // Unlike other actions, this step is optional and allowed to fail without
     // unwinding the saga. We attempt to start a successor saga only as an
     // optimization to improve the latency with which instance states are
-    // reconciled with VMM and migration states. Ig another update saga is
+    // reconciled with VMM and migration states. If another update saga is
     // required, it will always be started eventually by other mechanisms
     // regardless of whether this action succeeds, and a failure here does not
     // invalidate any of the other work performed by this saga.
