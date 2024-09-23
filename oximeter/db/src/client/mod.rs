@@ -1231,6 +1231,7 @@ mod tests {
     use bytes::Bytes;
     use chrono::Utc;
     use dropshot::test_util::LogContext;
+    use futures::Future;
     use omicron_test_utils::dev::clickhouse::ClickHouseDeployment;
     use omicron_test_utils::dev::test_setup_log;
     use oximeter::histogram::Histogram;
@@ -1242,6 +1243,7 @@ mod tests {
     use oximeter::Target;
     use std::net::Ipv6Addr;
     use std::path::PathBuf;
+    use std::pin::Pin;
     use std::time::Duration;
     use tempfile::TempDir;
     use uuid::Uuid;
@@ -1276,45 +1278,59 @@ mod tests {
         }
     }
 
-    // TODO-cleanup: We can parallelize these again, once we merge a fix for
-    // https://github.com/oxidecomputer/omicron/issues/6592.
-    #[tokio::test]
-    async fn test_single_node() {
-        let logctx = test_setup_log("test_single_node");
-        let mut db = ClickHouseDeployment::new_single_node(&logctx)
-            .await
-            .expect("Failed to start ClickHouse");
-        bad_db_connection_test().await.unwrap();
-        is_oximeter_cluster_test(&db).await.unwrap();
-        insert_samples_test(&db).await.unwrap();
-        schema_mismatch_test(&db).await.unwrap();
-        schema_updated_test(&db).await.unwrap();
-        client_select_timeseries_one_test(&db).await.unwrap();
-        field_record_count_test(&db).await.unwrap();
-        unquoted_64bit_integers_test(&db).await.unwrap();
-        differentiate_by_timeseries_name_test(&db).await.unwrap();
-        select_timeseries_with_select_one_test(&db).await.unwrap();
-        select_timeseries_with_select_one_field_with_multiple_values_test(&db)
-            .await
-            .unwrap();
-        select_timeseries_with_select_multiple_fields_with_multiple_values_test(&db).await.unwrap();
-        select_timeseries_with_all_test(&db).await.unwrap();
-        select_timeseries_with_start_time_test(&db).await.unwrap();
-        select_timeseries_with_limit_test(&db).await.unwrap();
-        select_timeseries_with_order_test(&db).await.unwrap();
-        get_schema_no_new_values_test(&db).await.unwrap();
-        timeseries_schema_list_test(&db).await.unwrap();
-        list_timeseries_test(&db).await.unwrap();
-        database_version_update_idempotent_test(&db).await.unwrap();
-        database_version_will_not_downgrade_test(&db).await.unwrap();
-        database_version_wipes_old_version_test(&db).await.unwrap();
-        update_schema_cache_on_new_sample_test(&db).await.unwrap();
-        select_all_datum_types_test(&db).await.unwrap();
-        new_schema_removed_when_not_inserted_test(&db).await.unwrap();
-        recall_of_all_fields_test(&db).await.unwrap();
-        db.cleanup().await.expect("Failed to cleanup ClickHouse server");
-        logctx.cleanup_successful();
-    }
+    // NOTE: Please read this when adding new tests here.
+    //
+    // The tests here are written in a sort of opaque way that deserves some
+    // explanation. The main reason for this is that we want to run some of the
+    // tests both against a single-node and replicated ClickHouse cluster.
+    //
+    // The set up for those two is very different, and importantly, we don't
+    // want to pay the cost of completely restarting all the ClickHouse
+    // processes for a replicated test. Instead, we'd like to just wipe the
+    // database in between them.
+    //
+    // So we try to share the bulk of the test itself in an implementation
+    // function. That should take a reference to the database and a client, and
+    // run whatever it needs to do. It can assume that the database is
+    // _initialized_ for the deployment type, but that it contains no data. It
+    // can do whatever it wants to with the database in the meantime -- no other
+    // tests will see those effects.
+    //
+    // For example, suppose we wanted to run a test called `test_do_the_thing`.
+    // We would write a single-node version like this:
+    //
+    // ```rust
+    // #[tokio::test]
+    // async fn test_to_the_thing() {
+    //    let logctx = test_setup_log("test_do_the_thing");
+    //    let mut db =
+    //        ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
+    //    let client = Client::new(db.http_address().into(), &logctx.log);
+    //    init_db(&db, &client).await;
+    //    test_do_the_thing_impl(&db, client).await;
+    //    db.cleanup().await.unwrap();
+    //    logctx.cleanup_successful();
+    // }
+    // ```
+    //
+    // That calls `test_do_the_thing_impl()` to actually run the guts of the
+    // test. That function can then be passed to the replicated tests, albeit
+    // with some ceremony. In `test_replicated()`, which runs all the tests
+    // against a replicated cluster, we put `test_do_the_thing_impl` into a list
+    // of boxed closures, called `futures`, like this:
+    //
+    // ```
+    //    // ... other tests above,
+    //    (
+    //        "test_do_the_thing",
+    //        Box::new(move |db, client| Box::pin(test_do_the_thing_impl(db, client))),
+    //    ),
+    // ```
+    //
+    // That specifies the test name, for naming log files, and then packages up
+    // the closure so all of them can be stored and executed.
+    //
+    // See `test_replicated()` for details and examples.
 
     async fn create_cluster(logctx: &LogContext) -> ClickHouseDeployment {
         let cur_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -1327,85 +1343,245 @@ mod tests {
             .expect("Failed to initialise ClickHouse Cluster")
     }
 
+    // A horrendous type signature used to store all replicated tests in an
+    // array.
+    //
+    // This says:
+    //
+    // - A boxed function trait object...
+    // - that accepts a deployment and client ...
+    // - and returns a boxed future ...
+    // - that resolves to ().
+    type AsyncTest<'a> = Box<
+        dyn FnMut(
+                &'a ClickHouseDeployment,
+                Client,
+            ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>>
+            + Send
+            + Sync
+            + 'a,
+    >;
+
     #[tokio::test]
     async fn test_replicated() {
         let logctx = test_setup_log("test_replicated");
         let mut cluster = create_cluster(&logctx).await;
-        bad_db_connection_test().await.unwrap();
-        is_oximeter_cluster_test(&cluster).await.unwrap();
-        insert_samples_test(&cluster).await.unwrap();
-        schema_mismatch_test(&cluster).await.unwrap();
-        schema_updated_test(&cluster).await.unwrap();
-        client_select_timeseries_one_test(&cluster).await.unwrap();
-        field_record_count_test(&cluster).await.unwrap();
-        unquoted_64bit_integers_test(&cluster).await.unwrap();
-        differentiate_by_timeseries_name_test(&cluster).await.unwrap();
-        select_timeseries_with_select_one_test(&cluster).await.unwrap();
-        select_timeseries_with_select_one_field_with_multiple_values_test(
-            &cluster,
-        )
-        .await
-        .unwrap();
-        select_timeseries_with_select_multiple_fields_with_multiple_values_test(
-            &cluster
-        )
-        .await
-        .unwrap();
-        select_timeseries_with_all_test(&cluster).await.unwrap();
-        select_timeseries_with_start_time_test(&cluster).await.unwrap();
-        select_timeseries_with_limit_test(&cluster).await.unwrap();
-        select_timeseries_with_order_test(&cluster).await.unwrap();
-        get_schema_no_new_values_test(&cluster).await.unwrap();
-        timeseries_schema_list_test(&cluster).await.unwrap();
-        list_timeseries_test(&cluster).await.unwrap();
-        database_version_update_idempotent_test(&cluster).await.unwrap();
-        database_version_will_not_downgrade_test(&cluster).await.unwrap();
-        database_version_wipes_old_version_test(&cluster).await.unwrap();
-        update_schema_cache_on_new_sample_test(&cluster).await.unwrap();
-        select_all_datum_types_test(&cluster).await.unwrap();
-        new_schema_removed_when_not_inserted_test(&cluster).await.unwrap();
-        recall_of_all_fields_test(&cluster).await.unwrap();
+        let address = cluster.http_address().into();
+        let client = Client::new(address, &logctx.log);
+        let futures: Vec<(&'static str, AsyncTest)> = vec![
+            (
+                "test_is_oximeter_cluster_replicated",
+                Box::new(move |db, client| {
+                    Box::pin(test_is_oximeter_cluster_impl(db, client))
+                }),
+            ),
+            (
+                "test_insert_samples_replicated",
+                Box::new(move |db, client| {
+                    Box::pin(test_insert_samples_impl(db, client))
+                }),
+            ),
+            (
+                "test_schema_mismatch_replicated",
+                Box::new(move |db, client| {
+                    Box::pin(test_schema_mismatch_impl(db, client))
+                }),
+            ),
+            (
+                "test_schema_updated_replicated",
+                Box::new(move |db, client| {
+                    Box::pin(test_schema_updated_impl(db, client))
+                }),
+            ),
+            (
+                "test_client_select_timeseries_one_replicated",
+                Box::new(move |db, client| {
+                    Box::pin(test_client_select_timeseries_one_impl(db, client))
+                }),
+            ),
+            (
+                "test_field_record_count_replicated",
+                Box::new(move |db, client|{
+                    Box::pin(test_field_record_count_impl(db, client))
+                }),
+            ),
+            (
+                "test_differentiate_by_timeseries_name_replicated",
+                Box::new(move |db, client| {
+                    Box::pin(test_differentiate_by_timeseries_name_impl(db, client))
+                }),
+            ),
+            (
+                "test_select_timeseries_with_select_one_replicated",
+                Box::new(move |db, client|{
+                    Box::pin(test_select_timeseries_with_select_one_impl(db, client))
+                }),
+            ),
+            (
+                "test_select_timeseries_with_select_one_field_with_multiple_values_replicated",
+                Box::new(move |db, client| {
+                    Box::pin(test_select_timeseries_with_select_one_field_with_multiple_values_impl(db, client))
+                }),
+            ),
+            (
+                "test_select_timeseries_with_select_multiple_fields_with_multiple_values_replicated",
+                Box::new(move |db, client| {
+                    Box::pin(test_select_timeseries_with_select_multiple_fields_with_multiple_values_impl(db, client))
+                }),
+            ),
+            (
+                "test_select_timeseries_with_all_replicated",
+                Box::new(move |db, client|{
+                    Box::pin(test_select_timeseries_with_all_impl(db, client))
+                }),
+            ),
+            (
+                "test_select_timeseries_with_start_time_replicated",
+                Box::new(move |db, client|{
+                    Box::pin(test_select_timeseries_with_start_time_impl(db, client))
+                }),
+            ),
+            (
+                "test_select_timeseries_with_limit_replicated",
+                Box::new(move |db, client|{
+                    Box::pin(test_select_timeseries_with_limit_impl(db, client))
+                }),
+            ),
+            (
+                "test_select_timeseries_with_order_replicated",
+                Box::new(move |db, client|{
+                    Box::pin(test_select_timeseries_with_order_impl(db, client))
+                }),
+            ),
+            (
+                "test_get_schema_no_new_values_replicated",
+                Box::new(move |db, client|{
+                    Box::pin(test_get_schema_no_new_values_impl(db, client))
+                }),
+            ),
+            (
+                "test_timeseries_schema_list_replicated",
+                Box::new(move |db, client|{
+                    Box::pin(test_timeseries_schema_list_impl(db, client))
+                }),
+            ),
+            (
+                "test_list_timeseries_replicated",
+                Box::new(move |db, client|{
+                    Box::pin(test_list_timeseries_impl(db, client))
+                }),
+            ),
+            (
+                "test_list_timeseries_replicated",
+                Box::new(move |db, client| {
+                    Box::pin(test_list_timeseries_impl(db, client))
+                }),
+            ),
+            (
+                "test_database_version_update_idempotent_replicated",
+                Box::new(move |db, client| {
+                    Box::pin(test_database_version_update_is_idempotent_impl(db, client))
+                }),
+            ),
+            (
+                "test_database_version_will_not_downgrade_replicated",
+                Box::new(move |db, client| {
+                    Box::pin(test_database_version_will_not_downgrade_impl(db, client))
+                }),
+            ),
+            (
+                "test_database_version_wipes_old_version_replicated",
+                Box::new(move |db, client| {
+                    Box::pin(test_database_version_wipes_old_version_impl(db, client))
+                }),
+            ),
+            (
+                "test_update_schema_cache_on_new_sample_replicated",
+                Box::new(move |db, client| {
+                    Box::pin(test_update_schema_cache_on_new_sample_impl(db, client))
+                }),
+            ),
+            (
+                "test_select_all_datum_types_replicated",
+                Box::new(move |db, client| {
+                    Box::pin(test_select_all_datum_types_impl(db, client))
+                }),
+            ),
+            (
+                "test_new_schema_removed_when_not_inserted_replicated",
+                Box::new(move |db, client| {
+                    Box::pin(test_new_schema_removed_when_not_inserted_impl(db, client))
+                }),
+            ),
+            (
+                "test_recall_of_all_fields_replicated",
+                Box::new(move |db, client| {
+                    Box::pin(test_recall_of_all_fields_impl(db, client))
+                }),
+            ),
+        ];
+        for (test_name, mut test) in futures {
+            let testctx = test_setup_log(test_name);
+            init_db(&cluster, &client).await;
+            test(&cluster, Client::new(address, &logctx.log)).await;
+            wipe_db(&cluster, &client).await;
+            testctx.cleanup_successful();
+        }
         cluster.cleanup().await.expect("Failed to cleanup ClickHouse cluster");
         logctx.cleanup_successful();
     }
 
-    async fn bad_db_connection_test() -> Result<(), Error> {
+    #[tokio::test]
+    async fn bad_db_connection_test() {
         let logctx = test_setup_log("test_bad_db_connection");
         let log = &logctx.log;
-
         let client = Client::new("127.0.0.1:443".parse().unwrap(), &log);
         assert!(matches!(
             client.ping().await,
             Err(Error::DatabaseUnavailable(_))
         ));
-
         logctx.cleanup_successful();
-        Ok(())
     }
 
-    async fn is_oximeter_cluster_test(
-        db: &ClickHouseDeployment,
-    ) -> Result<(), Error> {
+    #[tokio::test]
+    async fn test_is_oximeter_cluster() {
         let logctx = test_setup_log("test_is_oximeter_cluster");
-        let log = &logctx.log;
-        let client = Client::new(db.http_address().into(), &log);
+        let mut db =
+            ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
+        let client = Client::new(db.http_address().into(), &logctx.log);
+        init_db(&db, &client).await;
+        test_is_oximeter_cluster_impl(&db, client).await;
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    async fn test_is_oximeter_cluster_impl(
+        db: &ClickHouseDeployment,
+        client: Client,
+    ) {
         if db.is_cluster() {
             assert!(client.is_oximeter_cluster().await.unwrap());
         } else {
             assert!(!client.is_oximeter_cluster().await.unwrap());
         }
-        wipe_db(db, &client).await;
-        logctx.cleanup_successful();
-        Ok(())
     }
 
-    async fn insert_samples_test(
-        db: &ClickHouseDeployment,
-    ) -> Result<(), Error> {
+    #[tokio::test]
+    async fn test_insert_samples() {
         let logctx = test_setup_log("test_insert_samples");
-        let log = &logctx.log;
-        let client = Client::new(db.http_address().into(), &log);
-        init_db(db, &client).await;
+        let mut db =
+            ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
+        let client = Client::new(db.http_address().into(), &logctx.log);
+        init_db(&db, &client).await;
+        test_insert_samples_impl(&db, client).await;
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    async fn test_insert_samples_impl(
+        _: &ClickHouseDeployment,
+        client: Client,
+    ) {
         let samples = {
             let mut s = Vec::with_capacity(8);
             for _ in 0..s.capacity() {
@@ -1413,10 +1589,10 @@ mod tests {
             }
             s
         };
-        client.insert_samples(&samples).await?;
-        wipe_db(db, &client).await;
-        logctx.cleanup_successful();
-        Ok(())
+        client
+            .insert_samples(&samples)
+            .await
+            .expect("Should be able to insert samples");
     }
 
     // This is a target with the same name as that in `lib.rs` used for other tests, but with a
@@ -1439,13 +1615,22 @@ mod tests {
         }
     }
 
-    async fn schema_mismatch_test(
-        db: &ClickHouseDeployment,
-    ) -> Result<(), Error> {
+    #[tokio::test]
+    async fn test_schema_mismatch() {
         let logctx = test_setup_log("test_schema_mismatch");
-        let log = &logctx.log;
-        let client = Client::new(db.http_address().into(), &log);
+        let mut db =
+            ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
+        let client = Client::new(db.http_address().into(), &logctx.log);
         init_db(&db, &client).await;
+        test_schema_mismatch_impl(&db, client).await;
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    async fn test_schema_mismatch_impl(
+        _: &ClickHouseDeployment,
+        client: Client,
+    ) {
         let sample = oximeter_test_utils::make_sample();
         client.insert_samples(&[sample]).await.unwrap();
         let bad_name = name_mismatch::TestTarget {
@@ -1461,19 +1646,24 @@ mod tests {
         let sample = Sample::new(&bad_name, &metric).unwrap();
         let result = client.verify_or_cache_sample_schema(&sample).await;
         assert!(matches!(result, Err(Error::SchemaMismatch { .. })));
-        wipe_db(&db, &client).await;
-        logctx.cleanup_successful();
-        Ok(())
     }
 
-    async fn schema_updated_test(
-        db: &ClickHouseDeployment,
-    ) -> Result<(), Error> {
-        let logctx = test_setup_log("test_schema_updated");
-        let log = &logctx.log;
-
-        let client = Client::new(db.http_address().into(), &log);
+    #[tokio::test]
+    async fn test_schema_update() {
+        let logctx = test_setup_log("test_schema_update");
+        let mut db =
+            ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
+        let client = Client::new(db.http_address().into(), &logctx.log);
         init_db(&db, &client).await;
+        test_schema_updated_impl(&db, client).await;
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    async fn test_schema_updated_impl(
+        _: &ClickHouseDeployment,
+        client: Client,
+    ) {
         let sample = oximeter_test_utils::make_sample();
 
         // Verify that this sample is considered new, i.e., we return rows to update the timeseries
@@ -1535,21 +1725,26 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(schema.len(), 1);
         assert_eq!(expected_schema, schema[0]);
-        wipe_db(&db, &client).await;
-        logctx.cleanup_successful();
-        Ok(())
     }
 
-    async fn client_select_timeseries_one_test(
-        db: &ClickHouseDeployment,
-    ) -> Result<(), Error> {
+    #[tokio::test]
+    async fn test_client_select_timeseries_one() {
         let logctx = test_setup_log("test_client_select_timeseries_one");
-        let log = &logctx.log;
-
-        let client = Client::new(db.http_address().into(), &log);
+        let mut db =
+            ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
+        let client = Client::new(db.http_address().into(), &logctx.log);
         init_db(&db, &client).await;
+        test_client_select_timeseries_one_impl(&db, client).await;
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    async fn test_client_select_timeseries_one_impl(
+        _: &ClickHouseDeployment,
+        client: Client,
+    ) {
         let samples = oximeter_test_utils::generate_test_samples(2, 2, 2, 2);
-        client.insert_samples(&samples).await?;
+        client.insert_samples(&samples).await.unwrap();
 
         let sample = samples.first().unwrap();
         let target_fields = sample.target_fields().collect::<Vec<_>>();
@@ -1618,26 +1813,30 @@ mod tests {
             .fields
             .iter()
             .all(|field| field_cmp(field, sample.metric_fields()));
-
-        wipe_db(&db, &client).await;
-        logctx.cleanup_successful();
-        Ok(())
     }
 
-    async fn field_record_count_test(
-        db: &ClickHouseDeployment,
-    ) -> Result<(), Error> {
-        let logctx = test_setup_log("test_field_record_count");
-        let log = &logctx.log;
+    #[tokio::test]
+    async fn test_field_record_count() {
+        let logctx = test_setup_log("test_field_record_cont");
+        let mut db =
+            ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
+        let client = Client::new(db.http_address().into(), &logctx.log);
+        init_db(&db, &client).await;
+        test_field_record_count_impl(&db, client).await;
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
 
+    async fn test_field_record_count_impl(
+        _: &ClickHouseDeployment,
+        client: Client,
+    ) {
         // This test verifies that the number of records in the field tables is as expected.
         //
         // Because of the schema change, inserting field records per field per unique timeseries,
         // we'd like to exercise the logic of ClickHouse's replacing merge tree engine.
-        let client = Client::new(db.http_address().into(), &log);
-        init_db(&db, &client).await;
         let samples = oximeter_test_utils::generate_test_samples(2, 2, 2, 2);
-        client.insert_samples(&samples).await?;
+        client.insert_samples(&samples).await.unwrap();
 
         async fn assert_table_count(
             client: &Client,
@@ -1672,10 +1871,18 @@ mod tests {
             samples.len(),
         )
         .await;
+    }
 
-        wipe_db(&db, &client).await;
+    #[tokio::test]
+    async fn test_unquoted_64bit_integers() {
+        let logctx = test_setup_log("test_unquoted_64bit_integers");
+        let mut db =
+            ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
+        let client = Client::new(db.http_address().into(), &logctx.log);
+        init_db(&db, &client).await;
+        test_unquoted_64bit_integers_impl(&db, client).await;
+        db.cleanup().await.unwrap();
         logctx.cleanup_successful();
-        Ok(())
     }
 
     // Regression test verifying that integers are returned in the expected format from the
@@ -1684,15 +1891,11 @@ mod tests {
     // By default, ClickHouse _quotes_ 64-bit integers, which is apparently to support JavaScript
     // implementations of JSON. See https://github.com/ClickHouse/ClickHouse/issues/2375 for
     // details. This test verifies that we get back _unquoted_ integers from the database.
-    async fn unquoted_64bit_integers_test(
-        db: &ClickHouseDeployment,
-    ) -> Result<(), Error> {
+    async fn test_unquoted_64bit_integers_impl(
+        _: &ClickHouseDeployment,
+        client: Client,
+    ) {
         use serde_json::Value;
-        let logctx = test_setup_log("test_unquoted_64bit_integers");
-        let log = &logctx.log;
-
-        let client = Client::new(db.http_address().into(), &log);
-        init_db(&db, &client).await;
         let output = client
             .execute_with_body(
                 "SELECT toUInt64(1) AS foo FORMAT JSONEachRow;".to_string(),
@@ -1702,18 +1905,24 @@ mod tests {
             .1;
         let json: Value = serde_json::from_str(&output).unwrap();
         assert_eq!(json["foo"], Value::Number(1u64.into()));
-
-        wipe_db(&db, &client).await;
-        logctx.cleanup_successful();
-        Ok(())
     }
 
-    async fn differentiate_by_timeseries_name_test(
-        db: &ClickHouseDeployment,
-    ) -> Result<(), Error> {
+    #[tokio::test]
+    async fn test_differentiate_by_timeseries_name() {
         let logctx = test_setup_log("test_differentiate_by_timeseries_name");
-        let log = &logctx.log;
+        let mut db =
+            ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
+        let client = Client::new(db.http_address().into(), &logctx.log);
+        init_db(&db, &client).await;
+        test_differentiate_by_timeseries_name_impl(&db, client).await;
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
 
+    async fn test_differentiate_by_timeseries_name_impl(
+        _: &ClickHouseDeployment,
+        client: Client,
+    ) {
         #[derive(Debug, Default, PartialEq, oximeter::Target)]
         struct MyTarget {
             id: i64,
@@ -1731,9 +1940,6 @@ mod tests {
         struct SecondMetric {
             datum: i64,
         }
-
-        let client = Client::new(db.http_address().into(), &log);
-        init_db(&db, &client).await;
 
         let target = MyTarget::default();
         let first_metric = FirstMetric::default();
@@ -1769,22 +1975,25 @@ mod tests {
         );
         assert_eq!(timeseries.target.name, "my_target");
         assert_eq!(timeseries.metric.name, "second_metric");
-
-        wipe_db(&db, &client).await;
-        logctx.cleanup_successful();
-        Ok(())
     }
 
-    async fn select_timeseries_with_select_one_test(
-        db: &ClickHouseDeployment,
-    ) -> Result<(), Error> {
+    #[tokio::test]
+    async fn select_timeseries_with_select_one() {
         let logctx = test_setup_log("test_select_timeseries_with_select_one");
-        let log = &logctx.log;
-
-        let (target, metrics, samples) = setup_select_test();
-
-        let client = Client::new(db.http_address().into(), &log);
+        let mut db =
+            ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
+        let client = Client::new(db.http_address().into(), &logctx.log);
         init_db(&db, &client).await;
+        test_select_timeseries_with_select_one_impl(&db, client).await;
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    async fn test_select_timeseries_with_select_one_impl(
+        _: &ClickHouseDeployment,
+        client: Client,
+    ) {
+        let (target, metrics, samples) = setup_select_test();
         client
             .insert_samples(&samples)
             .await
@@ -1828,24 +2037,31 @@ mod tests {
         verify_measurements(&timeseries.measurements, &samples[..2]);
         verify_target(&timeseries.target, &target);
         verify_metric(&timeseries.metric, metrics.get(0).unwrap());
-
-        wipe_db(&db, &client).await;
-        logctx.cleanup_successful();
-        Ok(())
     }
 
-    async fn select_timeseries_with_select_one_field_with_multiple_values_test(
-        db: &ClickHouseDeployment,
-    ) -> Result<(), Error> {
+    #[tokio::test]
+    async fn test_select_timeseries_with_select_one_field_with_multiple_values()
+    {
         let logctx = test_setup_log(
             "test_select_timeseries_with_select_one_field_with_multiple_values",
         );
-        let log = &logctx.log;
-
-        let (target, metrics, samples) = setup_select_test();
-
-        let client = Client::new(db.http_address().into(), &log);
+        let mut db =
+            ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
+        let client = Client::new(db.http_address().into(), &logctx.log);
         init_db(&db, &client).await;
+        test_select_timeseries_with_select_one_field_with_multiple_values_impl(
+            &db, client,
+        )
+        .await;
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    async fn test_select_timeseries_with_select_one_field_with_multiple_values_impl(
+        _: &ClickHouseDeployment,
+        client: Client,
+    ) {
+        let (target, metrics, samples) = setup_select_test();
         client
             .insert_samples(&samples)
             .await
@@ -1895,22 +2111,27 @@ mod tests {
         for (ts, metric) in timeseries.iter().zip(metrics[1..3].iter()) {
             verify_metric(&ts.metric, metric);
         }
-
-        wipe_db(&db, &client).await;
-        logctx.cleanup_successful();
-        Ok(())
     }
 
-    async fn select_timeseries_with_select_multiple_fields_with_multiple_values_test(
-        db: &ClickHouseDeployment,
-    ) -> Result<(), Error> {
-        let logctx = test_setup_log("test_select_timeseries_with_select_multiple_fields_with_multiple_values");
-        let log = &logctx.log;
-
-        let (target, metrics, samples) = setup_select_test();
-
-        let client = Client::new(db.http_address().into(), &log);
+    #[tokio::test]
+    async fn test_select_timeseries_with_select_multiple_fields_with_multiple_values(
+    ) {
+        let logctx =
+            test_setup_log("test_select_timeseries_with_select_multiple_fields_with_multiple_values");
+        let mut db =
+            ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
+        let client = Client::new(db.http_address().into(), &logctx.log);
         init_db(&db, &client).await;
+        test_select_timeseries_with_select_multiple_fields_with_multiple_values_impl(&db, client).await;
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    async fn test_select_timeseries_with_select_multiple_fields_with_multiple_values_impl(
+        _: &ClickHouseDeployment,
+        client: Client,
+    ) {
+        let (target, metrics, samples) = setup_select_test();
         client
             .insert_samples(&samples)
             .await
@@ -1968,22 +2189,25 @@ mod tests {
                 verify_metric(&ts.metric, metric);
             }
         }
-
-        wipe_db(&db, &client).await;
-        logctx.cleanup_successful();
-        Ok(())
     }
 
-    async fn select_timeseries_with_all_test(
-        db: &ClickHouseDeployment,
-    ) -> Result<(), Error> {
+    #[tokio::test]
+    async fn test_select_timeseries_with_all() {
         let logctx = test_setup_log("test_select_timeseries_with_all");
-        let log = &logctx.log;
-
-        let (target, metrics, samples) = setup_select_test();
-
-        let client = Client::new(db.http_address().into(), &log);
+        let mut db =
+            ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
+        let client = Client::new(db.http_address().into(), &logctx.log);
         init_db(&db, &client).await;
+        test_select_timeseries_with_all_impl(&db, client).await;
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    async fn test_select_timeseries_with_all_impl(
+        _: &ClickHouseDeployment,
+        client: Client,
+    ) {
+        let (target, metrics, samples) = setup_select_test();
         client
             .insert_samples(&samples)
             .await
@@ -2026,22 +2250,25 @@ mod tests {
             verify_target(&ts.target, &target);
             verify_metric(&ts.metric, metrics.get(i).unwrap());
         }
-
-        wipe_db(&db, &client).await;
-        logctx.cleanup_successful();
-        Ok(())
     }
 
-    async fn select_timeseries_with_start_time_test(
-        db: &ClickHouseDeployment,
-    ) -> Result<(), Error> {
+    #[tokio::test]
+    async fn test_select_timeseries_with_start_time() {
         let logctx = test_setup_log("test_select_timeseries_with_start_time");
-        let log = &logctx.log;
-
-        let (_, metrics, samples) = setup_select_test();
-
-        let client = Client::new(db.http_address().into(), &log);
+        let mut db =
+            ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
+        let client = Client::new(db.http_address().into(), &logctx.log);
         init_db(&db, &client).await;
+        test_select_timeseries_with_start_time_impl(&db, client).await;
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    async fn test_select_timeseries_with_start_time_impl(
+        _: &ClickHouseDeployment,
+        client: Client,
+    ) {
+        let (_, metrics, samples) = setup_select_test();
         client
             .insert_samples(&samples)
             .await
@@ -2074,21 +2301,25 @@ mod tests {
                 assert!(meas.timestamp() > start_time);
             }
         }
-
-        wipe_db(&db, &client).await;
-        logctx.cleanup_successful();
-        Ok(())
     }
 
-    async fn select_timeseries_with_limit_test(
-        db: &ClickHouseDeployment,
-    ) -> Result<(), Error> {
+    #[tokio::test]
+    async fn test_select_timeseries_with_limit() {
         let logctx = test_setup_log("test_select_timeseries_with_limit");
-        let log = &logctx.log;
-
-        let (_, _, samples) = setup_select_test();
-        let client = Client::new(db.http_address().into(), &log);
+        let mut db =
+            ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
+        let client = Client::new(db.http_address().into(), &logctx.log);
         init_db(&db, &client).await;
+        test_select_timeseries_with_limit_impl(&db, client).await;
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    async fn test_select_timeseries_with_limit_impl(
+        _: &ClickHouseDeployment,
+        client: Client,
+    ) {
+        let (_, _, samples) = setup_select_test();
         client
             .insert_samples(&samples)
             .await
@@ -2189,21 +2420,25 @@ mod tests {
             all_measurements[all_measurements.len() / 2..],
             timeseries.measurements
         );
-
-        wipe_db(&db, &client).await;
-        logctx.cleanup_successful();
-        Ok(())
     }
 
-    async fn select_timeseries_with_order_test(
-        db: &ClickHouseDeployment,
-    ) -> Result<(), Error> {
+    #[tokio::test]
+    async fn test_select_timeseries_with_order() {
         let logctx = test_setup_log("test_select_timeseries_with_order");
-        let log = &logctx.log;
-
-        let (_, _, samples) = setup_select_test();
-        let client = Client::new(db.http_address().into(), &log);
+        let mut db =
+            ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
+        let client = Client::new(db.http_address().into(), &logctx.log);
         init_db(&db, &client).await;
+        test_select_timeseries_with_order_impl(&db, client).await;
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    async fn test_select_timeseries_with_order_impl(
+        _: &ClickHouseDeployment,
+        client: Client,
+    ) {
+        let (_, _, samples) = setup_select_test();
         client
             .insert_samples(&samples)
             .await
@@ -2287,22 +2522,26 @@ mod tests {
             desc_limit_1.first().unwrap(),
             timeseries_asc.last().unwrap()
         );
-
-        wipe_db(&db, &client).await;
-        logctx.cleanup_successful();
-        Ok(())
     }
 
-    async fn get_schema_no_new_values_test(
-        db: &ClickHouseDeployment,
-    ) -> Result<(), Error> {
+    #[tokio::test]
+    async fn test_get_schema_no_new_values() {
         let logctx = test_setup_log("test_get_schema_no_new_values");
-        let log = &logctx.log;
-
-        let client = Client::new(db.http_address().into(), &log);
+        let mut db =
+            ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
+        let client = Client::new(db.http_address().into(), &logctx.log);
         init_db(&db, &client).await;
+        test_get_schema_no_new_values_impl(&db, client).await;
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    async fn test_get_schema_no_new_values_impl(
+        _: &ClickHouseDeployment,
+        client: Client,
+    ) {
         let samples = oximeter_test_utils::generate_test_samples(2, 2, 2, 2);
-        client.insert_samples(&samples).await?;
+        client.insert_samples(&samples).await.unwrap();
 
         let original_schema = client.schema.lock().await.clone();
         let mut schema = client.schema.lock().await;
@@ -2311,22 +2550,26 @@ mod tests {
             .await
             .expect("Failed to get timeseries schema");
         assert_eq!(&original_schema, &*schema, "Schema shouldn't change");
-
-        wipe_db(&db, &client).await;
-        logctx.cleanup_successful();
-        Ok(())
     }
 
-    async fn timeseries_schema_list_test(
-        db: &ClickHouseDeployment,
-    ) -> Result<(), Error> {
+    #[tokio::test]
+    async fn test_timeseries_schema_list() {
         let logctx = test_setup_log("test_timeseries_schema_list");
-        let log = &logctx.log;
-
-        let client = Client::new(db.http_address().into(), &log);
+        let mut db =
+            ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
+        let client = Client::new(db.http_address().into(), &logctx.log);
         init_db(&db, &client).await;
+        test_timeseries_schema_list_impl(&db, client).await;
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    async fn test_timeseries_schema_list_impl(
+        _: &ClickHouseDeployment,
+        client: Client,
+    ) {
         let samples = oximeter_test_utils::generate_test_samples(2, 2, 2, 2);
-        client.insert_samples(&samples).await?;
+        client.insert_samples(&samples).await.unwrap();
 
         let limit = 100u32.try_into().unwrap();
         let page = dropshot::WhichPage::First(dropshot::EmptyScanParams {});
@@ -2346,21 +2589,26 @@ mod tests {
             result.next_page.is_none(),
             "Expected the next page token to be None"
         );
-        wipe_db(&db, &client).await;
-        logctx.cleanup_successful();
-        Ok(())
     }
 
-    async fn list_timeseries_test(
-        db: &ClickHouseDeployment,
-    ) -> Result<(), Error> {
+    #[tokio::test]
+    async fn test_list_timeseries() {
         let logctx = test_setup_log("test_list_timeseries");
-        let log = &logctx.log;
-
-        let client = Client::new(db.http_address().into(), &log);
+        let mut db =
+            ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
+        let client = Client::new(db.http_address().into(), &logctx.log);
         init_db(&db, &client).await;
+        test_list_timeseries_impl(&db, client).await;
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    async fn test_list_timeseries_impl(
+        _: &ClickHouseDeployment,
+        client: Client,
+    ) {
         let samples = oximeter_test_utils::generate_test_samples(2, 2, 2, 2);
-        client.insert_samples(&samples).await?;
+        client.insert_samples(&samples).await.unwrap();
 
         let limit = 7u32.try_into().unwrap();
         let params = crate::TimeseriesScanParams {
@@ -2420,10 +2668,6 @@ mod tests {
             result.items[0].metric, last_timeseries.metric,
             "Paginating should pick up where it left off"
         );
-
-        wipe_db(&db, &client).await;
-        logctx.cleanup_successful();
-        Ok(())
     }
 
     async fn recall_field_value_bool_test(
@@ -2922,104 +3166,80 @@ mod tests {
             .count()
     }
 
-    async fn recall_of_all_fields_test(
-        db: &ClickHouseDeployment,
-    ) -> Result<(), Error> {
+    #[tokio::test]
+    async fn test_recall_of_all_fields() {
         let logctx = test_setup_log("test_recall_of_all_fields");
-        let log = &logctx.log;
-
-        let client = Client::new(db.http_address().into(), log);
+        let mut db =
+            ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
+        let client = Client::new(db.http_address().into(), &logctx.log);
         init_db(&db, &client).await;
-
-        recall_measurement_bool_test(&client).await.unwrap();
-
-        recall_measurement_i8_test(&client).await.unwrap();
-
-        recall_measurement_u8_test(&client).await.unwrap();
-
-        recall_measurement_i16_test(&client).await.unwrap();
-
-        recall_measurement_u16_test(&client).await.unwrap();
-
-        recall_measurement_i32_test(&client).await.unwrap();
-
-        recall_measurement_u32_test(&client).await.unwrap();
-
-        recall_measurement_i64_test(&client).await.unwrap();
-
-        recall_measurement_u64_test(&client).await.unwrap();
-
-        recall_measurement_f32_test(&client).await.unwrap();
-
-        recall_measurement_f64_test(&client).await.unwrap();
-
-        recall_measurement_string_test(&client).await.unwrap();
-
-        recall_measurement_bytes_test(&client).await.unwrap();
-
-        recall_measurement_cumulative_i64_test(&client).await.unwrap();
-
-        recall_measurement_cumulative_u64_test(&client).await.unwrap();
-
-        recall_measurement_cumulative_f64_test(&client).await.unwrap();
-
-        recall_measurement_histogram_i8_test(&client).await.unwrap();
-
-        recall_measurement_histogram_u8_test(&client).await.unwrap();
-
-        recall_measurement_histogram_i16_test(&client).await.unwrap();
-
-        recall_measurement_histogram_u16_test(&client).await.unwrap();
-
-        recall_measurement_histogram_i32_test(&client).await.unwrap();
-
-        recall_measurement_histogram_u32_test(&client).await.unwrap();
-
-        recall_measurement_histogram_i64_test(&client).await.unwrap();
-
-        recall_measurement_histogram_u64_test(&client).await.unwrap();
-
-        recall_measurement_histogram_f64_test(&client).await.unwrap();
-
-        recall_field_value_bool_test(&client).await.unwrap();
-
-        recall_field_value_u8_test(&client).await.unwrap();
-
-        recall_field_value_i8_test(&client).await.unwrap();
-
-        recall_field_value_u16_test(&client).await.unwrap();
-
-        recall_field_value_i16_test(&client).await.unwrap();
-
-        recall_field_value_u32_test(&client).await.unwrap();
-
-        recall_field_value_i32_test(&client).await.unwrap();
-
-        recall_field_value_u64_test(&client).await.unwrap();
-
-        recall_field_value_i64_test(&client).await.unwrap();
-
-        recall_field_value_string_test(&client).await.unwrap();
-
-        recall_field_value_ipv6addr_test(&client).await.unwrap();
-
-        recall_field_value_uuid_test(&client).await.unwrap();
-
-        wipe_db(&db, &client).await;
+        test_recall_of_all_fields_impl(&db, client).await;
+        db.cleanup().await.unwrap();
         logctx.cleanup_successful();
-        Ok(())
     }
 
-    async fn database_version_update_idempotent_test(
+    async fn test_recall_of_all_fields_impl(
+        _: &ClickHouseDeployment,
+        client: Client,
+    ) {
+        recall_measurement_bool_test(&client).await.unwrap();
+        recall_measurement_i8_test(&client).await.unwrap();
+        recall_measurement_u8_test(&client).await.unwrap();
+        recall_measurement_i16_test(&client).await.unwrap();
+        recall_measurement_u16_test(&client).await.unwrap();
+        recall_measurement_i32_test(&client).await.unwrap();
+        recall_measurement_u32_test(&client).await.unwrap();
+        recall_measurement_i64_test(&client).await.unwrap();
+        recall_measurement_u64_test(&client).await.unwrap();
+        recall_measurement_f32_test(&client).await.unwrap();
+        recall_measurement_f64_test(&client).await.unwrap();
+        recall_measurement_string_test(&client).await.unwrap();
+        recall_measurement_bytes_test(&client).await.unwrap();
+        recall_measurement_cumulative_i64_test(&client).await.unwrap();
+        recall_measurement_cumulative_u64_test(&client).await.unwrap();
+        recall_measurement_cumulative_f64_test(&client).await.unwrap();
+        recall_measurement_histogram_i8_test(&client).await.unwrap();
+        recall_measurement_histogram_u8_test(&client).await.unwrap();
+        recall_measurement_histogram_i16_test(&client).await.unwrap();
+        recall_measurement_histogram_u16_test(&client).await.unwrap();
+        recall_measurement_histogram_i32_test(&client).await.unwrap();
+        recall_measurement_histogram_u32_test(&client).await.unwrap();
+        recall_measurement_histogram_i64_test(&client).await.unwrap();
+        recall_measurement_histogram_u64_test(&client).await.unwrap();
+        recall_measurement_histogram_f64_test(&client).await.unwrap();
+        recall_field_value_bool_test(&client).await.unwrap();
+        recall_field_value_u8_test(&client).await.unwrap();
+        recall_field_value_i8_test(&client).await.unwrap();
+        recall_field_value_u16_test(&client).await.unwrap();
+        recall_field_value_i16_test(&client).await.unwrap();
+        recall_field_value_u32_test(&client).await.unwrap();
+        recall_field_value_i32_test(&client).await.unwrap();
+        recall_field_value_u64_test(&client).await.unwrap();
+        recall_field_value_i64_test(&client).await.unwrap();
+        recall_field_value_string_test(&client).await.unwrap();
+        recall_field_value_ipv6addr_test(&client).await.unwrap();
+        recall_field_value_uuid_test(&client).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_database_version_update_is_idempotent() {
+        let logctx =
+            test_setup_log("test_database_version_update_is_idempotent");
+        let mut db =
+            ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
+        let client = Client::new(db.http_address().into(), &logctx.log);
+        // NOTE: We don't init the DB, because the test explicitly tests that.
+        test_database_version_update_is_idempotent_impl(&db, client).await;
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    async fn test_database_version_update_is_idempotent_impl(
         db: &ClickHouseDeployment,
-    ) -> Result<(), Error> {
-        let logctx = test_setup_log("test_database_version_update_idempotent");
-        let log = &logctx.log;
-
-        let replicated = false;
-
+        client: Client,
+    ) {
         // Initialize the database...
-        let client = Client::new(db.http_address().into(), &log);
+        let replicated = db.is_cluster();
         client
             .initialize_db_with_version(replicated, model::OXIMETER_VERSION)
             .await
@@ -3041,22 +3261,26 @@ mod tests {
             .expect("Failed to initialize timeseries database");
 
         assert_eq!(1, get_schema_count(&client).await);
-
-        wipe_db(&db, &client).await;
-        logctx.cleanup_successful();
-        Ok(())
     }
 
-    async fn database_version_will_not_downgrade_test(
-        db: &ClickHouseDeployment,
-    ) -> Result<(), Error> {
+    #[tokio::test]
+    async fn test_database_version_will_not_downgrade() {
         let logctx = test_setup_log("test_database_version_will_not_downgrade");
-        let log = &logctx.log;
+        let mut db =
+            ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
+        let client = Client::new(db.http_address().into(), &logctx.log);
+        // NOTE: We don't init the DB, because the test explicitly tests that.
+        test_database_version_will_not_downgrade_impl(&db, client).await;
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
 
-        let replicated = false;
-
+    async fn test_database_version_will_not_downgrade_impl(
+        db: &ClickHouseDeployment,
+        client: Client,
+    ) {
         // Initialize the database
-        let client = Client::new(db.http_address().into(), &log);
+        let replicated = db.is_cluster();
         client
             .initialize_db_with_version(replicated, model::OXIMETER_VERSION)
             .await
@@ -3076,22 +3300,26 @@ mod tests {
             .initialize_db_with_version(replicated, model::OXIMETER_VERSION)
             .await
             .expect_err("Should have failed, downgrades are not supported");
-
-        wipe_db(&db, &client).await;
-        logctx.cleanup_successful();
-        Ok(())
     }
 
-    async fn database_version_wipes_old_version_test(
-        db: &ClickHouseDeployment,
-    ) -> Result<(), Error> {
+    #[tokio::test]
+    async fn test_database_version_wipes_old_version() {
         let logctx = test_setup_log("test_database_version_wipes_old_version");
-        let log = &logctx.log;
+        let mut db =
+            ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
+        let client = Client::new(db.http_address().into(), &logctx.log);
+        // NOTE: We don't init the DB, because the test explicitly tests that.
+        test_database_version_wipes_old_version_impl(&db, client).await;
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
 
-        let replicated = false;
-
+    async fn test_database_version_wipes_old_version_impl(
+        db: &ClickHouseDeployment,
+        client: Client,
+    ) {
         // Initialize the Client
-        let client = Client::new(db.http_address().into(), &log);
+        let replicated = db.is_cluster();
         client
             .initialize_db_with_version(replicated, model::OXIMETER_VERSION)
             .await
@@ -3112,21 +3340,25 @@ mod tests {
             .await
             .expect("Should have initialized database successfully");
         assert_eq!(0, get_schema_count(&client).await);
-
-        wipe_db(&db, &client).await;
-        logctx.cleanup_successful();
-        Ok(())
     }
 
-    async fn update_schema_cache_on_new_sample_test(
-        db: &ClickHouseDeployment,
-    ) -> Result<(), Error> {
-        usdt::register_probes().unwrap();
+    #[tokio::test]
+    async fn test_update_schema_cache_on_new_sample() {
         let logctx = test_setup_log("test_update_schema_cache_on_new_sample");
-        let log = &logctx.log;
-
-        let client = Client::new(db.http_address().into(), &log);
+        let mut db =
+            ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
+        let client = Client::new(db.http_address().into(), &logctx.log);
         init_db(&db, &client).await;
+        test_update_schema_cache_on_new_sample_impl(&db, client).await;
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    async fn test_update_schema_cache_on_new_sample_impl(
+        _: &ClickHouseDeployment,
+        client: Client,
+    ) {
+        usdt::register_probes().unwrap();
         let samples = [oximeter_test_utils::make_sample()];
         client.insert_samples(&samples).await.unwrap();
 
@@ -3158,9 +3390,18 @@ mod tests {
             "Expected exactly 1 schema again"
         );
         assert_eq!(client.schema.lock().await.len(), 1);
-        wipe_db(&db, &client).await;
+    }
+
+    #[tokio::test]
+    async fn test_select_all_datum_types() {
+        let logctx = test_setup_log("test_select_all_datum_types");
+        let mut db =
+            ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
+        let client = Client::new(db.http_address().into(), &logctx.log);
+        init_db(&db, &client).await;
+        test_select_all_datum_types_impl(&db, client).await;
+        db.cleanup().await.unwrap();
         logctx.cleanup_successful();
-        Ok(())
     }
 
     // Regression test for https://github.com/oxidecomputer/omicron/issues/4336.
@@ -3168,17 +3409,12 @@ mod tests {
     // This tests that we can successfully query all extant datum types from the
     // schema table. There may be no such values, but the query itself should
     // succeed.
-    async fn select_all_datum_types_test(
-        db: &ClickHouseDeployment,
-    ) -> Result<(), Error> {
+    async fn test_select_all_datum_types_impl(
+        _: &ClickHouseDeployment,
+        client: Client,
+    ) {
         use strum::IntoEnumIterator;
         usdt::register_probes().unwrap();
-        let logctx = test_setup_log("test_select_all_datum_types");
-        let log = &logctx.log;
-
-        let client = Client::new(db.http_address().into(), &log);
-        init_db(&db, &client).await;
-
         // Attempt to select all schema with each datum type.
         for ty in oximeter::DatumType::iter() {
             let sql = format!(
@@ -3192,24 +3428,30 @@ mod tests {
             let count = res.trim().parse::<usize>().unwrap();
             assert_eq!(count, 0);
         }
-        wipe_db(&db, &client).await;
+    }
+
+    #[tokio::test]
+    async fn test_new_schema_removed_when_not_inserted() {
+        let logctx =
+            test_setup_log("test_new_schema_removed_when_not_inserted");
+        let mut db =
+            ClickHouseDeployment::new_single_node(&logctx).await.unwrap();
+        let client = Client::new(db.http_address().into(), &logctx.log);
+        init_db(&db, &client).await;
+        test_new_schema_removed_when_not_inserted_impl(&db, client).await;
+        db.cleanup().await.unwrap();
         logctx.cleanup_successful();
-        Ok(())
     }
 
     // Regression test for https://github.com/oxidecomputer/omicron/issues/4335.
     //
     // This tests that, when cache new schema but _fail_ to insert them, we also
     // remove them from the internal cache.
-    async fn new_schema_removed_when_not_inserted_test(
+    async fn test_new_schema_removed_when_not_inserted_impl(
         db: &ClickHouseDeployment,
-    ) -> Result<(), Error> {
+        client: Client,
+    ) {
         usdt::register_probes().unwrap();
-        let logctx = test_setup_log("test_update_schema_cache_on_new_sample");
-        let log = &logctx.log;
-
-        let client = Client::new(db.http_address().into(), &log);
-        init_db(&db, &client).await;
         let samples = [oximeter_test_utils::make_sample()];
 
         // We're using the components of the `insert_samples()` method here,
@@ -3233,8 +3475,6 @@ mod tests {
             "Failed to remove new schema from the cache when \
             they could not be inserted into the DB"
         );
-        logctx.cleanup_successful();
-        Ok(())
     }
 
     // Testing helper functions
