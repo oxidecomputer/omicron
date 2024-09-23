@@ -36,7 +36,6 @@ use diesel::IntoSql;
 use diesel::OptionalExtension;
 use diesel::QueryDsl;
 use diesel::RunQueryDsl;
-use nexus_db_model::schema::bp_clickhouse_cluster_config;
 use nexus_db_model::Blueprint as DbBlueprint;
 use nexus_db_model::BpClickhouseClusterConfig;
 use nexus_db_model::BpClickhouseKeeperZoneIdToNodeId;
@@ -187,6 +186,42 @@ impl DataStore {
             })
             .collect::<Result<Vec<BpOmicronZoneNic>, _>>()?;
 
+        let clickhouse_tables: Option<(_, _, _)> = if let Some(config) =
+            &blueprint.clickhouse_cluster_config
+        {
+            let mut keepers = vec![];
+            for (zone_id, keeper_id) in &config.keepers {
+                let keeper = BpClickhouseKeeperZoneIdToNodeId::new(
+                    blueprint_id,
+                    *zone_id,
+                    *keeper_id,
+                )
+                .with_context(|| format!("zone {zone_id}, keeper {keeper_id}"))
+                .map_err(|e| Error::internal_error(&format!("{:#}", e)))?;
+                keepers.push(keeper)
+            }
+
+            let mut servers = vec![];
+            for (zone_id, server_id) in &config.servers {
+                let server = BpClickhouseServerZoneIdToNodeId::new(
+                    blueprint_id,
+                    *zone_id,
+                    *server_id,
+                )
+                .with_context(|| format!("zone {zone_id}, server {server_id}"))
+                .map_err(|e| Error::internal_error(&format!("{:#}", e)))?;
+                servers.push(server);
+            }
+
+            let cluster_config =
+                BpClickhouseClusterConfig::new(blueprint_id, config)
+                    .map_err(|e| Error::internal_error(&format!("{:#}", e)))?;
+
+            Some((cluster_config, keepers, servers))
+        } else {
+            None
+        };
+
         // This implementation inserts all records associated with the
         // blueprint in one transaction.  This is required: we don't want
         // any planner or executor to see a half-inserted blueprint, nor do we
@@ -265,7 +300,33 @@ impl DataStore {
                         .await?;
             }
 
+            // Insert all clickhouse cluster related tables if necessary
+            if let Some((clickhouse_cluster_config, keepers, servers)) = clickhouse_tables {
+                {
+                    use db::schema::bp_clickhouse_cluster_config::dsl;
+                    let _ = diesel::insert_into(dsl::bp_clickhouse_cluster_config)
+                    .values(clickhouse_cluster_config)
+                    .execute_async(&conn)
+                    .await?;
+                }
+                {
+                    use db::schema::bp_clickhouse_keeper_zone_id_to_node_id::dsl;
+                    let _ = diesel::insert_into(dsl::bp_clickhouse_keeper_zone_id_to_node_id)
+                    .values(keepers)
+                    .execute_async(&conn)
+                    .await?;
+                }
+                {
+                    use db::schema::bp_clickhouse_server_zone_id_to_node_id::dsl;
+                    let _ = diesel::insert_into(dsl::bp_clickhouse_server_zone_id_to_node_id)
+                    .values(servers)
+                    .execute_async(&conn)
+                    .await?;
+                }
+            }
+
             Ok(())
+
         })
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
