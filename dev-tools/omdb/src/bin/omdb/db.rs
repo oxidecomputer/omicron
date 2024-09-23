@@ -2986,7 +2986,7 @@ async fn cmd_db_instance_info(
             )
         );
     }
-  
+
     println!("\n{:=<80}", "== INSTANCE ");
     println!("    {ID:>WIDTH$}: {}", instance.id());
     println!("    {PROJECT_ID:>WIDTH$}: {}", instance.project_id);
