@@ -453,29 +453,41 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             )
             .await
             .unwrap();
-        let port = clickhouse.http_address().port();
 
         let zpool_id = ZpoolUuid::new_v4();
         let dataset_id = Uuid::new_v4();
-        let address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, port, 0, 0);
+        let http_address = clickhouse.http_address();
+        let http_port = http_address.port();
         self.rack_init_builder.add_dataset(
             zpool_id,
             dataset_id,
-            address,
+            http_address,
             DatasetKind::Clickhouse,
             internal_dns::ServiceName::Clickhouse,
+        );
+
+        // Add the native protocol address to DNS as well.
+        //
+        // NOTE: The internals of `RackInitBuilder` use the dataset_id as the
+        // zone_id.
+        self.rack_init_builder.add_service_to_dns(
+            OmicronZoneUuid::from_untyped_uuid(dataset_id),
+            clickhouse.native_address(),
+            internal_dns::ServiceName::ClickhouseNative,
         );
         self.clickhouse = Some(clickhouse);
 
         // NOTE: We could pass this port information via DNS, rather than
         // requiring it to be known before Nexus starts.
+        //
+        // See https://github.com/oxidecomputer/omicron/issues/6407.
         self.config
             .pkg
             .timeseries_db
             .address
             .as_mut()
             .expect("Tests expect to set a port of Clickhouse")
-            .set_port(port);
+            .set_port(http_port);
 
         let pool_name = illumos_utils::zpool::ZpoolName::new_external(zpool_id)
             .to_string()
@@ -484,11 +496,11 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         self.blueprint_zones.push(BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: OmicronZoneUuid::from_untyped_uuid(dataset_id),
-            underlay_address: *address.ip(),
+            underlay_address: *http_address.ip(),
             filesystem_pool: Some(ZpoolName::new_external(zpool_id)),
             zone_type: BlueprintZoneType::Clickhouse(
                 blueprint_zone_type::Clickhouse {
-                    address,
+                    address: http_address,
                     dataset: OmicronZoneDataset { pool_name },
                 },
             ),
