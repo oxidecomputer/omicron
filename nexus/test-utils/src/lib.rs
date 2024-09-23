@@ -808,6 +808,8 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                 cockroachdb_fingerprint: String::new(),
                 cockroachdb_setting_preserve_downgrade:
                     CockroachDbPreserveDowngrade::DoNotModify,
+                // TODO(ajs): Should we create this in RSS? it relies on policy
+                clickhouse_cluster_config: None,
                 time_created: Utc::now(),
                 creator: "nexus-test-utils".to_string(),
                 comment: "initial test blueprint".to_string(),

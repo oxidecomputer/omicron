@@ -886,6 +886,9 @@ impl DataStore {
             nsled_agent_zones,
             nzones,
             nnics,
+            nclickhouse_cluster_configs,
+            nclickhouse_keepers,
+            nclickhouse_servers,
         ) = conn
             .transaction_async(|conn| async move {
                 // Ensure that blueprint we're about to delete is not the
@@ -986,6 +989,34 @@ impl DataStore {
                     .await?
                 };
 
+                let nclickhouse_cluster_configs = {
+                    use db::schema::bp_clickhouse_cluster_config::dsl;
+                    diesel::delete(
+                        dsl::bp_clickhouse_cluster_config
+                            .filter(dsl::blueprint_id.eq(blueprint_id)),
+                    )
+                    .execute_async(&conn)
+                    .await?
+                };
+
+                let nclickhouse_keepers = {
+                    use db::schema::bp_clickhouse_keeper_zone_id_to_node_id::dsl;
+                    diesel::delete(dsl::bp_clickhouse_keeper_zone_id_to_node_id
+                            .filter(dsl::blueprint_id.eq(blueprint_id)),
+                    )
+                    .execute_async(&conn)
+                    .await?
+                };
+
+                let nclickhouse_servers = {
+                    use db::schema::bp_clickhouse_server_zone_id_to_node_id::dsl;
+                    diesel::delete(dsl::bp_clickhouse_server_zone_id_to_node_id
+                            .filter(dsl::blueprint_id.eq(blueprint_id)),
+                    )
+                    .execute_async(&conn)
+                    .await?
+                };
+
                 Ok((
                     nblueprints,
                     nsled_states,
@@ -994,6 +1025,9 @@ impl DataStore {
                     nsled_agent_zones,
                     nzones,
                     nnics,
+                    nclickhouse_cluster_configs,
+                    nclickhouse_keepers,
+                    nclickhouse_servers,
                 ))
             })
             .await
@@ -1013,6 +1047,9 @@ impl DataStore {
             "nsled_agent_zones" => nsled_agent_zones,
             "nzones" => nzones,
             "nnics" => nnics,
+            "nclickhouse_cluster_configs" => nclickhouse_cluster_configs,
+            "nclickhouse_keepers" => nclickhouse_keepers,
+            "nclickhouse_servers" => nclickhouse_servers
         );
 
         Ok(())
