@@ -24,7 +24,7 @@ use tokio::io::AsyncWriteExt;
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("Could not connect to {addr}: {err}")]
-    Connect { addr: SocketAddrV6, err: io::Error },
+    Connect { addr: SocketAddrV6, err: sprockets_tls::Error },
 
     #[error("Failed serializing request: {0}")]
     Serialize(serde_json::Error),
@@ -115,7 +115,7 @@ impl Client {
             log.clone(),
         )
         .await
-        .unwrap();
+        .map_err(|err| Error::Connect { addr: self.addr, err })?;
 
         let mut stream = Box::new(tokio::io::BufStream::new(stream));
 
