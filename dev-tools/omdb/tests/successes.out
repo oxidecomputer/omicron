@@ -302,6 +302,11 @@ task: "external_endpoints"
     on each one
 
 
+task: "instance_reincarnation"
+    schedules start sagas for failed instances that can be automatically
+    restarted
+
+
 task: "instance_updater"
     detects if instances require update sagas and schedules them
 
@@ -517,6 +522,16 @@ task: "external_endpoints"
         warning: silo ..........<REDACTED_UUID>........... with DNS name "test-suite-silo.sys.oxide-dev.test" has no usable certificates
 
     TLS certificates: 0
+
+task: "instance_reincarnation"
+  configured period: every 1m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    instances eligible for reincarnation:                                0
+      instances reincarnated:                                            0
+      instances which changed state before they could be reincarnated:   0
+      instances which failed to be reincarnated:                         0
 
 task: "instance_updater"
   configured period: every <REDACTED_DURATION>s
@@ -947,6 +962,16 @@ task: "external_endpoints"
         warning: silo ..........<REDACTED_UUID>........... with DNS name "test-suite-silo.sys.oxide-dev.test" has no usable certificates
 
     TLS certificates: 0
+
+task: "instance_reincarnation"
+  configured period: every 1m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    instances eligible for reincarnation:                                0
+      instances reincarnated:                                            0
+      instances which changed state before they could be reincarnated:   0
+      instances which failed to be reincarnated:                         0
 
 task: "instance_updater"
   configured period: every <REDACTED_DURATION>s

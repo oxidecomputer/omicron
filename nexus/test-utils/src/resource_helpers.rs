@@ -34,6 +34,7 @@ use omicron_common::api::external::Disk;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
+use omicron_common::api::external::InstanceAutoRestartPolicy;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::RouteDestination;
@@ -503,11 +504,14 @@ pub async fn create_instance(
         // External IPs=
         Vec::<params::ExternalIpCreate>::new(),
         true,
+        Default::default(),
     )
     .await
 }
 
 /// Creates an instance with attached resources.
+// I know, Clippy. I don't like it either...
+#[allow(clippy::too_many_arguments)]
 pub async fn create_instance_with(
     client: &ClientTestContext,
     project_name: &str,
@@ -516,6 +520,7 @@ pub async fn create_instance_with(
     disks: Vec<params::InstanceDiskAttachment>,
     external_ips: Vec<params::ExternalIpCreate>,
     start: bool,
+    auto_restart_policy: Option<InstanceAutoRestartPolicy>,
 ) -> Instance {
     let url = format!("/v1/instances?project={}", project_name);
     object_create(
@@ -537,6 +542,7 @@ pub async fn create_instance_with(
             external_ips,
             disks,
             start,
+            auto_restart_policy,
         },
     )
     .await

@@ -5,7 +5,7 @@
 //! Helper functions for writing saga undo tests and working with instances in
 //! saga tests.
 
-use super::{instance_common::VmmAndSledIds, NexusSaga};
+use super::{instance_common::VmmAndSledIds, instance_start, NexusSaga};
 use crate::{app::saga::create_saga_dag, Nexus};
 use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
 use camino::Utf8Path;
@@ -60,7 +60,7 @@ pub(crate) async fn instance_start(
     let instance_lookup =
         nexus.instance_lookup(&opctx, instance_selector).unwrap();
     nexus
-        .instance_start(&opctx, &instance_lookup)
+        .instance_start(&opctx, &instance_lookup, instance_start::Reason::User)
         .await
         .expect("Failed to start instance");
 }
