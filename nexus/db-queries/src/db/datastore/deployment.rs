@@ -736,13 +736,11 @@ impl DataStore {
 
                             for k in batch {
                                 let keeper_id = KeeperId(
-                                    u64::try_from(k.keeper_id).or_else(
+                                    u64::try_from(k.keeper_id).map_err(
                                         |_| {
-                                            Err(Error::internal_error(
-                                                &format!(
-                                                    "keeper id is negative: {}",
-                                                    k.keeper_id
-                                                ),
+                                            Error::internal_error(&format!(
+                                                "keeper id is negative: {}",
+                                                k.keeper_id
                                             ))
                                         },
                                     )?,
@@ -785,13 +783,11 @@ impl DataStore {
 
                             for s in batch {
                                 let server_id = ServerId(
-                                    u64::try_from(s.server_id).or_else(
+                                    u64::try_from(s.server_id).map_err(
                                         |_| {
-                                            Err(Error::internal_error(
-                                                &format!(
-                                                    "server id is negative: {}",
-                                                    s.server_id
-                                                ),
+                                            Error::internal_error(&format!(
+                                                "server id is negative: {}",
+                                                s.server_id
                                             ))
                                         },
                                     )?,
@@ -809,20 +805,20 @@ impl DataStore {
                         generation: bp_config.generation.into(),
                         max_used_server_id: ServerId(
                             u64::try_from(bp_config.max_used_server_id)
-                                .or_else(|_| {
-                                    Err(Error::internal_error(&format!(
+                                .map_err(|_| {
+                                    Error::internal_error(&format!(
                                         "max server id is negative: {}",
                                         bp_config.max_used_server_id
-                                    )))
+                                    ))
                                 })?,
                         ),
                         max_used_keeper_id: KeeperId(
                             u64::try_from(bp_config.max_used_keeper_id)
-                                .or_else(|_| {
-                                    Err(Error::internal_error(&format!(
+                                .map_err(|_| {
+                                    Error::internal_error(&format!(
                                         "max keeper id is negative: {}",
                                         bp_config.max_used_keeper_id
-                                    )))
+                                    ))
                                 })?,
                         ),
                         cluster_name: bp_config.cluster_name,
@@ -831,11 +827,11 @@ impl DataStore {
                             u64::try_from(
                                 bp_config.highest_seen_keeper_leader_committed_log_index,
                             )
-                            .or_else(|_| {
-                                Err(Error::internal_error(&format!(
+                            .map_err(|_| {
+                                Error::internal_error(&format!(
                                     "max server id is negative: {}",
                                     bp_config.highest_seen_keeper_leader_committed_log_index
-                                )))
+                                ))
                             })?,
                         keepers,
                         servers,
