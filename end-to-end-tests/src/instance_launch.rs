@@ -76,6 +76,7 @@ async fn instance_launch() -> Result<()> {
                 ssh_key_name.clone(),
             )]),
             start: true,
+            auto_restart_policy: Default::default(),
         })
         .send()
         .await?;

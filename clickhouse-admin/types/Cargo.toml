@@ -9,6 +9,7 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
+atomicwrites.workspace = true
 camino.workspace = true
 camino-tempfile.workspace = true
 derive_more.workspace = true
@@ -17,4 +18,9 @@ omicron-workspace-hack.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+slog.workspace = true
 expectorate.workspace = true
+
+[dev-dependencies]
+slog-async.workspace = true
+slog-term.workspace = true

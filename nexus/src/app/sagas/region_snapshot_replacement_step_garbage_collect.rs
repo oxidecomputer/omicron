@@ -129,6 +129,7 @@ pub(crate) mod test {
     use nexus_db_model::Volume;
     use nexus_db_queries::authn::saga::Serialized;
     use nexus_db_queries::context::OpContext;
+    use nexus_db_queries::db::datastore::region_snapshot_replacement;
     use nexus_test_utils_macros::nexus_test;
     use sled_agent_client::types::CrucibleOpts;
     use sled_agent_client::types::VolumeConstructionRequest;
@@ -192,10 +193,15 @@ pub(crate) mod test {
             RegionSnapshotReplacementStepState::Complete;
         request.old_snapshot_volume_id = Some(old_snapshot_volume_id);
 
-        datastore
+        let result = datastore
             .insert_region_snapshot_replacement_step(&opctx, request.clone())
             .await
             .unwrap();
+
+        assert!(matches!(
+            result,
+            region_snapshot_replacement::InsertStepResult::Inserted { .. }
+        ));
 
         // Run the saga
         let params = Params {

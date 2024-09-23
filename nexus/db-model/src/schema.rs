@@ -407,13 +407,15 @@ table! {
         ncpus -> Int8,
         memory -> Int8,
         hostname -> Text,
-        auto_restart_policy -> Nullable<crate::InstanceAutoRestartEnum>,
+        auto_restart_policy -> Nullable<crate::InstanceAutoRestartPolicyEnum>,
+        auto_restart_cooldown -> Nullable<Interval>,
         time_state_updated -> Timestamptz,
         state_generation -> Int8,
         active_propolis_id -> Nullable<Uuid>,
         target_propolis_id -> Nullable<Uuid>,
         migration_id -> Nullable<Uuid>,
         state -> crate::InstanceStateEnum,
+        time_last_auto_restarted -> Nullable<Timestamptz>,
         updater_id -> Nullable<Uuid>,
         updater_gen-> Int8,
     }
@@ -794,6 +796,7 @@ table! {
         id -> Uuid,
         time_created -> Timestamptz,
         time_modified -> Timestamptz,
+        time_expunged -> Nullable<Timestamptz>,
         ip -> Inet,
         port -> Int4,
     }
@@ -1657,6 +1660,34 @@ table! {
         vni -> Int8,
         is_primary -> Bool,
         slot -> Int2,
+    }
+}
+
+table! {
+    bp_clickhouse_cluster_config (blueprint_id) {
+        blueprint_id -> Uuid,
+        generation -> Int8,
+        max_used_server_id -> Int8,
+        max_used_keeper_id -> Int8,
+        cluster_name -> Text,
+        cluster_secret -> Text,
+        highest_seen_keeper_leader_committed_log_index -> Int8,
+    }
+}
+
+table! {
+    bp_clickhouse_keeper_zone_id_to_node_id (blueprint_id, omicron_zone_id, keeper_id) {
+        blueprint_id -> Uuid,
+        omicron_zone_id -> Uuid,
+        keeper_id -> Int8,
+    }
+}
+
+table! {
+    bp_clickhouse_server_zone_id_to_node_id (blueprint_id, omicron_zone_id, server_id) {
+        blueprint_id -> Uuid,
+        omicron_zone_id -> Uuid,
+        server_id -> Int8,
     }
 }
 

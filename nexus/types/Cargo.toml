@@ -13,6 +13,7 @@ async-trait.workspace = true
 base64.workspace = true
 chrono.workspace = true
 clap.workspace = true
+clickhouse-admin-types.workspace = true
 cookie.workspace = true
 derive-where.workspace = true
 derive_more.workspace = true
@@ -37,6 +38,7 @@ steno.workspace = true
 strum.workspace = true
 thiserror.workspace = true
 newtype-uuid.workspace = true
+update-engine.workspace = true
 uuid.workspace = true
 
 api_identity.workspace = true

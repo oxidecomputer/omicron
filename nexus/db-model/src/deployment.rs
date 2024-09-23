@@ -8,10 +8,12 @@
 use crate::inventory::ZoneType;
 use crate::omicron_zone_config::{self, OmicronZoneNic};
 use crate::schema::{
-    blueprint, bp_omicron_dataset, bp_omicron_physical_disk, bp_omicron_zone,
-    bp_omicron_zone_nic, bp_sled_omicron_datasets,
-    bp_sled_omicron_physical_disks, bp_sled_omicron_zones, bp_sled_state,
-    bp_target,
+    blueprint, bp_clickhouse_cluster_config,
+    bp_clickhouse_keeper_zone_id_to_node_id,
+    bp_clickhouse_server_zone_id_to_node_id, bp_omicron_dataset,
+    bp_omicron_physical_disk, bp_omicron_zone, bp_omicron_zone_nic,
+    bp_sled_omicron_datasets, bp_sled_omicron_physical_disks,
+    bp_sled_omicron_zones, bp_sled_state, bp_target,
 };
 use crate::typed_uuid::DbTypedUuid;
 use crate::{
@@ -20,6 +22,7 @@ use crate::{
 };
 use anyhow::{anyhow, bail, Context, Result};
 use chrono::{DateTime, Utc};
+use clickhouse_admin_types::{KeeperId, ServerId};
 use ipnetwork::IpNetwork;
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
 use nexus_types::deployment::blueprint_zone_type;
@@ -33,6 +36,7 @@ use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::BlueprintZonesConfig;
+use nexus_types::deployment::ClickhouseClusterConfig;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::{
     OmicronZoneExternalFloatingAddr, OmicronZoneExternalFloatingIp,
@@ -41,10 +45,10 @@ use nexus_types::deployment::{
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::zpool_name::ZpoolName;
-use omicron_uuid_kinds::SledUuid;
-use omicron_uuid_kinds::ZpoolUuid;
-use omicron_uuid_kinds::{DatasetKind, ExternalIpKind, SledKind, ZpoolKind};
-use omicron_uuid_kinds::{ExternalIpUuid, GenericUuid, OmicronZoneUuid};
+use omicron_uuid_kinds::{
+    DatasetKind, ExternalIpKind, ExternalIpUuid, GenericUuid, OmicronZoneKind,
+    OmicronZoneUuid, SledKind, SledUuid, ZpoolKind, ZpoolUuid,
+};
 use std::net::{IpAddr, SocketAddrV6};
 use uuid::Uuid;
 
@@ -387,7 +391,7 @@ impl BpSledOmicronZones {
 pub struct BpOmicronZone {
     pub blueprint_id: Uuid,
     pub sled_id: DbTypedUuid<SledKind>,
-    pub id: Uuid,
+    pub id: DbTypedUuid<OmicronZoneKind>,
     pub underlay_address: ipv6::Ipv6Addr,
     pub zone_type: ZoneType,
     pub primary_service_ip: ipv6::Ipv6Addr,
@@ -430,7 +434,7 @@ impl BpOmicronZone {
             // `blueprint_zone.zone_type`
             blueprint_id,
             sled_id: sled_id.into(),
-            id: blueprint_zone.id.into_untyped_uuid(),
+            id: blueprint_zone.id.into(),
             underlay_address: blueprint_zone.underlay_address.into(),
             external_ip_id,
             filesystem_pool: blueprint_zone
@@ -675,7 +679,7 @@ impl BpOmicronZone {
         // Result) we immediately return. We check the inner result later, but
         // only if some code path tries to use `nic` and it's not present.
         let nic = omicron_zone_config::nic_row_to_network_interface(
-            self.id,
+            self.id.into(),
             self.bp_nic_id,
             nic_row.map(Into::into),
         )?;
@@ -840,7 +844,7 @@ impl BpOmicronZone {
 
         Ok(BlueprintZoneConfig {
             disposition: self.disposition.into(),
-            id: OmicronZoneUuid::from_untyped_uuid(self.id),
+            id: self.id.into(),
             underlay_address: self.underlay_address.into(),
             filesystem_pool: self
                 .filesystem_pool
@@ -917,7 +921,7 @@ impl BpOmicronZoneNic {
         let Some((_, nic)) = zone.zone_type.external_networking() else {
             return Ok(None);
         };
-        let nic = OmicronZoneNic::new(zone.id.into_untyped_uuid(), nic)?;
+        let nic = OmicronZoneNic::new(zone.id, nic)?;
         Ok(Some(Self {
             blueprint_id,
             id: nic.id,
@@ -933,7 +937,7 @@ impl BpOmicronZoneNic {
 
     pub fn into_network_interface_for_zone(
         self,
-        zone_id: Uuid,
+        zone_id: OmicronZoneUuid,
     ) -> Result<NetworkInterface, anyhow::Error> {
         let zone_nic = OmicronZoneNic::from(self);
         zone_nic.into_network_interface_for_zone(zone_id)
@@ -952,6 +956,96 @@ impl From<BpOmicronZoneNic> for OmicronZoneNic {
             is_primary: value.is_primary,
             slot: value.slot,
         }
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = bp_clickhouse_cluster_config)]
+pub struct BpClickhouseClusterConfig {
+    pub blueprint_id: Uuid,
+    pub generation: Generation,
+    pub max_used_server_id: i64,
+    pub max_used_keeper_id: i64,
+    pub cluster_name: String,
+    pub cluster_secret: String,
+    pub highest_seen_keeper_leader_committed_log_index: i64,
+}
+
+impl BpClickhouseClusterConfig {
+    pub fn new(
+        blueprint_id: Uuid,
+        config: &ClickhouseClusterConfig,
+    ) -> anyhow::Result<BpClickhouseClusterConfig> {
+        Ok(BpClickhouseClusterConfig {
+            blueprint_id,
+            generation: Generation(config.generation),
+            max_used_server_id: config
+                .max_used_server_id
+                .0
+                .try_into()
+                .context("more than 2^63 IDs in use")?,
+            max_used_keeper_id: config
+                .max_used_keeper_id
+                .0
+                .try_into()
+                .context("more than 2^63 IDs in use")?,
+            cluster_name: config.cluster_name.clone(),
+            cluster_secret: config.cluster_secret.clone(),
+            highest_seen_keeper_leader_committed_log_index: config
+                .highest_seen_keeper_leader_committed_log_index
+                .try_into()
+                .context("more than 2^63 IDs in use")?,
+        })
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = bp_clickhouse_keeper_zone_id_to_node_id)]
+pub struct BpClickhouseKeeperZoneIdToNodeId {
+    pub blueprint_id: Uuid,
+    pub omicron_zone_id: DbTypedUuid<OmicronZoneKind>,
+    pub keeper_id: i64,
+}
+
+impl BpClickhouseKeeperZoneIdToNodeId {
+    pub fn new(
+        blueprint_id: Uuid,
+        omicron_zone_id: OmicronZoneUuid,
+        keeper_id: KeeperId,
+    ) -> anyhow::Result<BpClickhouseKeeperZoneIdToNodeId> {
+        Ok(BpClickhouseKeeperZoneIdToNodeId {
+            blueprint_id,
+            omicron_zone_id: omicron_zone_id.into(),
+            keeper_id: keeper_id
+                .0
+                .try_into()
+                .context("more than 2^63 IDs in use")?,
+        })
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = bp_clickhouse_server_zone_id_to_node_id)]
+pub struct BpClickhouseServerZoneIdToNodeId {
+    pub blueprint_id: Uuid,
+    pub omicron_zone_id: DbTypedUuid<OmicronZoneKind>,
+    pub server_id: i64,
+}
+
+impl BpClickhouseServerZoneIdToNodeId {
+    pub fn new(
+        blueprint_id: Uuid,
+        omicron_zone_id: OmicronZoneUuid,
+        server_id: ServerId,
+    ) -> anyhow::Result<BpClickhouseServerZoneIdToNodeId> {
+        Ok(BpClickhouseServerZoneIdToNodeId {
+            blueprint_id,
+            omicron_zone_id: omicron_zone_id.into(),
+            server_id: server_id
+                .0
+                .try_into()
+                .context("more than 2^63 IDs in use")?,
+        })
     }
 }
 

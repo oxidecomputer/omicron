@@ -11,6 +11,8 @@ use dropshot::EmptyScanParams;
 use dropshot::WhichPage;
 use oximeter::TimeseriesSchema;
 
+#[cfg(any(feature = "native-sql", test))]
+pub mod native;
 #[cfg(any(feature = "oxql", test))]
 pub mod oxql;
 #[cfg(any(feature = "sql", test))]

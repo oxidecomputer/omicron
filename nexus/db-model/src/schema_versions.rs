@@ -17,8 +17,7 @@ use std::collections::BTreeMap;
 ///
 /// This must be updated when you change the database schema.  Refer to
 /// schema/crdb/README.adoc in the root of this repository for details.
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(97, 0, 0);
-
+pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(104, 0, 0);
 /// List of all past database schema versions, in *reverse* order
 ///
 /// If you want to change the Omicron database schema, you must update this.
@@ -29,7 +28,14 @@ static KNOWN_VERSIONS: Lazy<Vec<KnownVersion>> = Lazy::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
-        KnownVersion::new(97, "blueprint-dataset"),
+        KnownVersion::new(104, "blueprint-dataset"),
+        KnownVersion::new(103, "lookup-instances-by-state-index"),
+        KnownVersion::new(102, "add-instance-auto-restart-cooldown"),
+        KnownVersion::new(101, "auto-restart-policy-v2"),
+        KnownVersion::new(100, "add-instance-last-auto-restarted-timestamp"),
+        KnownVersion::new(99, "blueprint-add-clickhouse-tables"),
+        KnownVersion::new(98, "oximeter-add-time-expunged"),
+        KnownVersion::new(97, "lookup-region-snapshot-by-region-id"),
         KnownVersion::new(96, "inv-dataset"),
         KnownVersion::new(95, "turn-boot-on-fault-into-auto-restart"),
         KnownVersion::new(94, "put-back-creating-vmm-state"),

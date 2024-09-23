@@ -132,13 +132,19 @@ impl BuilderZonesConfig {
     }
 
     pub(super) fn build(self) -> BlueprintZonesConfig {
+        // Only bump the generation if any zones have been changed.
+        let generation = if self
+            .zones
+            .iter()
+            .any(|z| z.state != BuilderZoneState::Unchanged)
+        {
+            self.generation.next()
+        } else {
+            self.generation
+        };
+
         let mut ret = BlueprintZonesConfig {
-            // Something we could do here is to check if any zones have
-            // actually been modified, and if not, return the parent's
-            // generation. For now, we depend on callers to only call
-            // `BlueprintZonesBuilder::change_sled_zones` when they really
-            // mean it.
-            generation: self.generation.next(),
+            generation,
             zones: self.zones.into_iter().map(|z| z.zone).collect(),
         };
         ret.sort();
@@ -292,10 +298,17 @@ mod tests {
             (new_sled_id, input.build())
         };
 
+        let existing_sled_id = example
+            .input
+            .all_sled_ids(SledFilter::Commissioned)
+            .next()
+            .expect("at least one sled present");
+
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint_initial,
             &input2,
+            &example.collection,
             "the_test",
         )
         .expect("creating blueprint builder");
@@ -325,11 +338,6 @@ mod tests {
 
         // Now, test adding a new zone (Oximeter, picked arbitrarily) to an
         // existing sled.
-        let existing_sled_id = example
-            .input
-            .all_sled_ids(SledFilter::Commissioned)
-            .next()
-            .expect("at least one sled present");
         let change = builder.zones.change_sled_zones(existing_sled_id);
 
         let new_zone_id = OmicronZoneUuid::new_v4();
@@ -471,6 +479,31 @@ mod tests {
             assert_eq!(modified.zones.len(), 1);
             let modified_zone = &modified.zones[0];
             assert_eq!(modified_zone.zone.id(), existing_zone_id);
+        }
+
+        // Test a no-op change.
+        {
+            let mut builder = BlueprintBuilder::new_based_on(
+                &logctx.log,
+                &blueprint,
+                &input2,
+                &example.collection,
+                "the_test",
+            )
+            .expect("creating blueprint builder");
+            builder.set_rng_seed((TEST_NAME, "bp2"));
+
+            // This call by itself shouldn't bump the generation number.
+            builder.zones.change_sled_zones(existing_sled_id);
+
+            let blueprint_noop = builder.build();
+            verify_blueprint(&blueprint_noop);
+            let diff = blueprint_noop.diff_since_blueprint(&blueprint);
+            println!("expecting a noop:\n{}", diff.display());
+
+            assert!(diff.sleds_modified.is_empty(), "no sleds modified");
+            assert!(diff.sleds_added.is_empty(), "no sleds added");
+            assert!(diff.sleds_removed.is_empty(), "no sleds removed");
         }
 
         logctx.cleanup_successful();

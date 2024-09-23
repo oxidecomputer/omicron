@@ -55,6 +55,7 @@ use crate::app::db::datastore::ExistingTarget;
 use crate::app::db::datastore::RegionAllocationFor;
 use crate::app::db::datastore::RegionAllocationParameters;
 use crate::app::db::datastore::ReplacementTarget;
+use crate::app::db::datastore::VolumeReplaceResult;
 use crate::app::db::datastore::VolumeToDelete;
 use crate::app::db::datastore::VolumeWithTarget;
 use crate::app::db::lookup::LookupPath;
@@ -650,7 +651,7 @@ async fn rsrss_replace_snapshot_in_volume(
 
     // `volume_replace_snapshot` will swap the old snapshot for the new region.
     // No repair or reconcilation needs to occur after this.
-    osagactx
+    let volume_replace_snapshot_result = osagactx
         .datastore()
         .volume_replace_snapshot(
             VolumeWithTarget(replacement_params.old_volume_id),
@@ -661,7 +662,27 @@ async fn rsrss_replace_snapshot_in_volume(
         .await
         .map_err(ActionError::action_failed)?;
 
-    Ok(())
+    match volume_replace_snapshot_result {
+        VolumeReplaceResult::AlreadyHappened | VolumeReplaceResult::Done => {
+            // The replacement was done either by this run of this saga node, or
+            // a previous one (and this is a rerun). This can only be returned
+            // if the transaction occurred on the non-deleted volume so proceed
+            // with the rest of the saga.
+
+            Ok(())
+        }
+
+        VolumeReplaceResult::ExistingVolumeDeleted => {
+            // Unwind the saga here to clean up the resources allocated during
+            // this saga. The associated background task will transition this
+            // request's state to Completed.
+
+            Err(ActionError::action_failed(format!(
+                "existing volume {} deleted",
+                replacement_params.old_volume_id
+            )))
+        }
+    }
 }
 
 async fn rsrss_replace_snapshot_in_volume_undo(
@@ -687,7 +708,13 @@ async fn rsrss_replace_snapshot_in_volume_undo(
         replacement_params.old_volume_id,
     );
 
-    osagactx
+    // Note only the ExistingTarget and ReplacementTarget arguments are swapped
+    // here!
+    //
+    // It's ok if this function returns ExistingVolumeDeleted here: we don't
+    // want to throw an error and cause the saga to be stuck unwinding, as this
+    // would hold the lock on the replacement request.
+    let volume_replace_snapshot_result = osagactx
         .datastore()
         .volume_replace_snapshot(
             VolumeWithTarget(replacement_params.old_volume_id),
@@ -696,6 +723,12 @@ async fn rsrss_replace_snapshot_in_volume_undo(
             VolumeToDelete(replacement_params.new_volume_id),
         )
         .await?;
+
+    info!(
+        log,
+        "undo: volume_replace_snapshot returned {:?}",
+        volume_replace_snapshot_result,
+    );
 
     Ok(())
 }

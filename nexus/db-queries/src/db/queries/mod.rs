@@ -11,6 +11,7 @@ pub mod ip_pool;
 #[macro_use]
 mod next_item;
 pub mod network_interface;
+pub mod oximeter;
 pub mod region_allocation;
 pub mod virtual_provisioning_collection_update;
 pub mod volume;

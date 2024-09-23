@@ -49,7 +49,10 @@ impl RegionSnapshotReplacementDetector {
         };
 
         let saga_dag = SagaRegionSnapshotReplacementStart::prepare(&params)?;
-        self.sagas.saga_start(saga_dag).await
+        // We only care that the saga was started, and don't wish to wait for it
+        // to complete, so use `StartSaga::saga_start`, rather than `saga_run`.
+        self.sagas.saga_start(saga_dag).await?;
+        Ok(())
     }
 
     /// Find region snapshots on expunged physical disks and create region

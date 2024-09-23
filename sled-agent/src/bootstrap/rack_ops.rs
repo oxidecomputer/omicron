@@ -13,6 +13,7 @@ use sled_agent_types::rack_init::RackInitializeRequest;
 use sled_agent_types::rack_ops::{RackOperationStatus, RssStep};
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
+use sprockets_tls::keys::SprocketsConfig;
 use std::mem;
 use std::net::Ipv6Addr;
 use std::sync::Arc;
@@ -143,6 +144,7 @@ impl RssAccess {
     pub(crate) fn start_initializing(
         &self,
         parent_log: &Logger,
+        sprockets: SprocketsConfig,
         global_zone_bootstrap_ip: Ipv6Addr,
         storage_manager: &StorageHandle,
         bootstore_node_handle: &bootstore::NodeHandle,
@@ -186,6 +188,7 @@ impl RssAccess {
                 tokio::spawn(async move {
                     let result = rack_initialize(
                         &parent_log,
+                        sprockets,
                         global_zone_bootstrap_ip,
                         storage_manager,
                         bootstore_node_handle,
@@ -213,6 +216,7 @@ impl RssAccess {
     pub(super) fn start_reset(
         &self,
         parent_log: &Logger,
+        sprockets: SprocketsConfig,
         global_zone_bootstrap_ip: Ipv6Addr,
     ) -> Result<RackResetUuid, RssAccessError> {
         let mut status = self.status.lock().unwrap();
@@ -248,8 +252,12 @@ impl RssAccess {
                 let parent_log = parent_log.clone();
                 let status = Arc::clone(&self.status);
                 tokio::spawn(async move {
-                    let result =
-                        rack_reset(&parent_log, global_zone_bootstrap_ip).await;
+                    let result = rack_reset(
+                        &parent_log,
+                        sprockets,
+                        global_zone_bootstrap_ip,
+                    )
+                    .await;
                     let new_status = match result {
                         Ok(()) => {
                             RssStatus::Uninitialized { reset_id: Some(id) }
@@ -318,6 +326,7 @@ enum RssStatus {
 
 async fn rack_initialize(
     parent_log: &Logger,
+    sprockets: SprocketsConfig,
     global_zone_bootstrap_ip: Ipv6Addr,
     storage_manager: StorageHandle,
     bootstore_node_handle: bootstore::NodeHandle,
@@ -326,6 +335,7 @@ async fn rack_initialize(
 ) -> Result<(), SetupServiceError> {
     RssHandle::run_rss(
         parent_log,
+        sprockets,
         request,
         global_zone_bootstrap_ip,
         storage_manager,
@@ -337,7 +347,9 @@ async fn rack_initialize(
 
 async fn rack_reset(
     parent_log: &Logger,
+    sprockets: SprocketsConfig,
     global_zone_bootstrap_ip: Ipv6Addr,
 ) -> Result<(), SetupServiceError> {
-    RssHandle::run_rss_reset(parent_log, global_zone_bootstrap_ip).await
+    RssHandle::run_rss_reset(parent_log, global_zone_bootstrap_ip, sprockets)
+        .await
 }

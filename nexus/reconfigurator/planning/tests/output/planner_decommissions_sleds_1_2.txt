@@ -3,7 +3,7 @@ to:   blueprint 1ac2d88f-27dd-4506-8585-6b2be832528e
 
  MODIFIED SLEDS:
 
-  sled a1b477db-b629-48eb-911d-1ccdafca75b9:
+  sled a1b477db-b629-48eb-911d-1ccdafca75b9 (active -> decommissioned):
 
     physical disks from generation 1:
     ----------------------------------------------------------------------
@@ -53,7 +53,7 @@ to:   blueprint 1ac2d88f-27dd-4506-8585-6b2be832528e
      └─                                                   + expunged                           
 
 
-  sled d67ce8f0-a691-4010-b414-420d82e80527:
+  sled d67ce8f0-a691-4010-b414-420d82e80527 (active):
 
     physical disks at generation 1:
     ----------------------------------------------------------------------
@@ -91,7 +91,7 @@ to:   blueprint 1ac2d88f-27dd-4506-8585-6b2be832528e
 +   nexus          ff9ce09c-afbf-425b-bbfa-3d8fb254f98e   in service    fd00:1122:3344:101::2d
 
 
-  sled fefcf4cf-f7e7-46b3-b629-058526ce440e:
+  sled fefcf4cf-f7e7-46b3-b629-058526ce440e (active):
 
     physical disks at generation 1:
     ----------------------------------------------------------------------

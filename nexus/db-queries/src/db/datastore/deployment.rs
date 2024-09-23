@@ -1679,6 +1679,7 @@ mod tests {
     use super::*;
     use crate::db::datastore::test_utils::datastore_test;
     use nexus_inventory::now_db_precision;
+    use nexus_inventory::CollectionBuilder;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_reconfigurator_planning::blueprint_builder::Ensure;
     use nexus_reconfigurator_planning::blueprint_builder::EnsureMultiple;
@@ -1991,6 +1992,7 @@ mod tests {
             &logctx.log,
             &blueprint1,
             &planning_input,
+            &collection,
             "test",
         )
         .expect("failed to create builder");
@@ -2168,6 +2170,9 @@ mod tests {
             .unwrap_err();
         assert!(err.to_string().contains("no target blueprint set"));
 
+        // Create an initial empty collection
+        let collection = CollectionBuilder::new("test").build();
+
         // Create three blueprints:
         // * `blueprint1` has no parent
         // * `blueprint2` and `blueprint3` both have `blueprint1` as parent
@@ -2179,6 +2184,7 @@ mod tests {
             &logctx.log,
             &blueprint1,
             &EMPTY_PLANNING_INPUT,
+            &collection,
             "test2",
         )
         .expect("failed to create builder")
@@ -2187,6 +2193,7 @@ mod tests {
             &logctx.log,
             &blueprint1,
             &EMPTY_PLANNING_INPUT,
+            &collection,
             "test3",
         )
         .expect("failed to create builder")
@@ -2286,6 +2293,7 @@ mod tests {
             &logctx.log,
             &blueprint3,
             &EMPTY_PLANNING_INPUT,
+            &collection,
             "test3",
         )
         .expect("failed to create builder")
@@ -2318,6 +2326,9 @@ mod tests {
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
+        // Create an initial empty collection
+        let collection = CollectionBuilder::new("test").build();
+
         // Create an initial blueprint and a child.
         let blueprint1 = BlueprintBuilder::build_empty_with_sleds(
             std::iter::empty(),
@@ -2327,6 +2338,7 @@ mod tests {
             &logctx.log,
             &blueprint1,
             &EMPTY_PLANNING_INPUT,
+            &collection,
             "test2",
         )
         .expect("failed to create builder")
@@ -2429,6 +2441,9 @@ mod tests {
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) = datastore_test(&logctx, &db).await;
 
+        // Create an initial empty collection
+        let collection = CollectionBuilder::new("test").build();
+
         // Create an initial blueprint and a child.
         let blueprint1 = BlueprintBuilder::build_empty_with_sleds(
             std::iter::empty(),
@@ -2438,6 +2453,7 @@ mod tests {
             &logctx.log,
             &blueprint1,
             &EMPTY_PLANNING_INPUT,
+            &collection,
             "test2",
         )
         .expect("failed to create builder")

@@ -23,7 +23,7 @@ use omicron_common::api::external::{
 use openapi_manager_types::ValidationContext;
 use openapiv3::OpenAPI;
 
-pub const API_VERSION: &str = "20240821.0";
+pub const API_VERSION: &str = "20241009.0";
 
 // API ENDPOINT FUNCTION NAMING CONVENTIONS
 //
@@ -1484,7 +1484,7 @@ pub trait NexusExternalApi {
     }]
     async fn networking_bgp_config_list(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<PaginatedByNameOrId<params::BgpConfigListSelector>>,
+        query_params: Query<PaginatedByNameOrId>,
     ) -> Result<HttpResponseOk<ResultsPage<BgpConfig>>, HttpError>;
 
     //TODO pagination? the normal by-name/by-id stuff does not work here
@@ -1565,15 +1565,13 @@ pub trait NexusExternalApi {
     }]
     async fn networking_bgp_announce_set_list(
         rqctx: RequestContext<Self::Context>,
-        query_params: Query<
-            PaginatedByNameOrId<params::OptionalBgpAnnounceSetSelector>,
-        >,
+        query_params: Query<PaginatedByNameOrId>,
     ) -> Result<HttpResponseOk<Vec<BgpAnnounceSet>>, HttpError>;
 
     /// Delete BGP announce set
     #[endpoint {
         method = DELETE,
-        path = "/v1/system/networking/bgp-announce-set/{name_or_id}",
+        path = "/v1/system/networking/bgp-announce-set/{announce_set}",
         tags = ["system/networking"],
     }]
     async fn networking_bgp_announce_set_delete(
@@ -1586,7 +1584,7 @@ pub trait NexusExternalApi {
     /// Get originated routes for a specified BGP announce set
     #[endpoint {
         method = GET,
-        path = "/v1/system/networking/bgp-announce-set/{name_or_id}/announcement",
+        path = "/v1/system/networking/bgp-announce-set/{announce_set}/announcement",
         tags = ["system/networking"],
     }]
     async fn networking_bgp_announcement_list(
