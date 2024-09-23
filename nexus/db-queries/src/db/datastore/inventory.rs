@@ -2222,6 +2222,7 @@ mod test {
     use crate::db::datastore::inventory::DataStoreInventoryTest;
     use crate::db::datastore::test_utils::datastore_test;
     use crate::db::datastore::DataStoreConnection;
+    use crate::db::raw_query_builder::{QueryBuilder, TrustedStr};
     use crate::db::schema;
     use anyhow::Context;
     use async_bb8_diesel::AsyncConnection;
@@ -2787,6 +2788,94 @@ mod test {
         assert_ne!(coll_counts.baseboards, 0);
         assert_ne!(coll_counts.cabooses, 0);
         assert_ne!(coll_counts.rot_pages, 0);
+
+        // Clean up.
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    /// Creates a representative collection, deletes it, and walks through
+    /// tables to ensure that the subcomponents of the inventory have been
+    /// deleted.
+    ///
+    /// NOTE: This test depends on the naming convention "inv_" prefix name
+    /// to identify pieces of the inventory.
+    #[tokio::test]
+    async fn test_inventory_deletion() {
+        // Setup
+        let logctx = dev::test_setup_log("inventory_deletion");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        // Create a representative collection and write it to the database.
+        let Representative { builder, .. } = representative();
+        let collection = builder.build();
+        datastore
+            .inventory_insert_collection(&opctx, &collection)
+            .await
+            .expect("failed to insert collection");
+
+        // Delete that collection we just added
+        datastore
+            .inventory_delete_collection(&opctx, collection.id)
+            .await
+            .expect("failed to prune collections");
+        assert_eq!(
+            datastore
+                .inventory_collections()
+                .await
+                .unwrap()
+                .iter()
+                .map(|c| c.id.into())
+                .collect::<Vec<CollectionUuid>>(),
+            &[]
+        );
+
+        // Read all "inv_" tables and ensure that they're empty
+
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        let tables: Vec<String> = QueryBuilder::new().sql(
+            "SELECT table_name FROM information_schema.tables WHERE table_name LIKE 'inv\\_%'"
+            )
+            .query::<diesel::sql_types::Text>()
+            .load_async(&*conn)
+            .await
+            .unwrap();
+
+        // Sanity-check, if this breaks, break loudly.
+        // We expect to see all the "inv_..." tables here, even ones that
+        // haven't been written yet.
+        assert!(
+            tables.len() > 0,
+            "Something has gone wrong with the information_schema query"
+        );
+
+        // We need this to call "COUNT(*)" below.
+        conn.transaction_async(|conn| async move {
+            conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL)
+                .await
+                .unwrap();
+
+            for table in tables {
+                eprintln!("Validating that {table} is empty");
+                let count: i64 = QueryBuilder::new().sql(
+                        // We're scraping the table names dynamically here, so we
+                        // don't know them ahead of time. However, this is also a
+                        // test, so this usage is pretty benign.
+                        TrustedStr::i_take_responsibility_for_validating_this_string(
+                            format!("SELECT COUNT(*) FROM {table}")
+                        )
+                    )
+                    .query::<diesel::sql_types::Int8>()
+                    .get_result_async(&conn)
+                    .await
+                    .unwrap();
+                assert_eq!(count, 0, "Found deleted row(s) from table: {table}");
+            }
+            Ok::<(), anyhow::Error>(())
+        })
+        .await
+        .expect("Failed to check that tables were empty");
 
         // Clean up.
         db.cleanup().await.unwrap();
