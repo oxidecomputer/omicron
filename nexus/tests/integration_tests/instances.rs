@@ -52,9 +52,11 @@ use nexus_types::internal_api::params::InstanceMigrateRequest;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskState;
+use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::IdentityMetadataUpdateParams;
 use omicron_common::api::external::Instance;
+use omicron_common::api::external::InstanceAutoRestartPolicy;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::InstanceNetworkInterface;
 use omicron_common::api::external::InstanceState;
@@ -227,6 +229,7 @@ async fn test_create_instance_with_bad_hostname_impl(
         disks: vec![],
         start: false,
         ssh_public_keys: None,
+        auto_restart_policy: Default::default(),
     };
     let mut body: serde_json::Value =
         serde_json::from_str(&serde_json::to_string(&params).unwrap()).unwrap();
@@ -331,6 +334,7 @@ async fn test_instances_create_reboot_halt(
                 external_ips: vec![],
                 disks: vec![],
                 start: true,
+                auto_restart_policy: Default::default(),
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -771,6 +775,7 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
         Vec::<params::InstanceDiskAttachment>::new(),
         Vec::<params::ExternalIpCreate>::new(),
         true,
+        Default::default(),
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -962,6 +967,7 @@ async fn test_instance_migrate_v2p_and_routes(
         Vec::<params::InstanceDiskAttachment>::new(),
         Vec::<params::ExternalIpCreate>::new(),
         true,
+        Default::default(),
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -1115,7 +1121,12 @@ async fn test_instance_failed_after_sled_agent_forgets_vmm_can_be_restarted(
     let client = &cptestctx.external_client;
 
     let instance_name = "losing-is-fun";
-    let instance_id = make_forgotten_instance(&cptestctx, instance_name).await;
+    let instance_id = make_forgotten_instance(
+        &cptestctx,
+        instance_name,
+        InstanceAutoRestartPolicy::Never,
+    )
+    .await;
 
     // Attempting to reboot the forgotten instance will result in a 404
     // NO_SUCH_INSTANCE from the sled-agent, which Nexus turns into a 503.
@@ -1143,7 +1154,12 @@ async fn test_instance_failed_after_sled_agent_forgets_vmm_can_be_deleted(
     let client = &cptestctx.external_client;
 
     let instance_name = "losing-is-fun";
-    let instance_id = make_forgotten_instance(&cptestctx, instance_name).await;
+    let instance_id = make_forgotten_instance(
+        &cptestctx,
+        instance_name,
+        InstanceAutoRestartPolicy::Never,
+    )
+    .await;
 
     // Attempting to reboot the forgotten instance will result in a 404
     // NO_SUCH_INSTANCE from the sled-agent, which Nexus turns into a 503.
@@ -1170,7 +1186,12 @@ async fn test_instance_failed_by_instance_watcher_can_be_deleted(
 ) {
     let client = &cptestctx.external_client;
     let instance_name = "losing-is-fun";
-    let instance_id = make_forgotten_instance(&cptestctx, instance_name).await;
+    let instance_id = make_forgotten_instance(
+        &cptestctx,
+        instance_name,
+        InstanceAutoRestartPolicy::Never,
+    )
+    .await;
 
     nexus_test_utils::background::activate_background_task(
         &cptestctx.internal_client,
@@ -1194,7 +1215,12 @@ async fn test_instance_failed_by_instance_watcher_can_be_restarted(
 ) {
     let client = &cptestctx.external_client;
     let instance_name = "losing-is-fun";
-    let instance_id = make_forgotten_instance(&cptestctx, instance_name).await;
+    let instance_id = make_forgotten_instance(
+        &cptestctx,
+        instance_name,
+        InstanceAutoRestartPolicy::Never,
+    )
+    .await;
 
     nexus_test_utils::background::activate_background_task(
         &cptestctx.internal_client,
@@ -1207,6 +1233,143 @@ async fn test_instance_failed_by_instance_watcher_can_be_restarted(
 
     // Now, the instance should be deleteable.
     expect_instance_delete_ok(&client, instance_name).await;
+}
+
+// Verified that instances currently on Expunged sleds are marked as failed.
+#[nexus_test]
+async fn test_instance_failed_when_on_expunged_sled(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+    let instance1_name = "romeo";
+    let instance2_name = "juliet";
+
+    create_project_and_pool(&client).await;
+
+    // Create and start the test instances.
+    let mk_instance = |name: &'static str| async move {
+        let instance_url = get_instance_url(name);
+        let instance = create_instance(client, PROJECT_NAME, name).await;
+        let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+        instance_simulate(nexus, &instance_id).await;
+        let instance_next = instance_get(&client, &instance_url).await;
+        assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
+
+        slog::info!(
+            &cptestctx.logctx.log,
+            "test instance is running";
+            "instance_name" => %name,
+            "instance_id" => %instance_id,
+        );
+
+        instance_id
+    };
+    let instance1_id = mk_instance(instance1_name).await;
+    let instance2_id = mk_instance(instance2_name).await;
+
+    // Create a second sled for instances on the Expunged sled to be assigned
+    // to.
+    let default_sled_id: SledUuid =
+        nexus_test_utils::SLED_AGENT_UUID.parse().unwrap();
+    let update_dir = Utf8Path::new("/should/be/unused");
+    let other_sled_id = SledUuid::new_v4();
+    let _other_sa = nexus_test_utils::start_sled_agent(
+        cptestctx.logctx.log.new(o!("sled_id" => other_sled_id.to_string())),
+        cptestctx.server.get_http_server_internal_address().await,
+        other_sled_id,
+        &update_dir,
+        sim::SimMode::Explicit,
+    )
+    .await
+    .unwrap();
+
+    // Expunge the sled
+    slog::info!(
+        &cptestctx.logctx.log,
+        "expunging sled";
+        "sled_id" => %default_sled_id,
+    );
+    let int_client = &cptestctx.internal_client;
+    int_client
+        .make_request(
+            Method::POST,
+            "/sleds/expunge",
+            Some(params::SledSelector {
+                sled: default_sled_id.into_untyped_uuid(),
+            }),
+            StatusCode::OK,
+        )
+        .await
+        .unwrap();
+
+    // Wait for both instances to transition to Failed.
+    instance_wait_for_state(client, instance1_id, InstanceState::Failed).await;
+    instance_wait_for_state(client, instance2_id, InstanceState::Failed).await;
+
+    // Now, the instances should be deleteable...
+    expect_instance_delete_ok(&client, instance1_name).await;
+    // ...or restartable.
+    expect_instance_start_ok(client, instance2_name).await;
+
+    // The restarted instance shoild now transition back to `Running`, on its
+    // new sled.
+    instance_wait_for_vmm_registration(cptestctx, &instance2_id).await;
+    instance_simulate(nexus, &instance2_id).await;
+    instance_wait_for_state(client, instance2_id, InstanceState::Running).await;
+}
+
+// Verifies that the instance-watcher background task transitions an instance
+// to Failed when the sled-agent returns a 404, and that the instance can be
+// deleted after it transitions to Failed.
+#[nexus_test]
+async fn test_instance_failed_by_instance_watcher_automatically_reincarnates(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let nexus = &cptestctx.server.server_context().nexus;
+    let instance_id = dbg!(
+        make_forgotten_instance(
+            &cptestctx,
+            "resurgam",
+            InstanceAutoRestartPolicy::BestEffort,
+        )
+        .await
+    );
+
+    dbg!(
+        nexus_test_utils::background::activate_background_task(
+            &cptestctx.internal_client,
+            "instance_watcher",
+        )
+        .await
+    );
+
+    // Now, it should be automatically restarted!
+
+    // N.B.: it's tempting to want to wait for the instance to transition
+    // the way to `Failed`, or at least to `Stopping`, before it transitions to
+    // `Starting` again, but
+    // unfortunately, because the instance-update saga triggered by the
+    // instance-watcher task immediately triggers instance reincarnation, and
+    // this instance will be the only instance eligible to reincarnate, it's
+    // _very_ easy for the test to miss the very brief period of time it's in
+    // the `Failed` state, especially if we only poll once per second in
+    // `instance_wait_for_state`.
+    dbg!(
+        instance_wait_for_state(client, instance_id, InstanceState::Starting)
+            .await
+    );
+    // Wait for the VMM to be registered with the sim sled-agent before poking
+    // it.
+    dbg!(instance_wait_for_vmm_registration(cptestctx, &instance_id).await);
+    // Now, we can actually poke the instance.
+    dbg!(instance_simulate(nexus, &instance_id).await);
+    dbg!(
+        instance_wait_for_state(client, instance_id, InstanceState::Running)
+            .await
+    );
 }
 
 #[nexus_test]
@@ -1295,6 +1458,7 @@ async fn test_instances_are_not_marked_failed_on_other_sled_agent_errors_by_inst
 async fn make_forgotten_instance(
     cptestctx: &ControlPlaneTestContext,
     instance_name: &str,
+    auto_restart: InstanceAutoRestartPolicy,
 ) -> InstanceUuid {
     let client = &cptestctx.external_client;
     let apictx = &cptestctx.server.server_context();
@@ -1303,7 +1467,19 @@ async fn make_forgotten_instance(
     // Create and start the test instance.
     create_project_and_pool(&client).await;
     let instance_url = get_instance_url(instance_name);
-    let instance = create_instance(client, PROJECT_NAME, instance_name).await;
+    let instance = create_instance_with(
+        client,
+        PROJECT_NAME,
+        instance_name,
+        &params::InstanceNetworkInterfaceAttachment::Default,
+        // Disks=
+        Vec::<params::InstanceDiskAttachment>::new(),
+        // External IPs=
+        Vec::<params::ExternalIpCreate>::new(),
+        true,
+        Some(auto_restart),
+    )
+    .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
     instance_simulate(nexus, &instance_id).await;
     let instance_next = instance_get(&client, &instance_url).await;
@@ -1543,6 +1719,7 @@ async fn test_instance_metrics_with_migration(
         Vec::<params::InstanceDiskAttachment>::new(),
         Vec::<params::ExternalIpCreate>::new(),
         true,
+        Default::default(),
     )
     .await;
     let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
@@ -1710,6 +1887,7 @@ async fn test_instances_create_stopped_start(
             external_ips: vec![],
             disks: vec![],
             start: false,
+            auto_restart_policy: Default::default(),
         },
     )
     .await;
@@ -1889,6 +2067,7 @@ async fn test_instance_using_image_from_other_project_fails(
                     },
                 )],
                 start: true,
+                auto_restart_policy: Default::default(),
             }))
             .expect_status(Some(StatusCode::BAD_REQUEST)),
     )
@@ -1952,6 +2131,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
         external_ips: vec![],
         disks: vec![],
         start: true,
+        auto_restart_policy: Default::default(),
     };
     let response = NexusRequest::objects_post(
         client,
@@ -1980,6 +2160,7 @@ async fn test_instance_create_saga_removes_instance_database_record(
         external_ips: vec![],
         disks: vec![],
         start: true,
+        auto_restart_policy: Default::default(),
     };
     let _ = NexusRequest::objects_post(
         client,
@@ -2069,6 +2250,8 @@ async fn test_instance_with_single_explicit_ip_address(
         external_ips: vec![],
         disks: vec![],
         start: true,
+
+        auto_restart_policy: Default::default(),
     };
     let response = NexusRequest::objects_post(
         client,
@@ -2184,6 +2367,7 @@ async fn test_instance_with_new_custom_network_interfaces(
         external_ips: vec![],
         disks: vec![],
         start: true,
+        auto_restart_policy: Default::default(),
     };
     let response = NexusRequest::objects_post(
         client,
@@ -2299,6 +2483,7 @@ async fn test_instance_create_delete_network_interface(
         external_ips: vec![],
         disks: vec![],
         start: true,
+        auto_restart_policy: Default::default(),
     };
     let response = NexusRequest::objects_post(
         client,
@@ -2543,6 +2728,7 @@ async fn test_instance_update_network_interfaces(
         external_ips: vec![],
         disks: vec![],
         start: true,
+        auto_restart_policy: Default::default(),
     };
     let response = NexusRequest::objects_post(
         client,
@@ -2942,6 +3128,7 @@ async fn test_instance_with_multiple_nics_unwinds_completely(
         external_ips: vec![],
         disks: vec![],
         start: true,
+        auto_restart_policy: Default::default(),
     };
     let builder =
         RequestBuilder::new(client, http::Method::POST, &get_instances_url())
@@ -3012,6 +3199,7 @@ async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
             },
         )],
         start: true,
+        auto_restart_policy: Default::default(),
     };
 
     let builder =
@@ -3086,6 +3274,7 @@ async fn test_instance_create_attach_disks(
             ),
         ],
         start: true,
+        auto_restart_policy: Default::default(),
     };
 
     let builder =
@@ -3182,6 +3371,7 @@ async fn test_instance_create_attach_disks_undo(
             ),
         ],
         start: true,
+        auto_restart_policy: Default::default(),
     };
 
     let builder =
@@ -3259,6 +3449,7 @@ async fn test_attach_eight_disks_to_instance(
             })
             .collect(),
         start: true,
+        auto_restart_policy: Default::default(),
     };
 
     let builder =
@@ -3340,6 +3531,7 @@ async fn test_cannot_attach_nine_disks_to_instance(
             })
             .collect(),
         start: true,
+        auto_restart_policy: Default::default(),
     };
 
     let url_instances = format!("/v1/instances?project={}", project_name);
@@ -3435,6 +3627,7 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
             })
             .collect(),
         start: true,
+        auto_restart_policy: Default::default(),
     };
 
     let builder =
@@ -3519,6 +3712,7 @@ async fn test_disks_detached_when_instance_destroyed(
             })
             .collect(),
         start: true,
+        auto_restart_policy: Default::default(),
     };
 
     let builder =
@@ -3610,6 +3804,7 @@ async fn test_disks_detached_when_instance_destroyed(
             })
             .collect(),
         start: true,
+        auto_restart_policy: Default::default(),
     };
 
     let builder =
@@ -3663,6 +3858,7 @@ async fn test_instances_memory_rejected_less_than_min_memory_size(
         external_ips: vec![],
         disks: vec![],
         start: true,
+        auto_restart_policy: Default::default(),
     };
 
     let error = NexusRequest::new(
@@ -3713,6 +3909,7 @@ async fn test_instances_memory_not_divisible_by_min_memory_size(
         external_ips: vec![],
         disks: vec![],
         start: true,
+        auto_restart_policy: Default::default(),
     };
 
     let error = NexusRequest::new(
@@ -3763,6 +3960,7 @@ async fn test_instances_memory_greater_than_max_size(
         external_ips: vec![],
         disks: vec![],
         start: true,
+        auto_restart_policy: Default::default(),
     };
 
     let error = NexusRequest::new(
@@ -3845,6 +4043,7 @@ async fn test_instance_create_with_ssh_keys(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![],
+        auto_restart_policy: Default::default(),
     };
 
     let builder =
@@ -3891,6 +4090,7 @@ async fn test_instance_create_with_ssh_keys(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![],
+        auto_restart_policy: Default::default(),
     };
 
     let builder =
@@ -3936,6 +4136,7 @@ async fn test_instance_create_with_ssh_keys(
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
         disks: vec![],
+        auto_restart_policy: Default::default(),
     };
 
     let builder =
@@ -4057,6 +4258,7 @@ async fn test_cannot_provision_instance_beyond_cpu_capacity(
             external_ips: vec![],
             disks: vec![],
             start: false,
+            auto_restart_policy: Default::default(),
         };
 
         let url_instances = get_instances_url();
@@ -4113,6 +4315,7 @@ async fn test_cannot_provision_instance_beyond_cpu_limit(
         external_ips: vec![],
         disks: vec![],
         start: false,
+        auto_restart_policy: Default::default(),
     };
     let url_instances = get_instances_url();
 
@@ -4166,6 +4369,7 @@ async fn test_cannot_provision_instance_beyond_ram_capacity(
             external_ips: vec![],
             disks: vec![],
             start: false,
+            auto_restart_policy: Default::default(),
         };
 
         let url_instances = get_instances_url();
@@ -4464,6 +4668,7 @@ async fn test_instance_ephemeral_ip_from_correct_pool(
         ssh_public_keys: None,
         disks: vec![],
         start: true,
+        auto_restart_policy: Default::default(),
     };
     let error = object_create_error(
         client,
@@ -4531,6 +4736,7 @@ async fn test_instance_ephemeral_ip_from_orphan_pool(
         ssh_public_keys: None,
         disks: vec![],
         start: true,
+        auto_restart_policy: Default::default(),
     };
 
     // instance create 404s
@@ -4592,6 +4798,7 @@ async fn test_instance_ephemeral_ip_no_default_pool_error(
         ssh_public_keys: None,
         disks: vec![],
         start: true,
+        auto_restart_policy: Default::default(),
     };
 
     let url = format!("/v1/instances?project={}", PROJECT_NAME);
@@ -4657,6 +4864,7 @@ async fn test_instance_attach_several_external_ips(
         vec![],
         external_ip_create,
         true,
+        Default::default(),
     )
     .await;
 
@@ -4726,6 +4934,7 @@ async fn test_instance_allow_only_one_ephemeral_ip(
         external_ips: vec![ephemeral_create.clone(), ephemeral_create],
         disks: vec![],
         start: true,
+        auto_restart_policy: Default::default(),
     };
     let error = object_create_error(
         client,
@@ -4756,6 +4965,7 @@ async fn create_instance_with_pool(
             pool: pool_name.map(|name| name.parse::<Name>().unwrap().into()),
         }],
         true,
+        Default::default(),
     )
     .await
 }
@@ -4856,6 +5066,7 @@ async fn test_instance_create_in_silo(cptestctx: &ControlPlaneTestContext) {
         }],
         disks: vec![],
         start: true,
+        auto_restart_policy: Default::default(),
     };
     let url_instances = format!("/v1/instances?project={}", PROJECT_NAME);
     NexusRequest::objects_post(client, &url_instances, &instance_params)
@@ -5136,6 +5347,85 @@ pub async fn instance_wait_for_state_as(
             "instance {instance_id} did not transition to {state:?} \
              after {MAX_WAIT:?}: {e}"
         ),
+    }
+}
+
+/// Waits for an instance's VMM to be registered with the simulated sled-agent.
+///
+/// This is necessary when *restarting* an instance, as the instance's external
+/// API state will be `Starting` as soon as a VMM record is created in the
+/// database, even if that VMM's internal state is `VmmState::Creating` (which
+/// means it has not yet been registered with the sled-agent). If we attempt to
+/// simulate an instance before the simulated sled-agent has registered its VMM,
+/// the simulated sled-agent will panic.
+pub async fn instance_wait_for_vmm_registration(
+    cptestctx: &ControlPlaneTestContext,
+    instance_id: &InstanceUuid,
+) {
+    let datastore = cptestctx.server.server_context().nexus.datastore();
+    let log = &cptestctx.logctx.log;
+    let opctx = OpContext::for_tests(log.clone(), datastore.clone());
+    let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+        .instance_id(instance_id.into_untyped_uuid())
+        .lookup_for(nexus_db_queries::authz::Action::Read)
+        .await
+        .expect("instance must exist to wait for its VMM to be registered");
+
+    info!(
+        log,
+        "waiting for instance's VMM to be registered with sled-agent...";
+        "instance_id" => %instance_id,
+    );
+
+    let result = wait_for_condition(
+        || async {
+            debug!(
+                log,
+                "checking if instance's active VMM has been registered with sled-agent";
+                "instance_id" => %instance_id,
+            );
+            let gestalt = datastore
+                .instance_fetch_all(&opctx, &authz_instance)
+                .await
+                .map_err(poll::CondCheckError::Failed)?;
+            let vmm = match gestalt.active_vmm {
+                Some(v) => v,
+                None => {
+                    warn!(
+                        log,
+                        "instance does not have an active VMM, hopefully \
+                            it will soon...";
+                        "instance_id" => %instance_id,
+                    );
+                    return Err(CondCheckError::<Error>::NotYet);
+                }
+            };
+
+            if vmm.runtime.state == nexus_db_model::VmmState::Creating {
+                debug!(
+                    log,
+                    "instance's active VMM is still Creating";
+                    "instance_id" => %instance_id,
+                );
+                Err(poll::CondCheckError::<Error>::NotYet)
+            } else {
+                info!(
+                    log,
+                    "instance's active VMM is no longer Creating";
+                    "instance_id" => %instance_id,
+                    "vmm_id" => %vmm.id,
+                    "vmm_state" => ?vmm.runtime.state,
+                );
+                Ok(())
+            }
+        },
+        &Duration::from_secs(1),
+        &Duration::from_secs(60),
+    )
+    .await;
+
+    if let Err(err) = result {
+        panic!("instance {instance_id}'s VMM was not registered: {err:?}")
     }
 }
 

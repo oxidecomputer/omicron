@@ -2094,6 +2094,7 @@
           },
           "filesystem_pool": {
             "nullable": true,
+            "description": "zpool used for the zone's (transient) root filesystem",
             "allOf": [
               {
                 "$ref": "#/components/schemas/ZpoolName"
@@ -3316,6 +3317,16 @@
         "description": "View of an Instance",
         "type": "object",
         "properties": {
+          "auto_restart_cooldown_expiration": {
+            "nullable": true,
+            "description": "The time at which the auto-restart cooldown period for this instance completes, permitting it to be automatically restarted again. If the instance enters the `Failed` state, it will not be restarted until after this time.\n\nIf this is not present, then either the instance has never been automatically restarted, or the cooldown period has already expired, allowing the instance to be restarted immediately if it fails.",
+            "type": "string",
+            "format": "date-time"
+          },
+          "auto_restart_enabled": {
+            "description": "`true` if this instance's auto-restart policy will permit the control plane to automatically restart it if it enters the `Failed` state.",
+            "type": "boolean"
+          },
           "description": {
             "description": "human-readable free-form text about a resource",
             "type": "string"
@@ -3366,6 +3377,12 @@
             "type": "string",
             "format": "date-time"
           },
+          "time_last_auto_restarted": {
+            "nullable": true,
+            "description": "The timestamp of the most recent time this instance was automatically restarted by the control plane.\n\nIf this is not present, then this instance has not been automatically restarted.",
+            "type": "string",
+            "format": "date-time"
+          },
           "time_modified": {
             "description": "timestamp when this resource was last modified",
             "type": "string",
@@ -3377,6 +3394,7 @@
           }
         },
         "required": [
+          "auto_restart_enabled",
           "description",
           "hostname",
           "id",

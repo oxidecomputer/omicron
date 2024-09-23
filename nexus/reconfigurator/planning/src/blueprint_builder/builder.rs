@@ -34,6 +34,7 @@ use nexus_types::deployment::SledResources;
 use nexus_types::deployment::ZpoolFilter;
 use nexus_types::deployment::ZpoolName;
 use nexus_types::external_api::views::SledState;
+use nexus_types::inventory::Collection;
 use omicron_common::address::get_internal_dns_server_addresses;
 use omicron_common::address::get_sled_address;
 use omicron_common::address::get_switch_zone_address;
@@ -204,6 +205,10 @@ pub struct BlueprintBuilder<'a> {
     /// previous blueprint, on which this one will be based
     parent_blueprint: &'a Blueprint,
 
+    /// The latest inventory collection
+    #[allow(unused)]
+    collection: &'a Collection,
+
     // These fields are used to allocate resources for sleds.
     input: &'a PlanningInput,
     sled_ip_allocators: BTreeMap<SledUuid, IpAllocator>,
@@ -294,6 +299,7 @@ impl<'a> BlueprintBuilder<'a> {
         log: &Logger,
         parent_blueprint: &'a Blueprint,
         input: &'a PlanningInput,
+        inventory: &'a Collection,
         creator: &str,
     ) -> anyhow::Result<BlueprintBuilder<'a>> {
         let log = log.new(o!(
@@ -334,6 +340,7 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(BlueprintBuilder {
             log,
             parent_blueprint,
+            collection: inventory,
             input,
             sled_ip_allocators: BTreeMap::new(),
             external_networking,
@@ -1337,9 +1344,13 @@ impl<'a> BlueprintZonesBuilder<'a> {
     }
 
     /// Returns a mutable reference to a sled's Omicron zones *because* we're
-    /// going to change them.  It's essential that the caller _does_ change them
-    /// because we will have bumped the generation number and we don't want to
-    /// do that if no changes are being made.
+    /// going to change them.
+    ///
+    /// This updates internal data structures, and it is recommended that it be
+    /// called only when the caller actually wishes to make changes to zones.
+    /// But making no changes after calling this does not result in a changed
+    /// blueprint. (In particular, the generation number is only updated if
+    /// the state of any zones was updated.)
     pub fn change_sled_zones(
         &mut self,
         sled_id: SledUuid,
@@ -1446,9 +1457,11 @@ impl<'a> BlueprintDisksBuilder<'a> {
     }
 
     /// Returns a mutable reference to a sled's Omicron disks *because* we're
-    /// going to change them.  It's essential that the caller _does_ change them
-    /// because we will have bumped the generation number and we don't want to
-    /// do that if no changes are being made.
+    /// going to change them.
+    ///
+    /// Unlike [`BlueprintZonesBuilder::change_sled_zones`], it is essential
+    /// that the caller _does_ change them, because constructing this bumps the
+    /// generation number unconditionally.
     pub fn change_sled_disks(
         &mut self,
         sled_id: SledUuid,
@@ -1524,6 +1537,7 @@ pub mod test {
     use crate::example::ExampleSystem;
     use crate::system::SledBuilder;
     use expectorate::assert_contents;
+    use nexus_inventory::CollectionBuilder;
     use nexus_types::deployment::BlueprintOrCollectionZoneConfig;
     use nexus_types::deployment::BlueprintZoneFilter;
     use nexus_types::deployment::OmicronZoneNetworkResources;
@@ -1536,6 +1550,7 @@ pub mod test {
     pub const DEFAULT_N_SLEDS: usize = 3;
 
     /// Checks various conditions that should be true for all blueprints
+    #[track_caller]
     pub fn verify_blueprint(blueprint: &Blueprint) {
         // There should be no duplicate underlay IPs.
         let mut underlay_ips: BTreeMap<Ipv6Addr, &BlueprintZoneConfig> =
@@ -1586,6 +1601,34 @@ pub mod test {
         }
     }
 
+    #[track_caller]
+    pub fn assert_planning_makes_no_changes(
+        log: &Logger,
+        blueprint: &Blueprint,
+        input: &PlanningInput,
+        test_name: &'static str,
+    ) {
+        let collection = CollectionBuilder::new("test").build();
+        let builder = BlueprintBuilder::new_based_on(
+            &log,
+            &blueprint,
+            &input,
+            &collection,
+            test_name,
+        )
+        .expect("failed to create builder");
+        let child_blueprint = builder.build();
+        verify_blueprint(&child_blueprint);
+        let diff = child_blueprint.diff_since_blueprint(&blueprint);
+        println!(
+            "diff between blueprints (expected no changes):\n{}",
+            diff.display()
+        );
+        assert_eq!(diff.sleds_added.len(), 0);
+        assert_eq!(diff.sleds_removed.len(), 0);
+        assert_eq!(diff.sleds_modified.len(), 0);
+    }
+
     #[test]
     fn test_initial() {
         // Test creating a blueprint from a collection and verifying that it
@@ -1613,24 +1656,13 @@ pub mod test {
         assert_eq!(diff.sleds_removed.len(), 0);
         assert_eq!(diff.sleds_modified.len(), 0);
 
-        // Test a no-op blueprint.
-        let builder = BlueprintBuilder::new_based_on(
+        // Test a no-op planning iteration.
+        assert_planning_makes_no_changes(
             &logctx.log,
             &blueprint_initial,
             &input,
-            "test_basic",
-        )
-        .expect("failed to create builder");
-        let blueprint = builder.build();
-        verify_blueprint(&blueprint);
-        let diff = blueprint.diff_since_blueprint(&blueprint_initial);
-        println!(
-            "initial blueprint -> next blueprint (expected no changes):\n{}",
-            diff.display()
+            TEST_NAME,
         );
-        assert_eq!(diff.sleds_added.len(), 0);
-        assert_eq!(diff.sleds_removed.len(), 0);
-        assert_eq!(diff.sleds_modified.len(), 0);
 
         logctx.cleanup_successful();
     }
@@ -1648,6 +1680,7 @@ pub mod test {
             &logctx.log,
             blueprint1,
             &example.input,
+            &example.collection,
             "test_basic",
         )
         .expect("failed to create builder");
@@ -1684,6 +1717,7 @@ pub mod test {
             &logctx.log,
             &blueprint2,
             &input,
+            &example.collection,
             "test_basic",
         )
         .expect("failed to create builder");
@@ -1777,6 +1811,14 @@ pub mod test {
                 .collect()
         );
 
+        // Test a no-op planning iteration.
+        assert_planning_makes_no_changes(
+            &logctx.log,
+            &blueprint3,
+            &input,
+            TEST_NAME,
+        );
+
         logctx.cleanup_successful();
     }
 
@@ -1785,7 +1827,7 @@ pub mod test {
         static TEST_NAME: &str =
             "blueprint_builder_test_prune_decommissioned_sleds";
         let logctx = test_setup_log(TEST_NAME);
-        let (_, input, mut blueprint1) =
+        let (collection, input, mut blueprint1) =
             example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
         verify_blueprint(&blueprint1);
 
@@ -1814,6 +1856,7 @@ pub mod test {
             &logctx.log,
             &blueprint1,
             &input,
+            &collection,
             "test_prune_decommissioned_sleds",
         )
         .expect("created builder")
@@ -1840,6 +1883,7 @@ pub mod test {
             &logctx.log,
             &blueprint2,
             &input,
+            &collection,
             "test_prune_decommissioned_sleds",
         )
         .expect("created builder")
@@ -1854,6 +1898,14 @@ pub mod test {
             None,
         );
 
+        // Test a no-op planning iteration.
+        assert_planning_makes_no_changes(
+            &logctx.log,
+            &blueprint3,
+            &input,
+            TEST_NAME,
+        );
+
         logctx.cleanup_successful();
     }
 
@@ -1861,7 +1913,8 @@ pub mod test {
     fn test_add_physical_disks() {
         static TEST_NAME: &str = "blueprint_builder_test_add_physical_disks";
         let logctx = test_setup_log(TEST_NAME);
-        let (_, input, _) = example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+        let (collection, input, _) =
+            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
         let input = {
             // Clear out the external networking records from `input`, since
             // we're building an empty blueprint.
@@ -1884,6 +1937,7 @@ pub mod test {
                 &logctx.log,
                 &parent,
                 &input,
+                &collection,
                 "test",
             )
             .expect("failed to create builder");
@@ -1964,6 +2018,7 @@ pub mod test {
             &logctx.log,
             &parent,
             &input,
+            &collection,
             "test",
         )
         .expect("failed to create builder");
@@ -2064,6 +2119,7 @@ pub mod test {
                 &logctx.log,
                 &parent,
                 &input,
+                &collection,
                 "test",
             )
             .expect("failed to create builder");
@@ -2082,6 +2138,7 @@ pub mod test {
                 &logctx.log,
                 &parent,
                 &input,
+                &collection,
                 "test",
             )
             .expect("failed to create builder");
@@ -2115,6 +2172,7 @@ pub mod test {
                 &logctx.log,
                 &parent,
                 &input,
+                &collection,
                 "test",
             )
             .expect("failed to create builder");
@@ -2145,7 +2203,7 @@ pub mod test {
             "blueprint_builder_test_invalid_parent_blueprint_\
              two_zones_with_same_external_ip";
         let logctx = test_setup_log(TEST_NAME);
-        let (_, input, mut parent) =
+        let (collection, input, mut parent) =
             example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
 
         // We should fail if the parent blueprint claims to contain two
@@ -2179,6 +2237,7 @@ pub mod test {
             &logctx.log,
             &parent,
             &input,
+            &collection,
             "test",
         ) {
             Ok(_) => panic!("unexpected success"),
@@ -2197,7 +2256,7 @@ pub mod test {
             "blueprint_builder_test_invalid_parent_blueprint_\
              two_nexus_zones_with_same_nic_ip";
         let logctx = test_setup_log(TEST_NAME);
-        let (_, input, mut parent) =
+        let (collection, input, mut parent) =
             example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
 
         // We should fail if the parent blueprint claims to contain two
@@ -2231,6 +2290,7 @@ pub mod test {
             &logctx.log,
             &parent,
             &input,
+            &collection,
             "test",
         ) {
             Ok(_) => panic!("unexpected success"),
@@ -2249,7 +2309,7 @@ pub mod test {
             "blueprint_builder_test_invalid_parent_blueprint_\
              two_zones_with_same_vnic_mac";
         let logctx = test_setup_log(TEST_NAME);
-        let (_, input, mut parent) =
+        let (collection, input, mut parent) =
             example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
 
         // We should fail if the parent blueprint claims to contain two
@@ -2283,6 +2343,7 @@ pub mod test {
             &logctx.log,
             &parent,
             &input,
+            &collection,
             "test",
         ) {
             Ok(_) => panic!("unexpected success"),
@@ -2301,7 +2362,8 @@ pub mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Discard the example blueprint and start with an empty one.
-        let (_, input, _) = example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+        let (collection, input, _) =
+            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
         let input = {
             // Clear out the external networking records from `input`, since
             // we're building an empty blueprint.
@@ -2334,6 +2396,7 @@ pub mod test {
             &logctx.log,
             &parent,
             &input,
+            &collection,
             "test",
         )
         .expect("constructed builder");
@@ -2361,12 +2424,21 @@ pub mod test {
             num_sled_zpools
         );
 
+        // Test a no-op planning iteration.
+        assert_planning_makes_no_changes(
+            &logctx.log,
+            &blueprint,
+            &input,
+            TEST_NAME,
+        );
+
         // If we instead ask for one more zone than there are zpools, we should
         // get a zpool allocation error.
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &parent,
             &input,
+            &collection,
             "test",
         )
         .expect("constructed builder");

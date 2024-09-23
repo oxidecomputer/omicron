@@ -7,7 +7,7 @@
 use anyhow::bail;
 use futures::StreamExt;
 use schemars::JsonSchema;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::oneshot;
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::{
@@ -46,8 +46,7 @@ pub(crate) async fn generate_test_events(
     log: &slog::Logger,
     kind: GenerateTestEventsKind,
 ) -> Vec<Event<TestSpec>> {
-    // The channel is big enough to contain all possible events.
-    let (sender, receiver) = mpsc::channel(512);
+    let (sender, receiver) = crate::channel();
     let engine = UpdateEngine::new(log, sender);
 
     match kind {
@@ -176,7 +175,7 @@ fn define_test_steps(
         20,
         "Step 4 (remote nested)",
         move |cx| async move {
-            let (sender, mut receiver) = mpsc::channel(16);
+            let (sender, mut receiver) = crate::channel();
             let mut engine = UpdateEngine::new(&log, sender);
             define_remote_nested_engine(&mut engine, 20);
 

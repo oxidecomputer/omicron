@@ -13,10 +13,12 @@ use crate::external_api::params::PhysicalDiskKind;
 use crate::external_api::params::UninitializedSledId;
 use chrono::DateTime;
 use chrono::Utc;
+use clickhouse_admin_types::KeeperId;
 pub use gateway_client::types::PowerState;
 pub use gateway_client::types::RotImageError;
 pub use gateway_client::types::RotSlot;
 pub use gateway_client::types::SpType;
+use nexus_sled_agent_shared::inventory::InventoryDataset;
 use nexus_sled_agent_shared::inventory::InventoryDisk;
 use nexus_sled_agent_shared::inventory::InventoryZpool;
 use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
@@ -28,6 +30,8 @@ pub use omicron_common::api::internal::shared::NetworkInterfaceKind;
 pub use omicron_common::api::internal::shared::SourceNatConfig;
 pub use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::CollectionUuid;
+use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use serde::{Deserialize, Serialize};
@@ -115,6 +119,12 @@ pub struct Collection {
 
     /// Omicron zones found, by *sled* id
     pub omicron_zones: BTreeMap<SledUuid, OmicronZonesFound>,
+
+    /// The raft configuration (cluster membership) of the clickhouse keeper
+    /// cluster as returned from each available keeper via `clickhouse-admin` in
+    /// the `ClickhouseKeeper` zone
+    pub clickhouse_keeper_cluster_membership:
+        BTreeMap<OmicronZoneUuid, ClickhouseKeeperClusterMembership>,
 }
 
 impl Collection {
@@ -151,6 +161,17 @@ impl Collection {
             .iter()
             .filter(|(_, inventory)| inventory.sled_role == SledRole::Scrimlet)
             .map(|(sled_id, _)| *sled_id)
+    }
+
+    /// Return the latest clickhouse keeper configuration in this collection, if
+    /// there is one.
+    pub fn latest_clickhouse_keeper_membership(
+        &self,
+    ) -> Option<(OmicronZoneUuid, ClickhouseKeeperClusterMembership)> {
+        self.clickhouse_keeper_cluster_membership
+            .iter()
+            .max_by_key(|(_, membership)| membership.leader_committed_log_index)
+            .map(|(zone_id, membership)| (*zone_id, membership.clone()))
     }
 }
 
@@ -396,6 +417,47 @@ impl Zpool {
     }
 }
 
+/// A dataset reported by a sled agent.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct Dataset {
+    /// Although datasets mandated by the control plane will have UUIDs,
+    /// datasets can be created (and have been created) without UUIDs.
+    pub id: Option<DatasetUuid>,
+
+    /// This name is the full path of the dataset.
+    pub name: String,
+
+    /// The amount of remaining space usable by the dataset (and children)
+    /// assuming there is no other activity within the pool.
+    pub available: ByteCount,
+
+    /// The amount of space consumed by this dataset and descendents.
+    pub used: ByteCount,
+
+    /// The maximum amount of space usable by a dataset and all descendents.
+    pub quota: Option<ByteCount>,
+
+    /// The minimum amount of space guaranteed to a dataset and descendents.
+    pub reservation: Option<ByteCount>,
+
+    /// The compression algorithm used for this dataset, if any.
+    pub compression: String,
+}
+
+impl From<InventoryDataset> for Dataset {
+    fn from(disk: InventoryDataset) -> Self {
+        Self {
+            id: disk.id,
+            name: disk.name,
+            available: disk.available,
+            used: disk.used,
+            quota: disk.quota,
+            reservation: disk.reservation,
+            compression: disk.compression,
+        }
+    }
+}
+
 /// Inventory reported by sled agent
 ///
 /// This is a software notion of a sled, distinct from an underlying baseboard.
@@ -415,6 +477,7 @@ pub struct SledAgent {
     pub reservoir_size: ByteCount,
     pub disks: Vec<PhysicalDisk>,
     pub zpools: Vec<Zpool>,
+    pub datasets: Vec<Dataset>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -423,4 +486,18 @@ pub struct OmicronZonesFound {
     pub source: String,
     pub sled_id: SledUuid,
     pub zones: OmicronZonesConfig,
+}
+
+/// The configuration of the clickhouse keeper raft cluster returned from a
+/// single keeper node
+///
+/// Each keeper is asked for its known raft configuration via `clickhouse-admin`
+/// dropshot servers running in `ClickhouseKeeper` zones. state. We include the
+/// leader committed log index known to the current keeper node (whether or not
+/// it is the leader) to determine which configuration is newest.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct ClickhouseKeeperClusterMembership {
+    pub queried_keeper: KeeperId,
+    pub leader_committed_log_index: u64,
+    pub raft_config: BTreeSet<KeeperId>,
 }

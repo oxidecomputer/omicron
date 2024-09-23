@@ -12,8 +12,9 @@ use http::Uri;
 use omicron_common::api::external::{
     AddressLotKind, AllowedSourceIps, BfdMode, BgpPeer, ByteCount, Hostname,
     IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
-    InstanceCpuCount, LinkFec, LinkSpeed, Name, NameOrId, PaginationOrder,
-    RouteDestination, RouteTarget, SemverVersion, UserId,
+    InstanceAutoRestartPolicy, InstanceCpuCount, LinkFec, LinkSpeed, Name,
+    NameOrId, PaginationOrder, RouteDestination, RouteTarget, SemverVersion,
+    UserId,
 };
 use omicron_common::disk::DiskVariant;
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
@@ -1032,6 +1033,14 @@ pub struct InstanceCreate {
     /// Should this instance be started upon creation; true by default.
     #[serde(default = "bool_true")]
     pub start: bool,
+
+    /// The auto-restart policy for this instance.
+    ///
+    /// This indicates whether the instance should be automatically restarted by
+    /// the control plane on failure. If this is `null`, no auto-restart policy
+    /// has been configured for this instance by the user.
+    #[serde(default)]
+    pub auto_restart_policy: Option<InstanceAutoRestartPolicy>,
 }
 
 #[inline]
@@ -1653,13 +1662,6 @@ pub struct BgpConfigSelector {
     pub name_or_id: NameOrId,
 }
 
-/// List BGP configs with an optional name or id.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-pub struct BgpConfigListSelector {
-    /// A name or id to use when selecting BGP config.
-    pub name_or_id: Option<NameOrId>,
-}
-
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct BgpPeerConfig {
     pub peers: Vec<BgpPeer>,
@@ -1675,25 +1677,18 @@ pub struct BgpAnnounceSetCreate {
     pub announcement: Vec<BgpAnnouncementCreate>,
 }
 
-/// Optionally select a BGP announce set by a name or id.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-pub struct OptionalBgpAnnounceSetSelector {
-    /// A name or id to use when s electing BGP port settings
-    pub name_or_id: Option<NameOrId>,
-}
-
 /// Select a BGP announce set by a name or id.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct BgpAnnounceSetSelector {
-    /// A name or id to use when selecting BGP port settings
-    pub name_or_id: NameOrId,
+    /// Name or ID of the announce set
+    pub announce_set: NameOrId,
 }
 
 /// List BGP announce set with an optional name or id.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct BgpAnnounceListSelector {
-    /// A name or id to use when selecting BGP config.
-    pub name_or_id: Option<NameOrId>,
+    /// Name or ID of the announce set
+    pub announce_set: Option<NameOrId>,
 }
 
 /// Selector used for querying imported BGP routes.

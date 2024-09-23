@@ -11,11 +11,14 @@ use internal_dns::resolver::Resolver;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_reconfigurator_execution::RealizeBlueprintOutput;
-use nexus_types::deployment::{Blueprint, BlueprintTarget};
+use nexus_types::deployment::{
+    execution::EventBuffer, Blueprint, BlueprintTarget,
+};
+use omicron_uuid_kinds::OmicronZoneUuid;
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::watch;
-use uuid::Uuid;
+use update_engine::NestedError;
 
 /// Background task that takes a [`Blueprint`] and realizes the change to
 /// the state of the system based on the `Blueprint`.
@@ -23,7 +26,7 @@ pub struct BlueprintExecutor {
     datastore: Arc<DataStore>,
     resolver: Resolver,
     rx_blueprint: watch::Receiver<Option<Arc<(BlueprintTarget, Blueprint)>>>,
-    nexus_id: Uuid,
+    nexus_id: OmicronZoneUuid,
     tx: watch::Sender<usize>,
     saga_recovery: Activator,
 }
@@ -35,7 +38,7 @@ impl BlueprintExecutor {
         rx_blueprint: watch::Receiver<
             Option<Arc<(BlueprintTarget, Blueprint)>>,
         >,
-        nexus_id: Uuid,
+        nexus_id: OmicronZoneUuid,
         saga_recovery: Activator,
     ) -> BlueprintExecutor {
         let (tx, _) = watch::channel(0);
@@ -87,14 +90,31 @@ impl BlueprintExecutor {
             });
         }
 
+        let (sender, mut receiver) = update_engine::channel();
+
+        let receiver_task = tokio::spawn(async move {
+            // TODO: report progress
+            let mut event_buffer = EventBuffer::default();
+            while let Some(event) = receiver.recv().await {
+                event_buffer.add_event(event);
+            }
+
+            event_buffer.generate_report()
+        });
+
         let result = nexus_reconfigurator_execution::realize_blueprint(
             opctx,
             &self.datastore,
             &self.resolver,
             blueprint,
             self.nexus_id,
+            sender,
         )
         .await;
+
+        // Get the report for the receiver task.
+        let event_report =
+            receiver_task.await.map_err(|error| NestedError::new(&error));
 
         // Trigger anybody waiting for this to finish.
         self.tx.send_modify(|count| *count = *count + 1);
@@ -112,16 +132,23 @@ impl BlueprintExecutor {
                 json!({
                     "target_id": blueprint.id.to_string(),
                     "enabled": true,
+                    // Note: The field "error" is treated as special by omdb,
+                    // and if that field is present then nothing else is
+                    // displayed.
+                    "execution_error": null,
                     "needs_saga_recovery": needs_saga_recovery,
+                    "event_report": event_report,
                 })
             }
-            Err(errors) => {
-                let errors: Vec<_> =
-                    errors.into_iter().map(|e| format!("{:#}", e)).collect();
+            Err(error) => {
                 json!({
                     "target_id": blueprint.id.to_string(),
                     "enabled": true,
-                    "errors": errors
+                    // Note: The field "error" is treated as special by omdb,
+                    // and if that field is present then nothing else is
+                    // displayed.
+                    "execution_error": NestedError::new(error.as_ref()),
+                    "event_report": event_report,
                 })
             }
         }
@@ -141,7 +168,7 @@ impl BackgroundTask for BlueprintExecutor {
 mod test {
     use super::BlueprintExecutor;
     use crate::app::background::{Activator, BackgroundTask};
-    use httptest::matchers::{all_of, request};
+    use httptest::matchers::{not, request};
     use httptest::responders::status_code;
     use httptest::Expectation;
     use nexus_db_model::{
@@ -152,6 +179,10 @@ mod test {
     use nexus_db_queries::db::DataStore;
     use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::deployment::execution::{
+        EventBuffer, EventReport, ExecutionComponent, ExecutionStepId,
+        ReconfiguratorExecutionSpec, StepInfo,
+    };
     use nexus_types::deployment::BlueprintZoneFilter;
     use nexus_types::deployment::{
         blueprint_zone_type, Blueprint, BlueprintPhysicalDisksConfig,
@@ -171,6 +202,7 @@ mod test {
     use std::net::SocketAddr;
     use std::sync::Arc;
     use tokio::sync::watch;
+    use update_engine::{NestedError, TerminalKind};
     use uuid::Uuid;
 
     type ControlPlaneTestContext =
@@ -286,7 +318,7 @@ mod test {
             datastore.clone(),
             resolver.clone(),
             blueprint_rx,
-            Uuid::new_v4(),
+            OmicronZoneUuid::new_v4(),
             Activator::new(),
         );
 
@@ -312,16 +344,22 @@ mod test {
         );
         let blueprint_id = blueprint.1.id;
         blueprint_tx.send(Some(blueprint)).unwrap();
-        let value = task.activate(&opctx).await;
+        let mut value = task.activate(&opctx).await;
+
+        let event_buffer = extract_event_buffer(&mut value);
+
         println!("activating with no zones: {:?}", value);
         assert_eq!(
             value,
             json!({
                 "target_id": blueprint_id,
+                "execution_error": null,
                 "enabled": true,
                 "needs_saga_recovery": false,
             })
         );
+
+        assert_event_buffer_completed(&event_buffer);
 
         // Create a non-empty blueprint describing two servers and verify that
         // the task correctly winds up making requests to both of them and
@@ -371,6 +409,33 @@ mod test {
         )
         .await;
 
+        // The only sled-agent endpoint we care about in this test is `PUT
+        // /omicron-zones`. Add a closure to avoid repeating it multiple times
+        // below. We don't do a careful check of the _contents_ of what's being
+        // sent; for that, see the tests in nexus-reconfigurator-execution.
+        let match_put_omicron_zones =
+            || request::method_path("PUT", "/omicron-zones");
+
+        // Helper for our mock sled-agent http servers to blanket ignore and
+        // return 200 OK for anything _except_ `PUT /omciron-zones`, which is
+        // the endpoint we care about in this test.
+        //
+        // Other Nexus background tasks created by our test context may notice
+        // the sled-agent records we're about to insert into CRDB and query them
+        // (e.g., for inventory, vpc routing info, ...). We don't want those to
+        // cause spurious test failures, so just tell our sled-agents to accept
+        // any number of them.
+        let mock_server_ignore_spurious_http_requests =
+            |s: &mut httptest::Server| {
+                s.expect(
+                    Expectation::matching(not(match_put_omicron_zones()))
+                        .times(..)
+                        .respond_with(status_code(200)),
+                );
+            };
+        mock_server_ignore_spurious_http_requests(&mut s1);
+        mock_server_ignore_spurious_http_requests(&mut s2);
+
         // Insert records for the zpools backing the datasets in these zones.
         for (sled_id, config) in
             blueprint.1.all_omicron_zones(BlueprintZoneFilter::All)
@@ -393,35 +458,44 @@ mod test {
 
         blueprint_tx.send(Some(Arc::new(blueprint.clone()))).unwrap();
 
-        // Make sure that requests get made to the sled agent.  This is not a
-        // careful check of exactly what gets sent.  For that, see the tests in
-        // nexus-reconfigurator-execution.
+        // Make sure that requests get made to the sled agent.
         for s in [&mut s1, &mut s2] {
             s.expect(
-                Expectation::matching(all_of![request::method_path(
-                    "PUT",
-                    "/omicron-zones"
-                ),])
-                .respond_with(status_code(204)),
+                Expectation::matching(match_put_omicron_zones())
+                    .respond_with(status_code(204)),
             );
+            mock_server_ignore_spurious_http_requests(s);
         }
 
         // Activate the task to trigger zone configuration on the sled-agents
-        let value = task.activate(&opctx).await;
+        let mut value = task.activate(&opctx).await;
+        let event_buffer = extract_event_buffer(&mut value);
+
         println!("activating two sled agents: {:?}", value);
         assert_eq!(
             value,
             json!({
                 "target_id": blueprint.1.id.to_string(),
+                "execution_error": null,
                 "enabled": true,
                 "needs_saga_recovery": false,
             })
         );
+        assert_event_buffer_completed(&event_buffer);
+
         s1.verify_and_clear();
         s2.verify_and_clear();
 
+        // Immediately reapply our blanket ignores.
+        //
+        // TODO-cleanup Is there a tiny race window between verify_and_clear()
+        // and these calls where other bg tasks can cause spurious failures?
+        mock_server_ignore_spurious_http_requests(&mut s1);
+        mock_server_ignore_spurious_http_requests(&mut s2);
+
         // Now, disable the target and make sure that we _don't_ invoke the sled
-        // agent.  It's enough to just not set expectations.
+        // agent. It's enough to just not set expectations on
+        // match_put_omicron_zones().
         blueprint.1.internal_dns_version =
             blueprint.1.internal_dns_version.next();
         blueprint.0.enabled = false;
@@ -438,38 +512,117 @@ mod test {
         s1.verify_and_clear();
         s2.verify_and_clear();
 
+        // Immediately reapply our blanket ignores.
+        //
+        // TODO-cleanup Is there a tiny race window between verify_and_clear()
+        // and these calls where other bg tasks can cause spurious failures?
+        mock_server_ignore_spurious_http_requests(&mut s1);
+        mock_server_ignore_spurious_http_requests(&mut s2);
+
         // Do it all again, but configure one of the servers to fail so we can
         // verify the task's returned summary of what happened.
         blueprint.0.enabled = true;
         blueprint_tx.send(Some(Arc::new(blueprint))).unwrap();
         s1.expect(
-            Expectation::matching(request::method_path(
-                "PUT",
-                "/omicron-zones",
-            ))
-            .respond_with(status_code(204)),
+            Expectation::matching(match_put_omicron_zones())
+                .respond_with(status_code(204)),
         );
         s2.expect(
-            Expectation::matching(request::method_path(
-                "PUT",
-                "/omicron-zones",
-            ))
-            .respond_with(status_code(500)),
+            Expectation::matching(match_put_omicron_zones())
+                .respond_with(status_code(500)),
         );
 
         #[derive(Deserialize)]
         struct ErrorResult {
-            errors: Vec<String>,
+            execution_error: NestedError,
         }
 
-        let value = task.activate(&opctx).await;
+        let mut value = task.activate(&opctx).await;
+        let event_buffer = extract_event_buffer(&mut value);
+
         println!("after failure: {:?}", value);
         let result: ErrorResult = serde_json::from_value(value).unwrap();
-        assert_eq!(result.errors.len(), 1);
-        assert!(
-            result.errors[0].starts_with("Failed to put OmicronZonesConfig")
+        assert_eq!(
+            result.execution_error.message(),
+            "step failed: Deploy Omicron zones"
         );
+
+        assert_event_buffer_failed_at(
+            &event_buffer,
+            ExecutionComponent::OmicronZones,
+            ExecutionStepId::Ensure,
+        );
+
         s1.verify_and_clear();
         s2.verify_and_clear();
+    }
+
+    fn extract_event_buffer(value: &mut serde_json::Value) -> EventBuffer {
+        let event_report = value
+            .as_object_mut()
+            .expect("value is an object")
+            .remove("event_report")
+            .expect("event_report exists");
+        let event_report: Result<EventReport, NestedError> =
+            serde_json::from_value(event_report)
+                .expect("event_report is valid");
+        let event_report = event_report.expect("event_report is Ok");
+
+        let mut event_buffer = EventBuffer::default();
+        event_buffer.add_event_report(event_report);
+        event_buffer
+    }
+
+    fn assert_event_buffer_completed(event_buffer: &EventBuffer) {
+        let execution_status = event_buffer
+            .root_execution_summary()
+            .expect("event buffer has root execution summary")
+            .execution_status;
+        let terminal_info =
+            execution_status.terminal_info().unwrap_or_else(|| {
+                panic!(
+                    "execution status has terminal info: {:?}",
+                    execution_status
+                );
+            });
+        assert_eq!(
+            terminal_info.kind,
+            TerminalKind::Completed,
+            "execution should have completed successfully"
+        );
+    }
+
+    fn assert_event_buffer_failed_at(
+        event_buffer: &EventBuffer,
+        component: ExecutionComponent,
+        step_id: ExecutionStepId,
+    ) {
+        let execution_status = event_buffer
+            .root_execution_summary()
+            .expect("event buffer has root execution summary")
+            .execution_status;
+        let terminal_info =
+            execution_status.terminal_info().unwrap_or_else(|| {
+                panic!(
+                    "execution status has terminal info: {:?}",
+                    execution_status
+                );
+            });
+        assert_eq!(
+            terminal_info.kind,
+            TerminalKind::Failed,
+            "execution should have failed"
+        );
+        let step =
+            event_buffer.get(&terminal_info.step_key).expect("step exists");
+        let step_info = StepInfo::<ReconfiguratorExecutionSpec>::from_generic(
+            step.step_info().clone(),
+        )
+        .expect("step info follows ReconfiguratorExecutionSpec");
+        assert_eq!(
+            (step_info.component, step_info.id),
+            (component, step_id),
+            "component and step id matches expected"
+        );
     }
 }

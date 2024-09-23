@@ -467,7 +467,6 @@ mod test {
     use internal_dns::resolver::Resolver;
     use internal_dns::ServiceName;
     use internal_dns::DNS_ZONE;
-    use newtype_uuid::GenericUuid;
     use nexus_db_model::DnsGroup;
     use nexus_db_model::Silo;
     use nexus_db_queries::authn;
@@ -475,6 +474,7 @@ mod test {
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::DataStore;
     use nexus_inventory::now_db_precision;
+    use nexus_inventory::CollectionBuilder;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_reconfigurator_planning::blueprint_builder::EnsureMultiple;
     use nexus_reconfigurator_planning::example::example;
@@ -745,7 +745,7 @@ mod test {
         };
         Ok(BlueprintZoneConfig {
             disposition,
-            id: OmicronZoneUuid::from_untyped_uuid(config.id),
+            id: config.id,
             underlay_address: config.underlay_address,
             filesystem_pool: config.filesystem_pool,
             zone_type,
@@ -1545,10 +1545,12 @@ mod test {
 
             builder.build()
         };
+        let collection = CollectionBuilder::new("test").build();
         let mut builder = BlueprintBuilder::new_based_on(
             &log,
             &blueprint,
             &planning_input,
+            &collection,
             "test suite",
         )
         .unwrap();

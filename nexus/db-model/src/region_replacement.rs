@@ -84,7 +84,7 @@ impl std::str::FromStr for RegionReplacementState {
 ///         |                        |
 ///         v                        |
 ///                                  |
-///     Completed                    ---
+///     Complete                     ---
 /// ```
 ///
 /// which are captured in the RegionReplacementState enum. Annotated on the

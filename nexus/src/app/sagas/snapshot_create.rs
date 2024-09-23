@@ -1564,15 +1564,9 @@ async fn ssc_create_volume_record_undo(
     // `volume_hard_delete` here: soft deleting volumes is necessary for
     // `find_deleted_volume_regions` to work.
 
-    info!(
-        log,
-        "calling decrease crucible resource count for volume {}", volume_id
-    );
+    info!(log, "calling soft delete for volume {}", volume_id);
 
-    osagactx
-        .datastore()
-        .decrease_crucible_resource_count_and_soft_delete_volume(volume_id)
-        .await?;
+    osagactx.datastore().soft_delete_volume(volume_id).await?;
 
     Ok(())
 }
@@ -2135,6 +2129,7 @@ mod test {
                 disks: disks_to_attach,
                 external_ips: vec![],
                 start: true,
+                auto_restart_policy: Default::default(),
             },
         )
         .await;

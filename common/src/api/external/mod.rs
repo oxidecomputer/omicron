@@ -593,7 +593,18 @@ impl JsonSchema for RoleName {
 //
 // TODO: custom JsonSchema impl to describe i64::MAX limit; this is blocked by
 // https://github.com/oxidecomputer/typify/issues/589
-#[derive(Copy, Clone, Debug, Serialize, JsonSchema, PartialEq, Eq)]
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Serialize,
+    JsonSchema,
+    Hash,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+)]
 pub struct ByteCount(u64);
 
 impl<'de> Deserialize<'de> for ByteCount {
@@ -1147,6 +1158,12 @@ impl From<&InstanceCpuCount> for i64 {
 pub struct InstanceRuntimeState {
     pub run_state: InstanceState,
     pub time_run_state_updated: DateTime<Utc>,
+    /// The timestamp of the most recent time this instance was automatically
+    /// restarted by the control plane.
+    ///
+    /// If this is not present, then this instance has not been automatically
+    /// restarted.
+    pub time_last_auto_restarted: Option<DateTime<Utc>>,
 }
 
 /// View of an Instance
@@ -1168,6 +1185,52 @@ pub struct Instance {
 
     #[serde(flatten)]
     pub runtime: InstanceRuntimeState,
+
+    #[serde(flatten)]
+    pub auto_restart_status: InstanceAutoRestartStatus,
+}
+
+/// Status of control-plane driven automatic failure recovery for this instance.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InstanceAutoRestartStatus {
+    /// `true` if this instance's auto-restart policy will permit the control
+    /// plane to automatically restart it if it enters the `Failed` state.
+    //
+    // Rename this field, as the struct is `#[serde(flatten)]`ed into the
+    // `Instance` type, and we would like the field to be prefixed with
+    // `auto_restart`.
+    #[serde(rename = "auto_restart_enabled")]
+    pub enabled: bool,
+
+    /// The time at which the auto-restart cooldown period for this instance
+    /// completes, permitting it to be automatically restarted again. If the
+    /// instance enters the `Failed` state, it will not be restarted until after
+    /// this time.
+    ///
+    /// If this is not present, then either the instance has never been
+    /// automatically restarted, or the cooldown period has already expired,
+    /// allowing the instance to be restarted immediately if it fails.
+    //
+    // Rename this field, as the struct is `#[serde(flatten)]`ed into the
+    // `Instance` type, and we would like the field to be prefixed with
+    // `auto_restart`.
+    #[serde(rename = "auto_restart_cooldown_expiration")]
+    pub cooldown_expiration: Option<DateTime<Utc>>,
+}
+
+/// A policy determining when an instance should be automatically restarted by
+/// the control plane.
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum InstanceAutoRestartPolicy {
+    /// The instance should not be automatically restarted by the control plane
+    /// if it fails.
+    Never,
+    /// If this instance is running and unexpectedly fails (e.g. due to a host
+    /// software crash or unexpected host reboot), the control plane will make a
+    /// best-effort attempt to restart it. The control plane may choose not to
+    /// restart the instance to preserve the overall availability of the system.
+    BestEffort,
 }
 
 // DISKS
@@ -1400,8 +1463,8 @@ pub enum RouteTarget {
     Drop,
 }
 
-/// A `RouteDestination` is used to match traffic with a routing rule, on the
-/// destination of that traffic.
+/// A `RouteDestination` is used to match traffic with a routing rule based on
+/// the destination of that traffic.
 ///
 /// When traffic is to be sent to a destination that is within a given
 /// `RouteDestination`, the corresponding `RouterRoute` applies, and traffic
@@ -1419,13 +1482,13 @@ pub enum RouteTarget {
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 #[display("{}:{0}", style = "lowercase")]
 pub enum RouteDestination {
-    /// Route applies to traffic destined for a specific IP address
+    /// Route applies to traffic destined for the specified IP address
     Ip(IpAddr),
-    /// Route applies to traffic destined for a specific IP subnet
+    /// Route applies to traffic destined for the specified IP subnet
     IpNet(IpNet),
-    /// Route applies to traffic destined for the given VPC.
+    /// Route applies to traffic destined for the specified VPC
     Vpc(Name),
-    /// Route applies to traffic
+    /// Route applies to traffic destined for the specified VPC subnet
     Subnet(Name),
 }
 

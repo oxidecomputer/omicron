@@ -7,7 +7,7 @@
 use crate::omicron_zone_config::{self, OmicronZoneNic};
 use crate::schema::{
     hw_baseboard_id, inv_caboose, inv_collection, inv_collection_error,
-    inv_omicron_zone, inv_omicron_zone_nic, inv_physical_disk,
+    inv_dataset, inv_omicron_zone, inv_omicron_zone_nic, inv_physical_disk,
     inv_root_of_trust, inv_root_of_trust_page, inv_service_processor,
     inv_sled_agent, inv_sled_omicron_zones, inv_zpool, sw_caboose,
     sw_root_of_trust_page,
@@ -37,13 +37,14 @@ use nexus_types::inventory::{
 };
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::zpool_name::ZpoolName;
-use omicron_uuid_kinds::CollectionKind;
-use omicron_uuid_kinds::CollectionUuid;
+use omicron_uuid_kinds::DatasetKind;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolKind;
 use omicron_uuid_kinds::ZpoolUuid;
+use omicron_uuid_kinds::{CollectionKind, OmicronZoneKind};
+use omicron_uuid_kinds::{CollectionUuid, OmicronZoneUuid};
 use std::net::{IpAddr, SocketAddrV6};
 use uuid::Uuid;
 
@@ -935,6 +936,56 @@ impl From<InvZpool> for nexus_types::inventory::Zpool {
     }
 }
 
+/// See [`nexus_types::inventory::Dataset`].
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_dataset)]
+pub struct InvDataset {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub sled_id: DbTypedUuid<SledKind>,
+    pub id: Option<DbTypedUuid<DatasetKind>>,
+    pub name: String,
+    pub available: ByteCount,
+    pub used: ByteCount,
+    pub quota: Option<ByteCount>,
+    pub reservation: Option<ByteCount>,
+    pub compression: String,
+}
+
+impl InvDataset {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        sled_id: SledUuid,
+        dataset: &nexus_types::inventory::Dataset,
+    ) -> Self {
+        Self {
+            inv_collection_id: inv_collection_id.into(),
+            sled_id: sled_id.into(),
+
+            id: dataset.id.map(|id| id.into()),
+            name: dataset.name.clone(),
+            available: dataset.available.into(),
+            used: dataset.used.into(),
+            quota: dataset.quota.map(|q| q.into()),
+            reservation: dataset.reservation.map(|r| r.into()),
+            compression: dataset.compression.clone(),
+        }
+    }
+}
+
+impl From<InvDataset> for nexus_types::inventory::Dataset {
+    fn from(dataset: InvDataset) -> Self {
+        Self {
+            id: dataset.id.map(|id| id.0),
+            name: dataset.name,
+            available: *dataset.available,
+            used: *dataset.used,
+            quota: dataset.quota.map(|q| *q),
+            reservation: dataset.reservation.map(|r| *r),
+            compression: dataset.compression,
+        }
+    }
+}
+
 /// See [`nexus_types::inventory::OmicronZonesFound`].
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_sled_omicron_zones)]
@@ -1065,7 +1116,7 @@ impl From<nexus_sled_agent_shared::inventory::ZoneKind> for ZoneType {
 pub struct InvOmicronZone {
     pub inv_collection_id: DbTypedUuid<CollectionKind>,
     pub sled_id: DbTypedUuid<SledKind>,
-    pub id: Uuid,
+    pub id: DbTypedUuid<OmicronZoneKind>,
     pub underlay_address: ipv6::Ipv6Addr,
     pub zone_type: ZoneType,
     pub primary_service_ip: ipv6::Ipv6Addr,
@@ -1100,7 +1151,7 @@ impl InvOmicronZone {
             // `zone.zone_type`
             inv_collection_id: inv_collection_id.into(),
             sled_id: sled_id.into(),
-            id: zone.id,
+            id: zone.id.into(),
             underlay_address: zone.underlay_address.into(),
             filesystem_pool: zone
                 .filesystem_pool
@@ -1311,7 +1362,7 @@ impl InvOmicronZone {
         // Result) we immediately return. We check the inner result later, but
         // only if some code path tries to use `nic` and it's not present.
         let nic = omicron_zone_config::nic_row_to_network_interface(
-            self.id,
+            self.id.into(),
             self.nic_id,
             nic_row.map(Into::into),
         )?;
@@ -1431,7 +1482,7 @@ impl InvOmicronZone {
         };
 
         Ok(OmicronZoneConfig {
-            id: self.id,
+            id: self.id.into(),
             underlay_address: self.underlay_address.into(),
             filesystem_pool: self
                 .filesystem_pool
@@ -1494,7 +1545,7 @@ impl InvOmicronZoneNic {
 
     pub fn into_network_interface_for_zone(
         self,
-        zone_id: Uuid,
+        zone_id: OmicronZoneUuid,
     ) -> Result<NetworkInterface, anyhow::Error> {
         let zone_nic = OmicronZoneNic::from(self);
         zone_nic.into_network_interface_for_zone(zone_id)

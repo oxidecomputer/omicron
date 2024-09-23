@@ -2,7 +2,7 @@ from: collection 094d362b-7d79-49e7-a244-134276cca8fe
 to:   blueprint  e4aeb3b3-272f-4967-be34-2d34daa46aa1
  UNCHANGED SLEDS:
 
-  sled 08c7046b-c9c4-4368-881f-19a72df22143:
+  sled 08c7046b-c9c4-4368-881f-19a72df22143 (active):
 
     physical disks at generation 1:
     ----------------------------------------------------------------------
@@ -39,7 +39,7 @@ to:   blueprint  e4aeb3b3-272f-4967-be34-2d34daa46aa1
     nexus          b2573120-9c91-4ed7-8b4f-a7bfe8dbc807   in service    fd00:1122:3344:103::22
 
 
-  sled 84ac367e-9b03-4e9d-a846-df1a08deee6c:
+  sled 84ac367e-9b03-4e9d-a846-df1a08deee6c (active):
 
     physical disks at generation 1:
     ----------------------------------------------------------------------
@@ -76,7 +76,7 @@ to:   blueprint  e4aeb3b3-272f-4967-be34-2d34daa46aa1
     nexus          a9a6a974-8953-4783-b815-da46884f2c02   in service    fd00:1122:3344:101::22
 
 
-  sled be7f4375-2a6b-457f-b1a4-3074a715e5fe:
+  sled be7f4375-2a6b-457f-b1a4-3074a715e5fe (active):
 
     physical disks at generation 1:
     ----------------------------------------------------------------------

@@ -115,6 +115,7 @@ function install_packages {
       'brand/omicron1/tools'
       'library/libxmlsec1'
       'chrony'
+      'oxide/platform-identity-cacerts' # necessary for sprockets
     )
 
     # Install/update the set of packages.

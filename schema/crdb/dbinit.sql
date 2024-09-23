@@ -644,9 +644,13 @@ CREATE TABLE IF NOT EXISTS omicron.public.region_snapshot (
     PRIMARY KEY (dataset_id, region_id, snapshot_id)
 );
 
-/* Index for use during join with region table */
+/* Indexes for use during join with region table */
 CREATE INDEX IF NOT EXISTS lookup_region_by_dataset on omicron.public.region_snapshot (
     dataset_id, region_id
+);
+
+CREATE INDEX IF NOT EXISTS lookup_region_snapshot_by_region_id on omicron.public.region_snapshot (
+    region_id
 );
 
 /*
@@ -1027,17 +1031,12 @@ CREATE TYPE IF NOT EXISTS omicron.public.instance_auto_restart AS ENUM (
      */
     'never',
     /*
-     * The instance should be automatically restarted if, and only if, the sled
-     * it was running on has restarted or become unavailable. If the individual
-     * Propolis VMM process for this instance crashes, it should *not* be
-     * restarted automatically.
+     * If this instance is running and unexpectedly fails (e.g. due to a host
+     * software crash or unexpected host reboot), the control plane will make a
+     * best-effort attempt to restart it. The control plane may choose not to
+     * restart the instance to preserve the overall availability of the system.
      */
-     'sled_failures_only',
-    /*
-     * The instance should be automatically restarted any time a fault is
-     * detected
-     */
-    'all_failures'
+     'best_effort'
 );
 
 
@@ -1098,10 +1097,24 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
     state omicron.public.instance_state_v2 NOT NULL,
 
     /*
+     * The time of the most recent auto-restart attempt, or NULL if the control
+     * plane has never attempted to automatically restart this instance.
+     */
+    time_last_auto_restarted TIMESTAMPTZ,
+
+    /*
      * What failures should result in an instance being automatically restarted
      * by the control plane.
      */
     auto_restart_policy omicron.public.instance_auto_restart,
+
+    /*
+     * The cooldown period that must elapse between consecutive auto restart
+     * attempts. If this is NULL, no cooldown period is explicitly configured
+     * for this instance, and the default cooldown period should be used.
+     */
+     auto_restart_cooldown INTERVAL,
+
 
     CONSTRAINT vmm_iff_active_propolis CHECK (
         ((state = 'vmm') AND (active_propolis_id IS NOT NULL)) OR
@@ -1114,6 +1127,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_instance_by_project ON omicron.public.i
     project_id,
     name
 ) WHERE
+    time_deleted IS NULL;
+
+-- Many control plane operations wish to select all the instances in particular
+-- states.
+CREATE INDEX IF NOT EXISTS lookup_instance_by_state
+ON
+    omicron.public.instance (state)
+WHERE
     time_deleted IS NULL;
 
 /*
@@ -1365,8 +1386,19 @@ CREATE TABLE IF NOT EXISTS omicron.public.oximeter (
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     ip INET NOT NULL,
-    port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL
+    port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
+    time_expunged TIMESTAMPTZ
 );
+
+/*
+ * The query Nexus runs to choose an Oximeter instance for new metric producers
+ * involves listing the non-expunged instances sorted by ID, which would require
+ * a full table scan without this index.
+ */
+CREATE UNIQUE INDEX IF NOT EXISTS list_non_expunged_oximeter ON omicron.public.oximeter (
+    id
+) WHERE
+    time_expunged IS NULL;
 
 /*
  * The kind of metric producer each record corresponds to.
@@ -3230,6 +3262,31 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_zpool (
 -- Allow looking up the most recent Zpool by ID
 CREATE INDEX IF NOT EXISTS inv_zpool_by_id_and_time ON omicron.public.inv_zpool (id, time_collected DESC);
 
+CREATE TABLE IF NOT EXISTS omicron.public.inv_dataset (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+    sled_id UUID NOT NULL,
+
+    -- The control plane ID of the zpool.
+    -- This is nullable because datasets have been historically
+    -- self-managed by the Sled Agent, and some don't have explicit UUIDs.
+    id UUID,
+
+    name TEXT NOT NULL,
+    available INT8 NOT NULL,
+    used INT8 NOT NULL,
+    quota INT8,
+    reservation INT8,
+    compression TEXT NOT NULL,
+
+    -- PK consisting of:
+    -- - Which collection this was
+    -- - The sled reporting the disk
+    -- - The name of this dataset
+    PRIMARY KEY (inv_collection_id, sled_id, name)
+);
+
 CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_omicron_zones (
     -- where this observation came from
     -- (foreign key into `inv_collection` table)
@@ -3599,6 +3656,62 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone_nic (
 
     PRIMARY KEY (blueprint_id, id)
 );
+
+-- Blueprint information related to clickhouse cluster management
+--
+-- Rows for this table will only exist for deployments with an existing
+-- `ClickhousePolicy` as part of the fleet `Policy`. In the limit, this will be
+-- all deployments.
+CREATE TABLE IF NOT EXISTS omicron.public.bp_clickhouse_cluster_config (
+    -- Foreign key into the `blueprint` table
+    blueprint_id UUID PRIMARY KEY,
+    -- Generation number to track changes to the cluster state.
+    -- Used as optimizitic concurrency control.
+    generation INT8 NOT NULL,
+
+    -- Clickhouse server and keeper ids can never be reused. We hand them out
+    -- monotonically and keep track of the last one used here.
+    max_used_server_id INT8 NOT NULL,
+    max_used_keeper_id INT8 NOT NULL,
+
+    -- Each clickhouse cluster has a unique name and secret value. These are set
+    -- once and shared among all nodes for the lifetime of the fleet.
+    cluster_name TEXT NOT NULL,
+    cluster_secret TEXT NOT NULL,
+
+    -- A recording of an inventory value that serves as a marker to inform the
+    -- reconfigurator when a collection of a raft configuration is recent.
+    highest_seen_keeper_leader_committed_log_index INT8 NOT NULL
+);
+
+-- Mapping of an Omicron zone ID to Clickhouse Keeper node ID in a specific
+-- blueprint.
+--
+-- This can logically be considered a subtable of `bp_clickhouse_cluster_config`
+CREATE TABLE IF NOT EXISTS omicron.public.bp_clickhouse_keeper_zone_id_to_node_id (
+    -- Foreign key into the `blueprint` table
+    blueprint_id UUID NOT NULL,
+
+    omicron_zone_id UUID NOT NULL,
+    keeper_id INT8 NOT NULL,
+
+    PRIMARY KEY (blueprint_id, omicron_zone_id, keeper_id)
+);
+
+-- Mapping of an Omicron zone ID to Clickhouse Server node ID in a specific
+-- blueprint.
+--
+-- This can logically be considered a subtable of `bp_clickhouse_cluster_config`
+CREATE TABLE IF NOT EXISTS omicron.public.bp_clickhouse_server_zone_id_to_node_id (
+    -- Foreign key into the `blueprint` table
+    blueprint_id UUID NOT NULL,
+
+    omicron_zone_id UUID NOT NULL,
+    server_id INT8 NOT NULL,
+
+    PRIMARY KEY (blueprint_id, omicron_zone_id, server_id)
+);
+
 
 -- Mapping of Omicron zone ID to CockroachDB node ID. This isn't directly used
 -- by the blueprint tables above, but is used by the more general Reconfigurator
@@ -4259,7 +4372,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '95.0.0', NULL)
+    (TRUE, NOW(), NOW(), '103.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

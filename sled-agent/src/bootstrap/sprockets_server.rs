@@ -12,12 +12,14 @@ use crate::bootstrap::views::ResponseEnvelope;
 use crate::bootstrap::views::SledAgentResponse;
 use sled_agent_types::sled::StartSledAgentRequest;
 use slog::Logger;
+use sprockets_tls::keys::SprocketsConfig;
+use sprockets_tls::server::Server;
+use sprockets_tls::Stream;
 use std::io;
 use std::net::SocketAddrV6;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::io::BufStream;
-use tokio::net::TcpListener;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
@@ -28,7 +30,7 @@ type TxRequestsChannel = mpsc::Sender<(
 )>;
 
 pub(super) struct SprocketsServer {
-    listener: TcpListener,
+    listener: Server,
     tx_requests: TxRequestsChannel,
     log: Logger,
 }
@@ -37,10 +39,15 @@ impl SprocketsServer {
     pub(super) async fn bind(
         bind_addr: SocketAddrV6,
         tx_requests: TxRequestsChannel,
+        sprockets_conf: SprocketsConfig,
         base_log: &Logger,
     ) -> io::Result<Self> {
-        let listener = TcpListener::bind(bind_addr).await?;
         let log = base_log.new(o!("component" => "SledAgentSprocketsServer"));
+
+        // The root certificates associated with sprockets are loaded at
+        // server creation time
+        let listener =
+            Server::new(sprockets_conf, bind_addr, log.clone()).await.unwrap();
         info!(log, "Started listening"; "local_addr" => %bind_addr);
         Ok(Self { listener, tx_requests, log })
     }
@@ -48,12 +55,13 @@ impl SprocketsServer {
     /// Run the sprockets server.
     ///
     /// This method should be `tokio::spawn()`'d. It can safely be cancelled
-    /// to shut it down: its only `.await` point is on
-    /// `TcpListener::accept()`, which is cancel-safe. Note that cancelling this
+    /// to shut it down: its only `.await` point is on a sprocket listener,
+    /// which is cancel-safe. Note that cancelling this
     /// server does not necessarily cancel any outstanding requests that it has
     /// already received (and which may still be executing).
-    pub(super) async fn run(self) {
+    pub(super) async fn run(mut self) {
         loop {
+            // Sprockets actually _uses_ the key here!
             let (stream, remote_addr) = match self.listener.accept().await {
                 Ok(conn) => conn,
                 Err(err) => {
@@ -79,7 +87,7 @@ impl SprocketsServer {
 }
 
 async fn handle_start_sled_agent_request(
-    stream: TcpStream,
+    stream: Stream<TcpStream>,
     tx_requests: TxRequestsChannel,
     log: &Logger,
 ) -> Result<(), String> {
@@ -131,7 +139,7 @@ async fn handle_start_sled_agent_request(
 }
 
 async fn read_request(
-    stream: &mut Box<BufStream<TcpStream>>,
+    stream: &mut Box<BufStream<Stream<TcpStream>>>,
 ) -> Result<Request<'static>, String> {
     // Bound to avoid allocating an unreasonable amount of memory from a bogus
     // length prefix from a client. We authenticate clients via sprockets before
@@ -175,7 +183,7 @@ async fn read_request(
 }
 
 async fn write_response(
-    stream: &mut Box<BufStream<TcpStream>>,
+    stream: &mut Box<BufStream<Stream<TcpStream>>>,
     response: Result<Response, String>,
 ) -> Result<(), String> {
     // Build and serialize response.

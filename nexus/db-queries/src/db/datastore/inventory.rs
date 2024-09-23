@@ -38,6 +38,7 @@ use nexus_db_model::HwRotSlotEnum;
 use nexus_db_model::InvCaboose;
 use nexus_db_model::InvCollection;
 use nexus_db_model::InvCollectionError;
+use nexus_db_model::InvDataset;
 use nexus_db_model::InvOmicronZone;
 use nexus_db_model::InvOmicronZoneNic;
 use nexus_db_model::InvPhysicalDisk;
@@ -154,6 +155,17 @@ impl DataStore {
                     .zpools
                     .iter()
                     .map(|pool| InvZpool::new(collection_id, *sled_id, pool))
+            })
+            .collect();
+
+        // Pull datasets out of all sled agents
+        let datasets: Vec<_> = collection
+            .sled_agents
+            .iter()
+            .flat_map(|(sled_id, sled_agent)| {
+                sled_agent.datasets.iter().map(|dataset| {
+                    InvDataset::new(collection_id, *sled_id, dataset)
+                })
             })
             .collect();
 
@@ -745,6 +757,25 @@ impl DataStore {
                 }
             }
 
+            // Insert rows for all the datasets we found.
+            {
+                use db::schema::inv_dataset::dsl;
+
+                let batch_size = SQL_BATCH_SIZE.get().try_into().unwrap();
+                let mut datasets = datasets.into_iter();
+                loop {
+                    let some_datasets =
+                        datasets.by_ref().take(batch_size).collect::<Vec<_>>();
+                    if some_datasets.is_empty() {
+                        break;
+                    }
+                    let _ = diesel::insert_into(dsl::inv_dataset)
+                        .values(some_datasets)
+                        .execute_async(&conn)
+                        .await?;
+                }
+            }
+
             // Insert rows for the sled agents that we found.  In practice, we'd
             // expect these to all have baseboards (if using Oxide hardware) or
             // none have baseboards (if not).
@@ -1136,6 +1167,7 @@ impl DataStore {
             ncabooses,
             nrot_pages,
             nsled_agents,
+            ndatasets,
             nphysical_disks,
             nsled_agent_zones,
             nzones,
@@ -1204,6 +1236,17 @@ impl DataStore {
                     {
                         use db::schema::inv_sled_agent::dsl;
                         diesel::delete(dsl::inv_sled_agent.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ))
+                        .execute_async(&conn)
+                        .await?
+                    };
+
+                // Remove rows for datasets
+                let ndatasets =
+                    {
+                        use db::schema::inv_dataset::dsl;
+                        diesel::delete(dsl::inv_dataset.filter(
                             dsl::inv_collection_id.eq(db_collection_id),
                         ))
                         .execute_async(&conn)
@@ -1280,6 +1323,7 @@ impl DataStore {
                     ncabooses,
                     nrot_pages,
                     nsled_agents,
+                    ndatasets,
                     nphysical_disks,
                     nsled_agent_zones,
                     nzones,
@@ -1304,6 +1348,7 @@ impl DataStore {
             "ncabooses" => ncabooses,
             "nrot_pages" => nrot_pages,
             "nsled_agents" => nsled_agents,
+            "ndatasets" => ndatasets,
             "nphysical_disks" => nphysical_disks,
             "nsled_agent_zones" => nsled_agent_zones,
             "nzones" => nzones,
@@ -1601,6 +1646,39 @@ impl DataStore {
             zpools
         };
 
+        // Mapping of "Sled ID" -> "All datasets reported by that sled"
+        let datasets: BTreeMap<Uuid, Vec<nexus_types::inventory::Dataset>> = {
+            use db::schema::inv_dataset::dsl;
+
+            let mut datasets =
+                BTreeMap::<Uuid, Vec<nexus_types::inventory::Dataset>>::new();
+            let mut paginator = Paginator::new(batch_size);
+            while let Some(p) = paginator.next() {
+                let batch = paginated_multicolumn(
+                    dsl::inv_dataset,
+                    (dsl::sled_id, dsl::name),
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvDataset::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator = p.found_batch(&batch, &|row| {
+                    (row.sled_id, row.name.clone())
+                });
+                for dataset in batch {
+                    datasets
+                        .entry(dataset.sled_id.into_untyped_uuid())
+                        .or_default()
+                        .push(dataset.into());
+                }
+            }
+            datasets
+        };
+
         // Collect the unique baseboard ids referenced by SPs, RoTs, and Sled
         // Agents.
         let baseboard_id_ids: BTreeSet<_> = sps
@@ -1706,6 +1784,10 @@ impl DataStore {
                     zpools: zpools
                         .get(sled_id.as_untyped_uuid())
                         .map(|zpools| zpools.to_vec())
+                        .unwrap_or_default(),
+                    datasets: datasets
+                        .get(sled_id.as_untyped_uuid())
+                        .map(|datasets| datasets.to_vec())
                         .unwrap_or_default(),
                 };
                 Ok((sled_id, sled_agent))
@@ -2087,6 +2169,9 @@ impl DataStore {
             rot_pages_found,
             sled_agents,
             omicron_zones,
+            // Currently unused
+            // See: https://github.com/oxidecomputer/omicron/issues/6578
+            clickhouse_keeper_cluster_membership: BTreeMap::new(),
         })
     }
 }
@@ -2137,6 +2222,7 @@ mod test {
     use crate::db::datastore::inventory::DataStoreInventoryTest;
     use crate::db::datastore::test_utils::datastore_test;
     use crate::db::datastore::DataStoreConnection;
+    use crate::db::raw_query_builder::{QueryBuilder, TrustedStr};
     use crate::db::schema;
     use anyhow::Context;
     use async_bb8_diesel::AsyncConnection;
@@ -2660,6 +2746,12 @@ mod test {
                 .await
                 .unwrap();
             assert_eq!(0, count);
+            let count = schema::inv_dataset::dsl::inv_dataset
+                .select(diesel::dsl::count_star())
+                .first_async::<i64>(&conn)
+                .await
+                .unwrap();
+            assert_eq!(0, count);
             let count = schema::inv_physical_disk::dsl::inv_physical_disk
                 .select(diesel::dsl::count_star())
                 .first_async::<i64>(&conn)
@@ -2696,6 +2788,94 @@ mod test {
         assert_ne!(coll_counts.baseboards, 0);
         assert_ne!(coll_counts.cabooses, 0);
         assert_ne!(coll_counts.rot_pages, 0);
+
+        // Clean up.
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    /// Creates a representative collection, deletes it, and walks through
+    /// tables to ensure that the subcomponents of the inventory have been
+    /// deleted.
+    ///
+    /// NOTE: This test depends on the naming convention "inv_" prefix name
+    /// to identify pieces of the inventory.
+    #[tokio::test]
+    async fn test_inventory_deletion() {
+        // Setup
+        let logctx = dev::test_setup_log("inventory_deletion");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        // Create a representative collection and write it to the database.
+        let Representative { builder, .. } = representative();
+        let collection = builder.build();
+        datastore
+            .inventory_insert_collection(&opctx, &collection)
+            .await
+            .expect("failed to insert collection");
+
+        // Delete that collection we just added
+        datastore
+            .inventory_delete_collection(&opctx, collection.id)
+            .await
+            .expect("failed to prune collections");
+        assert_eq!(
+            datastore
+                .inventory_collections()
+                .await
+                .unwrap()
+                .iter()
+                .map(|c| c.id.into())
+                .collect::<Vec<CollectionUuid>>(),
+            &[]
+        );
+
+        // Read all "inv_" tables and ensure that they're empty
+
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+        let tables: Vec<String> = QueryBuilder::new().sql(
+            "SELECT table_name FROM information_schema.tables WHERE table_name LIKE 'inv\\_%'"
+            )
+            .query::<diesel::sql_types::Text>()
+            .load_async(&*conn)
+            .await
+            .unwrap();
+
+        // Sanity-check, if this breaks, break loudly.
+        // We expect to see all the "inv_..." tables here, even ones that
+        // haven't been written yet.
+        assert!(
+            !tables.is_empty(),
+            "Tables missing from information_schema query"
+        );
+
+        // We need this to call "COUNT(*)" below.
+        conn.transaction_async(|conn| async move {
+            conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL)
+                .await
+                .unwrap();
+
+            for table in tables {
+                eprintln!("Validating that {table} is empty");
+                let count: i64 = QueryBuilder::new().sql(
+                        // We're scraping the table names dynamically here, so we
+                        // don't know them ahead of time. However, this is also a
+                        // test, so this usage is pretty benign.
+                        TrustedStr::i_take_responsibility_for_validating_this_string(
+                            format!("SELECT COUNT(*) FROM {table}")
+                        )
+                    )
+                    .query::<diesel::sql_types::Int8>()
+                    .get_result_async(&conn)
+                    .await
+                    .unwrap();
+                assert_eq!(count, 0, "Found deleted row(s) from table: {table}");
+            }
+            Ok::<(), anyhow::Error>(())
+        })
+        .await
+        .expect("Failed to check that tables were empty");
 
         // Clean up.
         db.cleanup().await.unwrap();
