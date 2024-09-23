@@ -2225,7 +2225,7 @@ mod test {
     use crate::db::raw_query_builder::{QueryBuilder, TrustedStr};
     use crate::db::schema;
     use crate::db::DataStore;
-    use anyhow::Context;
+    use anyhow::{bail, Context};
     use async_bb8_diesel::AsyncConnection;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use async_bb8_diesel::AsyncSimpleConnection;
@@ -2800,33 +2800,36 @@ mod test {
         ArePopulated,
     }
 
-    #[track_caller]
-    async fn check_all_inv_tables(datastore: &DataStore, status: AllInvTables) {
-        let conn = datastore.pool_connection_for_tests().await.unwrap();
+    async fn check_all_inv_tables(
+        datastore: &DataStore,
+        status: AllInvTables,
+    ) -> anyhow::Result<()> {
+        let conn = datastore
+            .pool_connection_for_tests()
+            .await
+            .context("Failed to get datastore connection")?;
         let tables: Vec<String> = QueryBuilder::new().sql(
             "SELECT table_name FROM information_schema.tables WHERE table_name LIKE 'inv\\_%'"
             )
             .query::<diesel::sql_types::Text>()
             .load_async(&*conn)
             .await
-            .unwrap();
+            .context("Failed to query information_schema for tables")?;
 
         // Sanity-check, if this breaks, break loudly.
         // We expect to see all the "inv_..." tables here, even ones that
         // haven't been written yet.
-        assert!(
-            !tables.is_empty(),
-            "Tables missing from information_schema query"
-        );
+        if tables.is_empty() {
+            bail!("Tables missing from information_schema query");
+        }
 
-        // We need this to call "COUNT(*)" below.
         conn.transaction_async(|conn| async move {
+            // We need this to call "COUNT(*)" below.
             conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL)
                 .await
-                .unwrap();
+                .context("Failed to allow full table scans")?;
 
             for table in tables {
-                eprintln!("Validating that {table} is empty");
                 let count: i64 = QueryBuilder::new().sql(
                         // We're scraping the table names dynamically here, so we
                         // don't know them ahead of time. However, this is also a
@@ -2838,22 +2841,27 @@ mod test {
                     .query::<diesel::sql_types::Int8>()
                     .get_result_async(&conn)
                     .await
-                    .unwrap();
+                    .with_context(|| format!("Couldn't SELECT COUNT(*) from table {table}"))?;
 
                 match status {
                     AllInvTables::AreEmpty => {
-                        assert_eq!(count, 0, "Found deleted row(s) from table: {table}");
+                        if count != 0 {
+                            bail!("Found deleted row(s) from table: {table}");
+                        }
                     },
                     AllInvTables::ArePopulated => {
-                        assert_ne!(count, 0, "Found table without entries: {table}");
+                        if count == 0 {
+                            bail!("Found table without entries: {table}");
+                        }
                     },
 
                 }
             }
             Ok::<(), anyhow::Error>(())
         })
-        .await
-        .expect("Failed to check that tables were empty");
+        .await?;
+
+        Ok(())
     }
 
     /// Creates a representative collection, deletes it, and walks through
@@ -2878,7 +2886,9 @@ mod test {
             .expect("failed to insert collection");
 
         // Read all "inv_" tables and ensure that they are populated.
-        check_all_inv_tables(&datastore, AllInvTables::ArePopulated).await;
+        check_all_inv_tables(&datastore, AllInvTables::ArePopulated)
+            .await
+            .expect("All inv_... tables should be populated by representative collection");
 
         // Delete that collection we just added
         datastore
@@ -2897,7 +2907,9 @@ mod test {
         );
 
         // Read all "inv_" tables and ensure that they're empty
-        check_all_inv_tables(&datastore, AllInvTables::AreEmpty).await;
+        check_all_inv_tables(&datastore, AllInvTables::AreEmpty).await.expect(
+            "All inv_... tables should be deleted alongside collection",
+        );
 
         // Clean up.
         db.cleanup().await.unwrap();
@@ -2920,7 +2932,9 @@ mod test {
             .expect("failed to insert collection");
 
         // Read all "inv_" tables and ensure that they are populated.
-        check_all_inv_tables(&datastore, AllInvTables::ArePopulated).await;
+        check_all_inv_tables(&datastore, AllInvTables::ArePopulated)
+            .await
+            .expect("All inv_... tables should be populated by representative collection");
 
         // Clean up.
         db.cleanup().await.unwrap();
