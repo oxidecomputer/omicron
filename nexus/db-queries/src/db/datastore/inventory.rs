@@ -2745,7 +2745,7 @@ mod test {
                 .await
                 .unwrap();
             assert_eq!(0, count);
-            let count = schema::inv_physical_disk::dsl::inv_dataset
+            let count = schema::inv_dataset::dsl::inv_dataset
                 .select(diesel::dsl::count_star())
                 .first_async::<i64>(&conn)
                 .await
