@@ -1344,12 +1344,10 @@ async fn clickhouse_ready_from_log(
 
 #[cfg(test)]
 mod tests {
-    use crate::dev::clickhouse::CLICKHOUSE_TCP_PORT_NEEDLE;
-
     use super::{
-        discover_local_listening_ports, discover_ready, ClickHouseError,
-        ClickHousePorts, CLICKHOUSE_HTTP_PORT_NEEDLE, CLICKHOUSE_READY,
-        CLICKHOUSE_TIMEOUT,
+        discover_local_listening_ports, discover_ready, find_port_after_needle,
+        ClickHouseError, ClickHousePorts, CLICKHOUSE_HTTP_PORT_NEEDLE,
+        CLICKHOUSE_READY, CLICKHOUSE_TCP_PORT_NEEDLE, CLICKHOUSE_TIMEOUT,
     };
     use camino_tempfile::NamedUtf8TempFile;
     use std::process::Stdio;
@@ -1368,6 +1366,23 @@ mod tests {
             .stderr(Stdio::null())
             .spawn()
             .expect("Cannot find 'clickhouse' on PATH. Refer to README.md for installation instructions");
+    }
+
+    // Regression test for #5180.
+    #[tokio::test]
+    async fn test_find_port_after_needle_handles_empty_port() {
+        // This bit ends after we've found our needle, but doesn't actually
+        // contain a port number. Trying to parse this empty string will fail,
+        // and we should correctly wait for more data to be written to the log
+        // file.
+        let line = format!("{}:", CLICKHOUSE_TCP_PORT_NEEDLE);
+        let result = find_port_after_needle(&line, CLICKHOUSE_TCP_PORT_NEEDLE)
+            .expect("Should not return an error if the log line ends right after the needle");
+        assert_eq!(
+            result, None,
+            "Should return None if the log line ends right after \
+            the needle, so we try to read the file again"
+        );
     }
 
     #[tokio::test]
