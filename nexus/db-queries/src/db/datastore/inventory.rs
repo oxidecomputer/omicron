@@ -2846,8 +2846,8 @@ mod test {
         // We expect to see all the "inv_..." tables here, even ones that
         // haven't been written yet.
         assert!(
-            tables.len() > 0,
-            "Something has gone wrong with the information_schema query"
+            !tables.is_empty(),
+            "Tables missing from information_schema query"
         );
 
         // We need this to call "COUNT(*)" below.
