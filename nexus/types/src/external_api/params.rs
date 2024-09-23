@@ -12,8 +12,9 @@ use http::Uri;
 use omicron_common::api::external::{
     AddressLotKind, AllowedSourceIps, BfdMode, BgpPeer, ByteCount, Hostname,
     IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
-    InstanceCpuCount, LinkFec, LinkSpeed, Name, NameOrId, PaginationOrder,
-    RouteDestination, RouteTarget, SemverVersion, UserId,
+    InstanceAutoRestartPolicy, InstanceCpuCount, LinkFec, LinkSpeed, Name,
+    NameOrId, PaginationOrder, RouteDestination, RouteTarget, SemverVersion,
+    UserId,
 };
 use omicron_common::disk::DiskVariant;
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
@@ -1032,6 +1033,14 @@ pub struct InstanceCreate {
     /// Should this instance be started upon creation; true by default.
     #[serde(default = "bool_true")]
     pub start: bool,
+
+    /// The auto-restart policy for this instance.
+    ///
+    /// This indicates whether the instance should be automatically restarted by
+    /// the control plane on failure. If this is `null`, no auto-restart policy
+    /// has been configured for this instance by the user.
+    #[serde(default)]
+    pub auto_restart_policy: Option<InstanceAutoRestartPolicy>,
 }
 
 #[inline]

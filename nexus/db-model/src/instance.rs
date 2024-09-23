@@ -3,13 +3,17 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{
-    ByteCount, Disk, ExternalIp, Generation, InstanceAutoRestart,
+    ByteCount, Disk, ExternalIp, Generation, InstanceAutoRestartPolicy,
     InstanceCpuCount, InstanceState,
 };
 use crate::collection::DatastoreAttachTargetConfig;
 use crate::schema::{disk, external_ip, instance};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeDelta, Utc};
 use db_macros::Resource;
+use diesel::expression::{is_aggregate, ValidGrouping};
+use diesel::pg;
+use diesel::prelude::*;
+use diesel::sql_types::{Bool, Nullable};
 use nexus_types::external_api::params;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid};
 use serde::Deserialize;
@@ -55,13 +59,8 @@ pub struct Instance {
     #[diesel(column_name = hostname)]
     pub hostname: String,
 
-    /// The auto-restart policy for this instance.
-    ///
-    /// This indicates whether the instance should be automatically restarted by
-    /// the control plane on failure. If this is `NULL`, no auto-restart policy
-    /// has been configured for this instance by the user.
-    #[diesel(column_name = auto_restart_policy)]
-    pub auto_restart_policy: Option<InstanceAutoRestart>,
+    #[diesel(embed)]
+    pub auto_restart: InstanceAutoRestart,
 
     #[diesel(embed)]
     pub runtime_state: InstanceRuntimeState,
@@ -103,6 +102,11 @@ impl Instance {
             identity.time_modified,
         );
 
+        let auto_restart = InstanceAutoRestart {
+            policy: params.auto_restart_policy.map(Into::into),
+            cooldown: None,
+        };
+
         Self {
             identity,
             project_id,
@@ -110,9 +114,8 @@ impl Instance {
             ncpus: params.ncpus.into(),
             memory: params.memory.into(),
             hostname: params.hostname.to_string(),
-            // TODO(eliza): allow this to be configured via the instance-create
-            // params...
-            auto_restart_policy: None,
+            auto_restart,
+
             runtime_state,
 
             updater_gen: Generation::new(),
@@ -188,7 +191,6 @@ pub struct InstanceRuntimeState {
     pub propolis_id: Option<Uuid>,
 
     /// If a migration is in progress, the ID of the Propolis server that is
-    /// the migration target.
     ///
     /// This field is guarded by the instance's `gen`.
     #[diesel(column_name = target_propolis_id)]
@@ -209,6 +211,13 @@ pub struct InstanceRuntimeState {
     /// This field is guarded by the instance's `gen` field.
     #[diesel(column_name = state)]
     pub nexus_state: InstanceState,
+
+    /// The timestamp of the most recent auto-restart attempt, or `None` if this
+    /// instance has never been auto-restarted by the control plane.
+    ///
+    /// This field is guarded by the instance's `gen`.
+    #[diesel(column_name = time_last_auto_restarted)]
+    pub time_last_auto_restarted: Option<DateTime<Utc>>,
 }
 
 impl InstanceRuntimeState {
@@ -220,6 +229,237 @@ impl InstanceRuntimeState {
             dst_propolis_id: None,
             migration_id: None,
             gen: Generation::new(),
+            time_last_auto_restarted: None,
         }
+    }
+}
+
+/// Configuration for automatic instance restarts.
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    AsChangeset,
+    Selectable,
+    Insertable,
+    Queryable,
+    Serialize,
+    Deserialize,
+)]
+#[diesel(table_name = instance)]
+pub struct InstanceAutoRestart {
+    /// The auto-restart policy for this instance.
+    ///
+    /// This indicates whether the instance should be automatically restarted by
+    /// the control plane on failure. If this is `NULL`, no auto-restart policy
+    /// has been configured for this instance by the user.
+    #[diesel(column_name = auto_restart_policy)]
+    #[serde(default)]
+    pub policy: Option<InstanceAutoRestartPolicy>,
+    /// The cooldown period that must elapse between automatic restarts of this
+    /// instance.
+    ///
+    /// If this is `NULL`, no explicit cooldown period has been configured for
+    /// this instance, and the default cooldown period should be used instead.
+    #[diesel(column_name = auto_restart_cooldown)]
+    #[serde(default, with = "optional_time_delta")]
+    pub cooldown: Option<TimeDelta>,
+}
+
+/// Describes whether or not an instance can reincarnate.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum InstanceKarmicStatus {
+    /// The instance is ready to reincarnate.
+    Ready,
+    /// The instance does not need reincarnation, as it is not currently in the
+    /// `Failed` state.
+    NotFailed,
+    /// The instance cannot reincarnate again until the specified time.
+    CoolingDown(TimeDelta),
+    /// The instance's auto-restart policy forbids it from reincarnating.
+    Forbidden,
+}
+
+impl InstanceAutoRestart {
+    /// The default cooldown used when an instance has no overridden cooldown.
+    pub const DEFAULT_COOLDOWN: TimeDelta = match TimeDelta::try_hours(1) {
+        Some(delta) => delta,
+        None => unreachable!(), // 1 hour should be representable...
+    };
+
+    /// The default policy used when an instance does not override the
+    /// reincarnation policy.
+    pub const DEFAULT_POLICY: InstanceAutoRestartPolicy =
+        InstanceAutoRestartPolicy::BestEffort;
+
+    /// Returns `true` if `self` permits an instance to reincarnate given the
+    /// provided `state`.
+    pub fn status(&self, state: &InstanceRuntimeState) -> InstanceKarmicStatus {
+        // Instances only need to be automatically restarted if they are in the
+        // `Failed` state.
+        if state.nexus_state != InstanceState::Failed {
+            return InstanceKarmicStatus::NotFailed;
+        }
+
+        // Check if the instance's configured auto-restart policy permits the
+        // control plane to automatically restart it.
+        let policy = self.policy.unwrap_or(Self::DEFAULT_POLICY);
+        if policy == InstanceAutoRestartPolicy::Never {
+            return InstanceKarmicStatus::Forbidden;
+        }
+
+        // If the instance is permitted to reincarnate, ensure that its last
+        // reincarnation was at least one cooldown period ago.
+        if let Some(last) = state.time_last_auto_restarted {
+            // If no explicit cooldown is present, use the default.
+            // Eventually, we may also allow a project-level default, so we will
+            // need to consider that as well.
+            let cooldown = self.cooldown.unwrap_or(Self::DEFAULT_COOLDOWN);
+            let time_since_last = Utc::now().signed_duration_since(last);
+            if time_since_last >= cooldown {
+                return InstanceKarmicStatus::Ready;
+            } else {
+                return InstanceKarmicStatus::CoolingDown(
+                    cooldown - time_since_last,
+                );
+            }
+        }
+
+        InstanceKarmicStatus::Ready
+    }
+
+    /// Filters a database query to include only instances whose auto-restart
+    /// configs permit them to reincarnate.
+    ///
+    /// Yes, this should probably be in `nexus-db-queries`, but it seemed nice
+    /// for it to be defined on the same struct as the in-memory logic
+    /// (`can_reincarnate`).
+    pub fn filter_reincarnatable(
+    ) -> impl diesel::query_builder::QueryFragment<pg::Pg>
+           + diesel::query_builder::QueryId
+           // All elements in this expression appear on the `instance` table, so
+           // it's a valid `filter` for that table, and the expression evaluates
+           // to a bool (or NULL), making it a valid WHERE clause.
+           + AppearsOnTable<instance::table, SqlType = Nullable<Bool>>
+           // I think this trait tells diesel that the query fragment has no
+           // GROUP BY clause, so that it knows it can be used as a WHERE clause
+           + ValidGrouping<(), IsAggregate = is_aggregate::No> {
+        use instance::dsl;
+
+        let now = diesel::dsl::now.into_sql::<pg::sql_types::Timestamptz>();
+
+        dsl::state
+            // Only attempt to restart Failed instances.
+            .eq(InstanceState::Failed)
+            // The instance's auto-restart policy must allow the control plane
+            // to restart it automatically.
+            //
+            // N.B. that this may become more complex in the future if we grow
+            // additional auto-restart policies that require additional logic
+            // (such as restart limits...)
+            .and(
+                dsl::auto_restart_policy
+                    .eq(InstanceAutoRestartPolicy::BestEffort),
+            )
+            // An instance whose last reincarnation was within the cooldown
+            // interval from now must remain in _bardo_ --- the liminal
+            // state between death and rebirth --- before its next
+            // reincarnation.
+            .and(
+                // If the instance has never previously been reincarnated, then
+                // it's allowed to reincarnate.
+                dsl::time_last_auto_restarted
+                    .is_null()
+                    // Or, if it has an overridden cooldown period, has that elapsed?
+                    .or(dsl::auto_restart_cooldown.is_not_null().and(
+                        dsl::time_last_auto_restarted
+                            .le(now.nullable() - dsl::auto_restart_cooldown),
+                    ))
+                    // Or, finally, if it does not have an overridden cooldown
+                    // period, has the default cooldown period elapsed?
+                    .or(dsl::auto_restart_cooldown.is_null().and(
+                        dsl::time_last_auto_restarted
+                            .le((now - Self::DEFAULT_COOLDOWN).nullable()),
+                    )),
+            )
+    }
+}
+
+/// It's just a type with the same representation as a `TimeDelta` that
+/// implements `Serialize` and `Deserialize`, because `chrono`'s `Deserialize`
+/// implementation for this type is not actually for `TimeDelta`, but for the
+/// `rkyv::Archived` wrapper type (see [here]). While `chrono` *does* provide a
+/// `Serialize` implementation that we could use with this type, it's preferable
+/// to provide our own `Serialize` as well as `Deserialize`, since a future
+/// semver-compatible change in `chrono` could change the struct's internal
+/// representation, quietly breaking our ability to round-trip it. So, let's
+/// just derive both traits for this thing, which we control.
+///
+/// If you feel like this is unfortunate...yeah, I do too.
+///
+/// [here]: https://docs.rs/chrono/latest/chrono/struct.TimeDelta.html#impl-Deserialize%3CTimeDelta,+__D%3E-for-%3CTimeDelta+as+Archive%3E::Archived
+#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
+struct SerdeTimeDelta {
+    secs: i64,
+    nanos: i32,
+}
+
+impl From<TimeDelta> for SerdeTimeDelta {
+    fn from(delta: TimeDelta) -> Self {
+        Self { secs: delta.num_seconds(), nanos: delta.subsec_nanos() }
+    }
+}
+
+impl TryFrom<SerdeTimeDelta> for TimeDelta {
+    type Error = &'static str;
+    fn try_from(
+        SerdeTimeDelta { secs, nanos }: SerdeTimeDelta,
+    ) -> Result<Self, Self::Error> {
+        // This is a bit weird: `chrono::TimeDelta`'s getter for
+        // nanoseconds (`TimeDelta::subsec_nanos`) returns them as an i32,
+        // with the sign coming from the seconds part, but when constructing
+        // a `TimeDelta`, it takes them as a `u32` and panics if they're too
+        // big. So, we take the absolute value here, because what the serialize
+        // impl saw may have had its sign bit set, but the constructor will get
+        // mad if we give it something with that bit set. Hopefully that made
+        // sense?
+        let nanos = nanos.unsigned_abs();
+        TimeDelta::new(secs, nanos).ok_or("time delta out of range")
+    }
+}
+mod optional_time_delta {
+    use super::*;
+    use serde::{Deserializer, Serializer};
+
+    pub(super) fn deserialize<'de, D>(
+        deserializer: D,
+    ) -> Result<Option<TimeDelta>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let val = Option::<SerdeTimeDelta>::deserialize(deserializer)?;
+        match val {
+            None => return Ok(None),
+            Some(delta) => delta
+                .try_into()
+                .map_err(|e| {
+                    <D::Error as serde::de::Error>::custom(format!(
+                        "{e}: {val:?}"
+                    ))
+                })
+                .map(Some),
+        }
+    }
+
+    pub(super) fn serialize<S>(
+        td: &Option<TimeDelta>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        td.as_ref()
+            .map(|&delta| SerdeTimeDelta::from(delta))
+            .serialize(serializer)
     }
 }

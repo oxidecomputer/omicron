@@ -4,6 +4,7 @@
 
 use serde::Deserialize;
 use serde::Serialize;
+use std::collections::HashMap;
 use uuid::Uuid;
 
 /// The status of a `region_replacement` background task activation
@@ -113,4 +114,20 @@ impl InstanceUpdaterStatus {
             + self.failed_active_vmms
             + self.terminated_active_migrations
     }
+}
+
+/// The status of an `instance_reincarnation` background task activation.
+#[derive(Default, Serialize, Deserialize, Debug)]
+pub struct InstanceReincarnationStatus {
+    /// Total number of instances in need of reincarnation on this activation.
+    pub instances_found: usize,
+    /// UUIDs of instances reincarnated successfully by this activation.
+    pub instances_reincarnated: Vec<Uuid>,
+    /// UUIDs of instances which changed state before they could be
+    /// reincarnated.
+    pub changed_state: Vec<Uuid>,
+    /// Any error that occured while finding instances in need of reincarnation.
+    pub query_error: Option<String>,
+    /// Errors that occurred while restarting individual instances.
+    pub restart_errors: HashMap<Uuid, String>,
 }

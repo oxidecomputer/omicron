@@ -350,6 +350,7 @@ use crate::app::db::datastore::VmmStateUpdateResult;
 use crate::app::db::lookup::LookupPath;
 use crate::app::db::model::ByteCount;
 use crate::app::db::model::Generation;
+use crate::app::db::model::InstanceKarmicStatus;
 use crate::app::db::model::InstanceRuntimeState;
 use crate::app::db::model::InstanceState;
 use crate::app::db::model::MigrationState;
@@ -1281,6 +1282,37 @@ async fn siu_chain_successor_saga(
                 "instance update: successor update saga started!";
                 "instance_id" => %instance_id,
             );
+        } else {
+            // If the instance has transitioned to the `Failed` state and no additional
+            // update saga is required, check ifthe instance's auto-restart policy allows it
+            // to be automatically restarted. If it does, activate the
+            // instance-reincarnation  background task to automatically restart it.
+            let auto_restart = new_state.instance.auto_restart;
+            match auto_restart.status(&new_state.instance.runtime_state) {
+                InstanceKarmicStatus::Ready => {
+                    info!(
+                        log,
+                        "instance update: instance transitioned to Failed, but can \
+                        be automatically restarted; activating reincarnation.";
+                        "instance_id" => %instance_id,
+                        "auto_restart" => ?auto_restart,
+                        "runtime_state" => ?new_state.instance.runtime_state,
+                    );
+                    nexus.background_tasks.task_instance_reincarnation.activate();
+                }
+                InstanceKarmicStatus::CoolingDown(remaining) => {
+                    info!(
+                        log,
+                        "instance update: instance transitioned to Failed, but is \
+                        still in cooldown from a previous reincarnation";
+                        "instance_id" => %instance_id,
+                        "auto_restart" => ?auto_restart,
+                        "cooldown_remaining" => ?remaining,
+                        "runtime_state" => ?new_state.instance.runtime_state,
+                    );
+                }
+                InstanceKarmicStatus::Forbidden | InstanceKarmicStatus::NotFailed => {}
+            }
         }
 
         Ok::<(), anyhow::Error>(())
@@ -1298,7 +1330,9 @@ async fn siu_chain_successor_saga(
             "error" => %error,
         );
         nexus.background_tasks.task_instance_updater.activate();
+        return Ok(());
     }
+
 
     Ok(())
 }
@@ -1520,6 +1554,7 @@ mod test {
                 external_ips: vec![],
                 disks: vec![],
                 start: true,
+                auto_restart_policy: Default::default(),
             },
         )
         .await
@@ -1635,6 +1670,7 @@ mod test {
                     dst_propolis_id: None,
                     migration_id: None,
                     nexus_state: InstanceState::NoVmm,
+                    time_last_auto_restarted: None,
                 },
             )
             .await

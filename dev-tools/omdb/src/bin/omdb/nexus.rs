@@ -36,6 +36,7 @@ use nexus_db_queries::db::lookup::LookupPath;
 use nexus_saga_recovery::LastPass;
 use nexus_types::deployment::Blueprint;
 use nexus_types::internal_api::background::AbandonedVmmReaperStatus;
+use nexus_types::internal_api::background::InstanceReincarnationStatus;
 use nexus_types::internal_api::background::InstanceUpdaterStatus;
 use nexus_types::internal_api::background::LookupRegionPortStatus;
 use nexus_types::internal_api::background::RegionReplacementDriverStatus;
@@ -1781,6 +1782,80 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 }
             }
         }
+    } else if name == "instance_reincarnation" {
+        match serde_json::from_value::<InstanceReincarnationStatus>(
+            details.clone(),
+        ) {
+            Err(error) => eprintln!(
+                "warning: failed to interpret task details: {:?}: {:?}",
+                error, details
+            ),
+            Ok(InstanceReincarnationStatus {
+                instances_found,
+                instances_reincarnated,
+                changed_state,
+                query_error,
+                restart_errors,
+            }) => {
+                const FOUND: &'static str =
+                    "instances eligible for reincarnation:";
+                const REINCARNATED: &'static str = "  instances reincarnated:";
+                const CHANGED_STATE: &'static str =
+                    "  instances which changed state before they could be reincarnated:";
+                const ERRORS: &'static str =
+                    "  instances which failed to be reincarnated:";
+                const COOLDOWN_PERIOD: &'static str =
+                    "default cooldown period:";
+                const WIDTH: usize = const_max_len(&[
+                    FOUND,
+                    REINCARNATED,
+                    CHANGED_STATE,
+                    ERRORS,
+                    COOLDOWN_PERIOD,
+                ]);
+                let n_restart_errors = restart_errors.len();
+                let n_restarted = instances_reincarnated.len();
+                let n_changed_state = changed_state.len();
+                println!("    {FOUND:<WIDTH$} {instances_found:>3}");
+                println!("    {REINCARNATED:<WIDTH$} {n_restarted:>3}");
+                println!("    {CHANGED_STATE:<WIDTH$} {n_changed_state:>3}",);
+                println!("    {ERRORS:<WIDTH$} {n_restart_errors:>3}");
+
+                if let Some(e) = query_error {
+                    println!(
+                        "    an error occurred while searching for instances \
+                         to reincarnate:\n      {e}",
+                    );
+                }
+
+                if n_restart_errors > 0 {
+                    println!(
+                        "    errors occurred while restarting the following \
+                         instances:"
+                    );
+                    for (id, error) in restart_errors {
+                        println!("    > {id}: {error}");
+                    }
+                }
+
+                if n_restarted > 0 {
+                    println!("    the following instances have reincarnated:");
+                    for id in instances_reincarnated {
+                        println!("    > {id}")
+                    }
+                }
+
+                if n_changed_state > 0 {
+                    println!(
+                        "    the following instances states changed before \
+                         they could be reincarnated:"
+                    );
+                    for id in changed_state {
+                        println!("    > {id}")
+                    }
+                }
+            }
+        };
     } else {
         println!(
             "warning: unknown background task: {:?} \

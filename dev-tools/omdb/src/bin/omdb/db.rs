@@ -2881,7 +2881,9 @@ async fn cmd_db_instance_info(
         instance::dsl as instance_dsl, migration::dsl as migration_dsl,
         vmm::dsl as vmm_dsl,
     };
-    use nexus_db_model::{Instance, InstanceRuntimeState, Migration, Vmm};
+    use nexus_db_model::{
+        Instance, InstanceKarmicStatus, InstanceRuntimeState, Migration, Vmm,
+    };
     let InstanceInfoArgs { id } = args;
 
     let instance = instance_dsl::instance
@@ -2926,7 +2928,7 @@ async fn cmd_db_instance_info(
     // `nexus_db_model::Instance` type will want to make sure to update this
     // code as well. Unfortunately, we can't just destructure the struct here to
     // make sure this code breaks, since the `identity` field isn't public.
-    // So...just don't forget to do that, I  guess.
+    // So...just don't forget to do that, I guess.
     const ID: &'static str = "ID";
     const PROJECT_ID: &'static str = "project ID";
     const NAME: &'static str = "name";
@@ -2937,10 +2939,12 @@ async fn cmd_db_instance_info(
     const VCPUS: &'static str = "vCPUs";
     const MEMORY: &'static str = "memory";
     const HOSTNAME: &'static str = "hostname";
-    const AUTO_RESTART: &'static str = "auto-restart policy";
+    const AUTO_RESTART: &'static str = "auto-restart";
     const STATE: &'static str = "nexus state";
     const LAST_MODIFIED: &'static str = "last modified at";
     const LAST_UPDATED: &'static str = "last updated at";
+    const LAST_AUTO_RESTART: &'static str = "last auto-restarted at";
+    const KARMIC_STATUS: &'static str = "karmic status";
     const ACTIVE_VMM: &'static str = "active VMM ID";
     const TARGET_VMM: &'static str = "target VMM ID";
     const MIGRATION_ID: &'static str = "migration ID";
@@ -2962,6 +2966,8 @@ async fn cmd_db_instance_info(
         API_STATE,
         LAST_UPDATED,
         LAST_MODIFIED,
+        LAST_AUTO_RESTART,
+        KARMIC_STATUS,
         ACTIVE_VMM,
         TARGET_VMM,
         MIGRATION_ID,
@@ -2970,6 +2976,17 @@ async fn cmd_db_instance_info(
         MIGRATION_RECORD,
         TARGET_VMM_RECORD,
     ]);
+
+    fn print_multiline_debug(slug: &str, thing: &impl core::fmt::Debug) {
+        println!(
+            "    {slug:>WIDTH$}:\n{}",
+            textwrap::indent(
+                &format!("{thing:#?}"),
+                &" ".repeat(WIDTH - slug.len() + 8)
+            )
+        );
+    }
+
     println!("\n{:=<80}", "== INSTANCE ");
     println!("    {ID:>WIDTH$}: {}", instance.id());
     println!("    {PROJECT_ID:>WIDTH$}: {}", instance.project_id);
@@ -2985,7 +3002,7 @@ async fn cmd_db_instance_info(
     println!("    {VCPUS:>WIDTH$}: {}", instance.ncpus.0 .0);
     println!("    {MEMORY:>WIDTH$}: {}", instance.memory.0);
     println!("    {HOSTNAME:>WIDTH$}: {}", instance.hostname);
-    println!("    {AUTO_RESTART:>WIDTH$}: {:?}", instance.auto_restart_policy);
+    print_multiline_debug(AUTO_RESTART, &instance.auto_restart);
     println!("\n{:=<80}", "== RUNTIME STATE ");
     let InstanceRuntimeState {
         time_updated,
@@ -2994,6 +3011,7 @@ async fn cmd_db_instance_info(
         migration_id,
         nexus_state,
         r#gen,
+        time_last_auto_restarted,
     } = instance.runtime_state;
     println!("    {STATE:>WIDTH$}: {nexus_state:?}");
     let effective_state = InstanceAndActiveVmm::determine_effective_state(
@@ -3008,6 +3026,22 @@ async fn cmd_db_instance_info(
         "    {LAST_UPDATED:>WIDTH$}: {time_updated:?} (generation {})",
         r#gen.0
     );
+    println!("    {LAST_AUTO_RESTART:>WIDTH$}: {time_last_auto_restarted:?}");
+    match instance.auto_restart.status(&instance.runtime_state) {
+        InstanceKarmicStatus::NotFailed => {}
+        InstanceKarmicStatus::Ready => {
+            println!("(i) {KARMIC_STATUS:>WIDTH$}: ready to reincarnate!");
+        }
+        InstanceKarmicStatus::Forbidden => {
+            println!("(i) {KARMIC_STATUS:>WIDTH$}: reincarnation forbidden");
+        }
+        InstanceKarmicStatus::CoolingDown(remaining) => {
+            println!(
+                "/!\\ {KARMIC_STATUS:>WIDTH$}: cooling down \
+                 ({remaining:?} remaining)"
+            );
+        }
+    }
     println!("    {ACTIVE_VMM:>WIDTH$}: {propolis_id:?}");
     println!("    {TARGET_VMM:>WIDTH$}: {dst_propolis_id:?}");
     println!(

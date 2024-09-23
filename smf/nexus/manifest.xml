@@ -31,11 +31,6 @@
   <service_fmri value='svc:/oxide/opte-interface-setup:default' />
   </dependency>
 
-  <method_context>
-    <method_environment>
-      <envvar name="LD_LIBRARY_PATH" value="/opt/ooce/pgsql-13/lib/amd64" />
-    </method_environment>
-  </method_context>
   <exec_method type='method' name='start'
     exec='ctrun -l child -o noorphan,regent /opt/oxide/omicron-nexus/bin/nexus /var/svc/manifest/site/nexus/config.toml &amp;'
     timeout_seconds='0' />

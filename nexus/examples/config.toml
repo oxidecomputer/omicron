@@ -120,6 +120,8 @@ region_replacement_driver.period_secs = 10
 instance_watcher.period_secs = 30
 # How frequently to schedule new instance update sagas.
 instance_updater.period_secs = 30
+# How frequently to attempt to restart Failed instances?
+instance_reincarnation.period_secs = 60
 service_firewall_propagation.period_secs = 300
 v2p_mapping_propagation.period_secs = 30
 abandoned_vmm_reaper.period_secs = 60
