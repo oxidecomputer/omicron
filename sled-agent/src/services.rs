@@ -4898,12 +4898,7 @@ mod test {
             mgr,
             id,
             generation,
-            OmicronZoneType::InternalNtp {
-                address,
-                ntp_servers: vec![],
-                dns_servers: vec![],
-                domain: None,
-            },
+            OmicronZoneType::InternalNtp { address },
             tmp_dir,
         )
         .await
@@ -4953,12 +4948,7 @@ mod test {
                 zones: vec![OmicronZoneConfig {
                     id,
                     underlay_address: Ipv6Addr::LOCALHOST,
-                    zone_type: OmicronZoneType::InternalNtp {
-                        address,
-                        ntp_servers: vec![],
-                        dns_servers: vec![],
-                        domain: None,
-                    },
+                    zone_type: OmicronZoneType::InternalNtp { address },
                     filesystem_pool: None,
                 }],
             },
@@ -5270,12 +5260,7 @@ mod test {
             &mgr,
             id,
             v2,
-            OmicronZoneType::InternalNtp {
-                address,
-                ntp_servers: vec![],
-                dns_servers: vec![],
-                domain: None,
-            },
+            OmicronZoneType::InternalNtp { address },
             String::from(test_config.config_dir.path().as_str()),
         )
         .await
@@ -5549,12 +5534,7 @@ mod test {
         let mut zones = vec![OmicronZoneConfig {
             id: id1,
             underlay_address: Ipv6Addr::LOCALHOST,
-            zone_type: OmicronZoneType::InternalNtp {
-                address,
-                ntp_servers: vec![],
-                dns_servers: vec![],
-                domain: None,
-            },
+            zone_type: OmicronZoneType::InternalNtp { address },
             filesystem_pool: None,
         }];
 
@@ -5578,12 +5558,7 @@ mod test {
         zones.push(OmicronZoneConfig {
             id: id2,
             underlay_address: Ipv6Addr::LOCALHOST,
-            zone_type: OmicronZoneType::InternalNtp {
-                address,
-                ntp_servers: vec![],
-                dns_servers: vec![],
-                domain: None,
-            },
+            zone_type: OmicronZoneType::InternalNtp { address },
             filesystem_pool: None,
         });
 
