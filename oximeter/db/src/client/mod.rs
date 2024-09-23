@@ -1294,7 +1294,7 @@ mod tests {
     // run whatever it needs to do. It can assume that the database is
     // _initialized_ for the deployment type, but that it contains no data. It
     // can do whatever it wants to with the database in the meantime -- no other
-    // other tests will see those effects.
+    // tests will see those effects.
     //
     // For example, suppose we wanted to run a test called `test_do_the_thing`.
     // We would write a single-node version like this:
