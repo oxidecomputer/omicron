@@ -724,7 +724,7 @@ impl<'a> BlueprintBuilder<'a> {
     /// - If new datasets are proposed, they are added to the blueprint.
     /// - If datasets are changed, they are updated in the blueprint.
     /// - If datasets are not proposed, but they exist in the parent blueprint,
-    /// they are removed.
+    /// they are expunged.
     pub fn sled_ensure_datasets(
         &mut self,
         sled_id: SledUuid,
@@ -1987,6 +1987,10 @@ impl<'a> BlueprintSledDatasetsBuilder<'a> {
         }
 
         // If the dataset exists in the datastore, re-use the UUID.
+        //
+        // TODO(https://github.com/oxidecomputer/omicron/issues/6645): We
+        // could avoid reading from the datastore if we were confident all
+        // provisioned datasets existed in the parent blueprint.
         let id = if let Some(old_config) = self.get_from_db(zpool_id, kind) {
             old_config.id
         } else {
@@ -2050,10 +2054,18 @@ impl<'a> BlueprintSledDatasetsBuilder<'a> {
         expunges
     }
 
-    /// Returns all datasets that have been expunged in a prior blueprint,
-    /// and which are also deleted from the database.
+    /// TODO(https://github.com/oxidecomputer/omicron/issues/6646): This
+    /// function SHOULD do the following:
     ///
+    /// Returns all datasets that have been expunged in a prior blueprint, and
+    /// which have also been removed from the database and from inventory.
     /// This is our sign that the work of expungement has completed.
+    ///
+    /// TODO: In reality, however, this function actually implements the
+    /// following:
+    ///
+    /// - It returns an empty BTreeSet, effectively saying "no datasets are
+    /// removable from the blueprint".
     pub fn get_removable_datasets(&self) -> BTreeSet<DatasetUuid> {
         let dataset_exists_in =
             |group: &BTreeMap<
@@ -2069,7 +2081,7 @@ impl<'a> BlueprintSledDatasetsBuilder<'a> {
                 datasets.values().any(|config| config.id == dataset_id)
             };
 
-        let mut removals = BTreeSet::new();
+        let removals = BTreeSet::new();
         for (zpool_id, datasets) in &self.blueprint_datasets {
             for (_kind, config) in datasets {
                 if config.disposition == BlueprintDatasetDisposition::Expunged
@@ -2080,7 +2092,11 @@ impl<'a> BlueprintSledDatasetsBuilder<'a> {
                     )
                 {
                     info!(self.log, "dataset removable (expunged, not in database)"; "id" => ?config.id);
-                    removals.insert(config.id);
+
+                    // TODO(https://github.com/oxidecomputer/omicron/issues/6646):
+                    // We could call `removals.insert(config.id)` here, but
+                    // instead, opt to just log that the dataset is removable
+                    // and keep it in the blueprint.
                 }
             }
         }
@@ -2794,19 +2810,12 @@ pub mod test {
         // we no longer need to keep around records of their expungement.
         let sled_resources = input.sled_resources(&sled_id).unwrap();
         let r = builder.sled_ensure_datasets(sled_id, sled_resources).unwrap();
-        assert_eq!(
-            r,
-            EnsureMultiple::Changed {
-                added: 0,
-                updated: 0,
-                expunged: 0,
-                removed: 2
-            }
-        );
 
-        // They should only be removed once -- repeated calls won't change the
-        // builder further.
-        let r = builder.sled_ensure_datasets(sled_id, sled_resources).unwrap();
+        // TODO(https://github.com/oxidecomputer/omicron/issues/6646):
+        // Because of the workaround for #6646, we don't actually remove
+        // datasets yet.
+        //
+        // In the future, however, we will.
         assert_eq!(r, EnsureMultiple::NotNeeded);
 
         logctx.cleanup_successful();
