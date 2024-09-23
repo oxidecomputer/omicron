@@ -2800,6 +2800,7 @@ mod test {
         ArePopulated,
     }
 
+    #[track_caller]
     async fn check_all_inv_tables(datastore: &DataStore, status: AllInvTables) {
         let conn = datastore.pool_connection_for_tests().await.unwrap();
         let tables: Vec<String> = QueryBuilder::new().sql(
