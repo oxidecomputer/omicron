@@ -355,6 +355,10 @@ impl ColumnValue {
         Self { column: String::from(column), value: Some(value.into()) }
     }
 
+    fn null(column: &str) -> Self {
+        Self { column: String::from(column), value: None }
+    }
+
     fn expect(&self, column: &str) -> Option<&AnySqlType> {
         assert_eq!(self.column, column);
         self.value.as_ref()
@@ -1060,6 +1064,7 @@ const PROJECT: Uuid = Uuid::from_u128(0x11116701_5c3d_4647_83b0_8f3515da7be1);
 const INSTANCE1: Uuid = Uuid::from_u128(0x11111257_5c3d_4647_83b0_8f3515da7be1);
 const INSTANCE2: Uuid = Uuid::from_u128(0x22221257_5c3d_4647_83b0_8f3515da7be1);
 const INSTANCE3: Uuid = Uuid::from_u128(0x33331257_5c3d_4647_83b0_8f3515da7be1);
+const INSTANCE4: Uuid = Uuid::from_u128(0x44441257_5c3d_4647_83b0_8f3515da7be1);
 
 // "67060115" -> "Prop"olis
 const PROPOLIS: Uuid = Uuid::from_u128(0x11116706_5c3d_4647_83b0_8f3515da7be1);
@@ -1245,7 +1250,7 @@ fn before_70_0_0(client: &Client) -> BoxFuture<'_, ()> {
         NULL, 1),
         ('{INSTANCE2}', 'inst2', '', now(), now(), NULL, '{PROJECT}', '',
         'running', now(), 1, '{PROPOLIS}', NULL, NULL, 2, 1073741824, 'inst2',
-        false, NULL, 1),
+        true, NULL, 1),
         ('{INSTANCE3}', 'inst3', '', now(), now(), NULL, '{PROJECT}', '',
         'failed', now(), 1, NULL, NULL, NULL, 2, 1073741824, 'inst3', false,
         NULL, 1);
@@ -1316,6 +1321,146 @@ fn after_70_0_0(client: &Client) -> BoxFuture<'_, ()> {
     })
 }
 
+fn before_95_0_0(client: &Client) -> BoxFuture<'_, ()> {
+    // This reuses the instance records created in `before_70_0_0`
+    const COLUMN: &'static str = "boot_on_fault";
+    Box::pin(async {
+        let rows = client
+            .query("SELECT boot_on_fault FROM instance ORDER BY id", &[])
+            .await
+            .expect("failed to load instance boot_on_fault settings");
+        let instance_boot_on_faults = process_rows(&rows);
+
+        assert_eq!(
+            instance_boot_on_faults[0].values,
+            vec![ColumnValue::new(COLUMN, false,)]
+        );
+        assert_eq!(
+            instance_boot_on_faults[1].values,
+            vec![ColumnValue::new(COLUMN, true)]
+        );
+        assert_eq!(
+            instance_boot_on_faults[2].values,
+            vec![ColumnValue::new(COLUMN, false)]
+        );
+    })
+}
+
+const COLUMN_AUTO_RESTART: &'static str = "auto_restart_policy";
+const ENUM_AUTO_RESTART: &'static str = "instance_auto_restart";
+
+fn after_95_0_0(client: &Client) -> BoxFuture<'_, ()> {
+    // This reuses the instance records created in `before_70_0_0`
+    Box::pin(async {
+        let rows = client
+            .query(
+                &format!(
+                    "SELECT {COLUMN_AUTO_RESTART} FROM instance ORDER BY id"
+                ),
+                &[],
+            )
+            .await
+            .expect("failed to load instance auto-restart policies");
+        let policies = process_rows(&rows);
+
+        assert_eq!(
+            policies[0].values,
+            vec![ColumnValue::null(COLUMN_AUTO_RESTART)]
+        );
+        assert_eq!(
+            policies[1].values,
+            vec![ColumnValue::new(
+                COLUMN_AUTO_RESTART,
+                SqlEnum::from((ENUM_AUTO_RESTART, "all_failures"))
+            )]
+        );
+        assert_eq!(
+            policies[2].values,
+            vec![ColumnValue::null(COLUMN_AUTO_RESTART)]
+        );
+    })
+}
+
+fn before_101_0_0(client: &Client) -> BoxFuture<'_, ()> {
+    Box::pin(async {
+        // Make a new instance with an explicit 'sled_failures_only' v1 auto-restart
+        // policy
+        client
+            .batch_execute(&format!(
+                "INSERT INTO instance (
+                    id, name, description, time_created, time_modified,
+                    time_deleted, project_id, user_data, state,
+                    time_state_updated, state_generation, active_propolis_id,
+                    target_propolis_id, migration_id, ncpus, memory, hostname,
+                    {COLUMN_AUTO_RESTART}, updater_id, updater_gen
+                )
+                VALUES (
+                    '{INSTANCE4}', 'inst4', '', now(), now(), NULL,
+                    '{PROJECT}', '', 'no_vmm', now(), 1, NULL, NULL, NULL,
+                    2, 1073741824, 'inst1', 'sled_failures_only', NULL, 1
+                );"
+            ))
+            .await
+            .expect("failed to create instance");
+        // Change one of the NULLs to an explicit 'never'.
+        client
+            .batch_execute(&format!(
+                "UPDATE instance
+                SET {COLUMN_AUTO_RESTART} = 'never'
+                WHERE id = '{INSTANCE3}';"
+            ))
+            .await
+            .expect("failed to update instance");
+    })
+}
+
+fn after_101_0_0(client: &Client) -> BoxFuture<'_, ()> {
+    const BEST_EFFORT: &'static str = "best_effort";
+    Box::pin(async {
+        let rows = client
+            .query(
+                &format!(
+                    "SELECT {COLUMN_AUTO_RESTART} FROM instance ORDER BY id"
+                ),
+                &[],
+            )
+            .await
+            .expect("failed to load instance auto-restart policies");
+        let policies = process_rows(&rows);
+
+        assert_eq!(
+            policies[0].values,
+            vec![ColumnValue::null(COLUMN_AUTO_RESTART)],
+            "null auto-restart policies should remain null",
+        );
+        assert_eq!(
+            policies[1].values,
+            vec![ColumnValue::new(
+                COLUMN_AUTO_RESTART,
+                SqlEnum::from((ENUM_AUTO_RESTART, BEST_EFFORT))
+            )],
+            "'all_failures' auto-restart policies should be migrated to \
+             '{BEST_EFFORT}'",
+        );
+        assert_eq!(
+            policies[2].values,
+            vec![ColumnValue::new(
+                COLUMN_AUTO_RESTART,
+                SqlEnum::from((ENUM_AUTO_RESTART, "never"))
+            )],
+            "explicit 'never' auto-restart policies should remain 'never'",
+        );
+        assert_eq!(
+            policies[3].values,
+            vec![ColumnValue::new(
+                COLUMN_AUTO_RESTART,
+                SqlEnum::from((ENUM_AUTO_RESTART, BEST_EFFORT))
+            )],
+            "'sled_failures_only' auto-restart policies should be migrated \
+             to '{BEST_EFFORT}'",
+        );
+    })
+}
 // Lazily initializes all migration checks. The combination of Rust function
 // pointers and async makes defining a static table fairly painful, so we're
 // using lazy initialization instead.
@@ -1340,6 +1485,15 @@ fn get_migration_checks() -> BTreeMap<SemverVersion, DataMigrationFns> {
     map.insert(
         SemverVersion(semver::Version::parse("70.0.0").unwrap()),
         DataMigrationFns { before: Some(before_70_0_0), after: after_70_0_0 },
+    );
+    map.insert(
+        SemverVersion(semver::Version::parse("95.0.0").unwrap()),
+        DataMigrationFns { before: Some(before_95_0_0), after: after_95_0_0 },
+    );
+
+    map.insert(
+        SemverVersion(semver::Version::parse("101.0.0").unwrap()),
+        DataMigrationFns { before: Some(before_101_0_0), after: after_101_0_0 },
     );
 
     map

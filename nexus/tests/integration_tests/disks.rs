@@ -1786,6 +1786,7 @@ async fn create_instance_with_disk(client: &ClientTestContext) {
         )],
         Vec::<params::ExternalIpCreate>::new(),
         true,
+        Default::default(),
     )
     .await;
 }

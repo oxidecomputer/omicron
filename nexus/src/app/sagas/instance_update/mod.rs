@@ -350,6 +350,7 @@ use crate::app::db::datastore::VmmStateUpdateResult;
 use crate::app::db::lookup::LookupPath;
 use crate::app::db::model::ByteCount;
 use crate::app::db::model::Generation;
+use crate::app::db::model::InstanceKarmicStatus;
 use crate::app::db::model::InstanceRuntimeState;
 use crate::app::db::model::InstanceState;
 use crate::app::db::model::MigrationState;
@@ -1189,9 +1190,37 @@ async fn siu_commit_instance_updates(
     // try to start a new "actual" instance update saga that inherits our lock.
     // This way, we could also avoid computing updates required twice.
     // But, I'm a bit sketched out by the implications of not committing update
-    // and dropping the lock in the same operation. This deserves more thought...
-    if let Err(error) =
-        chain_update_saga(&sagactx, authz_instance, serialized_authn).await
+    // and dropping the lock in the same operation. This deserves more
+    // thought...
+
+    // Fetch the state from the database again to see if we should immediately
+    // run a new saga.
+    let new_state = match osagactx
+        .datastore()
+        .instance_fetch_all(&opctx, &authz_instance)
+        .await
+    {
+        Ok(s) => s,
+        // Do NOT unwind the rest of the saga if this fails, since we've
+        // already committed the update.
+        Err(e) => {
+            warn!(log,
+                "instance update: failed to fetch latest state after update";
+                "instance_id" => %instance_id,
+                "error" => %e,
+            );
+            nexus.background_tasks.task_instance_updater.activate();
+            return Ok(());
+        }
+    };
+
+    if let Err(error) = chain_update_saga(
+        &sagactx,
+        authz_instance,
+        serialized_authn,
+        &new_state,
+    )
+    .await
     {
         // If starting the new update saga failed, DO NOT unwind this saga and
         // undo all the work we've done successfully! Instead, just kick the
@@ -1204,6 +1233,38 @@ async fn siu_commit_instance_updates(
             "error" => %error,
         );
         nexus.background_tasks.task_instance_updater.activate();
+        return Ok(());
+    }
+
+    // If the instance has transitioned to the `Failed` state, no additional
+    // update saga is required, and the instance's auto-restart policy allows it
+    // to be automatically restarted, activate the instance-reincarnation
+    // background task to automatically restart it.
+    let auto_restart = new_state.instance.auto_restart;
+    match auto_restart.status(&new_state.instance.runtime_state) {
+        InstanceKarmicStatus::Ready => {
+            info!(
+                log,
+                "instance update: instance transitioned to Failed, but can \
+                 be automatically restarted; activating reincarnation.";
+                "instance_id" => %instance_id,
+                "auto_restart" => ?auto_restart,
+                "runtime_state" => ?new_state.instance.runtime_state,
+            );
+            nexus.background_tasks.task_instance_reincarnation.activate();
+        }
+        InstanceKarmicStatus::CoolingDown(remaining) => {
+            info!(
+                log,
+                "instance update: instance transitioned to Failed, but is \
+                 still in cooldown from a previous reincarnation";
+                "instance_id" => %instance_id,
+                "auto_restart" => ?auto_restart,
+                "cooldown_remaining" => ?remaining,
+                "runtime_state" => ?new_state.instance.runtime_state,
+            );
+        }
+        InstanceKarmicStatus::Forbidden | InstanceKarmicStatus::NotFailed => {}
     }
 
     Ok(())
@@ -1213,23 +1274,14 @@ async fn chain_update_saga(
     sagactx: &NexusActionContext,
     authz_instance: authz::Instance,
     serialized_authn: authn::saga::Serialized,
+    new_state: &InstanceGestalt,
 ) -> Result<(), anyhow::Error> {
-    let opctx =
-        crate::context::op_context_for_saga_action(sagactx, &serialized_authn);
     let osagactx = sagactx.user_data();
     let log = osagactx.log();
 
     let instance_id = authz_instance.id();
 
-    // Fetch the state from the database again to see if we should immediately
-    // run a new saga.
-    let new_state = osagactx
-        .datastore()
-        .instance_fetch_all(&opctx, &authz_instance)
-        .await
-        .context("failed to fetch latest snapshot for instance")?;
-
-    if let Some(update) = UpdatesRequired::for_instance(log, &new_state) {
+    if let Some(update) = UpdatesRequired::for_instance(log, new_state) {
         debug!(
             log,
             "instance update: additional updates required, preparing a \
@@ -1482,6 +1534,7 @@ mod test {
                 external_ips: vec![],
                 disks: vec![],
                 start: true,
+                auto_restart_policy: Default::default(),
             },
         )
         .await
@@ -1597,6 +1650,7 @@ mod test {
                     dst_propolis_id: None,
                     migration_id: None,
                     nexus_state: InstanceState::NoVmm,
+                    time_last_auto_restarted: None,
                 },
             )
             .await
