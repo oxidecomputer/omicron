@@ -97,7 +97,7 @@ struct ChronySetupArgs {
     #[arg(
         short,
         long,
-        num_args = 1..,
+        num_args = 0..,
         value_parser = NonEmptyStringValueParser::default(),
     )]
     servers: Vec<String>,
