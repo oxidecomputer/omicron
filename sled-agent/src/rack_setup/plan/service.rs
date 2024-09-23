@@ -475,10 +475,6 @@ impl Plan {
         );
         let dns_subnets =
             &reserved_rack_subnet.get_dns_subnets()[0..INTERNAL_DNS_REDUNDANCY];
-        let rack_dns_servers = dns_subnets
-            .into_iter()
-            .map(|dns_subnet| dns_subnet.dns_address().into())
-            .collect::<Vec<IpAddr>>();
         for i in 0..dns_subnets.len() {
             let dns_subnet = &dns_subnets[i];
             let ip = dns_subnet.dns_address();
@@ -923,9 +919,6 @@ impl Plan {
                     BlueprintZoneType::InternalNtp(
                         blueprint_zone_type::InternalNtp {
                             address: ntp_address,
-                            ntp_servers: boundary_ntp_servers.clone(),
-                            dns_servers: rack_dns_servers.clone(),
-                            domain: None,
                         },
                     ),
                     ServiceName::InternalNtp,

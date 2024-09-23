@@ -238,9 +238,6 @@ pub enum OmicronZoneType {
     },
     InternalNtp {
         address: SocketAddrV6,
-        ntp_servers: Vec<String>,
-        dns_servers: Vec<IpAddr>,
-        domain: Option<String>,
     },
     Nexus {
         /// The address at which the internal nexus server is reachable.

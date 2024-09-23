@@ -1278,21 +1278,9 @@ impl InvOmicronZone {
                 inv_omicron_zone.dns_gz_address_index =
                     Some(SqlU32::from(*gz_address_index));
             }
-            OmicronZoneType::InternalNtp {
-                address,
-                ntp_servers,
-                dns_servers,
-                domain,
-            } => {
+            OmicronZoneType::InternalNtp { address } => {
                 // Set the common fields
                 inv_omicron_zone.set_primary_service_ip_and_port(address);
-
-                // Set the zone specific fields
-                inv_omicron_zone.ntp_ntp_servers = Some(ntp_servers.clone());
-                inv_omicron_zone.ntp_dns_servers = Some(
-                    dns_servers.iter().cloned().map(IpNetwork::from).collect(),
-                );
-                inv_omicron_zone.ntp_domain.clone_from(domain);
             }
             OmicronZoneType::Nexus {
                 internal_address,
@@ -1453,12 +1441,9 @@ impl InvOmicronZone {
                     || anyhow!("expected dns_gz_address_index, found none"),
                 )?,
             },
-            ZoneType::InternalNtp => OmicronZoneType::InternalNtp {
-                address: primary_address,
-                ntp_servers: ntp_servers?,
-                dns_servers: ntp_dns_servers?,
-                domain: self.ntp_domain,
-            },
+            ZoneType::InternalNtp => {
+                OmicronZoneType::InternalNtp { address: primary_address }
+            }
             ZoneType::Nexus => OmicronZoneType::Nexus {
                 internal_address: primary_address,
                 external_ip: self

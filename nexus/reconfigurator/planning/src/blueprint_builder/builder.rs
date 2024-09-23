@@ -8,8 +8,6 @@ use crate::ip_allocator::IpAllocator;
 use crate::planner::zone_needs_expungement;
 use crate::planner::ZoneExpungeReason;
 use anyhow::anyhow;
-use internal_dns::config::Host;
-use internal_dns::config::Zone;
 use ipnet::IpAdd;
 use nexus_inventory::now_db_precision;
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
@@ -35,7 +33,6 @@ use nexus_types::deployment::ZpoolFilter;
 use nexus_types::deployment::ZpoolName;
 use nexus_types::external_api::views::SledState;
 use nexus_types::inventory::Collection;
-use omicron_common::address::get_internal_dns_server_addresses;
 use omicron_common::address::get_sled_address;
 use omicron_common::address::get_switch_zone_address;
 use omicron_common::address::ReservedRackSubnet;
@@ -717,47 +714,12 @@ impl<'a> BlueprintBuilder<'a> {
             return Ok(Ensure::NotNeeded);
         }
 
-        let sled_info = self.sled_resources(sled_id)?;
-        let sled_subnet = sled_info.subnet;
         let ip = self.sled_alloc_ip(sled_id)?;
         let ntp_address = SocketAddrV6::new(ip, NTP_PORT, 0, 0);
-
-        // Construct the list of internal DNS servers.
-        //
-        // It'd be tempting to get this list from the other internal NTP
-        // servers, but there may not be any of those.  We could also
-        // construct it manually from the set of internal DNS servers
-        // actually deployed, or ask the DNS subnet allocator; but those
-        // would both require that all the internal DNS zones be added
-        // before any NTP zones, a constraint we don't currently enforce.
-        // Instead, we take the same approach as RSS: they are at known,
-        // fixed addresses relative to the AZ subnet (which itself is a
-        // known-prefix parent subnet of the sled subnet).
-        let dns_servers =
-            get_internal_dns_server_addresses(sled_subnet.net().prefix());
-
-        // The list of boundary NTP servers is not necessarily stored
-        // anywhere (unless there happens to be another internal NTP zone
-        // lying around).  Recompute it based on what boundary servers
-        // currently exist.
-        let ntp_servers = self
-            .parent_blueprint
-            .all_omicron_zones(BlueprintZoneFilter::All)
-            .filter_map(|(_, z)| {
-                if matches!(z.zone_type, BlueprintZoneType::BoundaryNtp(_)) {
-                    Some(Host::for_zone(Zone::Other(z.id)).fqdn())
-                } else {
-                    None
-                }
-            })
-            .collect();
 
         let zone_type =
             BlueprintZoneType::InternalNtp(blueprint_zone_type::InternalNtp {
                 address: ntp_address,
-                ntp_servers,
-                dns_servers,
-                domain: None,
             });
         let filesystem_pool =
             self.sled_select_zpool(sled_id, zone_type.kind())?;

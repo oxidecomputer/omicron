@@ -918,7 +918,10 @@ impl ServiceManager {
         rack_network_config: Option<RackNetworkConfig>,
         metrics_queue: MetricsRequestQueue,
     ) -> Result<(), Error> {
-        info!(&self.inner.log, "sled agent started"; "underlay_address" => underlay_address.to_string());
+        info!(
+            &self.inner.log, "sled agent started";
+            "underlay_address" => underlay_address.to_string(),
+        );
         self.inner
             .sled_info
             .set(SledAgentInfo {
@@ -1330,7 +1333,7 @@ impl ServiceManager {
     async fn dns_install(
         info: &SledAgentInfo,
         ip_addrs: Option<Vec<IpAddr>>,
-        domain: &Option<String>,
+        domain: Option<&str>,
     ) -> Result<ServiceBuilder, Error> {
         // We want to configure the dns/install SMF service inside the
         // zone with the list of DNS nameservers.  This will cause
@@ -1585,7 +1588,7 @@ impl ServiceManager {
                     &[listen_addr],
                 )?;
 
-                let dns_service = Self::dns_install(info, None, &None).await?;
+                let dns_service = Self::dns_install(info, None, None).await?;
 
                 let config = PropertyGroupBuilder::new("config")
                     .add_property(
@@ -1666,7 +1669,7 @@ impl ServiceManager {
                     &[listen_addr],
                 )?;
 
-                let dns_service = Self::dns_install(info, None, &None).await?;
+                let dns_service = Self::dns_install(info, None, None).await?;
 
                 let config = PropertyGroupBuilder::new("config")
                     .add_property(
@@ -1751,7 +1754,7 @@ impl ServiceManager {
                     &[listen_addr],
                 )?;
 
-                let dns_service = Self::dns_install(info, None, &None).await?;
+                let dns_service = Self::dns_install(info, None, None).await?;
 
                 let config = PropertyGroupBuilder::new("config")
                     .add_property(
@@ -1844,7 +1847,7 @@ impl ServiceManager {
                     &[crdb_listen_ip],
                 )?;
 
-                let dns_service = Self::dns_install(info, None, &None).await?;
+                let dns_service = Self::dns_install(info, None, None).await?;
 
                 // Configure the CockroachDB service.
                 let cockroachdb_config = PropertyGroupBuilder::new("config")
@@ -2121,21 +2124,6 @@ impl ServiceManager {
                         ..
                     },
                 ..
-            })
-            | ZoneArgs::Omicron(OmicronZoneConfigLocal {
-                zone:
-                    OmicronZoneConfig {
-                        zone_type:
-                            OmicronZoneType::InternalNtp {
-                                dns_servers,
-                                ntp_servers,
-                                domain,
-                                ..
-                            },
-                        underlay_address,
-                        ..
-                    },
-                ..
             }) => {
                 let Some(info) = self.inner.sled_info.get() else {
                     return Err(Error::SledAgentNotReady);
@@ -2147,33 +2135,31 @@ impl ServiceManager {
                     &[*underlay_address],
                 )?;
 
-                let is_boundary = matches!(
-                    // It's safe to unwrap here as we already know it's one of InternalNTP or BoundaryNtp.
-                    request.omicron_type().unwrap(),
-                    OmicronZoneType::BoundaryNtp { .. }
-                );
-
                 let rack_net =
                     Ipv6Subnet::<RACK_PREFIX>::new(info.underlay_address)
                         .net()
                         .to_string();
 
-                let dns_install_service =
-                    Self::dns_install(info, Some(dns_servers.to_vec()), domain)
-                        .await?;
+                let dns_install_service = Self::dns_install(
+                    info,
+                    Some(dns_servers.to_vec()),
+                    domain.as_deref(),
+                )
+                .await?;
 
                 let mut chrony_config = PropertyGroupBuilder::new("config")
                     .add_property("allow", "astring", &rack_net)
-                    .add_property(
-                        "boundary",
-                        "boolean",
-                        is_boundary.to_string(),
-                    )
+                    .add_property("boundary", "boolean", "true")
                     .add_property(
                         "boundary_pool",
                         "astring",
                         format!("{BOUNDARY_NTP_DNS_NAME}.{DNS_ZONE}"),
                     );
+
+                for s in ntp_servers {
+                    chrony_config =
+                        chrony_config.add_property("server", "astring", s);
+                }
 
                 let dns_client_service;
                 if dns_servers.is_empty() {
@@ -2191,20 +2177,83 @@ impl ServiceManager {
                             .add_property_group(chrony_config),
                     );
 
-                let mut profile = ProfileBuilder::new("omicron")
+                let opte_interface_setup =
+                    Self::opte_interface_set_up_install(&installed_zone)?;
+
+                let profile = ProfileBuilder::new("omicron")
                     .add_service(nw_setup_service)
                     .add_service(chrony_setup_service)
                     .add_service(disabled_ssh_service)
                     .add_service(dns_install_service)
                     .add_service(dns_client_service)
-                    .add_service(ntp_service);
+                    .add_service(ntp_service)
+                    .add_service(opte_interface_setup);
 
-                // Only Boundary NTP needs an OPTE interface and port configured.
-                if is_boundary {
-                    let opte_interface_setup =
-                        Self::opte_interface_set_up_install(&installed_zone)?;
-                    profile = profile.add_service(opte_interface_setup)
-                }
+                profile
+                    .add_to_zone(&self.inner.log, &installed_zone)
+                    .await
+                    .map_err(|err| {
+                        Error::io("Failed to set up NTP profile", err)
+                    })?;
+
+                RunningZone::boot(installed_zone).await?
+            }
+            ZoneArgs::Omicron(OmicronZoneConfigLocal {
+                zone:
+                    OmicronZoneConfig {
+                        zone_type: OmicronZoneType::InternalNtp { .. },
+                        underlay_address,
+                        ..
+                    },
+                ..
+            }) => {
+                let Some(info) = self.inner.sled_info.get() else {
+                    return Err(Error::SledAgentNotReady);
+                };
+
+                let nw_setup_service = Self::zone_network_setup_install(
+                    Some(&info.underlay_address),
+                    &installed_zone,
+                    &[*underlay_address],
+                )?;
+
+                let rack_net =
+                    Ipv6Subnet::<RACK_PREFIX>::new(info.underlay_address)
+                        .net()
+                        .to_string();
+
+                let dns_install_service =
+                    Self::dns_install(info, None, None).await?;
+
+                let chrony_config = PropertyGroupBuilder::new("config")
+                    .add_property("allow", "astring", &rack_net)
+                    .add_property(
+                        "boundary",
+                        "boolean",
+                        "false",
+                    )
+                    .add_property(
+                        "boundary_pool",
+                        "astring",
+                        format!("{BOUNDARY_NTP_DNS_NAME}.{DNS_ZONE}"),
+                    );
+
+                let ntp_service = ServiceBuilder::new("oxide/ntp")
+                    .add_instance(ServiceInstanceBuilder::new("default"));
+
+                let chrony_setup_service =
+                    ServiceBuilder::new("oxide/chrony-setup").add_instance(
+                        ServiceInstanceBuilder::new("default")
+                            .add_property_group(chrony_config),
+                    );
+
+                let profile = ProfileBuilder::new("omicron")
+                    .add_service(nw_setup_service)
+                    .add_service(chrony_setup_service)
+                    .add_service(disabled_ssh_service)
+                    .add_service(dns_install_service)
+                    .add_service(enabled_dns_client_service)
+                    .add_service(ntp_service);
 
                 profile
                     .add_to_zone(&self.inner.log, &installed_zone)
