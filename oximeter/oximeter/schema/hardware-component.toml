@@ -181,3 +181,21 @@ datum_type = "cumulative_u64"
 versions = [
     { added_in = 1, fields = ["error"] }
 ]
+
+[[metrics]]
+name = "cpu_tctl"
+description = """
+A CPU Tctl (control temperature) reading from an AMD CPU.
+
+Note that, unlike other temperature metrics, this is not a measurement of \
+temperature in degrees Celcius or Fahrenheit, but is instead a dimensionless \
+quantity used by the processor's thermal control loop. This value has two \
+notable thresholds:
+
+1. At a value of 95, the CPU will begin internal thermal throttling.
+2. At a value of 100, the CPU will shut down."""
+units = "none"
+datum_type = "f32"
+versions = [
+    { added_in = 2, fields = ["sensor"]}
+]

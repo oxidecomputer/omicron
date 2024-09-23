@@ -827,6 +827,27 @@ impl SpPoller {
                     // something to produce a datum from both the `Ok` and
                     // `Error` cases...
                     let sample = match (m.value, m.kind) {
+                        // Temperature measurements which have the sensor name
+                        // "CPU" and are from the SB-TSI device kind are CPU
+                        // Tctl values. These are neither Fahrenheit nor
+                        // Celcius, but a secret third thing, which is
+                        // not actually a "temperature measurement" in the sense
+                        // that you probably imagined when you saw the words
+                        // "temperature" and "measurement".
+                        // See:
+                        // https://github.com/illumos/illumos-gate/blob/6cf3cc9d1e40f89e90135a48f74f03f879fce639/usr/src/uts/intel/io/amdzen/smntemp.c#L21-L57
+                        (Ok(datum), MeasurementKind::Temperature)
+                            if sensor == "CPU"
+                                && target.component_kind == "sbtsi" =>
+                        {
+                            Sample::new(
+                                target,
+                                &metric::CpuTctl { sensor, datum },
+                            )
+                        }
+                        // Other measurements with the "temperature" measurement
+                        // kind are physical temperatures that actually exist in
+                        // reality (and are always in Celcius).
                         (Ok(datum), MeasurementKind::Temperature) => {
                             Sample::new(
                                 target,
