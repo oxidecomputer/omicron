@@ -2227,11 +2227,7 @@ impl ServiceManager {
 
                 let chrony_config = PropertyGroupBuilder::new("config")
                     .add_property("allow", "astring", &rack_net)
-                    .add_property(
-                        "boundary",
-                        "boolean",
-                        "false",
-                    )
+                    .add_property("boundary", "boolean", "false")
                     .add_property(
                         "boundary_pool",
                         "astring",
