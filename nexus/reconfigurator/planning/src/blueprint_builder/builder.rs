@@ -2054,8 +2054,8 @@ impl<'a> BlueprintSledDatasetsBuilder<'a> {
         expunges
     }
 
-    /// TODO(https://github.com/oxidecomputer/omicron/issues/6646): This
-    /// function SHOULD do the following:
+    /// TODO: <https://github.com/oxidecomputer/omicron/issues/6646>
+    /// This function SHOULD do the following:
     ///
     /// Returns all datasets that have been expunged in a prior blueprint, and
     /// which have also been removed from the database and from inventory.
