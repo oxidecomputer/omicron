@@ -941,7 +941,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oxnet",
  "progenitor",
- "regress",
+ "regress 0.10.1",
  "reqwest",
  "schemars",
  "serde",
@@ -2459,7 +2459,7 @@ dependencies = [
  "progenitor-client",
  "quote",
  "rand",
- "regress",
+ "regress 0.10.1",
  "reqwest",
  "rustfmt-wrapper",
  "schemars",
@@ -4328,7 +4328,7 @@ dependencies = [
  "oxide-vpc",
  "oxlog",
  "oxnet",
- "regress",
+ "regress 0.10.1",
  "schemars",
  "serde",
  "serde_json",
@@ -4499,7 +4499,7 @@ dependencies = [
  "omicron-common",
  "omicron-workspace-hack",
  "progenitor",
- "regress",
+ "regress 0.10.1",
  "reqwest",
  "schemars",
  "serde",
@@ -5491,7 +5491,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oxnet",
  "progenitor",
- "regress",
+ "regress 0.10.1",
  "reqwest",
  "schemars",
  "serde",
@@ -6455,7 +6455,7 @@ dependencies = [
  "progenitor-client",
  "proptest",
  "rand",
- "regress",
+ "regress 0.10.1",
  "reqwest",
  "schemars",
  "semver 1.0.23",
@@ -7425,7 +7425,7 @@ dependencies = [
  "omicron-workspace-hack",
  "progenitor",
  "rand",
- "regress",
+ "regress 0.10.1",
  "reqwest",
  "serde",
  "serde_json",
@@ -9120,6 +9120,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "regress"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1541daf4e4ed43a0922b7969bdc2170178bcacc5dabf7e39bc508a9fa3953a7a"
+dependencies = [
+ "hashbrown 0.14.5",
+ "memchr",
+]
+
+[[package]]
 name = "relative-path"
 version = "1.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10275,7 +10285,7 @@ dependencies = [
  "omicron-workspace-hack",
  "oxnet",
  "progenitor",
- "regress",
+ "regress 0.10.1",
  "reqwest",
  "schemars",
  "serde",
@@ -11945,7 +11955,7 @@ dependencies = [
  "log",
  "proc-macro2",
  "quote",
- "regress",
+ "regress 0.9.1",
  "schemars",
  "semver 1.0.23",
  "serde",
@@ -12715,7 +12725,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "progenitor",
- "regress",
+ "regress 0.10.1",
  "reqwest",
  "schemars",
  "serde",
