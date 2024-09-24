@@ -833,8 +833,16 @@ impl SpPoller {
                         // Celcius, but a secret third thing, which is
                         // not actually a "temperature measurement" in the sense
                         // that you probably imagined when you saw the words
-                        // "temperature" and "measurement".
-                        // See:
+                        // "temperature" and "measurement". Instead, it's a
+                        // dimensionless value in the range from 0-100 that's
+                        // calculated by the CPU's thermal control loop.
+                        //
+                        // Therefore, we report it as a different metric from
+                        // the `hardware_component:temperature` metric, which is
+                        // in degrees Celcius.
+                        //
+                        // See this comment for details on what Tctl values
+                        // mean:
                         // https://github.com/illumos/illumos-gate/blob/6cf3cc9d1e40f89e90135a48f74f03f879fce639/usr/src/uts/intel/io/amdzen/smntemp.c#L21-L57
                         (Ok(datum), MeasurementKind::Temperature)
                             if sensor == "CPU"
