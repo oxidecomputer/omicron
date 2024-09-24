@@ -8,7 +8,7 @@ use crate::api_metadata::AllApiMetadata;
 use crate::cargo::Workspace;
 use crate::ClientPackageName;
 use anyhow::{anyhow, ensure, Context, Result};
-use camino::Utf8PathBuf;
+use camino::Utf8Path;
 use cargo_metadata::Package;
 use cargo_metadata::PackageId;
 use std::collections::BTreeMap;
@@ -255,26 +255,38 @@ fn load_dependent_repo(
 
     // The package metadata should show where the package's manifest file should
     // be.  This may be buried deep in the workspace.  How do we find the root
-    // of the workspace?  We assume (and verify) that the workspace is checked
-    // out in the usual place under CARGO_HOME.  Then the workspace root is the
-    // full path two component deeper than the checkouts directory.
-    let cargo_home = std::env::var("CARGO_HOME").context("CARGO_HOME")?;
-    let git_checkouts: Utf8PathBuf =
-        [&cargo_home, "git", "checkouts"].into_iter().collect();
-    let relative_path =
-        pkg.manifest_path.strip_prefix(&git_checkouts).map_err(|_| {
-            anyhow!(
-                "workspace {}: package {}: manifest path {:?} was not under \
-                 expected path {:?}",
-                workspace.name(),
-                pkgname,
-                pkg.manifest_path,
-                git_checkouts
+    // of the workspace?  Fortunately, `cargo locate-project` can do this.
+    let cargo_var = std::env::var("CARGO");
+    let cargo = cargo_var.as_deref().unwrap_or("cargo");
+    let output = std::process::Command::new(cargo)
+        .arg("locate-project")
+        .arg("--workspace")
+        .arg("--manifest-path")
+        .arg(&pkg.manifest_path)
+        .arg("--message-format")
+        .arg("plain")
+        .output()
+        .context("`cargo locate-project`")
+        .and_then(|output| {
+            if !output.status.success() {
+                Err(anyhow!(
+                    "`cargo locate-project` exited with {:?}: stderr: {:?}",
+                    output.status,
+                    String::from_utf8_lossy(&output.stderr),
+                ))
+            } else {
+                String::from_utf8(output.stdout).map_err(|_| {
+                    anyhow!("`cargo locate-project` output was not UTF-8")
+                })
+            }
+        })
+        .with_context(|| {
+            format!(
+                "locating workspace for {:?} (from {:?}) with \
+                 `cargo locate-project`",
+                pkgname, &pkg.manifest_path
             )
         })?;
-    let checkout_name: Utf8PathBuf =
-        relative_path.components().take(2).collect();
-    let workspace_manifest =
-        git_checkouts.join(checkout_name).join("Cargo.toml");
-    Workspace::load(repo, Some(&workspace_manifest), &ignored_non_clients)
+    let workspace_manifest = Utf8Path::new(output.trim_end());
+    Workspace::load(repo, Some(workspace_manifest), &ignored_non_clients)
 }
