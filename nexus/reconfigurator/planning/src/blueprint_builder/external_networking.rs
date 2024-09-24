@@ -171,16 +171,31 @@ impl<'a> BuilderExternalNetworking<'a> {
             }
         }
 
-        // Recycle the IP addresses of expunged external DNS zones.
+        // Recycle the IP addresses of expunged external DNS zones,
+        // ensuring that those addresses aren't currently in use.
         // TODO: Remove when external DNS addresses come from policy.
-        let mut available_external_dns_ips: BTreeSet<IpAddr> = BTreeSet::new();
-        for (_, zone) in
-            parent_blueprint.all_omicron_zones(BlueprintZoneFilter::Expunged)
-        {
-            if let BlueprintZoneType::ExternalDns(dns) = &zone.zone_type {
-                available_external_dns_ips.insert(dns.dns_address.addr.ip());
-            }
-        }
+        let used_external_dns_ips = parent_blueprint
+            .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+            .filter_map(|(_, zone)| {
+                if let BlueprintZoneType::ExternalDns(dns) = &zone.zone_type {
+                    Some(dns.dns_address.addr.ip())
+                } else {
+                    None
+                }
+            })
+            .collect::<BTreeSet<IpAddr>>();
+        let available_external_dns_ips = parent_blueprint
+            .all_omicron_zones(BlueprintZoneFilter::Expunged)
+            .filter_map(|(_, zone)| {
+                if let BlueprintZoneType::ExternalDns(dns) = &zone.zone_type {
+                    let ip = dns.dns_address.addr.ip();
+                    if !used_external_dns_ips.contains(&ip) {
+                        return Some(ip);
+                    }
+                }
+                None
+            })
+            .collect::<BTreeSet<IpAddr>>();
 
         // Check the planning input: there shouldn't be any external networking
         // resources in the database (the source of `input`) that we don't know
