@@ -1913,6 +1913,60 @@
           }
         }
       },
+      "put": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "Update instance",
+        "operationId": "instance_update",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "instance",
+            "description": "Name or ID of the instance",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstanceUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Instance"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
       "delete": {
         "tags": [
           "instances"
@@ -1941,50 +1995,6 @@
         "responses": {
           "204": {
             "description": "successful deletion"
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
-      "put": {
-        "tags": [
-          "instances"
-        ],
-        "summary": "Update instance configuration",
-        "operationId": "instance_update",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "project",
-            "description": "Name or ID of the project",
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          },
-          {
-            "in": "path",
-            "name": "instance",
-            "description": "Name or ID of the instance",
-            "required": true,
-            "schema": {
-              "$ref": "#/components/schemas/NameOrId"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Instance"
-                }
-              }
-            }
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -15136,6 +15146,12 @@
         "description": "View of an Instance",
         "type": "object",
         "properties": {
+          "boot_disk_id": {
+            "nullable": true,
+            "description": "the ID of the disk used to boot this Instance, if a specific one is assigned.",
+            "type": "string",
+            "format": "uuid"
+          },
           "description": {
             "description": "human-readable free-form text about a resource",
             "type": "string"
@@ -15220,6 +15236,16 @@
         "description": "Create-time parameters for an `Instance`",
         "type": "object",
         "properties": {
+          "boot_disk": {
+            "nullable": true,
+            "description": "Choice of which disk this instance should boot from.",
+            "default": null,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NameOrId"
+              }
+            ]
+          },
           "description": {
             "type": "string"
           },
@@ -15715,6 +15741,20 @@
             ]
           }
         ]
+      },
+      "InstanceUpdate": {
+        "description": "Parameters of an `Instance` that can be reconfigured after creation.",
+        "type": "object",
+        "properties": {
+          "boot_disk": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NameOrId"
+              }
+            ]
+          }
+        }
       },
       "IpNet": {
         "x-rust-type": {

@@ -3219,6 +3219,10 @@
         "description": "Describes the instance hardware.",
         "type": "object",
         "properties": {
+          "boot_disk": {
+            "nullable": true,
+            "type": "string"
+          },
           "cloud_init_bytes": {
             "nullable": true,
             "type": "string"
@@ -3230,13 +3234,6 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/DiskRequest"
-            }
-          },
-          "boot_order": {
-            "nullable": true,
-            "type": "array",
-            "items": {
-              "type": "string"
             }
           },
           "ephemeral_ip": {

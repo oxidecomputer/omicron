@@ -3316,6 +3316,12 @@
         "description": "View of an Instance",
         "type": "object",
         "properties": {
+          "boot_disk_id": {
+            "nullable": true,
+            "description": "the ID of the disk used to boot this Instance, if a specific one is assigned.",
+            "type": "string",
+            "format": "uuid"
+          },
           "description": {
             "description": "human-readable free-form text about a resource",
             "type": "string"
