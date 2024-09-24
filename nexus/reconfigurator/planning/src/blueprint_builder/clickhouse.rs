@@ -23,8 +23,8 @@ use thiserror::Error;
 // See: https://github.com/oxidecomputer/omicron/issues/6577
 #[allow(unused)]
 pub struct ClickhouseZonesThatShouldBeRunning {
-    keepers: BTreeSet<OmicronZoneUuid>,
-    servers: BTreeSet<OmicronZoneUuid>,
+    pub keepers: BTreeSet<OmicronZoneUuid>,
+    pub servers: BTreeSet<OmicronZoneUuid>,
 }
 
 impl From<&BTreeMap<SledUuid, BlueprintZonesConfig>>
@@ -140,6 +140,12 @@ impl ClickhouseAllocator {
         let current_keepers: BTreeSet<_> =
             self.parent_config.keepers.values().cloned().collect();
         let Some(inventory_membership) = &self.inventory else {
+            XXX
+            // We don't have any inventory yet. However, we may have just transitioned
+            // via a policy change to go from 0 to 1 keepers. In that case, there is a chicken/egg
+            // problem and no way to actually get a keeper config, since it comes from the keepers
+            // themselves. Therefore, we add a new keeper here to jumpstart our config.
+            XXX
             return bump_gen_if_necessary(new_config);
         };
 

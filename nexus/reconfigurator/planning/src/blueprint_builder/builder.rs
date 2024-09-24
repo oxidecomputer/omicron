@@ -351,6 +351,14 @@ impl<'a> BlueprintBuilder<'a> {
                 .clickhouse_cluster_config
                 .clone()
                 .unwrap_or_else(|| {
+                    info!(
+                        log,
+                        concat!(
+                            "Clickhouse cluster enabled by policy: ",
+                            "generating initial 'ClickhouseClusterConfig' ",
+                            "and 'ClickhouseAllocator'"
+                        )
+                    );
                     ClickhouseClusterConfig::new(OXIMETER_CLUSTER.to_string())
                 });
             Some(ClickhouseAllocator::new(
@@ -359,6 +367,16 @@ impl<'a> BlueprintBuilder<'a> {
                 inventory.latest_clickhouse_keeper_membership(),
             ))
         } else {
+            if parent_blueprint.clickhouse_cluster_config.is_some() {
+                info!(
+                    log,
+                    concat!(
+                        "clickhouse cluster disabled via policy ",
+                        "discarding existing 'ClickhouseAllocator' and ",
+                        "the resulting generated 'ClickhouseClusterConfig"
+                    )
+                );
+            }
             None
         };
 
@@ -415,7 +433,7 @@ impl<'a> BlueprintBuilder<'a> {
             match a.plan(&(&blueprint_zones).into()) {
                 Ok(config) => config,
                 Err(e) => {
-                    error!(self.log, "{e}");
+                    error!(self.log, "clickhouse allocator error: {e}");
                     a.parent_config().clone()
                 }
             }

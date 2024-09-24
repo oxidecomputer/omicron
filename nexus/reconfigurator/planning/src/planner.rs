@@ -761,6 +761,7 @@ mod test {
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneFilter;
     use nexus_types::deployment::BlueprintZoneType;
+    use nexus_types::deployment::ClickhousePolicy;
     use nexus_types::deployment::CockroachDbClusterVersion;
     use nexus_types::deployment::CockroachDbPreserveDowngrade;
     use nexus_types::deployment::CockroachDbSettings;
@@ -2199,5 +2200,88 @@ mod test {
         }
 
         logctx.cleanup_successful();
+    }
+
+    /// Deploy all keeper nodes 1 at a time and all server nodes at once
+    /// starting from 0 deployed nodes
+    #[test]
+    fn test_plan_deploy_all_clickhouse_cluster_nodes() {
+        static TEST_NAME: &str = "planner_deploy_all_keeper_nodes";
+        let logctx = test_setup_log(TEST_NAME);
+        let log = logctx.log.clone();
+
+        // Use our example system.
+        let (mut collection, input, blueprint1) =
+            example(&log, TEST_NAME, DEFAULT_N_SLEDS);
+        verify_blueprint(&blueprint1);
+
+        // We shouldn't have a clickhouse cluster config, as we don't have a
+        // clickhouse policy set yet
+        assert!(blueprint1.clickhouse_cluster_config.is_none());
+        let target_keepers = 3;
+        let target_servers = 2;
+
+        // Enable clickhouse clusters via policy
+        let mut input_builder = input.into_builder();
+        input_builder.policy_mut().clickhouse_policy = Some(ClickhousePolicy {
+            deploy_with_standalone: true,
+            target_servers,
+            target_keepers,
+        });
+
+        // Creating a new blueprint should deploy all the new clickhouse zones
+        let input = input_builder.build();
+        let blueprint2 = Planner::new_based_on(
+            log.clone(),
+            &blueprint1,
+            &input,
+            "test_blueprint2",
+            &collection,
+        )
+        .expect("created planner")
+        .with_rng_seed((TEST_NAME, "bp2"))
+        .plan()
+        .expect("plan");
+
+        println!("{}", blueprint2.display());
+
+        // We should see zones for 3 clickhouse keepers, and 2 servers created
+        let active_zones: Vec<_> = blueprint2
+            .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+            .map(|(_, z)| z.clone())
+            .collect();
+
+        let num_keeper_zones = active_zones
+            .iter()
+            .filter(|z| z.zone_type.is_clickhouse_keeper())
+            .count();
+        let num_server_zones = active_zones
+            .iter()
+            .filter(|z| z.zone_type.is_clickhouse_server())
+            .count();
+
+        assert_eq!(num_keeper_zones, target_keepers);
+        assert_eq!(num_server_zones, target_servers);
+
+        // We should be attempting to allocate both servers and 0 keepers
+        // since we don't have a keeper inventory to work with yet.
+        //
+        // TODO: Without allocating keepers ahead of time, how do we get a valid
+        // inventory in production? Maybe we just bootstrap wiht an empty one in
+        // this case. Seems reasonable.
+
+        // until the inventory reflects a change in keeper membership.
+        {
+            let clickhouse_cluster_config =
+                blueprint2.clickhouse_cluster_config.as_ref().unwrap();
+            assert_eq!(clickhouse_cluster_config.generation, 2.into());
+            assert_eq!(clickhouse_cluster_config.max_used_keeper_id, 0.into());
+            assert_eq!(
+                clickhouse_cluster_config.max_used_server_id,
+                (target_servers as u64).into()
+            );
+            assert_eq!(clickhouse_cluster_config.keepers.len(), 0);
+            assert_eq!(clickhouse_cluster_config.servers.len(), target_servers);
+        }
     }
 }
