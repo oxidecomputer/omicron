@@ -92,8 +92,9 @@ description = """
 Which kind of sensor could not be read due to a sensor error.
 
 This will be one of 'temperature', 'current', 'power', 'voltage', \
-'input_current', 'input_voltage', or 'fan_speed' (the same names as \
-the metrics emitted by these sensors when they are read successfully)."""
+'input_current', 'input_voltage', 'fan_speed', or 'cpu_tctl' (the same \
+names as the metrics emitted by these sensors when they are read \
+successfully)."""
 
 [[metrics]]
 name = "temperature"
