@@ -137,15 +137,27 @@ impl ClickhouseAllocator {
         // If we fail to retrieve any inventory for keepers in the current
         // collection than we must not modify our keeper config, as we don't
         // know whether a configuration is ongoing or not.
+        //
+        // There is an exception to this rule: on *new* clusters that have
+        // keeper zones deployed buty do not have any keepers running we must
+        // start at least one keeper unconditionally. This is because we cannot
+        // retrieve keeper inventory if there are no keepers running.
         let current_keepers: BTreeSet<_> =
             self.parent_config.keepers.values().cloned().collect();
         let Some(inventory_membership) = &self.inventory else {
-            XXX
-            // We don't have any inventory yet. However, we may have just transitioned
-            // via a policy change to go from 0 to 1 keepers. In that case, there is a chicken/egg
-            // problem and no way to actually get a keeper config, since it comes from the keepers
-            // themselves. Therefore, we add a new keeper here to jumpstart our config.
-            XXX
+            // Are we a new cluster and do we have any active keeper zones?
+            if new_config.max_used_keeper_id == 0.into()
+                && !active_clickhouse_zones.keepers.is_empty()
+            {
+                // Unwrap safety: We check that there is at least one keeper in
+                // the `if` condition above.
+                let zone_id = active_clickhouse_zones.keepers.first().unwrap();
+                // Allocate a new `KeeperId` and map it to the first zone
+                new_config.max_used_keeper_id += 1.into();
+                new_config
+                    .keepers
+                    .insert(*zone_id, new_config.max_used_keeper_id);
+            }
             return bump_gen_if_necessary(new_config);
         };
 
@@ -256,7 +268,7 @@ impl ClickhouseAllocator {
         // Do we need to add any nodes to in service zones that don't have them
         for zone_id in &active_clickhouse_zones.keepers {
             if !new_config.keepers.contains_key(zone_id) {
-                // Allocate a new `KeeperId` and map it to the server zone
+                // Allocate a new `KeeperId` and map it to the keeper zone
                 new_config.max_used_keeper_id += 1.into();
                 new_config
                     .keepers

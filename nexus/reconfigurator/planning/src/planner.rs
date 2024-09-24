@@ -781,6 +781,7 @@ mod test {
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
+    use std::collections::BTreeSet;
     use std::collections::HashMap;
     use std::mem;
     use typed_rng::TypedUuidRng;
@@ -2211,7 +2212,7 @@ mod test {
         let log = logctx.log.clone();
 
         // Use our example system.
-        let (mut collection, input, blueprint1) =
+        let (collection, input, blueprint1) =
             example(&log, TEST_NAME, DEFAULT_N_SLEDS);
         verify_blueprint(&blueprint1);
 
@@ -2263,24 +2264,18 @@ mod test {
         assert_eq!(num_keeper_zones, target_keepers);
         assert_eq!(num_server_zones, target_servers);
 
-        // We should be attempting to allocate both servers and 0 keepers
-        // since we don't have a keeper inventory to work with yet.
-        //
-        // TODO: Without allocating keepers ahead of time, how do we get a valid
-        // inventory in production? Maybe we just bootstrap wiht an empty one in
-        // this case. Seems reasonable.
-
+        // We should be attempting to allocate both servers and a single keeper
         // until the inventory reflects a change in keeper membership.
         {
             let clickhouse_cluster_config =
                 blueprint2.clickhouse_cluster_config.as_ref().unwrap();
             assert_eq!(clickhouse_cluster_config.generation, 2.into());
-            assert_eq!(clickhouse_cluster_config.max_used_keeper_id, 0.into());
+            assert_eq!(clickhouse_cluster_config.max_used_keeper_id, 1.into());
             assert_eq!(
                 clickhouse_cluster_config.max_used_server_id,
                 (target_servers as u64).into()
             );
-            assert_eq!(clickhouse_cluster_config.keepers.len(), 0);
+            assert_eq!(clickhouse_cluster_config.keepers.len(), 1);
             assert_eq!(clickhouse_cluster_config.servers.len(), target_servers);
         }
     }
