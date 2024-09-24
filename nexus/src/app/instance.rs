@@ -822,9 +822,12 @@ impl super::Nexus {
                 // is linked with a VMM. If the instance has an active VMM which
                 // is Failed, the instance's effective state will be Stopping,
                 // rather than Failed, until an instance-update saga has
-                // unlinked the Failed VMM. Therefore, we know that a Failed
-                // instance is not incarnated on a sled, so all we need to do to
-                // "stop" it is to update its state in the database.
+                // unlinked the Failed VMM. We can guarantee this is the case,
+                // as a database CHECK constraint will not permit an instance
+                // with an active Propolis ID to be Failed. Therefore, we know
+                // that a Failed instance is definitely not incarnated on a
+                // sled, so all we need to do to "stop" it is to update its
+                // state in the database.
                 InstanceState::Failed if matches!(requested, InstanceStateChangeRequest::Stop) => {
                     // As discussed above, this shouldn't happen, so return an
                     // internal error and complain about it in the logs.
@@ -937,7 +940,9 @@ impl super::Nexus {
                     // TODO(eliza): perhaps we should refetch the instance here
                     // and return Ok if it was in the desired state...
                     Err(InstanceStateChangeError::Other(Error::conflict(
-                        "instance changed state before it could be updated",
+                        "The instance was previously in a state that allowed \
+                         the requested state change, but the instance's state \
+                          changed before the request could be completed",
                     )))
                 } else {
                     Ok(())
