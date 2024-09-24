@@ -65,7 +65,6 @@ use nexus_config::{ConfigDropshotWithTls, DeploymentConfig};
 use nexus_sled_agent_shared::inventory::{
     OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig, ZoneKind,
 };
-use omicron_common::address::CLICKHOUSE_ADMIN_PORT;
 use omicron_common::address::CLICKHOUSE_HTTP_PORT;
 use omicron_common::address::CLICKHOUSE_KEEPER_TCP_PORT;
 use omicron_common::address::COCKROACH_PORT;
@@ -80,6 +79,9 @@ use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::address::WICKETD_NEXUS_PROXY_PORT;
 use omicron_common::address::WICKETD_PORT;
+use omicron_common::address::{
+    get_internal_dns_server_addresses, CLICKHOUSE_ADMIN_PORT,
+};
 use omicron_common::address::{Ipv6Subnet, NEXUS_TECHPORT_EXTERNAL_PORT};
 use omicron_common::address::{AZ_PREFIX, OXIMETER_PORT};
 use omicron_common::address::{BOOTSTRAP_ARTIFACT_PORT, COCKROACH_ADMIN_PORT};
@@ -1335,38 +1337,25 @@ impl ServiceManager {
         ip_addrs: Option<Vec<IpAddr>>,
         domain: Option<&str>,
     ) -> Result<ServiceBuilder, Error> {
-        // We want to configure the dns/install SMF service inside the
-        // zone with the list of DNS nameservers.  This will cause
-        // /etc/resolv.conf to be populated inside the zone.  To do
-        // this, we need the full list of nameservers.  Fortunately, the
-        // nameservers provide a DNS name for the full list of
-        // nameservers.
+        // We want to configure the dns/install SMF service inside the zone with
+        // the list of DNS nameservers. This will cause /etc/resolv.conf to be
+        // populated inside the zone. We will populate it with the small number
+        // of fixed DNS addresses that should always exist. If clients want to
+        // expand to a wider range of DNS servers, they can bootstrap from the
+        // fixed addresses by looking up additional internal DNS servers from
+        // those addresses.
         //
-        // Note that when we configure the dns/install service, we're
-        // supplying values for an existing property group on the SMF
-        // *service*.  We're not creating a new property group, nor are
-        // we configuring a property group on the instance.
-
-        // Users may decide to provide specific addresses to set as
-        // nameservers, or this information can be retrieved from
-        // from SledAgentInfo.
-        let nameservers = match ip_addrs {
-            None => {
-                let addrs = info
-                    .resolver
-                    .lookup_all_ipv6(internal_dns::ServiceName::InternalDns)
-                    .await?;
-
-                let mut servers: Vec<IpAddr> = vec![];
-                for a in addrs {
-                    let ip = IpAddr::V6(a);
-                    servers.push(ip);
-                }
-
-                servers
-            }
-            Some(servers) => servers,
-        };
+        // Note that when we configure the dns/install service, we're supplying
+        // values for an existing property group on the SMF *service*.  We're
+        // not creating a new property group, nor are we configuring a property
+        // group on the instance.
+        //
+        // Callers may decide to provide specific addresses to set as
+        // nameservers; e.g., boundary NTP zones need to specify upstream DNS
+        // servers to resolve customer-provided NTP server names.
+        let nameservers = ip_addrs.unwrap_or_else(|| {
+            get_internal_dns_server_addresses(info.underlay_address)
+        });
 
         let mut dns_config_builder = PropertyGroupBuilder::new("install_props");
         for ns_addr in &nameservers {
