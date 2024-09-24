@@ -3790,7 +3790,7 @@ async fn test_cannot_have_nonexistent_boot_disk(
     let err = response
         .parsed_body::<HttpErrorResponseBody>()
         .expect("Failed to parse error response body");
-    assert_eq!(err.message, "boot disk must be attached",);
+    assert_eq!(err.message, "boot disk must be attached");
 }
 
 // Create an instance with a boot disk, try and fail to detach it, change the
@@ -4068,6 +4068,11 @@ async fn test_boot_disk_must_be_attached(cptestctx: &ControlPlaneTestContext) {
         .execute()
         .await
         .expect("can attempt to reconfigure the instance");
+
+    let error =
+        response.parsed_body::<dropshot::HttpErrorResponseBody>().unwrap();
+
+    assert_eq!(error.message, format!("boot disk must be attached"));
 
     // Now attach the disk.
     let url_instance_detach_disk =
