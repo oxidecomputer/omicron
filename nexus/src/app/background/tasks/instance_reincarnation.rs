@@ -36,6 +36,8 @@ const DEFAULT_MAX_CONCURRENT_REINCARNATIONS: NonZeroU32 =
         None => unreachable!(), // 16 > 0
     };
 
+type RunningSaga = (Uuid, SagaId, BoxFuture<'static, Result<(), Error>>);
+
 impl BackgroundTask for InstanceReincarnation {
     fn activate<'a>(
         &'a mut self,
@@ -148,11 +150,7 @@ impl InstanceReincarnation {
         &mut self,
         log: &slog::Logger,
         status: &mut InstanceReincarnationStatus,
-        running_sagas: &mut Vec<(
-            Uuid,
-            SagaId,
-            BoxFuture<'_, Result<(), Error>>,
-        )>,
+        running_sagas: &mut Vec<RunningSaga>,
         serialized_authn: &authn::saga::Serialized,
         batch: Vec<db::model::Instance>,
     ) {
