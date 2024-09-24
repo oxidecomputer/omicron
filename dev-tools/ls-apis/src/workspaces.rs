@@ -46,7 +46,7 @@ impl Workspaces {
         // that comes from each of these workspaces and look at where its local
         // manifest file is.
         //
-        // Loading each workspace involves running `cargo metaata`, which is
+        // Loading each workspace involves running `cargo metadata`, which is
         // pretty I/O intensive.  Latency benefits significantly from
         // parallelizing, though we have to respect the dependencies.  We can't
         // look up a package in "maghemite" before we've loaded Maghemite.
