@@ -336,7 +336,7 @@ struct InstanceRunner {
 
     // Disk related properties
     requested_disks: Vec<propolis_client::types::DiskRequest>,
-    boot_settings: Option<BootSettings>,
+    boot_settings: Option<propolis_client::types::BootSettings>,
     cloud_init_bytes: Option<NoDebug<String>>,
 
     // Internal State management
@@ -1107,6 +1107,7 @@ impl Instance {
             dhcp_config,
             requested_disks: hardware.disks,
             cloud_init_bytes: hardware.cloud_init_bytes,
+            boot_settings: hardware.boot_settings,
             state: InstanceStates::new(vmm_runtime, migration_id),
             running_state: None,
             nexus_client,

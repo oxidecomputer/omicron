@@ -61,6 +61,8 @@ use propolis_client::support::WSClientOffset;
 use propolis_client::support::WebSocketStream;
 use sagas::instance_common::ExternalIpAttach;
 use sagas::instance_update;
+use sled_agent_client::types::BootOrderEntry;
+use sled_agent_client::types::BootSettings;
 use sled_agent_client::types::InstanceMigrationTargetParams;
 use sled_agent_client::types::InstanceProperties;
 use sled_agent_client::types::VmmPutStateBody;
@@ -1070,30 +1072,40 @@ impl super::Nexus {
             });
         }
 
-        // This should never occur: when setting the boot disk we ensure it is
-        // attached, and when detaching a disk we ensure it is not the boot
-        // disk. If this error is seen, the instance somehow had a boot disk
-        // that was not attached anyway.
-        //
-        // When Propolis accepts an ID rather than name, and we don't need to
-        // look up a name when assembling the Propolis request, we might as well
-        // remove this check; we can just pass the ID and rely on Propolis' own
-        // check that the boot disk is attached.
-        if let Some(instance_boot_disk_id) = db_instance.boot_disk_id.as_ref() {
-            if boot_disk_name.is_none() {
-                error!(self.log, "instance boot disk is not attached";
-                   "boot_disk_id" => ?instance_boot_disk_id,
-                   "instance id" => %db_instance.id());
+        let boot_settings = if let Some(boot_disk_name) = boot_disk_name {
+            Some(BootSettings {
+                order: vec![BootOrderEntry { name: boot_disk_name }],
+            })
+        } else {
+            if let Some(instance_boot_disk_id) =
+                db_instance.boot_disk_id.as_ref()
+            {
+                // This should never occur: when setting the boot disk we ensure it is
+                // attached, and when detaching a disk we ensure it is not the boot
+                // disk. If this error is seen, the instance somehow had a boot disk
+                // that was not attached anyway.
+                //
+                // When Propolis accepts an ID rather than name, and we don't need to
+                // look up a name when assembling the Propolis request, we might as well
+                // remove this check; we can just pass the ID and rely on Propolis' own
+                // check that the boot disk is attached.
+                if boot_disk_name.is_none() {
+                    error!(self.log, "instance boot disk is not attached";
+                       "boot_disk_id" => ?instance_boot_disk_id,
+                       "instance id" => %db_instance.id());
 
-                return Err(InstanceStateChangeError::Other(
-                    Error::internal_error(&format!(
-                        "instance {} has boot disk {:?} but it is not attached",
-                        db_instance.id(),
-                        db_instance.boot_disk_id.as_ref(),
-                    )),
-                ));
+                    return Err(InstanceStateChangeError::Other(
+                        Error::internal_error(&format!(
+                            "instance {} has boot disk {:?} but it is not attached",
+                            db_instance.id(),
+                            db_instance.boot_disk_id.as_ref(),
+                        )),
+                    ));
+                }
             }
-        }
+
+            None
+        };
 
         let nics = self
             .db_datastore
@@ -1242,7 +1254,7 @@ impl super::Nexus {
                 search_domains: Vec::new(),
             },
             disks: disk_reqs,
-            boot_order: boot_disk_name.map(|v| vec![v]),
+            boot_settings,
             cloud_init_bytes: Some(base64::Engine::encode(
                 &base64::engine::general_purpose::STANDARD,
                 db_instance.generate_cidata(&ssh_keys)?,
