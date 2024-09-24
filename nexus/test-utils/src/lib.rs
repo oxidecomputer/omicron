@@ -259,6 +259,32 @@ impl RackInitRequestBuilder {
             .service_backend_zone(service_name, &zone, address.port())
             .expect("Failed to set up DNS for {kind}");
     }
+
+    // Special handling of ClickHouse, which has multiple SRV records for its
+    // single zone.
+    fn add_clickhouse_dataset(
+        &mut self,
+        zpool_id: ZpoolUuid,
+        dataset_id: Uuid,
+        address: SocketAddrV6,
+    ) {
+        self.datasets.push(DatasetCreateRequest {
+            zpool_id: zpool_id.into_untyped_uuid(),
+            dataset_id,
+            request: DatasetPutRequest {
+                address,
+                kind: DatasetKind::Clickhouse,
+            },
+        });
+        self.internal_dns_config
+            .host_zone_clickhouse(
+                OmicronZoneUuid::from_untyped_uuid(dataset_id),
+                *address.ip(),
+                internal_dns::ServiceName::Clickhouse,
+                address.port(),
+            )
+            .expect("Failed to setup ClickHouse DNS");
+    }
 }
 
 pub struct ControlPlaneTestContextBuilder<'a, N: NexusServer> {
@@ -458,22 +484,10 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         let dataset_id = Uuid::new_v4();
         let http_address = clickhouse.http_address();
         let http_port = http_address.port();
-        self.rack_init_builder.add_dataset(
+        self.rack_init_builder.add_clickhouse_dataset(
             zpool_id,
             dataset_id,
             http_address,
-            DatasetKind::Clickhouse,
-            internal_dns::ServiceName::Clickhouse,
-        );
-
-        // Add the native protocol address to DNS as well.
-        //
-        // NOTE: The internals of `RackInitBuilder` use the dataset_id as the
-        // zone_id.
-        self.rack_init_builder.add_service_to_dns(
-            OmicronZoneUuid::from_untyped_uuid(dataset_id),
-            clickhouse.native_address(),
-            internal_dns::ServiceName::ClickhouseNative,
         );
         self.clickhouse = Some(clickhouse);
 
