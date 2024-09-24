@@ -2417,8 +2417,8 @@ mod test {
     // models what will happen after an RSS deployment with clickhouse policy
     // enabled or an existing system already running a clickhouse cluster.
     #[test]
-    fn test_grow_and_shrink_clickhouse_clusters() {
-        static TEST_NAME: &str = "planner_grow_and_shrink_clickhouse_clusters";
+    fn test_expunge_clickhouse_clusters() {
+        static TEST_NAME: &str = "planner_expunge_clickhouse_clusters";
         let logctx = test_setup_log(TEST_NAME);
         let log = logctx.log.clone();
 
