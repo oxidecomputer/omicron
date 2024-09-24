@@ -1026,6 +1026,13 @@ async fn sic_delete_instance_record(
     Ok(())
 }
 
+// This is done intentionally late in instance creation:
+// * if the boot disk is provided by name and that disk is created along with
+//   the disk, there would not have been an ID to use any earlier
+// * if the boot disk is pre-existing, we still must wait for `disk-attach`
+//   subsagas to complete; attempting to set the boot disk earlier would error
+//   out because the desired boot disk is not attached.
+/// Set the instance's boot disk, if one was specified.
 async fn sic_set_boot_disk(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
