@@ -6,6 +6,7 @@ use anyhow::{bail, Context, Error, Result};
 use atomicwrites::AtomicFile;
 use camino::Utf8PathBuf;
 use derive_more::{Add, AddAssign, Display, From};
+use itertools::Itertools;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use slog::{info, Logger};
@@ -501,6 +502,344 @@ impl RaftConfig {
     }
 }
 
+// While we generally use "Config", in this case we use "Conf"
+// as it is the four letter word command we are invoking:
+// `clickhouse keeper-client --q conf`
+/// Keeper configuration information
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+struct KeeperConf {
+    server_id: u64,
+    enable_ipv6: bool,
+    tcp_port: u16,
+    four_letter_word_allow_list: String,
+    max_requests_batch_size: u64,
+    min_session_timeout_ms: u64,
+    session_timeout_ms: u64,
+    operation_timeout_ms: u64,
+    dead_session_check_period_ms: u64,
+    heart_beat_interval_ms: u64,
+    election_timeout_lower_bound_ms: u64,
+    election_timeout_upper_bound_ms: u64,
+    reserved_log_items: u64,
+    snapshot_distance: u64,
+    auto_forwarding: bool,
+    shutdown_timeout: u64,
+    startup_timeout: u64,
+    raft_logs_level: LogLevel,
+    snapshots_to_keep: u64,
+    rotate_log_storage_interval: u64,
+    stale_log_gap: u64,
+    fresh_log_gap: u64,
+    // This field is duplicated
+    // max_requests_batch_size: u64,
+    max_requests_batch_bytes_size: u64,
+    max_request_queue_size: u64,
+    max_requests_quick_batch_size: u64,
+    quorum_reads: bool,
+    force_sync: bool,
+    compress_logs: bool,
+    compress_snapshots_with_zstd_format: bool,
+    configuration_change_tries_count: u64,
+    raft_limits_reconnect_limit: u64,
+    #[schemars(schema_with = "path_schema")]
+    log_storage_path: Utf8PathBuf,
+    log_storage_disk: String,
+    #[schemars(schema_with = "path_schema")]
+    snapshot_storage_path: Utf8PathBuf,
+    snapshot_storage_disk: String,
+}
+
+impl KeeperConf {
+    pub fn parse(log: &Logger, data: &[u8]) -> Result<Self> {
+        // Like Lgif, the reponse we get from running `clickhouse keeper-client -h {HOST} --q conf`
+        // isn't in any known format (e.g. JSON), but rather a series of lines with key-value
+        // pairs separated by a tab.
+        let s = String::from_utf8_lossy(data);
+        info!(
+            log,
+            "Retrieved data from `clickhouse keeper-config lgif`";
+            "output" => ?s
+        );
+
+        let expected = KeeperConf::expected_keys();
+
+        // Verify the output contains the same amount of lines as the expected keys.
+        // This will ensure we catch any new key-value pairs appended to the lgif output.
+        let lines = s.trim().lines();
+        if expected.len() != lines.count() {
+            bail!(
+                "Output from the Keeper differs to the expected output keys \
+                Output: {s:?} \
+                Expected output keys: {expected:?}"
+            );
+        }
+
+        let mut vals: Vec<&str> = Vec::new();
+        // TODO: Leave a comment about the duplicated item
+        for (line, expected_key) in s.lines().zip(expected.clone()).unique() {
+            let mut split = line.split('=');
+            let Some(key) = split.next() else {
+                bail!("Returned None while attempting to retrieve key");
+            };
+            if key != expected_key {
+                bail!("Extracted key `{key:?}` from output differs from expected key `{expected_key}`");
+            }
+            let Some(val) = split.next() else {
+                bail!("Command output has a line that does not contain a key-value pair: {key:?}");
+            };
+            vals.push(val);
+        }
+
+        // Remove duplicate item
+        let mut iter = vals.into_iter();
+        let server_id = match u64::from_str(iter.next().unwrap()) {
+            Ok(v) => v,
+            Err(e) => bail!("Unable to convert value into u64: {e}")
+        };
+
+        let enable_ipv6 = match bool::from_str(iter.next().unwrap()) {
+            Ok(v) => v,
+            Err(e) => bail!("Unable to convert value into bool: {e}")
+        };
+
+        let tcp_port = match u16::from_str(iter.next().unwrap()) {
+            Ok(v) => v,
+            Err(e) => bail!("Unable to convert value into u16: {e}")
+        };
+
+        let four_letter_word_allow_list = iter.next().unwrap().to_string();
+
+        let max_requests_batch_size = match u64::from_str(iter.next().unwrap()) {
+            Ok(v) => v,
+            Err(e) => bail!("Unable to convert value into u64: {e}")
+        };
+
+        let min_session_timeout_ms = match u64::from_str(iter.next().unwrap()) {
+            Ok(v) => v,
+            Err(e) => bail!("Unable to convert value into u64: {e}")
+        };
+
+        let session_timeout_ms = match u64::from_str(iter.next().unwrap()) {
+            Ok(v) => v,
+            Err(e) => bail!("Unable to convert value into u64: {e}")
+        };
+
+        let operation_timeout_ms = match u64::from_str(iter.next().unwrap()) {
+            Ok(v) => v,
+            Err(e) => bail!("Unable to convert value into u64: {e}")
+        };
+
+        let dead_session_check_period_ms = match u64::from_str(iter.next().unwrap()) {
+            Ok(v) => v,
+            Err(e) => bail!("Unable to convert value into u64: {e}")
+        };
+
+        let heart_beat_interval_ms = match u64::from_str(iter.next().unwrap()) {
+            Ok(v) => v,
+            Err(e) => bail!("Unable to convert value into u64: {e}")
+        };
+
+        let election_timeout_lower_bound_ms = match u64::from_str(iter.next().unwrap()) {
+            Ok(v) => v,
+            Err(e) => bail!("Unable to convert value into u64: {e}")
+        };
+
+        let election_timeout_upper_bound_ms = match u64::from_str(iter.next().unwrap()) {
+            Ok(v) => v,
+            Err(e) => bail!("Unable to convert value into u64: {e}")
+        };
+
+        let reserved_log_items = match u64::from_str(iter.next().unwrap()) {
+            Ok(v) => v,
+            Err(e) => bail!("Unable to convert value into u64: {e}")
+        };
+
+        let snapshot_distance = match u64::from_str(iter.next().unwrap()) {
+            Ok(v) => v,
+            Err(e) => bail!("Unable to convert value into u64: {e}")
+        };
+
+        let auto_forwarding = match bool::from_str(iter.next().unwrap()) {
+            Ok(v) => v,
+            Err(e) => bail!("Unable to convert value into bool: {e}")
+        };
+
+        let shutdown_timeout = match u64::from_str(iter.next().unwrap()) {
+            Ok(v) => v,
+            Err(e) => bail!("Unable to convert value into _u64 {e}")
+        };
+
+        let startup_timeout = match u64::from_str(iter.next().unwrap()) {
+            Ok(v) => v,
+            Err(e) => bail!("Unable to convert value into u64: {e}")
+        };
+
+        let raft_logs_level = match LogLevel::from_str(iter.next().unwrap()) {
+            Ok(v) => v,
+            Err(e) => bail!("Unable to convert value into _: {e}")
+        };
+
+        let snapshots_to_keep = match u64::from_str(iter.next().unwrap()) {
+            Ok(v) => v,
+            Err(e) => bail!("Unable to convert value into u64: {e}")
+        };
+
+        let rotate_log_storage_interval = match u64::from_str(iter.next().unwrap()) {
+            Ok(v) => v,
+            Err(e) => bail!("Unable to convert value into u64 {e}")
+        };
+
+        let stale_log_gap = match u64::from_str(iter.next().unwrap()) {
+            Ok(v) => v,
+            Err(e) => bail!("Unable to convert value into u64: {e}")
+        };
+
+        let fresh_log_gap = match u64::from_str(iter.next().unwrap()) {
+            Ok(v) => v,
+            Err(e) => bail!("Unable to convert value into u64: {e}")
+        };
+
+        let max_requests_batch_bytes_size = match u64::from_str(iter.next().unwrap()) {
+            Ok(v) => v,
+            Err(e) => bail!("Unable to convert value into _u64 {e}")
+        };
+
+        let max_request_queue_size = match u64::from_str(iter.next().unwrap()) {
+            Ok(v) => v,
+            Err(e) => bail!("Unable to convert value into _u64 {e}")
+        };
+
+        let max_requests_quick_batch_size = match u64::from_str(iter.next().unwrap()) {
+            Ok(v) => v,
+            Err(e) => bail!("Unable to convert value into _u64 {e}")
+        };
+
+        let quorum_reads = match bool::from_str(iter.next().unwrap()) {
+            Ok(v) => v,
+            Err(e) => bail!("Unable to convert value into bool: {e}")
+        };
+
+        let force_sync = match bool::from_str(iter.next().unwrap()) {
+            Ok(v) => v,
+            Err(e) => bail!("Unable to convert value into bool: {e}")
+        };
+
+        let compress_logs = match bool::from_str(iter.next().unwrap()) {
+            Ok(v) => v,
+            Err(e) => bail!("Unable to convert value into bool: {e}")
+        };
+
+        let compress_snapshots_with_zstd_format = match bool::from_str(iter.next().unwrap()) {
+            Ok(v) => v,
+            Err(e) => bail!("Unable to convert value into bool: {e}")
+        };
+
+        let configuration_change_tries_count = match u64::from_str(iter.next().unwrap()) {
+            Ok(v) => v,
+            Err(e) => bail!("Unable to convert value into u64: {e}")
+        };
+
+        let raft_limits_reconnect_limit = match u64::from_str(iter.next().unwrap()) {
+            Ok(v) => v,
+            Err(e) => bail!("Unable to convert value into u64: {e}")
+        };
+
+        let log_storage_path = match Utf8PathBuf::from_str(iter.next().unwrap()) {
+            Ok(v) => v,
+            Err(e) => bail!("Unable to convert value into Utf8PathBuf: {e}")
+        };
+
+        let log_storage_disk = iter.next().unwrap().to_string();
+
+        let snapshot_storage_path = match Utf8PathBuf::from_str(iter.next().unwrap()) {
+            Ok(v) => v,
+            Err(e) => bail!("Unable to convert value into Utf8PathBuf: {e}")
+        };
+
+        let snapshot_storage_disk = iter.next().unwrap().to_string();
+
+        Ok(Self {
+            server_id,
+            enable_ipv6,
+            tcp_port,
+            four_letter_word_allow_list,
+            max_requests_batch_size,
+            min_session_timeout_ms,
+            session_timeout_ms,
+            operation_timeout_ms,
+            dead_session_check_period_ms,
+            heart_beat_interval_ms,
+            election_timeout_lower_bound_ms,
+            election_timeout_upper_bound_ms,
+            reserved_log_items,
+            snapshot_distance,
+            auto_forwarding,
+            shutdown_timeout,
+            startup_timeout,
+            raft_logs_level,
+            snapshots_to_keep,
+            rotate_log_storage_interval,
+            stale_log_gap,
+            fresh_log_gap,
+            max_requests_batch_bytes_size,
+            max_request_queue_size,
+            max_requests_quick_batch_size,
+            quorum_reads,
+            force_sync,
+            compress_logs,
+            compress_snapshots_with_zstd_format,
+            configuration_change_tries_count,
+            raft_limits_reconnect_limit,
+            log_storage_path,
+            log_storage_disk,
+            snapshot_storage_path,
+            snapshot_storage_disk,
+        })
+    }
+
+    fn expected_keys() -> Vec<&'static str> {
+        vec![
+            "server_id",
+            "enable_ipv6",
+            "tcp_port",
+            "four_letter_word_allow_list",
+            "max_requests_batch_size",
+            "min_session_timeout_ms",
+            "session_timeout_ms",
+            "operation_timeout_ms",
+            "dead_session_check_period_ms",
+            "heart_beat_interval_ms",
+            "election_timeout_lower_bound_ms",
+            "election_timeout_upper_bound_ms",
+            "reserved_log_items",
+            "snapshot_distance",
+            "auto_forwarding",
+            "shutdown_timeout",
+            "startup_timeout",
+            "raft_logs_level",
+            "snapshots_to_keep",
+            "rotate_log_storage_interval",
+            "stale_log_gap",
+            "fresh_log_gap",
+            "max_requests_batch_size",
+            "max_requests_batch_bytes_size",
+            "max_request_queue_size",
+            "max_requests_quick_batch_size",
+            "quorum_reads",
+            "force_sync",
+            "compress_logs",
+            "compress_snapshots_with_zstd_format",
+            "configuration_change_tries_count",
+            "raft_limits_reconnect_limit",
+            "log_storage_path",
+            "log_storage_disk",
+            "snapshot_storage_path",
+            "snapshot_storage_disk",
+        ]
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use camino::Utf8PathBuf;
@@ -511,9 +850,7 @@ mod tests {
     use std::str::FromStr;
 
     use crate::{
-        ClickhouseHost, KeeperId, KeeperServerInfo, KeeperServerType,
-        KeeperSettings, Lgif, RaftConfig, RaftServerSettings, ServerId,
-        ServerSettings,
+        ClickhouseHost, KeeperConf, KeeperId, KeeperServerInfo, KeeperServerType, KeeperSettings, Lgif, RaftConfig, RaftServerSettings, ServerId, ServerSettings
     };
 
     fn log() -> slog::Logger {
@@ -959,5 +1296,19 @@ mod tests {
             format!("{}", root_cause),
            "Output is not as expected. Server identifier: '' Expected server identifier: 'server.{SERVER_ID}'",
         );
+    }
+
+    #[test]
+    fn test_full_keeper_conf_parse_success() {
+        let log = log();
+        // This data contains the duplicated "max_requests_batch_size" that occurs in the
+        // real conf command output
+        let data =
+            "server_id=1\nenable_ipv6=true\ntcp_port=20001\nfour_letter_word_allow_list=conf,cons,crst,envi,ruok,srst,srvr,stat,wchs,dirs,mntr,isro,rcvr,apiv,csnp,lgif,rqld,rclc,clrs,ftfl\nmax_requests_batch_size=100\nmin_session_timeout_ms=10000\nsession_timeout_ms=30000\noperation_timeout_ms=10000\ndead_session_check_period_ms=500\nheart_beat_interval_ms=500\nelection_timeout_lower_bound_ms=1000\nelection_timeout_upper_bound_ms=2000\nreserved_log_items=100000\nsnapshot_distance=100000\nauto_forwarding=true\nshutdown_timeout=5000\nstartup_timeout=180000\nraft_logs_level=trace\nsnapshots_to_keep=3\nrotate_log_storage_interval=100000\nstale_log_gap=10000\nfresh_log_gap=200\nmax_requests_batch_size=100\nmax_requests_batch_bytes_size=102400\nmax_request_queue_size=100000\nmax_requests_quick_batch_size=100\nquorum_reads=false\nforce_sync=true\ncompress_logs=true\ncompress_snapshots_with_zstd_format=true\nconfiguration_change_tries_count=20\nraft_limits_reconnect_limit=50\nlog_storage_path=./deployment/keeper-1/coordination/log\nlog_storage_disk=LocalLogDisk\nsnapshot_storage_path=./deployment/keeper-1/coordination/snapshots\nsnapshot_storage_disk=LocalSnapshotDisk\n\n"
+            .as_bytes();
+        let conf = KeeperConf::parse(&log, data).unwrap();
+
+        assert!(conf.server_id == 1);
+        assert!(conf.snapshot_storage_disk == "LocalSnapshotDisk".to_string())
     }
 }

@@ -606,3 +606,17 @@ impl Display for LogLevel {
         write!(f, "{s}")
     }
 }
+
+impl FromStr for LogLevel {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s == "trace" {
+            Ok(LogLevel::Trace)
+        } else if s == "debug" {
+            Ok(LogLevel::Debug)
+        } else {
+            bail!("{s} is not a valid log level")
+        }
+    }
+}

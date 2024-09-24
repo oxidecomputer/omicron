@@ -13,6 +13,7 @@ atomicwrites.workspace = true
 camino.workspace = true
 camino-tempfile.workspace = true
 derive_more.workspace = true
+itertools.workspace = true
 omicron-common.workspace = true
 omicron-workspace-hack.workspace = true
 schemars.workspace = true
