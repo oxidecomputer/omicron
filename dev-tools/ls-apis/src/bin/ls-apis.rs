@@ -54,7 +54,7 @@ pub struct ShowDepsArgs {
 #[derive(Args)]
 pub struct DotArgs {
     /// What kind of output format to use
-    #[arg(long)]
+    #[arg(long, default_value_t)]
     output_format: OutputFormat,
     /// Show the Rust dependency path resulting in the API dependency
     #[arg(long)]
