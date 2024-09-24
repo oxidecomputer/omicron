@@ -266,6 +266,7 @@ async fn test_timeseries_schema_list(
     // producers.
     let nexus_id = cptestctx.server.server_context().nexus.id();
     wait_for_producer(&cptestctx.oximeter, nexus_id).await;
+    wait_for_clickhouse(cptestctx).await;
 
     // We should be able to fetch the list of timeseries, and it should include
     // Nexus's HTTP latency distribution. This is defined in Nexus itself, and
@@ -786,4 +787,39 @@ async fn wait_for_producer_impl(
     )
     .await
     .expect("Failed to find producer within time limit");
+}
+
+// Wait for ClickHouse to be available in internal DNS.
+async fn wait_for_clickhouse(
+    context: &ControlPlaneTestContext<omicron_nexus::Server>,
+) {
+    let resolver = internal_dns::resolver::Resolver::new_from_addrs(
+        context.logctx.log.clone(),
+        &[context.internal_dns.dns_server.local_address()],
+    ).unwrap();
+    let client = oximeter_db::ClientBuilder::new(&context.logctx.log)
+        .resolver(resolver.clone())
+        .build()
+        .unwrap();
+    wait_for_condition(
+        || async {
+            let rec = resolver.lookup_socket_v6(internal_dns::ServiceName::Clickhouse).await.unwrap();
+            println!("{rec}");
+            if let Ok(resp) = reqwest::get(format!("http://{rec}/ping")).await {
+                println!("{:#?}", resp.text().await);
+            }
+            match client.ping().await {
+                Ok(_) => Ok(()),
+                Err(oximeter_db::Error::DatabaseUnavailable(e)) => {
+                    println!("{e:#?}");
+                    Err(CondCheckError::NotYet)
+                }
+                Err(e) => Err(CondCheckError::Failed(e.to_string())),
+            }
+        },
+        &Duration::from_secs(1),
+        &Duration::from_secs(60),
+    )
+    .await
+    .expect("Failed to ping ClickHouse within time limit");
 }

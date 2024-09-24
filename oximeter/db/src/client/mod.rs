@@ -76,7 +76,6 @@ mod probes {
     fn sql__query__done(_: &usdt::UniqueId) {}
 }
 
-
 /// A builder for a ClickHouse `Client` object.
 pub struct ClientBuilder {
     log: Logger,
@@ -147,7 +146,7 @@ impl ClientBuilder {
             (None, Some(address)) => format!("http://{address}"),
             (Some(resolver), None) => {
                 client_builder = client_builder.dns_resolver(resolver);
-                ServiceName::Clickhouse.srv_name()
+                format!("http://{}", ServiceName::Clickhouse.srv_name())
             }
             (Some(_), Some(_)) => anyhow::bail!(
                 "Cannot provide both IP address and resolver for the client"
@@ -155,13 +154,9 @@ impl ClientBuilder {
         };
         let timeout = self.timeout.unwrap_or(DEFAULT_REQUEST_TIMEOUT);
         client_builder = client_builder.timeout(timeout);
-        let client = client_builder.build().context("building reqwest client")?;
-        Ok(Client {
-            log,
-            url,
-            client,
-            schema: Mutex::new(BTreeMap::new()),
-        })
+        let client =
+            client_builder.build().context("building reqwest client")?;
+        Ok(Client { log, url, client, schema: Mutex::new(BTreeMap::new()) })
     }
 }
 
@@ -180,10 +175,7 @@ impl Client {
     /// This uses the `ClientBuilder`, only specifying the explicit address. If
     /// you'd like to use DNS, you'll need to use the builder directly.
     pub fn new(address: SocketAddr, log: &Logger) -> Self {
-        ClientBuilder::new(log)
-            .address(address)
-            .build()
-            .unwrap()
+        ClientBuilder::new(log).address(address).build().unwrap()
     }
 
     /// Return the url the client is trying to connect to
