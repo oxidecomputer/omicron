@@ -252,7 +252,7 @@ impl Lgif {
         let s = String::from_utf8_lossy(data);
         info!(
             log,
-            "Retrieved data from `clickhouse keeper-config lgif`";
+            "Retrieved data from `clickhouse keeper-client --q lgif`";
             "output" => ?s
         );
 
@@ -403,7 +403,7 @@ impl RaftConfig {
         let s = String::from_utf8_lossy(data);
         info!(
             log,
-            "Retrieved data from `clickhouse keeper-config --q 'get /keeper/config'`";
+            "Retrieved data from `clickhouse keeper-client --q 'get /keeper/config'`";
             "output" => ?s
         );
 
@@ -511,89 +511,89 @@ impl RaftConfig {
 pub struct KeeperConf {
     /// Unique server id, each participant of the ClickHouse Keeper cluster must
     /// have a unique number (1, 2, 3, and so on).
-    server_id: u64,
+    pub server_id: KeeperId,
     /// Whether Ipv6 is enabled.
-    enable_ipv6: bool,
+    pub enable_ipv6: bool,
     /// Port for a client to connect.
-    tcp_port: u16,
+    pub tcp_port: u16,
     /// Allolw list of 4lw commands.
-    four_letter_word_allow_list: String,
+    pub four_letter_word_allow_list: String,
     /// Max size of batch in requests count before it will be sent to RAFT.
-    max_requests_batch_size: u64,
+    pub max_requests_batch_size: u64,
     /// Min timeout for client session (ms).
-    min_session_timeout_ms: u64,
+    pub min_session_timeout_ms: u64,
     /// Max timeout for client session (ms).
-    session_timeout_ms: u64,
+    pub session_timeout_ms: u64,
     /// Timeout for a single client operation (ms).
-    operation_timeout_ms: u64,
+    pub operation_timeout_ms: u64,
     /// How often ClickHouse Keeper checks for dead sessions and removes them (ms).
-    dead_session_check_period_ms: u64,
+    pub dead_session_check_period_ms: u64,
     /// How often a ClickHouse Keeper leader will send heartbeats to followers (ms).
-    heart_beat_interval_ms: u64,
-    /// f the follower does not receive a heartbeat from the leader in this interval,
+    pub heart_beat_interval_ms: u64,
+    /// If the follower does not receive a heartbeat from the leader in this interval,
     /// then it can initiate leader election. Must be less than or equal to
     /// election_timeout_upper_bound_ms. Ideally they shouldn't be equal.
-    election_timeout_lower_bound_ms: u64,
+    pub election_timeout_lower_bound_ms: u64,
     /// If the follower does not receive a heartbeat from the leader in this interval,
     /// then it must initiate leader election.
-    election_timeout_upper_bound_ms: u64,
+    pub election_timeout_upper_bound_ms: u64,
     /// How many coordination log records to store before compaction.
-    reserved_log_items: u64,
+    pub reserved_log_items: u64,
     /// How often ClickHouse Keeper will create new snapshots
     /// (in the number of records in logs).
-    snapshot_distance: u64,
+    pub snapshot_distance: u64,
     /// Allow to forward write requests from followers to the leader.
-    auto_forwarding: bool,
+    pub auto_forwarding: bool,
     /// Wait to finish internal connections and shutdown (ms).
-    shutdown_timeout: u64,
+    pub shutdown_timeout: u64,
     /// If the server doesn't connect to other quorum participants in the specified
     /// timeout it will terminate (ms).
-    startup_timeout: u64,
+    pub startup_timeout: u64,
     /// Text logging level about coordination (trace, debug, and so on).
-    raft_logs_level: LogLevel,
+    pub raft_logs_level: LogLevel,
     /// How many snapshots to keep.
-    snapshots_to_keep: u64,
+    pub snapshots_to_keep: u64,
     /// How many log records to store in a single file.
-    rotate_log_storage_interval: u64,
+    pub rotate_log_storage_interval: u64,
     /// Threshold when leader considers follower as stale and sends the snapshot
     /// to it instead of logs.
-    stale_log_gap: u64,
+    pub stale_log_gap: u64,
     /// When the node became fresh.
-    fresh_log_gap: u64,
+    pub fresh_log_gap: u64,
     /// Max size in bytes of batch of requests that can be sent to RAFT.
-    max_requests_batch_bytes_size: u64,
+    pub max_requests_batch_bytes_size: u64,
     /// Maximum number of requests that can be in queue for processing.
-    max_request_queue_size: u64,
+    pub max_request_queue_size: u64,
     /// Max size of batch of requests to try to get before proceeding with RAFT.
     /// Keeper will not wait for requests but take only requests that are already
     /// in the queue.
-    max_requests_quick_batch_size: u64,
+    pub max_requests_quick_batch_size: u64,
     /// Whether to execute read requests as writes through whole RAFT consesus with
     /// similar speed.
-    quorum_reads: bool,
+    pub quorum_reads: bool,
     /// Whether to call fsync on each change in RAFT changelog.
-    force_sync: bool,
+    pub force_sync: bool,
     /// Whether to write compressed coordination logs in ZSTD format.
-    compress_logs: bool,
+    pub compress_logs: bool,
     /// Whether to write compressed snapshots in ZSTD format (instead of custom LZ4).
-    compress_snapshots_with_zstd_format: bool,
+    pub compress_snapshots_with_zstd_format: bool,
     /// How many times we will try to apply configuration change (add/remove server)
     /// to the cluster.
-    configuration_change_tries_count: u64,
+    pub configuration_change_tries_count: u64,
     /// If connection to a peer is silent longer than this limit * (heartbeat interval),
     /// we re-establish the connection.
-    raft_limits_reconnect_limit: u64,
+    pub raft_limits_reconnect_limit: u64,
     /// Path to coordination logs, just like ZooKeeper it is best to store logs
     /// on non-busy nodes.
     #[schemars(schema_with = "path_schema")]
-    log_storage_path: Utf8PathBuf,
+    pub log_storage_path: Utf8PathBuf,
     /// Name of disk used for logs.
-    log_storage_disk: String,
+    pub log_storage_disk: String,
     /// Path to coordination snapshots.
     #[schemars(schema_with = "path_schema")]
-    snapshot_storage_path: Utf8PathBuf,
+    pub snapshot_storage_path: Utf8PathBuf,
     /// Name of disk used for storage.
-    snapshot_storage_disk: String,
+    pub snapshot_storage_disk: String,
 }
 
 impl KeeperConf {
@@ -604,7 +604,7 @@ impl KeeperConf {
         let s = String::from_utf8_lossy(data);
         info!(
             log,
-            "Retrieved data from `clickhouse keeper-config lgif`";
+            "Retrieved data from `clickhouse keeper-client --q conf`";
             "output" => ?s
         );
 
@@ -640,7 +640,7 @@ impl KeeperConf {
 
         let mut iter = vals.into_iter();
         let server_id = match u64::from_str(iter.next().unwrap()) {
-            Ok(v) => v,
+            Ok(v) => KeeperId(v),
             Err(e) => bail!("Unable to convert value into u64: {e}"),
         };
 
@@ -1406,7 +1406,7 @@ snapshot_storage_disk=LocalSnapshotDisk
             .as_bytes();
         let conf = KeeperConf::parse(&log, data).unwrap();
 
-        assert!(conf.server_id == 1);
+        assert!(conf.server_id == KeeperId(1));
         assert!(conf.enable_ipv6);
         assert!(conf.tcp_port == 20001);
         assert!(conf.four_letter_word_allow_list == *"conf,cons,crst,envi,ruok,srst,srvr,stat,wchs,dirs,mntr,isro,rcvr,apiv,csnp,lgif,rqld,rclc,clrs,ftfl" );
