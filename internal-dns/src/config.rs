@@ -406,7 +406,6 @@ impl DnsConfigBuilder {
     /// a simple HTTP interface as well as a lower-level protocol over TCP,
     /// called the "Native protocol". This method inserts a zone and the related
     /// records for both of these services.
-    /// these services.
     ///
     /// `http_service` is the `ServiceName` for the HTTP service that belongs in
     /// this zone, and `http_port` is the associated port for that service. The
