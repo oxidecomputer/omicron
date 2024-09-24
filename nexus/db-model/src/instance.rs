@@ -348,19 +348,14 @@ impl InstanceAutoRestart {
 
         let now = diesel::dsl::now.into_sql::<pg::sql_types::Timestamptz>();
 
-        dsl::state
-            // Only attempt to restart Failed instances.
-            .eq(InstanceState::Failed)
-            // The instance's auto-restart policy must allow the control plane
-            // to restart it automatically.
-            //
-            // N.B. that this may become more complex in the future if we grow
-            // additional auto-restart policies that require additional logic
-            // (such as restart limits...)
-            .and(
-                dsl::auto_restart_policy
-                    .eq(InstanceAutoRestartPolicy::BestEffort),
-            )
+        // The instance's auto-restart policy must allow the control plane
+        // to restart it automatically.
+        //
+        // N.B. that this may become more complex in the future if we grow
+        // additional auto-restart policies that require additional logic
+        // (such as restart limits...)
+        dsl::auto_restart_policy
+            .eq(InstanceAutoRestartPolicy::BestEffort)
             // An instance whose last reincarnation was within the cooldown
             // interval from now must remain in _bardo_ --- the liminal
             // state between death and rebirth --- before its next
@@ -382,6 +377,12 @@ impl InstanceAutoRestart {
                             .le((now - Self::DEFAULT_COOLDOWN).nullable()),
                     )),
             )
+            // Deleted instances may not be reincarnated.
+            .and(dsl::time_deleted.is_null())
+            // If the instance is currently in the process of being updated,
+            // let's not mess with it for now and try to restart it on another
+            // pass.
+            .and(dsl::updater_id.is_null())
     }
 }
 

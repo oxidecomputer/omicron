@@ -495,24 +495,60 @@ impl DataStore {
     /// result set. Randomizing the order in which instances are returned allows
     /// a nicer distribution of work across multiple Nexus replicas'
     /// `instance_reincarnation` tasks.
-    pub async fn find_reincarnatable_instances(
+    pub async fn find_reincarnatable_failed_instances(
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<Instance> {
         use db::schema::instance::dsl;
 
-        define_sql_function!(fn random() -> sql_types::Float);
-
         paginated(dsl::instance, dsl::id, &pagparams)
+            // Only attempt to restart Failed instances.
+            .filter(dsl::state.eq(InstanceState::Failed))
             // Select only those instances which may be reincarnated.
             .filter(InstanceAutoRestart::filter_reincarnatable())
-            // Deleted instances may not be reincarnated.
-            .filter(dsl::time_deleted.is_null())
-            // If the instance is currently in the process of being updated,
-            // let's not mess with it for now and try to restart it on another
-            // pass.
-            .filter(dsl::updater_id.is_null())
+            .filter(dsl::active_propolis_id.is_null())
+            .select(Instance::as_select())
+            .load_async::<Instance>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// List all instances in the [`Failed`](InstanceState::Failed) state with an
+    /// auto-restart policy that permits them to be automatically restarted by
+    /// the control plane.
+    ///
+    /// This is used by the `instance_reincarnation` RPW to ensure that that any
+    /// such instances are restarted.
+    ///
+    /// This query returns `n` randomly-ordered instances which are eligible for
+    /// reincarnation. Because reincarnating an instance changes its state so
+    /// that it no longer matches this query, it isn't necessary to use
+    /// pagination to avoid the query returning the same instance multiple
+    /// times: instead, we just actually reincarnate it to remove it from the
+    /// result set. Randomizing the order in which instances are returned allows
+    /// a nicer distribution of work across multiple Nexus replicas'
+    /// `instance_reincarnation` tasks.
+    pub async fn find_reincarnatable_saga_unwound_instances(
+        &self,
+        opctx: &OpContext,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<Instance> {
+        use db::schema::instance::dsl;
+        use db::schema::vmm::dsl as vmm_dsl;
+
+        paginated(dsl::instance, dsl::id, &pagparams)
+            .filter(dsl::state.eq(InstanceState::Vmm))
+            // Select only those instances which may be reincarnated.
+            .filter(InstanceAutoRestart::filter_reincarnatable())
+            // The instance's active VMM must be in the `SagaUnwound` state.
+            .inner_join(
+                vmm_dsl::vmm
+                    .on(dsl::active_propolis_id.eq(vmm_dsl::id.nullable())),
+            )
+            .filter(vmm_dsl::state.eq(VmmState::SagaUnwound))
             // N.B. that it's tempting to also filter out instances that have no
             // active VMM, since they're only valid targets for instance-start
             // sagas once the active VMM is unlinked, *or* if the active VMM is
