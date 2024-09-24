@@ -45,7 +45,7 @@ use omicron_common::api::external::Generation;
 use omicron_common::api::external::Vni;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
-use omicron_common::policy::MAX_INTERNAL_DNS_REDUNDANCY;
+use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_uuid_kinds::ExternalIpKind;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneKind;
@@ -53,6 +53,7 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
+use once_cell::unsync::OnceCell;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 use slog::debug;
@@ -111,9 +112,7 @@ pub enum Error {
     Planner(#[source] anyhow::Error),
     #[error("no reserved subnets available for DNS")]
     NoAvailableDnsSubnets,
-    #[error(
-        "can only have {MAX_INTERNAL_DNS_REDUNDANCY} internal DNS servers"
-    )]
+    #[error("can only have {INTERNAL_DNS_REDUNDANCY} internal DNS servers")]
     TooManyDnsServers,
 }
 
@@ -209,8 +208,8 @@ pub struct BlueprintBuilder<'a> {
     // These fields are used to allocate resources for sleds.
     input: &'a PlanningInput,
     sled_ip_allocators: BTreeMap<SledUuid, IpAllocator>,
-    external_networking: BuilderExternalNetworking<'a>,
-    internal_dns_subnets: DnsSubnetAllocator,
+    external_networking: OnceCell<BuilderExternalNetworking<'a>>,
+    internal_dns_subnets: OnceCell<DnsSubnetAllocator>,
 
     // These fields will become part of the final blueprint.  See the
     // corresponding fields in `Blueprint`.
@@ -304,10 +303,12 @@ impl<'a> BlueprintBuilder<'a> {
             "parent_id" => parent_blueprint.id.to_string(),
         ));
 
+        /*
         let external_networking =
             BuilderExternalNetworking::new(parent_blueprint, input)?;
         let internal_dns_subnets =
             DnsSubnetAllocator::new(parent_blueprint, input)?;
+            */
 
         // Prefer the sled state from our parent blueprint for sleds
         // that were in it; there may be new sleds in `input`, in which
@@ -340,8 +341,8 @@ impl<'a> BlueprintBuilder<'a> {
             collection: inventory,
             input,
             sled_ip_allocators: BTreeMap::new(),
-            external_networking,
-            internal_dns_subnets,
+            external_networking: OnceCell::new(),
+            internal_dns_subnets: OnceCell::new(),
             zones: BlueprintZonesBuilder::new(parent_blueprint),
             disks: BlueprintDisksBuilder::new(parent_blueprint),
             sled_state,
@@ -352,6 +353,36 @@ impl<'a> BlueprintBuilder<'a> {
             comments: Vec::new(),
             rng: BlueprintBuilderRng::new(),
         })
+    }
+
+    fn external_networking(
+        &mut self,
+    ) -> Result<&mut BuilderExternalNetworking<'a>, Error> {
+        self.external_networking
+            .get_or_try_init(|| {
+                BuilderExternalNetworking::new(
+                    self.parent_blueprint,
+                    self.input,
+                )
+            })
+            .map_err(Error::Planner)?;
+        // TODO-john
+        Ok(self.external_networking.get_mut().unwrap())
+    }
+
+    fn internal_dns_subnets(
+        &mut self,
+    ) -> Result<&mut DnsSubnetAllocator, Error> {
+        self.internal_dns_subnets.get_or_try_init(|| {
+            DnsSubnetAllocator::new(
+                self.zones
+                    .current_zones(BlueprintZoneFilter::ShouldBeRunning)
+                    .flat_map(|(_sled_id, zone_config)| zone_config),
+                self.input,
+            )
+        })?;
+        // TODO-john
+        Ok(self.internal_dns_subnets.get_mut().unwrap())
     }
 
     /// Iterates over the list of sled IDs for which we have zones.
@@ -486,11 +517,12 @@ impl<'a> BlueprintBuilder<'a> {
                         );
                     }
                     ZoneExpungeReason::SledDecommissioned => {
-                        // A sled marked as decommissioned should have no resources
-                        // allocated to it. If it does, it's an illegal state, possibly
-                        // introduced by a bug elsewhere in the system -- we need to
-                        // produce a loud warning (i.e. an ERROR-level log message) on
-                        // this, while still removing the zones.
+                        // A sled marked as decommissioned should have no
+                        // resources allocated to it. If it does, it's an
+                        // illegal state, possibly introduced by a bug elsewhere
+                        // in the system -- we need to produce a loud warning
+                        // (i.e. an ERROR-level log message) on this, while
+                        // still removing the zones.
                         error!(
                             &log,
                             "sled has state Decommissioned, yet has zone \
@@ -645,7 +677,7 @@ impl<'a> BlueprintBuilder<'a> {
     ) -> Result<Ensure, Error> {
         let sled_subnet = self.sled_resources(sled_id)?.subnet;
         let rack_subnet = ReservedRackSubnet::from_subnet(sled_subnet);
-        let dns_subnet = self.internal_dns_subnets.alloc(rack_subnet)?;
+        let dns_subnet = self.internal_dns_subnets()?.alloc(rack_subnet)?;
         let address = dns_subnet.dns_address();
         let zpool = self.sled_select_zpool(sled_id, ZoneKind::InternalDns)?;
         let zone_type =
@@ -874,7 +906,7 @@ impl<'a> BlueprintBuilder<'a> {
                 nic_ip,
                 nic_subnet,
                 nic_mac,
-            } = self.external_networking.for_new_nexus()?;
+            } = self.external_networking()?.for_new_nexus()?;
             let external_ip = OmicronZoneExternalFloatingIp {
                 id: self.rng.external_ip_rng.next(),
                 ip: external_ip,
@@ -1062,7 +1094,7 @@ impl<'a> BlueprintBuilder<'a> {
             nic_ip,
             nic_subnet,
             nic_mac,
-        } = self.external_networking.for_new_boundary_ntp()?;
+        } = self.external_networking()?.for_new_boundary_ntp()?;
         let external_ip = OmicronZoneExternalSnatIp {
             id: self.rng.external_ip_rng.next(),
             snat_cfg,
@@ -1338,6 +1370,21 @@ impl<'a> BlueprintZonesBuilder<'a> {
         sled_ids.into_iter()
     }
 
+    /// TODO-john
+    pub fn current_zones(
+        &self,
+        filter: BlueprintZoneFilter,
+    ) -> impl Iterator<Item = (SledUuid, Vec<&BlueprintZoneConfig>)> {
+        let sled_ids = self.sled_ids_with_zones();
+        sled_ids.map(move |sled_id| {
+            let zones = self
+                .current_sled_zones(sled_id, filter)
+                .map(|(zone_config, _)| zone_config)
+                .collect();
+            (sled_id, zones)
+        })
+    }
+
     /// Iterates over the list of Omicron zones currently configured for this
     /// sled in the blueprint that's being built, along with each zone's state
     /// in the builder.
@@ -1506,6 +1553,7 @@ pub mod test {
     use nexus_types::external_api::views::SledPolicy;
     use omicron_common::address::IpRange;
     use omicron_test_utils::dev::test_setup_log;
+    use slog_error_chain::InlineErrorChain;
     use std::collections::BTreeSet;
     use std::mem;
 
@@ -1517,7 +1565,9 @@ pub mod test {
         // There should be no duplicate underlay IPs.
         let mut underlay_ips: BTreeMap<Ipv6Addr, &BlueprintZoneConfig> =
             BTreeMap::new();
-        for (_, zone) in blueprint.all_omicron_zones(BlueprintZoneFilter::All) {
+        for (_, zone) in
+            blueprint.all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+        {
             if let Some(previous) =
                 underlay_ips.insert(zone.underlay_address, zone)
             {
@@ -2195,18 +2245,24 @@ pub mod test {
         }
         assert!(found_second_nexus_zone, "only one Nexus zone present?");
 
-        match BlueprintBuilder::new_based_on(
+        let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &parent,
             &input,
             &collection,
             "test",
-        ) {
+        )
+        .expect("created builder");
+
+        match builder.external_networking() {
             Ok(_) => panic!("unexpected success"),
-            Err(err) => assert!(
-                err.to_string().contains("duplicate external IP"),
-                "unexpected error: {err:#}"
-            ),
+            Err(err) => {
+                let err = InlineErrorChain::new(&err).to_string();
+                assert!(
+                    err.contains("duplicate external IP"),
+                    "unexpected error: {err}"
+                );
+            }
         };
 
         logctx.cleanup_successful();
@@ -2248,18 +2304,24 @@ pub mod test {
         }
         assert!(found_second_nexus_zone, "only one Nexus zone present?");
 
-        match BlueprintBuilder::new_based_on(
+        let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &parent,
             &input,
             &collection,
             "test",
-        ) {
+        )
+        .expect("created builder");
+
+        match builder.external_networking() {
             Ok(_) => panic!("unexpected success"),
-            Err(err) => assert!(
-                err.to_string().contains("duplicate Nexus NIC IP"),
-                "unexpected error: {err:#}"
-            ),
+            Err(err) => {
+                let err = InlineErrorChain::new(&err).to_string();
+                assert!(
+                    err.contains("duplicate Nexus NIC IP"),
+                    "unexpected error: {err}"
+                );
+            }
         };
 
         logctx.cleanup_successful();
@@ -2301,18 +2363,24 @@ pub mod test {
         }
         assert!(found_second_nexus_zone, "only one Nexus zone present?");
 
-        match BlueprintBuilder::new_based_on(
+        let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &parent,
             &input,
             &collection,
             "test",
-        ) {
+        )
+        .expect("created builder");
+
+        match builder.external_networking() {
             Ok(_) => panic!("unexpected success"),
-            Err(err) => assert!(
-                err.to_string().contains("duplicate service vNIC MAC"),
-                "unexpected error: {err:#}"
-            ),
+            Err(err) => {
+                let err = InlineErrorChain::new(&err).to_string();
+                assert!(
+                    err.contains("duplicate service vNIC MAC"),
+                    "unexpected error: {err}"
+                );
+            }
         };
 
         logctx.cleanup_successful();

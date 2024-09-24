@@ -38,7 +38,7 @@ use omicron_common::disk::{
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_common::policy::{
     BOUNDARY_NTP_REDUNDANCY, COCKROACHDB_REDUNDANCY, INTERNAL_DNS_REDUNDANCY,
-    MAX_INTERNAL_DNS_REDUNDANCY, NEXUS_REDUNDANCY,
+    NEXUS_REDUNDANCY, RESERVED_INTERNAL_DNS_REDUNDANCY,
 };
 use omicron_uuid_kinds::{
     ExternalIpUuid, GenericUuid, OmicronZoneUuid, SledUuid, ZpoolUuid,
@@ -471,7 +471,7 @@ impl Plan {
         // Provision internal DNS zones, striping across Sleds.
         let reserved_rack_subnet = ReservedRackSubnet::new(config.az_subnet());
         static_assertions::const_assert!(
-            INTERNAL_DNS_REDUNDANCY <= MAX_INTERNAL_DNS_REDUNDANCY
+            INTERNAL_DNS_REDUNDANCY <= RESERVED_INTERNAL_DNS_REDUNDANCY
         );
         let dns_subnets =
             &reserved_rack_subnet.get_dns_subnets()[0..INTERNAL_DNS_REDUNDANCY];

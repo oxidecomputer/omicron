@@ -9,7 +9,7 @@ use hickory_resolver::lookup::SrvLookup;
 use hickory_resolver::TokioAsyncResolver;
 use hyper::client::connect::dns::Name;
 use omicron_common::address::{
-    Ipv6Subnet, ReservedRackSubnet, AZ_PREFIX, DNS_PORT,
+    get_internal_dns_server_addresses, Ipv6Subnet, AZ_PREFIX, DNS_PORT,
 };
 use slog::{debug, error, info, trace};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
@@ -129,13 +129,9 @@ impl Resolver {
     pub fn servers_from_subnet(
         subnet: Ipv6Subnet<AZ_PREFIX>,
     ) -> Vec<SocketAddr> {
-        ReservedRackSubnet::new(subnet)
-            .get_dns_subnets()
+        get_internal_dns_server_addresses(subnet.net().addr())
             .into_iter()
-            .map(|dns_subnet| {
-                let ip_addr = IpAddr::V6(dns_subnet.dns_address());
-                SocketAddr::new(ip_addr, DNS_PORT)
-            })
+            .map(|ip_addr| SocketAddr::new(ip_addr, DNS_PORT))
             .collect()
     }
 
