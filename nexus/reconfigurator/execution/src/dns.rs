@@ -288,8 +288,13 @@ pub fn blueprint_internal_dns_config(
                     ServiceName::ClickhouseServer
                 };
 
-                // Safety: This only fails if we provide the same zone id more
-                // than once, which should not be possible here.
+                // Safety: This only fails if the ServiceName isn't one of the
+                // ClickHouse types, which is guaranteed by this match arm. It
+                // may also fail if we add a zone with the same ID more than
+                // once, but as with the call to `host_zone_with_one_backend()`
+                // below, that should not be possible at this point in the
+                // code, since the IDs of the zones in the blueprint should be
+                // unique.
                 dns_builder
                     .host_zone_clickhouse(
                         zone.id,
