@@ -197,5 +197,5 @@ notable thresholds:
 units = "none"
 datum_type = "f32"
 versions = [
-    { added_in = 2, fields = ["sensor"]}
+    { added_in = 1, fields = ["sensor"]}
 ]
