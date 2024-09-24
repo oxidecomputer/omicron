@@ -131,3 +131,11 @@ pub struct InstanceReincarnationStatus {
     /// Errors that occurred while restarting individual instances.
     pub restart_errors: HashMap<Uuid, String>,
 }
+
+impl InstanceReincarnationStatus {
+    pub fn total_sagas_started(&self) -> usize {
+        self.instances_reincarnated.len()
+            + self.changed_state.len()
+            + self.restart_errors.len()
+    }
+}
