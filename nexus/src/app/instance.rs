@@ -233,6 +233,10 @@ enum InstanceStateChangeRequestAction {
     /// Request the appropriate state change from the sled with the specified
     /// UUID.
     SendToSled { sled_id: SledUuid, propolis_id: PropolisUuid },
+
+    /// The instance is not currently incarnated on a sled, so just update its
+    /// runtime state in the database without communicating with a sled-agent.
+    UpdateRuntime(db::model::InstanceRuntimeState),
 }
 
 /// What is the higher level operation that is calling
@@ -811,13 +815,36 @@ impl super::Nexus {
                                 still being created"
                                 ))
                 }
+                // Failed instances may transition to Stopped by just changing
+                // the Nexus state in the database to NoVmm.
+                //
+                // An instance's effective state will never be Failed while it
+                // is linked with a VMM. If the instance has an active VMM which
+                // is Failed, the instance's effective state will be Stopping,
+                // rather than Failed, until an instance-update saga has
+                // unlinked the Failed VMM. Therefore, we know that a Failed
+                // instance is not incarnated on a sled, so all we need to do to
+                // "stop" it is to update its state in the database.
+                InstanceState::Failed if matches!(requested, InstanceStateChangeRequest::Stop) => {
+                    // As discussed above, this shouldn't happen, so return an
+                    // internal error and complain about it in the logs.
+                    if vmm_state.is_some() {
+                        return Err(Error::internal_error(
+                            "an instance should not be in the Failed \
+                             effective state if it has an active VMM"
+                        ));
+                    }
 
+                    let prev_runtime = instance_state.runtime();
+                    return Ok(InstanceStateChangeRequestAction::UpdateRuntime(db::model::InstanceRuntimeState {
+                        time_updated: chrono::Utc::now(),
+                        r#gen: prev_runtime.r#gen.0.next().into(),
+                        nexus_state: db::model::InstanceState::NoVmm,
+                        ..prev_runtime.clone()
+                    }));
+                }
                 // If the instance has no sled beacuse it's been destroyed or
                 // has fallen over, reject the state change.
-                //
-                // TODO(#2825): Failed instances should be allowed to stop, but
-                // this requires a special action because there is no sled to
-                // send the request to.
                 InstanceState::Failed | InstanceState::Destroyed => {
                     return Err(Error::invalid_request(&format!(
                         "instance state cannot be changed from {}",
@@ -898,6 +925,24 @@ impl super::Nexus {
             &requested,
         )? {
             InstanceStateChangeRequestAction::AlreadyDone => Ok(()),
+            InstanceStateChangeRequestAction::UpdateRuntime(new_runtime) => {
+                let instance_id =
+                    InstanceUuid::from_untyped_uuid(prev_instance_state.id());
+                let changed = self
+                    .datastore()
+                    .instance_update_runtime(&instance_id, &new_runtime)
+                    .await
+                    .map_err(InstanceStateChangeError::Other)?;
+                if !changed {
+                    // TODO(eliza): perhaps we should refetch the instance here
+                    // and return Ok if it was in the desired state...
+                    Err(InstanceStateChangeError::Other(Error::conflict(
+                        "instance changed state before it could be updated",
+                    )))
+                } else {
+                    Ok(())
+                }
+            }
             InstanceStateChangeRequestAction::SendToSled {
                 sled_id,
                 propolis_id,
