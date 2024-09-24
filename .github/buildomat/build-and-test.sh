@@ -101,12 +101,9 @@ fi
 
 # Do some test runs of the `ls-apis` command.
 banner ls-apis
-(
-    source ./tools/include/force-git-over-https.sh;
-    ptime -m cargo xtask ls-apis apis &&
-        ptime -m cargo xtask ls-apis deployment-units &&
-        ptime -m cargo xtask ls-apis servers
-)
+ptime -m cargo xtask ls-apis apis
+ptime -m cargo xtask ls-apis deployment-units
+ptime -m cargo xtask ls-apis servers
 
 # We expect the seed CRDB to be placed here, so we explicitly remove it so the
 # rmdir check below doesn't get triggered. Nextest doesn't have support for
