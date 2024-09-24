@@ -1774,7 +1774,7 @@ mod tests {
                             params::InstanceNetworkInterfaceAttachment::None,
                         external_ips: Vec::new(),
                         disks: Vec::new(),
-                        boot_disk_id: None,
+                        boot_disk: None,
                         ssh_public_keys: None,
                         start: false,
                     },
