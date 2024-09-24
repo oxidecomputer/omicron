@@ -336,6 +336,7 @@ struct InstanceRunner {
 
     // Disk related properties
     requested_disks: Vec<propolis_client::types::DiskRequest>,
+    boot_settings: Option<BootSettings>,
     cloud_init_bytes: Option<NoDebug<String>>,
 
     // Internal State management
@@ -735,7 +736,7 @@ impl InstanceRunner {
                 .cloned()
                 .map(Into::into)
                 .collect(),
-            boot_order: Some(vec![]),
+            boot_settings: self.boot_settings.clone().into(),
             migrate,
             cloud_init_bytes: self.cloud_init_bytes.clone().map(|x| x.0),
         };
