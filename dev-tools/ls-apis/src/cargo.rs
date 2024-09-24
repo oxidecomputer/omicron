@@ -226,7 +226,9 @@ impl Workspace {
     /// Iterate over the required dependencies of package `root`, invoking
     /// `func` for each one as:
     ///
-    ///     func(package: &Package, dep_path: &DepPath)
+    /// ```ignore
+    /// func(package: &Package, dep_path: &DepPath)
+    /// ```
     ///
     /// where `package` is the package that is (directly or indirectly) a
     /// dependency of `root` and `dep_path` describes the dependency path from
