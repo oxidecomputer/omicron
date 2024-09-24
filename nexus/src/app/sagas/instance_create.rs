@@ -1069,7 +1069,7 @@ async fn sic_set_boot_disk(
         nexus_db_model::InstanceUpdate { boot_disk_id: Some(authz_disk.id()) };
 
     datastore
-        .reconfigure_instance(&opctx, &authz_instance, initial_configuration)
+        .instance_reconfigure(&opctx, &authz_instance, initial_configuration)
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -1101,7 +1101,7 @@ async fn sic_set_boot_disk_undo(
         nexus_db_model::InstanceUpdate { boot_disk_id: None };
 
     datastore
-        .reconfigure_instance(&opctx, &authz_instance, undo_configuration)
+        .instance_reconfigure(&opctx, &authz_instance, undo_configuration)
         .await
         .map_err(ActionError::action_failed)?;
 

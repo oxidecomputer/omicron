@@ -881,7 +881,7 @@ impl DataStore {
         Ok(result)
     }
 
-    pub async fn reconfigure_instance(
+    pub async fn instance_reconfigure(
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,

@@ -2164,7 +2164,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
             let instance_lookup =
                 nexus.instance_lookup(&opctx, instance_selector)?;
             let instance = nexus
-                .reconfigure_instance(
+                .instance_reconfigure(
                     &opctx,
                     &instance_lookup,
                     &reconfigure_params,

@@ -295,7 +295,7 @@ impl super::Nexus {
         }
     }
 
-    pub(crate) async fn reconfigure_instance(
+    pub(crate) async fn instance_reconfigure(
         self: &Arc<Self>,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
@@ -325,7 +325,7 @@ impl super::Nexus {
 
         let update = InstanceUpdate { boot_disk_id };
         self.datastore()
-            .reconfigure_instance(opctx, &authz_instance, update)
+            .instance_reconfigure(opctx, &authz_instance, update)
             .await
     }
 
