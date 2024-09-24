@@ -303,13 +303,6 @@ impl<'a> BlueprintBuilder<'a> {
             "parent_id" => parent_blueprint.id.to_string(),
         ));
 
-        /*
-        let external_networking =
-            BuilderExternalNetworking::new(parent_blueprint, input)?;
-        let internal_dns_subnets =
-            DnsSubnetAllocator::new(parent_blueprint, input)?;
-            */
-
         // Prefer the sled state from our parent blueprint for sleds
         // that were in it; there may be new sleds in `input`, in which
         // case we'll use their current state as our starting point.
