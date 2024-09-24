@@ -290,7 +290,7 @@ assert_matches = "1.5.0"
 assert_cmd = "2.0.16"
 async-bb8-diesel = "0.2"
 async-trait = "0.1.82"
-atomicwrites = "0.4.3"
+atomicwrites = "0.4.4"
 authz-macros = { path = "nexus/authz-macros" }
 backoff = { version = "0.4.0", features = [ "tokio" ] }
 base64 = "0.22.1"
@@ -301,7 +301,7 @@ bootstrap-agent-api = { path = "sled-agent/bootstrap-agent-api" }
 bootstrap-agent-client = { path = "clients/bootstrap-agent-client" }
 buf-list = { version = "1.0.3", features = ["tokio1"] }
 byteorder = "1.5.0"
-bytes = "1.7.1"
+bytes = "1.7.2"
 camino = { version = "1.1", features = ["serde1"] }
 camino-tempfile = "1.1.1"
 cancel-safe-futures = "0.1.5"
@@ -499,7 +499,7 @@ pem = "3.0"
 petgraph = "0.6.5"
 postgres-protocol = "0.6.7"
 predicates = "3.1.2"
-pretty_assertions = "1.4.0"
+pretty_assertions = "1.4.1"
 pretty-hex = "0.4.1"
 prettyplease = { version = "0.2.20", features = ["verbatim"] }
 proc-macro2 = "1.0"

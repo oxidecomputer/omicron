@@ -2064,6 +2064,12 @@ mod test {
         // Now remove the decommissioned sled from the input entirely. (This
         // should not happen in practice at the moment -- entries in the sled
         // table are kept forever -- but we need to test it.)
+        //
+        // Eventually, once zone and sled garbage collection is implemented,
+        // we'll expect that the blueprint's sleds_removed will become
+        // non-zero. At some point we may also want to remove entries from the
+        // sled table, but that's a future concern that would come after
+        // blueprint cleanup is implemented.
         let mut builder = input.into_builder();
         builder.sleds_mut().remove(&expunged_sled_id);
         let input = builder.build();

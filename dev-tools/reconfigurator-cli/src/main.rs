@@ -1151,7 +1151,9 @@ fn cmd_load(
                     continue;
                 }
                 SledLookupErrorKind::Missing => {
-                    // Only load details for sleds that are in the current
+                    // A sled being missing from the input is the only case in
+                    // which we decide to load new sleds. The logic to do that
+                    // is below.
                 }
             },
         }
