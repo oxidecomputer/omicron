@@ -355,6 +355,18 @@ impl<'a> BlueprintBuilder<'a> {
         })
     }
 
+    // Helper method to create a `BuilderExternalNetworking` allocator at the
+    // point of first use. This is to work around some timing issues between the
+    // planner and the builder: `BuilderExternalNetworking` wants to know what
+    // resources are in use by running zones, but the planner constructs the
+    // `BlueprintBuilder` before it expunges zones. We want to wait to look at
+    // resources are in use until after that expungement happens; this
+    // implicitly does that by virtue of knowing that the planner won't try to
+    // allocate new external networking until after it's done expunging and has
+    // started to provision new zones.
+    //
+    // This is gross and fragile. We should clean up the planner/builder split
+    // soon.
     fn external_networking(
         &mut self,
     ) -> Result<&mut BuilderExternalNetworking<'a>, Error> {
@@ -362,14 +374,18 @@ impl<'a> BlueprintBuilder<'a> {
             .get_or_try_init(|| {
                 BuilderExternalNetworking::new(
                     self.parent_blueprint,
+                    self.zones
+                        .current_zones(BlueprintZoneFilter::ShouldBeRunning)
+                        .flat_map(|(_sled_id, zone_config)| zone_config),
                     self.input,
                 )
             })
             .map_err(Error::Planner)?;
-        // TODO-john
         Ok(self.external_networking.get_mut().unwrap())
     }
 
+    // See `external_networking`; this is a similar helper for DNS subnet
+    // allocation, with deferred creation for the same reasons.
     fn internal_dns_subnets(
         &mut self,
     ) -> Result<&mut DnsSubnetAllocator, Error> {
@@ -381,7 +397,6 @@ impl<'a> BlueprintBuilder<'a> {
                 self.input,
             )
         })?;
-        // TODO-john
         Ok(self.internal_dns_subnets.get_mut().unwrap())
     }
 
@@ -1370,7 +1385,10 @@ impl<'a> BlueprintZonesBuilder<'a> {
         sled_ids.into_iter()
     }
 
-    /// TODO-john
+    /// Iterates over the list of `current_sled_zones` for all sled IDs for
+    /// which we have zones.
+    ///
+    /// This may include decommissioned sleds.
     pub fn current_zones(
         &self,
         filter: BlueprintZoneFilter,

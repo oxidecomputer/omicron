@@ -8,6 +8,7 @@ use debug_ignore::DebugIgnore;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::OmicronZoneExternalIp;
@@ -50,11 +51,12 @@ pub(super) struct BuilderExternalNetworking<'a> {
 }
 
 impl<'a> BuilderExternalNetworking<'a> {
-    pub(super) fn new(
+    pub(super) fn new<'b>(
         parent_blueprint: &'a Blueprint,
+        running_omicron_zones: impl Iterator<Item = &'b BlueprintZoneConfig>,
         input: &'a PlanningInput,
     ) -> anyhow::Result<Self> {
-        // Scan through the parent blueprint and build several sets of "used
+        // Scan through the running zones and build several sets of "used
         // resources". When adding new control plane zones to a sled, we may
         // need to allocate new resources to that zone. However, allocation at
         // this point is entirely optimistic and theoretical: our caller may
@@ -65,11 +67,10 @@ impl<'a> BuilderExternalNetworking<'a> {
         // and when we become the target, but we cannot _actually_ perform
         // resource allocation.
         //
-        // To do this, we look at our parent blueprint's used resources, and
-        // then choose new resources that aren't already in use (if possible;
-        // if we need to allocate a new resource and the parent blueprint
-        // appears to be using all the resources of that kind, our blueprint
-        // generation will fail).
+        // To do this, we look at our currently-used resources, and then choose
+        // new resources that aren't already in use (if possible; if we need to
+        // allocate a new resource and we're already using all the resources of
+        // that kind, our blueprint generation will fail).
         //
         // For example, RSS assigns Nexus NIC IPs by stepping through a list of
         // addresses based on `NEXUS_OPTE_IPVx_SUBNET` (as in the iterators
@@ -77,21 +78,12 @@ impl<'a> BuilderExternalNetworking<'a> {
         // filter out the existing IPs for any Nexus instances that already
         // exist.
         //
-        // Note that by building these iterators up front based on
-        // `parent_blueprint`, we cannot reuse resources in a case where we
-        // remove a zone that used a resource and then add another zone that
-        // wants the same kind of resource. That is mostly okay, but there are
-        // some cases in which we may have to do that -- particularly external
-        // DNS zones, which tend to have a small number of fixed IPs. Solving
-        // that is a TODO.
-        //
         // Also note that currently, we don't perform any kind of garbage
         // collection on sleds and zones that no longer have any attached
         // resources. Once a sled or zone is marked expunged, it will always
         // stay in that state.
         // https://github.com/oxidecomputer/omicron/issues/5552 tracks
-        // implementing this kind of garbage collection, and we should do it
-        // very soon.
+        // implementing this kind of garbage collection.
 
         let mut existing_nexus_v4_ips: HashSet<Ipv4Addr> = HashSet::new();
         let mut existing_nexus_v6_ips: HashSet<Ipv6Addr> = HashSet::new();
@@ -103,9 +95,7 @@ impl<'a> BuilderExternalNetworking<'a> {
             ExternalIpAllocator::new(input.service_ip_pool_ranges());
         let mut used_macs: HashSet<MacAddr> = HashSet::new();
 
-        for (_, z) in parent_blueprint
-            .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
-        {
+        for z in running_omicron_zones {
             let zone_type = &z.zone_type;
             match zone_type {
                 BlueprintZoneType::BoundaryNtp(ntp) => match ntp.nic.ip {
