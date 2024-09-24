@@ -18,7 +18,3 @@ petgraph.workspace = true
 serde.workspace = true
 toml.workspace = true
 omicron-workspace-hack.workspace = true
-
-[[bin]]
-name = "ls-apis"
-path = "src/main.rs"
