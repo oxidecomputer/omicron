@@ -4,6 +4,7 @@
 
 //! Integration tests for operating on certificates
 
+use display_error_chain::ErrorChainExt;
 use dropshot::test_util::ClientTestContext;
 use dropshot::HttpErrorResponseBody;
 use futures::TryStreamExt;
@@ -28,7 +29,6 @@ use oxide_client::ClientSessionExt;
 use oxide_client::ClientSilosExt;
 use oxide_client::ClientSystemSilosExt;
 use oxide_client::CustomDnsResolver;
-use std::error::Error;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -600,19 +600,7 @@ async fn test_silo_certificates() {
         );
     if let oxide_client::Error::CommunicationError(error) = error {
         assert!(error.is_connect());
-        let mut xxx = &error as &dyn Error;
-        while let Some(e) = xxx.source() {
-            eprintln!("source: {}", e);
-            xxx = e;
-        }
-        assert!(
-            error.to_string().contains("invalid peer certificate")
-                || error.to_string().contains("self-signed certificate")
-                || error.to_string().contains("self signed certificate"),
-            "Unexpected error: {} {}",
-            error,
-            error.source().map_or_else(String::new, |e| e.to_string()),
-        );
+        assert!(error.chain().to_string().contains("self-signed certificate"));
     } else {
         panic!(
             "unexpected error connecting with wrong certificate: {:#}",
