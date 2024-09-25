@@ -58,6 +58,10 @@ pub struct ArtifactsWithPlan {
     // will contain two entries mapping each of the images to their data.
     by_hash: DebugIgnore<HashMap<ArtifactHashId, ExtractedArtifactDataHandle>>,
 
+    // Map from Rot artifact IDs to hash of signing information. This is
+    // used to select between different artifact versions in the same
+    // repository
+    rot_by_sign: DebugIgnore<HashMap<ArtifactId, Vec<u8>>>,
     // The plan to use to update a component within the rack.
     plan: UpdatePlan,
 }
@@ -240,8 +244,13 @@ impl ArtifactsWithPlan {
 
         // Ensure we know how to apply updates from this set of artifacts; we'll
         // remember the plan we create.
-        let UpdatePlanBuildOutput { plan, by_id, by_hash, artifacts_meta } =
-            builder.build()?;
+        let UpdatePlanBuildOutput {
+            plan,
+            by_id,
+            by_hash,
+            rot_by_sign,
+            artifacts_meta,
+        } = builder.build()?;
 
         let tuf_repository = repository.repo();
 
@@ -266,7 +275,13 @@ impl ArtifactsWithPlan {
         let description =
             TufRepoDescription { repo: repo_meta, artifacts: artifacts_meta };
 
-        Ok(Self { description, by_id, by_hash: by_hash.into(), plan })
+        Ok(Self {
+            description,
+            by_id,
+            by_hash: by_hash.into(),
+            rot_by_sign: rot_by_sign.into(),
+            plan,
+        })
     }
 
     /// Returns the `ArtifactsDocument` corresponding to this TUF repo.
@@ -287,6 +302,10 @@ impl ArtifactsWithPlan {
 
     pub fn plan(&self) -> &UpdatePlan {
         &self.plan
+    }
+
+    pub fn rot_by_sign(&self) -> &HashMap<ArtifactId, Vec<u8>> {
+        &self.rot_by_sign
     }
 
     pub fn get_by_hash(

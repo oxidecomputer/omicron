@@ -1087,6 +1087,8 @@ mod test {
             git_commit: String::from("git_commit1"),
             name: String::from("name1"),
             version: String::from("version1"),
+            sign: None,
+            epoch: None,
         };
         assert!(!builder
             .found_caboose_already(&bogus_baseboard, CabooseWhich::SpSlot0));
@@ -1153,6 +1155,8 @@ mod test {
                     git_commit: String::from("git_commit2"),
                     name: String::from("name2"),
                     version: String::from("version2"),
+                    sign: None,
+                    epoch: None,
                 },
             )
             .unwrap_err();
