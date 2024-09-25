@@ -600,6 +600,11 @@ async fn test_silo_certificates() {
         );
     if let oxide_client::Error::CommunicationError(error) = error {
         assert!(error.is_connect());
+        let mut xxx = &error as &dyn Error;
+        while let Some(e) = xxx.source() {
+            eprintln!("source: {}", e);
+            xxx = e;
+        }
         assert!(
             error.to_string().contains("invalid peer certificate")
                 || error.to_string().contains("self-signed certificate")
