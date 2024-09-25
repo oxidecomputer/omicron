@@ -118,6 +118,13 @@ pub enum RepositoryError {
         #[source]
         error: hubtools::CabooseError,
     },
+    #[error("error reading sign from hubris caboose of {id:?}")]
+    ReadHubrisCabooseSign {
+        id: ArtifactId,
+        #[source]
+        error: hubtools::CabooseError,
+    },
+
 
     #[error(
         "error reading board from hubris caboose of {0:?}: non-utf8 value"
@@ -186,6 +193,7 @@ impl RepositoryError {
             | RepositoryError::ParsingHubrisArchive { .. }
             | RepositoryError::ReadHubrisCaboose { .. }
             | RepositoryError::ReadHubrisCabooseBoard { .. }
+            | RepositoryError::ReadHubrisCabooseSign { .. }
             | RepositoryError::ReadHubrisCabooseBoardUtf8(_)
             | RepositoryError::MultipleVersionsPresent { .. } => {
                 HttpError::for_bad_request(None, message)

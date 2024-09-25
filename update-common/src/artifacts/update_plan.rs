@@ -1004,7 +1004,7 @@ fn read_hubris_sign_from_archive(
     let sign = match caboose.sign() {
         Ok(sign) => sign,
         Err(error) => {
-            return Err(RepositoryError::ReadHubrisCabooseBoard { id, error });
+            return Err(RepositoryError::ReadHubrisCabooseSign { id, error });
         }
     };
     Ok((id, sign.to_vec()))
