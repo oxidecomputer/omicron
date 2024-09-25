@@ -506,8 +506,10 @@ proc-macro2 = "1.0"
 progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "24a74d0c76b6a63961ecef76acb1516b6e66c5c9" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "a9c5fdac442fa6fd5a65e413ea874fe3c62c3fd9" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "a9c5fdac442fa6fd5a65e413ea874fe3c62c3fd9" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "cee2adcf5d28c69e514b8d1fbfeffc279f39cb24" }
+# propolis-client = { path = "/rpool/devel/oxide/propolis/lib/propolis-client" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "cee2adcf5d28c69e514b8d1fbfeffc279f39cb24" }
+# propolis-mock-server = { path = "/rpool/devel/oxide/propolis/bin/mock-server" }
 proptest = "1.5.0"
 qorb = { git = "https://github.com/oxidecomputer/qorb", branch = "master" }
 quote = "1.0"
