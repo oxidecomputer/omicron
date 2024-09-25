@@ -125,7 +125,6 @@ pub enum RepositoryError {
         error: hubtools::CabooseError,
     },
 
-
     #[error(
         "error reading board from hubris caboose of {0:?}: non-utf8 value"
     )]
