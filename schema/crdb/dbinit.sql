@@ -512,7 +512,8 @@ CREATE TYPE IF NOT EXISTS omicron.public.dataset_kind AS ENUM (
   'internal_dns',
   'zone_root',
   'zone',
-  'debug'
+  'debug',
+  'update'
 );
 
 /*
@@ -4382,7 +4383,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '104.0.0', NULL)
+    (TRUE, NOW(), NOW(), '105.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
