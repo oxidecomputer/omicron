@@ -19,6 +19,7 @@ use nexus_types::deployment::BlueprintDatasetsConfig;
 use nexus_types::identity::Asset;
 use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DatasetsConfig;
+use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -123,6 +124,7 @@ pub(crate) struct EnsureDatasetsResult {
 pub(crate) async fn ensure_dataset_records_exist(
     opctx: &OpContext,
     datastore: &DataStore,
+    bp_id: BlueprintUuid,
     bp_datasets: impl Iterator<Item = &BlueprintDatasetConfig>,
 ) -> anyhow::Result<EnsureDatasetsResult> {
     // Before attempting to insert any datasets, first query for any existing
@@ -175,9 +177,12 @@ pub(crate) async fn ensure_dataset_records_exist(
         };
 
         let dataset = Dataset::from(bp_dataset.clone());
-        datastore.dataset_upsert(dataset).await.with_context(|| {
-            format!("failed to upsert dataset record for dataset {id}")
-        })?;
+        datastore
+            .dataset_upsert_if_blueprint_is_enabled(&opctx, bp_id, dataset)
+            .await
+            .with_context(|| {
+                format!("failed to upsert dataset record for dataset {id}")
+            })?;
 
         info!(
             opctx.log,
@@ -202,7 +207,13 @@ pub(crate) async fn ensure_dataset_records_exist(
                 continue;
             }
 
-            datastore.dataset_delete(&opctx, bp_dataset.id).await?;
+            datastore
+                .dataset_delete_if_blueprint_is_enabled(
+                    &opctx,
+                    bp_id,
+                    bp_dataset.id,
+                )
+                .await?;
             num_removed += 1;
         }
     }
@@ -291,7 +302,11 @@ mod tests {
         let opctx = &opctx;
 
         // Use the standard example system.
-        let (collection, _, blueprint) = example(&opctx.log, TEST_NAME, 5);
+        let (collection, _, mut blueprint) = example(&opctx.log, TEST_NAME, 5);
+
+        // Set the target so our database-modifying operations know they
+        // can safely act on the current target blueprint.
+        update_blueprint_target(&datastore, &opctx, &mut blueprint).await;
 
         // Record the sleds and zpools.
         crate::tests::insert_sled_records(datastore, &blueprint).await;
@@ -320,10 +335,16 @@ mod tests {
         let nzones_with_durable_datasets = all_datasets.len();
         assert!(nzones_with_durable_datasets > 0);
 
+        let bp_id = BlueprintUuid::from_untyped_uuid(blueprint.id);
         let EnsureDatasetsResult { inserted, updated, removed } =
-            ensure_dataset_records_exist(opctx, datastore, all_datasets.iter())
-                .await
-                .expect("failed to ensure datasets");
+            ensure_dataset_records_exist(
+                opctx,
+                datastore,
+                bp_id,
+                all_datasets.iter(),
+            )
+            .await
+            .expect("failed to ensure datasets");
 
         // We should have inserted a dataset for each zone with a durable
         // dataset.
@@ -341,9 +362,14 @@ mod tests {
 
         // Ensuring the same datasets again should insert no new records.
         let EnsureDatasetsResult { inserted, updated, removed } =
-            ensure_dataset_records_exist(opctx, datastore, all_datasets.iter())
-                .await
-                .expect("failed to ensure datasets");
+            ensure_dataset_records_exist(
+                opctx,
+                datastore,
+                bp_id,
+                all_datasets.iter(),
+            )
+            .await
+            .expect("failed to ensure datasets");
         assert_eq!(inserted, 0);
         assert_eq!(updated, 0);
         assert_eq!(removed, 0);
@@ -401,6 +427,7 @@ mod tests {
             ensure_dataset_records_exist(
                 opctx,
                 datastore,
+                bp_id,
                 all_datasets.iter().chain(&new_zones),
             )
             .await
@@ -418,6 +445,34 @@ mod tests {
         );
     }
 
+    // Sets the target blueprint to "blueprint"
+    //
+    // Reads the current target, and uses it as the "parent" blueprint
+    async fn update_blueprint_target(
+        datastore: &DataStore,
+        opctx: &OpContext,
+        blueprint: &mut Blueprint,
+    ) {
+        // Fetch the initial blueprint installed during rack initialization.
+        let parent_blueprint_target = datastore
+            .blueprint_target_get_current(&opctx)
+            .await
+            .expect("failed to read current target blueprint");
+        blueprint.parent_blueprint_id = Some(parent_blueprint_target.target_id);
+        datastore.blueprint_insert(&opctx, &blueprint).await.unwrap();
+        datastore
+            .blueprint_target_set_current(
+                &opctx,
+                nexus_types::deployment::BlueprintTarget {
+                    target_id: blueprint.id,
+                    enabled: true,
+                    time_made_target: nexus_inventory::now_db_precision(),
+                },
+            )
+            .await
+            .unwrap();
+    }
+
     #[nexus_test]
     async fn test_dataset_records_update(cptestctx: &ControlPlaneTestContext) {
         const TEST_NAME: &str = "test_dataset_records_update";
@@ -432,7 +487,11 @@ mod tests {
         let opctx = &opctx;
 
         // Use the standard example system.
-        let (_, _, blueprint) = example(&opctx.log, TEST_NAME, 5);
+        let (_, _, mut blueprint) = example(&opctx.log, TEST_NAME, 5);
+
+        // Set the target so our database-modifying operations know they
+        // can safely act on the current target blueprint.
+        update_blueprint_target(&datastore, &opctx, &mut blueprint).await;
 
         // Record the sleds and zpools.
         crate::tests::insert_sled_records(datastore, &blueprint).await;
@@ -442,10 +501,16 @@ mod tests {
         .await;
 
         let mut all_datasets = get_all_datasets_from_zones(&blueprint);
+        let bp_id = BlueprintUuid::from_untyped_uuid(blueprint.id);
         let EnsureDatasetsResult { inserted, updated, removed } =
-            ensure_dataset_records_exist(opctx, datastore, all_datasets.iter())
-                .await
-                .expect("failed to ensure datasets");
+            ensure_dataset_records_exist(
+                opctx,
+                datastore,
+                bp_id,
+                all_datasets.iter(),
+            )
+            .await
+            .expect("failed to ensure datasets");
         assert_eq!(inserted, all_datasets.len());
         assert_eq!(updated, 0);
         assert_eq!(removed, 0);
@@ -463,9 +528,14 @@ mod tests {
 
         // Update the datastore
         let EnsureDatasetsResult { inserted, updated, removed } =
-            ensure_dataset_records_exist(opctx, datastore, all_datasets.iter())
-                .await
-                .expect("failed to ensure datasets");
+            ensure_dataset_records_exist(
+                opctx,
+                datastore,
+                bp_id,
+                all_datasets.iter(),
+            )
+            .await
+            .expect("failed to ensure datasets");
         assert_eq!(inserted, 0);
         assert_eq!(updated, 1);
         assert_eq!(removed, 0);
@@ -501,7 +571,11 @@ mod tests {
         let opctx = &opctx;
 
         // Use the standard example system.
-        let (_, _, blueprint) = example(&opctx.log, TEST_NAME, 5);
+        let (_, _, mut blueprint) = example(&opctx.log, TEST_NAME, 5);
+
+        // Set the target so our database-modifying operations know they
+        // can safely act on the current target blueprint.
+        update_blueprint_target(&datastore, &opctx, &mut blueprint).await;
 
         // Record the sleds and zpools.
         crate::tests::insert_sled_records(datastore, &blueprint).await;
@@ -523,10 +597,16 @@ mod tests {
             reservation: None,
             compression: CompressionAlgorithm::Off,
         });
+        let bp_id = BlueprintUuid::from_untyped_uuid(blueprint.id);
         let EnsureDatasetsResult { inserted, updated, removed } =
-            ensure_dataset_records_exist(opctx, datastore, all_datasets.iter())
-                .await
-                .expect("failed to ensure datasets");
+            ensure_dataset_records_exist(
+                opctx,
+                datastore,
+                bp_id,
+                all_datasets.iter(),
+            )
+            .await
+            .expect("failed to ensure datasets");
         assert_eq!(inserted, all_datasets.len());
         assert_eq!(updated, 0);
         assert_eq!(removed, 0);
@@ -563,9 +643,14 @@ mod tests {
         // dataset, where we punt the deletion to a background task.
 
         let EnsureDatasetsResult { inserted, updated, removed } =
-            ensure_dataset_records_exist(opctx, datastore, all_datasets.iter())
-                .await
-                .expect("failed to ensure datasets");
+            ensure_dataset_records_exist(
+                opctx,
+                datastore,
+                bp_id,
+                all_datasets.iter(),
+            )
+            .await
+            .expect("failed to ensure datasets");
         assert_eq!(inserted, 0);
         assert_eq!(updated, 0);
         assert_eq!(removed, 1);
@@ -600,7 +685,11 @@ mod tests {
         let opctx = &opctx;
 
         // Use the standard example system.
-        let (_, _, blueprint) = example(&opctx.log, TEST_NAME, 5);
+        let (_, _, mut blueprint) = example(&opctx.log, TEST_NAME, 5);
+
+        // Set the target so our database-modifying operations know they
+        // can safely act on the current target blueprint.
+        update_blueprint_target(&datastore, &opctx, &mut blueprint).await;
 
         // Record the sleds and zpools.
         crate::tests::insert_sled_records(datastore, &blueprint).await;
@@ -624,10 +713,16 @@ mod tests {
             compression: CompressionAlgorithm::Off,
         });
 
+        let bp_id = BlueprintUuid::from_untyped_uuid(blueprint.id);
         let EnsureDatasetsResult { inserted, updated, removed } =
-            ensure_dataset_records_exist(opctx, datastore, all_datasets.iter())
-                .await
-                .expect("failed to ensure datasets");
+            ensure_dataset_records_exist(
+                opctx,
+                datastore,
+                bp_id,
+                all_datasets.iter(),
+            )
+            .await
+            .expect("failed to ensure datasets");
         assert_eq!(inserted, all_datasets.len());
         assert_eq!(updated, 0);
         assert_eq!(removed, 0);
@@ -642,9 +737,14 @@ mod tests {
 
         // Observe that no datasets are removed.
         let EnsureDatasetsResult { inserted, updated, removed } =
-            ensure_dataset_records_exist(opctx, datastore, all_datasets.iter())
-                .await
-                .expect("failed to ensure datasets");
+            ensure_dataset_records_exist(
+                opctx,
+                datastore,
+                bp_id,
+                all_datasets.iter(),
+            )
+            .await
+            .expect("failed to ensure datasets");
         assert_eq!(inserted, 0);
         assert_eq!(updated, 0);
         assert_eq!(removed, 0);

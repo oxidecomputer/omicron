@@ -12,6 +12,7 @@ use crate::db;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::public_error_from_diesel;
+use crate::db::error::retryable;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Asset;
 use crate::db::model::Dataset;
@@ -20,10 +21,12 @@ use crate::db::model::PhysicalDiskPolicy;
 use crate::db::model::Zpool;
 use crate::db::pagination::paginated;
 use crate::db::pagination::Paginator;
+use crate::db::TransactionError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::upsert::excluded;
+use futures::FutureExt;
 use nexus_db_model::DatasetKind;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
@@ -33,6 +36,7 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
+use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use uuid::Uuid;
@@ -56,6 +60,45 @@ impl DataStore {
         &self,
         dataset: Dataset,
     ) -> CreateResult<Dataset> {
+        let conn = &*self.pool_connection_unauthorized().await?;
+        Self::dataset_upsert_on_connection(&conn, dataset).await.map_err(|e| {
+            match e {
+                TransactionError::CustomError(e) => e,
+                TransactionError::Database(e) => {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
+            }
+        })
+    }
+
+    pub async fn dataset_upsert_if_blueprint_is_enabled(
+        &self,
+        opctx: &OpContext,
+        bp_id: BlueprintUuid,
+        dataset: Dataset,
+    ) -> CreateResult<Dataset> {
+        let conn = self.pool_connection_unauthorized().await?;
+
+        self.transaction_if_current_blueprint_is(
+            &conn,
+            "dataset_upsert_if_blueprint_is_enabled",
+            opctx,
+            bp_id,
+            |conn| {
+                let dataset = dataset.clone();
+                async move {
+                    Self::dataset_upsert_on_connection(&conn, dataset).await
+                }
+                .boxed()
+            },
+        )
+        .await
+    }
+
+    async fn dataset_upsert_on_connection(
+        conn: &async_bb8_diesel::Connection<db::DbConnection>,
+        dataset: Dataset,
+    ) -> Result<Dataset, TransactionError<Error>> {
         use db::schema::dataset::dsl;
 
         let dataset_id = dataset.id();
@@ -78,22 +121,27 @@ impl DataStore {
                     dsl::compression.eq(excluded(dsl::compression)),
                 )),
         )
-        .insert_and_get_result_async(
-            &*self.pool_connection_unauthorized().await?,
-        )
+        .insert_and_get_result_async(&*conn)
         .await
         .map_err(|e| match e {
-            AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
-                type_name: ResourceType::Zpool,
-                lookup_type: LookupType::ById(zpool_id),
-            },
-            AsyncInsertError::DatabaseError(e) => public_error_from_diesel(
-                e,
-                ErrorHandler::Conflict(
-                    ResourceType::Dataset,
-                    &dataset_id.to_string(),
-                ),
-            ),
+            AsyncInsertError::CollectionNotFound => {
+                TransactionError::CustomError(Error::ObjectNotFound {
+                    type_name: ResourceType::Zpool,
+                    lookup_type: LookupType::ById(zpool_id),
+                })
+            }
+            AsyncInsertError::DatabaseError(e) => {
+                if retryable(&e) {
+                    return TransactionError::Database(e);
+                }
+                TransactionError::CustomError(public_error_from_diesel(
+                    e,
+                    ErrorHandler::Conflict(
+                        ResourceType::Dataset,
+                        &dataset_id.to_string(),
+                    ),
+                ))
+            }
         })
     }
 
@@ -196,11 +244,43 @@ impl DataStore {
         id: DatasetUuid,
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        let conn = self.pool_connection_authorized(&opctx).await?;
 
+        Self::dataset_delete_on_connection(&conn, id)
+            .await
+            .map_err(|e| e.into())
+    }
+
+    pub async fn dataset_delete_if_blueprint_is_enabled(
+        &self,
+        opctx: &OpContext,
+        bp_id: BlueprintUuid,
+        id: DatasetUuid,
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
+        let conn = self.pool_connection_authorized(&opctx).await?;
+
+        self.transaction_if_current_blueprint_is(
+            &conn,
+            "dataset_delete_if_blueprint_is_enabled",
+            opctx,
+            bp_id,
+            |conn| {
+                async move {
+                    Self::dataset_delete_on_connection(&conn, id).await
+                }
+                .boxed()
+            },
+        )
+        .await
+    }
+
+    async fn dataset_delete_on_connection(
+        conn: &async_bb8_diesel::Connection<db::DbConnection>,
+        id: DatasetUuid,
+    ) -> Result<(), TransactionError<Error>> {
         use db::schema::dataset::dsl as dataset_dsl;
         let now = Utc::now();
-
-        let conn = &*self.pool_connection_authorized(&opctx).await?;
 
         let id = *id.as_untyped_uuid();
         diesel::update(dataset_dsl::dataset)
@@ -272,27 +352,23 @@ mod test {
     use nexus_db_model::SledBaseboard;
     use nexus_db_model::SledSystemHardware;
     use nexus_db_model::SledUpdate;
+    use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_test_utils::db::test_setup_database;
+    use nexus_types::deployment::Blueprint;
+    use nexus_types::deployment::BlueprintTarget;
     use omicron_common::api::internal::shared::DatasetKind as ApiDatasetKind;
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::SledUuid;
+    use omicron_uuid_kinds::ZpoolUuid;
 
-    #[tokio::test]
-    async fn test_insert_if_not_exists() {
-        let logctx = dev::test_setup_log("inventory_insert");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
-        let opctx = &opctx;
-
-        // There should be no datasets initially.
-        assert_eq!(
-            datastore.dataset_list_all_batched(opctx, None).await.unwrap(),
-            []
-        );
-
+    async fn create_sled_and_zpool(
+        datastore: &DataStore,
+        opctx: &OpContext,
+    ) -> (SledUuid, ZpoolUuid) {
         // Create a fake sled that holds our fake zpool.
-        let sled_id = Uuid::new_v4();
+        let sled_id = SledUuid::new_v4();
         let sled = SledUpdate::new(
-            sled_id,
+            *sled_id.as_untyped_uuid(),
             "[::1]:0".parse().unwrap(),
             SledBaseboard {
                 serial_number: "test-sn".to_string(),
@@ -311,18 +387,41 @@ mod test {
         datastore.sled_upsert(sled).await.expect("failed to upsert sled");
 
         // Create a fake zpool that backs our fake datasets.
-        let zpool_id = Uuid::new_v4();
-        let zpool = Zpool::new(zpool_id, sled_id, Uuid::new_v4());
+        let zpool_id = ZpoolUuid::new_v4();
+        let zpool = Zpool::new(
+            *zpool_id.as_untyped_uuid(),
+            *sled_id.as_untyped_uuid(),
+            Uuid::new_v4(),
+        );
         datastore
             .zpool_insert(opctx, zpool)
             .await
             .expect("failed to upsert zpool");
 
+        (sled_id, zpool_id)
+    }
+
+    #[tokio::test]
+    async fn test_insert_if_not_exists() {
+        let logctx = dev::test_setup_log("insert_if_not_exists");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let opctx = &opctx;
+
+        // There should be no datasets initially.
+        assert_eq!(
+            datastore.dataset_list_all_batched(opctx, None).await.unwrap(),
+            []
+        );
+
+        let (_sled_id, zpool_id) =
+            create_sled_and_zpool(&datastore, opctx).await;
+
         // Inserting a new dataset should succeed.
         let dataset1 = datastore
             .dataset_insert_if_not_exists(Dataset::new(
                 Uuid::new_v4(),
-                zpool_id,
+                *zpool_id.as_untyped_uuid(),
                 Some("[::1]:0".parse().unwrap()),
                 ApiDatasetKind::Crucible,
             ))
@@ -355,7 +454,7 @@ mod test {
         let insert_again_result = datastore
             .dataset_insert_if_not_exists(Dataset::new(
                 dataset1.id(),
-                zpool_id,
+                *zpool_id.as_untyped_uuid(),
                 Some("[::1]:12345".parse().unwrap()),
                 ApiDatasetKind::Cockroach,
             ))
@@ -371,7 +470,7 @@ mod test {
         let dataset2 = datastore
             .dataset_upsert(Dataset::new(
                 Uuid::new_v4(),
-                zpool_id,
+                *zpool_id.as_untyped_uuid(),
                 Some("[::1]:0".parse().unwrap()),
                 ApiDatasetKind::Cockroach,
             ))
@@ -403,7 +502,7 @@ mod test {
         let insert_again_result = datastore
             .dataset_insert_if_not_exists(Dataset::new(
                 dataset1.id(),
-                zpool_id,
+                *zpool_id.as_untyped_uuid(),
                 Some("[::1]:12345".parse().unwrap()),
                 ApiDatasetKind::Cockroach,
             ))
@@ -414,6 +513,117 @@ mod test {
             datastore.dataset_list_all_batched(opctx, None).await.unwrap(),
             expected_datasets,
         );
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    async fn bp_insert_and_make_target(
+        opctx: &OpContext,
+        datastore: &DataStore,
+        bp: &Blueprint,
+    ) {
+        datastore
+            .blueprint_insert(opctx, bp)
+            .await
+            .expect("inserted blueprint");
+        datastore
+            .blueprint_target_set_current(
+                opctx,
+                BlueprintTarget {
+                    target_id: bp.id,
+                    enabled: true,
+                    time_made_target: Utc::now(),
+                },
+            )
+            .await
+            .expect("made blueprint the target");
+    }
+
+    fn new_dataset_on(zpool_id: ZpoolUuid) -> Dataset {
+        Dataset::new(
+            Uuid::new_v4(),
+            *zpool_id.as_untyped_uuid(),
+            Some("[::1]:0".parse().unwrap()),
+            ApiDatasetKind::Cockroach,
+        )
+    }
+
+    #[tokio::test]
+    async fn test_upsert_and_delete_while_blueprint_changes() {
+        let logctx =
+            dev::test_setup_log("upsert_and_delete_while_blueprint_changes");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let opctx = &opctx;
+
+        let (sled_id, zpool_id) =
+            create_sled_and_zpool(&datastore, opctx).await;
+
+        // The datastore methods don't actually read the blueprint, but they do
+        // guard against concurrent changes to the current target.
+        //
+        // We can test behavior by swapping between empty blueprints.
+        let bp0 = BlueprintBuilder::build_empty_with_sleds(
+            [sled_id].into_iter(),
+            "test",
+        );
+        bp_insert_and_make_target(&opctx, &datastore, &bp0).await;
+
+        let bp1 = {
+            let mut bp1 = bp0.clone();
+            bp1.id = Uuid::new_v4();
+            bp1.parent_blueprint_id = Some(bp0.id);
+            bp1
+        };
+        bp_insert_and_make_target(&opctx, &datastore, &bp1).await;
+
+        let old_blueprint_id = BlueprintUuid::from_untyped_uuid(bp0.id);
+        let current_blueprint_id = BlueprintUuid::from_untyped_uuid(bp1.id);
+
+        // Upsert referencing old blueprint: Error
+        datastore
+            .dataset_upsert_if_blueprint_is_enabled(
+                &opctx,
+                old_blueprint_id,
+                new_dataset_on(zpool_id),
+            )
+            .await
+            .expect_err(
+                "Shouldn't be able to insert referencing old blueprint",
+            );
+
+        // Upsert referencing current blueprint: OK
+        let dataset = datastore
+            .dataset_upsert_if_blueprint_is_enabled(
+                &opctx,
+                current_blueprint_id,
+                new_dataset_on(zpool_id),
+            )
+            .await
+            .expect("Should be able to insert while blueprint is active");
+
+        // Delete referencing old blueprint: Error
+        datastore
+            .dataset_delete_if_blueprint_is_enabled(
+                &opctx,
+                old_blueprint_id,
+                DatasetUuid::from_untyped_uuid(dataset.id()),
+            )
+            .await
+            .expect_err(
+                "Shouldn't be able to delete referencing old blueprint",
+            );
+
+        // Delete referencing current blueprint: OK
+        datastore
+            .dataset_delete_if_blueprint_is_enabled(
+                &opctx,
+                current_blueprint_id,
+                DatasetUuid::from_untyped_uuid(dataset.id()),
+            )
+            .await
+            .expect("Should be able to delete while blueprint is active");
 
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();

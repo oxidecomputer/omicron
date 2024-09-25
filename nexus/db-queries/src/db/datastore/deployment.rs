@@ -20,6 +20,8 @@ use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::DateTime;
 use chrono::Utc;
+use core::future::Future;
+use core::pin::Pin;
 use diesel::expression::SelectableHelper;
 use diesel::pg::Pg;
 use diesel::query_builder::AstPass;
@@ -35,6 +37,7 @@ use diesel::IntoSql;
 use diesel::OptionalExtension;
 use diesel::QueryDsl;
 use diesel::RunQueryDsl;
+use futures::FutureExt;
 use nexus_db_model::Blueprint as DbBlueprint;
 use nexus_db_model::BpOmicronDataset;
 use nexus_db_model::BpOmicronPhysicalDisk;
@@ -60,6 +63,7 @@ use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
+use omicron_uuid_kinds::BlueprintUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
 use std::collections::BTreeMap;
@@ -97,6 +101,76 @@ impl DataStore {
     ) -> Result<(), Error> {
         let conn = self.pool_connection_authorized(opctx).await?;
         Self::blueprint_insert_on_connection(&conn, opctx, blueprint).await
+    }
+
+    /// Creates a transaction iff the current blueprint is "bp_id".
+    ///
+    /// - The transaction is retryable and named "name"
+    /// - The "bp_id" value is checked as the first operation within the
+    /// transaction.
+    /// - If "bp_id" is still the current target, then "f" is called,
+    /// within a transactional context.
+    pub async fn transaction_if_current_blueprint_is<Func, R>(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        name: &'static str,
+        opctx: &OpContext,
+        bp_id: BlueprintUuid,
+        f: Func,
+    ) -> Result<R, Error>
+    where
+        Func: for<'t> Fn(
+                &'t async_bb8_diesel::Connection<DbConnection>,
+            ) -> Pin<
+                Box<
+                    dyn Future<Output = Result<R, TransactionError<Error>>>
+                        + Send
+                        + 't,
+                >,
+            > + Send
+            + Sync
+            + Clone,
+        R: Send + 'static,
+    {
+        let err = OptionalError::new();
+        let r = self
+            .transaction_retry_wrapper(name)
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                let f = f.clone();
+                async move {
+                    // Bail if `bp_id` is no longer the target
+                    let target =
+                        Self::blueprint_target_get_current_on_connection(
+                            &conn, opctx,
+                        )
+                        .await
+                        .map_err(|txn_error| txn_error.into_diesel(&err))?;
+                    let bp_id_current =
+                        BlueprintUuid::from_untyped_uuid(target.target_id);
+                    if bp_id_current != bp_id {
+                        return Err(err.bail(
+                            Error::invalid_request(format!(
+                                "blueprint target has changed from {} -> {}",
+                                bp_id, bp_id_current
+                            ))
+                            .into(),
+                        ));
+                    }
+
+                    // Otherwise, perform our actual operation
+                    f(&conn)
+                        .await
+                        .map_err(|txn_error| txn_error.into_diesel(&err))
+                }
+                .boxed()
+            })
+            .await
+            .map_err(|e| match err.take() {
+                Some(txn_error) => txn_error.into(),
+                None => public_error_from_diesel(e, ErrorHandler::Server),
+            })?;
+        Ok(r)
     }
 
     /// Variant of [Self::blueprint_insert] which may be called from a
@@ -809,12 +883,11 @@ impl DataStore {
             .transaction_async(|conn| async move {
                 // Ensure that blueprint we're about to delete is not the
                 // current target.
-                let current_target = self
-                    .blueprint_current_target_only(
-                        &conn,
-                        SelectFlavor::Standard,
-                    )
-                    .await?;
+                let current_target = Self::blueprint_current_target_only(
+                    &conn,
+                    SelectFlavor::Standard,
+                )
+                .await?;
                 if current_target.target_id == blueprint_id {
                     return Err(TransactionError::CustomError(
                         Error::conflict(format!(
@@ -1023,18 +1096,20 @@ impl DataStore {
 
             async move {
                 // Bail out if `blueprint` isn't the current target.
-                let current_target = self
-                    .blueprint_current_target_only(
-                        &conn,
-                        SelectFlavor::ForUpdate,
-                    )
-                    .await
-                    .map_err(|e| err.bail(e))?;
+                let current_target = Self::blueprint_current_target_only(
+                    &conn,
+                    SelectFlavor::ForUpdate,
+                )
+                .await
+                .map_err(|txn_error| txn_error.into_diesel(&err))?;
                 if current_target.target_id != blueprint.id {
-                    return Err(err.bail(Error::invalid_request(format!(
+                    return Err(err.bail(
+                        Error::invalid_request(format!(
                         "blueprint {} is not the current target blueprint ({})",
                         blueprint.id, current_target.target_id
-                    ))));
+                    ))
+                        .into(),
+                    ));
                 }
 
                 // See the comment on this method; this lets us notify our test
@@ -1063,7 +1138,7 @@ impl DataStore {
                         .map(|(_sled_id, zone)| zone),
                 )
                 .await
-                .map_err(|e| err.bail(e))?;
+                .map_err(|e| err.bail(e.into()))?;
                 self.ensure_zone_external_networking_allocated_on_connection(
                     &conn,
                     opctx,
@@ -1074,7 +1149,7 @@ impl DataStore {
                         .map(|(_sled_id, zone)| zone),
                 )
                 .await
-                .map_err(|e| err.bail(e))?;
+                .map_err(|e| err.bail(e.into()))?;
 
                 // See the comment on this method; this lets us wait until our
                 // test caller is ready for us to return.
@@ -1095,7 +1170,7 @@ impl DataStore {
         .await
         .map_err(|e| {
             if let Some(err) = err.take() {
-                err
+                err.into()
             } else {
                 public_error_from_diesel(e, ErrorHandler::Server)
             }
@@ -1245,9 +1320,9 @@ impl DataStore {
         opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
 
         let conn = self.pool_connection_authorized(opctx).await?;
-        let target = self
-            .blueprint_current_target_only(&conn, SelectFlavor::Standard)
-            .await?;
+        let target =
+            Self::blueprint_current_target_only(&conn, SelectFlavor::Standard)
+                .await?;
 
         // The blueprint for the current target cannot be deleted while it is
         // the current target, but it's possible someone else (a) made a new
@@ -1262,13 +1337,24 @@ impl DataStore {
     }
 
     /// Get the current target blueprint, if one exists
+    pub async fn blueprint_target_get_current_on_connection(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        opctx: &OpContext,
+    ) -> Result<BlueprintTarget, TransactionError<Error>> {
+        opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
+        Self::blueprint_current_target_only(&conn, SelectFlavor::Standard).await
+    }
+
+    /// Get the current target blueprint, if one exists
     pub async fn blueprint_target_get_current(
         &self,
         opctx: &OpContext,
     ) -> Result<BlueprintTarget, Error> {
         opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
-        self.blueprint_current_target_only(&conn, SelectFlavor::Standard).await
+        Self::blueprint_current_target_only(&conn, SelectFlavor::Standard)
+            .await
+            .map_err(|e| e.into())
     }
 
     // Helper to fetch the current blueprint target (without fetching the entire
@@ -1276,10 +1362,9 @@ impl DataStore {
     //
     // Caller is responsible for checking authz for this operation.
     async fn blueprint_current_target_only(
-        &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         select_flavor: SelectFlavor,
-    ) -> Result<BlueprintTarget, Error> {
+    ) -> Result<BlueprintTarget, TransactionError<Error>> {
         use db::schema::bp_target::dsl;
 
         let query_result = match select_flavor {
