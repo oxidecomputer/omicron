@@ -139,7 +139,7 @@ impl ClickhouseAllocator {
         // know whether a configuration is ongoing or not.
         //
         // There is an exception to this rule: on *new* clusters that have
-        // keeper zones deployed buty do not have any keepers running we must
+        // keeper zones deployed but do not have any keepers running we must
         // start at least one keeper unconditionally. This is because we cannot
         // retrieve keeper inventory if there are no keepers running.
         let current_keepers: BTreeSet<_> =
@@ -153,7 +153,7 @@ impl ClickhouseAllocator {
                 // the `if` condition above.
                 let zone_id = active_clickhouse_zones.keepers.first().unwrap();
                 // Allocate a new `KeeperId` and map it to the first zone
-                new_config.max_used_keeper_id += 1.into();
+                new_config.max_used_keeper_id = 1.into();
                 new_config
                     .keepers
                     .insert(*zone_id, new_config.max_used_keeper_id);

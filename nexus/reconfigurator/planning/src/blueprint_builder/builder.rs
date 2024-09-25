@@ -344,8 +344,8 @@ impl<'a> BlueprintBuilder<'a> {
         });
 
         // If we have the clickhouse cluster setup enabled via policy and we
-        // don't yet have a `ClickhouseClusterConfiguration`then we must create
-        // one and feed it to our `ClickhouseAllocator`
+        // don't yet have a `ClickhouseClusterConfiguration`, then we must create
+        // one and feed it to our `ClickhouseAllocator`.
         let clickhouse_allocator = if input.clickhouse_cluster_enabled() {
             let parent_config = parent_blueprint
                 .clickhouse_cluster_config
