@@ -6704,7 +6704,7 @@ dependencies = [
  "pq-sys",
  "pretty_assertions",
  "progenitor-client",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=a9c5fdac442fa6fd5a65e413ea874fe3c62c3fd9)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=cee2adcf5d28c69e514b8d1fbfeffc279f39cb24)",
  "rand",
  "rcgen",
  "ref-cast",
@@ -6962,7 +6962,7 @@ dependencies = [
  "oximeter-producer",
  "oxnet",
  "pretty_assertions",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=a9c5fdac442fa6fd5a65e413ea874fe3c62c3fd9)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=cee2adcf5d28c69e514b8d1fbfeffc279f39cb24)",
  "propolis-mock-server",
  "rand",
  "rcgen",
@@ -8647,7 +8647,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=a9c5fdac442fa6fd5a65e413ea874fe3c62c3fd9#a9c5fdac442fa6fd5a65e413ea874fe3c62c3fd9"
+source = "git+https://github.com/oxidecomputer/propolis?rev=cee2adcf5d28c69e514b8d1fbfeffc279f39cb24#cee2adcf5d28c69e514b8d1fbfeffc279f39cb24"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
@@ -8668,7 +8668,7 @@ dependencies = [
 [[package]]
 name = "propolis-mock-server"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=a9c5fdac442fa6fd5a65e413ea874fe3c62c3fd9#a9c5fdac442fa6fd5a65e413ea874fe3c62c3fd9"
+source = "git+https://github.com/oxidecomputer/propolis?rev=cee2adcf5d28c69e514b8d1fbfeffc279f39cb24#cee2adcf5d28c69e514b8d1fbfeffc279f39cb24"
 dependencies = [
  "anyhow",
  "atty",
@@ -8678,7 +8678,7 @@ dependencies = [
  "futures",
  "hyper 0.14.30",
  "progenitor",
- "propolis_types 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=a9c5fdac442fa6fd5a65e413ea874fe3c62c3fd9)",
+ "propolis_types 0.0.0 (git+https://github.com/oxidecomputer/propolis?rev=cee2adcf5d28c69e514b8d1fbfeffc279f39cb24)",
  "rand",
  "reqwest",
  "schemars",
@@ -8719,7 +8719,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=a9c5fdac442fa6fd5a65e413ea874fe3c62c3fd9#a9c5fdac442fa6fd5a65e413ea874fe3c62c3fd9"
+source = "git+https://github.com/oxidecomputer/propolis?rev=cee2adcf5d28c69e514b8d1fbfeffc279f39cb24#cee2adcf5d28c69e514b8d1fbfeffc279f39cb24"
 dependencies = [
  "schemars",
  "serde",
@@ -10300,7 +10300,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
- "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=a9c5fdac442fa6fd5a65e413ea874fe3c62c3fd9)",
+ "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=cee2adcf5d28c69e514b8d1fbfeffc279f39cb24)",
  "rcgen",
  "schemars",
  "serde",

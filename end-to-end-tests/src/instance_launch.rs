@@ -7,7 +7,7 @@ use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use oxide_client::types::{
     ByteCount, DiskCreate, DiskSource, ExternalIp, ExternalIpCreate,
     InstanceCpuCount, InstanceCreate, InstanceDiskAttachment,
-    InstanceNetworkInterfaceAttachment, InstanceState, SshKeyCreate,
+    InstanceNetworkInterfaceAttachment, InstanceState, NameOrId, SshKeyCreate,
 };
 use oxide_client::{ClientDisksExt, ClientInstancesExt, ClientSessionExt};
 use russh::{ChannelMsg, Disconnect};
@@ -69,6 +69,7 @@ async fn instance_launch() -> Result<()> {
             disks: vec![InstanceDiskAttachment::Attach {
                 name: disk_name.clone(),
             }],
+            boot_disk: Some(NameOrId::Name(disk_name.clone())),
             network_interfaces: InstanceNetworkInterfaceAttachment::Default,
             external_ips: vec![ExternalIpCreate::Ephemeral { pool: None }],
             user_data: String::new(),
