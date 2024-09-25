@@ -1406,6 +1406,7 @@ mod test {
             &logctx.log,
             &blueprint1,
             &input,
+            &collection,
             TEST_NAME,
         )
         .expect("failed to build blueprint builder");
@@ -1423,6 +1424,7 @@ mod test {
             &logctx.log,
             &blueprint1,
             &input,
+            &collection,
             TEST_NAME,
         )
         .expect("failed to build blueprint builder");
