@@ -763,7 +763,7 @@ impl<'a> BlueprintBuilder<'a> {
                     CompressionAlgorithm::Off,
                 );
                 datasets_builder.ensure(
-                    DatasetName::new(zpool, DatasetKind::ZoneRoot),
+                    DatasetName::new(zpool, DatasetKind::TransientZoneRoot),
                     address,
                     None,
                     None,
@@ -783,7 +783,7 @@ impl<'a> BlueprintBuilder<'a> {
                     datasets_builder.ensure(
                         DatasetName::new(
                             fs_zpool.clone(),
-                            DatasetKind::Zone { name },
+                            DatasetKind::TransientZone { name },
                         ),
                         address,
                         None,
@@ -2367,8 +2367,11 @@ pub mod test {
                     dataset.disposition,
                     BlueprintDatasetDisposition::InService
                 );
-                let dataset =
-                    find_dataset(&datasets, &zpool, DatasetKind::ZoneRoot);
+                let dataset = find_dataset(
+                    &datasets,
+                    &zpool,
+                    DatasetKind::TransientZoneRoot,
+                );
                 assert_eq!(
                     dataset.disposition,
                     BlueprintDatasetDisposition::InService
@@ -2391,7 +2394,8 @@ pub mod test {
             let datasets = datasets_for_sled(&blueprint, sled_id);
 
             let zpool = zone_config.filesystem_pool.as_ref().unwrap();
-            let kind = DatasetKind::Zone { name: zone_name(&zone_config) };
+            let kind =
+                DatasetKind::TransientZone { name: zone_name(&zone_config) };
             let dataset = find_dataset(&datasets, &zpool, kind);
             assert_eq!(
                 dataset.disposition,

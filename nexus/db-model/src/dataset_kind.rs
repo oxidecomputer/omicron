@@ -24,8 +24,8 @@ impl_enum_type!(
     ClickhouseServer => b"clickhouse_server"
     ExternalDns => b"external_dns"
     InternalDns => b"internal_dns"
-    ZoneRoot => b"zone_root"
-    Zone => b"zone"
+    TransientZoneRoot => b"zone_root"
+    TransientZone => b"zone"
     Debug => b"debug"
 );
 
@@ -43,10 +43,12 @@ impl DatasetKind {
             (Self::ClickhouseServer, None) => ApiKind::ClickhouseServer,
             (Self::ExternalDns, None) => ApiKind::ExternalDns,
             (Self::InternalDns, None) => ApiKind::InternalDns,
-            (Self::ZoneRoot, None) => ApiKind::ZoneRoot,
-            (Self::Zone, Some(name)) => ApiKind::Zone { name },
+            (Self::TransientZoneRoot, None) => ApiKind::TransientZoneRoot,
+            (Self::TransientZone, Some(name)) => {
+                ApiKind::TransientZone { name }
+            }
             (Self::Debug, None) => ApiKind::Debug,
-            (Self::Zone, None) => {
+            (Self::TransientZone, None) => {
                 return Err(Error::internal_error("Zone kind needs name"))
             }
             (_, Some(_)) => {
@@ -78,12 +80,16 @@ impl From<&internal::shared::DatasetKind> for DatasetKind {
             internal::shared::DatasetKind::InternalDns => {
                 DatasetKind::InternalDns
             }
-            internal::shared::DatasetKind::ZoneRoot => DatasetKind::ZoneRoot,
+            internal::shared::DatasetKind::TransientZoneRoot => {
+                DatasetKind::TransientZoneRoot
+            }
             // Enums in the database do not have associated data, so this drops
             // the "name" of the zone and only considers the type.
             //
             // The zone name, if it exists, is stored in a separate column.
-            internal::shared::DatasetKind::Zone { .. } => DatasetKind::Zone,
+            internal::shared::DatasetKind::TransientZone { .. } => {
+                DatasetKind::TransientZone
+            }
             internal::shared::DatasetKind::Debug => DatasetKind::Debug,
         }
     }

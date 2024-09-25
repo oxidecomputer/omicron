@@ -64,7 +64,7 @@ impl Dataset {
         let kind = DatasetKind::from(&api_kind);
         let (size_used, zone_name) = match api_kind {
             ApiDatasetKind::Crucible => (Some(0), None),
-            ApiDatasetKind::Zone { name } => (None, Some(name)),
+            ApiDatasetKind::TransientZone { name } => (None, Some(name)),
             _ => (None, None),
         };
 
@@ -96,10 +96,19 @@ impl Dataset {
 impl From<BlueprintDatasetConfig> for Dataset {
     fn from(bp: BlueprintDatasetConfig) -> Self {
         let kind = DatasetKind::from(&bp.kind);
-        let (size_used, zone_name) = match bp.kind {
-            ApiDatasetKind::Crucible => (Some(0), None),
-            ApiDatasetKind::Zone { name } => (None, Some(name)),
-            _ => (None, None),
+        let zone_name = bp.kind.zone_name().map(|s| s.to_string());
+        // Only Crucible uses this "size_used" field.
+        let size_used = match bp.kind {
+            ApiDatasetKind::Crucible => Some(0),
+            ApiDatasetKind::Cockroach
+            | ApiDatasetKind::Clickhouse
+            | ApiDatasetKind::ClickhouseKeeper
+            | ApiDatasetKind::ClickhouseServer
+            | ApiDatasetKind::ExternalDns
+            | ApiDatasetKind::InternalDns
+            | ApiDatasetKind::TransientZone { .. }
+            | ApiDatasetKind::TransientZoneRoot
+            | ApiDatasetKind::Debug => None,
         };
         let addr = bp.address;
         Self {

@@ -389,7 +389,7 @@ mod tests {
                 disposition: BlueprintDatasetDisposition::InService,
                 id: DatasetUuid::new_v4(),
                 pool: ZpoolName::new_external(new_zpool_id),
-                kind: DatasetKind::ZoneRoot,
+                kind: DatasetKind::TransientZoneRoot,
                 address: None,
                 quota: None,
                 reservation: None,
