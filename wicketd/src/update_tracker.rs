@@ -1897,8 +1897,6 @@ impl UpdateContext {
             Some(RotInterrogation {
                 // We always update slot 1
                 slot_to_update: 1,
-                //available_artifacts,
-                //available_artifacts_version,
                 artifact_to_apply: artifact_to_apply.clone(),
                 sp: self.sp,
                 active_version,

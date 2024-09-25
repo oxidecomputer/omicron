@@ -1128,8 +1128,7 @@ fn append_caboose(
     let SpComponentCaboose {
         board,
         git_commit,
-        // Currently `name` is always the same as `board`, so we'll skip it.
-        name: _,
+        name,
         sign,
         version,
         epoch,
@@ -1150,6 +1149,14 @@ fn append_caboose(
             prefix.clone(),
             Span::styled("Board: ", label_style),
             Span::styled(board.clone(), ok_style),
+        ]
+        .into(),
+    );
+    spans.push(
+        vec![
+            prefix.clone(),
+            Span::styled("Name: ", label_style),
+            Span::styled(name.clone(), ok_style),
         ]
         .into(),
     );
