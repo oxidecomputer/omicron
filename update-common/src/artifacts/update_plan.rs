@@ -1875,6 +1875,81 @@ mod tests {
         logctx.cleanup_successful();
     }
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_bad_hubris_cabooses() {
+        const VERSION_0: SemverVersion = SemverVersion::new(0, 0, 0);
+
+        let logctx = test_setup_log("test_bad_hubris_cabooses");
+
+        let mut plan_builder =
+            UpdatePlanBuilder::new("0.0.0".parse().unwrap(), &logctx.log)
+                .unwrap();
+
+        let gimlet_rot = make_bad_rot_image("gimlet");
+        let psc_rot = make_bad_rot_image("psc");
+        let sidecar_rot = make_bad_rot_image("sidecar");
+
+        for (kind, artifact) in [
+            (KnownArtifactKind::GimletRot, &gimlet_rot),
+            (KnownArtifactKind::PscRot, &psc_rot),
+            (KnownArtifactKind::SwitchRot, &sidecar_rot),
+        ] {
+            let data = &artifact.tarball;
+            let hash = ArtifactHash(Sha256::digest(data).into());
+            let id = ArtifactId {
+                name: format!("{kind:?}"),
+                version: VERSION_0,
+                kind: kind.into(),
+            };
+            match plan_builder
+                .add_artifact(
+                    id,
+                    hash,
+                    futures::stream::iter([Ok(data.clone())]),
+                )
+                .await
+            {
+                Ok(_) => panic!("expected to fail"),
+                Err(_) => (),
+            }
+        }
+
+        let gimlet_rot_bootloader = make_fake_bad_rot_image("test-gimlet-a");
+        let psc_rot_bootloader = make_fake_bad_rot_image("test-psc-a");
+        let switch_rot_bootloader = make_fake_bad_rot_image("test-sidecar-a");
+        for (kind, artifact) in [
+            (
+                KnownArtifactKind::GimletRotBootloader,
+                gimlet_rot_bootloader.clone(),
+            ),
+            (KnownArtifactKind::PscRotBootloader, psc_rot_bootloader.clone()),
+            (
+                KnownArtifactKind::SwitchRotBootloader,
+                switch_rot_bootloader.clone(),
+            ),
+        ] {
+            let hash = ArtifactHash(Sha256::digest(&artifact).into());
+            let id = ArtifactId {
+                name: format!("{kind:?}"),
+                version: VERSION_0,
+                kind: kind.into(),
+            };
+            match plan_builder
+                .add_artifact(
+                    id,
+                    hash,
+                    futures::stream::iter([Ok(Bytes::from(artifact))]),
+                )
+                .await
+            {
+                Ok(_) => panic!("unexpected success"),
+                Err(_) => (),
+            }
+        }
+
+        logctx.cleanup_successful();
+    }
+
     async fn read_to_vec(data: &ExtractedArtifactDataHandle) -> Vec<u8> {
         let mut buf = Vec::with_capacity(data.file_size());
         let mut stream = data.reader_stream().await.unwrap();
