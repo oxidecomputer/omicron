@@ -2446,13 +2446,17 @@ fn artifact_version(
                 None => return "UNKNOWN".to_string(),
             };
             let cnt = artifact_versions.len();
+            // We loop through all possible artifact versions for a
+            // given artifact type. Right now only RoT artifacts
+            // will have a sign value.
             for a in artifact_versions {
                 match (&a.sign, component.rot_sign()) {
-                    // This matches SP components and old RoT repos
+                    // No sign anywhere, this is for SP components
                     (None, None) => return a.version.to_string(),
                     // if we have a version that's tagged with sign data but
                     // we can't read from the caboose check if we can fall
-                    // back to just returning the version
+                    // back to just returning the version. This matches
+                    // very old repositories
                     (Some(_), None) => {
                         if multiple && cnt > 1 {
                             return "UNKNOWN (MISSING SIGN)".to_string();
@@ -2461,8 +2465,11 @@ fn artifact_version(
                         }
                     }
                     // If something isn't tagged with a sign just
-                    // pass on the version
+                    // pass on the version. This should only match
+                    // very old repositories/testing configurations
                     (None, Some(_)) => return a.version.to_string(),
+                    // The interesting case to make sure the sign
+                    // matches both the component and the caboose
                     (Some(s), Some(c)) => {
                         if *s == c {
                             return a.version.to_string();
