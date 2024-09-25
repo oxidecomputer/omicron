@@ -18,7 +18,6 @@ use crate::inventory::Collection;
 pub use crate::inventory::SourceNatConfig;
 pub use crate::inventory::ZpoolName;
 use derive_more::From;
-use newtype_uuid::GenericUuid;
 use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneType;
 use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
@@ -71,6 +70,8 @@ pub use planning_input::Policy;
 pub use planning_input::SledDetails;
 pub use planning_input::SledDisk;
 pub use planning_input::SledFilter;
+pub use planning_input::SledLookupError;
+pub use planning_input::SledLookupErrorKind;
 pub use planning_input::SledResources;
 pub use planning_input::ZpoolFilter;
 pub use zone_type::blueprint_zone_type;
@@ -612,7 +613,7 @@ impl ZoneSortKey for OmicronZoneConfig {
     }
 
     fn id(&self) -> OmicronZoneUuid {
-        OmicronZoneUuid::from_untyped_uuid(self.id)
+        self.id
     }
 }
 
@@ -650,7 +651,7 @@ pub struct BlueprintZoneConfig {
 impl From<BlueprintZoneConfig> for OmicronZoneConfig {
     fn from(z: BlueprintZoneConfig) -> Self {
         Self {
-            id: z.id.into_untyped_uuid(),
+            id: z.id,
             underlay_address: z.underlay_address,
             filesystem_pool: z.filesystem_pool,
             zone_type: z.zone_type.into(),

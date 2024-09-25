@@ -98,6 +98,7 @@ use super::tasks::dns_config;
 use super::tasks::dns_propagation;
 use super::tasks::dns_servers;
 use super::tasks::external_endpoints;
+use super::tasks::instance_reincarnation;
 use super::tasks::instance_updater;
 use super::tasks::instance_watcher;
 use super::tasks::inventory_collection;
@@ -128,6 +129,7 @@ use nexus_config::DnsTasksConfig;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use oximeter::types::ProducerRegistry;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -160,6 +162,7 @@ pub struct BackgroundTasks {
     pub task_region_replacement_driver: Activator,
     pub task_instance_watcher: Activator,
     pub task_instance_updater: Activator,
+    pub task_instance_reincarnation: Activator,
     pub task_service_firewall_propagation: Activator,
     pub task_abandoned_vmm_reaper: Activator,
     pub task_vpc_route_manager: Activator,
@@ -245,6 +248,7 @@ impl BackgroundTasksInitializer {
             task_region_replacement_driver: Activator::new(),
             task_instance_watcher: Activator::new(),
             task_instance_updater: Activator::new(),
+            task_instance_reincarnation: Activator::new(),
             task_service_firewall_propagation: Activator::new(),
             task_abandoned_vmm_reaper: Activator::new(),
             task_vpc_route_manager: Activator::new(),
@@ -311,6 +315,7 @@ impl BackgroundTasksInitializer {
             task_region_replacement_driver,
             task_instance_watcher,
             task_instance_updater,
+            task_instance_reincarnation,
             task_service_firewall_propagation,
             task_abandoned_vmm_reaper,
             task_vpc_route_manager,
@@ -669,6 +674,27 @@ impl BackgroundTasksInitializer {
             });
         }
 
+        // Background task: schedule restart sagas for failed instances that can
+        // be automatically restarted.
+        {
+            let reincarnator =
+                instance_reincarnation::InstanceReincarnation::new(
+                    datastore.clone(),
+                    sagas.clone(),
+                    config.instance_reincarnation.disable,
+                );
+            driver.register(TaskDefinition {
+                name: "instance_reincarnation",
+                description: "schedules start sagas for failed instances that \
+                    can be automatically restarted",
+                period: config.instance_reincarnation.period_secs,
+                task_impl: Box::new(reincarnator),
+                opctx: opctx.child(BTreeMap::new()),
+                watchers: vec![],
+                activator: task_instance_reincarnation,
+            });
+        }
+
         // Background task: service firewall rule propagation
         driver.register(TaskDefinition {
             name: "service_firewall_rule_propagation",
@@ -719,7 +745,7 @@ impl BackgroundTasksInitializer {
         {
             let task_impl = Box::new(saga_recovery::SagaRecovery::new(
                 datastore.clone(),
-                nexus_db_model::SecId(args.nexus_id),
+                nexus_db_model::SecId::from(args.nexus_id),
                 args.saga_recovery,
             ));
 
@@ -820,7 +846,7 @@ pub struct BackgroundTasksData {
     /// rack identifier
     pub rack_id: Uuid,
     /// nexus identifier
-    pub nexus_id: Uuid,
+    pub nexus_id: OmicronZoneUuid,
     /// internal DNS DNS resolver, used when tasks need to contact other
     /// internal services
     pub resolver: internal_dns::resolver::Resolver,

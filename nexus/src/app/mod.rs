@@ -30,6 +30,7 @@ use omicron_common::address::MGD_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::shared::SwitchLocation;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use oximeter_producer::Server as ProducerServer;
 use slog::Logger;
 use std::collections::HashMap;
@@ -120,7 +121,7 @@ pub const MAX_SSH_KEYS_PER_INSTANCE: u32 = 100;
 /// Manages an Oxide fleet -- the heart of the control plane
 pub struct Nexus {
     /// uuid for this nexus instance.
-    id: Uuid,
+    id: OmicronZoneUuid,
 
     /// uuid for this rack
     rack_id: Uuid,
@@ -552,8 +553,8 @@ impl Nexus {
     }
 
     /// Return the ID for this Nexus instance.
-    pub fn id(&self) -> &Uuid {
-        &self.id
+    pub fn id(&self) -> OmicronZoneUuid {
+        self.id
     }
 
     /// Return the rack ID for this Nexus instance.

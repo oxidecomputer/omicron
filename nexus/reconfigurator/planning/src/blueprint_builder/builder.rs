@@ -25,6 +25,7 @@ use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::CockroachDbPreserveDowngrade;
 use nexus_types::deployment::DiskFilter;
+use nexus_types::deployment::OmicronZoneExternalFloatingAddr;
 use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::deployment::OmicronZoneExternalSnatIp;
 use nexus_types::deployment::PlanningInput;
@@ -34,6 +35,7 @@ use nexus_types::deployment::SledResources;
 use nexus_types::deployment::ZpoolFilter;
 use nexus_types::deployment::ZpoolName;
 use nexus_types::external_api::views::SledState;
+use nexus_types::inventory::Collection;
 use omicron_common::address::get_internal_dns_server_addresses;
 use omicron_common::address::get_sled_address;
 use omicron_common::address::get_switch_zone_address;
@@ -69,6 +71,7 @@ use std::fmt;
 use std::hash::Hash;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
+use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use thiserror::Error;
 use typed_rng::TypedUuidRng;
@@ -95,6 +98,8 @@ pub enum Error {
     NoNexusZonesInParentBlueprint,
     #[error("no Boundary NTP zones exist in parent blueprint")]
     NoBoundaryNtpZonesInParentBlueprint,
+    #[error("no external DNS IP addresses are available")]
+    NoExternalDnsIpAvailable,
     #[error("no external service IP addresses are available")]
     NoExternalServiceIpAvailable,
     #[error("no system MAC addresses are available")]
@@ -117,6 +122,8 @@ pub enum Error {
         "can only have {MAX_INTERNAL_DNS_REDUNDANCY} internal DNS servers"
     )]
     TooManyDnsServers,
+    #[error("planner produced too many {kind:?} zones")]
+    TooManyZones { kind: ZoneKind },
 }
 
 /// Describes whether an idempotent "ensure" operation resulted in action taken
@@ -203,6 +210,10 @@ pub struct BlueprintBuilder<'a> {
 
     /// previous blueprint, on which this one will be based
     parent_blueprint: &'a Blueprint,
+
+    /// The latest inventory collection
+    #[allow(unused)]
+    collection: &'a Collection,
 
     // These fields are used to allocate resources for sleds.
     input: &'a PlanningInput,
@@ -294,6 +305,7 @@ impl<'a> BlueprintBuilder<'a> {
         log: &Logger,
         parent_blueprint: &'a Blueprint,
         input: &'a PlanningInput,
+        inventory: &'a Collection,
         creator: &str,
     ) -> anyhow::Result<BlueprintBuilder<'a>> {
         let log = log.new(o!(
@@ -334,6 +346,7 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(BlueprintBuilder {
             log,
             parent_blueprint,
+            collection: inventory,
             input,
             sled_ip_allocators: BTreeMap::new(),
             external_networking,
@@ -695,6 +708,97 @@ impl<'a> BlueprintBuilder<'a> {
         }
 
         Ok(EnsureMultiple::Changed { added: to_add, removed: 0 })
+    }
+
+    fn sled_add_zone_external_dns(
+        &mut self,
+        sled_id: SledUuid,
+    ) -> Result<Ensure, Error> {
+        let id = self.rng.zone_rng.next();
+        let ExternalNetworkingChoice {
+            external_ip,
+            nic_ip,
+            nic_subnet,
+            nic_mac,
+        } = self.external_networking.for_new_external_dns()?;
+        let nic = NetworkInterface {
+            id: self.rng.network_interface_rng.next(),
+            kind: NetworkInterfaceKind::Service { id: id.into_untyped_uuid() },
+            name: format!("external-dns-{id}").parse().unwrap(),
+            ip: nic_ip,
+            mac: nic_mac,
+            subnet: nic_subnet,
+            vni: Vni::SERVICES_VNI,
+            primary: true,
+            slot: 0,
+            transit_ips: vec![],
+        };
+
+        let underlay_address = self.sled_alloc_ip(sled_id)?;
+        let http_address =
+            SocketAddrV6::new(underlay_address, DNS_HTTP_PORT, 0, 0);
+        let dns_address = OmicronZoneExternalFloatingAddr {
+            id: self.rng.external_ip_rng.next(),
+            addr: SocketAddr::new(external_ip, DNS_PORT),
+        };
+        let pool_name =
+            self.sled_select_zpool(sled_id, ZoneKind::ExternalDns)?;
+        let zone_type =
+            BlueprintZoneType::ExternalDns(blueprint_zone_type::ExternalDns {
+                dataset: OmicronZoneDataset { pool_name: pool_name.clone() },
+                http_address,
+                dns_address,
+                nic,
+            });
+
+        let zone = BlueprintZoneConfig {
+            disposition: BlueprintZoneDisposition::InService,
+            id,
+            underlay_address,
+            filesystem_pool: Some(pool_name),
+            zone_type,
+        };
+        self.sled_add_zone(sled_id, zone)?;
+        Ok(Ensure::Added)
+    }
+
+    pub fn sled_ensure_zone_multiple_external_dns(
+        &mut self,
+        sled_id: SledUuid,
+        desired_zone_count: usize,
+    ) -> Result<EnsureMultiple, Error> {
+        // How many external DNS zones do we want to add?
+        let count =
+            self.sled_num_running_zones_of_kind(sled_id, ZoneKind::ExternalDns);
+        let to_add = match desired_zone_count.checked_sub(count) {
+            Some(0) => return Ok(EnsureMultiple::NotNeeded),
+            Some(n) => n,
+            None => {
+                return Err(Error::Planner(anyhow!(
+                    "removing an external DNS zone not yet supported \
+                     (sled {sled_id} has {count}; \
+                     planner wants {desired_zone_count})"
+                )));
+            }
+        };
+
+        // Running out of DNS addresses is not a fatal error. This happens,
+        // for instance, when a sled is first marked expunged, since the
+        // available addresses are collected before planning, but the
+        // zones on the sled aren't marked expunged until after planning
+        // has begun. The *next* round of planning will add them back in,
+        // since it will see the zones as expunged and recycle their
+        // addresses.
+        let mut added = 0;
+        for _ in 0..to_add {
+            match self.sled_add_zone_external_dns(sled_id) {
+                Ok(_) => added += 1,
+                Err(Error::NoExternalDnsIpAvailable) => break,
+                Err(e) => return Err(e),
+            }
+        }
+
+        Ok(EnsureMultiple::Changed { added, removed: 0 })
     }
 
     pub fn sled_ensure_zone_ntp(
@@ -1259,16 +1363,46 @@ impl<'a> BlueprintBuilder<'a> {
         Err(Error::NoAvailableZpool { sled_id, kind: zone_kind })
     }
 
+    /// Returns the resources for a sled that hasn't been decommissioned.
     fn sled_resources(
         &self,
         sled_id: SledUuid,
     ) -> Result<&SledResources, Error> {
-        self.input.sled_resources(&sled_id).ok_or_else(|| {
-            Error::Planner(anyhow!(
-                "attempted to use sled that is not currently known: {}",
-                sled_id
-            ))
-        })
+        let details = self
+            .input
+            .sled_lookup(SledFilter::Commissioned, sled_id)
+            .map_err(|error| {
+                Error::Planner(anyhow!(error).context(format!(
+                    "for sled {sled_id}, error looking up resources"
+                )))
+            })?;
+        Ok(&details.resources)
+    }
+
+    /// Determine the number of desired external DNS zones by counting
+    /// unique addresses in the parent blueprint.
+    ///
+    /// TODO-cleanup: Remove when external DNS addresses are in the policy.
+    pub fn count_parent_external_dns_zones(&self) -> usize {
+        self.parent_blueprint
+            .all_omicron_zones(BlueprintZoneFilter::All)
+            .filter_map(|(_id, zone)| match &zone.zone_type {
+                BlueprintZoneType::ExternalDns(dns) => {
+                    Some(dns.dns_address.addr.ip())
+                }
+                _ => None,
+            })
+            .collect::<HashSet<IpAddr>>()
+            .len()
+    }
+
+    /// Allow a test to manually add an external DNS address, which could
+    /// ordinarily only come from RSS.
+    ///
+    /// TODO-cleanup: Remove when external DNS addresses are in the policy.
+    #[cfg(test)]
+    pub fn add_external_dns_ip(&mut self, addr: IpAddr) {
+        self.external_networking.add_external_dns_ip(addr);
     }
 }
 
@@ -1530,6 +1664,7 @@ pub mod test {
     use crate::example::ExampleSystem;
     use crate::system::SledBuilder;
     use expectorate::assert_contents;
+    use nexus_inventory::CollectionBuilder;
     use nexus_types::deployment::BlueprintOrCollectionZoneConfig;
     use nexus_types::deployment::BlueprintZoneFilter;
     use nexus_types::deployment::OmicronZoneNetworkResources;
@@ -1542,6 +1677,7 @@ pub mod test {
     pub const DEFAULT_N_SLEDS: usize = 3;
 
     /// Checks various conditions that should be true for all blueprints
+    #[track_caller]
     pub fn verify_blueprint(blueprint: &Blueprint) {
         // There should be no duplicate underlay IPs.
         let mut underlay_ips: BTreeMap<Ipv6Addr, &BlueprintZoneConfig> =
@@ -1592,6 +1728,34 @@ pub mod test {
         }
     }
 
+    #[track_caller]
+    pub fn assert_planning_makes_no_changes(
+        log: &Logger,
+        blueprint: &Blueprint,
+        input: &PlanningInput,
+        test_name: &'static str,
+    ) {
+        let collection = CollectionBuilder::new("test").build();
+        let builder = BlueprintBuilder::new_based_on(
+            &log,
+            &blueprint,
+            &input,
+            &collection,
+            test_name,
+        )
+        .expect("failed to create builder");
+        let child_blueprint = builder.build();
+        verify_blueprint(&child_blueprint);
+        let diff = child_blueprint.diff_since_blueprint(&blueprint);
+        println!(
+            "diff between blueprints (expected no changes):\n{}",
+            diff.display()
+        );
+        assert_eq!(diff.sleds_added.len(), 0);
+        assert_eq!(diff.sleds_removed.len(), 0);
+        assert_eq!(diff.sleds_modified.len(), 0);
+    }
+
     #[test]
     fn test_initial() {
         // Test creating a blueprint from a collection and verifying that it
@@ -1619,24 +1783,13 @@ pub mod test {
         assert_eq!(diff.sleds_removed.len(), 0);
         assert_eq!(diff.sleds_modified.len(), 0);
 
-        // Test a no-op blueprint.
-        let builder = BlueprintBuilder::new_based_on(
+        // Test a no-op planning iteration.
+        assert_planning_makes_no_changes(
             &logctx.log,
             &blueprint_initial,
             &input,
-            "test_basic",
-        )
-        .expect("failed to create builder");
-        let blueprint = builder.build();
-        verify_blueprint(&blueprint);
-        let diff = blueprint.diff_since_blueprint(&blueprint_initial);
-        println!(
-            "initial blueprint -> next blueprint (expected no changes):\n{}",
-            diff.display()
+            TEST_NAME,
         );
-        assert_eq!(diff.sleds_added.len(), 0);
-        assert_eq!(diff.sleds_removed.len(), 0);
-        assert_eq!(diff.sleds_modified.len(), 0);
 
         logctx.cleanup_successful();
     }
@@ -1654,6 +1807,7 @@ pub mod test {
             &logctx.log,
             blueprint1,
             &example.input,
+            &example.collection,
             "test_basic",
         )
         .expect("failed to create builder");
@@ -1690,12 +1844,15 @@ pub mod test {
             &logctx.log,
             &blueprint2,
             &input,
+            &example.collection,
             "test_basic",
         )
         .expect("failed to create builder");
         builder.sled_ensure_zone_ntp(new_sled_id).unwrap();
-        // TODO-cleanup use `TypedUuid` everywhere
-        let new_sled_resources = input.sled_resources(&new_sled_id).unwrap();
+        let new_sled_resources = &input
+            .sled_lookup(SledFilter::Commissioned, new_sled_id)
+            .unwrap()
+            .resources;
         for pool_id in new_sled_resources.zpools.keys() {
             builder.sled_ensure_zone_crucible(new_sled_id, *pool_id).unwrap();
         }
@@ -1783,6 +1940,14 @@ pub mod test {
                 .collect()
         );
 
+        // Test a no-op planning iteration.
+        assert_planning_makes_no_changes(
+            &logctx.log,
+            &blueprint3,
+            &input,
+            TEST_NAME,
+        );
+
         logctx.cleanup_successful();
     }
 
@@ -1791,7 +1956,7 @@ pub mod test {
         static TEST_NAME: &str =
             "blueprint_builder_test_prune_decommissioned_sleds";
         let logctx = test_setup_log(TEST_NAME);
-        let (_, input, mut blueprint1) =
+        let (collection, input, mut blueprint1) =
             example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
         verify_blueprint(&blueprint1);
 
@@ -1820,6 +1985,7 @@ pub mod test {
             &logctx.log,
             &blueprint1,
             &input,
+            &collection,
             "test_prune_decommissioned_sleds",
         )
         .expect("created builder")
@@ -1846,6 +2012,7 @@ pub mod test {
             &logctx.log,
             &blueprint2,
             &input,
+            &collection,
             "test_prune_decommissioned_sleds",
         )
         .expect("created builder")
@@ -1860,6 +2027,14 @@ pub mod test {
             None,
         );
 
+        // Test a no-op planning iteration.
+        assert_planning_makes_no_changes(
+            &logctx.log,
+            &blueprint3,
+            &input,
+            TEST_NAME,
+        );
+
         logctx.cleanup_successful();
     }
 
@@ -1867,7 +2042,8 @@ pub mod test {
     fn test_add_physical_disks() {
         static TEST_NAME: &str = "blueprint_builder_test_add_physical_disks";
         let logctx = test_setup_log(TEST_NAME);
-        let (_, input, _) = example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+        let (collection, input, _) =
+            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
         let input = {
             // Clear out the external networking records from `input`, since
             // we're building an empty blueprint.
@@ -1890,6 +2066,7 @@ pub mod test {
                 &logctx.log,
                 &parent,
                 &input,
+                &collection,
                 "test",
             )
             .expect("failed to create builder");
@@ -1970,6 +2147,7 @@ pub mod test {
             &logctx.log,
             &parent,
             &input,
+            &collection,
             "test",
         )
         .expect("failed to create builder");
@@ -2070,6 +2248,7 @@ pub mod test {
                 &logctx.log,
                 &parent,
                 &input,
+                &collection,
                 "test",
             )
             .expect("failed to create builder");
@@ -2088,6 +2267,7 @@ pub mod test {
                 &logctx.log,
                 &parent,
                 &input,
+                &collection,
                 "test",
             )
             .expect("failed to create builder");
@@ -2121,6 +2301,7 @@ pub mod test {
                 &logctx.log,
                 &parent,
                 &input,
+                &collection,
                 "test",
             )
             .expect("failed to create builder");
@@ -2151,7 +2332,7 @@ pub mod test {
             "blueprint_builder_test_invalid_parent_blueprint_\
              two_zones_with_same_external_ip";
         let logctx = test_setup_log(TEST_NAME);
-        let (_, input, mut parent) =
+        let (collection, input, mut parent) =
             example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
 
         // We should fail if the parent blueprint claims to contain two
@@ -2185,6 +2366,7 @@ pub mod test {
             &logctx.log,
             &parent,
             &input,
+            &collection,
             "test",
         ) {
             Ok(_) => panic!("unexpected success"),
@@ -2203,7 +2385,7 @@ pub mod test {
             "blueprint_builder_test_invalid_parent_blueprint_\
              two_nexus_zones_with_same_nic_ip";
         let logctx = test_setup_log(TEST_NAME);
-        let (_, input, mut parent) =
+        let (collection, input, mut parent) =
             example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
 
         // We should fail if the parent blueprint claims to contain two
@@ -2237,6 +2419,7 @@ pub mod test {
             &logctx.log,
             &parent,
             &input,
+            &collection,
             "test",
         ) {
             Ok(_) => panic!("unexpected success"),
@@ -2255,7 +2438,7 @@ pub mod test {
             "blueprint_builder_test_invalid_parent_blueprint_\
              two_zones_with_same_vnic_mac";
         let logctx = test_setup_log(TEST_NAME);
-        let (_, input, mut parent) =
+        let (collection, input, mut parent) =
             example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
 
         // We should fail if the parent blueprint claims to contain two
@@ -2289,6 +2472,7 @@ pub mod test {
             &logctx.log,
             &parent,
             &input,
+            &collection,
             "test",
         ) {
             Ok(_) => panic!("unexpected success"),
@@ -2307,7 +2491,8 @@ pub mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Discard the example blueprint and start with an empty one.
-        let (_, input, _) = example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+        let (collection, input, _) =
+            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
         let input = {
             // Clear out the external networking records from `input`, since
             // we're building an empty blueprint.
@@ -2340,6 +2525,7 @@ pub mod test {
             &logctx.log,
             &parent,
             &input,
+            &collection,
             "test",
         )
         .expect("constructed builder");
@@ -2367,12 +2553,21 @@ pub mod test {
             num_sled_zpools
         );
 
+        // Test a no-op planning iteration.
+        assert_planning_makes_no_changes(
+            &logctx.log,
+            &blueprint,
+            &input,
+            TEST_NAME,
+        );
+
         // If we instead ask for one more zone than there are zpools, we should
         // get a zpool allocation error.
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &parent,
             &input,
+            &collection,
             "test",
         )
         .expect("constructed builder");

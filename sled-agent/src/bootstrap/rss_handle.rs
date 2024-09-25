@@ -19,6 +19,7 @@ use sled_agent_types::rack_ops::RssStep;
 use sled_agent_types::sled::StartSledAgentRequest;
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
+use sprockets_tls::keys::SprocketsConfig;
 use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 use tokio::sync::mpsc;
@@ -46,13 +47,14 @@ impl RssHandle {
     /// Executes the rack setup service until it has completed
     pub(super) async fn run_rss(
         log: &Logger,
+        sprockets: SprocketsConfig,
         config: RackInitializeRequest,
         our_bootstrap_address: Ipv6Addr,
         storage_manager: StorageHandle,
         bootstore: bootstore::NodeHandle,
         step_tx: watch::Sender<RssStep>,
     ) -> Result<(), SetupServiceError> {
-        let (tx, rx) = rss_channel(our_bootstrap_address);
+        let (tx, rx) = rss_channel(our_bootstrap_address, sprockets);
 
         let rss = RackSetupService::new(
             log.new(o!("component" => "RSS")),
@@ -71,8 +73,9 @@ impl RssHandle {
     pub(super) async fn run_rss_reset(
         log: &Logger,
         our_bootstrap_address: Ipv6Addr,
+        sprockets: SprocketsConfig,
     ) -> Result<(), SetupServiceError> {
-        let (tx, rx) = rss_channel(our_bootstrap_address);
+        let (tx, rx) = rss_channel(our_bootstrap_address, sprockets);
 
         let rss = RackSetupService::new_reset_rack(
             log.new(o!("component" => "RSS")),
@@ -88,10 +91,12 @@ impl RssHandle {
 async fn initialize_sled_agent(
     log: &Logger,
     bootstrap_addr: SocketAddrV6,
+    sprockets: SprocketsConfig,
     request: &StartSledAgentRequest,
 ) -> Result<(), bootstrap_agent_client::Error> {
     let client = bootstrap_agent_client::Client::new(
         bootstrap_addr,
+        sprockets,
         log.new(o!("BootstrapAgentClient" => bootstrap_addr.to_string())),
     );
 
@@ -122,11 +127,12 @@ async fn initialize_sled_agent(
 // communication mechanism.
 fn rss_channel(
     our_bootstrap_address: Ipv6Addr,
+    sprockets: SprocketsConfig,
 ) -> (BootstrapAgentHandle, BootstrapAgentHandleReceiver) {
     let (tx, rx) = mpsc::channel(32);
     (
         BootstrapAgentHandle { inner: tx, our_bootstrap_address },
-        BootstrapAgentHandleReceiver { inner: rx },
+        BootstrapAgentHandleReceiver { inner: rx, sprockets },
     )
 }
 
@@ -197,6 +203,7 @@ impl BootstrapAgentHandle {
 
 struct BootstrapAgentHandleReceiver {
     inner: mpsc::Receiver<Request>,
+    sprockets: SprocketsConfig,
 }
 
 impl BootstrapAgentHandleReceiver {
@@ -215,16 +222,25 @@ impl BootstrapAgentHandleReceiver {
             RequestKind::Init(requests) => {
                 // Convert the vec of requests into a `FuturesUnordered` containing all
                 // of the initialization requests, allowing them to run concurrently.
+
+                let s = self.sprockets.clone();
                 let mut futs = requests
                     .into_iter()
-                    .map(|(bootstrap_addr, request)| async move {
-                        info!(
-                            log, "Received initialization request from RSS";
-                            "request" => ?request,
-                            "target_sled" => %bootstrap_addr,
-                        );
+                    .map(|(bootstrap_addr, request)| {
+                        let value = s.clone();
+                        async move {
+                            info!(
+                                log, "Received initialization request from RSS";
+                                "request" => ?request,
+                                "target_sled" => %bootstrap_addr,
+                            );
 
-                        initialize_sled_agent(log, bootstrap_addr, &request)
+                            initialize_sled_agent(
+                                log,
+                                bootstrap_addr,
+                                value,
+                                &request,
+                            )
                             .await
                             .map_err(|err| {
                                 format!(
@@ -233,12 +249,13 @@ impl BootstrapAgentHandleReceiver {
                                 )
                             })?;
 
-                        info!(
-                            log, "Initialized sled agent";
-                            "target_sled" => %bootstrap_addr,
-                        );
+                            info!(
+                                log, "Initialized sled agent";
+                                "target_sled" => %bootstrap_addr,
+                            );
 
-                        Ok(())
+                            Ok(())
+                        }
                     })
                     .collect::<FuturesUnordered<_>>();
 

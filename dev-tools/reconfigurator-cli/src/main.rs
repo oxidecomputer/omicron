@@ -12,6 +12,7 @@ use clap::ValueEnum;
 use clap::{Args, Parser, Subcommand};
 use dns_service_client::DnsDiff;
 use indexmap::IndexMap;
+use nexus_inventory::CollectionBuilder;
 use nexus_reconfigurator_execution::blueprint_external_dns_config;
 use nexus_reconfigurator_execution::blueprint_internal_dns_config;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
@@ -27,6 +28,7 @@ use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
+use nexus_types::deployment::SledLookupErrorKind;
 use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
 use nexus_types::internal_api::params::DnsConfigParams;
 use nexus_types::inventory::Collection;
@@ -391,6 +393,10 @@ struct SledAddArgs {
 struct SledArgs {
     /// id of the sled
     sled_id: SledUuid,
+
+    /// Filter to match sled ID against
+    #[clap(short = 'F', long, value_enum, default_value_t = SledFilter::Commissioned)]
+    filter: SledFilter,
 }
 
 #[derive(Debug, Args)]
@@ -605,9 +611,8 @@ fn cmd_sled_show(
         .context("failed to generate planning_input builder")?
         .build();
     let sled_id = args.sled_id;
-    let sled_resources = planning_input
-        .sled_resources(&sled_id)
-        .ok_or_else(|| anyhow!("no sled with id {sled_id}"))?;
+    let sled_resources =
+        &planning_input.sled_lookup(args.filter, sled_id)?.resources;
     let mut s = String::new();
     swriteln!(s, "sled {}", sled_id);
     swriteln!(s, "subnet {}", sled_resources.subnet.net());
@@ -736,10 +741,17 @@ fn cmd_blueprint_edit(
     let blueprint = sim.blueprint_lookup(blueprint_id)?;
     let creator = args.creator.as_deref().unwrap_or("reconfigurator-cli");
     let planning_input = sim.planning_input(blueprint)?;
+    let latest_collection = sim
+        .collections
+        .iter()
+        .max_by_key(|(_, c)| c.time_started)
+        .map(|(_, c)| c.clone())
+        .unwrap_or_else(|| CollectionBuilder::new("sim").build());
     let mut builder = BlueprintBuilder::new_based_on(
         &sim.log,
         blueprint,
         &planning_input,
+        &latest_collection,
         creator,
     )
     .context("creating blueprint builder")?;
@@ -829,12 +841,12 @@ fn cmd_blueprint_diff(
         &blueprint1,
         &sleds_by_id,
         &Default::default(),
-    );
+    )?;
     let internal_dns_config2 = blueprint_internal_dns_config(
         &blueprint2,
         &sleds_by_id,
         &Default::default(),
-    );
+    )?;
     let dns_diff = DnsDiff::new(&internal_dns_config1, &internal_dns_config2)
         .context("failed to assemble DNS diff")?;
     swriteln!(rv, "internal DNS:\n{}", dns_diff);
@@ -908,7 +920,7 @@ fn cmd_blueprint_diff_dns(
                 blueprint,
                 &sleds_by_id,
                 &Default::default(),
-            )
+            )?
         }
         CliDnsGroup::External => blueprint_external_dns_config(
             blueprint,
@@ -1116,14 +1128,34 @@ fn cmd_load(
     for (sled_id, sled_details) in
         loaded.planning_input.all_sleds(SledFilter::Commissioned)
     {
-        if current_planning_input.sled_resources(&sled_id).is_some() {
-            swriteln!(
-                s,
-                "sled {}: skipped (one with \
-                the same id is already loaded)",
-                sled_id
-            );
-            continue;
+        match current_planning_input
+            .sled_lookup(SledFilter::Commissioned, sled_id)
+        {
+            Ok(_) => {
+                swriteln!(
+                    s,
+                    "sled {}: skipped (one with \
+                     the same id is already loaded)",
+                    sled_id
+                );
+                continue;
+            }
+            Err(error) => match error.kind() {
+                SledLookupErrorKind::Filtered { .. } => {
+                    swriteln!(
+                        s,
+                        "error: load sled {}: turning a decommissioned sled \
+                         into a commissioned one is not supported",
+                        sled_id
+                    );
+                    continue;
+                }
+                SledLookupErrorKind::Missing => {
+                    // A sled being missing from the input is the only case in
+                    // which we decide to load new sleds. The logic to do that
+                    // is below.
+                }
+            },
         }
 
         let Some(inventory_sled_agent) =

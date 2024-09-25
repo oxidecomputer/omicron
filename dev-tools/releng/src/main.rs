@@ -147,6 +147,10 @@ struct Args {
     /// Build the helios OS image from local sources.
     #[clap(long)]
     helios_local: bool,
+
+    /// Extra manifest to be merged with the rest of the repo
+    #[clap(long)]
+    extra_manifest: Option<Utf8PathBuf>,
 }
 
 impl Args {
@@ -592,6 +596,7 @@ async fn main() -> Result<()> {
             args.output_dir.clone(),
             version,
             manifest,
+            args.extra_manifest,
         ),
     )
     .after("tuf-stamp")

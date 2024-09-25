@@ -2,15 +2,18 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Error, Result};
 use atomicwrites::AtomicFile;
 use camino::Utf8PathBuf;
 use derive_more::{Add, AddAssign, Display, From};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use slog::{info, Logger};
+use std::collections::BTreeSet;
 use std::fs::create_dir;
 use std::io::{ErrorKind, Write};
 use std::net::Ipv6Addr;
+use std::str::FromStr;
 
 pub mod config;
 use config::*;
@@ -206,20 +209,319 @@ impl KeeperSettings {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+/// Logically grouped information file from a keeper node
+pub struct Lgif {
+    /// Index of the first log entry in the current log segment
+    pub first_log_idx: u64,
+    /// Term of the leader when the first log entry was created
+    pub first_log_term: u64,
+    /// Index of the last log entry in the current log segment
+    pub last_log_idx: u64,
+    /// Term of the leader when the last log entry was created
+    pub last_log_term: u64,
+    /// Index of the last committed log entry
+    pub last_committed_log_idx: u64,
+    /// Index of the last committed log entry from the leader's perspective
+    pub leader_committed_log_idx: u64,
+    /// Target index for log commitment during replication or recovery
+    pub target_committed_log_idx: u64,
+    /// Index of the most recent snapshot taken
+    pub last_snapshot_idx: u64,
+}
+
+impl Lgif {
+    pub fn parse(log: &Logger, data: &[u8]) -> Result<Self> {
+        // The reponse we get from running `clickhouse keeper-client -h {HOST} --q lgif`
+        // isn't in any known format (e.g. JSON), but rather a series of lines with key-value
+        // pairs separated by a tab:
+        //
+        // ```console
+        // $ clickhouse keeper-client -h localhost -p 20001 --q lgif
+        // first_log_idx	1
+        // first_log_term	1
+        // last_log_idx	10889
+        // last_log_term	20
+        // last_committed_log_idx	10889
+        // leader_committed_log_idx	10889
+        // target_committed_log_idx	10889
+        // last_snapshot_idx	9465
+        // ```
+        let s = String::from_utf8_lossy(data);
+        info!(
+            log,
+            "Retrieved data from `clickhouse keeper-config lgif`";
+            "output" => ?s
+        );
+
+        let expected = Lgif::expected_keys();
+
+        // Verify the output contains the same amount of lines as the expected keys.
+        // This will ensure we catch any new key-value pairs appended to the lgif output.
+        let lines = s.trim().lines();
+        if expected.len() != lines.count() {
+            bail!(
+                "Output from the Keeper differs to the expected output keys \
+                Output: {s:?} \
+                Expected output keys: {expected:?}"
+            );
+        }
+
+        let mut vals: Vec<u64> = Vec::new();
+        for (line, expected_key) in s.lines().zip(expected.clone()) {
+            let mut split = line.split('\t');
+            let Some(key) = split.next() else {
+                bail!("Returned None while attempting to retrieve key");
+            };
+            if key != expected_key {
+                bail!("Extracted key `{key:?}` from output differs from expected key `{expected_key}`");
+            }
+            let Some(val) = split.next() else {
+                bail!("Command output has a line that does not contain a key-value pair: {key:?}");
+            };
+            let val = match u64::from_str(val) {
+                Ok(v) => v,
+                Err(e) => bail!("Unable to convert value {val:?} into u64 for key {key}: {e}"),
+            };
+            vals.push(val);
+        }
+
+        let mut iter = vals.into_iter();
+        Ok(Lgif {
+            first_log_idx: iter.next().unwrap(),
+            first_log_term: iter.next().unwrap(),
+            last_log_idx: iter.next().unwrap(),
+            last_log_term: iter.next().unwrap(),
+            last_committed_log_idx: iter.next().unwrap(),
+            leader_committed_log_idx: iter.next().unwrap(),
+            target_committed_log_idx: iter.next().unwrap(),
+            last_snapshot_idx: iter.next().unwrap(),
+        })
+    }
+
+    fn expected_keys() -> Vec<&'static str> {
+        vec![
+            "first_log_idx",
+            "first_log_term",
+            "last_log_idx",
+            "last_log_term",
+            "last_committed_log_idx",
+            "leader_committed_log_idx",
+            "target_committed_log_idx",
+            "last_snapshot_idx",
+        ]
+    }
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Deserialize,
+    Ord,
+    PartialOrd,
+    Serialize,
+    JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum KeeperServerType {
+    Participant,
+    Learner,
+}
+
+impl FromStr for KeeperServerType {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<KeeperServerType, Self::Err> {
+        match s {
+            "participant" => Ok(KeeperServerType::Participant),
+            "learner" => Ok(KeeperServerType::Learner),
+            _ => bail!("{s} is not a valid keeper server type"),
+        }
+    }
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Deserialize,
+    PartialOrd,
+    Ord,
+    Serialize,
+    JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub struct KeeperServerInfo {
+    /// Unique, immutable ID of the keeper server
+    pub server_id: KeeperId,
+    /// Host of the keeper server
+    pub host: ClickhouseHost,
+    /// Keeper server raft port
+    pub raft_port: u16,
+    /// A keeper server either participant or learner
+    /// (learner does not participate in leader elections).
+    pub server_type: KeeperServerType,
+    /// non-negative integer telling which nodes should be
+    /// prioritised on leader elections.
+    /// Priority of 0 means server will never be a leader.
+    pub priority: u16,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Deserialize,
+    PartialOrd,
+    Ord,
+    Serialize,
+    JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+/// Keeper raft configuration information
+pub struct RaftConfig {
+    pub keeper_servers: BTreeSet<KeeperServerInfo>,
+}
+
+impl RaftConfig {
+    pub fn parse(log: &Logger, data: &[u8]) -> Result<Self> {
+        // The response we get from `$ clickhouse keeper-client -h {HOST} --q 'get /keeper/config'
+        // is a format unique to ClickHouse, where the data for each server is separated by a colon
+        //
+        // ```console
+        // $ clickhouse keeper-client -h localhost --q 'get /keeper/config'
+        // server.1=::1:21001;participant;1
+        // server.2=::1:21002;participant;1
+        // server.3=::1:21003;participant;1
+        //```
+        let s = String::from_utf8_lossy(data);
+        info!(
+            log,
+            "Retrieved data from `clickhouse keeper-config --q 'get /keeper/config'`";
+            "output" => ?s
+        );
+
+        if s.is_empty() {
+            bail!("Cannot parse an empty response");
+        }
+
+        let mut keeper_servers = BTreeSet::new();
+        for line in s.lines() {
+            let mut split = line.split('=');
+            let Some(server) = split.next() else {
+                bail!("Returned None while attempting to retrieve raft configuration");
+            };
+
+            // Retrieve server ID
+            let mut split_server = server.split(".");
+            let Some(s) = split_server.next() else {
+                bail!("Returned None while attempting to retrieve server identifier")
+            };
+            if s != "server" {
+                bail!(
+                    "Output is not as expected. \
+                Server identifier: '{server}' \
+                Expected server identifier: 'server.{{SERVER_ID}}'"
+                )
+            };
+            let Some(id) = split_server.next() else {
+                bail!("Returned None while attempting to retrieve server ID");
+            };
+            let u64_id = match u64::from_str(id) {
+                Ok(v) => v,
+                Err(e) => bail!("Unable to convert value {id:?} into u64: {e}"),
+            };
+            let server_id = KeeperId(u64_id);
+
+            // Retrieve server information
+            let Some(info) = split.next() else {
+                bail!("Returned None while attempting to retrieve server info");
+            };
+            let mut split_info = info.split(";");
+
+            // Retrieve port
+            let Some(address) = split_info.next() else {
+                bail!("Returned None while attempting to retrieve address")
+            };
+            let Some(port) = address.split(':').last() else {
+                bail!("A port could not be extracted from {address}")
+            };
+            let raft_port = match u16::from_str(port) {
+                Ok(v) => v,
+                Err(e) => {
+                    bail!("Unable to convert value {port:?} into u16: {e}")
+                }
+            };
+
+            // Retrieve host
+            let p = format!(":{}", port);
+            let Some(h) = address.split(&p).next() else {
+                bail!("A host could not be extracted from {address}. Missing port {port}")
+            };
+            // The ouput we get from running the clickhouse keeper-client
+            // command does not add square brackets to an IPv6 address
+            // that cointains a port: server.1=::1:21001;participant;1
+            // Because of this, we can parse `h` directly into an Ipv6Addr
+            let host = ClickhouseHost::from_str(h)?;
+
+            // Retrieve server_type
+            let Some(s_type) = split_info.next() else {
+                bail!("Returned None while attempting to retrieve server type")
+            };
+            let server_type = KeeperServerType::from_str(s_type)?;
+
+            // Retrieve priority
+            let Some(s_priority) = split_info.next() else {
+                bail!("Returned None while attempting to retrieve priority")
+            };
+            let priority = match u16::from_str(s_priority) {
+                Ok(v) => v,
+                Err(e) => {
+                    bail!(
+                        "Unable to convert value {s_priority:?} into u16: {e}"
+                    )
+                }
+            };
+
+            keeper_servers.insert(KeeperServerInfo {
+                server_id,
+                host,
+                raft_port,
+                server_type,
+                priority,
+            });
+        }
+
+        Ok(RaftConfig { keeper_servers })
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use std::{
-        net::{Ipv4Addr, Ipv6Addr},
-        str::FromStr,
-    };
-
     use camino::Utf8PathBuf;
     use camino_tempfile::Builder;
+    use slog::{o, Drain};
+    use slog_term::{FullFormat, PlainDecorator, TestStdoutWriter};
+    use std::net::{Ipv4Addr, Ipv6Addr};
+    use std::str::FromStr;
 
     use crate::{
-        ClickhouseHost, KeeperId, KeeperSettings, RaftServerSettings, ServerId,
+        ClickhouseHost, KeeperId, KeeperServerInfo, KeeperServerType,
+        KeeperSettings, Lgif, RaftConfig, RaftServerSettings, ServerId,
         ServerSettings,
     };
+
+    fn log() -> slog::Logger {
+        let decorator = PlainDecorator::new(TestStdoutWriter);
+        let drain = FullFormat::new(decorator).build().fuse();
+        let drain = slog_async::Async::new(drain).build().fuse();
+        slog::Logger::root(drain, o!())
+    }
 
     #[test]
     fn test_generate_keeper_config() {
@@ -309,5 +611,353 @@ mod tests {
         );
 
         expectorate::assert_contents(expected_file, &generated_content);
+    }
+
+    #[test]
+    fn test_full_lgif_parse_success() {
+        let log = log();
+        let data =
+            "first_log_idx\t1\nfirst_log_term\t1\nlast_log_idx\t4386\nlast_log_term\t1\nlast_committed_log_idx\t4386\nleader_committed_log_idx\t4386\ntarget_committed_log_idx\t4386\nlast_snapshot_idx\t0\n\n"
+            .as_bytes();
+        let lgif = Lgif::parse(&log, data).unwrap();
+
+        assert!(lgif.first_log_idx == 1);
+        assert!(lgif.first_log_term == 1);
+        assert!(lgif.last_log_idx == 4386);
+        assert!(lgif.last_log_term == 1);
+        assert!(lgif.last_committed_log_idx == 4386);
+        assert!(lgif.leader_committed_log_idx == 4386);
+        assert!(lgif.target_committed_log_idx == 4386);
+        assert!(lgif.last_snapshot_idx == 0);
+    }
+
+    #[test]
+    fn test_missing_keys_lgif_parse_fail() {
+        let log = log();
+        let data =
+            "first_log_idx\t1\nlast_log_idx\t4386\nlast_log_term\t1\nlast_committed_log_idx\t4386\nleader_committed_log_idx\t4386\ntarget_committed_log_idx\t4386\nlast_snapshot_idx\t0\n\n"
+            .as_bytes();
+        let result = Lgif::parse(&log, data);
+        let error = result.unwrap_err();
+        let root_cause = error.root_cause();
+
+        assert_eq!(
+            format!("{}", root_cause),
+            "Output from the Keeper differs to the expected output keys \
+            Output: \"first_log_idx\\t1\\nlast_log_idx\\t4386\\nlast_log_term\\t1\\nlast_committed_log_idx\\t4386\\nleader_committed_log_idx\\t4386\\ntarget_committed_log_idx\\t4386\\nlast_snapshot_idx\\t0\\n\\n\" \
+            Expected output keys: [\"first_log_idx\", \"first_log_term\", \"last_log_idx\", \"last_log_term\", \"last_committed_log_idx\", \"leader_committed_log_idx\", \"target_committed_log_idx\", \"last_snapshot_idx\"]"
+        );
+    }
+
+    #[test]
+    fn test_empty_value_lgif_parse_fail() {
+        let log = log();
+        let data =
+            "first_log_idx\nfirst_log_term\t1\nlast_log_idx\t4386\nlast_log_term\t1\nlast_committed_log_idx\t4386\nleader_committed_log_idx\t4386\ntarget_committed_log_idx\t4386\nlast_snapshot_idx\t0\n\n"
+            .as_bytes();
+        let result = Lgif::parse(&log, data);
+        let error = result.unwrap_err();
+        let root_cause = error.root_cause();
+
+        assert_eq!(
+            format!("{}", root_cause),
+            "Command output has a line that does not contain a key-value pair: \"first_log_idx\""
+        );
+    }
+
+    #[test]
+    fn test_non_u64_value_lgif_parse_fail() {
+        let log = log();
+        let data =
+            "first_log_idx\t1\nfirst_log_term\tBOB\nlast_log_idx\t4386\nlast_log_term\t1\nlast_committed_log_idx\t4386\nleader_committed_log_idx\t4386\ntarget_committed_log_idx\t4386\nlast_snapshot_idx\t0\n\n"
+            .as_bytes();
+        let result = Lgif::parse(&log, data);
+        let error = result.unwrap_err();
+        let root_cause = error.root_cause();
+
+        assert_eq!(
+            format!("{}", root_cause),
+            "Unable to convert value \"BOB\" into u64 for key first_log_term: invalid digit found in string"
+        );
+    }
+
+    #[test]
+    fn test_non_existent_key_with_correct_value_lgif_parse_fail() {
+        let log = log();
+        let data =
+            "first_log_idx\t1\nfirst_log\t1\nlast_log_idx\t4386\nlast_log_term\t1\nlast_committed_log_idx\t4386\nleader_committed_log_idx\t4386\ntarget_committed_log_idx\t4386\nlast_snapshot_idx\t0\n\n"
+            .as_bytes();
+        let result = Lgif::parse(&log, data);
+        let error = result.unwrap_err();
+        let root_cause = error.root_cause();
+
+        assert_eq!(
+            format!("{}", root_cause),
+            "Extracted key `\"first_log\"` from output differs from expected key `first_log_term`"
+        );
+    }
+
+    #[test]
+    fn test_additional_key_value_pairs_in_output_parse_fail() {
+        let log = log();
+        let data = "first_log_idx\t1\nfirst_log_term\t1\nlast_log_idx\t4386\nlast_log_term\t1\nlast_committed_log_idx\t4386\nleader_committed_log_idx\t4386\ntarget_committed_log_idx\t4386\nlast_snapshot_idx\t0\nlast_snapshot_idx\t3\n\n"
+            .as_bytes();
+
+        let result = Lgif::parse(&log, data);
+        let error = result.unwrap_err();
+        let root_cause = error.root_cause();
+
+        assert_eq!(
+            format!("{}", root_cause),
+            "Output from the Keeper differs to the expected output keys \
+            Output: \"first_log_idx\\t1\\nfirst_log_term\\t1\\nlast_log_idx\\t4386\\nlast_log_term\\t1\\nlast_committed_log_idx\\t4386\\nleader_committed_log_idx\\t4386\\ntarget_committed_log_idx\\t4386\\nlast_snapshot_idx\\t0\\nlast_snapshot_idx\\t3\\n\\n\" \
+            Expected output keys: [\"first_log_idx\", \"first_log_term\", \"last_log_idx\", \"last_log_term\", \"last_committed_log_idx\", \"leader_committed_log_idx\", \"target_committed_log_idx\", \"last_snapshot_idx\"]",
+        );
+    }
+
+    #[test]
+    fn test_empty_output_parse_fail() {
+        let log = log();
+        let data = "".as_bytes();
+        let result = Lgif::parse(&log, data);
+        let error = result.unwrap_err();
+        let root_cause = error.root_cause();
+
+        assert_eq!(
+            format!("{}", root_cause),
+           "Output from the Keeper differs to the expected output keys \
+           Output: \"\" \
+           Expected output keys: [\"first_log_idx\", \"first_log_term\", \"last_log_idx\", \"last_log_term\", \"last_committed_log_idx\", \"leader_committed_log_idx\", \"target_committed_log_idx\", \"last_snapshot_idx\"]",
+        );
+    }
+
+    #[test]
+    fn test_full_raft_config_parse_success() {
+        let log = log();
+        let data =
+            "server.1=::1:21001;participant;1\nserver.2=oxide.internal:21002;participant;1\nserver.3=127.0.0.1:21003;learner;0\n"
+            .as_bytes();
+        let raft_config = RaftConfig::parse(&log, data).unwrap();
+
+        assert!(raft_config.keeper_servers.contains(&KeeperServerInfo {
+            server_id: KeeperId(1),
+            host: ClickhouseHost::Ipv6("::1".parse().unwrap()),
+            raft_port: 21001,
+            server_type: KeeperServerType::Participant,
+            priority: 1,
+        },));
+        assert!(raft_config.keeper_servers.contains(&KeeperServerInfo {
+            server_id: KeeperId(2),
+            host: ClickhouseHost::DomainName("oxide.internal".to_string()),
+            raft_port: 21002,
+            server_type: KeeperServerType::Participant,
+            priority: 1,
+        },));
+        assert!(raft_config.keeper_servers.contains(&KeeperServerInfo {
+            server_id: KeeperId(3),
+            host: ClickhouseHost::Ipv4("127.0.0.1".parse().unwrap()),
+            raft_port: 21003,
+            server_type: KeeperServerType::Learner,
+            priority: 0,
+        },));
+    }
+
+    #[test]
+    fn test_misshapen_id_raft_config_parse_fail() {
+        let log = log();
+        let data = "serv.1=::1:21001;participant;1\n".as_bytes();
+        let result = RaftConfig::parse(&log, data);
+
+        let error = result.unwrap_err();
+        let root_cause = error.root_cause();
+
+        assert_eq!(
+            format!("{}", root_cause),
+           "Output is not as expected. Server identifier: 'serv.1' Expected server identifier: 'server.{SERVER_ID}'",
+        );
+    }
+
+    #[test]
+    fn test_misshapen_port_raft_config_parse_fail() {
+        let log = log();
+        let data = "server.1=::1:BOB;participant;1".as_bytes();
+        let result = RaftConfig::parse(&log, data);
+
+        let error = result.unwrap_err();
+        let root_cause = error.root_cause();
+
+        assert_eq!(
+            format!("{}", root_cause),
+           "Unable to convert value \"BOB\" into u16: invalid digit found in string",
+        );
+    }
+
+    #[test]
+    fn test_empty_output_raft_config_parse_fail() {
+        let log = log();
+        let data = "".as_bytes();
+        let result = RaftConfig::parse(&log, data);
+
+        let error = result.unwrap_err();
+        let root_cause = error.root_cause();
+
+        assert_eq!(format!("{}", root_cause), "Cannot parse an empty response",);
+    }
+
+    #[test]
+    fn test_missing_server_id_raft_config_parse_fail() {
+        let log = log();
+        let data = "server.=::1:21001;participant;1".as_bytes();
+        let result = RaftConfig::parse(&log, data);
+
+        let error = result.unwrap_err();
+        let root_cause = error.root_cause();
+
+        assert_eq!(
+            format!("{}", root_cause),
+           "Unable to convert value \"\" into u64: cannot parse integer from empty string",
+        );
+    }
+
+    #[test]
+    fn test_missing_address_raft_config_parse_fail() {
+        let log = log();
+        let data = "server.1=:21001;participant;1".as_bytes();
+        let result = RaftConfig::parse(&log, data);
+
+        let error = result.unwrap_err();
+        let root_cause = error.root_cause();
+
+        assert_eq!(
+            format!("{}", root_cause),
+            " is not a valid address or domain name",
+        );
+    }
+
+    #[test]
+    fn test_invalid_address_raft_config_parse_fail() {
+        let log = log();
+        let data = "server.1=oxide.com:21001;participant;1".as_bytes();
+        let result = RaftConfig::parse(&log, data);
+
+        let error = result.unwrap_err();
+        let root_cause = error.root_cause();
+
+        assert_eq!(
+            format!("{}", root_cause),
+            "oxide.com is not a valid address or domain name",
+        );
+    }
+
+    #[test]
+    fn test_missing_port_raft_config_parse_fail() {
+        let log = log();
+        let data = "server.1=::1:;participant;1".as_bytes();
+        let result = RaftConfig::parse(&log, data);
+
+        let error = result.unwrap_err();
+        let root_cause = error.root_cause();
+
+        assert_eq!(
+            format!("{}", root_cause),
+           "Unable to convert value \"\" into u16: cannot parse integer from empty string",
+        );
+    }
+
+    #[test]
+    fn test_missing_participant_raft_config_parse_fail() {
+        let log = log();
+        let data = "server.1=::1:21001;1".as_bytes();
+        let result = RaftConfig::parse(&log, data);
+
+        let error = result.unwrap_err();
+        let root_cause = error.root_cause();
+
+        assert_eq!(
+            format!("{}", root_cause),
+            "1 is not a valid keeper server type",
+        );
+
+        let data = "server.1=::1:21001;;1".as_bytes();
+        let result = RaftConfig::parse(&log, data);
+
+        let error = result.unwrap_err();
+        let root_cause = error.root_cause();
+
+        assert_eq!(
+            format!("{}", root_cause),
+            " is not a valid keeper server type",
+        );
+    }
+
+    #[test]
+    fn test_misshapen_participant_raft_config_parse_fail() {
+        let log = log();
+        let data = "server.1=::1:21001;runner;1\n".as_bytes();
+        let result = RaftConfig::parse(&log, data);
+
+        let error = result.unwrap_err();
+        let root_cause = error.root_cause();
+
+        assert_eq!(
+            format!("{}", root_cause),
+            "runner is not a valid keeper server type",
+        );
+    }
+
+    #[test]
+    fn test_missing_priority_raft_config_parse_fail() {
+        let log = log();
+        let data = "server.1=::1:21001;learner;\n".as_bytes();
+        let result = RaftConfig::parse(&log, data);
+
+        let error = result.unwrap_err();
+        let root_cause = error.root_cause();
+
+        assert_eq!(
+            format!("{}", root_cause),
+           "Unable to convert value \"\" into u16: cannot parse integer from empty string",
+        );
+
+        let data = "server.1=::1:21001;learner\n".as_bytes();
+        let result = RaftConfig::parse(&log, data);
+
+        let error = result.unwrap_err();
+        let root_cause = error.root_cause();
+
+        assert_eq!(
+            format!("{}", root_cause),
+            "Returned None while attempting to retrieve priority",
+        );
+    }
+
+    #[test]
+    fn test_misshapen_priority_raft_config_parse_fail() {
+        let log = log();
+        let data = "server.1=::1:21001;learner;BOB\n".as_bytes();
+        let result = RaftConfig::parse(&log, data);
+
+        let error = result.unwrap_err();
+        let root_cause = error.root_cause();
+
+        assert_eq!(
+            format!("{}", root_cause),
+           "Unable to convert value \"BOB\" into u16: invalid digit found in string",
+        );
+    }
+
+    #[test]
+    fn test_misshapen_raft_config_parse_fail() {
+        let log = log();
+        let data = "=;;\n".as_bytes();
+        let result = RaftConfig::parse(&log, data);
+
+        let error = result.unwrap_err();
+        let root_cause = error.root_cause();
+
+        assert_eq!(
+            format!("{}", root_cause),
+           "Output is not as expected. Server identifier: '' Expected server identifier: 'server.{SERVER_ID}'",
+        );
     }
 }

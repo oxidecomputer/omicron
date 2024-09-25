@@ -16,6 +16,7 @@ use omicron_common::vlan::VlanID;
 use serde::Deserialize;
 use sled_hardware::is_gimlet;
 use sled_hardware::UnparsedDisk;
+use sprockets_tls::keys::SprocketsConfig;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -101,6 +102,11 @@ pub struct Config {
     /// mode maghemite there.
     #[serde(default)]
     pub switch_zone_maghemite_links: Vec<PhysicalLink>,
+
+    /// Settings for sprockets running on the bootstrap network. Includes
+    /// root certificates and whether to use local certificate chain or
+    /// one over IPCC
+    pub sprockets: SprocketsConfig,
 }
 
 #[derive(Debug, thiserror::Error)]

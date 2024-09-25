@@ -38,14 +38,14 @@ use nexus_types::inventory::{
 };
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::zpool_name::ZpoolName;
-use omicron_uuid_kinds::CollectionKind;
-use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetKind;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolKind;
 use omicron_uuid_kinds::ZpoolUuid;
+use omicron_uuid_kinds::{CollectionKind, OmicronZoneKind};
+use omicron_uuid_kinds::{CollectionUuid, OmicronZoneUuid};
 use std::net::{IpAddr, SocketAddrV6};
 use thiserror::Error;
 use uuid::Uuid;
@@ -1305,7 +1305,7 @@ impl From<nexus_sled_agent_shared::inventory::ZoneKind> for ZoneType {
 pub struct InvOmicronZone {
     pub inv_collection_id: DbTypedUuid<CollectionKind>,
     pub sled_id: DbTypedUuid<SledKind>,
-    pub id: Uuid,
+    pub id: DbTypedUuid<OmicronZoneKind>,
     pub underlay_address: ipv6::Ipv6Addr,
     pub zone_type: ZoneType,
     pub primary_service_ip: ipv6::Ipv6Addr,
@@ -1340,7 +1340,7 @@ impl InvOmicronZone {
             // `zone.zone_type`
             inv_collection_id: inv_collection_id.into(),
             sled_id: sled_id.into(),
-            id: zone.id,
+            id: zone.id.into(),
             underlay_address: zone.underlay_address.into(),
             filesystem_pool: zone
                 .filesystem_pool
@@ -1551,7 +1551,7 @@ impl InvOmicronZone {
         // Result) we immediately return. We check the inner result later, but
         // only if some code path tries to use `nic` and it's not present.
         let nic = omicron_zone_config::nic_row_to_network_interface(
-            self.id,
+            self.id.into(),
             self.nic_id,
             nic_row.map(Into::into),
         )?;
@@ -1671,7 +1671,7 @@ impl InvOmicronZone {
         };
 
         Ok(OmicronZoneConfig {
-            id: self.id,
+            id: self.id.into(),
             underlay_address: self.underlay_address.into(),
             filesystem_pool: self
                 .filesystem_pool
@@ -1734,7 +1734,7 @@ impl InvOmicronZoneNic {
 
     pub fn into_network_interface_for_zone(
         self,
-        zone_id: Uuid,
+        zone_id: OmicronZoneUuid,
     ) -> Result<NetworkInterface, anyhow::Error> {
         let zone_nic = OmicronZoneNic::from(self);
         zone_nic.into_network_interface_for_zone(zone_id)

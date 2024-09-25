@@ -153,6 +153,10 @@ enum Subcommand {
         #[clap(flatten)]
         opts: oximeter_db::shells::oxql::ShellOptions,
     },
+
+    /// Start a native SQL shell to a ClickHouse server.
+    #[cfg(feature = "native-sql")]
+    NativeSql,
 }
 
 fn describe_data() {
@@ -356,6 +360,8 @@ async fn main() -> anyhow::Result<()> {
             oximeter_db::shells::oxql::shell(args.address, args.port, log, opts)
                 .await?
         }
+        #[cfg(feature = "native-sql")]
+        Subcommand::NativeSql => oximeter_db::shells::native::shell().await?,
     }
     Ok(())
 }
