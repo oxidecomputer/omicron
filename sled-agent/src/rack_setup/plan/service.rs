@@ -704,14 +704,14 @@ impl Plan {
             };
             let id = OmicronZoneUuid::new_v4();
             let ip = sled.addr_alloc.next().expect("Not enough addrs");
-            let port = omicron_common::address::CLICKHOUSE_HTTP_PORT;
-            let address = SocketAddrV6::new(ip, port, 0, 0);
+            let http_port = omicron_common::address::CLICKHOUSE_HTTP_PORT;
+            let http_address = SocketAddrV6::new(ip, http_port, 0, 0);
             dns_builder
-                .host_zone_with_one_backend(
+                .host_zone_clickhouse(
                     id,
                     ip,
                     ServiceName::Clickhouse,
-                    port,
+                    http_port,
                 )
                 .unwrap();
             let dataset_name =
@@ -723,7 +723,7 @@ impl Plan {
                 underlay_address: ip,
                 zone_type: BlueprintZoneType::Clickhouse(
                     blueprint_zone_type::Clickhouse {
-                        address,
+                        address: http_address,
                         dataset: OmicronZoneDataset {
                             pool_name: dataset_name.pool().clone(),
                         },
@@ -747,14 +747,14 @@ impl Plan {
             let ip = sled.addr_alloc.next().expect("Not enough addrs");
             // TODO: This may need to be a different port if/when to have single node
             // and replicated running side by side as per stage 1 of RFD 468.
-            let port = omicron_common::address::CLICKHOUSE_HTTP_PORT;
-            let address = SocketAddrV6::new(ip, port, 0, 0);
+            let http_port = omicron_common::address::CLICKHOUSE_HTTP_PORT;
+            let http_address = SocketAddrV6::new(ip, http_port, 0, 0);
             dns_builder
-                .host_zone_with_one_backend(
+                .host_zone_clickhouse(
                     id,
                     ip,
                     ServiceName::ClickhouseServer,
-                    port,
+                    http_port,
                 )
                 .unwrap();
             let dataset_name =
@@ -766,7 +766,7 @@ impl Plan {
                 underlay_address: ip,
                 zone_type: BlueprintZoneType::ClickhouseServer(
                     blueprint_zone_type::ClickhouseServer {
-                        address,
+                        address: http_address,
                         dataset: OmicronZoneDataset {
                             pool_name: dataset_name.pool().clone(),
                         },

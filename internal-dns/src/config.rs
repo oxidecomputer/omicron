@@ -64,6 +64,7 @@ use crate::names::{ServiceName, BOUNDARY_NTP_DNS_NAME, DNS_ZONE};
 use anyhow::{anyhow, ensure};
 use core::fmt;
 use dns_service_client::types::{DnsConfigParams, DnsConfigZone, DnsRecord};
+use omicron_common::address::CLICKHOUSE_TCP_PORT;
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::{OmicronZoneUuid, SledUuid};
 use std::collections::BTreeMap;
@@ -396,6 +397,45 @@ impl DnsConfigBuilder {
             mgs_port,
         )?;
         self.service_backend_zone(ServiceName::Mgd, &zone, mgd_port)
+    }
+
+    /// Higher-level shorthand for adding a ClickHouse zone with several
+    /// services.
+    ///
+    /// ClickHouse servers expose several interfaces on the network. We use both
+    /// a simple HTTP interface as well as a lower-level protocol over TCP,
+    /// called the "Native protocol". This method inserts a zone and the related
+    /// records for both of these services.
+    ///
+    /// `http_service` is the `ServiceName` for the HTTP service that belongs in
+    /// this zone, and `http_port` is the associated port for that service. The
+    /// native service is added automatically, using its default port.
+    ///
+    /// # Errors
+    ///
+    /// This fails if the provided `http_service` is not for a ClickHouse
+    /// replica server. It also fails if the given zone has already been added
+    /// to the configuration.
+    pub fn host_zone_clickhouse(
+        &mut self,
+        zone_id: OmicronZoneUuid,
+        underlay_address: Ipv6Addr,
+        http_service: ServiceName,
+        http_port: u16,
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            http_service == ServiceName::Clickhouse
+                || http_service == ServiceName::ClickhouseServer,
+            "This method is only valid for ClickHouse replica servers, \
+            but we were provided the service '{http_service:?}'",
+        );
+        let zone = self.host_zone(zone_id, underlay_address)?;
+        self.service_backend_zone(http_service, &zone, http_port)?;
+        self.service_backend_zone(
+            ServiceName::ClickhouseNative,
+            &zone,
+            CLICKHOUSE_TCP_PORT,
+        )
     }
 
     /// Construct a `DnsConfigZone` describing the control plane zone described

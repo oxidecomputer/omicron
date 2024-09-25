@@ -1,0 +1,210 @@
+:showtitle:
+:toc: left
+:icons: font
+
+= ls-apis: list information about Dropshot/Progenitor-based APIs
+
+This tool attempts to identify Progenitor-based API dependencies between Rust components and show information about them.  The focus is on providing information to inform the online upgrade project.
+
+== Quick start
+
+=== Listing APIs and their consumers
+
+```
+$ cargo xtask ls-apis apis
+...
+Nexus Internal API (client: nexus-client)
+    consumed by: dpd (dendrite/dpd)
+    consumed by: omicron-nexus (omicron/nexus)
+    consumed by: omicron-sled-agent (omicron/sled-agent)
+    consumed by: oximeter-collector (omicron/oximeter/collector)
+    consumed by: propolis-server (propolis/bin/propolis-server)
+...
+```
+
+To see what Cargo dependencies caused the tool to identify an API dependency, use `--show-deps`:
+
+```
+$ cargo xtask ls-apis apis --show-deps
+...
+Dendrite DPD (client: dpd-client)
+    consumed by: ddmd (maghemite/ddmd)
+        via path+file:///home/dap/omicron-merge/out/ls-apis/checkout/maghemite/ddmd#0.1.0
+    consumed by: mgd (maghemite/mgd)
+        via path+file:///home/dap/omicron-merge/out/ls-apis/checkout/maghemite/mg-lower#0.1.0
+        via path+file:///home/dap/omicron-merge/out/ls-apis/checkout/maghemite/mgd#0.1.0
+    consumed by: omicron-nexus (omicron/nexus)
+        via path+file:///home/dap/omicron-merge/nexus#omicron-nexus@0.1.0
+    consumed by: omicron-sled-agent (omicron/sled-agent)
+        via path+file:///home/dap/omicron-merge/sled-agent#omicron-sled-agent@0.1.0
+    consumed by: tfportd (dendrite/tfportd)
+        via path+file:///home/dap/omicron-merge/out/ls-apis/checkout/dendrite/tfportd#0.1.0
+    consumed by: wicketd (omicron/wicketd)
+        via path+file:///home/dap/omicron-merge/wicketd#0.1.0
+...
+```
+
+These paths are local to your system and will differ from system to system.
+
+=== Listing servers and the APIs exposed and consumed by each one
+
+```
+$ cargo xtask ls-apis servers
+...
+omicron-sled-agent (omicron/sled-agent)
+    exposes: Bootstrap Agent (client = bootstrap-agent-client)
+    exposes: Sled Agent (client = sled-agent-client)
+    consumes: bootstrap-agent-client
+    consumes: ddm-admin-client
+    consumes: dns-service-client
+    consumes: dpd-client
+    consumes: gateway-client
+    consumes: mg-admin-client
+    consumes: nexus-client
+    consumes: propolis-client
+    consumes: sled-agent-client
+...
+```
+
+You can similarly use `--show-deps` to see the Cargo dependency path that shows the API dependency.
+
+=== Listing deployment units, their servers, and the APIs produced and consumed by each one
+
+Deployment units are groups of components that are always deployed together.  For example, all the components in the host OS global zone and switch zone represent one deployment unit.
+
+```
+$ cargo xtask ls-apis deployment-units
+...
+Crucible
+    crucible-agent (crucible/agent)
+        exposes: Crucible Agent (client = crucible-agent-client)
+
+    crucible-downstairs (crucible/downstairs)
+        exposes: Crucible Repair (client = repair-client)
+        consumes: repair-client
+
+
+Crucible Pantry
+    crucible-pantry (crucible/pantry)
+        exposes: Crucible Pantry (client = crucible-pantry-client)
+...
+```
+
+=== Visualizing dependencies
+
+The `servers` and `deployment-units` commands accept a `--dot` argument to print output in a format that `dot(1)` can process:
+
+```
+$ cargo xtask ls-apis deployment-units --dot > deployment-units.dot
+```
+
+You can generate a PNG image of the graph like this:
+
+```
+$ dot -T png -o deployment-units.png deployment-units.dot
+```
+
+
+== Details
+
+This tool is aimed at helping answer these questions related to online upgrade:
+
+* What Dropshot/Progenitor-based API dependencies exist on all the software that ships on the Oxide rack?
+* Why does any particular component depend on some other component?
+* Is there a way to sequence upgrades of some API servers so that clients can always assume that the corresponding servers have been upgraded?
+
+This tool combines **two sources of information:**
+
+* Cargo/Rust package metadata (including package names and dependencies)
+* Developer-maintained metadata about APIs and their dependencies, located in link:./api-manifest.toml[]
+
+This tool basically works as follows:
+
+. It loads and validates information about all of the relevant Cargo workspaces by running `cargo metadata` using manifests from the local Git clones.
+. Using this information, it identifies all packages that _look_ like Progenitor-based clients for Dropshot APIs: these are packages that (1) depend directly on `progenitor` as a normal or build dependency, and (2) end in `-client`.  (A few non-client packages depend on Progenitor, like `omicron-common`.  These are ignored using a hardcoded ignore list.  Any other package that depends on Progenitor but does _not_ end in `-client` will produce a warning.)
+. Then, it loads and validates the developer-maintained metadata (`api-manifest.toml`).
+. Then, it applies whatever filter has been selected and prints out whatever information was asked for.
+
+The filtering is a little complicated but very important!
+
+=== The purpose of filtering
+
+Built-in filtering aims to solve a few different problems:
+
+. Many apparent dependencies identified through the above process are bogus.  This usually happens because a package `P` depends on a Progenitor client solely for access to its types (e.g., to define a `From` impl for its own types).  In this case, a component using `P` does not necessarily depend on the corresponding API.  We want to ignore these bogus dependencies altogether.  (If the component _does_ depend on that API, it must have a different dependency on the Progenitor client package and that one will still cause this tool to identify the API dependency.)
+. While exploring the dependency graph, we sometimes want to exclude some legitimate dependencies.  Sometimes, a package `P` depends on a Progenitor client, but only for a test program or some other thing that doesn't actually get deployed with `P`.  These are not bogus dependencies, but they're not interesting for the purpose of online upgrade.
+. To keep track of (and filter output based on) developer-maintained labels for each API dependency.  More on this below.
+
+Our broader goal is to construct a DAG whose nodes are deployment units and whose edges represent API dependencies between them.  By doing that, we can define an update order that greatly simplifies any changes to these APIs because clients can always assume their dependencies are updated before them.  We hope to do this by:
+
+1. Starting with the complete directed graph of API dependencies discovered by this tool, ignoring bogus dependencies and dependencies from non-deployed components.
+2. Removing one edge, meaning that we nominate that API as one where clients _cannot_ assume their dependencies will be updated before them.
+3. Checking if we still have cycles.  If so, repeat.
+
+=== How filters work
+
+==== Example
+
+Filter rules are defined in `api-manifest.toml` in the `dependency_filter_rules` block.  Here's an example:
+
+```toml
+[[dependency_filter_rules]]
+ancestor = "nexus-types"
+client = "gateway-client"
+evaluation = "bogus"
+note = """
+nexus-types depends on gateway-client for defining some types.
+"""
+```
+
+Implied in this rule is that the Rust package `nexus-types` depends on the Rust package `gateway-client`, which is a client for the MGS API.  Without this rule, the tool would identify any Rust component that depends on `nexus-types` as depending on the MGS API.  This rule says: ignore any dependency on `gateway-client` that goes through `nexus-types` because it's `bogus`: it's not a real dependency because `nexus-types` doesn't actually make requests to MGS.  It just borrows some types.
+
+Say we have a component called `omicron-nexus` that depends on `nexus-types` _and_ `gateway-client`.  For that component, this rule has no effect because there's another Rust dependency path from `omicron-nexus` to `gateway-client` that doesn't go through `nexus-types`, so the tool still knows it depends on the MGS API.
+
+But if we had a component called `oximeter-collector` that depends on `nexus-types` but doesn't depend on `gateway-client` through any other path, then this rule prevents the tool from falsely claiming that `oximeter-collector` depends on the MGS API.
+
+==== Evaluations
+
+Filter rules always represent a determination that a human has made about one or more dependencies found by the tool.  The possible evaluations are:
+
+[cols="1,3",options="header"]
+|===
+|Evaluation
+|Meaning
+
+|`unknown`
+|No determination has been made.  These are included by default.  This is also the default evaluation for a dependency, if no filter rules match it.
+
+|`bogus`
+|Any matching dependency is a false positive.  The dependency should be ignored altogether.
+
+|`not-deployed`
+|The matching dependency is for a program that is never deployed, like a test program, even though the package that it's _in_ does get deployed.  These are ignored by default.
+
+|`non-dag`
+|Any matching dependency has been flagged as "will not be part of the DAG used for online upgrade".  This is primarily to help us keep track of the specific dependencies that we've looked at and made this determination for.  These are currently ignored by default.
+
+|`dag`
+|Any matching dependency has been flagged as "we want this to be part of the DAG used for online upgrade".
+
+|===
+
+In summary:
+
+* All dependencies start as `unknown`.
+* All the known false positives have been flagged as `bogus`.
+* All the known dependencies from non-deployed programs inside deployed packages have been flagged as `not-deployed`.
+* What remains is to evaluate the rest of the edges and determine if they're going to be `dag` or `non-dag`.
+
+It is a runtime error for two filter rules to match any dependency chain.  This makes the evaluation unambiguous.  i.e., you can't have one rule match a dependency chain and say it's `bogus` while another says it's `dag`.
+
+==== Applying different filters at runtime
+
+By default, this command shows dependencies that might be in the final graph.  This includes those labeled `dag` and `unknown`.  It excludes `bogus`, `non-dag`, and `not-deployed` dependencies.
+
+You can select different subsets using the `--filter` option, which accepts:
+
+* `include-non-dag`: show non-`bogus`, non-`not-deployed` dependencies (i.e., all dependencies that do exist in the deployed system).
+* `non-bogus`: show everything _except_ bogus dependencies
+* `bogus`: show only the bogus dependencies (useful for seeing all the false positives)
+* `all`: show everything, even bogus dependencies
