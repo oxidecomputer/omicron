@@ -138,11 +138,8 @@ fn version_or_unknown(caboose: Option<&SpComponentCaboose>) -> String {
     caboose.map(|c| c.version.as_str()).unwrap_or("UNKNOWN").to_string()
 }
 
-fn caboose_sign(caboose: Option<&SpComponentCaboose>) -> Option<Vec<u8>> {
-    match caboose {
-        None => None,
-        Some(c) => c.sign.as_ref().map(|s| s.as_bytes().to_vec()),
-    }
+fn caboose_sign(caboose: &SpComponentCaboose) -> Option<Vec<u8>> {
+    caboose.sign.as_ref().map(|s| s.as_bytes().to_vec())
 }
 
 impl Component {
@@ -205,12 +202,12 @@ impl Component {
     // of the bootloader is going to be identical to the RoT.
     pub fn rot_sign(&self) -> Option<Vec<u8>> {
         match self.rot_active_slot()? {
-            RotSlot::A => caboose_sign(
-                self.sp().rot.as_ref().and_then(|rot| rot.caboose_a.as_ref()),
-            ),
-            RotSlot::B => caboose_sign(
-                self.sp().rot.as_ref().and_then(|rot| rot.caboose_b.as_ref()),
-            ),
+            RotSlot::A => self.sp().rot.as_ref().map_or(None, |rot| {
+                rot.caboose_a.as_ref().map_or(None, |x| caboose_sign(x))
+            }),
+            RotSlot::B => self.sp().rot.as_ref().map_or(None, |rot| {
+                rot.caboose_b.as_ref().map_or(None, |x| caboose_sign(x))
+            }),
         }
     }
 }
