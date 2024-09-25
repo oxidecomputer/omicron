@@ -13,6 +13,7 @@ use openapi_manager_types::{ValidationBackend, ValidationContext};
 use openapiv3::OpenAPI;
 
 /// All APIs managed by openapi-manager.
+// TODO The metadata here overlaps with metadata in api-manifest.toml.
 pub fn all_apis() -> Vec<ApiSpec> {
     vec![
         ApiSpec {
