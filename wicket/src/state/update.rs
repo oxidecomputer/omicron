@@ -123,18 +123,12 @@ impl RackUpdateState {
         self.artifact_versions.clear();
         for a in &mut self.artifacts {
             if let Ok(known) = a.id.kind.parse() {
-                self.artifact_versions
-                    .entry(known)
-                    .and_modify(|x| {
-                        x.push(ArtifactVersions {
-                            version: a.id.version.clone(),
-                            sign: a.sign.clone(),
-                        })
-                    })
-                    .or_insert(vec![ArtifactVersions {
+                self.artifact_versions.entry(known).or_default().push(
+                    ArtifactVersions {
                         version: a.id.version.clone(),
                         sign: a.sign.clone(),
-                    }]);
+                    },
+                );
             }
         }
 

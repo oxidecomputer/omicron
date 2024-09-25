@@ -204,22 +204,13 @@ impl Component {
     // We also use this for the bootloader selection as the SIGN
     // of the bootloader is going to be identical to the RoT.
     pub fn rot_sign(&self) -> Option<Vec<u8>> {
-        match self.rot_active_slot() {
-            None => return None,
-            Some(s) => match s {
-                RotSlot::A => caboose_sign(
-                    self.sp()
-                        .rot
-                        .as_ref()
-                        .and_then(|rot| rot.caboose_a.as_ref()),
-                ),
-                RotSlot::B => caboose_sign(
-                    self.sp()
-                        .rot
-                        .as_ref()
-                        .and_then(|rot| rot.caboose_b.as_ref()),
-                ),
-            },
+        match self.rot_active_slot()? {
+            RotSlot::A => caboose_sign(
+                self.sp().rot.as_ref().and_then(|rot| rot.caboose_a.as_ref()),
+            ),
+            RotSlot::B => caboose_sign(
+                self.sp().rot.as_ref().and_then(|rot| rot.caboose_b.as_ref()),
+            ),
         }
     }
 }

@@ -1125,14 +1125,8 @@ fn append_caboose(
     prefix: Span<'static>,
     caboose: &SpComponentCaboose,
 ) {
-    let SpComponentCaboose {
-        board,
-        git_commit,
-        name,
-        sign,
-        version,
-        epoch,
-    } = caboose;
+    let SpComponentCaboose { board, git_commit, name, sign, version, epoch } =
+        caboose;
     let label_style = style::text_label();
     let ok_style = style::text_success();
 
