@@ -17499,11 +17499,11 @@
             "type": "string",
             "format": "ip"
           },
-          "local_pref": {
+          "rib_priority": {
             "nullable": true,
             "description": "Local preference for route. Higher preference indictes precedence within and across protocols.",
             "type": "integer",
-            "format": "uint32",
+            "format": "uint8",
             "minimum": 0
           },
           "vid": {
@@ -19564,17 +19564,17 @@
             "description": "The interface name this route configuration is assigned to.",
             "type": "string"
           },
-          "local_pref": {
-            "nullable": true,
-            "description": "Local preference indicating priority within and across protocols.",
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          },
           "port_settings_id": {
             "description": "The port settings object this route configuration belongs to.",
             "type": "string",
             "format": "uuid"
+          },
+          "rib_priority": {
+            "nullable": true,
+            "description": "RIB Priority indicating priority within and across protocols.",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
           },
           "vlan_id": {
             "nullable": true,

@@ -329,15 +329,15 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
     // routes = []
     let mut routes_out = Array::new();
     for r in routes {
-        let RouteConfig { destination, nexthop, vlan_id, local_pref } = r;
+        let RouteConfig { destination, nexthop, vlan_id, rib_priority } = r;
         let mut route = InlineTable::new();
         route.insert("nexthop", string_value(nexthop));
         route.insert("destination", string_value(destination));
         if let Some(vlan_id) = vlan_id {
             route.insert("vlan_id", i64_value(i64::from(*vlan_id)));
         }
-        if let Some(local_pref) = local_pref {
-            route.insert("local_pref", i64_value(i64::from(*local_pref)));
+        if let Some(rib_priority) = rib_priority {
+            route.insert("rib_priority", i64_value(i64::from(*rib_priority)));
         }
         routes_out.push(Value::InlineTable(route));
     }

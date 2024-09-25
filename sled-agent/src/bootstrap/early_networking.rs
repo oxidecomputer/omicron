@@ -631,8 +631,13 @@ impl<'a> EarlyNetworkSetup<'a> {
                     IpAddr::V6(_) => continue,
                 };
                 let vlan_id = r.vlan_id;
-                let local_pref = r.local_pref;
-                let sr = StaticRoute4 { nexthop, prefix, vlan_id, local_pref };
+                let rib_priority = r.rib_priority;
+                let sr = StaticRoute4 {
+                    nexthop,
+                    prefix,
+                    vlan_id,
+                    rib_priority: rib_priority.unwrap_or(1),
+                };
                 rq.routes.list.push(sr);
             }
         }

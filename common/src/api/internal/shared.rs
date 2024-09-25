@@ -306,9 +306,9 @@ pub struct RouteConfig {
     /// The VLAN id associated with this route.
     #[serde(default)]
     pub vlan_id: Option<u16>,
-    /// The local preference associated with this route.
+    /// The RIB priority (i.e. Admin Distance) associated with this route.
     #[serde(default)]
-    pub local_pref: Option<u32>,
+    pub rib_priority: Option<u8>,
 }
 
 #[derive(
