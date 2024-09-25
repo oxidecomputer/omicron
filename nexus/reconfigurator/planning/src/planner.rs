@@ -30,7 +30,6 @@ use nexus_types::inventory::Collection;
 use omicron_uuid_kinds::SledUuid;
 use slog::error;
 use slog::{info, warn, Logger};
-use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::hash::Hash;
@@ -564,21 +563,15 @@ impl<'a> Planner<'a> {
             }
         }
 
-        // Double check that we didn't make any arithmetic mistakes.
-        // It's not an error to place fewer zones than requested;
-        // maybe they'll be added in the next round of planning.
-        match new_zones_added.cmp(&num_zones_to_add) {
-            Ordering::Less => {
-                warn!(
-                    self.log, "added fewer {kind:?} zones than requested";
-                    "added" => new_zones_added,
-                    "requested" => num_zones_to_add
-                );
-                Ok(())
-            }
-            Ordering::Equal => Ok(()),
-            Ordering::Greater => Err(Error::TooManyZones { kind: kind.into() }),
-        }
+        // Double check that we didn't make any arithmetic mistakes. If we've
+        // arrived here, we think we've added the number of `kind` zones we
+        // needed to.
+        assert_eq!(
+            new_zones_added, num_zones_to_add,
+            "internal error counting {kind:?} zones"
+        );
+
+        Ok(())
     }
 
     fn do_plan_cockroachdb_settings(&mut self) {
@@ -1510,11 +1503,14 @@ mod test {
         );
 
         // Expunge the first sled and re-plan. That gets us two expunged
-        // external DNS zones ...
+        // external DNS zones; two external DNS zones should then be added to
+        // the remaining sleds.
         let mut input_builder = input.into_builder();
-        let (&sled_id, details) =
-            input_builder.sleds_mut().iter_mut().next().expect("no sleds");
-        details.policy = SledPolicy::Expunged;
+        input_builder
+            .sleds_mut()
+            .get_mut(&sled_1)
+            .expect("found sled 1 again")
+            .policy = SledPolicy::Expunged;
         let input = input_builder.build();
         let blueprint3 = Planner::new_based_on(
             logctx.log.clone(),
@@ -1542,25 +1538,9 @@ mod test {
             2
         );
 
-        // ... which we can pick up after one more round of planning.
-        let blueprint4 = Planner::new_based_on(
-            logctx.log.clone(),
-            &blueprint3,
-            &input,
-            "test_blueprint4",
-            &collection,
-        )
-        .expect("failed to create planner")
-        .with_rng_seed((TEST_NAME, "bp4"))
-        .plan()
-        .expect("failed to re-re-plan");
-
-        let diff = blueprint4.diff_since_blueprint(&blueprint3);
-        println!("3 -> 4 (expunged zones):\n{}", diff.display());
-
         // The IP addresses of the new external DNS zones should be the
         // same as the original set that we "found".
-        let mut ips = blueprint4
+        let mut ips = blueprint3
             .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
             .filter_map(|(_id, zone)| {
                 zone.zone_type.is_external_dns().then(|| {
@@ -1577,7 +1557,7 @@ mod test {
         // Test a no-op planning iteration.
         assert_planning_makes_no_changes(
             &logctx.log,
-            &blueprint4,
+            &blueprint3,
             &input,
             TEST_NAME,
         );

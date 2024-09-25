@@ -376,6 +376,9 @@ impl<'a> BlueprintBuilder<'a> {
                     self.zones
                         .current_zones(BlueprintZoneFilter::ShouldBeRunning)
                         .flat_map(|(_sled_id, zone_config)| zone_config),
+                    self.zones
+                        .current_zones(BlueprintZoneFilter::Expunged)
+                        .flat_map(|(_sled_id, zone_config)| zone_config),
                     self.input,
                 )
             })
@@ -757,7 +760,7 @@ impl<'a> BlueprintBuilder<'a> {
             nic_ip,
             nic_subnet,
             nic_mac,
-        } = self.external_networking.for_new_external_dns()?;
+        } = self.external_networking()?.for_new_external_dns()?;
         let nic = NetworkInterface {
             id: self.rng.network_interface_rng.next(),
             kind: NetworkInterfaceKind::Service { id: id.into_untyped_uuid() },
@@ -1403,8 +1406,11 @@ impl<'a> BlueprintBuilder<'a> {
     ///
     /// TODO-cleanup: Remove when external DNS addresses are in the policy.
     #[cfg(test)]
+    #[track_caller]
     pub fn add_external_dns_ip(&mut self, addr: IpAddr) {
-        self.external_networking.add_external_dns_ip(addr);
+        self.external_networking()
+            .expect("failed to initialize external networking allocator")
+            .add_external_dns_ip(addr);
     }
 }
 

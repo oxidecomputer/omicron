@@ -60,6 +60,7 @@ impl<'a> BuilderExternalNetworking<'a> {
     pub(super) fn new<'b>(
         parent_blueprint: &'a Blueprint,
         running_omicron_zones: impl Iterator<Item = &'b BlueprintZoneConfig>,
+        expunged_omicron_zones: impl Iterator<Item = &'b BlueprintZoneConfig>,
         input: &'a PlanningInput,
     ) -> anyhow::Result<Self> {
         // Scan through the running zones and build several sets of "used
@@ -104,6 +105,7 @@ impl<'a> BuilderExternalNetworking<'a> {
         let mut external_ip_alloc =
             ExternalIpAllocator::new(input.service_ip_pool_ranges());
         let mut used_macs: HashSet<MacAddr> = HashSet::new();
+        let mut used_external_dns_ips: HashSet<IpAddr> = HashSet::new();
 
         for z in running_omicron_zones {
             let zone_type = &z.zone_type;
@@ -132,18 +134,27 @@ impl<'a> BuilderExternalNetworking<'a> {
                         }
                     }
                 },
-                BlueprintZoneType::ExternalDns(dns) => match dns.nic.ip {
-                    IpAddr::V4(ip) => {
-                        if !existing_external_dns_v4_ips.insert(ip) {
-                            bail!("duplicate external DNS IP: {ip}");
+                BlueprintZoneType::ExternalDns(dns) => {
+                    if !used_external_dns_ips.insert(dns.dns_address.addr.ip())
+                    {
+                        bail!(
+                            "duplicate external DNS external IP: {}",
+                            dns.dns_address.addr
+                        );
+                    }
+                    match dns.nic.ip {
+                        IpAddr::V4(ip) => {
+                            if !existing_external_dns_v4_ips.insert(ip) {
+                                bail!("duplicate external DNS IP: {ip}");
+                            }
+                        }
+                        IpAddr::V6(ip) => {
+                            if !existing_external_dns_v6_ips.insert(ip) {
+                                bail!("duplicate external DNS IP: {ip}");
+                            }
                         }
                     }
-                    IpAddr::V6(ip) => {
-                        if !existing_external_dns_v6_ips.insert(ip) {
-                            bail!("duplicate external DNS IP: {ip}");
-                        }
-                    }
-                },
+                }
                 _ => (),
             }
 
@@ -164,19 +175,8 @@ impl<'a> BuilderExternalNetworking<'a> {
         // Recycle the IP addresses of expunged external DNS zones,
         // ensuring that those addresses aren't currently in use.
         // TODO: Remove when external DNS addresses come from policy.
-        let used_external_dns_ips = parent_blueprint
-            .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
-            .filter_map(|(_, zone)| {
-                if let BlueprintZoneType::ExternalDns(dns) = &zone.zone_type {
-                    Some(dns.dns_address.addr.ip())
-                } else {
-                    None
-                }
-            })
-            .collect::<BTreeSet<IpAddr>>();
-        let available_external_dns_ips = parent_blueprint
-            .all_omicron_zones(BlueprintZoneFilter::Expunged)
-            .filter_map(|(_, zone)| {
+        let available_external_dns_ips = expunged_omicron_zones
+            .filter_map(|zone| {
                 if let BlueprintZoneType::ExternalDns(dns) = &zone.zone_type {
                     let ip = dns.dns_address.addr.ip();
                     if !used_external_dns_ips.contains(&ip) {
