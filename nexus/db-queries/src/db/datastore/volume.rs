@@ -2057,12 +2057,19 @@ impl DataStore {
                     let old_volume = if let Some(old_volume) = maybe_old_volume {
                         old_volume
                     } else {
-                        // Existing volume was deleted, so return here. We can't
-                        // perform the region replacement now, and this will
-                        // short-circuit the rest of the process.
+                        // Existing volume was hard-deleted, so return here. We
+                        // can't perform the region replacement now, and this
+                        // will short-circuit the rest of the process.
 
                         return Ok(VolumeReplaceResult::ExistingVolumeDeleted);
                     };
+
+                    if old_volume.time_deleted.is_some() {
+                        // Existing volume was soft-deleted, so return here for
+                        // the same reason: the region replacement process
+                        // should be short-circuited now.
+                        return Ok(VolumeReplaceResult::ExistingVolumeDeleted);
+                    }
 
                     let old_vcr: VolumeConstructionRequest =
                         match serde_json::from_str(&old_volume.data()) {
@@ -2268,12 +2275,19 @@ impl DataStore {
                     let old_volume = if let Some(old_volume) = maybe_old_volume {
                         old_volume
                     } else {
-                        // Existing volume was deleted, so return here. We can't
-                        // perform the region snapshot replacement now, and this
+                        // Existing volume was hard-deleted, so return here. We
+                        // can't perform the region replacement now, and this
                         // will short-circuit the rest of the process.
 
                         return Ok(VolumeReplaceResult::ExistingVolumeDeleted);
                     };
+
+                    if old_volume.time_deleted.is_some() {
+                        // Existing volume was soft-deleted, so return here for
+                        // the same reason: the region replacement process
+                        // should be short-circuited now.
+                        return Ok(VolumeReplaceResult::ExistingVolumeDeleted);
+                    }
 
                     let old_vcr: VolumeConstructionRequest =
                         match serde_json::from_str(&old_volume.data()) {
