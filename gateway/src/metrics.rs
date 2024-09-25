@@ -795,7 +795,7 @@ impl SpPoller {
                     if let Err(error) = m.value {
                         let kind = match m.kind {
                             MeasurementKind::Temperature if is_tctl => {
-                                "cpu_tctl"
+                                "amd_cpu_tctl"
                             }
                             MeasurementKind::Temperature => "temperature",
                             MeasurementKind::Current => "current",
@@ -855,7 +855,7 @@ impl SpPoller {
                         {
                             Sample::new(
                                 target,
-                                &metric::CpuTctl { sensor, datum },
+                                &metric::AmdCpuTctl { sensor, datum },
                             )
                         }
                         // Other measurements with the "temperature" measurement
@@ -870,7 +870,7 @@ impl SpPoller {
                         (Err(_), MeasurementKind::Temperature) if is_tctl => {
                             Sample::new_missing(
                                 target,
-                                &metric::CpuTctl { sensor, datum: 0.0 },
+                                &metric::AmdCpuTctl { sensor, datum: 0.0 },
                             )
                         }
                         (Err(_), MeasurementKind::Temperature) => {

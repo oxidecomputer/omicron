@@ -760,7 +760,7 @@ async fn test_mgs_metrics(
     .await;
     check_all_timeseries_present(&cptestctx, "fan_speed", fan_speed_sensors)
         .await;
-    check_all_timeseries_present(&cptestctx, "cpu_tctl", cpu_tctl_sensors)
+    check_all_timeseries_present(&cptestctx, "amd_cpu_tctl", cpu_tctl_sensors)
         .await;
 
     // Because the `ControlPlaneTestContext` isn't managing the MGS we made for

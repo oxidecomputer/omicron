@@ -184,7 +184,7 @@ versions = [
 ]
 
 [[metrics]]
-name = "cpu_tctl"
+name = "amd_cpu_tctl"
 description = """
 A CPU Tctl (control temperature) reading from an AMD CPU.
 
