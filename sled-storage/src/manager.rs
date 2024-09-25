@@ -11,7 +11,7 @@ use crate::dataset::CONFIG_DATASET;
 use crate::disk::RawDisk;
 use crate::error::Error;
 use crate::resources::{AllDisks, StorageResources};
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 use debug_ignore::DebugIgnore;
 use futures::future::FutureExt;
 use illumos_utils::zfs::{Mountpoint, Zfs};
@@ -1012,10 +1012,7 @@ impl StorageManager {
         let mountpoint_path = if zoned {
             Utf8PathBuf::from("/data")
         } else {
-            config.name.pool().dataset_mountpoint(
-                &Utf8PathBuf::from("/"),
-                &config.name.dataset().to_string(),
-            )
+            config.name.mountpoint(Utf8Path::new("/"))
         };
         let mountpoint = Mountpoint::Path(mountpoint_path);
 

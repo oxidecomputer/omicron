@@ -5,6 +5,7 @@
 //! Disk related types shared among crates
 
 use anyhow::bail;
+use camino::{Utf8Path, Utf8PathBuf};
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
@@ -124,6 +125,21 @@ impl DatasetName {
         } else {
             self.full_unencrypted_name()
         }
+    }
+
+    /// Returns the mountpoint of the dataset.
+    ///
+    /// If this dataset should be encrypted, this automatically adds the
+    /// "crypt" dataset component.
+    pub fn mountpoint(&self, root: &Utf8Path) -> Utf8PathBuf {
+        self.pool_name.dataset_mountpoint(
+            root,
+            &if self.kind.dataset_should_be_encrypted() {
+                format!("crypt/{}", self.kind)
+            } else {
+                self.kind.to_string()
+            },
+        )
     }
 
     fn full_encrypted_name(&self) -> String {
