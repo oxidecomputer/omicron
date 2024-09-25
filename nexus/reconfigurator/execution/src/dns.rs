@@ -60,7 +60,7 @@ pub(crate) async fn deploy_dns(
 
     // Next, construct the DNS config represented by the blueprint.
     let internal_dns_zone_blueprint =
-        blueprint_internal_dns_config(blueprint, sleds_by_id, overrides);
+        blueprint_internal_dns_config(blueprint, sleds_by_id, overrides)?;
     let silos = datastore
         .silo_list_all_batched(opctx, Discoverability::All)
         .await
@@ -250,7 +250,7 @@ pub fn blueprint_internal_dns_config(
     blueprint: &Blueprint,
     sleds_by_id: &BTreeMap<SledUuid, Sled>,
     overrides: &Overridables,
-) -> DnsConfigZone {
+) -> Result<DnsConfigZone, Error> {
     // The DNS names configured here should match what RSS configures for the
     // same zones.  It's tricky to have RSS share the same code because it uses
     // Sled Agent's _internal_ `OmicronZoneConfig` (and friends), whereas we're
@@ -287,14 +287,6 @@ pub fn blueprint_internal_dns_config(
                 } else {
                     ServiceName::ClickhouseServer
                 };
-
-                // Safety: This only fails if the ServiceName isn't one of the
-                // ClickHouse types, which is guaranteed by this match arm. It
-                // may also fail if we add a zone with the same ID more than
-                // once, but as with the call to `host_zone_with_one_backend()`
-                // below, that should not be possible at this point in the
-                // code, since the IDs of the zones in the blueprint should be
-                // unique.
                 dns_builder
                     .host_zone_clickhouse(
                         zone.id,
@@ -302,7 +294,9 @@ pub fn blueprint_internal_dns_config(
                         http_service,
                         address.port(),
                     )
-                    .unwrap();
+                    .map_err(|e| Error::InternalError {
+                        internal_message: e.to_string(),
+                    })?;
                 continue 'all_zones;
             }
             BlueprintZoneType::ClickhouseKeeper(
@@ -332,9 +326,6 @@ pub fn blueprint_internal_dns_config(
                 blueprint_zone_type::InternalDns { http_address, .. },
             ) => (ServiceName::InternalDns, http_address.port()),
         };
-
-        // This unwrap is safe because this function only fails if we provide
-        // the same zone id twice, which should not be possible here.
         dns_builder
             .host_zone_with_one_backend(
                 zone.id,
@@ -342,14 +333,15 @@ pub fn blueprint_internal_dns_config(
                 service_name,
                 port,
             )
-            .unwrap();
+            .map_err(|e| Error::InternalError {
+                internal_message: e.to_string(),
+            })?;
     }
 
     let scrimlets = sleds_by_id.values().filter(|sled| sled.is_scrimlet);
     for scrimlet in scrimlets {
         let sled_subnet = scrimlet.subnet();
         let switch_zone_ip = overrides.switch_zone_ip(scrimlet.id, sled_subnet);
-        // unwrap(): see above.
         dns_builder
             .host_zone_switch(
                 scrimlet.id,
@@ -358,10 +350,12 @@ pub fn blueprint_internal_dns_config(
                 overrides.mgs_port(scrimlet.id),
                 overrides.mgd_port(scrimlet.id),
             )
-            .unwrap();
+            .map_err(|e| Error::InternalError {
+                internal_message: e.to_string(),
+            })?;
     }
 
-    dns_builder.build_zone()
+    Ok(dns_builder.build_zone())
 }
 
 pub fn blueprint_external_dns_config(
@@ -793,7 +787,8 @@ mod test {
             &blueprint,
             &BTreeMap::new(),
             &Default::default(),
-        );
+        )
+        .unwrap();
         assert!(blueprint_dns.records.is_empty());
     }
 
@@ -917,7 +912,8 @@ mod test {
             &blueprint,
             &sleds_by_id,
             &Default::default(),
-        );
+        )
+        .unwrap();
         assert_eq!(blueprint_dns_zone.zone_name, DNS_ZONE);
 
         // Now, verify a few different properties about the generated DNS

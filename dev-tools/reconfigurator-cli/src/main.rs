@@ -837,12 +837,12 @@ fn cmd_blueprint_diff(
         &blueprint1,
         &sleds_by_id,
         &Default::default(),
-    );
+    )?;
     let internal_dns_config2 = blueprint_internal_dns_config(
         &blueprint2,
         &sleds_by_id,
         &Default::default(),
-    );
+    )?;
     let dns_diff = DnsDiff::new(&internal_dns_config1, &internal_dns_config2)
         .context("failed to assemble DNS diff")?;
     swriteln!(rv, "internal DNS:\n{}", dns_diff);
@@ -916,7 +916,7 @@ fn cmd_blueprint_diff_dns(
                 blueprint,
                 &sleds_by_id,
                 &Default::default(),
-            )
+            )?
         }
         CliDnsGroup::External => blueprint_external_dns_config(
             blueprint,
