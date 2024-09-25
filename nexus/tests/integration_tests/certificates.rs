@@ -28,6 +28,7 @@ use oxide_client::ClientSessionExt;
 use oxide_client::ClientSilosExt;
 use oxide_client::ClientSystemSilosExt;
 use oxide_client::CustomDnsResolver;
+use std::error::Error;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -603,8 +604,9 @@ async fn test_silo_certificates() {
             error.to_string().contains("invalid peer certificate")
                 || error.to_string().contains("self-signed certificate")
                 || error.to_string().contains("self signed certificate"),
-            "Unexpected error: {}",
+            "Unexpected error: {} {}",
             error,
+            error.source().map_or_else(String::new, |e| e.to_string()),
         );
     } else {
         panic!(
