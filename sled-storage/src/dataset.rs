@@ -7,7 +7,6 @@
 use crate::config::MountConfig;
 use crate::keyfile::KeyFile;
 use camino::Utf8PathBuf;
-use cfg_if::cfg_if;
 use illumos_utils::zfs::{
     self, DestroyDatasetErrorVariant, EncryptionDetails, Keypath, Mountpoint,
     SizeDetails, Zfs,
@@ -19,7 +18,6 @@ use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::disk::{
     CompressionAlgorithm, DatasetName, DiskIdentity, DiskVariant, GzipLevel,
 };
-use once_cell::sync::Lazy;
 use rand::distributions::{Alphanumeric, DistString};
 use slog::{debug, info, Logger};
 use std::process::Stdio;
@@ -33,19 +31,18 @@ pub const CONFIG_DATASET: &'static str = "config";
 pub const M2_DEBUG_DATASET: &'static str = "debug";
 pub const M2_BACKING_DATASET: &'static str = "backing";
 
-cfg_if! {
-    if #[cfg(any(test, feature = "testing"))] {
+pub const DEBUG_DATASET_QUOTA: ByteCount =
+    if cfg!(any(test, feature = "testing")) {
         // Tuned for zone_bundle tests
-        pub const DEBUG_DATASET_QUOTA: u64 = 1 << 20;
+        ByteCount::from_mebibytes_u32(1)
     } else {
-        // TODO-correctness: This value of 100GiB is a pretty wild guess, and should be
-        // tuned as needed.
-        pub const DEBUG_DATASET_QUOTA: u64 = 100 * (1 << 30);
-    }
-}
+        // TODO-correctness: This value of 100GiB is a pretty wild guess, and
+        // should be tuned as needed.
+        ByteCount::from_gibibytes_u32(100)
+    };
 // TODO-correctness: This value of 100GiB is a pretty wild guess, and should be
 // tuned as needed.
-pub const DUMP_DATASET_QUOTA: u64 = 100 * (1 << 30);
+pub const DUMP_DATASET_QUOTA: ByteCount = ByteCount::from_gibibytes_u32(100);
 // passed to zfs create -o compression=
 pub const DUMP_DATASET_COMPRESSION: CompressionAlgorithm =
     CompressionAlgorithm::GzipN { level: GzipLevel::new::<9>() };
@@ -59,50 +56,41 @@ pub const U2_DEBUG_DATASET: &'static str = "crypt/debug";
 pub const CRYPT_DATASET: &'static str = "crypt";
 
 const U2_EXPECTED_DATASET_COUNT: usize = 2;
-static U2_EXPECTED_DATASETS: Lazy<
-    [ExpectedDataset; U2_EXPECTED_DATASET_COUNT],
-> = Lazy::new(|| {
-    [
-        // Stores filesystems for zones
-        ExpectedDataset::new(ZONE_DATASET).wipe(),
-        // For storing full kernel RAM dumps
-        ExpectedDataset::new(DUMP_DATASET)
-            .quota(ByteCount::try_from(DUMP_DATASET_QUOTA).unwrap())
-            .compression(DUMP_DATASET_COMPRESSION),
-    ]
-});
+const U2_EXPECTED_DATASETS: [ExpectedDataset; U2_EXPECTED_DATASET_COUNT] = [
+    // Stores filesystems for zones
+    ExpectedDataset::new(ZONE_DATASET).wipe(),
+    // For storing full kernel RAM dumps
+    ExpectedDataset::new(DUMP_DATASET)
+        .quota(DUMP_DATASET_QUOTA)
+        .compression(DUMP_DATASET_COMPRESSION),
+];
 
 const M2_EXPECTED_DATASET_COUNT: usize = 6;
-static M2_EXPECTED_DATASETS: Lazy<
-    [ExpectedDataset; M2_EXPECTED_DATASET_COUNT],
-> = Lazy::new(|| {
-    [
-        // Stores software images.
-        //
-        // Should be duplicated to both M.2s.
-        ExpectedDataset::new(INSTALL_DATASET),
-        // Stores crash dumps.
-        ExpectedDataset::new(CRASH_DATASET),
-        // Backing store for OS data that should be persisted across reboots.
-        // Its children are selectively overlay mounted onto parts of the ramdisk
-        // root.
-        ExpectedDataset::new(M2_BACKING_DATASET),
-        // Stores cluter configuration information.
-        //
-        // Should be duplicated to both M.2s.
-        ExpectedDataset::new(CLUSTER_DATASET),
-        // Stores configuration data, including:
-        // - What services should be launched on this sled
-        // - Information about how to initialize the Sled Agent
-        // - (For scrimlets) RSS setup information
-        //
-        // Should be duplicated to both M.2s.
-        ExpectedDataset::new(CONFIG_DATASET),
-        // Store debugging data, such as service bundles.
-        ExpectedDataset::new(M2_DEBUG_DATASET)
-            .quota(ByteCount::try_from(DEBUG_DATASET_QUOTA).unwrap()),
-    ]
-});
+const M2_EXPECTED_DATASETS: [ExpectedDataset; M2_EXPECTED_DATASET_COUNT] = [
+    // Stores software images.
+    //
+    // Should be duplicated to both M.2s.
+    ExpectedDataset::new(INSTALL_DATASET),
+    // Stores crash dumps.
+    ExpectedDataset::new(CRASH_DATASET),
+    // Backing store for OS data that should be persisted across reboots.
+    // Its children are selectively overlay mounted onto parts of the ramdisk
+    // root.
+    ExpectedDataset::new(M2_BACKING_DATASET),
+    // Stores cluter configuration information.
+    //
+    // Should be duplicated to both M.2s.
+    ExpectedDataset::new(CLUSTER_DATASET),
+    // Stores configuration data, including:
+    // - What services should be launched on this sled
+    // - Information about how to initialize the Sled Agent
+    // - (For scrimlets) RSS setup information
+    //
+    // Should be duplicated to both M.2s.
+    ExpectedDataset::new(CONFIG_DATASET),
+    // Store debugging data, such as service bundles.
+    ExpectedDataset::new(M2_DEBUG_DATASET).quota(DEBUG_DATASET_QUOTA),
+];
 
 // Helper type for describing expected datasets and their optional quota.
 #[derive(Clone, Copy, Debug)]

@@ -2224,7 +2224,8 @@ mod test {
     use crate::db::datastore::DataStoreConnection;
     use crate::db::raw_query_builder::{QueryBuilder, TrustedStr};
     use crate::db::schema;
-    use anyhow::Context;
+    use crate::db::DataStore;
+    use anyhow::{bail, Context};
     use async_bb8_diesel::AsyncConnection;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use async_bb8_diesel::AsyncSimpleConnection;
@@ -2794,6 +2795,75 @@ mod test {
         logctx.cleanup_successful();
     }
 
+    enum AllInvTables {
+        AreEmpty,
+        ArePopulated,
+    }
+
+    async fn check_all_inv_tables(
+        datastore: &DataStore,
+        status: AllInvTables,
+    ) -> anyhow::Result<()> {
+        let conn = datastore
+            .pool_connection_for_tests()
+            .await
+            .context("Failed to get datastore connection")?;
+        let tables: Vec<String> = QueryBuilder::new().sql(
+            "SELECT table_name FROM information_schema.tables WHERE table_name LIKE 'inv\\_%'"
+            )
+            .query::<diesel::sql_types::Text>()
+            .load_async(&*conn)
+            .await
+            .context("Failed to query information_schema for tables")?;
+
+        // Sanity-check, if this breaks, break loudly.
+        // We expect to see all the "inv_..." tables here, even ones that
+        // haven't been written yet.
+        if tables.is_empty() {
+            bail!("Tables missing from information_schema query");
+        }
+
+        conn.transaction_async(|conn| async move {
+            // We need this to call "COUNT(*)" below.
+            conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL)
+                .await
+                .context("Failed to allow full table scans")?;
+
+            for table in tables {
+                let count: i64 = QueryBuilder::new().sql(
+                        // We're scraping the table names dynamically here, so we
+                        // don't know them ahead of time. However, this is also a
+                        // test, so this usage is pretty benign.
+                        TrustedStr::i_take_responsibility_for_validating_this_string(
+                            format!("SELECT COUNT(*) FROM {table}")
+                        )
+                    )
+                    .query::<diesel::sql_types::Int8>()
+                    .get_result_async(&conn)
+                    .await
+                    .with_context(|| format!("Couldn't SELECT COUNT(*) from table {table}"))?;
+
+                match status {
+                    AllInvTables::AreEmpty => {
+                        if count != 0 {
+                            bail!("Found deleted row(s) from table: {table}");
+                        }
+                    },
+                    AllInvTables::ArePopulated => {
+                        if count == 0 {
+                            bail!("Found table without entries: {table}");
+                        }
+                    },
+
+                }
+            }
+            Ok::<(), anyhow::Error>(())
+        })
+        .await?;
+
+        Ok(())
+    }
+
     /// Creates a representative collection, deletes it, and walks through
     /// tables to ensure that the subcomponents of the inventory have been
     /// deleted.
@@ -2815,6 +2885,11 @@ mod test {
             .await
             .expect("failed to insert collection");
 
+        // Read all "inv_" tables and ensure that they are populated.
+        check_all_inv_tables(&datastore, AllInvTables::ArePopulated)
+            .await
+            .expect("All inv_... tables should be populated by representative collection");
+
         // Delete that collection we just added
         datastore
             .inventory_delete_collection(&opctx, collection.id)
@@ -2832,50 +2907,34 @@ mod test {
         );
 
         // Read all "inv_" tables and ensure that they're empty
-
-        let conn = datastore.pool_connection_for_tests().await.unwrap();
-        let tables: Vec<String> = QueryBuilder::new().sql(
-            "SELECT table_name FROM information_schema.tables WHERE table_name LIKE 'inv\\_%'"
-            )
-            .query::<diesel::sql_types::Text>()
-            .load_async(&*conn)
-            .await
-            .unwrap();
-
-        // Sanity-check, if this breaks, break loudly.
-        // We expect to see all the "inv_..." tables here, even ones that
-        // haven't been written yet.
-        assert!(
-            !tables.is_empty(),
-            "Tables missing from information_schema query"
+        check_all_inv_tables(&datastore, AllInvTables::AreEmpty).await.expect(
+            "All inv_... tables should be deleted alongside collection",
         );
 
-        // We need this to call "COUNT(*)" below.
-        conn.transaction_async(|conn| async move {
-            conn.batch_execute_async(ALLOW_FULL_TABLE_SCAN_SQL)
-                .await
-                .unwrap();
+        // Clean up.
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
 
-            for table in tables {
-                eprintln!("Validating that {table} is empty");
-                let count: i64 = QueryBuilder::new().sql(
-                        // We're scraping the table names dynamically here, so we
-                        // don't know them ahead of time. However, this is also a
-                        // test, so this usage is pretty benign.
-                        TrustedStr::i_take_responsibility_for_validating_this_string(
-                            format!("SELECT COUNT(*) FROM {table}")
-                        )
-                    )
-                    .query::<diesel::sql_types::Int8>()
-                    .get_result_async(&conn)
-                    .await
-                    .unwrap();
-                assert_eq!(count, 0, "Found deleted row(s) from table: {table}");
-            }
-            Ok::<(), anyhow::Error>(())
-        })
-        .await
-        .expect("Failed to check that tables were empty");
+    #[tokio::test]
+    async fn test_representative_collection_populates_database() {
+        // Setup
+        let logctx = dev::test_setup_log("inventory_deletion");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+
+        // Create a representative collection and write it to the database.
+        let Representative { builder, .. } = representative();
+        let collection = builder.build();
+        datastore
+            .inventory_insert_collection(&opctx, &collection)
+            .await
+            .expect("failed to insert collection");
+
+        // Read all "inv_" tables and ensure that they are populated.
+        check_all_inv_tables(&datastore, AllInvTables::ArePopulated)
+            .await
+            .expect("All inv_... tables should be populated by representative collection");
 
         // Clean up.
         db.cleanup().await.unwrap();

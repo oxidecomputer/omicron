@@ -581,6 +581,7 @@ async fn test_mgs_metrics(
     let mut input_voltage_sensors = HashMap::new();
     let mut input_current_sensors = HashMap::new();
     let mut fan_speed_sensors = HashMap::new();
+    let mut cpu_tctl_sensors = HashMap::new();
     for sp in all_sp_configs {
         let mut temp = 0;
         let mut current = 0;
@@ -589,11 +590,24 @@ async fn test_mgs_metrics(
         let mut input_current = 0;
         let mut power = 0;
         let mut speed = 0;
+        let mut cpu_tctl = 0;
         for component in &sp.components {
             for sensor in &component.sensors {
                 use gateway_messages::measurement::MeasurementKind as Kind;
                 match sensor.def.kind {
-                    Kind::Temperature => temp += 1,
+                    Kind::Temperature => {
+                        // Currently, Tctl measurements are reported as a
+                        // "temperature" measurement, but are tracked by a
+                        // different metric, as they are not actually a
+                        // measurement of physical degrees Celsius.
+                        if component.device == "sbtsi"
+                            && sensor.def.name == "CPU"
+                        {
+                            cpu_tctl += 1
+                        } else {
+                            temp += 1;
+                        }
+                    }
                     Kind::Current => current += 1,
                     Kind::Voltage => voltage += 1,
                     Kind::InputVoltage => input_voltage += 1,
@@ -610,6 +624,7 @@ async fn test_mgs_metrics(
         input_current_sensors.insert(sp.serial_number.clone(), input_current);
         fan_speed_sensors.insert(sp.serial_number.clone(), speed);
         power_sensors.insert(sp.serial_number.clone(), power);
+        cpu_tctl_sensors.insert(sp.serial_number.clone(), cpu_tctl);
     }
 
     async fn check_all_timeseries_present(
@@ -744,6 +759,8 @@ async fn test_mgs_metrics(
     )
     .await;
     check_all_timeseries_present(&cptestctx, "fan_speed", fan_speed_sensors)
+        .await;
+    check_all_timeseries_present(&cptestctx, "amd_cpu_tctl", cpu_tctl_sensors)
         .await;
 
     // Because the `ControlPlaneTestContext` isn't managing the MGS we made for

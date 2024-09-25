@@ -1984,8 +1984,11 @@ mod tests {
             builder.set_external_dns_version(new_external_dns_version);
             builder.build()
         };
-        let new_sled_zpools =
-            &planning_input.sled_resources(&new_sled_id).unwrap().zpools;
+        let new_sled_zpools = &planning_input
+            .sled_lookup(SledFilter::Commissioned, new_sled_id)
+            .unwrap()
+            .resources
+            .zpools;
 
         // Create a builder for a child blueprint.
         let mut builder = BlueprintBuilder::new_based_on(
@@ -2003,9 +2006,9 @@ mod tests {
                 .sled_ensure_disks(
                     new_sled_id,
                     &planning_input
-                        .sled_resources(&new_sled_id)
+                        .sled_lookup(SledFilter::Commissioned, new_sled_id)
                         .unwrap()
-                        .clone(),
+                        .resources,
                 )
                 .unwrap(),
             EnsureMultiple::Changed {

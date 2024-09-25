@@ -82,8 +82,21 @@ impl PlanningInputFromDb<'_> {
         datastore: &DataStore,
     ) -> Result<PlanningInput, Error> {
         opctx.check_complex_operations_allowed()?;
+        // Note we list *all* rows here including the ones for decommissioned
+        // sleds, because parts of the system consult the input to determine
+        // whether a sled is decommissioned.
+        //
+        // Returning decommissioned sleds is not an absolute necessity, but for
+        // zone cleanup it acts as a safety guard. Why? Let's say that the
+        // input only contained commissioned sleds. One way to infer that a
+        // sled is decommissioned is to assume that any sleds that are in the
+        // blueprint but not the planning input are decommissioned. But the
+        // concern is that if a commissioned sled somehow goes missing, the
+        // zone cleanup process might mistakenly think that the sled is
+        // decommissioned and remove it from the blueprint. This would turn a
+        // bug into a disaster.
         let sled_rows = datastore
-            .sled_list_all_batched(opctx, SledFilter::Commissioned)
+            .sled_list_all_batched(opctx, SledFilter::All)
             .await
             .internal_context("fetching all sleds")?;
         let zpool_rows = datastore

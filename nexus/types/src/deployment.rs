@@ -78,6 +78,8 @@ pub use planning_input::Policy;
 pub use planning_input::SledDetails;
 pub use planning_input::SledDisk;
 pub use planning_input::SledFilter;
+pub use planning_input::SledLookupError;
+pub use planning_input::SledLookupErrorKind;
 pub use planning_input::SledResources;
 pub use planning_input::ZpoolFilter;
 pub use zone_type::blueprint_zone_type;
