@@ -768,7 +768,7 @@ impl SpPoller {
 
                     // Temperature measurements which have the sensor name "CPU"
                     // and are from the SB-TSI device kind are CPU Tctl values.
-                    // These are neither Fahrenheit nor Celcius, but a secret
+                    // These are neither Fahrenheit nor Celsius, but a secret
                     // third thing, which is  not actually a "temperature
                     // measurement" in the sense that you probably imagined when
                     // you saw the words "temperature" and "measurement".
@@ -778,7 +778,7 @@ impl SpPoller {
                     //
                     // Therefore, we report it as a different metric from the
                     // `hardware_component:temperature` metric, which is
-                    // in degrees Celcius.
+                    // in degrees Celsius.
                     //
                     // See this comment for details on what Tctl values mean:
                     // https://github.com/illumos/illumos-gate/blob/6cf3cc9d1e40f89e90135a48f74f03f879fce639/usr/src/uts/intel/io/amdzen/smntemp.c#L21-L57
@@ -860,7 +860,7 @@ impl SpPoller {
                         }
                         // Other measurements with the "temperature" measurement
                         // kind are physical temperatures that actually exist in
-                        // reality (and are always in Celcius).
+                        // reality (and are always in Celsius).
                         (Ok(datum), MeasurementKind::Temperature) => {
                             Sample::new(
                                 target,

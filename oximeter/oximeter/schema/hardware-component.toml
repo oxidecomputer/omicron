@@ -102,7 +102,7 @@ description = """
 A physical temperature reading from a hardware component.
 
 Note that AMD host CPUs report a control temperature (Tctl) value, which is \
-*not* a temperature measurement in degrees Celcius, but a dimensionless \
+*not* a temperature measurement in degrees Celsius, but a dimensionless \
 value that represents how close the CPU is to thermal throttling. This value \
 is recorded in a separate `hardware_component:amd_cpu_tctl` metric.\
 """
@@ -196,7 +196,7 @@ description = """
 A CPU Tctl (control temperature) reading from an AMD CPU.
 
 Note that, unlike other temperature metrics, this is not a measurement of \
-temperature in degrees Celcius or Fahrenheit, but is instead a dimensionless \
+temperature in degrees Celsius or Fahrenheit, but is instead a dimensionless \
 quantity used by the processor's thermal control loop. This value has two \
 notable thresholds:
 

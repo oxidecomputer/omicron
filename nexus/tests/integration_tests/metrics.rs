@@ -599,7 +599,7 @@ async fn test_mgs_metrics(
                         // Currently, Tctl measurements are reported as a
                         // "temperature" measurement, but are tracked by a
                         // different metric, as they are not actually a
-                        // measurement of physical degrees Celcius.
+                        // measurement of physical degrees Celsius.
                         if component.device == "sbtsi"
                             && sensor.def.name == "CPU"
                         {
