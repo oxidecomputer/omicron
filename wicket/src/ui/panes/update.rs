@@ -8,8 +8,8 @@ use std::collections::BTreeMap;
 use super::{align_by, help_text, push_text_lines, Control, PendingScroll};
 use crate::keymap::ShowPopupCmd;
 use crate::state::{
-    update_component_title, ComponentId, Inventory, UpdateItemState,
-    ALL_COMPONENT_IDS,
+    update_component_title, ArtifactVersions, ComponentId, Inventory,
+    UpdateItemState, ALL_COMPONENT_IDS,
 };
 use crate::ui::defaults::style;
 use crate::ui::widgets::{
@@ -39,7 +39,6 @@ use wicket_common::update_events::{
     EventBuffer, EventReport, ProgressEvent, StepOutcome, StepStatus,
     UpdateComponent,
 };
-use wicketd_client::types::SemverVersion;
 
 const MAX_COLUMN_WIDTH: u16 = 25;
 
@@ -2395,12 +2394,10 @@ fn all_installed_versions(
     }
 }
 
-type ArtifactVersions = Vec<(SemverVersion, Option<Vec<u8>>)>;
-
 fn artifact_version(
     id: &ComponentId,
     update_component: UpdateComponent,
-    versions: &BTreeMap<KnownArtifactKind, ArtifactVersions>,
+    versions: &BTreeMap<KnownArtifactKind, Vec<ArtifactVersions>>,
     inventory: &Inventory,
 ) -> String {
     let (artifact, multiple) = match (id, update_component) {
@@ -2443,16 +2440,16 @@ fn artifact_version(
     };
     match versions.get(&artifact) {
         None => "UNKNOWN".to_string(),
-        Some(v) => {
+        Some(artifact_versions) => {
             let component = match inventory.get_inventory(id) {
                 Some(c) => c,
                 None => return "UNKNOWN".to_string(),
             };
-            let cnt = v.len();
-            for (vers, sign) in v {
-                match (sign, component.rot_sign()) {
+            let cnt = artifact_versions.len();
+            for a in artifact_versions {
+                match (&a.sign, component.rot_sign()) {
                     // This matches SP components and old RoT repos
-                    (None, None) => return vers.to_string(),
+                    (None, None) => return a.version.to_string(),
                     // if we have a version that's tagged with sign data but
                     // we can't read from the caboose check if we can fall
                     // back to just returning the version
@@ -2460,15 +2457,15 @@ fn artifact_version(
                         if multiple && cnt > 1 {
                             return "UNKNOWN (MISSING SIGN)".to_string();
                         } else {
-                            return vers.to_string();
+                            return a.version.to_string();
                         }
                     }
                     // If something isn't tagged with a sign just
                     // pass on the version
-                    (None, Some(_)) => return vers.to_string(),
+                    (None, Some(_)) => return a.version.to_string(),
                     (Some(s), Some(c)) => {
                         if *s == c {
-                            return vers.to_string();
+                            return a.version.to_string();
                         }
                     }
                 }

@@ -18,6 +18,15 @@ use wicketd_client::types::{
 /// Event report type returned by the get_artifacts_and_event_reports API call.
 pub type EventReportMap = HashMap<String, HashMap<String, EventReport>>;
 
+/// Represents an artifact from a TUF repo
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArtifactData {
+    /// Artifact ID
+    pub id: ArtifactId,
+    /// Optional sign information (currently only used for RoT images)
+    pub sign: Option<Vec<u8>>,
+}
+
 /// An event that will update state
 ///
 /// This can be a keypress, mouse event, or response from a downstream service.
@@ -32,7 +41,7 @@ pub enum Event {
     /// TUF repo artifacts unpacked by wicketd, and event reports
     ArtifactsAndEventReports {
         system_version: Option<SemverVersion>,
-        artifacts: Vec<(ArtifactId, Option<Vec<u8>>)>,
+        artifacts: Vec<ArtifactData>,
         event_reports: EventReportMap,
     },
 

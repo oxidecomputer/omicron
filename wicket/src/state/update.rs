@@ -11,7 +11,10 @@ use wicket_common::update_events::{
 };
 
 use crate::helpers::{get_update_simulated_result, get_update_test_error};
-use crate::{events::EventReportMap, ui::defaults::style};
+use crate::{
+    events::{ArtifactData, EventReportMap},
+    ui::defaults::style,
+};
 
 use super::{ComponentId, ParsableComponentId, ALL_COMPONENT_IDS};
 use omicron_common::api::internal::nexus::KnownArtifactKind;
@@ -19,16 +22,24 @@ use serde::{Deserialize, Serialize};
 use slog::Logger;
 use std::collections::BTreeMap;
 use std::fmt::Display;
-use wicketd_client::types::{ArtifactId, SemverVersion};
+use wicketd_client::types::SemverVersion;
 
-type ArtifactVersions = Vec<(SemverVersion, Option<Vec<u8>>)>;
+// Represents a version and the signature (optional) associated
+// with a particular artifact. This allows for multiple versions
+// with different versions to be present in the repo. Note
+// sign is currently only used for RoT artifacts
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArtifactVersions {
+    pub version: SemverVersion,
+    pub sign: Option<Vec<u8>>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RackUpdateState {
     pub items: BTreeMap<ComponentId, UpdateItem>,
     pub system_version: Option<SemverVersion>,
-    pub artifacts: Vec<(ArtifactId, Option<Vec<u8>>)>,
-    pub artifact_versions: BTreeMap<KnownArtifactKind, ArtifactVersions>,
+    pub artifacts: Vec<ArtifactData>,
+    pub artifact_versions: BTreeMap<KnownArtifactKind, Vec<ArtifactVersions>>,
     // The update item currently selected is recorded in
     // state.rack_state.selected.
     pub status_view_displayed: bool,
@@ -104,18 +115,26 @@ impl RackUpdateState {
         &mut self,
         logger: &Logger,
         system_version: Option<SemverVersion>,
-        artifacts: Vec<(ArtifactId, Option<Vec<u8>>)>,
+        artifacts: Vec<ArtifactData>,
         reports: EventReportMap,
     ) {
         self.system_version = system_version;
         self.artifacts = artifacts;
         self.artifact_versions.clear();
-        for (id, s) in &mut self.artifacts {
-            if let Ok(known) = id.kind.parse() {
+        for a in &mut self.artifacts {
+            if let Ok(known) = a.id.kind.parse() {
                 self.artifact_versions
                     .entry(known)
-                    .and_modify(|x| x.push((id.version.clone(), s.clone())))
-                    .or_insert(vec![(id.version.clone(), s.clone())]);
+                    .and_modify(|x| {
+                        x.push(ArtifactVersions {
+                            version: a.id.version.clone(),
+                            sign: a.sign.clone(),
+                        })
+                    })
+                    .or_insert(vec![ArtifactVersions {
+                        version: a.id.version.clone(),
+                        sign: a.sign.clone(),
+                    }]);
             }
         }
 
