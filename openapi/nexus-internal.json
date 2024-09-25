@@ -3317,13 +3317,6 @@
         "description": "View of an Instance",
         "type": "object",
         "properties": {
-<<<<<<< HEAD
-          "boot_disk_id": {
-            "nullable": true,
-            "description": "the ID of the disk used to boot this Instance, if a specific one is assigned.",
-            "type": "string",
-            "format": "uuid"
-=======
           "auto_restart_cooldown_expiration": {
             "nullable": true,
             "description": "The time at which the auto-restart cooldown period for this instance completes, permitting it to be automatically restarted again. If the instance enters the `Failed` state, it will not be restarted until after this time.\n\nIf this is not present, then either the instance has never been automatically restarted, or the cooldown period has already expired, allowing the instance to be restarted immediately if it fails.",
@@ -3333,7 +3326,12 @@
           "auto_restart_enabled": {
             "description": "`true` if this instance's auto-restart policy will permit the control plane to automatically restart it if it enters the `Failed` state.",
             "type": "boolean"
->>>>>>> main
+          },
+          "boot_disk_id": {
+            "nullable": true,
+            "description": "the ID of the disk used to boot this Instance, if a specific one is assigned.",
+            "type": "string",
+            "format": "uuid"
           },
           "description": {
             "description": "human-readable free-form text about a resource",
