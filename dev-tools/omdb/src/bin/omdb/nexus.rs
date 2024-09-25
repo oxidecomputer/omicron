@@ -1791,10 +1791,11 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 error, details
             ),
             Ok(InstanceReincarnationStatus {
+                disabled,
                 instances_found,
                 instances_reincarnated,
                 changed_state,
-                query_error,
+                errors,
                 restart_errors,
             }) => {
                 const FOUND: &'static str =
@@ -1821,12 +1822,12 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 println!("    {CHANGED_STATE:<WIDTH$} {n_changed_state:>3}",);
                 println!("    {ERRORS:<WIDTH$} {n_restart_errors:>3}");
 
-                if let Some(e) = query_error {
-                    println!(
-                        "    an error occurred while searching for instances \
-                         to reincarnate:\n      {e}",
-                    );
-                }
+                // if let Some(e) = query_error {
+                //     println!(
+                //         "    an error occurred while searching for instances \
+                //          to reincarnate:\n      {e}",
+                //     );
+                // }
 
                 if n_restart_errors > 0 {
                     println!(

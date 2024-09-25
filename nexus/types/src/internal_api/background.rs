@@ -119,6 +119,10 @@ impl InstanceUpdaterStatus {
 /// The status of an `instance_reincarnation` background task activation.
 #[derive(Default, Serialize, Deserialize, Debug)]
 pub struct InstanceReincarnationStatus {
+    /// If `true`, then instance reincarnation has been explicitly disabled by
+    /// the config file.
+    pub disabled: bool,
+
     /// Total number of instances in need of reincarnation on this activation.
     pub instances_found: usize,
     /// UUIDs of instances reincarnated successfully by this activation.
@@ -126,8 +130,8 @@ pub struct InstanceReincarnationStatus {
     /// UUIDs of instances which changed state before they could be
     /// reincarnated.
     pub changed_state: Vec<Uuid>,
-    /// Any error that occured while finding instances in need of reincarnation.
-    pub query_error: Option<String>,
+    /// Any errors that occured while finding instances in need of reincarnation.
+    pub errors: Vec<String>,
     /// Errors that occurred while restarting individual instances.
     pub restart_errors: HashMap<Uuid, String>,
 }

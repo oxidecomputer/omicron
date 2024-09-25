@@ -12,6 +12,7 @@ use crate::app::sagas::NexusSaga;
 use futures::future::BoxFuture;
 use nexus_db_queries::authn;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::datastore::instance;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
 use nexus_types::identity::Resource;
@@ -45,39 +46,20 @@ impl BackgroundTask for InstanceReincarnation {
     ) -> BoxFuture<'a, serde_json::Value> {
         Box::pin(async move {
             let mut status = InstanceReincarnationStatus::default();
-            match self.actually_activate(opctx, &mut status).await {
-                Err(error) => {
-                    error!(
-                        &opctx.log,
-                        "instance reincarnation failed!";
-                        "instances_found" => status.instances_found,
-                        "instances_reincarnated" => status.instances_reincarnated.len(),
-                        "instances_changed_state" => status.changed_state.len(),
-                        "error" => %error,
-                        "restart_errors" => status.restart_errors.len(),
-                    );
-                    status.query_error = Some(error.to_string());
-                }
-                Ok(()) if !status.restart_errors.is_empty() => {
-                    warn!(
-                        &opctx.log,
-                        "instance reincarnation completed with saga errors";
-                        "instances_found" => status.instances_found,
-                        "instances_reincarnated" => status.instances_reincarnated.len(),
-                        "instances_changed_state" => status.changed_state.len(),
-                        "restart_errors" => status.restart_errors.len(),
-                    );
-                }
-                Ok(()) => {
-                    info!(
-                        &opctx.log,
-                        "instance reincarnation completed successfully";
-                        "instances_found" => status.instances_found,
-                        "instances_reincarnated" => status.instances_reincarnated.len(),
-                        "instances_changed_state" => status.changed_state.len(),
-                    );
-                }
+            // /!\ BREAK GLASS IN CASE OF EMERGENCY /!\
+            if self.disabled {
+                status.disabled = true;
+                debug!(
+                    &opctx.log,
+                    "instance reincarnation disabled, doing nothing",
+                );
+                return serde_json::json!(status);
             }
+
+            let mut running_sagas =
+                Vec::with_capacity(self.concurrency_limit.get() as usize);
+
+            if !status.errors.is_empty() {}
 
             serde_json::json!(status)
         })
@@ -98,31 +80,25 @@ impl InstanceReincarnation {
         }
     }
 
-    async fn actually_activate(
+    async fn reincarnate_all(
         &mut self,
         opctx: &OpContext,
+        reason: instance::ReincarnationReason,
         status: &mut InstanceReincarnationStatus,
+        running_sagas: &mut Vec<RunningSaga>,
     ) -> anyhow::Result<()> {
-        // /!\ BREAK GLASS IN CASE OF EMERGENCY /!\
-        anyhow::ensure!(
-            !self.disabled,
-            "instance reincarnation explicitly disabled by config"
-        );
-
-        let mut running_sagas =
-            Vec::with_capacity(self.concurrency_limit.get() as usize);
         let serialized_authn = authn::saga::Serialized::for_opctx(opctx);
 
         let mut paginator = Paginator::new(self.concurrency_limit);
         while let Some(p) = paginator.next() {
             let batch = self
                 .datastore
-                .find_reincarnatable_failed_instances(
-                    opctx,
+                .find_reincarnatable_instances(
+                    &opctx,
+                    reason,
                     &p.current_pagparams(),
                 )
                 .await?;
-
             paginator = p.found_batch(&batch, &|instance| instance.id());
 
             let found = batch.len();
@@ -130,181 +106,144 @@ impl InstanceReincarnation {
             if found == 0 {
                 trace!(
                     opctx.log,
-                    "no more Failed instances in need of reincarnation";
+                    "no more instances in need of reincarnation";
                     "total_found" => status.instances_found,
+                    "reincarnation_reason" => ?reason,
                 );
                 break;
             }
-
-            self.reincarnate_batch(
-                &opctx.log,
-                "Failed",
-                status,
-                &mut running_sagas,
-                &serialized_authn,
-                batch,
-            )
-            .await;
-        }
-
-        let mut paginator = Paginator::new(self.concurrency_limit);
-        while let Some(p) = paginator.next() {
-            let batch = self
-                .datastore
-                .find_reincarnatable_saga_unwound_instances(
-                    opctx,
-                    &p.current_pagparams(),
-                )
-                .await?;
-
-            paginator = p.found_batch(&batch, &|instance| instance.id());
-
             let found = batch.len();
-            status.instances_found += found;
-            if found == 0 {
-                trace!(
+            for db_instance in batch {
+                let instance_id = db_instance.id();
+                info!(
                     opctx.log,
-                    "no more SagaUnwound instances in need of reincarnation";
-                    "total_found" => status.instances_found,
+                    "attempting to reincarnate instance...";
+                    "instance_id" => %instance_id,
+                    "reincarnation_reason" => ?reason,
+                    "instance_state" => ?db_instance.runtime().nexus_state,
+                    "auto_restart_config" => ?db_instance.auto_restart,
+                    "last_auto_restarted_at" => ?db_instance
+                        .runtime()
+                        .time_last_auto_restarted,
                 );
-                break;
+
+                let running_saga = async {
+                    let dag = instance_start::SagaInstanceStart::prepare(
+                        &instance_start::Params {
+                            db_instance,
+                            serialized_authn: serialized_authn.clone(),
+                            reason: instance_start::Reason::AutoRestart,
+                        },
+                    )?;
+                    self.sagas.saga_run(dag).await
+                }
+                .await;
+                match running_saga {
+                    Ok((saga_id, completed)) => {
+                        running_sagas.push((instance_id, saga_id, completed));
+                    }
+                    Err(error) => {
+                        const ERR_MSG: &'static str =
+                            "failed to start instance-start saga";
+                        error!(
+                            opctx.log,
+                            "{ERR_MSG} for instance {instance_id}";
+                            "instance_id" => %instance_id,
+                            "reincarnation_reason" => ?reason,
+                            "error" => %error,
+                        );
+                        let _prev_error = status.restart_errors.insert(
+                            instance_id,
+                            format!(
+                                "{ERR_MSG} for {reason:?} instance: {error}"
+                            ),
+                        );
+                        debug_assert_eq!(
+                            _prev_error, None,
+                            "if a saga for {instance_id} already failed, we \
+                            shouldn't see it again in the same activation!",
+                        );
+                    }
+                };
             }
 
-            self.reincarnate_batch(
-                &opctx.log,
-                "SagaUnwound",
-                status,
-                &mut running_sagas,
-                &serialized_authn,
-                batch,
-            )
-            .await;
+            debug!(
+                opctx.log,
+                "found {reason:?} instances in need of reincarnation";
+                "reincarnation_reason" => ?reason,
+                "instances_found" => found,
+                "total_found" => status.instances_found,
+                "sagas_started" => running_sagas.len(),
+                "total_sagas_started" => running_sagas.len() +
+                    status.total_sagas_started(),
+            );
+
+            // All sagas started, wait for them to come back before moving on to
+            // the next chunk.
+            // N.B. that although it's tempting to want to query the database
+            // again as soon as one saga completes, so that we're *always*
+            // running `concurrency_limit` sagas in parallel, rather than
+            // running *up to* that many sagas, we ought not to query the
+            // database again until all the sagas we've started have finished.
+            // Otherwise, we may see some instances multiple times, because
+            // their sagas completing is what changes the instance record's
+            // state so that it no longer shows up in the query results.
+            for (instance_id, saga_id, saga) in running_sagas.drain(..) {
+                match saga.await {
+                    // Start saga completed successfully
+                    Ok(_) => {
+                        debug!(
+                            opctx.log,
+                            "welcome back to the realm of the living, \
+                             {instance_id}!";
+                            "instance_id" => %instance_id,
+                            "start_saga_id" => %saga_id,
+                            "reincarnation_reason" => ?reason,
+                        );
+                        status.instances_reincarnated.push(instance_id);
+                    }
+                    // The instance's state changed in the meantime, that's fine...
+                    Err(err @ Error::Conflict { .. }) => {
+                        debug!(
+                            opctx.log,
+                            "{reason:?} instance {instance_id} changed state \
+                             before it could be reincarnated";
+                            "instance_id" => %instance_id,
+                            "reincarnation_reason" => ?reason,
+                            "start_saga_id" => %saga_id,
+                            "error" => err,
+                        );
+                        status.changed_state.push(instance_id);
+                    }
+                    // Start saga failed
+                    Err(error) => {
+                        const ERR_MSG: &'static str = "instance-start saga";
+                        warn!(
+                            opctx.log,
+                            "{ERR_MSG} for instance {instance_id} failed";
+                            "instance_id" => %instance_id,
+                            "reincarnation_reason" => ?reason,
+                            "start_saga_id" => %saga_id,
+                            "error" => %error,
+                        );
+                        let _prev_error = status.restart_errors.insert(
+                            instance_id,
+                            format!(
+                                "{ERR_MSG} {saga_id} for {reason:?} instance \
+                                 failed: {error}",
+                            ),
+                        );
+                        debug_assert_eq!(
+                            _prev_error, None,
+                            "if a saga for {instance_id} already failed, we \
+                            shouldn't see it again in the same activation!",
+                        );
+                    }
+                }
+            }
         }
 
         Ok(())
-    }
-
-    async fn reincarnate_batch(
-        &mut self,
-        log: &slog::Logger,
-        which: &str,
-        status: &mut InstanceReincarnationStatus,
-        running_sagas: &mut Vec<RunningSaga>,
-        serialized_authn: &authn::saga::Serialized,
-        batch: Vec<db::model::Instance>,
-    ) {
-        let found = batch.len();
-        for db_instance in batch {
-            let instance_id = db_instance.id();
-            info!(
-                log,
-                "attempting to reincarnate {which} instance...";
-                "instance_id" => %instance_id,
-                "instance_state" => ?db_instance.runtime().nexus_state,
-                "auto_restart_config" => ?db_instance.auto_restart,
-                "last_auto_restarted_at" => ?db_instance.runtime().time_last_auto_restarted,
-            );
-
-            let running_saga = async {
-                let dag = instance_start::SagaInstanceStart::prepare(
-                    &instance_start::Params {
-                        db_instance,
-                        serialized_authn: serialized_authn.clone(),
-                        reason: instance_start::Reason::AutoRestart,
-                    },
-                )?;
-                self.sagas.saga_run(dag).await
-            }
-            .await;
-            match running_saga {
-                Ok((saga_id, completed)) => {
-                    running_sagas.push((instance_id, saga_id, completed));
-                }
-                Err(error) => {
-                    const ERR_MSG: &'static str =
-                        "failed to start instance-start saga";
-                    error!(
-                        log,
-                        "{ERR_MSG} for {which} instance {instance_id}";
-                        "instance_id" => %instance_id,
-                        "error" => %error,
-                    );
-                    let _prev_error = status.restart_errors.insert(
-                        instance_id,
-                        format!("{ERR_MSG} for {which} instance: {error}"),
-                    );
-                    debug_assert_eq!(
-                        _prev_error, None,
-                        "if a saga for {instance_id} already failed, we \
-                         shouldn't see it again in the same activation!",
-                    );
-                }
-            };
-        }
-
-        debug!(
-            log,
-            "found {which} instances in need of reincarnation";
-            "instances_found" => found,
-            "total_found" => status.instances_found,
-            "sagas_started" => running_sagas.len(),
-            "total_sagas_started" => running_sagas.len() + status.total_sagas_started(),
-        );
-
-        // All sagas started, wait for them to come back before moving on to
-        // the next chunk.
-        // N.B. that although it's tempting to want to query the database
-        // again as soon as one saga completes, so that we're *always*
-        // running `concurrency_limit` sagas in parallel, rather than
-        // running *up to* that many sagas, we ought not to query the
-        // database again until all the sagas we've started have finished.
-        // Otherwise, we may see some instances multiple times, because
-        // their sagas completing is what changes the instance record's
-        // state so that it no longer shows up in the query results.
-        for (instance_id, saga_id, saga) in running_sagas.drain(..) {
-            match saga.await {
-                // Start saga completed successfully
-                Ok(_) => {
-                    debug!(
-                        log,
-                        "welcome back to the realm of the living, {instance_id}!";
-                        "instance_id" => %instance_id,
-                        "start_saga_id" => %saga_id,
-                    );
-                    status.instances_reincarnated.push(instance_id);
-                }
-                // The instance's state changed in the meantime, that's fine...
-                Err(err @ Error::Conflict { .. }) => {
-                    debug!(
-                        log,
-                        "{which} instance {instance_id} changed state before it could be reincarnated";
-                        "instance_id" => %instance_id,
-                        "start_saga_id" => %saga_id,
-                        "error" => err,
-                    );
-                    status.changed_state.push(instance_id);
-                }
-                // Start saga failed
-                Err(error) => {
-                    const ERR_MSG: &'static str = "instance-start saga";
-                    warn!(log,
-                        "{ERR_MSG} for {which} instance failed";
-                        "instance_id" => %instance_id,
-                        "start_saga_id" => %saga_id,
-                        "error" => %error,
-                    );
-                    let _prev_error = status.restart_errors.insert(
-                        instance_id,
-                        format!("{ERR_MSG} {saga_id} for {which} instance failed: {error}"),
-                    );
-                    debug_assert_eq!(
-                        _prev_error, None,
-                        "if a saga for {instance_id} already failed, we \
-                         shouldn't see it again in the same activation!",
-                    );
-                }
-            }
-        }
     }
 }
 
