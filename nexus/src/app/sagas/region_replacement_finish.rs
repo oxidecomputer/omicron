@@ -275,8 +275,8 @@ pub(crate) mod test {
                 opts: CrucibleOpts {
                     id: old_region_volume_id,
                     target: vec![
-                        // XXX if you put something here, you'll need a
-                        // synthetic dataset record
+                        // if you put something here, you'll need a synthetic
+                        // dataset record
                     ],
                     lossy: false,
                     flush_timeout: None,
