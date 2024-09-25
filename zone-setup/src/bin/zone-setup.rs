@@ -4,7 +4,7 @@
 
 //! CLI to set up zone configuration
 
-use anyhow::{anyhow, Context};
+use anyhow::{anyhow, bail, Context};
 use clap::builder::{
     NonEmptyStringValueParser, StringValueParser, TypedValueParser,
 };
@@ -94,6 +94,10 @@ struct ChronySetupArgs {
     #[arg(short, long, action = ArgAction::Set)]
     boundary: bool,
     /// list of NTP servers
+    ///
+    /// At least one must be provided if this is a boundary NTP zone. Ignored if
+    /// this is an internal NTP zone: internal NTP zones find their servers, the
+    /// boundary NTP zones, via DNS.
     #[arg(
         short,
         long,
@@ -467,6 +471,13 @@ maxslewrate 2708.333
     new_config = new_config.replace("@ALLOW@", &allow.to_string());
 
     if is_boundary {
+        if servers.is_empty() {
+            bail!(
+                "at least one upstream server must be provided for \
+                 boundary NTP zones"
+            );
+        }
+
         for s in servers {
             writeln!(
                 &mut new_config,

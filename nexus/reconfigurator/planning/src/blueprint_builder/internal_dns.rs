@@ -125,6 +125,7 @@ pub mod test {
             zone_config.zones.retain(|z| !z.zone_type.is_internal_dns());
         }
         let npruned = blueprint1.blueprint_zones.len() - 1;
+        assert!(npruned > 0);
 
         verify_blueprint(blueprint1);
 

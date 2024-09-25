@@ -473,8 +473,7 @@ impl Plan {
         static_assertions::const_assert!(
             INTERNAL_DNS_REDUNDANCY <= RESERVED_INTERNAL_DNS_REDUNDANCY
         );
-        let dns_subnets =
-            &reserved_rack_subnet.get_dns_subnets()[0..INTERNAL_DNS_REDUNDANCY];
+        let dns_subnets = reserved_rack_subnet.get_dns_subnets();
         for i in 0..dns_subnets.len() {
             let dns_subnet = &dns_subnets[i];
             let ip = dns_subnet.dns_address();
