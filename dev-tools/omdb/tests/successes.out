@@ -606,6 +606,7 @@ task: "region_replacement"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     region replacement requests created ok: 0
     region replacement start sagas started ok: 0
+    region replacement requests set to completed ok: 0
     errors: 0
 
 task: "region_replacement_driver"
@@ -1046,6 +1047,7 @@ task: "region_replacement"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     region replacement requests created ok: 0
     region replacement start sagas started ok: 0
+    region replacement requests set to completed ok: 0
     errors: 0
 
 task: "region_replacement_driver"
