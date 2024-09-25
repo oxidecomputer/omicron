@@ -1050,7 +1050,12 @@ impl<'a> BlueprintBuilder<'a> {
             }
         }
 
-        Ok(EnsureMultiple::Changed { added, removed: 0 })
+        Ok(EnsureMultiple::Changed {
+            added,
+            updated: 0,
+            removed: 0,
+            expunged: 0,
+        })
     }
 
     pub fn sled_ensure_zone_ntp(
@@ -2828,7 +2833,7 @@ pub mod test {
         //
         // If we haven't changed inputs, the output should be the same!
         for (sled_id, resources) in
-            input.all_sled_resources(SledFilter::InService)
+            input.all_sled_resources(SledFilter::Commissioned)
         {
             let r = builder.sled_ensure_datasets(sled_id, resources).unwrap();
             assert_eq!(r, EnsureMultiple::NotNeeded);
@@ -2840,7 +2845,8 @@ pub mod test {
             .all_sled_ids(SledFilter::Commissioned)
             .next()
             .expect("at least one sled present");
-        let sled_resources = input.sled_resources(&sled_id).unwrap();
+        let sled_details =
+            input.sled_lookup(SledFilter::Commissioned, sled_id).unwrap();
         let crucible_zone_id = builder
             .zones
             .current_sled_zones(sled_id, BlueprintZoneFilter::ShouldBeRunning)
@@ -2857,7 +2863,9 @@ pub mod test {
 
         // In the case of Crucible, we have a durable dataset and a transient
         // zone filesystem, so we expect two datasets to be expunged.
-        let r = builder.sled_ensure_datasets(sled_id, sled_resources).unwrap();
+        let r = builder
+            .sled_ensure_datasets(sled_id, &sled_details.resources)
+            .unwrap();
         assert_eq!(
             r,
             EnsureMultiple::Changed {
@@ -2868,7 +2876,9 @@ pub mod test {
             }
         );
         // Once the datasets are expunged, no further changes will be proposed.
-        let r = builder.sled_ensure_datasets(sled_id, sled_resources).unwrap();
+        let r = builder
+            .sled_ensure_datasets(sled_id, &sled_details.resources)
+            .unwrap();
         assert_eq!(r, EnsureMultiple::NotNeeded);
 
         let blueprint = builder.build();
@@ -2885,7 +2895,9 @@ pub mod test {
 
         // While the datasets still exist in the input (effectively, the db) we
         // cannot remove them.
-        let r = builder.sled_ensure_datasets(sled_id, sled_resources).unwrap();
+        let r = builder
+            .sled_ensure_datasets(sled_id, &sled_details.resources)
+            .unwrap();
         assert_eq!(r, EnsureMultiple::NotNeeded);
 
         let blueprint = builder.build();
@@ -2937,8 +2949,11 @@ pub mod test {
 
         // Now, we should see the datasets "removed" from the blueprint, since
         // we no longer need to keep around records of their expungement.
-        let sled_resources = input.sled_resources(&sled_id).unwrap();
-        let r = builder.sled_ensure_datasets(sled_id, sled_resources).unwrap();
+        let sled_details =
+            input.sled_lookup(SledFilter::Commissioned, sled_id).unwrap();
+        let r = builder
+            .sled_ensure_datasets(sled_id, &sled_details.resources)
+            .unwrap();
 
         // TODO(https://github.com/oxidecomputer/omicron/issues/6646):
         // Because of the workaround for #6646, we don't actually remove

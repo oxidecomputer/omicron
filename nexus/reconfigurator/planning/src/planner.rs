@@ -1466,7 +1466,12 @@ mod test {
             builder
                 .sled_ensure_zone_multiple_external_dns(sled_id, 3)
                 .expect("can't add external DNS zones"),
-            EnsureMultiple::Changed { added: 0, removed: 0 },
+            EnsureMultiple::Changed {
+                added: 0,
+                updated: 0,
+                removed: 0,
+                expunged: 0
+            },
         );
 
         // Build a builder for a modfied blueprint that will include
@@ -1505,13 +1510,23 @@ mod test {
             blueprint_builder
                 .sled_ensure_zone_multiple_external_dns(sled_1, 2)
                 .expect("can't add external DNS zones to blueprint"),
-            EnsureMultiple::Changed { added: 2, removed: 0 }
+            EnsureMultiple::Changed {
+                added: 2,
+                updated: 0,
+                removed: 0,
+                expunged: 0
+            }
         ));
         assert!(matches!(
             blueprint_builder
                 .sled_ensure_zone_multiple_external_dns(sled_2, 1)
                 .expect("can't add external DNS zones to blueprint"),
-            EnsureMultiple::Changed { added: 1, removed: 0 }
+            EnsureMultiple::Changed {
+                added: 1,
+                updated: 0,
+                removed: 0,
+                expunged: 0
+            }
         ));
 
         let blueprint1a = blueprint_builder.build();
