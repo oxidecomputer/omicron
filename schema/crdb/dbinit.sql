@@ -1031,17 +1031,12 @@ CREATE TYPE IF NOT EXISTS omicron.public.instance_auto_restart AS ENUM (
      */
     'never',
     /*
-     * The instance should be automatically restarted if, and only if, the sled
-     * it was running on has restarted or become unavailable. If the individual
-     * Propolis VMM process for this instance crashes, it should *not* be
-     * restarted automatically.
+     * If this instance is running and unexpectedly fails (e.g. due to a host
+     * software crash or unexpected host reboot), the control plane will make a
+     * best-effort attempt to restart it. The control plane may choose not to
+     * restart the instance to preserve the overall availability of the system.
      */
-     'sled_failures_only',
-    /*
-     * The instance should be automatically restarted any time a fault is
-     * detected
-     */
-    'all_failures'
+     'best_effort'
 );
 
 
@@ -1102,10 +1097,24 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
     state omicron.public.instance_state_v2 NOT NULL,
 
     /*
+     * The time of the most recent auto-restart attempt, or NULL if the control
+     * plane has never attempted to automatically restart this instance.
+     */
+    time_last_auto_restarted TIMESTAMPTZ,
+
+    /*
      * What failures should result in an instance being automatically restarted
      * by the control plane.
      */
     auto_restart_policy omicron.public.instance_auto_restart,
+
+    /*
+     * The cooldown period that must elapse between consecutive auto restart
+     * attempts. If this is NULL, no cooldown period is explicitly configured
+     * for this instance, and the default cooldown period should be used.
+     */
+     auto_restart_cooldown INTERVAL,
+
 
     CONSTRAINT vmm_iff_active_propolis CHECK (
         ((state = 'vmm') AND (active_propolis_id IS NOT NULL)) OR
@@ -1118,6 +1127,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_instance_by_project ON omicron.public.i
     project_id,
     name
 ) WHERE
+    time_deleted IS NULL;
+
+-- Many control plane operations wish to select all the instances in particular
+-- states.
+CREATE INDEX IF NOT EXISTS lookup_instance_by_state
+ON
+    omicron.public.instance (state)
+WHERE
     time_deleted IS NULL;
 
 /*
@@ -2797,6 +2814,10 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config (
     PRIMARY KEY (port_settings_id, interface_name, addr)
 );
 
+CREATE INDEX IF NOT EXISTS lookup_sps_bgp_peer_config_by_bgp_config_id on omicron.public.switch_port_settings_bgp_peer_config(
+    bgp_config_id
+);
+
 CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_bgp_peer_config_communities (
     port_settings_id UUID NOT NULL,
     interface_name TEXT NOT NULL,
@@ -4344,6 +4365,12 @@ CREATE INDEX IF NOT EXISTS lookup_region_snapshot_by_snapshot_id on omicron.publ
     snapshot_id
 );
 
+CREATE INDEX IF NOT EXISTS lookup_bgp_config_by_bgp_announce_set_id ON omicron.public.bgp_config (
+    bgp_announce_set_id
+) WHERE
+    time_deleted IS NULL;
+
+
 /*
  * Keep this at the end of file so that the database does not contain a version
  * until it is fully populated.
@@ -4355,7 +4382,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '99.0.0', NULL)
+    (TRUE, NOW(), NOW(), '104.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

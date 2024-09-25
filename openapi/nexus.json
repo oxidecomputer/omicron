@@ -15092,6 +15092,16 @@
         "description": "View of an Instance",
         "type": "object",
         "properties": {
+          "auto_restart_cooldown_expiration": {
+            "nullable": true,
+            "description": "The time at which the auto-restart cooldown period for this instance completes, permitting it to be automatically restarted again. If the instance enters the `Failed` state, it will not be restarted until after this time.\n\nIf this is not present, then either the instance has never been automatically restarted, or the cooldown period has already expired, allowing the instance to be restarted immediately if it fails.",
+            "type": "string",
+            "format": "date-time"
+          },
+          "auto_restart_enabled": {
+            "description": "`true` if this instance's auto-restart policy will permit the control plane to automatically restart it if it enters the `Failed` state.",
+            "type": "boolean"
+          },
           "description": {
             "description": "human-readable free-form text about a resource",
             "type": "string"
@@ -15142,6 +15152,12 @@
             "type": "string",
             "format": "date-time"
           },
+          "time_last_auto_restarted": {
+            "nullable": true,
+            "description": "The timestamp of the most recent time this instance was automatically restarted by the control plane.\n\nIf this is not present, then this instance has not been automatically restarted.",
+            "type": "string",
+            "format": "date-time"
+          },
           "time_modified": {
             "description": "timestamp when this resource was last modified",
             "type": "string",
@@ -15153,6 +15169,7 @@
           }
         },
         "required": [
+          "auto_restart_enabled",
           "description",
           "hostname",
           "id",
@@ -15166,6 +15183,25 @@
           "time_run_state_updated"
         ]
       },
+      "InstanceAutoRestartPolicy": {
+        "description": "A policy determining when an instance should be automatically restarted by the control plane.",
+        "oneOf": [
+          {
+            "description": "The instance should not be automatically restarted by the control plane if it fails.",
+            "type": "string",
+            "enum": [
+              "never"
+            ]
+          },
+          {
+            "description": "If this instance is running and unexpectedly fails (e.g. due to a host software crash or unexpected host reboot), the control plane will make a best-effort attempt to restart it. The control plane may choose not to restart the instance to preserve the overall availability of the system.",
+            "type": "string",
+            "enum": [
+              "best_effort"
+            ]
+          }
+        ]
+      },
       "InstanceCpuCount": {
         "description": "The number of CPUs in an Instance",
         "type": "integer",
@@ -15176,6 +15212,16 @@
         "description": "Create-time parameters for an `Instance`",
         "type": "object",
         "properties": {
+          "auto_restart_policy": {
+            "nullable": true,
+            "description": "The auto-restart policy for this instance.\n\nThis indicates whether the instance should be automatically restarted by the control plane on failure. If this is `null`, no auto-restart policy has been configured for this instance by the user.",
+            "default": null,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceAutoRestartPolicy"
+              }
+            ]
+          },
           "description": {
             "type": "string"
           },

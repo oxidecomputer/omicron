@@ -309,6 +309,7 @@ Options:
           Show sleds that match the given filter
 
           Possible values:
+          - all:                    All sleds in the system, regardless of policy or state
           - commissioned:           All sleds that are currently part of the control plane cluster
           - decommissioned:         All sleds that were previously part of the control plane cluster
             but have been decommissioned
