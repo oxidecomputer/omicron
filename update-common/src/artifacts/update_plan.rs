@@ -1102,6 +1102,37 @@ mod tests {
         tarball: Bytes,
     }
 
+    fn make_bad_rot_image(board: &str) -> RandomRotImage {
+        use tufaceous_lib::CompositeRotArchiveBuilder;
+
+        let archive_a = make_fake_bad_rot_image(board);
+        let archive_b = make_fake_bad_rot_image(board);
+
+        let mut builder =
+            CompositeRotArchiveBuilder::new(Vec::new(), MtimeSource::Zero)
+                .unwrap();
+        builder
+            .append_archive_a(CompositeEntry {
+                data: &archive_a,
+                mtime_source: MtimeSource::Zero,
+            })
+            .unwrap();
+        builder
+            .append_archive_b(CompositeEntry {
+                data: &archive_b,
+                mtime_source: MtimeSource::Zero,
+            })
+            .unwrap();
+
+        let tarball = builder.finish().unwrap();
+
+        RandomRotImage {
+            archive_a: Bytes::from(archive_a),
+            archive_b: Bytes::from(archive_b),
+            tarball: Bytes::from(tarball),
+        }
+    }
+
     fn make_random_rot_image(sign: &str, board: &str) -> RandomRotImage {
         use tufaceous_lib::CompositeRotArchiveBuilder;
 
@@ -1142,6 +1173,22 @@ mod tests {
             .version("0.0.0")
             .name("rot-bord")
             .sign(sign)
+            .build();
+
+        let mut builder = HubrisArchiveBuilder::with_fake_image();
+        builder.write_caboose(caboose.as_slice()).unwrap();
+        builder.build_to_vec().unwrap()
+    }
+
+    fn make_fake_bad_rot_image(board: &str) -> Vec<u8> {
+        use hubtools::{CabooseBuilder, HubrisArchiveBuilder};
+
+        // Intentionally leave out `sign`
+        let caboose = CabooseBuilder::default()
+            .git_commit("this-is-fake-data")
+            .board(board)
+            .version("0.0.0")
+            .name("rot-bord")
             .build();
 
         let mut builder = HubrisArchiveBuilder::with_fake_image();
