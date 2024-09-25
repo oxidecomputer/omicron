@@ -280,6 +280,7 @@ pub fn representative() -> Representative {
     // This first one will match "sled1_bb"'s baseboard information.
     let sled_agent_id_basic =
         "c5aec1df-b897-49e4-8085-ccd975f9b529".parse().unwrap();
+
     // Add some disks to this first sled.
     let disks = vec![
         // Let's say we have one manufacturer for our M.2...
@@ -291,6 +292,11 @@ pub fn representative() -> Representative {
             },
             variant: DiskVariant::M2,
             slot: 0,
+            active_firmware_slot: 1,
+            next_active_firmware_slot: None,
+            number_of_firmware_slots: 1,
+            slot1_is_read_only: true,
+            slot_firmware_versions: vec![Some("EXAMP1".to_string())],
         },
         // ... and a couple different vendors for our U.2s
         InventoryDisk {
@@ -301,6 +307,11 @@ pub fn representative() -> Representative {
             },
             variant: DiskVariant::U2,
             slot: 1,
+            active_firmware_slot: 1,
+            next_active_firmware_slot: None,
+            number_of_firmware_slots: 1,
+            slot1_is_read_only: true,
+            slot_firmware_versions: vec![Some("EXAMP1".to_string())],
         },
         InventoryDisk {
             identity: omicron_common::disk::DiskIdentity {
@@ -310,6 +321,11 @@ pub fn representative() -> Representative {
             },
             variant: DiskVariant::U2,
             slot: 2,
+            active_firmware_slot: 1,
+            next_active_firmware_slot: None,
+            number_of_firmware_slots: 1,
+            slot1_is_read_only: true,
+            slot_firmware_versions: vec![Some("EXAMP1".to_string())],
         },
         InventoryDisk {
             identity: omicron_common::disk::DiskIdentity {
@@ -319,6 +335,11 @@ pub fn representative() -> Representative {
             },
             variant: DiskVariant::U2,
             slot: 3,
+            active_firmware_slot: 1,
+            next_active_firmware_slot: None,
+            number_of_firmware_slots: 1,
+            slot1_is_read_only: true,
+            slot_firmware_versions: vec![Some("EXAMP1".to_string())],
         },
     ];
     let zpools = vec![InventoryZpool {
