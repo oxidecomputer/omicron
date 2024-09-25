@@ -9,6 +9,7 @@ workspace = true
 
 [dependencies]
 camino.workspace = true
+chrono.workspace = true
 dropshot.workspace = true
 nexus-sled-agent-shared.workspace = true
 omicron-common.workspace = true

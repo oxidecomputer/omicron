@@ -432,6 +432,34 @@ impl SledAgentApi for SledAgentSimImpl {
         method_unimplemented()
     }
 
+    async fn support_bundle_list(
+        _rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<SupportBundleMetadata>>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn support_bundle_create(
+        _rqctx: RequestContext<Self::Context>,
+        _path_params: Path<SupportBundlePathParam>,
+        _body: StreamingBody,
+    ) -> Result<HttpResponseCreated<()>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn support_bundle_get(
+        _rqctx: RequestContext<Self::Context>,
+        _path_params: Path<SupportBundlePathParam>,
+    ) -> Result<HttpResponseHeaders<HttpResponseOk<FreeformBody>>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn support_bundle_delete(
+        _rqctx: RequestContext<Self::Context>,
+        _path_params: Path<SupportBundlePathParam>,
+    ) -> Result<HttpResponseCreated<()>, HttpError> {
+        method_unimplemented()
+    }
+
     async fn zones_list(
         _rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<String>>, HttpError> {

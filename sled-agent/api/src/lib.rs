@@ -26,7 +26,7 @@ use omicron_common::{
         DisksManagementResult, OmicronPhysicalDisksConfig,
     },
 };
-use omicron_uuid_kinds::{PropolisUuid, ZpoolUuid};
+use omicron_uuid_kinds::{DatasetUuid, PropolisUuid, SupportBundleUuid, ZpoolUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::{
@@ -153,6 +153,46 @@ pub trait SledAgentApi {
     async fn zones_list(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<String>>, HttpError>;
+
+    /// List all support bundles stored on this sled
+    #[endpoint {
+        method = GET,
+        path = "/support-bundles"
+    }]
+    async fn support_bundle_list(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<Vec<SupportBundleMetadata>>, HttpError>;
+
+    /// Create a service bundle within a particular dataset
+    #[endpoint {
+        method = POST,
+        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}"
+    }]
+    async fn support_bundle_create(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+        body: StreamingBody,
+    ) -> Result<HttpResponseCreated<()>, HttpError>;
+
+    /// Fetch a service bundle from a particular dataset
+    #[endpoint {
+        method = GET,
+        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}"
+    }]
+    async fn support_bundle_get(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+    ) -> Result<HttpResponseHeaders<HttpResponseOk<FreeformBody>>, HttpError>;
+
+    /// Delete a service bundle from a particular dataset
+    #[endpoint {
+        method = DELETE,
+        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}"
+    }]
+    async fn support_bundle_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+    ) -> Result<HttpResponseCreated<()>, HttpError>;
 
     #[endpoint {
         method = GET,
@@ -537,6 +577,32 @@ impl From<DiskVariant> for DiskType {
 #[derive(Deserialize, JsonSchema)]
 pub struct VmmPathParam {
     pub propolis_id: PropolisUuid,
+}
+
+/// Path parameters for Support Bundle requests (sled agent API)
+#[derive(Deserialize, JsonSchema)]
+pub struct SupportBundlePathParam {
+    /// The zpool on which this support bundle was provisioned
+    pub zpool_id: ZpoolUuid,
+
+    /// The dataset on which this support bundle was provisioned
+    pub dataset_id: DatasetUuid,
+
+    /// The ID of the support bundle itself
+    pub support_bundle_id: SupportBundleUuid,
+}
+
+/// Metadata about a support bundle
+#[derive(Deserialize, Serialize, JsonSchema)]
+pub struct SupportBundleMetadata {
+    pub support_bundle_id: SupportBundleUuid,
+
+    /// The zpool on which this support bundle was provisioned
+    pub zpool_id: ZpoolUuid,
+    /// The dataset on which this support bundle was provisioned
+    pub dataset_id: DatasetUuid,
+
+    pub time_created: chrono::DateTime<chrono::Utc>,
 }
 
 /// Path parameters for Disk requests (sled agent API)

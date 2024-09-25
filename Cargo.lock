@@ -10250,6 +10250,7 @@ name = "sled-agent-api"
 version = "0.1.0"
 dependencies = [
  "camino",
+ "chrono",
  "dropshot 0.10.2-dev",
  "nexus-sled-agent-shared",
  "omicron-common",
