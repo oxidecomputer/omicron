@@ -29,11 +29,11 @@ bitflags-dff4ba8e3ae991db = { package = "bitflags", version = "1.3.2" }
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.6.0", default-features = false, features = ["serde", "std"] }
 bstr = { version = "1.9.1" }
 byteorder = { version = "1.5.0" }
-bytes = { version = "1.7.1", features = ["serde"] }
+bytes = { version = "1.7.2", features = ["serde"] }
 chrono = { version = "0.4.38", features = ["serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
-clap = { version = "4.5.16", features = ["cargo", "derive", "env", "wrap_help"] }
-clap_builder = { version = "4.5.15", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
+clap = { version = "4.5.18", features = ["cargo", "derive", "env", "wrap_help"] }
+clap_builder = { version = "4.5.18", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
 console = { version = "0.15.8" }
 crossbeam-epoch = { version = "0.9.18" }
 crossbeam-utils = { version = "0.8.19" }
@@ -140,12 +140,12 @@ bitflags-dff4ba8e3ae991db = { package = "bitflags", version = "1.3.2" }
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.6.0", default-features = false, features = ["serde", "std"] }
 bstr = { version = "1.9.1" }
 byteorder = { version = "1.5.0" }
-bytes = { version = "1.7.1", features = ["serde"] }
+bytes = { version = "1.7.2", features = ["serde"] }
 cc = { version = "1.0.97", default-features = false, features = ["parallel"] }
 chrono = { version = "0.4.38", features = ["serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
-clap = { version = "4.5.16", features = ["cargo", "derive", "env", "wrap_help"] }
-clap_builder = { version = "4.5.15", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
+clap = { version = "4.5.18", features = ["cargo", "derive", "env", "wrap_help"] }
+clap_builder = { version = "4.5.18", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
 console = { version = "0.15.8" }
 crossbeam-epoch = { version = "0.9.18" }
 crossbeam-utils = { version = "0.8.19" }
