@@ -4098,7 +4098,7 @@ async fn test_boot_disk_can_be_changed(cptestctx: &ControlPlaneTestContext) {
 
     let instance = response.parsed_body::<Instance>().unwrap();
 
-    assert_eq!(instance.boot_disk_id, Some(disks[0].identity.id.clone()));
+    assert_eq!(instance.boot_disk_id, Some(disks[0].identity.id));
 
     // Change the instance's boot disk.
     let url_instance_update = format!("/v1/instances/{}", instance.identity.id);
@@ -4106,7 +4106,7 @@ async fn test_boot_disk_can_be_changed(cptestctx: &ControlPlaneTestContext) {
     let builder =
         RequestBuilder::new(client, http::Method::PUT, &url_instance_update)
             .body(Some(&params::InstanceUpdate {
-                boot_disk: Some(disks[1].identity.id.clone().into()),
+                boot_disk: Some(disks[1].identity.id.into()),
             }))
             .expect_status(Some(http::StatusCode::OK));
 
@@ -4119,7 +4119,7 @@ async fn test_boot_disk_can_be_changed(cptestctx: &ControlPlaneTestContext) {
     let instance = response.parsed_body::<Instance>().unwrap();
     assert_eq!(
         instance.boot_disk_id,
-        Some(disks[1].identity.id.clone().into())
+        Some(disks[1].identity.id)
     );
 }
 
@@ -4180,7 +4180,7 @@ async fn test_boot_disk_must_be_attached(cptestctx: &ControlPlaneTestContext) {
     let builder =
         RequestBuilder::new(client, http::Method::PUT, &url_instance_update)
             .body(Some(&params::InstanceUpdate {
-                boot_disk: Some(disks[0].identity.id.clone().into()),
+                boot_disk: Some(disks[0].identity.id.into()),
             }))
             .expect_status(Some(http::StatusCode::CONFLICT));
     let response = NexusRequest::new(builder)
@@ -4225,7 +4225,7 @@ async fn test_boot_disk_must_be_attached(cptestctx: &ControlPlaneTestContext) {
         .expect("can attempt to reconfigure the instance");
 
     let instance = response.parsed_body::<Instance>().unwrap();
-    assert_eq!(instance.boot_disk_id, Some(disks[0].identity.id.into()));
+    assert_eq!(instance.boot_disk_id, Some(disks[0].identity.id));
 }
 
 // Tests that an instance is rejected if the memory is less than
