@@ -18,7 +18,6 @@ use crate::inventory::Collection;
 pub use crate::inventory::SourceNatConfig;
 pub use crate::inventory::ZpoolName;
 use derive_more::From;
-use newtype_uuid::GenericUuid;
 use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
 use nexus_sled_agent_shared::inventory::OmicronZoneType;
 use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
@@ -42,12 +41,14 @@ use uuid::Uuid;
 
 mod blueprint_diff;
 mod blueprint_display;
+mod clickhouse;
 pub mod execution;
 mod network_resources;
 mod planning_input;
 mod tri_map;
 mod zone_type;
 
+pub use clickhouse::ClickhouseClusterConfig;
 pub use network_resources::AddNetworkResourceError;
 pub use network_resources::OmicronZoneExternalFloatingAddr;
 pub use network_resources::OmicronZoneExternalFloatingIp;
@@ -69,6 +70,8 @@ pub use planning_input::Policy;
 pub use planning_input::SledDetails;
 pub use planning_input::SledDisk;
 pub use planning_input::SledFilter;
+pub use planning_input::SledLookupError;
+pub use planning_input::SledLookupErrorKind;
 pub use planning_input::SledResources;
 pub use planning_input::ZpoolFilter;
 pub use zone_type::blueprint_zone_type;
@@ -197,7 +200,19 @@ impl Blueprint {
         &self,
         filter: BlueprintZoneFilter,
     ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)> {
-        self.blueprint_zones.iter().flat_map(move |(sled_id, z)| {
+        Blueprint::filtered_zones(&self.blueprint_zones, filter)
+    }
+
+    /// Iterate over the [`BlueprintZoneConfig`] instances that match the
+    /// provided filter, along with the associated sled id.
+    //
+    // This is a scoped function so that it can be used in the
+    // `BlueprintBuilder` during planning as well as in the `Blueprint`.
+    pub fn filtered_zones(
+        zones_by_sled_id: &BTreeMap<SledUuid, BlueprintZonesConfig>,
+        filter: BlueprintZoneFilter,
+    ) -> impl Iterator<Item = (SledUuid, &BlueprintZoneConfig)> {
+        zones_by_sled_id.iter().flat_map(move |(sled_id, z)| {
             z.zones
                 .iter()
                 .filter(move |z| z.disposition.matches(filter))
@@ -598,7 +613,7 @@ impl ZoneSortKey for OmicronZoneConfig {
     }
 
     fn id(&self) -> OmicronZoneUuid {
-        OmicronZoneUuid::from_untyped_uuid(self.id)
+        self.id
     }
 }
 
@@ -628,6 +643,7 @@ pub struct BlueprintZoneConfig {
 
     pub id: OmicronZoneUuid,
     pub underlay_address: Ipv6Addr,
+    /// zpool used for the zone's (transient) root filesystem
     pub filesystem_pool: Option<ZpoolName>,
     pub zone_type: BlueprintZoneType,
 }
@@ -635,7 +651,7 @@ pub struct BlueprintZoneConfig {
 impl From<BlueprintZoneConfig> for OmicronZoneConfig {
     fn from(z: BlueprintZoneConfig) -> Self {
         Self {
-            id: z.id.into_untyped_uuid(),
+            id: z.id,
             underlay_address: z.underlay_address,
             filesystem_pool: z.filesystem_pool,
             zone_type: z.zone_type.into(),

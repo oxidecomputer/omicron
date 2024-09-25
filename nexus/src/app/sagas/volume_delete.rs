@@ -130,14 +130,14 @@ async fn svd_decrease_crucible_resource_count(
 
     let crucible_resources = osagactx
         .datastore()
-        .decrease_crucible_resource_count_and_soft_delete_volume(
-            params.volume_id,
-        )
+        .soft_delete_volume(params.volume_id)
         .await
-        .map_err(|e| ActionError::action_failed(format!(
-            "failed to decrease_crucible_resource_count_and_soft_delete_volume: {:?}",
-            e,
-        )))?;
+        .map_err(|e| {
+            ActionError::action_failed(format!(
+                "failed to soft_delete_volume: {:?}",
+                e,
+            ))
+        })?;
 
     Ok(crucible_resources)
 }

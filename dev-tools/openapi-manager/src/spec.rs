@@ -13,6 +13,7 @@ use openapi_manager_types::{ValidationBackend, ValidationContext};
 use openapiv3::OpenAPI;
 
 /// All APIs managed by openapi-manager.
+// TODO The metadata here overlaps with metadata in api-manifest.toml.
 pub fn all_apis() -> Vec<ApiSpec> {
     vec![
         ApiSpec {
@@ -81,7 +82,7 @@ pub fn all_apis() -> Vec<ApiSpec> {
         },
         ApiSpec {
             title: "Oxide Region API",
-            version: "20240821.0",
+            version: "20241009.0",
             description: "API for interacting with the Oxide control plane",
             boundary: ApiBoundary::External,
             api_description:

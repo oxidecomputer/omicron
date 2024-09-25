@@ -53,7 +53,7 @@ pub mod vpc_create;
 pub mod common_storage;
 
 #[cfg(test)]
-mod test_helpers;
+pub(crate) mod test_helpers;
 
 #[derive(Debug)]
 pub struct NexusSagaType;

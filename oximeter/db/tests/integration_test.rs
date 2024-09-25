@@ -3,15 +3,13 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use anyhow::Context;
-use clickward::{
-    BasePorts, Deployment, DeploymentConfig, KeeperClient, KeeperError,
-    KeeperId,
-};
+use clickward::{BasePorts, Deployment, DeploymentConfig, KeeperId};
 use dropshot::test_util::log_prefix_for_test;
 use omicron_test_utils::dev::poll;
 use omicron_test_utils::dev::test_setup_log;
 use oximeter_db::{Client, DbWrite, OxqlResult, Sample, TestDbWrite};
-use slog::{debug, info, Logger};
+use oximeter_test_utils::wait_for_keepers;
+use slog::{info, Logger};
 use std::collections::BTreeSet;
 use std::default::Default;
 use std::time::Duration;
@@ -449,59 +447,6 @@ async fn wait_for_num_points(
     )
     .await
     .context("failed to get all samples from clickhouse server")?;
-    Ok(())
-}
-
-/// Wait for all keeper servers to be capable of handling commands
-async fn wait_for_keepers(
-    log: &Logger,
-    deployment: &Deployment,
-    ids: Vec<KeeperId>,
-) -> anyhow::Result<()> {
-    let mut keepers = vec![];
-    for id in &ids {
-        keepers.push(KeeperClient::new(deployment.keeper_addr(*id)?));
-    }
-
-    poll::wait_for_condition(
-        || async {
-            let mut done = true;
-            for keeper in &keepers {
-                match keeper.config().await {
-                    Ok(config) => {
-                        // The node isn't really up yet
-                        if config.len() != keepers.len() {
-                            done = false;
-                            debug!(log, "Keeper config not set";
-                                "addr" => keeper.addr(),
-                                "expected" => keepers.len(),
-                                "got" => config.len()
-                            );
-                            break;
-                        }
-                    }
-                    Err(e) => {
-                        done = false;
-                        debug!(log, "Keeper connection error: {}", e;
-                            "addr" => keeper.addr()
-                        );
-                        break;
-                    }
-                }
-            }
-            if !done {
-                Err(poll::CondCheckError::<KeeperError>::NotYet)
-            } else {
-                Ok(())
-            }
-        },
-        &Duration::from_millis(1),
-        &Duration::from_secs(30),
-    )
-    .await
-    .with_context(|| format!("failed to contact all keepers: {ids:?}"))?;
-
-    info!(log, "Keepers ready: {ids:?}");
     Ok(())
 }
 

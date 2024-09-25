@@ -23,6 +23,7 @@ use omicron_common::api::external::InstanceState;
 use omicron_common::api::internal::nexus;
 use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PropolisUuid;
 use oximeter::types::ProducerRegistry;
 use sled_agent_client::Client as SledAgentClient;
@@ -249,13 +250,28 @@ impl InstanceWatcher {
                         _ => Err(Incomplete::UpdateFailed),
                     };
                 }
-                Ok(Some((_, saga))) => {
-                    check.update_saga_queued = true;
-                    if let Err(e) = sagas.saga_start(saga).await {
-                        warn!(opctx.log, "update saga failed"; "error" => ?e);
+                Ok(Some((_, saga))) => match sagas.saga_run(saga).await {
+                    Ok((saga_id, completed)) => {
+                        check.update_saga_queued = true;
+                        if let Err(e) = completed.await {
+                            warn!(
+                                opctx.log,
+                                "update saga failed";
+                                "saga_id" => %saga_id,
+                                "error" => e,
+                            );
+                            check.result = Err(Incomplete::UpdateFailed);
+                        }
+                    }
+                    Err(e) => {
+                        warn!(
+                            opctx.log,
+                            "update saga could not be started";
+                            "error" => e,
+                        );
                         check.result = Err(Incomplete::UpdateFailed);
                     }
-                }
+                },
                 Ok(None) => {}
             };
 
@@ -271,7 +287,7 @@ impl InstanceWatcher {
 /// (rather than positional arguments) and can't be swapped accidentally.
 #[derive(Copy, Clone)]
 pub struct WatcherIdentity {
-    pub nexus_id: Uuid,
+    pub nexus_id: OmicronZoneUuid,
     pub rack_id: Uuid,
 }
 
@@ -286,7 +302,7 @@ impl VirtualMachine {
         let addr = sled.address();
         Self {
             rack_id,
-            nexus_id,
+            nexus_id: nexus_id.into_untyped_uuid(),
             instance_id: instance.id(),
             silo_id: project.silo_id,
             project_id: project.id(),

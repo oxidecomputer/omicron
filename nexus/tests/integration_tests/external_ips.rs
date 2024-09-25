@@ -1001,6 +1001,7 @@ async fn test_floating_ip_attach_fail_between_projects(
             }],
             disks: vec![],
             start: true,
+            auto_restart_policy: Default::default(),
         },
         StatusCode::BAD_REQUEST,
     )
@@ -1264,6 +1265,7 @@ async fn instance_for_external_ips(
         vec![],
         fips,
         start,
+        Default::default(),
     )
     .await
 }

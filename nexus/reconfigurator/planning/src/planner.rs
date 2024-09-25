@@ -30,6 +30,7 @@ use nexus_types::inventory::Collection;
 use omicron_uuid_kinds::SledUuid;
 use slog::error;
 use slog::{info, warn, Logger};
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::hash::Hash;
@@ -71,6 +72,7 @@ impl<'a> Planner<'a> {
             &log,
             parent_blueprint,
             input,
+            inventory,
             creator,
         )?;
         Ok(Planner { log, input, blueprint, inventory })
@@ -354,6 +356,7 @@ impl<'a> Planner<'a> {
             DiscretionaryOmicronZone::BoundaryNtp,
             DiscretionaryOmicronZone::CockroachDb,
             DiscretionaryOmicronZone::InternalDns,
+            DiscretionaryOmicronZone::ExternalDns,
             DiscretionaryOmicronZone::Nexus,
         ] {
             let num_zones_to_add = self.num_additional_zones_needed(zone_kind);
@@ -434,6 +437,11 @@ impl<'a> Planner<'a> {
             }
             DiscretionaryOmicronZone::InternalDns => {
                 self.input.target_internal_dns_zone_count()
+            }
+            DiscretionaryOmicronZone::ExternalDns => {
+                // TODO-cleanup: When external DNS addresses are
+                // in the policy, this can use the input, too.
+                self.blueprint.count_parent_external_dns_zones()
             }
             DiscretionaryOmicronZone::Nexus => {
                 self.input.target_nexus_zone_count()
@@ -523,6 +531,12 @@ impl<'a> Planner<'a> {
                         new_total_zone_count,
                     )?
                 }
+                DiscretionaryOmicronZone::ExternalDns => {
+                    self.blueprint.sled_ensure_zone_multiple_external_dns(
+                        sled_id,
+                        new_total_zone_count,
+                    )?
+                }
                 DiscretionaryOmicronZone::Nexus => {
                     self.blueprint.sled_ensure_zone_multiple_nexus(
                         sled_id,
@@ -550,15 +564,21 @@ impl<'a> Planner<'a> {
             }
         }
 
-        // Double check that we didn't make any arithmetic mistakes. If we've
-        // arrived here, we think we've added the number of Nexus zones we
-        // needed to.
-        assert_eq!(
-            new_zones_added, num_zones_to_add,
-            "internal error counting {kind:?} zones"
-        );
-
-        Ok(())
+        // Double check that we didn't make any arithmetic mistakes.
+        // It's not an error to place fewer zones than requested;
+        // maybe they'll be added in the next round of planning.
+        match new_zones_added.cmp(&num_zones_to_add) {
+            Ordering::Less => {
+                warn!(
+                    self.log, "added fewer {kind:?} zones than requested";
+                    "added" => new_zones_added,
+                    "requested" => num_zones_to_add
+                );
+                Ok(())
+            }
+            Ordering::Equal => Ok(()),
+            Ordering::Greater => Err(Error::TooManyZones { kind: kind.into() }),
+        }
     }
 
     fn do_plan_cockroachdb_settings(&mut self) {
@@ -723,8 +743,11 @@ pub(crate) enum ZoneExpungeReason {
 #[cfg(test)]
 mod test {
     use super::Planner;
+    use crate::blueprint_builder::test::assert_planning_makes_no_changes;
     use crate::blueprint_builder::test::verify_blueprint;
     use crate::blueprint_builder::test::DEFAULT_N_SLEDS;
+    use crate::blueprint_builder::BlueprintBuilder;
+    use crate::blueprint_builder::EnsureMultiple;
     use crate::example::example;
     use crate::example::ExampleSystem;
     use crate::system::SledBuilder;
@@ -760,6 +783,7 @@ mod test {
     use omicron_uuid_kinds::ZpoolUuid;
     use std::collections::HashMap;
     use std::mem;
+    use std::net::IpAddr;
     use typed_rng::TypedUuidRng;
 
     /// Runs through a basic sequence of blueprints for adding a sled
@@ -931,24 +955,12 @@ mod test {
         verify_blueprint(&blueprint5);
 
         // Check that there are no more steps.
-        let blueprint6 = Planner::new_based_on(
-            logctx.log.clone(),
+        assert_planning_makes_no_changes(
+            &logctx.log,
             &blueprint5,
             &input,
-            "test: no-op?",
-            &collection,
-        )
-        .expect("failed to create planner")
-        .with_rng_seed((TEST_NAME, "bp6"))
-        .plan()
-        .expect("failed to plan");
-
-        let diff = blueprint6.diff_since_blueprint(&blueprint5);
-        println!("5 -> 6 (expect no changes):\n{}", diff.display());
-        assert_eq!(diff.sleds_added.len(), 0);
-        assert_eq!(diff.sleds_removed.len(), 0);
-        assert_eq!(diff.sleds_modified.len(), 0);
-        verify_blueprint(&blueprint6);
+            TEST_NAME,
+        );
 
         logctx.cleanup_successful();
     }
@@ -1062,7 +1074,6 @@ mod test {
         assert_eq!(diff.sleds_modified.len(), 1);
         let changed_sled_id = diff.sleds_modified.first().unwrap();
 
-        // TODO-cleanup use `TypedUuid` everywhere
         assert_eq!(*changed_sled_id, sled_id);
         assert_eq!(diff.zones.removed.len(), 0);
         assert_eq!(diff.zones.modified.len(), 0);
@@ -1076,6 +1087,14 @@ mod test {
                 panic!("unexpectedly added a non-Nexus zone: {zone:?}");
             }
         }
+
+        // Test a no-op planning iteration.
+        assert_planning_makes_no_changes(
+            &logctx.log,
+            &blueprint2,
+            &input,
+            TEST_NAME,
+        );
 
         logctx.cleanup_successful();
     }
@@ -1151,6 +1170,14 @@ mod test {
         }
         assert_eq!(total_new_nexus_zones, 11);
 
+        // Test a no-op planning iteration.
+        assert_planning_makes_no_changes(
+            &logctx.log,
+            &blueprint2,
+            &input,
+            TEST_NAME,
+        );
+
         logctx.cleanup_successful();
     }
 
@@ -1196,13 +1223,16 @@ mod test {
         );
 
         // Try again with a reasonable number.
-        let mut builder = input.into_builder();
-        builder.policy_mut().target_internal_dns_zone_count =
-            MAX_INTERNAL_DNS_REDUNDANCY;
+        let input = {
+            let mut builder = input.into_builder();
+            builder.policy_mut().target_internal_dns_zone_count =
+                MAX_INTERNAL_DNS_REDUNDANCY;
+            builder.build()
+        };
         let blueprint2 = Planner::new_based_on(
             logctx.log.clone(),
             &blueprint1,
-            &builder.build(),
+            &input,
             "test_blueprint2",
             &collection,
         )
@@ -1245,6 +1275,14 @@ mod test {
             }
         }
         assert_eq!(total_new_zones, 2);
+
+        // Test a no-op planning iteration.
+        assert_planning_makes_no_changes(
+            &logctx.log,
+            &blueprint2,
+            &input,
+            TEST_NAME,
+        );
 
         logctx.cleanup_successful();
     }
@@ -1297,7 +1335,6 @@ mod test {
         // the service IP pool. This will force reuse of the IP that was
         // allocated to the expunged Nexus zone.
         let mut builder = input.into_builder();
-        builder.update_network_resources_from_blueprint(&blueprint2).unwrap();
         assert_eq!(builder.policy_mut().service_ip_pool_ranges.len(), 1);
         builder.policy_mut().target_nexus_zone_count =
             builder.policy_mut().service_ip_pool_ranges[0]
@@ -1337,6 +1374,204 @@ mod test {
         println!(
             "zone {} reused external IP {} from expunged zone {}",
             new_zone.id, expunged_ip, zone.id
+        );
+
+        // Test a no-op planning iteration.
+        assert_planning_makes_no_changes(
+            &logctx.log,
+            &blueprint3,
+            &input,
+            TEST_NAME,
+        );
+
+        logctx.cleanup_successful();
+    }
+
+    /// Check that the planner will reuse external DNS IPs that were
+    /// previously assigned to expunged zones
+    #[test]
+    fn test_reuse_external_dns_ips_from_expunged_zones() {
+        static TEST_NAME: &str =
+            "planner_reuse_external_dns_ips_from_expunged_zones";
+        let logctx = test_setup_log(TEST_NAME);
+
+        // Use our example system as a starting point.
+        let (collection, input, blueprint1) =
+            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+
+        // We should not be able to add any external DNS zones yet,
+        // because we haven't give it any addresses (which currently
+        // come only from RSS). This is not an error, though.
+        let mut builder = BlueprintBuilder::new_based_on(
+            &logctx.log,
+            &blueprint1,
+            &input,
+            &collection,
+            TEST_NAME,
+        )
+        .expect("failed to build blueprint builder");
+        let sled_id = builder.sled_ids_with_zones().next().expect("no sleds");
+        assert_eq!(
+            builder
+                .sled_ensure_zone_multiple_external_dns(sled_id, 3)
+                .expect("can't add external DNS zones"),
+            EnsureMultiple::Changed { added: 0, removed: 0 },
+        );
+
+        // Build a builder for a modfied blueprint that will include
+        // some external DNS addresses.
+        let mut blueprint_builder = BlueprintBuilder::new_based_on(
+            &logctx.log,
+            &blueprint1,
+            &input,
+            &collection,
+            TEST_NAME,
+        )
+        .expect("failed to build blueprint builder");
+
+        // Manually reach into the external networking allocator and "find"
+        // some external IP addresses (maybe they fell off a truck).
+        // TODO-cleanup: Remove when external DNS addresses are in the policy.
+        let external_dns_ips =
+            ["10.0.0.1", "10.0.0.2", "10.0.0.3"].map(|addr| {
+                addr.parse::<IpAddr>()
+                    .expect("can't parse external DNS IP address")
+            });
+        for addr in external_dns_ips {
+            blueprint_builder.add_external_dns_ip(addr);
+        }
+
+        // Now we can add external DNS zones. We'll add two to the first
+        // sled and one to the second.
+        let (sled_1, sled_2) = {
+            let mut sleds = blueprint_builder.sled_ids_with_zones();
+            (
+                sleds.next().expect("no first sled"),
+                sleds.next().expect("no second sled"),
+            )
+        };
+        assert!(matches!(
+            blueprint_builder
+                .sled_ensure_zone_multiple_external_dns(sled_1, 2)
+                .expect("can't add external DNS zones to blueprint"),
+            EnsureMultiple::Changed { added: 2, removed: 0 }
+        ));
+        assert!(matches!(
+            blueprint_builder
+                .sled_ensure_zone_multiple_external_dns(sled_2, 1)
+                .expect("can't add external DNS zones to blueprint"),
+            EnsureMultiple::Changed { added: 1, removed: 0 }
+        ));
+
+        let blueprint1a = blueprint_builder.build();
+        assert_eq!(
+            blueprint1a
+                .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+                .filter(|(_, zone)| zone.zone_type.is_external_dns())
+                .count(),
+            3,
+            "can't find external DNS zones in new blueprint"
+        );
+
+        // Plan with external DNS.
+        let input_builder = input.clone().into_builder();
+        let input = input_builder.build();
+        let blueprint2 = Planner::new_based_on(
+            logctx.log.clone(),
+            &blueprint1a,
+            &input,
+            "test_blueprint2",
+            &collection,
+        )
+        .expect("failed to create planner")
+        .with_rng_seed((TEST_NAME, "bp2"))
+        .plan()
+        .expect("failed to plan");
+
+        let diff = blueprint2.diff_since_blueprint(&blueprint1);
+        println!("1 -> 2 (added external DNS zones):\n{}", diff.display());
+
+        // The first sled should have three external DNS zones.
+        assert_eq!(
+            blueprint2
+                .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+                .filter(|(_, zone)| zone.zone_type.is_external_dns())
+                .count(),
+            3,
+            "can't find external DNS zones in planned blueprint"
+        );
+
+        // Expunge the first sled and re-plan. That gets us two expunged
+        // external DNS zones ...
+        let mut input_builder = input.into_builder();
+        let (&sled_id, details) =
+            input_builder.sleds_mut().iter_mut().next().expect("no sleds");
+        details.policy = SledPolicy::Expunged;
+        let input = input_builder.build();
+        let blueprint3 = Planner::new_based_on(
+            logctx.log.clone(),
+            &blueprint2,
+            &input,
+            "test_blueprint3",
+            &collection,
+        )
+        .expect("failed to create planner")
+        .with_rng_seed((TEST_NAME, "bp3"))
+        .plan()
+        .expect("failed to re-plan");
+
+        let diff = blueprint3.diff_since_blueprint(&blueprint2);
+        println!("2 -> 3 (expunged sled):\n{}", diff.display());
+        assert_eq!(
+            blueprint3.blueprint_zones[&sled_id]
+                .zones
+                .iter()
+                .filter(|zone| {
+                    zone.disposition == BlueprintZoneDisposition::Expunged
+                        && zone.zone_type.is_external_dns()
+                })
+                .count(),
+            2
+        );
+
+        // ... which we can pick up after one more round of planning.
+        let blueprint4 = Planner::new_based_on(
+            logctx.log.clone(),
+            &blueprint3,
+            &input,
+            "test_blueprint4",
+            &collection,
+        )
+        .expect("failed to create planner")
+        .with_rng_seed((TEST_NAME, "bp4"))
+        .plan()
+        .expect("failed to re-re-plan");
+
+        let diff = blueprint4.diff_since_blueprint(&blueprint3);
+        println!("3 -> 4 (expunged zones):\n{}", diff.display());
+
+        // The IP addresses of the new external DNS zones should be the
+        // same as the original set that we "found".
+        let mut ips = blueprint4
+            .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+            .filter_map(|(_id, zone)| {
+                zone.zone_type.is_external_dns().then(|| {
+                    zone.zone_type.external_networking().unwrap().0.ip()
+                })
+            })
+            .collect::<Vec<IpAddr>>();
+        ips.sort();
+        assert_eq!(
+            ips, external_dns_ips,
+            "wrong addresses for new external DNS zones"
+        );
+
+        // Test a no-op planning iteration.
+        assert_planning_makes_no_changes(
+            &logctx.log,
+            &blueprint4,
+            &input,
+            TEST_NAME,
         );
 
         logctx.cleanup_successful();
@@ -1422,6 +1657,14 @@ mod test {
             NEW_IN_SERVICE_DISKS
         );
         assert!(!diff.zones.removed.contains_key(sled_id));
+
+        // Test a no-op planning iteration.
+        assert_planning_makes_no_changes(
+            &logctx.log,
+            &blueprint2,
+            &input,
+            TEST_NAME,
+        );
 
         logctx.cleanup_successful();
     }
@@ -1511,6 +1754,14 @@ mod test {
             modified_zone.disposition(),
             BlueprintZoneDisposition::Expunged,
             "Should have expunged this zone"
+        );
+
+        // Test a no-op planning iteration.
+        assert_planning_makes_no_changes(
+            &logctx.log,
+            &blueprint2,
+            &input,
+            TEST_NAME,
         );
 
         logctx.cleanup_successful();
@@ -1627,6 +1878,14 @@ mod test {
             );
         }
 
+        // Test a no-op planning iteration.
+        assert_planning_makes_no_changes(
+            &logctx.log,
+            &blueprint2,
+            &input,
+            TEST_NAME,
+        );
+
         logctx.cleanup_successful();
     }
 
@@ -1696,10 +1955,6 @@ mod test {
             *sled_id
         };
         println!("1 -> 2: decommissioned {decommissioned_sled_id}");
-
-        // Because we marked zones as expunged, we need to update the networking
-        // config in the planning input.
-        builder.update_network_resources_from_blueprint(&blueprint1).unwrap();
 
         // Now run the planner with a high number of target Nexus zones. The
         // number (9) is chosen such that:
@@ -1878,6 +2133,7 @@ mod test {
         logctx.cleanup_successful();
     }
 
+    #[track_caller]
     fn assert_all_zones_expunged(
         diff: &BlueprintDiff,
         expunged_sled_id: SledUuid,
@@ -1973,10 +2229,14 @@ mod test {
             SledState::Decommissioned
         );
 
-        // Remove the now-decommissioned sled from the planning input.
+        // Set the state of the expunged sled to decommissioned, and run the
+        // planner again.
         let mut builder = input.into_builder();
-        builder.update_network_resources_from_blueprint(&blueprint2).unwrap();
-        builder.sleds_mut().remove(&expunged_sled_id);
+        let expunged = builder
+            .sleds_mut()
+            .get_mut(&expunged_sled_id)
+            .expect("expunged sled is present in input");
+        expunged.state = SledState::Decommissioned;
         let input = builder.build();
 
         let blueprint3 = Planner::new_based_on(
@@ -1989,7 +2249,7 @@ mod test {
         .expect("created planner")
         .with_rng_seed((TEST_NAME, "bp3"))
         .plan()
-        .expect("failed to plan");
+        .expect("succeeded in planner");
 
         // There should be no changes to the blueprint; we don't yet garbage
         // collect zones, so we should still have the sled's expunged zones
@@ -2004,6 +2264,57 @@ mod test {
         assert_eq!(diff.sleds_removed.len(), 0);
         assert_eq!(diff.sleds_modified.len(), 0);
         assert_eq!(diff.sleds_unchanged.len(), DEFAULT_N_SLEDS);
+
+        // Test a no-op planning iteration.
+        assert_planning_makes_no_changes(
+            &logctx.log,
+            &blueprint3,
+            &input,
+            TEST_NAME,
+        );
+
+        // Now remove the decommissioned sled from the input entirely. (This
+        // should not happen in practice at the moment -- entries in the sled
+        // table are kept forever -- but we need to test it.)
+        //
+        // Eventually, once zone and sled garbage collection is implemented,
+        // we'll expect that the blueprint's sleds_removed will become
+        // non-zero. At some point we may also want to remove entries from the
+        // sled table, but that's a future concern that would come after
+        // blueprint cleanup is implemented.
+        let mut builder = input.into_builder();
+        builder.sleds_mut().remove(&expunged_sled_id);
+        let input = builder.build();
+
+        let blueprint4 = Planner::new_based_on(
+            logctx.log.clone(),
+            &blueprint3,
+            &input,
+            "test_blueprint4",
+            &collection,
+        )
+        .expect("created planner")
+        .with_rng_seed((TEST_NAME, "bp4"))
+        .plan()
+        .expect("succeeded in planner");
+
+        let diff = blueprint4.diff_since_blueprint(&blueprint3);
+        println!(
+            "3 -> 4 (removed from input {expunged_sled_id}):\n{}",
+            diff.display()
+        );
+        assert_eq!(diff.sleds_added.len(), 0);
+        assert_eq!(diff.sleds_removed.len(), 0);
+        assert_eq!(diff.sleds_modified.len(), 0);
+        assert_eq!(diff.sleds_unchanged.len(), DEFAULT_N_SLEDS);
+
+        // Test a no-op planning iteration.
+        assert_planning_makes_no_changes(
+            &logctx.log,
+            &blueprint4,
+            &input,
+            TEST_NAME,
+        );
 
         logctx.cleanup_successful();
     }

@@ -581,6 +581,7 @@ async fn test_mgs_metrics(
     let mut input_voltage_sensors = HashMap::new();
     let mut input_current_sensors = HashMap::new();
     let mut fan_speed_sensors = HashMap::new();
+    let mut cpu_tctl_sensors = HashMap::new();
     for sp in all_sp_configs {
         let mut temp = 0;
         let mut current = 0;
@@ -589,11 +590,24 @@ async fn test_mgs_metrics(
         let mut input_current = 0;
         let mut power = 0;
         let mut speed = 0;
+        let mut cpu_tctl = 0;
         for component in &sp.components {
             for sensor in &component.sensors {
                 use gateway_messages::measurement::MeasurementKind as Kind;
                 match sensor.def.kind {
-                    Kind::Temperature => temp += 1,
+                    Kind::Temperature => {
+                        // Currently, Tctl measurements are reported as a
+                        // "temperature" measurement, but are tracked by a
+                        // different metric, as they are not actually a
+                        // measurement of physical degrees Celsius.
+                        if component.device == "sbtsi"
+                            && sensor.def.name == "CPU"
+                        {
+                            cpu_tctl += 1
+                        } else {
+                            temp += 1;
+                        }
+                    }
                     Kind::Current => current += 1,
                     Kind::Voltage => voltage += 1,
                     Kind::InputVoltage => input_voltage += 1,
@@ -610,6 +624,7 @@ async fn test_mgs_metrics(
         input_current_sensors.insert(sp.serial_number.clone(), input_current);
         fan_speed_sensors.insert(sp.serial_number.clone(), speed);
         power_sensors.insert(sp.serial_number.clone(), power);
+        cpu_tctl_sensors.insert(sp.serial_number.clone(), cpu_tctl);
     }
 
     async fn check_all_timeseries_present(
@@ -725,7 +740,7 @@ async fn test_mgs_metrics(
     }
 
     // Wait until the MGS registers as a producer with Oximeter.
-    wait_for_producer(&cptestctx.oximeter, &mgs.gateway_id).await;
+    wait_for_producer(&cptestctx.oximeter, mgs.gateway_id).await;
 
     check_all_timeseries_present(&cptestctx, "temperature", temp_sensors).await;
     check_all_timeseries_present(&cptestctx, "voltage", voltage_sensors).await;
@@ -745,6 +760,8 @@ async fn test_mgs_metrics(
     .await;
     check_all_timeseries_present(&cptestctx, "fan_speed", fan_speed_sensors)
         .await;
+    check_all_timeseries_present(&cptestctx, "amd_cpu_tctl", cpu_tctl_sensors)
+        .await;
 
     // Because the `ControlPlaneTestContext` isn't managing the MGS we made for
     // this test, we are responsible for removing its logs.
@@ -755,9 +772,18 @@ async fn test_mgs_metrics(
 ///
 /// This blocks until the producer is registered, for up to 60s. It panics if
 /// the retry loop hits a permanent error.
-pub async fn wait_for_producer(
+pub async fn wait_for_producer<G: GenericUuid>(
     oximeter: &oximeter_collector::Oximeter,
-    producer_id: &Uuid,
+    producer_id: G,
+) {
+    wait_for_producer_impl(oximeter, producer_id.into_untyped_uuid()).await;
+}
+
+// This function is outlined from wait_for_producer to avoid unnecessary
+// monomorphization.
+async fn wait_for_producer_impl(
+    oximeter: &oximeter_collector::Oximeter,
+    producer_id: Uuid,
 ) {
     wait_for_condition(
         || async {
@@ -765,7 +791,7 @@ pub async fn wait_for_producer(
                 .list_producers(None, usize::MAX)
                 .await
                 .iter()
-                .any(|p| &p.id == producer_id)
+                .any(|p| p.id == producer_id)
             {
                 Ok(())
             } else {

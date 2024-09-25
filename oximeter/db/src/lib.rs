@@ -34,10 +34,12 @@ use thiserror::Error;
 
 mod client;
 pub mod model;
+#[cfg(feature = "native-sql")]
+pub mod native;
 #[cfg(any(feature = "oxql", test))]
 pub mod oxql;
 pub mod query;
-#[cfg(any(feature = "oxql", feature = "sql", test))]
+#[cfg(any(feature = "oxql", feature = "sql", feature = "native-sql", test))]
 pub mod shells;
 #[cfg(any(feature = "sql", test))]
 pub mod sql;

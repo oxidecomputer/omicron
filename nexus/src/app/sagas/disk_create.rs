@@ -635,10 +635,7 @@ async fn sdc_create_volume_record_undo(
 
     // Depending on the read only parent, there will some read only resources
     // used, however this saga tracks them all.
-    osagactx
-        .datastore()
-        .decrease_crucible_resource_count_and_soft_delete_volume(volume_id)
-        .await?;
+    osagactx.datastore().soft_delete_volume(volume_id).await?;
 
     osagactx.datastore().volume_hard_delete(volume_id).await?;
 

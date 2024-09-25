@@ -147,6 +147,9 @@ impl CollectionBuilder {
             rot_pages_found: self.rot_pages_found,
             sled_agents: self.sleds,
             omicron_zones: self.omicron_zones,
+            // Currently unused
+            // See: https://github.com/oxidecomputer/omicron/issues/6578
+            clickhouse_keeper_cluster_membership: BTreeMap::new(),
         }
     }
 
@@ -1084,6 +1087,8 @@ mod test {
             git_commit: String::from("git_commit1"),
             name: String::from("name1"),
             version: String::from("version1"),
+            sign: None,
+            epoch: None,
         };
         assert!(!builder
             .found_caboose_already(&bogus_baseboard, CabooseWhich::SpSlot0));
@@ -1150,6 +1155,8 @@ mod test {
                     git_commit: String::from("git_commit2"),
                     name: String::from("name2"),
                     version: String::from("version2"),
+                    sign: None,
+                    epoch: None,
                 },
             )
             .unwrap_err();

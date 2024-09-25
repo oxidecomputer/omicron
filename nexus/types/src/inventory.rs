@@ -13,6 +13,7 @@ use crate::external_api::params::PhysicalDiskKind;
 use crate::external_api::params::UninitializedSledId;
 use chrono::DateTime;
 use chrono::Utc;
+use clickhouse_admin_types::KeeperId;
 pub use gateway_client::types::PowerState;
 pub use gateway_client::types::RotImageError;
 pub use gateway_client::types::RotSlot;
@@ -30,6 +31,7 @@ pub use omicron_common::api::internal::shared::SourceNatConfig;
 pub use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use serde::{Deserialize, Serialize};
@@ -117,6 +119,12 @@ pub struct Collection {
 
     /// Omicron zones found, by *sled* id
     pub omicron_zones: BTreeMap<SledUuid, OmicronZonesFound>,
+
+    /// The raft configuration (cluster membership) of the clickhouse keeper
+    /// cluster as returned from each available keeper via `clickhouse-admin` in
+    /// the `ClickhouseKeeper` zone
+    pub clickhouse_keeper_cluster_membership:
+        BTreeMap<OmicronZoneUuid, ClickhouseKeeperClusterMembership>,
 }
 
 impl Collection {
@@ -153,6 +161,17 @@ impl Collection {
             .iter()
             .filter(|(_, inventory)| inventory.sled_role == SledRole::Scrimlet)
             .map(|(sled_id, _)| *sled_id)
+    }
+
+    /// Return the latest clickhouse keeper configuration in this collection, if
+    /// there is one.
+    pub fn latest_clickhouse_keeper_membership(
+        &self,
+    ) -> Option<(OmicronZoneUuid, ClickhouseKeeperClusterMembership)> {
+        self.clickhouse_keeper_cluster_membership
+            .iter()
+            .max_by_key(|(_, membership)| membership.leader_committed_log_index)
+            .map(|(zone_id, membership)| (*zone_id, membership.clone()))
     }
 }
 
@@ -358,6 +377,23 @@ impl IntoRotPage for gateway_client::types::RotCfpa {
     }
 }
 
+/// Firmware reported for a physical NVMe disk.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct NvmeFirmware {
+    pub active_slot: u8,
+    pub next_active_slot: Option<u8>,
+    pub number_of_slots: u8,
+    pub slot1_is_read_only: bool,
+    pub slot_firmware_versions: Vec<Option<String>>,
+}
+
+/// Firmware reported by sled agent for a particular disk format.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub enum PhysicalDiskFirmware {
+    Unknown,
+    Nvme(NvmeFirmware),
+}
+
 /// A physical disk reported by a sled agent.
 ///
 /// This identifies that a physical disk appears in a Sled.
@@ -372,6 +408,7 @@ pub struct PhysicalDisk {
     pub identity: omicron_common::disk::DiskIdentity,
     pub variant: PhysicalDiskKind,
     pub slot: i64,
+    pub firmware: PhysicalDiskFirmware,
 }
 
 impl From<InventoryDisk> for PhysicalDisk {
@@ -380,6 +417,13 @@ impl From<InventoryDisk> for PhysicalDisk {
             identity: disk.identity,
             variant: disk.variant.into(),
             slot: disk.slot,
+            firmware: PhysicalDiskFirmware::Nvme(NvmeFirmware {
+                active_slot: disk.active_firmware_slot,
+                next_active_slot: disk.next_active_firmware_slot,
+                number_of_slots: disk.number_of_firmware_slots,
+                slot1_is_read_only: disk.slot1_is_read_only,
+                slot_firmware_versions: disk.slot_firmware_versions,
+            }),
         }
     }
 }
@@ -467,4 +511,18 @@ pub struct OmicronZonesFound {
     pub source: String,
     pub sled_id: SledUuid,
     pub zones: OmicronZonesConfig,
+}
+
+/// The configuration of the clickhouse keeper raft cluster returned from a
+/// single keeper node
+///
+/// Each keeper is asked for its known raft configuration via `clickhouse-admin`
+/// dropshot servers running in `ClickhouseKeeper` zones. state. We include the
+/// leader committed log index known to the current keeper node (whether or not
+/// it is the leader) to determine which configuration is newest.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct ClickhouseKeeperClusterMembership {
+    pub queried_keeper: KeeperId,
+    pub leader_committed_log_index: u64,
+    pub raft_config: BTreeSet<KeeperId>,
 }
