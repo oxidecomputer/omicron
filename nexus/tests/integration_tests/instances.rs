@@ -3891,6 +3891,7 @@ async fn test_cannot_have_nonexistent_boot_disk(
         disks: vec![],
         boot_disk: Some("probablydata".parse().unwrap()),
         start: true,
+        auto_restart_policy: Default::default(),
     };
 
     let builder =
@@ -3944,6 +3945,7 @@ async fn test_cannot_detach_boot_disk(cptestctx: &ControlPlaneTestContext) {
         )],
         boot_disk: Some("probablydata0".parse().unwrap()),
         start: false,
+        auto_restart_policy: Default::default(),
     };
 
     let builder =
@@ -4081,6 +4083,7 @@ async fn test_boot_disk_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         ],
         boot_disk: Some("probablydata0".parse().unwrap()),
         start: false,
+        auto_restart_policy: Default::default(),
     };
 
     let builder =
@@ -4156,6 +4159,7 @@ async fn test_boot_disk_must_be_attached(cptestctx: &ControlPlaneTestContext) {
         disks: vec![],
         boot_disk: None,
         start: false,
+        auto_restart_policy: Default::default(),
     };
 
     let builder =
