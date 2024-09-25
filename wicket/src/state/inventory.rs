@@ -203,7 +203,7 @@ impl Component {
     pub fn rot_sign(&self) -> Option<Vec<u8>> {
         match self.rot_active_slot()? {
             RotSlot::A => self.sp().rot.as_ref().map_or(None, |rot| {
-                rot.caboose_a.as_ref().map_or(None, |x| caboose_sign(x))
+                rot.caboose_a.as_ref().and_then(caboose_sign)
             }),
             RotSlot::B => self.sp().rot.as_ref().map_or(None, |rot| {
                 rot.caboose_b.as_ref().map_or(None, |x| caboose_sign(x))
