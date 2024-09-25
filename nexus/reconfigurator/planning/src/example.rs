@@ -43,7 +43,7 @@ impl ExampleSystem {
             let _ = system.sled(SledBuilder::new().id(*sled_id)).unwrap();
         }
 
-        let mut input_builder = system
+        let input_builder = system
             .to_planning_input_builder()
             .expect("failed to make planning input builder");
         let base_input = input_builder.clone().build();
@@ -55,11 +55,18 @@ impl ExampleSystem {
             (test_name, "ExampleSystem initial"),
         );
 
+        // Start with an empty collection
+        let collection = system
+            .to_collection_builder()
+            .expect("failed to build collection")
+            .build();
+
         // Now make a blueprint and collection with some zones on each sled.
         let mut builder = BlueprintBuilder::new_based_on(
             log,
             &initial_blueprint,
             &base_input,
+            &collection,
             "test suite",
         )
         .unwrap();
@@ -91,10 +98,6 @@ impl ExampleSystem {
         let mut builder =
             system.to_collection_builder().expect("failed to build collection");
         builder.set_rng_seed((test_name, "ExampleSystem collection"));
-
-        input_builder
-            .update_network_resources_from_blueprint(&blueprint)
-            .expect("failed to add network resources from blueprint");
 
         for (sled_id, zones) in &blueprint.blueprint_zones {
             builder

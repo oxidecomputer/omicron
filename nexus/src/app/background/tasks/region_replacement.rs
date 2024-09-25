@@ -51,7 +51,10 @@ impl RegionReplacementDetector {
         };
 
         let saga_dag = SagaRegionReplacementStart::prepare(&params)?;
-        self.sagas.saga_start(saga_dag).await
+        // We only care that the saga was started, and don't wish to wait for it
+        // to complete, so use `StartSaga::saga_start`, rather than `saga_run`.
+        self.sagas.saga_start(saga_dag).await?;
+        Ok(())
     }
 }
 
@@ -148,42 +151,12 @@ impl BackgroundTask for RegionReplacementDetector {
 
             // Next, for each region replacement request in state "Requested",
             // run the start saga.
-            match self.datastore.get_requested_region_replacements(opctx).await
+            let requests = match self
+                .datastore
+                .get_requested_region_replacements(opctx)
+                .await
             {
-                Ok(requests) => {
-                    for request in requests {
-                        let request_id = request.id;
-
-                        let result = self
-                            .send_start_request(
-                                authn::saga::Serialized::for_opctx(opctx),
-                                request,
-                            )
-                            .await;
-
-                        match result {
-                            Ok(()) => {
-                                let s = format!(
-                                    "region replacement start invoked ok \
-                                    for {request_id}"
-                                );
-                                info!(&log, "{s}");
-
-                                status.start_invoked_ok.push(s);
-                            }
-
-                            Err(e) => {
-                                let s = format!(
-                                    "sending region replacement start request \
-                                    failed: {e}",
-                                );
-                                error!(&log, "{s}");
-
-                                status.errors.push(s);
-                            }
-                        }
-                    }
-                }
+                Ok(requests) => requests,
 
                 Err(e) => {
                     let s = format!(
@@ -192,6 +165,40 @@ impl BackgroundTask for RegionReplacementDetector {
                     error!(&log, "{s}");
 
                     status.errors.push(s);
+                    return json!(status);
+                }
+            };
+
+            for request in requests {
+                let request_id = request.id;
+
+                let result = self
+                    .send_start_request(
+                        authn::saga::Serialized::for_opctx(opctx),
+                        request,
+                    )
+                    .await;
+
+                match result {
+                    Ok(()) => {
+                        let s = format!(
+                            "region replacement start invoked ok \
+                            for {request_id}"
+                        );
+                        info!(&log, "{s}");
+
+                        status.start_invoked_ok.push(s);
+                    }
+
+                    Err(e) => {
+                        let s = format!(
+                            "sending region replacement start request \
+                            failed: {e}",
+                        );
+                        error!(&log, "{s}");
+
+                        status.errors.push(s);
+                    }
                 }
             }
 

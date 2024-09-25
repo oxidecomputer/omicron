@@ -6,8 +6,6 @@
 //! blueprints.
 
 use super::AddNetworkResourceError;
-use super::Blueprint;
-use super::BlueprintZoneFilter;
 use super::OmicronZoneExternalIp;
 use super::OmicronZoneNetworkResources;
 use super::OmicronZoneNic;
@@ -18,7 +16,6 @@ use crate::external_api::views::SledProvisionPolicy;
 use crate::external_api::views::SledState;
 use clap::ValueEnum;
 use ipnetwork::IpNetwork;
-use newtype_uuid::GenericUuid;
 use omicron_common::address::IpRange;
 use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::SLED_PREFIX;
@@ -28,7 +25,6 @@ use omicron_common::disk::DiskIdentity;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
-use omicron_uuid_kinds::VnicUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -741,6 +737,12 @@ pub struct Policy {
 /// Policy for replicated clickhouse setups
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClickhousePolicy {
+    /// Should we run the single-node cluster alongside the replicated cluster?
+    /// This is stage 1 of our deployment plan as laid out in RFD 468
+    ///
+    /// If this is set to false, then we will only deploy replicated clusters.
+    pub deploy_with_standalone: bool,
+
     /// Desired number of clickhouse servers
     pub target_servers: usize,
 
@@ -861,35 +863,6 @@ impl PlanningInputBuilder {
         &mut self,
     ) -> &mut OmicronZoneNetworkResources {
         &mut self.network_resources
-    }
-
-    pub fn update_network_resources_from_blueprint(
-        &mut self,
-        blueprint: &Blueprint,
-    ) -> Result<(), PlanningInputBuildError> {
-        self.network_resources = OmicronZoneNetworkResources::new();
-        for (_, zone) in
-            blueprint.all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
-        {
-            let service_id = zone.id;
-            if let Some((external_ip, nic)) =
-                zone.zone_type.external_networking()
-            {
-                self.add_omicron_zone_external_ip(service_id, external_ip)?;
-                self.add_omicron_zone_nic(
-                    service_id,
-                    OmicronZoneNic {
-                        // TODO-cleanup use `TypedUuid` everywhere
-                        id: VnicUuid::from_untyped_uuid(nic.id),
-                        mac: nic.mac,
-                        ip: nic.ip,
-                        slot: nic.slot,
-                        primary: nic.primary,
-                    },
-                )?;
-            }
-        }
-        Ok(())
     }
 
     pub fn policy_mut(&mut self) -> &mut Policy {

@@ -1550,10 +1550,7 @@ async fn test_volume_remove_read_only_parent_volume_deleted(
     create_volume(&datastore, volume_id, Some(rop)).await;
 
     // Soft delete the volume
-    let _cr = datastore
-        .decrease_crucible_resource_count_and_soft_delete_volume(volume_id)
-        .await
-        .unwrap();
+    let _cr = datastore.soft_delete_volume(volume_id).await.unwrap();
 
     let t_vid = Uuid::new_v4();
     // Nothing should be removed, but we also don't return error.
@@ -1781,10 +1778,7 @@ async fn test_volume_remove_rop_saga_deleted_volume(
     create_volume(&datastore, volume_id, Some(rop)).await;
 
     // Soft delete the volume
-    let _cr = datastore
-        .decrease_crucible_resource_count_and_soft_delete_volume(volume_id)
-        .await
-        .unwrap();
+    let _cr = datastore.soft_delete_volume(volume_id).await.unwrap();
 
     let int_client = &cptestctx.internal_client;
     let rop_url = format!("/volume/{}/remove-read-only-parent", volume_id);
@@ -2158,7 +2152,7 @@ async fn test_volume_checkout_randomize_ids_only_read_only(
 }
 
 /// Test that the Crucible agent's port reuse does not confuse
-/// `decrease_crucible_resource_count_and_soft_delete_volume`, due to the
+/// `soft_delete_volume`, due to the
 /// `[ipv6]:port` targets being reused.
 #[nexus_test]
 async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
@@ -2310,10 +2304,7 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
     // Soft delete the volume, and validate that only three region_snapshot
     // records are returned.
 
-    let cr = datastore
-        .decrease_crucible_resource_count_and_soft_delete_volume(volume_id)
-        .await
-        .unwrap();
+    let cr = datastore.soft_delete_volume(volume_id).await.unwrap();
 
     for i in 0..3 {
         let (dataset_id, region_id, snapshot_id, _) = region_snapshots[i];
@@ -2434,10 +2425,7 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
     // Soft delete the volume, and validate that only three region_snapshot
     // records are returned.
 
-    let cr = datastore
-        .decrease_crucible_resource_count_and_soft_delete_volume(volume_id)
-        .await
-        .unwrap();
+    let cr = datastore.soft_delete_volume(volume_id).await.unwrap();
 
     // Make sure every region_snapshot is now 0, and deleting
 
@@ -3446,8 +3434,7 @@ async fn test_upstairs_notify_downstairs_client_stops(
         .unwrap();
 }
 
-/// Assert the `decrease_crucible_resource_count_and_soft_delete_volume` CTE
-/// returns the regions associated with the volume.
+/// Assert `soft_delete_volume` returns the regions associated with the volume.
 #[nexus_test]
 async fn test_cte_returns_regions(cptestctx: &ControlPlaneTestContext) {
     let client = &cptestctx.external_client;
@@ -3497,12 +3484,8 @@ async fn test_cte_returns_regions(cptestctx: &ControlPlaneTestContext) {
 
     assert_eq!(allocated_regions.len(), 3);
 
-    let resources_to_clean_up = datastore
-        .decrease_crucible_resource_count_and_soft_delete_volume(
-            db_disk.volume_id,
-        )
-        .await
-        .unwrap();
+    let resources_to_clean_up =
+        datastore.soft_delete_volume(db_disk.volume_id).await.unwrap();
 
     let datasets_and_regions_to_clean =
         datastore.regions_to_delete(&resources_to_clean_up).await.unwrap();

@@ -64,6 +64,7 @@ async fn create_instance_expect_failure(
         disks: vec![],
         boot_disk: None,
         start: true,
+        auto_restart_policy: Default::default(),
     };
 
     NexusRequest::new(
@@ -152,6 +153,7 @@ async fn test_subnet_allocation(cptestctx: &ControlPlaneTestContext) {
             // External IPs=
             Vec::<params::ExternalIpCreate>::new(),
             true,
+            Default::default(),
         )
         .await;
     }

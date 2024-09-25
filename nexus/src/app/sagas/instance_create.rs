@@ -1221,6 +1221,7 @@ pub mod test {
                 )],
                 boot_disk: Some(DISK_NAME.parse().unwrap()),
                 start: false,
+                auto_restart_policy: Default::default(),
             },
             boundary_switches: HashSet::from([SwitchLocation::Switch0]),
         }

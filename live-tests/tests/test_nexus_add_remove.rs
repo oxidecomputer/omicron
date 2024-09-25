@@ -12,6 +12,7 @@ use futures::TryStreamExt;
 use live_tests_macros::live_test;
 use nexus_client::types::Saga;
 use nexus_client::types::SagaState;
+use nexus_inventory::CollectionBuilder;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_planning::blueprint_builder::EnsureMultiple;
 use nexus_reconfigurator_preparation::PlanningInputFromDb;
@@ -43,6 +44,11 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     let planning_input = PlanningInputFromDb::assemble(&opctx, &datastore)
         .await
         .expect("planning input");
+    let collection = datastore
+        .inventory_get_latest_collection(opctx)
+        .await
+        .expect("latest inventory collection")
+        .unwrap_or_else(|| CollectionBuilder::new("test").build());
     let initial_nexus_clients = lc.all_internal_nexus_clients().await.unwrap();
     let nexus = initial_nexus_clients.first().expect("internal Nexus client");
 
@@ -54,6 +60,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     let (blueprint1, blueprint2) = blueprint_edit_current_target(
         log,
         &planning_input,
+        &collection,
         &nexus,
         &|builder: &mut BlueprintBuilder| {
             let nnexus = builder
@@ -123,6 +130,7 @@ async fn test_nexus_add_remove(lc: &LiveTestContext) {
     let _ = blueprint_edit_current_target(
         log,
         &planning_input,
+        &collection,
         &nexus,
         &|builder: &mut BlueprintBuilder| {
             builder

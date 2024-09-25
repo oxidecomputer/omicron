@@ -33,6 +33,7 @@ pub(crate) async fn build_tuf_repo(
     output_dir: Utf8PathBuf,
     version: Version,
     package_manifest: Arc<Config>,
+    extra_manifest: Option<Utf8PathBuf>,
 ) -> Result<()> {
     // We currently go about this somewhat strangely; the old release
     // engineering process produced a Tufaceous manifest, and (the now very many
@@ -56,6 +57,14 @@ pub(crate) async fn build_tuf_repo(
     .context("failed to open intermediate hubris production manifest")?;
     for (kind, artifacts) in hubris_production.artifacts {
         manifest.artifacts.entry(kind).or_default().extend(artifacts);
+    }
+
+    if let Some(path) = extra_manifest {
+        let m = DeserializedManifest::from_path(&path)
+            .context("failed to open extra manifest")?;
+        for (kind, artifacts) in m.artifacts {
+            manifest.artifacts.entry(kind).or_default().extend(artifacts);
+        }
     }
 
     // Add the OS images.

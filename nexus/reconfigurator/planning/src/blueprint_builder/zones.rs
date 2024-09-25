@@ -304,6 +304,7 @@ mod tests {
             &logctx.log,
             &blueprint_initial,
             &input2,
+            &example.collection,
             "the_test",
         )
         .expect("creating blueprint builder");
@@ -475,6 +476,7 @@ mod tests {
                 &logctx.log,
                 &blueprint,
                 &input2,
+                &example.collection,
                 "the_test",
             )
             .expect("creating blueprint builder");

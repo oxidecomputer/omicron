@@ -123,7 +123,8 @@ Commands:
   region-snapshot-replacement  Query for information about region snapshot replacements, optionally
                                manually triggering one
   sleds                        Print information about sleds
-  instances                    Print information about customer instances
+  instance                     Print information about customer instances
+  instances                    Alias to `omdb instance list`
   network                      Print information about the network
   migrations                   Print information about migrations
   snapshots                    Print information about snapshots
@@ -170,7 +171,8 @@ Commands:
   region-snapshot-replacement  Query for information about region snapshot replacements, optionally
                                manually triggering one
   sleds                        Print information about sleds
-  instances                    Print information about customer instances
+  instance                     Print information about customer instances
+  instances                    Alias to `omdb instance list`
   network                      Print information about the network
   migrations                   Print information about migrations
   snapshots                    Print information about snapshots

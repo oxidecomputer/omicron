@@ -164,6 +164,7 @@ async fn test_project_deletion_with_instance(
             disks: vec![],
             boot_disk: None,
             start: false,
+            auto_restart_policy: Default::default(),
         },
     )
     .await;

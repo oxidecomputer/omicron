@@ -2226,8 +2226,13 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let instance_lookup =
                 nexus.instance_lookup(&opctx, instance_selector)?;
-            let instance =
-                nexus.instance_start(&opctx, &instance_lookup).await?;
+            let instance = nexus
+                .instance_start(
+                    &opctx,
+                    &instance_lookup,
+                    crate::app::sagas::instance_start::Reason::User,
+                )
+                .await?;
             Ok(HttpResponseAccepted(instance.into()))
         };
         apictx

@@ -2240,12 +2240,17 @@ mod tests {
         // sled IDs running services.
         assert_service_sled_ids(&datastore, &[]).await;
 
+        // Build an initial empty collection
+        let collection =
+            system.to_collection_builder().expect("collection builder").build();
+
         // Create a blueprint that has a Nexus on our third sled.
         let bp1 = {
             let mut builder = BlueprintBuilder::new_based_on(
                 &logctx.log,
                 &bp0,
                 &planning_input,
+                &collection,
                 "test",
             )
             .expect("created blueprint builder");
@@ -2315,6 +2320,7 @@ mod tests {
                 &logctx.log,
                 &bp2,
                 &planning_input,
+                &collection,
                 "test",
             )
             .expect("created blueprint builder");
@@ -2839,6 +2845,7 @@ mod tests {
                         boot_disk: None,
                         ssh_public_keys: None,
                         start: false,
+                        auto_restart_policy: Default::default(),
                     },
                 ),
             )

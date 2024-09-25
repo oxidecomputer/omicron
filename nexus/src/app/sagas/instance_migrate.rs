@@ -619,6 +619,7 @@ mod tests {
                 disks: vec![],
                 boot_disk: None,
                 start: true,
+                auto_restart_policy: Default::default(),
             },
         )
         .await

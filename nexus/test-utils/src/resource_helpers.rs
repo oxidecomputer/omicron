@@ -34,6 +34,7 @@ use omicron_common::api::external::Disk;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Instance;
+use omicron_common::api::external::InstanceAutoRestartPolicy;
 use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::RouteDestination;
@@ -432,6 +433,28 @@ pub async fn create_disk(
     .await
 }
 
+pub async fn create_disk_from_snapshot(
+    client: &ClientTestContext,
+    project_name: &str,
+    disk_name: &str,
+    snapshot_id: Uuid,
+) -> Disk {
+    let url = format!("/v1/disks?project={}", project_name);
+    object_create(
+        client,
+        &url,
+        &params::DiskCreate {
+            identity: IdentityMetadataCreateParams {
+                name: disk_name.parse().unwrap(),
+                description: String::from("sells rainsticks"),
+            },
+            disk_source: params::DiskSource::Snapshot { snapshot_id },
+            size: ByteCount::from_gibibytes_u32(1),
+        },
+    )
+    .await
+}
+
 pub async fn create_snapshot(
     client: &ClientTestContext,
     project_name: &str,
@@ -481,11 +504,14 @@ pub async fn create_instance(
         // External IPs=
         Vec::<params::ExternalIpCreate>::new(),
         true,
+        Default::default(),
     )
     .await
 }
 
 /// Creates an instance with attached resources.
+// I know, Clippy. I don't like it either...
+#[allow(clippy::too_many_arguments)]
 pub async fn create_instance_with(
     client: &ClientTestContext,
     project_name: &str,
@@ -494,6 +520,7 @@ pub async fn create_instance_with(
     disks: Vec<params::InstanceDiskAttachment>,
     external_ips: Vec<params::ExternalIpCreate>,
     start: bool,
+    auto_restart_policy: Option<InstanceAutoRestartPolicy>,
 ) -> Instance {
     let url = format!("/v1/instances?project={}", project_name);
 
@@ -517,6 +544,7 @@ pub async fn create_instance_with(
             disks,
             boot_disk: None,
             start,
+            auto_restart_policy,
         },
     )
     .await
@@ -1216,6 +1244,10 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
     }
 
     /// Returns true if all Crucible resources were cleaned up, false otherwise.
+    ///
+    /// Note: be careful performing this test when also peforming physical disk
+    /// expungement, as Nexus will consider resources on those physical disks
+    /// gone and will not attempt to clean them up!
     pub async fn crucible_resources_deleted(&self) -> bool {
         for (sled_id, state) in &self.sleds {
             for zpool in &state.zpools {
@@ -1232,5 +1264,18 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
         }
 
         true
+    }
+
+    /// Drop all of a zpool's resources
+    ///
+    /// Call this before checking `crucible_resources_deleted` if the test has
+    /// also performed a physical disk policy change to "expunged". Nexus will
+    /// _not_ clean up crucible resources on an expunged disk (due to the "gone"
+    /// check that it performs), but it's useful for tests to be able to assert
+    /// all crucible resources are cleaned up.
+    pub async fn remove_zpool(&mut self, zpool_id: Uuid) {
+        for sled in self.sleds.values_mut() {
+            sled.zpools.retain(|zpool| *zpool.id.as_untyped_uuid() != zpool_id);
+        }
     }
 }

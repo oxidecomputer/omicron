@@ -637,31 +637,31 @@ const GiB: u64 = MiB * 1024;
 const TiB: u64 = GiB * 1024;
 
 impl ByteCount {
-    pub fn from_kibibytes_u32(kibibytes: u32) -> ByteCount {
-        ByteCount::try_from(KiB * u64::from(kibibytes)).unwrap()
+    // None of these three constructors can create a value larger than
+    // `i64::MAX`. (Note that a `from_tebibytes_u32` could overflow u64.)
+    pub const fn from_kibibytes_u32(kibibytes: u32) -> ByteCount {
+        ByteCount(KiB * kibibytes as u64)
+    }
+    pub const fn from_mebibytes_u32(mebibytes: u32) -> ByteCount {
+        ByteCount(MiB * mebibytes as u64)
+    }
+    pub const fn from_gibibytes_u32(gibibytes: u32) -> ByteCount {
+        ByteCount(GiB * gibibytes as u64)
     }
 
-    pub fn from_mebibytes_u32(mebibytes: u32) -> ByteCount {
-        ByteCount::try_from(MiB * u64::from(mebibytes)).unwrap()
-    }
-
-    pub fn from_gibibytes_u32(gibibytes: u32) -> ByteCount {
-        ByteCount::try_from(GiB * u64::from(gibibytes)).unwrap()
-    }
-
-    pub fn to_bytes(&self) -> u64 {
+    pub const fn to_bytes(&self) -> u64 {
         self.0
     }
-    pub fn to_whole_kibibytes(&self) -> u64 {
+    pub const fn to_whole_kibibytes(&self) -> u64 {
         self.to_bytes() / KiB
     }
-    pub fn to_whole_mebibytes(&self) -> u64 {
+    pub const fn to_whole_mebibytes(&self) -> u64 {
         self.to_bytes() / MiB
     }
-    pub fn to_whole_gibibytes(&self) -> u64 {
+    pub const fn to_whole_gibibytes(&self) -> u64 {
         self.to_bytes() / GiB
     }
-    pub fn to_whole_tebibytes(&self) -> u64 {
+    pub const fn to_whole_tebibytes(&self) -> u64 {
         self.to_bytes() / TiB
     }
 }
@@ -1168,6 +1168,12 @@ impl From<&InstanceCpuCount> for i64 {
 pub struct InstanceRuntimeState {
     pub run_state: InstanceState,
     pub time_run_state_updated: DateTime<Utc>,
+    /// The timestamp of the most recent time this instance was automatically
+    /// restarted by the control plane.
+    ///
+    /// If this is not present, then this instance has not been automatically
+    /// restarted.
+    pub time_last_auto_restarted: Option<DateTime<Utc>>,
 }
 
 /// View of an Instance
@@ -1192,6 +1198,52 @@ pub struct Instance {
 
     #[serde(flatten)]
     pub runtime: InstanceRuntimeState,
+
+    #[serde(flatten)]
+    pub auto_restart_status: InstanceAutoRestartStatus,
+}
+
+/// Status of control-plane driven automatic failure recovery for this instance.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InstanceAutoRestartStatus {
+    /// `true` if this instance's auto-restart policy will permit the control
+    /// plane to automatically restart it if it enters the `Failed` state.
+    //
+    // Rename this field, as the struct is `#[serde(flatten)]`ed into the
+    // `Instance` type, and we would like the field to be prefixed with
+    // `auto_restart`.
+    #[serde(rename = "auto_restart_enabled")]
+    pub enabled: bool,
+
+    /// The time at which the auto-restart cooldown period for this instance
+    /// completes, permitting it to be automatically restarted again. If the
+    /// instance enters the `Failed` state, it will not be restarted until after
+    /// this time.
+    ///
+    /// If this is not present, then either the instance has never been
+    /// automatically restarted, or the cooldown period has already expired,
+    /// allowing the instance to be restarted immediately if it fails.
+    //
+    // Rename this field, as the struct is `#[serde(flatten)]`ed into the
+    // `Instance` type, and we would like the field to be prefixed with
+    // `auto_restart`.
+    #[serde(rename = "auto_restart_cooldown_expiration")]
+    pub cooldown_expiration: Option<DateTime<Utc>>,
+}
+
+/// A policy determining when an instance should be automatically restarted by
+/// the control plane.
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum InstanceAutoRestartPolicy {
+    /// The instance should not be automatically restarted by the control plane
+    /// if it fails.
+    Never,
+    /// If this instance is running and unexpectedly fails (e.g. due to a host
+    /// software crash or unexpected host reboot), the control plane will make a
+    /// best-effort attempt to restart it. The control plane may choose not to
+    /// restart the instance to preserve the overall availability of the system.
+    BestEffort,
 }
 
 // DISKS
@@ -1424,8 +1476,8 @@ pub enum RouteTarget {
     Drop,
 }
 
-/// A `RouteDestination` is used to match traffic with a routing rule, on the
-/// destination of that traffic.
+/// A `RouteDestination` is used to match traffic with a routing rule based on
+/// the destination of that traffic.
 ///
 /// When traffic is to be sent to a destination that is within a given
 /// `RouteDestination`, the corresponding `RouterRoute` applies, and traffic
@@ -1443,13 +1495,13 @@ pub enum RouteTarget {
 #[serde(tag = "type", content = "value", rename_all = "snake_case")]
 #[display("{}:{0}", style = "lowercase")]
 pub enum RouteDestination {
-    /// Route applies to traffic destined for a specific IP address
+    /// Route applies to traffic destined for the specified IP address
     Ip(IpAddr),
-    /// Route applies to traffic destined for a specific IP subnet
+    /// Route applies to traffic destined for the specified IP subnet
     IpNet(IpNet),
-    /// Route applies to traffic destined for the given VPC.
+    /// Route applies to traffic destined for the specified VPC
     Vpc(Name),
-    /// Route applies to traffic
+    /// Route applies to traffic destined for the specified VPC subnet
     Subnet(Name),
 }
 
@@ -3214,6 +3266,21 @@ mod test {
         // For good measure, let's check i64::MIN
         let bogus = ByteCount::try_from(i64::MIN).unwrap_err();
         assert_eq!(bogus.to_string(), "value is too small for a byte count");
+
+        // The largest input value to the `from_*_u32` methods do not create
+        // a value larger than i64::MAX.
+        assert!(
+            ByteCount::from_kibibytes_u32(u32::MAX).to_bytes()
+                <= u64::try_from(i64::MAX).unwrap()
+        );
+        assert!(
+            ByteCount::from_mebibytes_u32(u32::MAX).to_bytes()
+                <= u64::try_from(i64::MAX).unwrap()
+        );
+        assert!(
+            ByteCount::from_gibibytes_u32(u32::MAX).to_bytes()
+                <= u64::try_from(i64::MAX).unwrap()
+        );
 
         // We've now exhaustively tested both sides of all boundary conditions
         // for all three constructors (to the extent that that's possible).

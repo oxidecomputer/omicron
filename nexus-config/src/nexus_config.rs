@@ -14,6 +14,7 @@ use omicron_common::address::Ipv6Subnet;
 use omicron_common::address::NEXUS_TECHPORT_EXTERNAL_PORT;
 use omicron_common::address::RACK_PREFIX;
 use omicron_common::api::internal::shared::SwitchLocation;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
@@ -150,7 +151,7 @@ pub enum InternalDns {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize, JsonSchema)]
 pub struct DeploymentConfig {
     /// Uuid of the Nexus instance
-    pub id: Uuid,
+    pub id: OmicronZoneUuid,
     /// Uuid of the Rack where Nexus is executing.
     pub rack_id: Uuid,
     /// Port on which the "techport external" dropshot server should listen.
@@ -381,6 +382,8 @@ pub struct BackgroundTaskConfig {
     pub instance_watcher: InstanceWatcherConfig,
     /// configuration for instance updater task
     pub instance_updater: InstanceUpdaterConfig,
+    /// configuration for instance reincarnation task
+    pub instance_reincarnation: InstanceReincarnationConfig,
     /// configuration for service VPC firewall propagation task
     pub service_firewall_propagation: ServiceFirewallPropagationConfig,
     /// configuration for v2p mapping propagation task
@@ -583,6 +586,23 @@ pub struct InstanceUpdaterConfig {
     ///
     /// This config is intended for use in testing, and should generally not be
     /// enabled in real life.
+    ///
+    /// Default: Off
+    #[serde(default)]
+    pub disable: bool,
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct InstanceReincarnationConfig {
+    /// period (in seconds) for periodic activations of this background task
+    #[serde_as(as = "DurationSeconds<u64>")]
+    pub period_secs: Duration,
+
+    /// disable background checks for instances in need of updates.
+    ///
+    /// This is an emergency lever for support / operations. It should only be
+    /// necessary if something has gone extremely wrong.
     ///
     /// Default: Off
     #[serde(default)]
@@ -911,6 +931,7 @@ mod test {
             instance_watcher.period_secs = 30
             instance_updater.period_secs = 30
             instance_updater.disable = false
+            instance_reincarnation.period_secs = 67
             service_firewall_propagation.period_secs = 300
             v2p_mapping_propagation.period_secs = 30
             abandoned_vmm_reaper.period_secs = 60
@@ -1066,6 +1087,10 @@ mod test {
                             period_secs: Duration::from_secs(30),
                             disable: false,
                         },
+                        instance_reincarnation: InstanceReincarnationConfig {
+                            period_secs: Duration::from_secs(67),
+                            disable: false,
+                        },
                         service_firewall_propagation:
                             ServiceFirewallPropagationConfig {
                                 period_secs: Duration::from_secs(300),
@@ -1169,6 +1194,7 @@ mod test {
             region_replacement_driver.period_secs = 30
             instance_watcher.period_secs = 30
             instance_updater.period_secs = 30
+            instance_reincarnation.period_secs = 67
             service_firewall_propagation.period_secs = 300
             v2p_mapping_propagation.period_secs = 30
             abandoned_vmm_reaper.period_secs = 60

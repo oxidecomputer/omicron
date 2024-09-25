@@ -23,6 +23,7 @@ use omicron_common::api::external::ListResultVec;
 use serde_json::json;
 use std::future::Future;
 use std::sync::Arc;
+use steno::SagaId;
 use tokio::task::JoinSet;
 use uuid::Uuid;
 
@@ -138,17 +139,18 @@ impl InstanceUpdater {
                         .saga_errors
                         .push((None, format!("unexpected JoinError: {err}")));
                 }
-                Ok(Err((instance_id, err))) => {
-                    const MSG: &'static str = "update saga failed";
+                Ok(Err((instance_id, saga_id, err))) => {
                     warn!(
                         opctx.log,
-                        "{MSG}!";
+                        "update saga failed!";
                         "instance_id" => %instance_id,
+                        "saga_id" => %saga_id,
                         "error" => &err,
                     );
-                    status
-                        .saga_errors
-                        .push((Some(instance_id), err.to_string()));
+                    status.saga_errors.push((
+                        Some(instance_id),
+                        format!("update saga {saga_id} failed: {err}"),
+                    ));
                 }
                 Ok(Ok(())) => status.sagas_completed += 1,
             }
@@ -159,7 +161,7 @@ impl InstanceUpdater {
         &self,
         opctx: &OpContext,
         status: &mut InstanceUpdaterStatus,
-        sagas: &mut JoinSet<Result<(), (Uuid, Error)>>,
+        sagas: &mut JoinSet<Result<(), (Uuid, SagaId, Error)>>,
         instances: impl IntoIterator<Item = Instance>,
     ) {
         let serialized_authn = authn::saga::Serialized::for_opctx(opctx);
@@ -171,24 +173,21 @@ impl InstanceUpdater {
                         .instance_id(instance_id)
                         .lookup_for(authz::Action::Modify)
                         .await?;
-                instance_update::SagaInstanceUpdate::prepare(
+                let dag = instance_update::SagaInstanceUpdate::prepare(
                     &instance_update::Params {
                         serialized_authn: serialized_authn.clone(),
                         authz_instance,
                     },
-                )
+                )?;
+                self.sagas.saga_run(dag).await
             }
             .await;
             match saga {
-                Ok(saga) => {
-                    let start_saga = self.sagas.clone();
-                    sagas.spawn(async move {
-                        start_saga
-                            .saga_start(saga)
-                            .await
-                            .map_err(|e| (instance_id, e))
-                    });
+                Ok((saga_id, completed)) => {
                     status.sagas_started += 1;
+                    sagas.spawn(async move {
+                        completed.await.map_err(|e| (instance_id, saga_id, e))
+                    });
                 }
                 Err(err) => {
                     const ERR_MSG: &str = "failed to start update saga";

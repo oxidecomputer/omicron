@@ -88,6 +88,7 @@ impl ResourceAllocator {
                 disks: Vec::<params::InstanceDiskAttachment>::new(),
                 boot_disk: None,
                 start: false,
+                auto_restart_policy: Default::default(),
             },
         )
         .authn_as(self.auth.clone())

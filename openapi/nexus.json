@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "20240821.0"
+    "version": "20241009.0"
   },
   "paths": {
     "/device/auth": {
@@ -15146,11 +15146,23 @@
         "description": "View of an Instance",
         "type": "object",
         "properties": {
+<<<<<<< HEAD
           "boot_disk_id": {
             "nullable": true,
             "description": "the ID of the disk used to boot this Instance, if a specific one is assigned.",
             "type": "string",
             "format": "uuid"
+=======
+          "auto_restart_cooldown_expiration": {
+            "nullable": true,
+            "description": "The time at which the auto-restart cooldown period for this instance completes, permitting it to be automatically restarted again. If the instance enters the `Failed` state, it will not be restarted until after this time.\n\nIf this is not present, then either the instance has never been automatically restarted, or the cooldown period has already expired, allowing the instance to be restarted immediately if it fails.",
+            "type": "string",
+            "format": "date-time"
+          },
+          "auto_restart_enabled": {
+            "description": "`true` if this instance's auto-restart policy will permit the control plane to automatically restart it if it enters the `Failed` state.",
+            "type": "boolean"
+>>>>>>> main
           },
           "description": {
             "description": "human-readable free-form text about a resource",
@@ -15202,6 +15214,12 @@
             "type": "string",
             "format": "date-time"
           },
+          "time_last_auto_restarted": {
+            "nullable": true,
+            "description": "The timestamp of the most recent time this instance was automatically restarted by the control plane.\n\nIf this is not present, then this instance has not been automatically restarted.",
+            "type": "string",
+            "format": "date-time"
+          },
           "time_modified": {
             "description": "timestamp when this resource was last modified",
             "type": "string",
@@ -15213,6 +15231,7 @@
           }
         },
         "required": [
+          "auto_restart_enabled",
           "description",
           "hostname",
           "id",
@@ -15226,6 +15245,25 @@
           "time_run_state_updated"
         ]
       },
+      "InstanceAutoRestartPolicy": {
+        "description": "A policy determining when an instance should be automatically restarted by the control plane.",
+        "oneOf": [
+          {
+            "description": "The instance should not be automatically restarted by the control plane if it fails.",
+            "type": "string",
+            "enum": [
+              "never"
+            ]
+          },
+          {
+            "description": "If this instance is running and unexpectedly fails (e.g. due to a host software crash or unexpected host reboot), the control plane will make a best-effort attempt to restart it. The control plane may choose not to restart the instance to preserve the overall availability of the system.",
+            "type": "string",
+            "enum": [
+              "best_effort"
+            ]
+          }
+        ]
+      },
       "InstanceCpuCount": {
         "description": "The number of CPUs in an Instance",
         "type": "integer",
@@ -15236,6 +15274,7 @@
         "description": "Create-time parameters for an `Instance`",
         "type": "object",
         "properties": {
+<<<<<<< HEAD
           "boot_disk": {
             "nullable": true,
             "description": "Choice of which disk this instance should boot from.",
@@ -15243,6 +15282,15 @@
             "allOf": [
               {
                 "$ref": "#/components/schemas/NameOrId"
+=======
+          "auto_restart_policy": {
+            "nullable": true,
+            "description": "The auto-restart policy for this instance.\n\nThis indicates whether the instance should be automatically restarted by the control plane on failure. If this is `null`, no auto-restart policy has been configured for this instance by the user.",
+            "default": null,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceAutoRestartPolicy"
+>>>>>>> main
               }
             ]
           },
@@ -17456,10 +17504,10 @@
         ]
       },
       "RouteDestination": {
-        "description": "A `RouteDestination` is used to match traffic with a routing rule, on the destination of that traffic.\n\nWhen traffic is to be sent to a destination that is within a given `RouteDestination`, the corresponding `RouterRoute` applies, and traffic will be forward to the `RouteTarget` for that rule.",
+        "description": "A `RouteDestination` is used to match traffic with a routing rule based on the destination of that traffic.\n\nWhen traffic is to be sent to a destination that is within a given `RouteDestination`, the corresponding `RouterRoute` applies, and traffic will be forward to the `RouteTarget` for that rule.",
         "oneOf": [
           {
-            "description": "Route applies to traffic destined for a specific IP address",
+            "description": "Route applies to traffic destined for the specified IP address",
             "type": "object",
             "properties": {
               "type": {
@@ -17479,7 +17527,7 @@
             ]
           },
           {
-            "description": "Route applies to traffic destined for a specific IP subnet",
+            "description": "Route applies to traffic destined for the specified IP subnet",
             "type": "object",
             "properties": {
               "type": {
@@ -17498,7 +17546,7 @@
             ]
           },
           {
-            "description": "Route applies to traffic destined for the given VPC.",
+            "description": "Route applies to traffic destined for the specified VPC",
             "type": "object",
             "properties": {
               "type": {
@@ -17517,7 +17565,7 @@
             ]
           },
           {
-            "description": "Route applies to traffic",
+            "description": "Route applies to traffic destined for the specified VPC subnet",
             "type": "object",
             "properties": {
               "type": {

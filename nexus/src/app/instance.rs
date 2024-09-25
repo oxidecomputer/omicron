@@ -60,6 +60,7 @@ use propolis_client::support::InstanceSerialConsoleHelper;
 use propolis_client::support::WSClientOffset;
 use propolis_client::support::WebSocketStream;
 use sagas::instance_common::ExternalIpAttach;
+use sagas::instance_start;
 use sagas::instance_update;
 use sled_agent_client::types::BootOrderEntry;
 use sled_agent_client::types::BootSettings;
@@ -508,7 +509,13 @@ impl super::Nexus {
             let lookup = LookupPath::new(opctx, &self.db_datastore)
                 .instance_id(instance_id);
 
-            let start_result = self.instance_start(opctx, &lookup).await;
+            let start_result = self
+                .instance_start(
+                    opctx,
+                    &lookup,
+                    instance_start::Reason::AutoStart,
+                )
+                .await;
             if let Err(e) = start_result {
                 info!(self.log, "failed to start newly-created instance";
                       "instance_id" => %instance_id,
@@ -683,6 +690,7 @@ impl super::Nexus {
         self: &Arc<Self>,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
+        reason: instance_start::Reason,
     ) -> Result<InstanceAndActiveVmm, InstanceStateChangeError> {
         let (.., authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
@@ -692,12 +700,13 @@ impl super::Nexus {
             .instance_fetch_with_vmm(opctx, &authz_instance)
             .await?;
 
-        match instance_start_allowed(&self.log, &state)? {
+        match instance_start_allowed(&self.log, &state, reason)? {
             InstanceStartDisposition::AlreadyStarted => Ok(state),
             InstanceStartDisposition::Start => {
                 let saga_params = sagas::instance_start::Params {
                     serialized_authn: authn::saga::Serialized::for_opctx(opctx),
                     db_instance: state.instance().clone(),
+                    reason,
                 };
 
                 self.sagas
@@ -2128,6 +2137,7 @@ pub(crate) async fn process_vmm_update(
 fn instance_start_allowed(
     log: &slog::Logger,
     state: &InstanceAndActiveVmm,
+    reason: instance_start::Reason,
 ) -> Result<InstanceStartDisposition, Error> {
     let (instance, vmm) = (state.instance(), state.vmm());
 
@@ -2146,7 +2156,8 @@ fn instance_start_allowed(
         | s @ InstanceState::Migrating => {
             debug!(log, "asked to start an active instance";
                    "instance_id" => %instance.id(),
-                   "state" => ?s);
+                   "state" => ?s,
+                   "start_reason" => ?reason);
 
             Ok(InstanceStartDisposition::AlreadyStarted)
         }
@@ -2159,7 +2170,8 @@ fn instance_start_allowed(
                     debug!(
                         log,
                         "instance's last VMM's start saga unwound, OK to start";
-                        "instance_id" => %instance.id()
+                        "instance_id" => %instance.id(),
+                        "start_reason" => ?reason,
                     );
 
                     Ok(InstanceStartDisposition::Start)
@@ -2172,7 +2184,8 @@ fn instance_start_allowed(
                             "instance is {s:?} but still has an active VMM";
                             "instance_id" => %instance.id(),
                             "propolis_id" => %vmm.id,
-                            "propolis_state" => ?vmm.runtime.state);
+                            "propolis_state" => ?vmm.runtime.state,
+                            "start_reason" => ?reason);
 
                     Err(Error::InternalError {
                         internal_message: format!(
@@ -2192,7 +2205,8 @@ fn instance_start_allowed(
             debug!(log, "instance's VMM is still in the process of stopping";
                    "instance_id" => %instance.id(),
                    "propolis_id" => ?propolis_id,
-                   "propolis_state" => ?propolis_state);
+                   "propolis_state" => ?propolis_state,
+                   "start_reason" => ?reason);
             Err(Error::conflict(
                 "instance must finish stopping before it can be started",
             ))
@@ -2338,6 +2352,7 @@ mod tests {
             boot_disk: None,
             ssh_public_keys: None,
             start: false,
+            auto_restart_policy: Default::default(),
         };
 
         let instance_id = InstanceUuid::from_untyped_uuid(Uuid::new_v4());
@@ -2364,7 +2379,12 @@ mod tests {
         let (mut instance, _vmm) = make_instance_and_vmm();
         instance.runtime_state.nexus_state = DbInstanceState::NoVmm;
         let state = InstanceAndActiveVmm::from((instance, None));
-        assert!(instance_start_allowed(&logctx.log, &state).is_ok());
+        assert!(instance_start_allowed(
+            &logctx.log,
+            &state,
+            instance_start::Reason::User
+        )
+        .is_ok());
         logctx.cleanup_successful();
     }
 
@@ -2378,7 +2398,12 @@ mod tests {
         instance.runtime_state.propolis_id = Some(vmm.id);
         vmm.runtime.state = DbVmmState::SagaUnwound;
         let state = InstanceAndActiveVmm::from((instance, Some(vmm)));
-        assert!(instance_start_allowed(&logctx.log, &state).is_ok());
+        assert!(instance_start_allowed(
+            &logctx.log,
+            &state,
+            instance_start::Reason::User
+        )
+        .is_ok());
         logctx.cleanup_successful();
     }
 
@@ -2389,7 +2414,12 @@ mod tests {
         let (mut instance, _vmm) = make_instance_and_vmm();
         instance.runtime_state.nexus_state = DbInstanceState::Creating;
         let state = InstanceAndActiveVmm::from((instance, None));
-        assert!(instance_start_allowed(&logctx.log, &state).is_err());
+        assert!(instance_start_allowed(
+            &logctx.log,
+            &state,
+            instance_start::Reason::User
+        )
+        .is_err());
         logctx.cleanup_successful();
     }
 
@@ -2402,21 +2432,41 @@ mod tests {
         vmm.runtime.state = DbVmmState::Starting;
         let state =
             InstanceAndActiveVmm::from((instance.clone(), Some(vmm.clone())));
-        assert!(instance_start_allowed(&logctx.log, &state).is_ok());
+        assert!(instance_start_allowed(
+            &logctx.log,
+            &state,
+            instance_start::Reason::User
+        )
+        .is_ok());
 
         vmm.runtime.state = DbVmmState::Running;
         let state =
             InstanceAndActiveVmm::from((instance.clone(), Some(vmm.clone())));
-        assert!(instance_start_allowed(&logctx.log, &state).is_ok());
+        assert!(instance_start_allowed(
+            &logctx.log,
+            &state,
+            instance_start::Reason::User
+        )
+        .is_ok());
 
         vmm.runtime.state = DbVmmState::Rebooting;
         let state =
             InstanceAndActiveVmm::from((instance.clone(), Some(vmm.clone())));
-        assert!(instance_start_allowed(&logctx.log, &state).is_ok());
+        assert!(instance_start_allowed(
+            &logctx.log,
+            &state,
+            instance_start::Reason::User
+        )
+        .is_ok());
 
         vmm.runtime.state = DbVmmState::Migrating;
         let state = InstanceAndActiveVmm::from((instance, Some(vmm)));
-        assert!(instance_start_allowed(&logctx.log, &state).is_ok());
+        assert!(instance_start_allowed(
+            &logctx.log,
+            &state,
+            instance_start::Reason::User
+        )
+        .is_ok());
         logctx.cleanup_successful();
     }
 }

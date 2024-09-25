@@ -1017,6 +1017,7 @@ mod tests {
                 disks: vec![],
                 boot_disk: None,
                 start: false,
+                auto_restart_policy: Default::default(),
             });
 
             let conn = self

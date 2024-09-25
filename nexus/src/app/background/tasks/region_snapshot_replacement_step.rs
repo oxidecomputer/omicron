@@ -32,6 +32,7 @@ use futures::future::BoxFuture;
 use futures::FutureExt;
 use nexus_db_model::RegionSnapshotReplacementStep;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::datastore::region_snapshot_replacement;
 use nexus_db_queries::db::DataStore;
 use nexus_types::identity::Asset;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStepStatus;
@@ -59,7 +60,10 @@ impl RegionSnapshotReplacementFindAffected {
         };
 
         let saga_dag = SagaRegionSnapshotReplacementStep::prepare(&params)?;
-        self.sagas.saga_start(saga_dag).await
+        // We only care that the saga was started, and don't wish to wait for it
+        // to complete, so use `StartSaga::saga_start`, rather than `saga_run`.
+        self.sagas.saga_start(saga_dag).await?;
+        Ok(())
     }
 
     async fn send_garbage_collect_request(
@@ -89,7 +93,12 @@ impl RegionSnapshotReplacementFindAffected {
 
         let saga_dag =
             SagaRegionSnapshotReplacementStepGarbageCollect::prepare(&params)?;
-        self.sagas.saga_start(saga_dag).await
+
+        // We only care that the saga was started, and don't wish to wait for it
+        // to complete, so throwing out the future returned by `saga_start` is
+        // fine. Dropping it will *not* cancel the saga itself.
+        self.sagas.saga_start(saga_dag).await?;
+        Ok(())
     }
 
     async fn clean_up_region_snapshot_replacement_step_volumes(
@@ -314,15 +323,26 @@ impl RegionSnapshotReplacementFindAffected {
                     )
                     .await
                 {
-                    Ok(step_request_id) => {
-                        let s = format!("created {step_request_id}");
-                        info!(
-                            log,
-                            "{s}";
-                            "request id" => ?request.id,
-                            "volume id" => ?volume.id(),
-                        );
-                        status.step_records_created_ok.push(s);
+                    Ok(insertion_result) => match insertion_result {
+                        region_snapshot_replacement::InsertStepResult::Inserted { step_id } => {
+                            let s = format!("created {step_id}");
+                            info!(
+                                log,
+                                "{s}";
+                                "request id" => ?request.id,
+                                "volume id" => ?volume.id(),
+                            );
+                            status.step_records_created_ok.push(s);
+                        }
+
+                        region_snapshot_replacement::InsertStepResult::AlreadyHandled { .. } => {
+                            info!(
+                                log,
+                                "step already exists for volume id";
+                                "request id" => ?request.id,
+                                "volume id" => ?volume.id(),
+                            );
+                        }
                     }
 
                     Err(e) => {
@@ -695,7 +715,7 @@ mod test {
         // Now, add some Complete records and make sure the garbage collection
         // saga is invoked.
 
-        datastore
+        let result = datastore
             .insert_region_snapshot_replacement_step(&opctx, {
                 let mut record = RegionSnapshotReplacementStep::new(
                     Uuid::new_v4(),
@@ -711,7 +731,12 @@ mod test {
             .await
             .unwrap();
 
-        datastore
+        assert!(matches!(
+            result,
+            region_snapshot_replacement::InsertStepResult::Inserted { .. }
+        ));
+
+        let result = datastore
             .insert_region_snapshot_replacement_step(&opctx, {
                 let mut record = RegionSnapshotReplacementStep::new(
                     Uuid::new_v4(),
@@ -726,6 +751,11 @@ mod test {
             })
             .await
             .unwrap();
+
+        assert!(matches!(
+            result,
+            region_snapshot_replacement::InsertStepResult::Inserted { .. }
+        ));
 
         // Activate the task - it should pick the complete steps up and try to
         // run the region snapshot replacement step garbage collect saga

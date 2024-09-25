@@ -250,6 +250,7 @@ mod test {
             )],
             boot_disk: Some(DISK_NAME.parse().unwrap()),
             start: false,
+            auto_restart_policy: Default::default(),
         }
     }
 

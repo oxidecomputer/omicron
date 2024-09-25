@@ -7,8 +7,8 @@
 use internal_dns::resolver::Resolver;
 use nexus_db_queries::{context::OpContext, db::DataStore};
 use nexus_types::deployment::{execution::EventBuffer, Blueprint};
+use omicron_uuid_kinds::OmicronZoneUuid;
 use update_engine::TerminalKind;
-use uuid::Uuid;
 
 use crate::{overridables::Overridables, RealizeBlueprintOutput};
 
@@ -34,7 +34,7 @@ pub(crate) async fn realize_blueprint_and_expect(
         datastore,
         resolver,
         blueprint,
-        Uuid::new_v4(),
+        OmicronZoneUuid::new_v4(),
         overrides,
         sender,
     )

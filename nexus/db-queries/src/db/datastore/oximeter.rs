@@ -15,18 +15,35 @@ use crate::db::model::OximeterInfo;
 use crate::db::model::ProducerEndpoint;
 use crate::db::pagination::paginated;
 use crate::db::pagination::Paginator;
+use crate::db::queries;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::DateTime;
 use chrono::Utc;
 use diesel::prelude::*;
+use diesel::result::DatabaseErrorKind;
+use diesel::result::Error as DieselError;
+use diesel::sql_types;
+use nexus_db_model::ProducerKindEnum;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::ResourceType;
 use uuid::Uuid;
 
+/// Type returned when reassigning producers from an Oximeter collector.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CollectorReassignment {
+    /// Success: `n` producers were reassigned to other collector(s).
+    Complete(usize),
+    /// Reassignment could not complete because there are no other collectors
+    /// available.
+    NoCollectorsAvailable,
+}
+
 impl DataStore {
     /// Lookup an oximeter instance by its ID.
+    ///
+    /// Fails if the instance has been expunged.
     pub async fn oximeter_lookup(
         &self,
         opctx: &OpContext,
@@ -34,6 +51,7 @@ impl DataStore {
     ) -> Result<OximeterInfo, Error> {
         use db::schema::oximeter::dsl;
         dsl::oximeter
+            .filter(dsl::time_expunged.is_null())
             .find(*id)
             .first_async(&*self.pool_connection_authorized(opctx).await?)
             .await
@@ -48,10 +66,19 @@ impl DataStore {
     ) -> Result<(), Error> {
         use db::schema::oximeter::dsl;
 
-        // If we get a conflict on the Oximeter ID, this means that collector instance was
-        // previously registered, and it's re-registering due to something like a service restart.
-        // In this case, we update the time modified and the service address, rather than
-        // propagating a constraint violation to the caller.
+        // If we get a conflict on the Oximeter ID, this means that collector
+        // instance was previously registered, and it's re-registering due to
+        // something like a service restart. In this case, we update the time
+        // modified and the service address, rather than propagating a
+        // constraint violation to the caller.
+        //
+        // TODO-completeness - We should return an error if `info.id()` maps to
+        // an existing row that has been expunged. We don't expect that to
+        // happen in practice (it would mean an expunged Oximeter zone has come
+        // back to life and reregistered itself). If it does happen, as written
+        // we'll update time_modified/ip/port but leave time_expunged set to
+        // whatever it was (which will leave the Oximeter in the "expunged"
+        // state).
         diesel::insert_into(dsl::oximeter)
             .values(*info)
             .on_conflict(dsl::id)
@@ -75,7 +102,33 @@ impl DataStore {
         Ok(())
     }
 
+    /// Mark an Oximeter instance as expunged
+    ///
+    /// This method is idempotent and has no effect if called with the ID for an
+    /// already-expunged Oximeter.
+    pub async fn oximeter_expunge(
+        &self,
+        opctx: &OpContext,
+        id: Uuid,
+    ) -> Result<(), Error> {
+        use db::schema::oximeter::dsl;
+
+        let now = Utc::now();
+
+        diesel::update(dsl::oximeter)
+            .filter(dsl::time_expunged.is_null())
+            .filter(dsl::id.eq(id))
+            .set(dsl::time_expunged.eq(now))
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(())
+    }
+
     /// List the oximeter collector instances
+    ///
+    /// Omits expunged instances.
     pub async fn oximeter_list(
         &self,
         opctx: &OpContext,
@@ -83,11 +136,36 @@ impl DataStore {
     ) -> ListResultVec<OximeterInfo> {
         use db::schema::oximeter::dsl;
         paginated(dsl::oximeter, dsl::id, page_params)
+            .filter(dsl::time_expunged.is_null())
             .load_async::<OximeterInfo>(
                 &*self.pool_connection_authorized(opctx).await?,
             )
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// Reassign all metric producers currently assigned to Oximeter `id`
+    ///
+    /// The new Oximeter instance for each producer will be randomly selected
+    /// from all available Oximeters. On success, returns the number of metric
+    /// producers reassigned. Fails if there are no available Oximeter instances
+    /// (e.g., all Oximeter instances have been expunged).
+    pub async fn oximeter_reassign_all_producers(
+        &self,
+        opctx: &OpContext,
+        id: Uuid,
+    ) -> Result<CollectorReassignment, Error> {
+        match queries::oximeter::reassign_producers_query(id)
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+        {
+            Ok(n) => Ok(CollectorReassignment::Complete(n)),
+            Err(DieselError::DatabaseError(
+                DatabaseErrorKind::NotNullViolation,
+                _,
+            )) => Ok(CollectorReassignment::NoCollectorsAvailable),
+            Err(e) => Err(public_error_from_diesel(e, ErrorHandler::Server)),
+        }
     }
 
     /// Create a record for a new producer endpoint
@@ -96,11 +174,47 @@ impl DataStore {
         opctx: &OpContext,
         producer: &ProducerEndpoint,
     ) -> Result<(), Error> {
+        // Our caller has already chosen an Oximeter instance for this producer,
+        // but we don't want to allow it to use a nonexistent or expunged
+        // Oximeter. This query turns into a `SELECT all_the_fields_of_producer
+        // WHERE producer.oximeter_id is legal` in a diesel-compatible way. I'm
+        // not aware of a helper method to generate "all the fields of
+        // `producer`", so instead we have a big tuple of its fields that must
+        // stay in sync with the `table!` definition and field ordering for the
+        // `metric_producer` table. The compiler will catch any mistakes
+        // _except_ incorrect orderings where the types still line up (e.g.,
+        // swapping two Uuid columns), which is not ideal but is hopefully good
+        // enough.
+        let producer_subquery = {
+            use db::schema::oximeter::dsl;
+
+            dsl::oximeter
+                .select((
+                    producer.id().into_sql::<sql_types::Uuid>(),
+                    producer
+                        .time_created()
+                        .into_sql::<sql_types::Timestamptz>(),
+                    producer
+                        .time_modified()
+                        .into_sql::<sql_types::Timestamptz>(),
+                    producer.kind.into_sql::<ProducerKindEnum>(),
+                    producer.ip.into_sql::<sql_types::Inet>(),
+                    producer.port.into_sql::<sql_types::Int4>(),
+                    producer.interval.into_sql::<sql_types::Float8>(),
+                    producer.oximeter_id.into_sql::<sql_types::Uuid>(),
+                ))
+                .filter(
+                    dsl::id
+                        .eq(producer.oximeter_id)
+                        .and(dsl::time_expunged.is_null()),
+                )
+        };
+
         use db::schema::metric_producer::dsl;
 
         // TODO: see https://github.com/oxidecomputer/omicron/issues/323
-        diesel::insert_into(dsl::metric_producer)
-            .values(producer.clone())
+        let n = diesel::insert_into(dsl::metric_producer)
+            .values(producer_subquery)
             .on_conflict(dsl::id)
             .do_update()
             .set((
@@ -121,7 +235,22 @@ impl DataStore {
                     ),
                 )
             })?;
-        Ok(())
+
+        // We expect `n` to basically always be 1 (1 row was inserted or
+        // updated). It can be 0 if `producer.oximeter_id` doesn't exist or has
+        // been expunged. It can never be 2 or greater because
+        // `producer_subquery` filters on finding an exact row for its Oximeter
+        // instance's ID.
+        match n {
+            0 => Err(Error::not_found_by_id(
+                ResourceType::Oximeter,
+                &producer.oximeter_id,
+            )),
+            1 => Ok(()),
+            _ => Err(Error::internal_error(&format!(
+                "multiple rows inserted ({n}) in `producer_endpoint_create`"
+            ))),
+        }
     }
 
     /// Delete a record for a producer endpoint, by its ID.
@@ -226,6 +355,7 @@ mod tests {
     use db::datastore::pub_test_utils::datastore_test;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::internal_api::params;
+    use omicron_common::api::external::LookupType;
     use omicron_common::api::internal::nexus;
     use omicron_test_utils::dev;
     use std::time::Duration;
@@ -270,6 +400,406 @@ mod tests {
             .expect("failed to read batched expired producers");
         assert_eq!(expired_one_page, expired_batched);
         expired_batched
+    }
+
+    #[tokio::test]
+    async fn test_oximeter_expunge() {
+        // Setup
+        let logctx = dev::test_setup_log("test_oximeter_expunge");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) =
+            datastore_test(&logctx, &db, Uuid::new_v4()).await;
+
+        // Insert a few Oximeter collectors.
+        let mut collector_ids =
+            (0..4).map(|_| Uuid::new_v4()).collect::<Vec<_>>();
+
+        // Sort the IDs for easier comparisons later.
+        collector_ids.sort();
+
+        for &collector_id in &collector_ids {
+            let info = OximeterInfo::new(&params::OximeterInfo {
+                collector_id,
+                address: "[::1]:0".parse().unwrap(), // unused
+            });
+            datastore
+                .oximeter_create(&opctx, &info)
+                .await
+                .expect("inserted collector");
+        }
+
+        // Ensure all our collectors exist and aren't expunged.
+        let mut all_collectors = datastore
+            .oximeter_list(&opctx, &DataPageParams::max_page())
+            .await
+            .expect("listed collectors");
+        all_collectors.sort_by_key(|info| info.id);
+        assert_eq!(all_collectors.len(), collector_ids.len());
+        for (info, &expected_id) in all_collectors.iter().zip(&collector_ids) {
+            assert_eq!(info.id, expected_id);
+            assert!(info.time_expunged.is_none());
+        }
+
+        // Delete the first two of them.
+        datastore
+            .oximeter_expunge(&opctx, collector_ids[0])
+            .await
+            .expect("expunged collector");
+        datastore
+            .oximeter_expunge(&opctx, collector_ids[1])
+            .await
+            .expect("expunged collector");
+
+        // Ensure those two were expunged.
+        let mut all_collectors = datastore
+            .oximeter_list(&opctx, &DataPageParams::max_page())
+            .await
+            .expect("listed collectors");
+        all_collectors.sort_by_key(|info| info.id);
+        assert_eq!(all_collectors.len(), collector_ids.len() - 2);
+        for (info, &expected_id) in
+            all_collectors.iter().zip(&collector_ids[2..])
+        {
+            assert_eq!(info.id, expected_id);
+            assert!(info.time_expunged.is_none());
+        }
+
+        // Deletion is idempotent. To test, we'll read the expunged rows
+        // directly, expunge them again, and confirm the row contents haven't
+        // changed.
+        let find_oximeter_ignoring_expunged = |id| {
+            let datastore = &datastore;
+            let opctx = &opctx;
+            async move {
+                let conn = datastore
+                    .pool_connection_authorized(opctx)
+                    .await
+                    .expect("acquired connection");
+                use db::schema::oximeter::dsl;
+                let info: OximeterInfo = dsl::oximeter
+                    .find(id)
+                    .first_async(&*conn)
+                    .await
+                    .expect("found Oximeter by ID");
+                info
+            }
+        };
+        let expunged0a =
+            find_oximeter_ignoring_expunged(collector_ids[0]).await;
+        let expunged1a =
+            find_oximeter_ignoring_expunged(collector_ids[1]).await;
+        assert!(expunged0a.time_expunged.is_some());
+        assert!(expunged1a.time_expunged.is_some());
+
+        datastore
+            .oximeter_expunge(&opctx, collector_ids[0])
+            .await
+            .expect("expunged collector");
+        datastore
+            .oximeter_expunge(&opctx, collector_ids[1])
+            .await
+            .expect("expunged collector");
+
+        let expunged0b =
+            find_oximeter_ignoring_expunged(collector_ids[0]).await;
+        let expunged1b =
+            find_oximeter_ignoring_expunged(collector_ids[1]).await;
+        assert_eq!(expunged0a, expunged0b);
+        assert_eq!(expunged1a, expunged1b);
+
+        // Cleanup
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_producer_endpoint_create_rejects_expunged_oximeters() {
+        // Setup
+        let logctx = dev::test_setup_log(
+            "test_producer_endpoint_create_rejects_expunged_oximeters",
+        );
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) =
+            datastore_test(&logctx, &db, Uuid::new_v4()).await;
+
+        // Insert a few Oximeter collectors.
+        let collector_ids = (0..4).map(|_| Uuid::new_v4()).collect::<Vec<_>>();
+        for &collector_id in &collector_ids {
+            let info = OximeterInfo::new(&params::OximeterInfo {
+                collector_id,
+                address: "[::1]:0".parse().unwrap(), // unused
+            });
+            datastore
+                .oximeter_create(&opctx, &info)
+                .await
+                .expect("inserted collector");
+        }
+
+        // We can insert metric producers for each collector.
+        for &collector_id in &collector_ids {
+            let producer = ProducerEndpoint::new(
+                &nexus::ProducerEndpoint {
+                    id: Uuid::new_v4(),
+                    kind: nexus::ProducerKind::Service,
+                    address: "[::1]:0".parse().unwrap(), // unused
+                    interval: Duration::from_secs(0),    // unused
+                },
+                collector_id,
+            );
+            datastore
+                .producer_endpoint_create(&opctx, &producer)
+                .await
+                .expect("created producer");
+        }
+
+        // Delete the first collector.
+        datastore
+            .oximeter_expunge(&opctx, collector_ids[0])
+            .await
+            .expect("expunged collector");
+
+        // Attempting to insert a producer assigned to the first collector
+        // should fail, now that it's expunged.
+        let err = {
+            let producer = ProducerEndpoint::new(
+                &nexus::ProducerEndpoint {
+                    id: Uuid::new_v4(),
+                    kind: nexus::ProducerKind::Service,
+                    address: "[::1]:0".parse().unwrap(), // unused
+                    interval: Duration::from_secs(0),    // unused
+                },
+                collector_ids[0],
+            );
+            datastore
+                .producer_endpoint_create(&opctx, &producer)
+                .await
+                .expect_err("producer creation fails")
+        };
+        assert_eq!(
+            err,
+            Error::ObjectNotFound {
+                type_name: ResourceType::Oximeter,
+                lookup_type: LookupType::ById(collector_ids[0])
+            }
+        );
+
+        // We can still insert metric producers for the other collectors...
+        for &collector_id in &collector_ids[1..] {
+            let mut producer = ProducerEndpoint::new(
+                &nexus::ProducerEndpoint {
+                    id: Uuid::new_v4(),
+                    kind: nexus::ProducerKind::Service,
+                    address: "[::1]:0".parse().unwrap(), // unused
+                    interval: Duration::from_secs(0),    // unused
+                },
+                collector_id,
+            );
+            datastore
+                .producer_endpoint_create(&opctx, &producer)
+                .await
+                .expect("created producer");
+
+            // ... and we can update them.
+            producer.port = 100.into();
+            datastore
+                .producer_endpoint_create(&opctx, &producer)
+                .await
+                .expect("created producer");
+        }
+
+        // Cleanup
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_oximeter_reassigns_randomly() {
+        // Setup
+        let logctx = dev::test_setup_log("test_oximeter_reassigns_randomly");
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) =
+            datastore_test(&logctx, &db, Uuid::new_v4()).await;
+
+        // Insert a few Oximeter collectors.
+        let collector_ids = (0..4).map(|_| Uuid::new_v4()).collect::<Vec<_>>();
+        for &collector_id in &collector_ids {
+            let info = OximeterInfo::new(&params::OximeterInfo {
+                collector_id,
+                address: "[::1]:0".parse().unwrap(), // unused
+            });
+            datastore
+                .oximeter_create(&opctx, &info)
+                .await
+                .expect("inserted collector");
+        }
+
+        // Insert 250 metric producers assigned to each collector.
+        for &collector_id in &collector_ids {
+            for _ in 0..250 {
+                let producer = ProducerEndpoint::new(
+                    &nexus::ProducerEndpoint {
+                        id: Uuid::new_v4(),
+                        kind: nexus::ProducerKind::Service,
+                        address: "[::1]:0".parse().unwrap(), // unused
+                        interval: Duration::from_secs(0),    // unused
+                    },
+                    collector_id,
+                );
+                datastore
+                    .producer_endpoint_create(&opctx, &producer)
+                    .await
+                    .expect("created producer");
+            }
+        }
+
+        // Delete one collector.
+        datastore
+            .oximeter_expunge(&opctx, collector_ids[0])
+            .await
+            .expect("expunged Oximeter");
+
+        // Reassign producers that belonged to that collector.
+        let num_reassigned = datastore
+            .oximeter_reassign_all_producers(&opctx, collector_ids[0])
+            .await
+            .expect("reassigned producers");
+        assert_eq!(num_reassigned, CollectorReassignment::Complete(250));
+
+        // Check the distribution of producers for each of the remaining
+        // collectors. We don't know the exact count, so we'll check that:
+        //
+        // * Each of the three remaining collectors gained at least one (the
+        //   probability that any of the three collectors gained zero is low
+        //   enough that most calculators give up and call it 0)
+        // * All 1000 producers are assigned to one of the three collectors
+        //
+        // to guard against "the reassignment query gave all 250 to exactly one
+        // of the remaining collectors", which is an easy failure mode for this
+        // kind of SQL query, where the query engine only evaluates the
+        // randomness once instead of once for each producer.
+        let mut producer_counts = [0; 4];
+        for i in 0..4 {
+            producer_counts[i] = datastore
+                .producers_list_by_oximeter_id(
+                    &opctx,
+                    collector_ids[i],
+                    &DataPageParams::max_page(),
+                )
+                .await
+                .expect("listed producers")
+                .len();
+        }
+        assert_eq!(producer_counts[0], 0); // all reassigned
+        assert!(producer_counts[1] > 250); // gained at least one
+        assert!(producer_counts[2] > 250); // gained at least one
+        assert!(producer_counts[3] > 250); // gained at least one
+        assert_eq!(producer_counts[1..].iter().sum::<usize>(), 1000);
+
+        // Cleanup
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn test_oximeter_reassign_fails_if_no_collectors() {
+        // Setup
+        let logctx = dev::test_setup_log(
+            "test_oximeter_reassign_fails_if_no_collectors",
+        );
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) =
+            datastore_test(&logctx, &db, Uuid::new_v4()).await;
+
+        // Insert a few Oximeter collectors.
+        let collector_ids = (0..4).map(|_| Uuid::new_v4()).collect::<Vec<_>>();
+        for &collector_id in &collector_ids {
+            let info = OximeterInfo::new(&params::OximeterInfo {
+                collector_id,
+                address: "[::1]:0".parse().unwrap(), // unused
+            });
+            datastore
+                .oximeter_create(&opctx, &info)
+                .await
+                .expect("inserted collector");
+        }
+
+        // Insert 10 metric producers assigned to each collector.
+        for &collector_id in &collector_ids {
+            for _ in 0..10 {
+                let producer = ProducerEndpoint::new(
+                    &nexus::ProducerEndpoint {
+                        id: Uuid::new_v4(),
+                        kind: nexus::ProducerKind::Service,
+                        address: "[::1]:0".parse().unwrap(), // unused
+                        interval: Duration::from_secs(0),    // unused
+                    },
+                    collector_id,
+                );
+                datastore
+                    .producer_endpoint_create(&opctx, &producer)
+                    .await
+                    .expect("created producer");
+            }
+        }
+
+        // Delete all four collectors.
+        for &collector_id in &collector_ids {
+            datastore
+                .oximeter_expunge(&opctx, collector_id)
+                .await
+                .expect("expunged Oximeter");
+        }
+
+        // Try to reassign producers that belonged to each collector; this
+        // should fail, as all collectors have been expunged.
+        for &collector_id in &collector_ids {
+            let num_reassigned = datastore
+                .oximeter_reassign_all_producers(&opctx, collector_id)
+                .await
+                .expect("reassigned producers");
+            assert_eq!(
+                num_reassigned,
+                CollectorReassignment::NoCollectorsAvailable
+            );
+        }
+
+        // Now insert a new collector.
+        let new_collector_id = Uuid::new_v4();
+        datastore
+            .oximeter_create(
+                &opctx,
+                &OximeterInfo::new(&params::OximeterInfo {
+                    collector_id: new_collector_id,
+                    address: "[::1]:0".parse().unwrap(), // unused
+                }),
+            )
+            .await
+            .expect("inserted collector");
+
+        // Reassigning the original four collectors should now all succeed.
+        for &collector_id in &collector_ids {
+            let num_reassigned = datastore
+                .oximeter_reassign_all_producers(&opctx, collector_id)
+                .await
+                .expect("reassigned producers");
+            assert_eq!(num_reassigned, CollectorReassignment::Complete(10));
+        }
+
+        // All 40 producers should be assigned to our new collector.
+        let nproducers = datastore
+            .producers_list_by_oximeter_id(
+                &opctx,
+                new_collector_id,
+                &DataPageParams::max_page(),
+            )
+            .await
+            .expect("listed producers")
+            .len();
+        assert_eq!(nproducers, 40);
+
+        // Cleanup
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
     }
 
     #[tokio::test]

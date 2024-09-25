@@ -431,6 +431,7 @@ pub static DEMO_INSTANCE_CREATE: Lazy<params::InstanceCreate> =
         disks: vec![],
         boot_disk: None,
         start: true,
+        auto_restart_policy: Default::default(),
     });
 pub static DEMO_INSTANCE_UPDATE: Lazy<params::InstanceUpdate> =
     Lazy::new(|| params::InstanceUpdate { boot_disk: None });

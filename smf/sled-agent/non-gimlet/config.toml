@@ -88,3 +88,10 @@ level = "info"
 mode = "file"
 path = "/dev/stdout"
 if_exists = "append"
+
+# These are pre-generated keys and roots designed to be used for testing.
+# Create your own if you need to test a multi-node system
+# See the .kdl file for use with pki-playground for generating
+[sprockets]
+resolve = { which = "local", priv_key = "/opt/oxide/sled-agent/pkg/sprockets-auth.key.pem", cert_chain = "/opt/oxide/sled-agent/pkg/sprockets-chain.pem" }
+roots = ["/opt/oxide/sled-agent/pkg/root.cert.pem"]
