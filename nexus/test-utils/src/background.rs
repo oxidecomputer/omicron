@@ -97,7 +97,10 @@ pub async fn run_region_replacement(
     let LastResult::Completed(last_result_completed) =
         last_background_task.last
     else {
-        panic!();
+        panic!(
+            "unexpected {:?} returned from region_replacement task",
+            last_background_task.last,
+        );
     };
 
     let status = serde_json::from_value::<RegionReplacementStatus>(
@@ -124,7 +127,10 @@ pub async fn run_region_replacement_driver(
     let LastResult::Completed(last_result_completed) =
         last_background_task.last
     else {
-        panic!();
+        panic!(
+            "unexpected {:?} returned from region_replacement_driver task",
+            last_background_task.last,
+        );
     };
 
     let status = serde_json::from_value::<RegionReplacementDriverStatus>(
@@ -151,7 +157,11 @@ pub async fn run_region_snapshot_replacement_start(
     let LastResult::Completed(last_result_completed) =
         last_background_task.last
     else {
-        panic!();
+        panic!(
+            "unexpected {:?} returned from region_snapshot_replacement_start \
+            task",
+            last_background_task.last,
+        );
     };
 
     let status =
@@ -179,7 +189,11 @@ pub async fn run_region_snapshot_replacement_garbage_collection(
     let LastResult::Completed(last_result_completed) =
         last_background_task.last
     else {
-        panic!();
+        panic!(
+            "unexpected {:?} returned from \
+            region_snapshot_replacement_garbage_collection task",
+            last_background_task.last,
+        );
     };
 
     let status = serde_json::from_value::<
@@ -206,7 +220,11 @@ pub async fn run_region_snapshot_replacement_step(
     let LastResult::Completed(last_result_completed) =
         last_background_task.last
     else {
-        panic!();
+        panic!(
+            "unexpected {:?} returned from region_snapshot_replacement_step \
+            task",
+            last_background_task.last,
+        );
     };
 
     let status = serde_json::from_value::<RegionSnapshotReplacementStepStatus>(
@@ -237,7 +255,11 @@ pub async fn run_region_snapshot_replacement_finish(
     let LastResult::Completed(last_result_completed) =
         last_background_task.last
     else {
-        panic!();
+        panic!(
+            "unexpected {:?} returned from region_snapshot_replacement_finish \
+            task",
+            last_background_task.last,
+        );
     };
 
     let status =
