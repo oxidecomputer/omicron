@@ -2523,7 +2523,6 @@ mod test {
         let (sled_id, bp_zone_config) = blueprint3
             .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
             .find(|(_, z)| z.zone_type.is_clickhouse_keeper())
-            .clone()
             .unwrap();
 
         // Expunge a keeper zone
@@ -2550,7 +2549,7 @@ mod test {
         let old_config = blueprint3.clickhouse_cluster_config.as_ref().unwrap();
         let config = blueprint4.clickhouse_cluster_config.as_ref().unwrap();
         assert_eq!(config.generation, old_config.generation.next());
-        assert!(config.keepers.get(&bp_zone_config.id).is_none());
+        assert!(config.keepers.contains_key(&bp_zone_config.id));
         // We've only removed one keeper from our desired state
         assert_eq!(config.keepers.len() + 1, old_config.keepers.len());
         // We haven't allocated any new keepers
@@ -2607,7 +2606,7 @@ mod test {
 
         // Our generation has changed to reflect the added keeper
         assert_eq!(config.generation, old_config.generation.next());
-        assert!(config.keepers.get(&bp_zone_config.id).is_none());
+        assert!(config.keepers.contains_key(&bp_zone_config.id));
         // We've only added one keeper from our desired state
         // This brings us back up to our target count
         assert_eq!(config.keepers.len(), old_config.keepers.len() + 1);
