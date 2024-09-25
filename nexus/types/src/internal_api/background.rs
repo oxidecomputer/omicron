@@ -122,9 +122,10 @@ pub struct InstanceReincarnationStatus {
     /// If `true`, then instance reincarnation has been explicitly disabled by
     /// the config file.
     pub disabled: bool,
-
     /// Total number of instances in need of reincarnation on this activation.
-    pub instances_found: usize,
+    /// This is broken down by the reason that the instance needed
+    /// reincarnation.
+    pub instances_found: HashMap<String, usize>,
     /// UUIDs of instances reincarnated successfully by this activation.
     pub instances_reincarnated: Vec<Uuid>,
     /// UUIDs of instances which changed state before they could be
@@ -137,6 +138,14 @@ pub struct InstanceReincarnationStatus {
 }
 
 impl InstanceReincarnationStatus {
+    pub fn total_instances_found(&self) -> usize {
+        self.instances_found.values().sum()
+    }
+
+    pub fn total_errors(&self) -> usize {
+        self.errors.len() + self.restart_errors.len()
+    }
+
     pub fn total_sagas_started(&self) -> usize {
         self.instances_reincarnated.len()
             + self.changed_state.len()

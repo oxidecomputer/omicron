@@ -1790,58 +1790,67 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                 "warning: failed to interpret task details: {:?}: {:?}",
                 error, details
             ),
-            Ok(InstanceReincarnationStatus {
-                disabled,
-                instances_found,
-                instances_reincarnated,
-                changed_state,
-                errors,
-                restart_errors,
-            }) => {
+            Ok(status) => {
                 const FOUND: &'static str =
                     "instances eligible for reincarnation:";
-                const REINCARNATED: &'static str = "  instances reincarnated:";
+                const REINCARNATED: &'static str =
+                    "instances reincarnated successfully:";
                 const CHANGED_STATE: &'static str =
-                    "  instances which changed state before they could be reincarnated:";
+                    "instances which changed state before they could reincarnate:";
                 const ERRORS: &'static str =
-                    "  instances which failed to be reincarnated:";
-                const COOLDOWN_PERIOD: &'static str =
-                    "default cooldown period:";
+                    "instances which failed to reincarnate:";
                 const WIDTH: usize = const_max_len(&[
                     FOUND,
                     REINCARNATED,
                     CHANGED_STATE,
                     ERRORS,
-                    COOLDOWN_PERIOD,
                 ]);
-                let n_restart_errors = restart_errors.len();
-                let n_restarted = instances_reincarnated.len();
-                let n_changed_state = changed_state.len();
-                println!("    {FOUND:<WIDTH$} {instances_found:>3}");
+                if status.disabled {
+                    println!(
+                        "    instance reincarnation explicitly disabled \
+                         by config!"
+                    );
+                    return;
+                }
+
+                if !status.errors.is_empty() {
+                    println!(
+                        "    errors occurred while finding instances to \
+                          reincarnate:"
+                    );
+                    for error in &status.errors {
+                        println!("    > {error}")
+                    }
+                }
+
+                let n_restart_errors = status.restart_errors.len();
+                let n_restarted = status.instances_reincarnated.len();
+                let n_changed_state = status.changed_state.len();
+                println!(
+                    "    {FOUND:<WIDTH$} {:>3}",
+                    status.total_instances_found()
+                );
+                for (reason, count) in &status.instances_found {
+                    let reason = format!("  {reason} instances:");
+                    println!("    {reason:<WIDTH$} {count:>3}",);
+                }
                 println!("    {REINCARNATED:<WIDTH$} {n_restarted:>3}");
                 println!("    {CHANGED_STATE:<WIDTH$} {n_changed_state:>3}",);
                 println!("    {ERRORS:<WIDTH$} {n_restart_errors:>3}");
-
-                // if let Some(e) = query_error {
-                //     println!(
-                //         "    an error occurred while searching for instances \
-                //          to reincarnate:\n      {e}",
-                //     );
-                // }
 
                 if n_restart_errors > 0 {
                     println!(
                         "    errors occurred while restarting the following \
                          instances:"
                     );
-                    for (id, error) in restart_errors {
+                    for (id, error) in status.restart_errors {
                         println!("    > {id}: {error}");
                     }
                 }
 
                 if n_restarted > 0 {
                     println!("    the following instances have reincarnated:");
-                    for id in instances_reincarnated {
+                    for id in status.instances_reincarnated {
                         println!("    > {id}")
                     }
                 }
@@ -1851,7 +1860,7 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                         "    the following instances states changed before \
                          they could be reincarnated:"
                     );
-                    for id in changed_state {
+                    for id in status.changed_state {
                         println!("    > {id}")
                     }
                 }

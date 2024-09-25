@@ -528,10 +528,12 @@ task: "instance_reincarnation"
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    instances eligible for reincarnation:                                0
-      instances reincarnated:                                            0
-      instances which changed state before they could be reincarnated:   0
-      instances which failed to be reincarnated:                         0
+    instances eligible for reincarnation:                          0
+      failed instances:                                            0
+      start saga unwound instances:                                0
+    instances reincarnated successfully:                           0
+    instances which changed state before they could reincarnate:   0
+    instances which failed to reincarnate:                         0
 
 task: "instance_updater"
   configured period: every <REDACTED_DURATION>s
@@ -968,10 +970,12 @@ task: "instance_reincarnation"
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    instances eligible for reincarnation:                                0
-      instances reincarnated:                                            0
-      instances which changed state before they could be reincarnated:   0
-      instances which failed to be reincarnated:                         0
+    instances eligible for reincarnation:                          0
+      failed instances:                                            0
+      start saga unwound instances:                                0
+    instances reincarnated successfully:                           0
+    instances which changed state before they could reincarnate:   0
+    instances which failed to reincarnate:                         0
 
 task: "instance_updater"
   configured period: every <REDACTED_DURATION>s
