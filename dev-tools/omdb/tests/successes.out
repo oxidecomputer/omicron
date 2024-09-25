@@ -150,6 +150,7 @@ SP DETAILS: type "Sled" slot 0
         dev-7        FAKE U.2 Sharkfin A hot swap controller  max5970         Present  None   
         dev-8        FAKE U.2 A NVMe Basic Management Command nvme_bmc        Present  None   
         dev-39       FAKE T6 temperature sensor               tmp451          Present  None   
+        dev-46       CPU temperature sensor                   sbtsi           Present  None   
         dev-53       FAKE Fan controller                      max31790        Present  None   
 
     CABOOSES: none found
@@ -183,6 +184,7 @@ SP DETAILS: type "Sled" slot 1
         dev-7        FAKE U.2 Sharkfin A hot swap controller  max5970      Present  None   
         dev-8        FAKE U.2 A NVMe Basic Management Command nvme_bmc     Present  None   
         dev-39       FAKE T6 temperature sensor               tmp451       Present  None   
+        dev-46       CPU temperature sensor                   sbtsi        Present  None   
         dev-53       FAKE Fan controller                      max31790     Present  None   
 
     CABOOSES: none found
