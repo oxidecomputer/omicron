@@ -600,7 +600,7 @@ task: "physical_disk_adoption"
     last completion reported error: task disabled
 
 task: "region_replacement"
-  configured period: every <REDACTED_DURATION>s
+  configured period: every 1m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
@@ -610,7 +610,7 @@ task: "region_replacement"
     errors: 0
 
 task: "region_replacement_driver"
-  configured period: every <REDACTED_DURATION>s
+  configured period: every 1m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
@@ -619,7 +619,7 @@ task: "region_replacement_driver"
     errors: 0
 
 task: "region_snapshot_replacement_finish"
-  configured period: every <REDACTED_DURATION>s
+  configured period: every 1m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
@@ -627,7 +627,7 @@ task: "region_snapshot_replacement_finish"
     errors: 0
 
 task: "region_snapshot_replacement_garbage_collection"
-  configured period: every <REDACTED_DURATION>s
+  configured period: every 1m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
@@ -635,7 +635,7 @@ task: "region_snapshot_replacement_garbage_collection"
     errors: 0
 
 task: "region_snapshot_replacement_start"
-  configured period: every <REDACTED_DURATION>s
+  configured period: every 1m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
@@ -644,7 +644,7 @@ task: "region_snapshot_replacement_start"
     errors: 0
 
 task: "region_snapshot_replacement_step"
-  configured period: every <REDACTED_DURATION>s
+  configured period: every 1m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
@@ -1041,7 +1041,7 @@ task: "physical_disk_adoption"
     last completion reported error: task disabled
 
 task: "region_replacement"
-  configured period: every <REDACTED_DURATION>s
+  configured period: every 1m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
@@ -1051,7 +1051,7 @@ task: "region_replacement"
     errors: 0
 
 task: "region_replacement_driver"
-  configured period: every <REDACTED_DURATION>s
+  configured period: every 1m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
@@ -1060,7 +1060,7 @@ task: "region_replacement_driver"
     errors: 0
 
 task: "region_snapshot_replacement_finish"
-  configured period: every <REDACTED_DURATION>s
+  configured period: every 1m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
@@ -1068,7 +1068,7 @@ task: "region_snapshot_replacement_finish"
     errors: 0
 
 task: "region_snapshot_replacement_garbage_collection"
-  configured period: every <REDACTED_DURATION>s
+  configured period: every 1m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
@@ -1076,7 +1076,7 @@ task: "region_snapshot_replacement_garbage_collection"
     errors: 0
 
 task: "region_snapshot_replacement_start"
-  configured period: every <REDACTED_DURATION>s
+  configured period: every 1m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
@@ -1085,7 +1085,7 @@ task: "region_snapshot_replacement_start"
     errors: 0
 
 task: "region_snapshot_replacement_step"
-  configured period: every <REDACTED_DURATION>s
+  configured period: every 1m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
