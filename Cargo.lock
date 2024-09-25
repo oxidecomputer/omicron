@@ -1489,17 +1489,6 @@ checksum = "6245d59a3e82a7fc217c5828a6692dbc6dfb63a0c8c90495621f7b9d79704a0e"
 
 [[package]]
 name = "cookie"
-version = "0.17.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7efb37c3e1ccb1ff97164ad95ac1606e8ccd35b3fa0a7d99a304c7f4a428cc24"
-dependencies = [
- "percent-encoding",
- "time",
- "version_check",
-]
-
-[[package]]
-name = "cookie"
 version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4ddef33a339a91ea89fb53151bd0a4689cfce27055c291dfa69945475d22c747"
@@ -1511,28 +1500,11 @@ dependencies = [
 
 [[package]]
 name = "cookie_store"
-version = "0.20.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "387461abbc748185c3a6e1673d826918b450b87ff22639429c694619a83b6cf6"
-dependencies = [
- "cookie 0.17.0",
- "idna 0.3.0",
- "log",
- "publicsuffix",
- "serde",
- "serde_derive",
- "serde_json",
- "time",
- "url",
-]
-
-[[package]]
-name = "cookie_store"
 version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4934e6b7e8419148b6ef56950d277af8561060b56afd59e2aadf98b59fce6baa"
 dependencies = [
- "cookie 0.18.1",
+ "cookie",
  "idna 0.5.0",
  "log",
  "publicsuffix",
@@ -5414,7 +5386,7 @@ dependencies = [
  "authz-macros",
  "base64 0.22.1",
  "chrono",
- "cookie 0.18.1",
+ "cookie",
  "dropshot 0.11.1-dev",
  "futures",
  "headers",
@@ -5979,7 +5951,7 @@ dependencies = [
  "chrono",
  "clap",
  "clickhouse-admin-types",
- "cookie 0.18.1",
+ "cookie",
  "derive-where",
  "derive_more",
  "dns-service-client",
@@ -7060,6 +7032,7 @@ dependencies = [
  "clap",
  "clap_builder",
  "console",
+ "cookie",
  "crossbeam-epoch",
  "crossbeam-utils",
  "crypto-common",
@@ -7090,8 +7063,10 @@ dependencies = [
  "hmac",
  "hyper 0.14.30",
  "hyper 1.4.1",
+ "hyper-rustls 0.27.3",
  "hyper-util",
  "indexmap 2.5.0",
+ "indicatif",
  "inout",
  "itertools 0.10.5",
  "itertools 0.12.1",
@@ -7122,9 +7097,12 @@ dependencies = [
  "regex-automata 0.4.6",
  "regex-syntax 0.8.4",
  "reqwest 0.11.27",
+ "reqwest 0.12.7",
  "ring 0.17.8",
  "rsa",
  "rustix",
+ "rustls 0.21.12",
+ "rustls 0.23.10",
  "schemars",
  "scopeguard",
  "semver 1.0.23",
@@ -7145,6 +7123,7 @@ dependencies = [
  "time-macros",
  "tokio",
  "tokio-postgres",
+ "tokio-rustls 0.26.0",
  "tokio-stream",
  "tokio-util",
  "toml 0.7.8",
@@ -9189,8 +9168,6 @@ checksum = "dd67538700a17451e7cba03ac727fb961abb7607553461627b97de0b89cf4a62"
 dependencies = [
  "base64 0.21.7",
  "bytes",
- "cookie 0.17.0",
- "cookie_store 0.20.0",
  "encoding_rs",
  "futures-core",
  "futures-util",
@@ -9237,8 +9214,8 @@ checksum = "f8f4955649ef5c38cc7f9e8aa41761d48fb9677197daea9984dc54f56aad5e63"
 dependencies = [
  "base64 0.22.1",
  "bytes",
- "cookie 0.18.1",
- "cookie_store 0.21.0",
+ "cookie",
+ "cookie_store",
  "encoding_rs",
  "futures-channel",
  "futures-core",
