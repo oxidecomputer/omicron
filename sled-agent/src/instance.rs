@@ -736,7 +736,7 @@ impl InstanceRunner {
                 .cloned()
                 .map(Into::into)
                 .collect(),
-            boot_settings: self.boot_settings.clone().into(),
+            boot_settings: self.boot_settings.clone(),
             migrate,
             cloud_init_bytes: self.cloud_init_bytes.clone().map(|x| x.0),
         };

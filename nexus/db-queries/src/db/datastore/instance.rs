@@ -245,7 +245,7 @@ impl From<InstanceAndActiveVmm> for external::Instance {
                 .hostname
                 .parse()
                 .expect("found invalid hostname in the database"),
-            boot_disk_id: value.instance.boot_disk_id.into(),
+            boot_disk_id: value.instance.boot_disk_id,
             runtime: external::InstanceRuntimeState {
                 run_state: value.effective_state(),
                 time_run_state_updated,
@@ -1051,7 +1051,7 @@ impl DataStore {
                         }
                     }
 
-                    if let Some(disk_id) = update.boot_disk_id.clone() {
+                    if let Some(disk_id) = update.boot_disk_id {
                         // Ensure the disk is currently attached before updating
                         // the database.
                         let expected_state = api::external::DiskState::Attached(
