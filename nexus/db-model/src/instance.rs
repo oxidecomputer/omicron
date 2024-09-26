@@ -359,7 +359,10 @@ impl InstanceAutoRestart {
             // (such as restart limits...)
             .and(
                 dsl::auto_restart_policy
-                    .eq(InstanceAutoRestartPolicy::BestEffort),
+                    .eq(InstanceAutoRestartPolicy::BestEffort)
+                    // If the auto-restart policy is null, then it should
+                    // default to "best effort".
+                    .or(dsl::auto_restart_policy.is_null()),
             )
             // An instance whose last reincarnation was within the cooldown
             // interval from now must remain in _bardo_ --- the liminal
