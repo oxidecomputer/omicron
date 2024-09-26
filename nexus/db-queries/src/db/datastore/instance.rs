@@ -41,6 +41,7 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
 use nexus_db_model::Disk;
+use nexus_types::internal_api::background::ReincarnationReason;
 use omicron_common::api;
 use omicron_common::api::external;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -300,13 +301,6 @@ pub enum UpdaterLockError {
     /// An error occurred executing the query.
     #[error("error locking instance: {0}")]
     Query(#[from] Error),
-}
-
-/// Describes a reason why an instance needs reincarnation.
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub enum ReincarnationReason {
-    Failed,
-    SagaUnwound,
 }
 
 impl DataStore {

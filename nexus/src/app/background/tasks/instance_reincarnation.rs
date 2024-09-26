@@ -11,11 +11,12 @@ use crate::app::sagas::NexusSaga;
 use futures::future::BoxFuture;
 use nexus_db_queries::authn;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::datastore::instance;
 use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::background::InstanceReincarnationStatus;
+use nexus_types::internal_api::background::ReincarnatableInstance;
+use nexus_types::internal_api::background::ReincarnationReason;
 use omicron_common::api::external::Error;
 use std::num::NonZeroU32;
 use std::sync::Arc;
@@ -61,7 +62,7 @@ impl BackgroundTask for InstanceReincarnation {
             if let Err(error) = self
                 .reincarnate_all(
                     &opctx,
-                    instance::ReincarnationReason::Failed,
+                    ReincarnationReason::Failed,
                     &mut status,
                     &mut running_sagas,
                 )
@@ -81,7 +82,7 @@ impl BackgroundTask for InstanceReincarnation {
             if let Err(error) = self
                 .reincarnate_all(
                     &opctx,
-                    instance::ReincarnationReason::SagaUnwound,
+                    ReincarnationReason::SagaUnwound,
                     &mut status,
                     &mut running_sagas,
                 )
@@ -140,22 +141,14 @@ impl InstanceReincarnation {
     async fn reincarnate_all(
         &mut self,
         opctx: &OpContext,
-        reason: instance::ReincarnationReason,
+        reason: ReincarnationReason,
         status: &mut InstanceReincarnationStatus,
         running_sagas: &mut Vec<RunningSaga>,
     ) -> anyhow::Result<()> {
         let serialized_authn = authn::saga::Serialized::for_opctx(opctx);
 
         let mut paginator = Paginator::new(self.concurrency_limit);
-        let instances_found = status
-            .instances_found
-            .entry(match reason {
-                instance::ReincarnationReason::Failed => "failed".to_string(),
-                instance::ReincarnationReason::SagaUnwound => {
-                    "start saga unwound".to_string()
-                }
-            })
-            .or_insert(0);
+        let instances_found = status.instances_found.entry(reason).or_insert(0);
         let mut sagas_started = 0;
         while let Some(p) = paginator.next() {
             let batch = self
@@ -175,7 +168,7 @@ impl InstanceReincarnation {
                     opctx.log,
                     "no more instances in need of reincarnation";
                     "total_found" => *instances_found,
-                    "reincarnation_reason" => ?reason,
+                    "reincarnation_reason" => %reason,
                 );
                 break;
             }
@@ -186,7 +179,7 @@ impl InstanceReincarnation {
                     opctx.log,
                     "attempting to reincarnate instance...";
                     "instance_id" => %instance_id,
-                    "reincarnation_reason" => ?reason,
+                    "reincarnation_reason" => %reason,
                     "instance_state" => ?db_instance.runtime().nexus_state,
                     "auto_restart_config" => ?db_instance.auto_restart,
                     "last_auto_restarted_at" => ?db_instance
@@ -216,20 +209,15 @@ impl InstanceReincarnation {
                             opctx.log,
                             "{ERR_MSG} for instance {instance_id}";
                             "instance_id" => %instance_id,
-                            "reincarnation_reason" => ?reason,
+                            "reincarnation_reason" => %reason,
                             "error" => %error,
                         );
-                        let _prev_error = status.restart_errors.insert(
-                            instance_id,
+                        status.restart_errors.push((
+                            ReincarnatableInstance { instance_id, reason },
                             format!(
                                 "{ERR_MSG} for {reason:?} instance: {error}"
                             ),
-                        );
-                        debug_assert_eq!(
-                            _prev_error, None,
-                            "if a saga for {instance_id} already failed, we \
-                            shouldn't see it again in the same activation!",
-                        );
+                        ));
                     }
                 };
             }
@@ -238,7 +226,7 @@ impl InstanceReincarnation {
             debug!(
                 opctx.log,
                 "found {reason:?} instances in need of reincarnation";
-                "reincarnation_reason" => ?reason,
+                "reincarnation_reason" => %reason,
                 "instances_found" => found,
                 "total_found" => *instances_found,
                 "sagas_started" => running_sagas.len(),
@@ -265,9 +253,11 @@ impl InstanceReincarnation {
                              {instance_id}!";
                             "instance_id" => %instance_id,
                             "start_saga_id" => %saga_id,
-                            "reincarnation_reason" => ?reason,
+                            "reincarnation_reason" => %reason,
                         );
-                        status.instances_reincarnated.push(instance_id);
+                        status.instances_reincarnated.push(
+                            ReincarnatableInstance { instance_id, reason },
+                        );
                     }
                     // The instance's state changed in the meantime, that's fine...
                     Err(err @ Error::Conflict { .. }) => {
@@ -276,11 +266,14 @@ impl InstanceReincarnation {
                             "{reason:?} instance {instance_id} changed state \
                              before it could be reincarnated";
                             "instance_id" => %instance_id,
-                            "reincarnation_reason" => ?reason,
+                            "reincarnation_reason" => %reason,
                             "start_saga_id" => %saga_id,
                             "error" => err,
                         );
-                        status.changed_state.push(instance_id);
+                        status.changed_state.push(ReincarnatableInstance {
+                            instance_id,
+                            reason,
+                        });
                     }
                     // Start saga failed
                     Err(error) => {
@@ -289,22 +282,17 @@ impl InstanceReincarnation {
                             opctx.log,
                             "{ERR_MSG} for instance {instance_id} failed";
                             "instance_id" => %instance_id,
-                            "reincarnation_reason" => ?reason,
+                            "reincarnation_reason" => %reason,
                             "start_saga_id" => %saga_id,
                             "error" => %error,
                         );
-                        let _prev_error = status.restart_errors.insert(
-                            instance_id,
+                        status.restart_errors.push((
+                            ReincarnatableInstance { instance_id, reason },
                             format!(
-                                "{ERR_MSG} {saga_id} for {reason:?} instance \
+                                "{ERR_MSG} {saga_id} for instance \
                                  failed: {error}",
                             ),
-                        );
-                        debug_assert_eq!(
-                            _prev_error, None,
-                            "if a saga for {instance_id} already failed, we \
-                            shouldn't see it again in the same activation!",
-                        );
+                        ));
                     }
                 }
             }
@@ -337,7 +325,6 @@ mod test {
     use omicron_common::api::external::InstanceAutoRestartPolicy;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::InstanceUuid;
-    use std::collections::HashMap;
     use std::time::Duration;
 
     type ControlPlaneTestContext =
@@ -532,9 +519,16 @@ mod test {
                     .expect("JSON must be correctly shaped");
             let status = dbg!(activation);
             assert_eq!(status.errors, Vec::<String>::new());
-            assert_eq!(status.restart_errors, HashMap::new());
+            assert_eq!(status.restart_errors, Vec::new());
             status
         }};
+    }
+
+    fn failed(instance_id: Uuid) -> ReincarnatableInstance {
+        ReincarnatableInstance {
+            instance_id,
+            reason: ReincarnationReason::Failed,
+        }
     }
 
     #[nexus_test(server = crate::Server)]
@@ -577,7 +571,7 @@ mod test {
         // instance-start saga started.
         let status = assert_activation_ok!(task.activate(&opctx).await);
         assert_eq!(status.total_instances_found(), 1);
-        assert_eq!(status.instances_reincarnated, vec![instance.id()]);
+        assert_eq!(status.instances_reincarnated, vec![failed(instance.id())]);
         assert_eq!(status.changed_state, Vec::new());
 
         test_helpers::instance_wait_for_state(
@@ -620,7 +614,7 @@ mod test {
                 InstanceState::Failed,
             )
             .await;
-            will_reincarnate.insert(instance.id());
+            will_reincarnate.insert(failed(instance.id()));
         }
         // Create instances with SagaUnwound active VMMs that are eligible to be
         // reincarnated.
@@ -637,7 +631,10 @@ mod test {
             .await;
             // Now, give the instance an active VMM which is SagaUnwound.
             attach_saga_unwound_vmm(&cptestctx, &opctx, &instance).await;
-            will_reincarnate.insert(instance.id());
+            will_reincarnate.insert(ReincarnatableInstance {
+                instance_id: instance.id(),
+                reason: ReincarnationReason::SagaUnwound,
+            });
         }
 
         // Create some instances that will not reincarnate.
@@ -695,35 +692,41 @@ mod test {
         // instance-start saga started.
         let status = assert_activation_ok!(task.activate(&opctx).await);
         assert_eq!(status.total_instances_found(), will_reincarnate.len());
-        assert_eq!(status.instances_found.get("failed"), Some(&num_failed));
         assert_eq!(
-            status.instances_found.get("start saga unwound"),
+            status.instances_found.get(&ReincarnationReason::Failed),
+            Some(&num_failed)
+        );
+        assert_eq!(
+            status.instances_found.get(&ReincarnationReason::SagaUnwound),
             Some(&num_saga_unwound)
         );
         assert_eq!(status.instances_reincarnated.len(), will_reincarnate.len());
         assert_eq!(status.changed_state, Vec::new());
         assert_eq!(status.errors, Vec::<String>::new());
-        assert_eq!(status.restart_errors, HashMap::new());
+        assert_eq!(
+            status.restart_errors,
+            Vec::<(ReincarnatableInstance, String)>::new()
+        );
 
-        for id in &status.instances_reincarnated {
-            eprintln!("instance {id} reincarnated");
+        for instance in &status.instances_reincarnated {
+            eprintln!("instance {instance} reincarnated");
             assert!(
-                !will_not_reincarnate.contains(id),
-                "expected {id} not to reincarnate! reincarnated: {:?}",
+                !will_not_reincarnate.contains(&instance.instance_id),
+                "expected {instance} not to reincarnate! reincarnated: {:?}",
                 status.instances_reincarnated
             );
         }
 
-        for id in will_reincarnate {
+        for instance in will_reincarnate {
             assert!(
-                status.instances_reincarnated.contains(&id),
-                "expected {id} to have reincarnated! reincarnated: {:?}",
+                status.instances_reincarnated.contains(&instance),
+                "expected {instance} to have reincarnated! reincarnated: {:?}",
                 status.instances_reincarnated
             );
 
             test_helpers::instance_wait_for_state(
                 &cptestctx,
-                InstanceUuid::from_untyped_uuid(id),
+                InstanceUuid::from_untyped_uuid(instance.instance_id),
                 InstanceState::Vmm,
             )
             .await;
@@ -787,7 +790,7 @@ mod test {
         assert_eq!(status.total_instances_found(), 1);
         assert_eq!(
             status.instances_reincarnated,
-            &[instance1_id.into_untyped_uuid()]
+            &[failed(instance1_id.into_untyped_uuid())]
         );
         assert_eq!(status.changed_state, Vec::new());
 
@@ -822,7 +825,7 @@ mod test {
         assert_eq!(status.total_instances_found(), 1);
         assert_eq!(
             status.instances_reincarnated,
-            &[instance2_id.into_untyped_uuid()]
+            &[failed(instance2_id.into_untyped_uuid())]
         );
         assert_eq!(status.changed_state, Vec::new());
 
@@ -842,7 +845,7 @@ mod test {
         assert_eq!(status.total_instances_found(), 1);
         assert_eq!(
             status.instances_reincarnated,
-            &[instance1_id.into_untyped_uuid()]
+            &[failed(instance1_id.into_untyped_uuid())]
         );
         assert_eq!(status.changed_state, Vec::new());
 

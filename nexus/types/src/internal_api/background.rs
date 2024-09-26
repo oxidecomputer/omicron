@@ -125,16 +125,16 @@ pub struct InstanceReincarnationStatus {
     /// Total number of instances in need of reincarnation on this activation.
     /// This is broken down by the reason that the instance needed
     /// reincarnation.
-    pub instances_found: BTreeMap<String, usize>,
+    pub instances_found: BTreeMap<ReincarnationReason, usize>,
     /// UUIDs of instances reincarnated successfully by this activation.
-    pub instances_reincarnated: Vec<Uuid>,
+    pub instances_reincarnated: Vec<ReincarnatableInstance>,
     /// UUIDs of instances which changed state before they could be
     /// reincarnated.
-    pub changed_state: Vec<Uuid>,
+    pub changed_state: Vec<ReincarnatableInstance>,
     /// Any errors that occured while finding instances in need of reincarnation.
     pub errors: Vec<String>,
     /// Errors that occurred while restarting individual instances.
-    pub restart_errors: BTreeMap<Uuid, String>,
+    pub restart_errors: Vec<(ReincarnatableInstance, String)>,
 }
 
 impl InstanceReincarnationStatus {
@@ -150,5 +150,43 @@ impl InstanceReincarnationStatus {
         self.instances_reincarnated.len()
             + self.changed_state.len()
             + self.restart_errors.len()
+    }
+}
+
+/// Describes a reason why an instance needs reincarnation.
+#[derive(
+    Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize, Ord, PartialOrd,
+)]
+pub enum ReincarnationReason {
+    /// The instance is Failed.
+    Failed,
+    /// A previous instance-start saga for this instance has failed.
+    SagaUnwound,
+}
+
+impl std::fmt::Display for ReincarnationReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Failed => "instance failed",
+            Self::SagaUnwound => "start saga failed",
+        })
+    }
+}
+
+/// An instance eligible for reincarnation
+#[derive(
+    Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize, Ord, PartialOrd,
+)]
+pub struct ReincarnatableInstance {
+    /// The instance's UUID
+    pub instance_id: Uuid,
+    /// Why the instance required reincarnation
+    pub reason: ReincarnationReason,
+}
+
+impl std::fmt::Display for ReincarnatableInstance {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { instance_id, reason } = self;
+        write!(f, "{instance_id} ({reason})")
     }
 }
