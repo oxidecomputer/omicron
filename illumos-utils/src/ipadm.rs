@@ -141,7 +141,7 @@ impl Ipadm {
         Ok(Self::addrobj_addr(addrobj)?.is_some())
     }
 
-    // Set MTU to 9000 on both IPv4 and IPv6
+    /// Set MTU to 9000 on both IPv4 and IPv6
     pub fn set_interface_mtu(datalink: &str) -> Result<(), ExecutionError> {
         let mut cmd = std::process::Command::new(PFEXEC);
         let cmd = cmd.args(&[
