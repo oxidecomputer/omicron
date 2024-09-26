@@ -5,7 +5,7 @@ ID NZPOOLS SUBNET
 ID NERRORS TIME_DONE 
 
 > blueprint-list
-ID 
+ID PARENT TIME_CREATED 
 
 > 
 
