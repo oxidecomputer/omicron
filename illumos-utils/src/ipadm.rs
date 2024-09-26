@@ -197,4 +197,36 @@ impl Ipadm {
         Self::ensure_ip_addrobj_exists(&addrobj, AddrObjType::DHCP)?;
         Ok(())
     }
+
+    /// Set TCP recv_buf to 1 MB.
+    pub fn set_tcp_recv_buf() -> Result<(), ExecutionError> {
+        let mut cmd = std::process::Command::new(PFEXEC);
+        let cmd = cmd.args(&[
+            IPADM,
+            "set-prop",
+            "-t",
+            "-p",
+            "recv_buf=1000000",
+            "tcp",
+        ]);
+        execute(cmd)?;
+
+        Ok(())
+    }
+
+    /// Set TCP congestion control algorithm to `cubic`.
+    pub fn set_tcp_congestion_control() -> Result<(), ExecutionError> {
+        let mut cmd = std::process::Command::new(PFEXEC);
+        let cmd = cmd.args(&[
+            IPADM,
+            "set-prop",
+            "-t",
+            "-p",
+            "congestion_control=cubic",
+            "tcp",
+        ]);
+        execute(cmd)?;
+
+        Ok(())
+    }
 }

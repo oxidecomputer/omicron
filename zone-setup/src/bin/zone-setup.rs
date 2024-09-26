@@ -563,6 +563,17 @@ async fn common_nw_set_up(
     Ipadm::set_interface_mtu(&datalink)
         .with_context(|| format!("failed to set MTU on datalink {datalink}"))?;
 
+    info!(
+        log, "Setting TCP recv_buf size to 1 MB";
+    );
+    Ipadm::set_tcp_recv_buf().context("failed to set TCP recv_buf")?;
+
+    info!(
+        log, "Setting TCP congestion control algorithm to cubic";
+    );
+    Ipadm::set_tcp_congestion_control()
+        .context("failed to set TCP congestion_control")?;
+
     if static_addrs.is_empty() {
         info!(
             log,
