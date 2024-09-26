@@ -1337,12 +1337,22 @@ impl DataStore {
     }
 
     /// Get the current target blueprint, if one exists
+    ///
+    /// Grabs a write lock on the blueprint target row.
+    ///
+    /// This function may be called from a transactional context,
+    /// which could read or modify the blueprint target.
+    ///
+    /// CockroachDb guarantees serializability either way, but
+    /// this makes it less likely for concurrent transactions
+    /// to fail with retryable errors.
     pub async fn blueprint_target_get_current_on_connection(
         conn: &async_bb8_diesel::Connection<DbConnection>,
         opctx: &OpContext,
     ) -> Result<BlueprintTarget, TransactionError<Error>> {
         opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
-        Self::blueprint_current_target_only(&conn, SelectFlavor::Standard).await
+        Self::blueprint_current_target_only(&conn, SelectFlavor::ForUpdate)
+            .await
     }
 
     /// Get the current target blueprint, if one exists
