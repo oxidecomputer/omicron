@@ -2411,6 +2411,8 @@ mod test {
                 .highest_seen_keeper_leader_committed_log_index,
             2
         );
+
+        logctx.cleanup_successful();
     }
 
     // Start with an existing clickhouse cluster and expunge a keeper. This
@@ -2616,5 +2618,7 @@ mod test {
             config.max_used_keeper_id,
             old_config.max_used_keeper_id + 1.into()
         );
+
+        logctx.cleanup_successful();
     }
 }
