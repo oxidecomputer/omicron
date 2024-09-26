@@ -2603,10 +2603,18 @@
           "board": {
             "type": "string"
           },
+          "epoch": {
+            "nullable": true,
+            "type": "string"
+          },
           "git_commit": {
             "type": "string"
           },
           "name": {
+            "type": "string"
+          },
+          "sign": {
+            "nullable": true,
             "type": "string"
           },
           "version": {

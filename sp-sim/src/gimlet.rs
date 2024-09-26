@@ -1351,12 +1351,16 @@ impl SpHandler for Handler {
             (SpComponent::ROT, b"NAME", _, _) => ROT_NAME,
             (SpComponent::ROT, b"VERS", 0, _) => ROT_VERS0,
             (SpComponent::ROT, b"VERS", 1, _) => ROT_VERS1,
+            // gimlet staging/devel hash
+            (SpComponent::ROT, b"SIGN", _, _) => &"11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf".as_bytes(),
             (SpComponent::STAGE0, b"GITC", 0, false) => STAGE0_GITC0,
             (SpComponent::STAGE0, b"GITC", 1, false) => STAGE0_GITC1,
             (SpComponent::STAGE0, b"BORD", _, false) => STAGE0_BORD,
             (SpComponent::STAGE0, b"NAME", _, false) => STAGE0_NAME,
             (SpComponent::STAGE0, b"VERS", 0, false) => STAGE0_VERS0,
             (SpComponent::STAGE0, b"VERS", 1, false) => STAGE0_VERS1,
+            // gimlet staging/devel hash
+            (SpComponent::STAGE0, b"SIGN", _, false) => &"11594bb5548a757e918e6fe056e2ad9e084297c9555417a025d8788eacf55daf".as_bytes(),
             _ => return Err(SpError::NoSuchCabooseKey(key)),
         };
 

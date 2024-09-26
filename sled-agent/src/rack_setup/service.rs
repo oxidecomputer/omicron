@@ -1669,6 +1669,11 @@ mod test {
                         },
                         variant: DiskVariant::U2,
                         slot: i.try_into().unwrap(),
+                        active_firmware_slot: 1,
+                        next_active_firmware_slot: None,
+                        number_of_firmware_slots: 1,
+                        slot1_is_read_only: true,
+                        slot_firmware_versions: vec![Some("TEST1".to_string())],
                     })
                     .collect(),
                 zpools: vec![],
