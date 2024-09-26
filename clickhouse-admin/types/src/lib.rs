@@ -516,7 +516,7 @@ pub struct KeeperConf {
     pub enable_ipv6: bool,
     /// Port for a client to connect.
     pub tcp_port: u16,
-    /// Allolw list of 4lw commands.
+    /// Allow list of 4lw commands.
     pub four_letter_word_allow_list: String,
     /// Max size of batch in requests count before it will be sent to RAFT.
     pub max_requests_batch_size: u64,

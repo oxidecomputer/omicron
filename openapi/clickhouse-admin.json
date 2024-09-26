@@ -273,7 +273,7 @@
             "type": "boolean"
           },
           "four_letter_word_allow_list": {
-            "description": "Allolw list of 4lw commands.",
+            "description": "Allow list of 4lw commands.",
             "type": "string"
           },
           "fresh_log_gap": {
