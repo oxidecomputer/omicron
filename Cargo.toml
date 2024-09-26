@@ -574,7 +574,7 @@ smf = "0.2"
 socket2 = { version = "0.5", features = ["all"] }
 sp-sim = { path = "sp-sim" }
 sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "cc13773832df1e38257cdc511adfaad72954bbe1" }
-sqlformat = "0.2.4"
+sqlformat = "0.2.6"
 sqlparser = { version = "0.45.0", features = [ "visitor" ] }
 static_assertions = "1.1.0"
 # Please do not change the Steno version to a Git dependency.  It makes it
