@@ -215,6 +215,7 @@ pub enum CompressionAlgorithm {
     Zle,
 }
 
+/// These match the arguments which can be passed to "zfs set compression=..."
 impl fmt::Display for CompressionAlgorithm {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use CompressionAlgorithm::*;
