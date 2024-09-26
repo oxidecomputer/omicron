@@ -1340,12 +1340,29 @@ impl DataStore {
     ///
     /// Grabs a write lock on the blueprint target row.
     ///
-    /// This function may be called from a transactional context,
-    /// which could read or modify the blueprint target.
+    /// This "SELECT FOR UPDATE" statement is necessary for correctness:
+    /// without it, it's possible that an "old blueprint" value is read
+    /// while the blueprint is concurrently updated.
     ///
-    /// CockroachDb guarantees serializability either way, but
-    /// this makes it less likely for concurrent transactions
-    /// to fail with retryable errors.
+    /// For example:
+    ///
+    /// - Caller of this function: Start transaction, read blueprint value X, confirm it matches an
+    /// expected value.
+    /// - Elsewhere: Blueprint value updated to X + 1
+    /// - Caller of this function: Performs a write operation, commit.
+    ///
+    /// In this situation, "no stale read" occurred, because the transaction checking the blueprint
+    /// value could have been "ordered before" the blueprint being updated. This is arguably quite
+    /// bad! In this situation, arbitrary database transactions could be performing modifications,
+    /// thinking they are enacting the current target blueprint, when in reality it has changed.
+    ///
+    /// However, with "SELECT FOR UPDATE" being applied to the blueprint target row, we acquire
+    /// an exclusive write lock on the row we're checking:
+    /// - If we're checking the current target blueprint, and
+    /// - A concurrent update tries to read the current target blueprint and update it,
+    ///
+    /// One of these operations will be blocked behind the other, which restores our mental
+    /// model of serialized transactions, with respect to the latest blueprint.
     pub async fn blueprint_target_get_current_on_connection(
         conn: &async_bb8_diesel::Connection<DbConnection>,
         opctx: &OpContext,
