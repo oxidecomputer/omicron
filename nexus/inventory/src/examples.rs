@@ -24,7 +24,6 @@ use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageWhich;
 use omicron_common::api::external::ByteCount;
 use omicron_common::disk::DiskVariant;
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
 use std::sync::Arc;
 use strum::IntoEnumIterator;
@@ -558,7 +557,7 @@ pub fn sled_agent(
         reservoir_size: ByteCount::from(1024),
         sled_role,
         sled_agent_address: "[::1]:56792".parse().unwrap(),
-        sled_id: sled_id.into_untyped_uuid(),
+        sled_id: sled_id,
         usable_hardware_threads: 10,
         usable_physical_ram: ByteCount::from(1024 * 1024),
         disks,

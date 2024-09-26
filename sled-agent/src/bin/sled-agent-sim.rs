@@ -20,10 +20,10 @@ use omicron_sled_agent::sim::{
     run_standalone_server, Config, ConfigHardware, ConfigStorage, ConfigZpool,
     SimMode,
 };
+use omicron_uuid_kinds::SledUuid;
 use sled_hardware_types::Baseboard;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
-use uuid::Uuid;
 
 fn parse_sim_mode(src: &str) -> Result<SimMode, String> {
     match src {
@@ -45,7 +45,7 @@ struct Args {
     sim_mode: SimMode,
 
     #[clap(name = "SA_UUID", action)]
-    uuid: Uuid,
+    uuid: SledUuid,
 
     #[clap(name = "SA_IP:PORT", action)]
     sled_agent_addr: SocketAddrV6,
