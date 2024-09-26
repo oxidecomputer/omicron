@@ -27,6 +27,7 @@ impl_enum_type!(
     TransientZoneRoot => b"zone_root"
     TransientZone => b"zone"
     Debug => b"debug"
+    Update => b"update"
 );
 
 impl DatasetKind {
@@ -91,6 +92,7 @@ impl From<&internal::shared::DatasetKind> for DatasetKind {
                 DatasetKind::TransientZone
             }
             internal::shared::DatasetKind::Debug => DatasetKind::Debug,
+            internal::shared::DatasetKind::Update => DatasetKind::Update,
         }
     }
 }
