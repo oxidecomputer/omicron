@@ -600,7 +600,7 @@ tokio = "1.39.3"
 tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1" ] }
 tokio-stream = "0.1.16"
 tokio-tungstenite = "0.20"
-tokio-util = { version = "0.7.11", features = ["io", "io-util"] }
+tokio-util = { version = "0.7.12", features = ["io", "io-util"] }
 toml = "0.8.19"
 toml_edit = "0.22.20"
 tough = { version = "0.17.1", features = [ "http" ] }
