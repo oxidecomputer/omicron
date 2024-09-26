@@ -529,8 +529,8 @@ task: "instance_reincarnation"
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     instances eligible for reincarnation:                          0
-      failed instances:                                            0
-      start saga unwound instances:                                0
+      instance failed instances:                                   0
+      start saga failed instances:                                 0
     instances reincarnated successfully:                           0
     instances which changed state before they could reincarnate:   0
     instances which failed to reincarnate:                         0
@@ -971,8 +971,8 @@ task: "instance_reincarnation"
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     instances eligible for reincarnation:                          0
-      failed instances:                                            0
-      start saga unwound instances:                                0
+      instance failed instances:                                   0
+      start saga failed instances:                                 0
     instances reincarnated successfully:                           0
     instances which changed state before they could reincarnate:   0
     instances which failed to reincarnate:                         0
