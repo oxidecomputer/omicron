@@ -51,6 +51,12 @@ pub struct Dataset {
 
     quota: Option<ByteCount>,
     reservation: Option<ByteCount>,
+    // This is the stringified form of
+    // "omicron_common::disk::CompressionAlgorithm".
+    //
+    // It can't serialize to the database without forcing omicron_common to
+    // depend on Diesel -- we could create a newtype, but "to_string" and
+    // "parse" cover this usage similarly.
     compression: Option<String>,
 }
 
