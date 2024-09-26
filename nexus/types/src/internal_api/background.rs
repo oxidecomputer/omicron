@@ -4,7 +4,7 @@
 
 use serde::Deserialize;
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use uuid::Uuid;
 
 /// The status of a `region_replacement` background task activation
@@ -125,7 +125,7 @@ pub struct InstanceReincarnationStatus {
     /// Total number of instances in need of reincarnation on this activation.
     /// This is broken down by the reason that the instance needed
     /// reincarnation.
-    pub instances_found: HashMap<String, usize>,
+    pub instances_found: BTreeMap<String, usize>,
     /// UUIDs of instances reincarnated successfully by this activation.
     pub instances_reincarnated: Vec<Uuid>,
     /// UUIDs of instances which changed state before they could be
@@ -134,7 +134,7 @@ pub struct InstanceReincarnationStatus {
     /// Any errors that occured while finding instances in need of reincarnation.
     pub errors: Vec<String>,
     /// Errors that occurred while restarting individual instances.
-    pub restart_errors: HashMap<Uuid, String>,
+    pub restart_errors: BTreeMap<Uuid, String>,
 }
 
 impl InstanceReincarnationStatus {
