@@ -872,7 +872,7 @@ impl<'a> BlueprintBuilder<'a> {
             }
 
             // Small optimization -- if no expungement nor updates are left,
-            // bail.
+            // bail
             if expunges.is_empty() && updates.is_empty() {
                 break;
             }
