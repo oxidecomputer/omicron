@@ -3463,20 +3463,50 @@
         "description": "Identifies information about disks which may be attached to Sleds.",
         "type": "object",
         "properties": {
+          "active_firmware_slot": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
           "identity": {
             "$ref": "#/components/schemas/DiskIdentity"
+          },
+          "next_active_firmware_slot": {
+            "nullable": true,
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "number_of_firmware_slots": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
           },
           "slot": {
             "type": "integer",
             "format": "int64"
+          },
+          "slot1_is_read_only": {
+            "type": "boolean"
+          },
+          "slot_firmware_versions": {
+            "type": "array",
+            "items": {
+              "nullable": true,
+              "type": "string"
+            }
           },
           "variant": {
             "$ref": "#/components/schemas/DiskVariant"
           }
         },
         "required": [
+          "active_firmware_slot",
           "identity",
+          "number_of_firmware_slots",
           "slot",
+          "slot1_is_read_only",
+          "slot_firmware_versions",
           "variant"
         ]
       },

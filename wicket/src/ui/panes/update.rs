@@ -8,8 +8,8 @@ use std::collections::BTreeMap;
 use super::{align_by, help_text, push_text_lines, Control, PendingScroll};
 use crate::keymap::ShowPopupCmd;
 use crate::state::{
-    update_component_title, ComponentId, Inventory, UpdateItemState,
-    ALL_COMPONENT_IDS,
+    update_component_title, ArtifactVersions, ComponentId, Inventory,
+    UpdateItemState, ALL_COMPONENT_IDS,
 };
 use crate::ui::defaults::style;
 use crate::ui::widgets::{
@@ -39,7 +39,6 @@ use wicket_common::update_events::{
     EventBuffer, EventReport, ProgressEvent, StepOutcome, StepStatus,
     UpdateComponent,
 };
-use wicketd_client::types::SemverVersion;
 
 const MAX_COLUMN_WIDTH: u16 = 25;
 
@@ -844,8 +843,9 @@ impl UpdatePane {
                 let children: Vec<_> = states
                     .iter()
                     .flat_map(|(component, s)| {
-                        let target_version =
-                            artifact_version(id, component, &versions);
+                        let target_version = artifact_version(
+                            id, component, &versions, inventory,
+                        );
                         let installed_versions =
                             all_installed_versions(id, component, inventory);
                         installed_versions.into_iter().map(move |v| {
@@ -1459,6 +1459,7 @@ impl UpdatePane {
                     &state.rack_state.selected,
                     component,
                     versions,
+                    inventory,
                 );
                 let installed_versions = all_installed_versions(
                     &state.rack_state.selected,
@@ -1740,7 +1741,7 @@ impl From<&'_ State> for ForceUpdateSelectionState {
             }
 
             let artifact_version =
-                artifact_version(&component_id, component, versions);
+                artifact_version(&component_id, component, versions, inventory);
             let installed_version =
                 active_installed_version(&component_id, component, inventory);
             match component {
@@ -2395,38 +2396,41 @@ fn all_installed_versions(
 
 fn artifact_version(
     id: &ComponentId,
-    component: UpdateComponent,
-    versions: &BTreeMap<KnownArtifactKind, SemverVersion>,
+    update_component: UpdateComponent,
+    versions: &BTreeMap<KnownArtifactKind, Vec<ArtifactVersions>>,
+    inventory: &Inventory,
 ) -> String {
-    let artifact = match (id, component) {
+    let (artifact, multiple) = match (id, update_component) {
         (ComponentId::Sled(_), UpdateComponent::RotBootloader) => {
-            KnownArtifactKind::GimletRotBootloader
+            (KnownArtifactKind::GimletRotBootloader, true)
         }
         (ComponentId::Sled(_), UpdateComponent::Rot) => {
-            KnownArtifactKind::GimletRot
+            (KnownArtifactKind::GimletRot, true)
         }
         (ComponentId::Sled(_), UpdateComponent::Sp) => {
-            KnownArtifactKind::GimletSp
+            (KnownArtifactKind::GimletSp, false)
         }
         (ComponentId::Sled(_), UpdateComponent::Host) => {
-            KnownArtifactKind::Host
+            (KnownArtifactKind::Host, false)
         }
         (ComponentId::Switch(_), UpdateComponent::RotBootloader) => {
-            KnownArtifactKind::SwitchRotBootloader
+            (KnownArtifactKind::SwitchRotBootloader, true)
         }
         (ComponentId::Switch(_), UpdateComponent::Rot) => {
-            KnownArtifactKind::SwitchRot
+            (KnownArtifactKind::SwitchRot, true)
         }
         (ComponentId::Switch(_), UpdateComponent::Sp) => {
-            KnownArtifactKind::SwitchSp
+            (KnownArtifactKind::SwitchSp, false)
         }
         (ComponentId::Psc(_), UpdateComponent::RotBootloader) => {
-            KnownArtifactKind::PscRotBootloader
+            (KnownArtifactKind::PscRotBootloader, true)
         }
         (ComponentId::Psc(_), UpdateComponent::Rot) => {
-            KnownArtifactKind::PscRot
+            (KnownArtifactKind::PscRot, true)
         }
-        (ComponentId::Psc(_), UpdateComponent::Sp) => KnownArtifactKind::PscSp,
+        (ComponentId::Psc(_), UpdateComponent::Sp) => {
+            (KnownArtifactKind::PscSp, false)
+        }
 
         // Switches and PSCs do not have a host.
         (ComponentId::Switch(_), UpdateComponent::Host)
@@ -2434,10 +2438,48 @@ fn artifact_version(
             return "N/A".to_string()
         }
     };
-    versions
-        .get(&artifact)
-        .cloned()
-        .map_or_else(|| "UNKNOWN".to_string(), |v| v.to_string())
+    match versions.get(&artifact) {
+        None => "UNKNOWN".to_string(),
+        Some(artifact_versions) => {
+            let component = match inventory.get_inventory(id) {
+                Some(c) => c,
+                None => return "UNKNOWN".to_string(),
+            };
+            let cnt = artifact_versions.len();
+            // We loop through all possible artifact versions for a
+            // given artifact type. Right now only RoT artifacts
+            // will have a sign value.
+            for a in artifact_versions {
+                match (&a.sign, component.rot_sign()) {
+                    // No sign anywhere, this is for SP components
+                    (None, None) => return a.version.to_string(),
+                    // if we have a version that's tagged with sign data but
+                    // we can't read from the caboose check if we can fall
+                    // back to just returning the version. This matches
+                    // very old repositories
+                    (Some(_), None) => {
+                        if multiple && cnt > 1 {
+                            return "UNKNOWN (MISSING SIGN)".to_string();
+                        } else {
+                            return a.version.to_string();
+                        }
+                    }
+                    // If something isn't tagged with a sign just
+                    // pass on the version. This should only match
+                    // very old repositories/testing configurations
+                    (None, Some(_)) => return a.version.to_string(),
+                    // The interesting case to make sure the sign
+                    // matches both the component and the caboose
+                    (Some(s), Some(c)) => {
+                        if *s == c {
+                            return a.version.to_string();
+                        }
+                    }
+                }
+            }
+            "NO MATCH".to_string()
+        }
+    }
 }
 
 impl Control for UpdatePane {

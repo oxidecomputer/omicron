@@ -845,6 +845,11 @@ impl SledAgent {
                     identity: info.identity.clone(),
                     variant: info.variant,
                     slot: info.slot,
+                    active_firmware_slot: 1,
+                    next_active_firmware_slot: None,
+                    number_of_firmware_slots: 1,
+                    slot1_is_read_only: true,
+                    slot_firmware_versions: vec![Some("SIMUL1".to_string())],
                 })
                 .collect(),
             zpools: storage
