@@ -293,9 +293,10 @@ mod test {
         cptestctx: &ControlPlaneTestContext,
         opctx: &OpContext,
         name: &str,
-        auto_restart: InstanceAutoRestartPolicy,
+        auto_restart: impl Into<Option<InstanceAutoRestartPolicy>>,
         state: InstanceState,
     ) -> InstanceUuid {
+        let auto_restart_policy = auto_restart.into();
         let instances_url = format!("/v1/instances?project={}", PROJECT_NAME);
         // Use the first chunk of the UUID as the name, to avoid conflicts.
         // Start with a lower ascii character to satisfy the name constraints.
@@ -325,7 +326,7 @@ mod test {
                     disks: Vec::new(),
                     ssh_public_keys: None,
                     start: state == InstanceState::Vmm,
-                    auto_restart_policy: Some(auto_restart),
+                    auto_restart_policy,
                 },
             )
             .await;
@@ -336,7 +337,8 @@ mod test {
         }
 
         eprintln!(
-            "instance {id}: auto_restart_policy={auto_restart:?}; state={state:?}"
+            "instance {id}: auto_restart_policy={auto_restart_policy:?}; \
+             state={state:?}"
         );
         id
     }
@@ -433,6 +435,54 @@ mod test {
             &opctx,
             "my-cool-instance",
             InstanceAutoRestartPolicy::BestEffort,
+            InstanceState::Failed,
+        )
+        .await;
+
+        // Activate the task again, and check that our instance had an
+        // instance-start saga started.
+        let status = assert_activation_ok!(task.activate(&opctx).await);
+        assert_eq!(status.instances_found, 1);
+        assert_eq!(
+            status.instances_reincarnated,
+            vec![instance_id.into_untyped_uuid()]
+        );
+        assert_eq!(status.changed_state, Vec::new());
+
+        test_helpers::instance_wait_for_state(
+            &cptestctx,
+            instance_id,
+            InstanceState::Vmm,
+        )
+        .await;
+    }
+
+    #[nexus_test(server = crate::Server)]
+    async fn test_default_policy_is_reincarnatable(
+        cptestctx: &ControlPlaneTestContext,
+    ) {
+        let nexus = &cptestctx.server.server_context().nexus;
+        let datastore = nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.clone(),
+            datastore.clone(),
+        );
+
+        setup_test_project(&cptestctx, &opctx).await;
+
+        let mut task = InstanceReincarnation::new(
+            datastore.clone(),
+            nexus.sagas.clone(),
+            false,
+        );
+
+        // Create an instance in the `Failed` state that's eligible to be
+        // restarted.
+        let instance_id = create_instance(
+            &cptestctx,
+            &opctx,
+            "my-cool-instance",
+            None,
             InstanceState::Failed,
         )
         .await;
