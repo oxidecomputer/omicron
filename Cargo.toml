@@ -291,7 +291,7 @@ approx = "0.5.1"
 assert_matches = "1.5.0"
 assert_cmd = "2.0.16"
 async-bb8-diesel = "0.2"
-async-trait = "0.1.82"
+async-trait = "0.1.83"
 atomicwrites = "0.4.4"
 authz-macros = { path = "nexus/authz-macros" }
 backoff = { version = "0.4.0", features = [ "tokio" ] }
@@ -392,7 +392,7 @@ hkdf = "0.12.4"
 http = "1.1.0"
 http-body-util = "0.1.2"
 httpmock = "0.8.0-alpha.1"
-httptest = "0.15.5"
+httptest = "0.16.1"
 hubtools = { git = "https://github.com/oxidecomputer/hubtools.git", branch = "main" }
 humantime = "2.1.0"
 hyper = "1.4.1"
@@ -417,7 +417,7 @@ ipnetwork = { version = "0.20", features = ["schemars"] }
 ispf = { git = "https://github.com/oxidecomputer/ispf" }
 key-manager = { path = "key-manager" }
 kstat-rs = "0.2.4"
-libc = "0.2.158"
+libc = "0.2.159"
 libipcc = { git = "https://github.com/oxidecomputer/libipcc", rev = "fdffa212373a8f92473ea5f411088912bf458d5f" }
 libfalcon = { git = "https://github.com/oxidecomputer/falcon", branch = "main" }
 libnvme = { git = "https://github.com/oxidecomputer/libnvme", rev = "dd5bb221d327a1bc9287961718c3c10d6bd37da0" }
@@ -485,7 +485,7 @@ openssl = "0.10"
 openssl-sys = "0.9"
 opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "76878de67229ea113d70503c441eab47ac5dc653" }
 oso = "0.27"
-owo-colors = "4.0.0"
+owo-colors = "4.1.0"
 oximeter = { path = "oximeter/oximeter" }
 oximeter-api = { path = "oximeter/api" }
 oximeter-client = { path = "clients/oximeter-client" }
@@ -512,7 +512,7 @@ postgres-protocol = "0.6.7"
 predicates = "3.1.2"
 pretty_assertions = "1.4.1"
 pretty-hex = "0.4.1"
-prettyplease = { version = "0.2.20", features = ["verbatim"] }
+prettyplease = { version = "0.2.22", features = ["verbatim"] }
 proc-macro2 = "1.0"
 # progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 # progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
@@ -552,7 +552,7 @@ secrecy = "0.8.0"
 semver = { version = "1.0.23", features = ["std", "serde"] }
 serde = { version = "1.0", default-features = false, features = [ "derive", "rc" ] }
 serde_human_bytes = { git = "https://github.com/oxidecomputer/serde_human_bytes", branch = "main" }
-serde_json = "1.0.125"
+serde_json = "1.0.128"
 serde_path_to_error = "0.1.16"
 serde_tokenstream = "0.2"
 serde_urlencoded = "0.7.1"
@@ -588,7 +588,7 @@ smf = "0.2"
 socket2 = { version = "0.5", features = ["all"] }
 sp-sim = { path = "sp-sim" }
 sprockets-tls = { git = "https://github.com/oxidecomputer/sprockets.git", rev = "cc13773832df1e38257cdc511adfaad72954bbe1" }
-sqlformat = "0.2.4"
+sqlformat = "0.2.6"
 sqlparser = { version = "0.45.0", features = [ "visitor" ] }
 static_assertions = "1.1.0"
 # Please do not change the Steno version to a Git dependency.  It makes it
@@ -612,11 +612,11 @@ thiserror = "1.0"
 tofino = { git = "https://github.com/oxidecomputer/tofino", branch = "main" }
 tokio = "1.39.3"
 tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1" ] }
-tokio-stream = "0.1.15"
+tokio-stream = "0.1.16"
 tokio-tungstenite = "0.23.1"
-tokio-util = { version = "0.7.11", features = ["io", "io-util"] }
+tokio-util = { version = "0.7.12", features = ["io", "io-util"] }
 toml = "0.8.19"
-toml_edit = "0.22.20"
+toml_edit = "0.22.22"
 tough = { version = "0.17.1", features = [ "http" ] }
 trybuild = "1.0.99"
 tufaceous = { path = "tufaceous" }

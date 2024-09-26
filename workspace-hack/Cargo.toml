@@ -69,7 +69,7 @@ itertools-5ef9efb8ec2df382 = { package = "itertools", version = "0.12.1" }
 itertools-93f6ce9d446188ac = { package = "itertools", version = "0.10.5" }
 lalrpop-util = { version = "0.19.12" }
 lazy_static = { version = "1.5.0", default-features = false, features = ["spin_no_std"] }
-libc = { version = "0.2.158", features = ["extra_traits"] }
+libc = { version = "0.2.159", features = ["extra_traits"] }
 log = { version = "0.4.22", default-features = false, features = ["kv_unstable", "std"] }
 managed = { version = "0.8.0", default-features = false, features = ["alloc", "map"] }
 memchr = { version = "2.7.2" }
@@ -111,11 +111,11 @@ syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.77", features = ["extra
 time = { version = "0.3.36", features = ["formatting", "local-offset", "macros", "parsing"] }
 tokio = { version = "1.39.3", features = ["full", "test-util"] }
 tokio-postgres = { version = "0.7.11", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
-tokio-stream = { version = "0.1.15", features = ["net", "sync"] }
-tokio-util = { version = "0.7.11", features = ["codec", "io-util"] }
+tokio-stream = { version = "0.1.16", features = ["net", "sync"] }
+tokio-util = { version = "0.7.12", features = ["codec", "io-util"] }
 toml = { version = "0.7.8" }
 toml_datetime = { version = "0.6.8", default-features = false, features = ["serde"] }
-toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.20", features = ["serde"] }
+toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.22", features = ["serde"] }
 tracing = { version = "0.1.40", features = ["log"] }
 unicode-bidi = { version = "0.3.15" }
 unicode-normalization = { version = "0.1.23" }
@@ -180,7 +180,7 @@ itertools-5ef9efb8ec2df382 = { package = "itertools", version = "0.12.1" }
 itertools-93f6ce9d446188ac = { package = "itertools", version = "0.10.5" }
 lalrpop-util = { version = "0.19.12" }
 lazy_static = { version = "1.5.0", default-features = false, features = ["spin_no_std"] }
-libc = { version = "0.2.158", features = ["extra_traits"] }
+libc = { version = "0.2.159", features = ["extra_traits"] }
 log = { version = "0.4.22", default-features = false, features = ["kv_unstable", "std"] }
 managed = { version = "0.8.0", default-features = false, features = ["alloc", "map"] }
 memchr = { version = "2.7.2" }
@@ -224,11 +224,11 @@ time = { version = "0.3.36", features = ["formatting", "local-offset", "macros",
 time-macros = { version = "0.2.18", default-features = false, features = ["formatting", "parsing"] }
 tokio = { version = "1.39.3", features = ["full", "test-util"] }
 tokio-postgres = { version = "0.7.11", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
-tokio-stream = { version = "0.1.15", features = ["net", "sync"] }
-tokio-util = { version = "0.7.11", features = ["codec", "io-util"] }
+tokio-stream = { version = "0.1.16", features = ["net", "sync"] }
+tokio-util = { version = "0.7.12", features = ["codec", "io-util"] }
 toml = { version = "0.7.8" }
 toml_datetime = { version = "0.6.8", default-features = false, features = ["serde"] }
-toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.20", features = ["serde"] }
+toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.22", features = ["serde"] }
 tracing = { version = "0.1.40", features = ["log"] }
 unicode-bidi = { version = "0.3.15" }
 unicode-normalization = { version = "0.1.23" }
