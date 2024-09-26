@@ -2633,4 +2633,101 @@ mod test {
 
         logctx.cleanup_successful();
     }
+
+    #[test]
+    fn test_expunge_all_clickhouse_cluster_zones_after_policy_is_disabled() {
+        static TEST_NAME: &str = "planner_expunge_all_clickhouse_cluster_zones_after_policy_is_disabled";
+        let logctx = test_setup_log(TEST_NAME);
+        let log = logctx.log.clone();
+
+        // Use our example system.
+        let (collection, input, blueprint1) =
+            example(&log, TEST_NAME, DEFAULT_N_SLEDS);
+
+        let target_keepers = 3;
+        let target_servers = 2;
+
+        // Enable clickhouse clusters via policy
+        let mut input_builder = input.into_builder();
+        input_builder.policy_mut().clickhouse_policy = Some(ClickhousePolicy {
+            deploy_with_standalone: true,
+            target_servers,
+            target_keepers,
+        });
+        let input = input_builder.build();
+
+        // Create a new blueprint to deploy all our clickhouse zones
+        let blueprint2 = Planner::new_based_on(
+            log.clone(),
+            &blueprint1,
+            &input,
+            "test_blueprint2",
+            &collection,
+        )
+        .expect("created planner")
+        .with_rng_seed((TEST_NAME, "bp2"))
+        .plan()
+        .expect("plan");
+
+        // We should see zones for 2 clickhouse keepers, and 2 servers created
+        let active_zones: Vec<_> = blueprint2
+            .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+            .map(|(_, z)| z.clone())
+            .collect();
+
+        let keeper_zone_ids: BTreeSet<_> = active_zones
+            .iter()
+            .filter(|z| z.zone_type.is_clickhouse_keeper())
+            .map(|z| z.id)
+            .collect();
+        let server_zone_ids: BTreeSet<_> = active_zones
+            .iter()
+            .filter(|z| z.zone_type.is_clickhouse_server())
+            .map(|z| z.id)
+            .collect();
+
+        assert_eq!(keeper_zone_ids.len(), target_keepers);
+        assert_eq!(server_zone_ids.len(), target_servers);
+
+        // Disable clickhouse clusters via policy
+        let mut input_builder = input.into_builder();
+        input_builder.policy_mut().clickhouse_policy = None;
+        let input = input_builder.build();
+
+        // Create a new blueprint with the disabled policy
+        let blueprint3 = Planner::new_based_on(
+            log.clone(),
+            &blueprint2,
+            &input,
+            "test_blueprint3",
+            &collection,
+        )
+        .expect("created planner")
+        .with_rng_seed((TEST_NAME, "bp3"))
+        .plan()
+        .expect("plan");
+
+        // All our clickhouse keeper and server zones that we created when we
+        // enabled our clickhouse policy should be expunged when we disable it.
+        let expunged_zones: Vec<_> = blueprint3
+            .all_omicron_zones(BlueprintZoneFilter::Expunged)
+            .map(|(_, z)| z.clone())
+            .collect();
+
+        let expunged_keeper_zone_ids: BTreeSet<_> = expunged_zones
+            .iter()
+            .filter(|z| z.zone_type.is_clickhouse_keeper())
+            .map(|z| z.id)
+            .collect();
+        let expunged_server_zone_ids: BTreeSet<_> = expunged_zones
+            .iter()
+            .filter(|z| z.zone_type.is_clickhouse_server())
+            .map(|z| z.id)
+            .collect();
+
+        assert_eq!(keeper_zone_ids, expunged_keeper_zone_ids);
+        assert_eq!(server_zone_ids, expunged_server_zone_ids);
+
+        logctx.cleanup_successful();
+    }
 }
