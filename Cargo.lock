@@ -663,7 +663,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?branch=hyper-v1#81e04b69611e8c8814dd96e081ec311d489c9e57"
+source = "git+https://github.com/oxidecomputer/propolis?branch=hyper-v1#5b65dc6923420c2bfe0863825be7bcbee895ca09"
 dependencies = [
  "bhyve_api_sys",
  "libc",
@@ -673,7 +673,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?branch=hyper-v1#81e04b69611e8c8814dd96e081ec311d489c9e57"
+source = "git+https://github.com/oxidecomputer/propolis?branch=hyper-v1#5b65dc6923420c2bfe0863825be7bcbee895ca09"
 dependencies = [
  "libc",
  "strum",
@@ -2444,7 +2444,7 @@ dependencies = [
 [[package]]
 name = "dropshot"
 version = "0.11.1-dev"
-source = "git+https://github.com/seanmonstar/dropshot?branch=hyper-v1-2.4-own-body#9075a2a56f0e6cd8797ecc3a0842922718f0560b"
+source = "git+https://github.com/seanmonstar/dropshot?branch=hyper-v1-2.4-own-body#35c897b26aa0f9241c5b523a84ec009e8999ba97"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -2552,7 +2552,7 @@ dependencies = [
 [[package]]
 name = "dropshot_endpoint"
 version = "0.11.1-dev"
-source = "git+https://github.com/seanmonstar/dropshot?branch=hyper-v1-2.4-own-body#9075a2a56f0e6cd8797ecc3a0842922718f0560b"
+source = "git+https://github.com/seanmonstar/dropshot?branch=hyper-v1-2.4-own-body#35c897b26aa0f9241c5b523a84ec009e8999ba97"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -4872,7 +4872,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c2a198fb6b0eada2a8df47933734e6d35d350665a33a3593d7164fa52c75c19"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -8528,7 +8528,7 @@ dependencies = [
 [[package]]
 name = "progenitor"
 version = "0.7.0"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=dependabot/cargo/reqwest-0.12.4#e6b4ef462cce01e5f65ec78b13f7bfda7c5953db"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=dependabot/cargo/reqwest-0.12.4#ab69e4e7f5147f0f12deb84d03aa145e144d9e53"
 dependencies = [
  "progenitor-client 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=dependabot/cargo/reqwest-0.12.4)",
  "progenitor-impl 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=dependabot/cargo/reqwest-0.12.4)",
@@ -8548,7 +8548,7 @@ dependencies = [
 [[package]]
 name = "progenitor-client"
 version = "0.7.0"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=dependabot/cargo/reqwest-0.12.4#e6b4ef462cce01e5f65ec78b13f7bfda7c5953db"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=dependabot/cargo/reqwest-0.12.4#ab69e4e7f5147f0f12deb84d03aa145e144d9e53"
 dependencies = [
  "bytes",
  "futures-core",
@@ -8576,10 +8576,10 @@ dependencies = [
 [[package]]
 name = "progenitor-impl"
 version = "0.7.0"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=dependabot/cargo/reqwest-0.12.4#e6b4ef462cce01e5f65ec78b13f7bfda7c5953db"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=dependabot/cargo/reqwest-0.12.4#ab69e4e7f5147f0f12deb84d03aa145e144d9e53"
 dependencies = [
  "heck 0.5.0",
- "http 0.2.12",
+ "http 1.1.0",
  "indexmap 2.5.0",
  "openapiv3",
  "proc-macro2",
@@ -8618,7 +8618,7 @@ dependencies = [
 [[package]]
 name = "progenitor-macro"
 version = "0.7.0"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=dependabot/cargo/reqwest-0.12.4#e6b4ef462cce01e5f65ec78b13f7bfda7c5953db"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=dependabot/cargo/reqwest-0.12.4#ab69e4e7f5147f0f12deb84d03aa145e144d9e53"
 dependencies = [
  "openapiv3",
  "proc-macro2",
@@ -8652,12 +8652,12 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?branch=hyper-v1#81e04b69611e8c8814dd96e081ec311d489c9e57"
+source = "git+https://github.com/oxidecomputer/propolis?branch=hyper-v1#5b65dc6923420c2bfe0863825be7bcbee895ca09"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
  "futures",
- "progenitor 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=dependabot/cargo/reqwest-0.12.4)",
+ "progenitor 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
  "rand",
  "reqwest 0.12.7",
  "schemars",
@@ -8694,16 +8694,16 @@ dependencies = [
 [[package]]
 name = "propolis-mock-server"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?branch=hyper-v1#81e04b69611e8c8814dd96e081ec311d489c9e57"
+source = "git+https://github.com/oxidecomputer/propolis?branch=hyper-v1#5b65dc6923420c2bfe0863825be7bcbee895ca09"
 dependencies = [
  "anyhow",
  "atty",
  "base64 0.21.7",
  "clap",
- "dropshot 0.11.1-dev (git+https://github.com/seanmonstar/dropshot?branch=hyper-v1-2.4-own-body)",
+ "dropshot 0.11.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
  "futures",
  "hyper 1.4.1",
- "progenitor 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=dependabot/cargo/reqwest-0.12.4)",
+ "progenitor 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
  "propolis_types",
  "rand",
  "reqwest 0.12.7",
@@ -8736,7 +8736,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?branch=hyper-v1#81e04b69611e8c8814dd96e081ec311d489c9e57"
+source = "git+https://github.com/oxidecomputer/propolis?branch=hyper-v1#5b65dc6923420c2bfe0863825be7bcbee895ca09"
 dependencies = [
  "schemars",
  "serde",
