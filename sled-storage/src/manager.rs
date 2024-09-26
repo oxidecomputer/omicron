@@ -15,7 +15,7 @@ use camino::Utf8PathBuf;
 use debug_ignore::DebugIgnore;
 use futures::future::FutureExt;
 use illumos_utils::zfs::{Mountpoint, Zfs};
-use illumos_utils::zpool::ZpoolName;
+use illumos_utils::zpool::{ZpoolName, ZPOOL_MOUNTPOINT_ROOT};
 use key_manager::StorageKeyRequester;
 use omicron_common::disk::{
     DatasetConfig, DatasetManagementStatus, DatasetName, DatasetsConfig,
@@ -1009,14 +1009,8 @@ impl StorageManager {
         }
 
         let zoned = config.name.dataset().zoned();
-        let mountpoint_path = if zoned {
-            Utf8PathBuf::from("/data")
-        } else {
-            config.name.pool().dataset_mountpoint(
-                &Utf8PathBuf::from("/"),
-                &config.name.dataset().to_string(),
-            )
-        };
+        let mountpoint_path =
+            config.name.mountpoint(ZPOOL_MOUNTPOINT_ROOT.into());
         let mountpoint = Mountpoint::Path(mountpoint_path);
 
         let fs_name = &config.name.full_name();
