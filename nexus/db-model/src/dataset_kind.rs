@@ -49,6 +49,7 @@ impl DatasetKind {
                 ApiKind::TransientZone { name }
             }
             (Self::Debug, None) => ApiKind::Debug,
+            (Self::Update, None) => ApiKind::Update,
             (Self::TransientZone, None) => {
                 return Err(Error::internal_error("Zone kind needs name"))
             }

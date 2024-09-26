@@ -178,7 +178,9 @@ pub(crate) async fn ensure_dataset_records_exist(
 
         let dataset = Dataset::from(bp_dataset.clone());
         datastore
-            .dataset_upsert_if_blueprint_is_enabled(&opctx, bp_id, dataset)
+            .dataset_upsert_if_blueprint_is_current_target(
+                &opctx, bp_id, dataset,
+            )
             .await
             .with_context(|| {
                 format!("failed to upsert dataset record for dataset {id}")
@@ -208,7 +210,7 @@ pub(crate) async fn ensure_dataset_records_exist(
             }
 
             datastore
-                .dataset_delete_if_blueprint_is_enabled(
+                .dataset_delete_if_blueprint_is_current_target(
                     &opctx,
                     bp_id,
                     bp_dataset.id,

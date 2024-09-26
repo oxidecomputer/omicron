@@ -114,7 +114,8 @@ impl From<BlueprintDatasetConfig> for Dataset {
             | ApiDatasetKind::InternalDns
             | ApiDatasetKind::TransientZone { .. }
             | ApiDatasetKind::TransientZoneRoot
-            | ApiDatasetKind::Debug => None,
+            | ApiDatasetKind::Debug
+            | ApiDatasetKind::Update => None,
         };
         let addr = bp.address;
         Self {
