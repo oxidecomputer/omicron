@@ -196,7 +196,7 @@ impl PlanningInputFromDb<'_> {
                     )
                 })
                 .collect();
-            datasets.sort_by(|(a, _), (b, _)| a.cmp(&b));
+            datasets.sort_unstable_by_key(|(zpool_id, _)| *zpool_id);
             let mut datasets_by_zpool: BTreeMap<_, Vec<_>> = BTreeMap::new();
             for (zpool_id, dataset) in datasets {
                 datasets_by_zpool
