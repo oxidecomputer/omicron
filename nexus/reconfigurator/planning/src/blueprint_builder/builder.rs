@@ -176,6 +176,9 @@ impl fmt::Display for Operation {
                     ZoneExpungeReason::SledExpunged => {
                         "sled policy is expunged"
                     }
+                    ZoneExpungeReason::ClickhouseClusterDisabled => {
+                        "clickhouse cluster disabled via policy"
+                    }
                 };
                 write!(
                     f,
@@ -513,6 +516,13 @@ impl<'a> BlueprintBuilder<'a> {
             "sled_id" => sled_id.to_string(),
         ));
 
+        // If there are any `ClickhouseServer` or `ClickhouseKeeper` zones that
+        // are not expunged and we no longer have a `ClickhousePolicy` which
+        // indicates replicated clickhouse clusters should be running, we need
+        // to expunge all such zones.
+        let clickhouse_cluster_enabled =
+            self.input.clickhouse_cluster_enabled();
+
         // Do any zones need to be marked expunged?
         let mut zones_to_expunge = BTreeMap::new();
 
@@ -524,9 +534,11 @@ impl<'a> BlueprintBuilder<'a> {
                 "zone_id" => zone_id.to_string()
             ));
 
-            let Some(reason) =
-                zone_needs_expungement(sled_details, zone_config)
-            else {
+            let Some(reason) = zone_needs_expungement(
+                sled_details,
+                zone_config,
+                clickhouse_cluster_enabled,
+            ) else {
                 continue;
             };
 
@@ -564,6 +576,13 @@ impl<'a> BlueprintBuilder<'a> {
                             "expunged sled with non-expunged zone found"
                         );
                     }
+                    ZoneExpungeReason::ClickhouseClusterDisabled => {
+                        info!(
+                            &log,
+                            "clickhouse cluster disabled via policy, \
+                            expunging related zone"
+                        );
+                    }
                 }
 
                 zones_to_expunge.insert(zone_id, reason);
@@ -594,6 +613,7 @@ impl<'a> BlueprintBuilder<'a> {
         let mut count_disk_expunged = 0;
         let mut count_sled_decommissioned = 0;
         let mut count_sled_expunged = 0;
+        let mut count_clickhouse_cluster_disabled = 0;
         for reason in zones_to_expunge.values() {
             match reason {
                 ZoneExpungeReason::DiskExpunged => count_disk_expunged += 1,
@@ -601,12 +621,19 @@ impl<'a> BlueprintBuilder<'a> {
                     count_sled_decommissioned += 1;
                 }
                 ZoneExpungeReason::SledExpunged => count_sled_expunged += 1,
+                ZoneExpungeReason::ClickhouseClusterDisabled => {
+                    count_clickhouse_cluster_disabled += 1
+                }
             };
         }
         let count_and_reason = [
             (count_disk_expunged, ZoneExpungeReason::DiskExpunged),
             (count_sled_decommissioned, ZoneExpungeReason::SledDecommissioned),
             (count_sled_expunged, ZoneExpungeReason::SledExpunged),
+            (
+                count_clickhouse_cluster_disabled,
+                ZoneExpungeReason::ClickhouseClusterDisabled,
+            ),
         ];
         for (count, reason) in count_and_reason {
             if count > 0 {

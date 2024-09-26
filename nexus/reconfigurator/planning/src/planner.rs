@@ -703,6 +703,7 @@ fn sled_needs_all_zones_expunged(
 pub(crate) fn zone_needs_expungement(
     sled_details: &SledDetails,
     zone_config: &BlueprintZoneConfig,
+    clickhouse_cluster_enabled: bool,
 ) -> Option<ZoneExpungeReason> {
     // Should we expunge the zone because the sled is gone?
     if let Some(reason) =
@@ -727,6 +728,16 @@ pub(crate) fn zone_needs_expungement(
         }
     };
 
+    // Should we expunge the zone because clickhouse clusters are no longer
+    // enabled via policy?
+    if !clickhouse_cluster_enabled {
+        if zone_config.zone_type.is_clickhouse_keeper()
+            || zone_config.zone_type.is_clickhouse_server()
+        {
+            return Some(ZoneExpungeReason::ClickhouseClusterDisabled);
+        }
+    }
+
     None
 }
 
@@ -739,6 +750,7 @@ pub(crate) enum ZoneExpungeReason {
     DiskExpunged,
     SledDecommissioned,
     SledExpunged,
+    ClickhouseClusterDisabled,
 }
 
 #[cfg(test)]
