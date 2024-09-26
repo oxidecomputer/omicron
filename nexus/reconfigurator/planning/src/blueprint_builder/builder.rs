@@ -878,6 +878,19 @@ impl<'a> BlueprintBuilder<'a> {
             }
         }
 
+        // These conditions should be dead-code, and arguably could be
+        // assertions, but are safety nets to catch programming errors.
+        if !expunges.is_empty() {
+            return Err(Error::Planner(anyhow!(
+                "Should have marked all expunged datasets"
+            )));
+        }
+        if !updates.is_empty() {
+            return Err(Error::Planner(anyhow!(
+                "Should have applied all updates"
+            )));
+        }
+
         // Remove all datasets that we've finished expunging.
         datasets.retain(|_id, d| {
             if removals.contains(&d.id) {
