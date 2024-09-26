@@ -238,7 +238,10 @@ impl fmt::Display for Operation {
 }
 
 fn zone_name(zone: &BlueprintZoneConfig) -> String {
-    format!("oxz_{}_{}", zone.zone_type.kind().zone_prefix(), zone.id)
+    illumos_utils::zone::zone_name(
+        zone.zone_type.kind().zone_prefix(),
+        Some(zone.id),
+    )
 }
 
 /// Helper for assembling a blueprint

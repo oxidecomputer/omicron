@@ -32,7 +32,9 @@ use omicron_common::api::internal::shared::{
 use omicron_common::backoff;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_common::NoDebug;
-use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid};
+use omicron_uuid_kinds::{
+    GenericUuid, InstanceUuid, OmicronZoneUuid, PropolisUuid,
+};
 use propolis_client::Client as PropolisClient;
 use rand::prelude::IteratorRandom;
 use rand::SeedableRng;
@@ -1417,7 +1419,9 @@ impl InstanceRunner {
             .with_zone_root_path(root)
             .with_zone_image_paths(&["/opt/oxide".into()])
             .with_zone_type("propolis-server")
-            .with_unique_name(self.propolis_id.into_untyped_uuid())
+            .with_unique_name(OmicronZoneUuid::from_untyped_uuid(
+                self.propolis_id.into_untyped_uuid(),
+            ))
             .with_datasets(&[])
             .with_filesystems(&[])
             .with_data_links(&[])

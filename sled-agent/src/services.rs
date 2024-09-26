@@ -93,7 +93,6 @@ use omicron_common::backoff::{
 use omicron_common::disk::{DatasetKind, DatasetName};
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_ddm_admin_client::{Client as DdmAdminClient, DdmError};
-use omicron_uuid_kinds::GenericUuid;
 use once_cell::sync::OnceCell;
 use rand::prelude::SliceRandom;
 use sled_agent_types::{
@@ -1529,8 +1528,7 @@ impl ServiceManager {
             Some(dir) => ZoneBuilderFactory::fake(Some(dir)).builder(),
         };
         if let Some(uuid) = unique_name {
-            zone_builder =
-                zone_builder.with_unique_name(uuid.into_untyped_uuid());
+            zone_builder = zone_builder.with_unique_name(uuid);
         }
         if let Some(vnic) = bootstrap_vnic {
             zone_builder = zone_builder.with_bootstrap_vnic(vnic);
