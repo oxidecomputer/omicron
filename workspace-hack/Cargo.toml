@@ -85,7 +85,7 @@ peg-runtime = { version = "0.8.3", default-features = false, features = ["std"] 
 pem-rfc7468 = { version = "0.7.0", default-features = false, features = ["std"] }
 petgraph = { version = "0.6.5", features = ["serde-1"] }
 pkcs8 = { version = "0.10.2", default-features = false, features = ["encryption", "pem", "std"] }
-postgres-types = { version = "0.2.7", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
+postgres-types = { version = "0.2.8", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 predicates = { version = "3.1.2" }
 proc-macro2 = { version = "1.0.86" }
 quote = { version = "1.0.37" }
@@ -105,13 +105,14 @@ sha2 = { version = "0.10.8", features = ["oid"] }
 similar = { version = "2.6.0", features = ["bytes", "inline", "unicode"] }
 slog = { version = "2.7.0", features = ["dynamic-keys", "max_level_trace", "release_max_level_debug", "release_max_level_trace"] }
 smallvec = { version = "1.13.2", default-features = false, features = ["const_new"] }
+socket2 = { version = "0.5.7", default-features = false, features = ["all"] }
 spin = { version = "0.9.8" }
 string_cache = { version = "0.8.7" }
 subtle = { version = "2.5.0" }
 syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.77", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 time = { version = "0.3.36", features = ["formatting", "local-offset", "macros", "parsing"] }
 tokio = { version = "1.39.3", features = ["full", "test-util"] }
-tokio-postgres = { version = "0.7.11", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
+tokio-postgres = { version = "0.7.12", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 tokio-stream = { version = "0.1.16", features = ["net", "sync"] }
 tokio-util = { version = "0.7.11", features = ["codec", "io-util"] }
 toml = { version = "0.7.8" }
@@ -197,7 +198,7 @@ peg-runtime = { version = "0.8.3", default-features = false, features = ["std"] 
 pem-rfc7468 = { version = "0.7.0", default-features = false, features = ["std"] }
 petgraph = { version = "0.6.5", features = ["serde-1"] }
 pkcs8 = { version = "0.10.2", default-features = false, features = ["encryption", "pem", "std"] }
-postgres-types = { version = "0.2.7", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
+postgres-types = { version = "0.2.8", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 predicates = { version = "3.1.2" }
 proc-macro2 = { version = "1.0.86" }
 quote = { version = "1.0.37" }
@@ -217,6 +218,7 @@ sha2 = { version = "0.10.8", features = ["oid"] }
 similar = { version = "2.6.0", features = ["bytes", "inline", "unicode"] }
 slog = { version = "2.7.0", features = ["dynamic-keys", "max_level_trace", "release_max_level_debug", "release_max_level_trace"] }
 smallvec = { version = "1.13.2", default-features = false, features = ["const_new"] }
+socket2 = { version = "0.5.7", default-features = false, features = ["all"] }
 spin = { version = "0.9.8" }
 string_cache = { version = "0.8.7" }
 subtle = { version = "2.5.0" }
@@ -225,7 +227,7 @@ syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.77", features = ["extra
 time = { version = "0.3.36", features = ["formatting", "local-offset", "macros", "parsing"] }
 time-macros = { version = "0.2.18", default-features = false, features = ["formatting", "parsing"] }
 tokio = { version = "1.39.3", features = ["full", "test-util"] }
-tokio-postgres = { version = "0.7.11", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
+tokio-postgres = { version = "0.7.12", features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 tokio-stream = { version = "0.1.16", features = ["net", "sync"] }
 tokio-util = { version = "0.7.11", features = ["codec", "io-util"] }
 toml = { version = "0.7.8" }
