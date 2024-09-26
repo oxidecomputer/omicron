@@ -513,8 +513,8 @@ pretty_assertions = "1.4.1"
 pretty-hex = "0.4.1"
 prettyplease = { version = "0.2.22", features = ["verbatim"] }
 proc-macro2 = "1.0"
-progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
-progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
+progenitor = "0.8.0"
+progenitor-client = "0.8.0"
 # bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "24a74d0c76b6a63961ecef76acb1516b6e66c5c9" }
 # propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "a9c5fdac442fa6fd5a65e413ea874fe3c62c3fd9" }
 # propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "a9c5fdac442fa6fd5a65e413ea874fe3c62c3fd9" }
