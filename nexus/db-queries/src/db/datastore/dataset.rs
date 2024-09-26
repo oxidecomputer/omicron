@@ -71,7 +71,7 @@ impl DataStore {
         })
     }
 
-    pub async fn dataset_upsert_if_blueprint_is_enabled(
+    pub async fn dataset_upsert_if_blueprint_is_current_target(
         &self,
         opctx: &OpContext,
         bp_id: BlueprintUuid,
@@ -81,7 +81,7 @@ impl DataStore {
 
         self.transaction_if_current_blueprint_is(
             &conn,
-            "dataset_upsert_if_blueprint_is_enabled",
+            "dataset_upsert_if_blueprint_is_current_target",
             opctx,
             bp_id,
             |conn| {
@@ -251,7 +251,7 @@ impl DataStore {
             .map_err(|e| e.into())
     }
 
-    pub async fn dataset_delete_if_blueprint_is_enabled(
+    pub async fn dataset_delete_if_blueprint_is_current_target(
         &self,
         opctx: &OpContext,
         bp_id: BlueprintUuid,
@@ -262,7 +262,7 @@ impl DataStore {
 
         self.transaction_if_current_blueprint_is(
             &conn,
-            "dataset_delete_if_blueprint_is_enabled",
+            "dataset_delete_if_blueprint_is_current_target",
             opctx,
             bp_id,
             |conn| {
@@ -583,7 +583,7 @@ mod test {
 
         // Upsert referencing old blueprint: Error
         datastore
-            .dataset_upsert_if_blueprint_is_enabled(
+            .dataset_upsert_if_blueprint_is_current_target(
                 &opctx,
                 old_blueprint_id,
                 new_dataset_on(zpool_id),
@@ -595,7 +595,7 @@ mod test {
 
         // Upsert referencing current blueprint: OK
         let dataset = datastore
-            .dataset_upsert_if_blueprint_is_enabled(
+            .dataset_upsert_if_blueprint_is_current_target(
                 &opctx,
                 current_blueprint_id,
                 new_dataset_on(zpool_id),
@@ -605,7 +605,7 @@ mod test {
 
         // Delete referencing old blueprint: Error
         datastore
-            .dataset_delete_if_blueprint_is_enabled(
+            .dataset_delete_if_blueprint_is_current_target(
                 &opctx,
                 old_blueprint_id,
                 DatasetUuid::from_untyped_uuid(dataset.id()),
@@ -617,7 +617,7 @@ mod test {
 
         // Delete referencing current blueprint: OK
         datastore
-            .dataset_delete_if_blueprint_is_enabled(
+            .dataset_delete_if_blueprint_is_current_target(
                 &opctx,
                 current_blueprint_id,
                 DatasetUuid::from_untyped_uuid(dataset.id()),
