@@ -2305,7 +2305,8 @@ mod test {
             }
         }
 
-        // Planning again withougt changing inventory should result in the same state
+        // Planning again without changing inventory should result in the same
+        // state
         let blueprint3 = Planner::new_based_on(
             log.clone(),
             &blueprint2,
@@ -2465,7 +2466,7 @@ mod test {
         .plan()
         .expect("plan");
 
-        // We should see zones for 2 clickhouse keepers, and 2 servers created
+        // We should see zones for 3 clickhouse keepers, and 2 servers created
         let active_zones: Vec<_> = blueprint2
             .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
             .map(|(_, z)| z.clone())
@@ -2669,7 +2670,7 @@ mod test {
         .plan()
         .expect("plan");
 
-        // We should see zones for 2 clickhouse keepers, and 2 servers created
+        // We should see zones for 3 clickhouse keepers, and 2 servers created
         let active_zones: Vec<_> = blueprint2
             .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
             .map(|(_, z)| z.clone())

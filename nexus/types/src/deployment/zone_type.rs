@@ -105,7 +105,7 @@ impl BlueprintZoneType {
         matches!(self, BlueprintZoneType::ClickhouseServer(_))
     }
 
-    /// Identifies whether this is a clickhouse zone
+    /// Identifies whether this is a single-node clickhouse zone
     pub fn is_clickhouse(&self) -> bool {
         matches!(self, BlueprintZoneType::Clickhouse(_))
     }
