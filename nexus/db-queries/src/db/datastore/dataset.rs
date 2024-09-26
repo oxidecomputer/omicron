@@ -121,7 +121,7 @@ impl DataStore {
                     dsl::compression.eq(excluded(dsl::compression)),
                 )),
         )
-        .insert_and_get_result_async(&*conn)
+        .insert_and_get_result_async(conn)
         .await
         .map_err(|e| match e {
             AsyncInsertError::CollectionNotFound => {
