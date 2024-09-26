@@ -349,8 +349,7 @@ dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
 dpd-client = { path = "clients/dpd-client" }
-# dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
-dropshot = { git = "https://github.com/seanmonstar/dropshot", branch = "hyper-v1-2.4-own-body", features = ["usdt-probes"] }
+dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
 dyn-clone = "1.0.17"
 either = "1.13.0"
 expectorate = "1.1.0"
@@ -514,10 +513,8 @@ pretty_assertions = "1.4.1"
 pretty-hex = "0.4.1"
 prettyplease = { version = "0.2.22", features = ["verbatim"] }
 proc-macro2 = "1.0"
-# progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
-# progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
-progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "dependabot/cargo/reqwest-0.12.4" }
-progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "dependabot/cargo/reqwest-0.12.4" }
+progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
+progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
 # bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "24a74d0c76b6a63961ecef76acb1516b6e66c5c9" }
 # propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "a9c5fdac442fa6fd5a65e413ea874fe3c62c3fd9" }
 # propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "a9c5fdac442fa6fd5a65e413ea874fe3c62c3fd9" }

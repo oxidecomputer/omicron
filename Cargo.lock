@@ -876,7 +876,7 @@ dependencies = [
 name = "bootstrap-agent-api"
 version = "0.1.0"
 dependencies = [
- "dropshot 0.11.1-dev",
+ "dropshot 0.11.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
  "nexus-client",
  "omicron-common",
  "omicron-uuid-kinds",
@@ -895,7 +895,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
- "progenitor 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=dependabot/cargo/reqwest-0.12.4)",
+ "progenitor 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
  "regress 0.9.1",
  "reqwest 0.12.7",
  "schemars",
@@ -1141,7 +1141,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "dropshot 0.11.1-dev",
+ "dropshot 0.11.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
  "futures",
  "libc",
  "omicron-common",
@@ -1287,7 +1287,7 @@ name = "clickhouse-admin-api"
 version = "0.1.0"
 dependencies = [
  "clickhouse-admin-types",
- "dropshot 0.11.1-dev",
+ "dropshot 0.11.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -1351,7 +1351,7 @@ name = "cockroach-admin-api"
 version = "0.1.0"
 dependencies = [
  "cockroach-admin-types",
- "dropshot 0.11.1-dev",
+ "dropshot 0.11.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -1366,7 +1366,7 @@ dependencies = [
  "chrono",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "progenitor 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=dependabot/cargo/reqwest-0.12.4)",
+ "progenitor 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
  "reqwest 0.12.7",
  "schemars",
  "serde",
@@ -1576,7 +1576,7 @@ name = "crdb-seed"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "dropshot 0.11.1-dev",
+ "dropshot 0.11.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
  "omicron-test-utils",
  "omicron-workspace-hack",
  "slog",
@@ -1728,7 +1728,7 @@ dependencies = [
  "anyhow",
  "atty",
  "crucible-workspace-hack",
- "dropshot 0.11.1-dev",
+ "dropshot 0.11.1-dev (git+https://github.com/seanmonstar/dropshot?branch=hyper-v1-2.4-own-body)",
  "nix 0.29.0",
  "rusqlite",
  "rustls-pemfile 1.0.4",
@@ -2289,7 +2289,7 @@ dependencies = [
  "clap",
  "dns-server-api",
  "dns-service-client",
- "dropshot 0.11.1-dev",
+ "dropshot 0.11.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
  "expectorate",
  "hickory-client",
  "hickory-proto",
@@ -2322,7 +2322,7 @@ name = "dns-server-api"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "dropshot 0.11.1-dev",
+ "dropshot 0.11.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
  "omicron-workspace-hack",
  "schemars",
  "serde",
@@ -2337,7 +2337,7 @@ dependencies = [
  "expectorate",
  "http 1.1.0",
  "omicron-workspace-hack",
- "progenitor 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=dependabot/cargo/reqwest-0.12.4)",
+ "progenitor 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
  "reqwest 0.12.7",
  "schemars",
  "serde",
@@ -2380,8 +2380,8 @@ dependencies = [
  "http 1.1.0",
  "omicron-workspace-hack",
  "omicron-zone-package",
- "progenitor 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=dependabot/cargo/reqwest-0.12.4)",
- "progenitor-client 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=dependabot/cargo/reqwest-0.12.4)",
+ "progenitor 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
+ "progenitor-client 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
  "quote",
  "rand",
  "regress 0.9.1",
@@ -2453,7 +2453,54 @@ dependencies = [
  "camino",
  "chrono",
  "debug-ignore",
- "dropshot_endpoint 0.11.1-dev",
+ "dropshot_endpoint 0.11.1-dev (git+https://github.com/seanmonstar/dropshot?branch=hyper-v1-2.4-own-body)",
+ "form_urlencoded",
+ "futures",
+ "hostname 0.4.0",
+ "http 1.1.0",
+ "http-body-util",
+ "hyper 1.4.1",
+ "hyper-util",
+ "indexmap 2.5.0",
+ "multer",
+ "openapiv3",
+ "paste",
+ "percent-encoding",
+ "rustls 0.22.4",
+ "rustls-pemfile 2.1.3",
+ "schemars",
+ "scopeguard",
+ "serde",
+ "serde_json",
+ "serde_path_to_error",
+ "serde_urlencoded",
+ "sha1",
+ "slog",
+ "slog-async",
+ "slog-bunyan",
+ "slog-json",
+ "slog-term",
+ "tokio",
+ "tokio-rustls 0.25.0",
+ "toml 0.8.19",
+ "uuid",
+ "version_check",
+ "waitgroup",
+]
+
+[[package]]
+name = "dropshot"
+version = "0.11.1-dev"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#e257f44fd36e358ff88793363aed6bf2108910de"
+dependencies = [
+ "async-stream",
+ "async-trait",
+ "base64 0.22.1",
+ "bytes",
+ "camino",
+ "chrono",
+ "debug-ignore",
+ "dropshot_endpoint 0.11.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
  "form_urlencoded",
  "futures",
  "hostname 0.4.0",
@@ -2506,6 +2553,19 @@ dependencies = [
 name = "dropshot_endpoint"
 version = "0.11.1-dev"
 source = "git+https://github.com/seanmonstar/dropshot?branch=hyper-v1-2.4-own-body#9075a2a56f0e6cd8797ecc3a0842922718f0560b"
+dependencies = [
+ "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "serde",
+ "serde_tokenstream",
+ "syn 2.0.77",
+]
+
+[[package]]
+name = "dropshot_endpoint"
+version = "0.11.1-dev"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#e257f44fd36e358ff88793363aed6bf2108910de"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -3160,7 +3220,7 @@ dependencies = [
 name = "gateway-api"
 version = "0.1.0"
 dependencies = [
- "dropshot 0.11.1-dev",
+ "dropshot 0.11.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
  "gateway-types",
  "omicron-common",
  "omicron-uuid-kinds",
@@ -3201,7 +3261,7 @@ dependencies = [
  "chrono",
  "gateway-messages",
  "omicron-workspace-hack",
- "progenitor 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=dependabot/cargo/reqwest-0.12.4)",
+ "progenitor 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
  "rand",
  "reqwest 0.12.7",
  "schemars",
@@ -3265,7 +3325,7 @@ name = "gateway-test-utils"
 version = "0.1.0"
 dependencies = [
  "camino",
- "dropshot 0.11.1-dev",
+ "dropshot 0.11.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
  "gateway-messages",
  "gateway-types",
  "omicron-gateway",
@@ -3310,15 +3370,6 @@ checksum = "dc3655aa6818d65bc620d6911f05aa7b6aeb596291e1e9f79e52df85583d1e30"
 dependencies = [
  "rustix",
  "windows-targets 0.52.6",
-]
-
-[[package]]
-name = "getopts"
-version = "0.2.21"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14dbbfd5c71d70241ecf9e6f13737f7b5ce823821063188d7e46c41d371eebd5"
-dependencies = [
- "unicode-width",
 ]
 
 [[package]]
@@ -3990,7 +4041,7 @@ dependencies = [
  "httpdate",
  "itoa",
  "pin-project-lite",
- "socket2 0.5.7",
+ "socket2 0.4.10",
  "tokio",
  "tower-service",
  "tracing",
@@ -4397,7 +4448,7 @@ name = "installinator-api"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "dropshot 0.11.1-dev",
+ "dropshot 0.11.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
  "hyper 1.4.1",
  "installinator-common",
  "omicron-common",
@@ -4415,7 +4466,7 @@ dependencies = [
  "installinator-common",
  "omicron-common",
  "omicron-workspace-hack",
- "progenitor 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=dependabot/cargo/reqwest-0.12.4)",
+ "progenitor 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
  "regress 0.9.1",
  "reqwest 0.12.7",
  "schemars",
@@ -4465,7 +4516,7 @@ dependencies = [
  "chrono",
  "dns-server",
  "dns-service-client",
- "dropshot 0.11.1-dev",
+ "dropshot 0.11.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
  "expectorate",
  "futures",
  "hickory-resolver",
@@ -4474,7 +4525,7 @@ dependencies = [
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "progenitor 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=dependabot/cargo/reqwest-0.12.4)",
+ "progenitor 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
  "reqwest 0.12.7",
  "serde",
  "serde_json",
@@ -4492,7 +4543,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "dropshot 0.11.1-dev",
+ "dropshot 0.11.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
  "hickory-resolver",
  "internal-dns",
  "omicron-common",
@@ -4821,7 +4872,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c2a198fb6b0eada2a8df47933734e6d35d350665a33a3593d7164fa52c75c19"
 dependencies = [
  "cfg-if",
- "windows-targets 0.52.6",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -5378,7 +5429,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "cookie",
- "dropshot 0.11.1-dev",
+ "dropshot 0.11.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
  "futures",
  "headers",
  "http 1.1.0",
@@ -5419,7 +5470,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
- "progenitor 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=dependabot/cargo/reqwest-0.12.4)",
+ "progenitor 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
  "regress 0.9.1",
  "reqwest 0.12.7",
  "schemars",
@@ -5435,7 +5486,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "camino",
- "dropshot 0.11.1-dev",
+ "dropshot 0.11.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
  "expectorate",
  "libc",
  "omicron-common",
@@ -5527,7 +5578,7 @@ dependencies = [
  "db-macros",
  "diesel",
  "diesel-dtrace",
- "dropshot 0.11.1-dev",
+ "dropshot 0.11.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
  "expectorate",
  "futures",
  "gateway-client",
@@ -5609,7 +5660,7 @@ name = "nexus-external-api"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "dropshot 0.11.1-dev",
+ "dropshot 0.11.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
  "http 1.1.0",
  "hyper 1.4.1",
  "ipnetwork",
@@ -5626,7 +5677,7 @@ dependencies = [
 name = "nexus-internal-api"
 version = "0.1.0"
 dependencies = [
- "dropshot 0.11.1-dev",
+ "dropshot 0.11.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
  "nexus-types",
  "omicron-common",
  "omicron-uuid-kinds",
@@ -5885,7 +5936,7 @@ dependencies = [
  "crucible-agent-client",
  "dns-server",
  "dns-service-client",
- "dropshot 0.11.1-dev",
+ "dropshot 0.11.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
  "futures",
  "gateway-messages",
  "gateway-test-utils",
@@ -5946,7 +5997,7 @@ dependencies = [
  "derive-where",
  "derive_more",
  "dns-service-client",
- "dropshot 0.11.1-dev",
+ "dropshot 0.11.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
  "futures",
  "gateway-client",
  "http 1.1.0",
@@ -6286,7 +6337,7 @@ dependencies = [
  "clickhouse-admin-api",
  "clickhouse-admin-types",
  "clickward",
- "dropshot 0.11.1-dev",
+ "dropshot 0.11.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
  "expectorate",
  "http 1.1.0",
  "illumos-utils",
@@ -6325,7 +6376,7 @@ dependencies = [
  "cockroach-admin-api",
  "cockroach-admin-types",
  "csv",
- "dropshot 0.11.1-dev",
+ "dropshot 0.11.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
  "expectorate",
  "http 1.1.0",
  "illumos-utils",
@@ -6367,7 +6418,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "chrono",
- "dropshot 0.11.1-dev",
+ "dropshot 0.11.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
  "expectorate",
  "futures",
  "hex",
@@ -6381,8 +6432,8 @@ dependencies = [
  "once_cell",
  "oxnet",
  "parse-display",
- "progenitor 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=dependabot/cargo/reqwest-0.12.4)",
- "progenitor-client 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=dependabot/cargo/reqwest-0.12.4)",
+ "progenitor 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
+ "progenitor-client 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
  "proptest",
  "rand",
  "regress 0.9.1",
@@ -6412,7 +6463,7 @@ dependencies = [
  "either",
  "omicron-common",
  "omicron-workspace-hack",
- "progenitor-client 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=dependabot/cargo/reqwest-0.12.4)",
+ "progenitor-client 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
  "reqwest 0.12.7",
  "serde",
  "sled-hardware-types",
@@ -6428,7 +6479,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "dropshot 0.11.1-dev",
+ "dropshot 0.11.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
  "expectorate",
  "futures",
  "libc",
@@ -6468,7 +6519,7 @@ dependencies = [
  "camino",
  "chrono",
  "clap",
- "dropshot 0.11.1-dev",
+ "dropshot 0.11.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
  "expectorate",
  "futures",
  "gateway-api",
@@ -6512,7 +6563,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_matches",
- "dropshot 0.11.1-dev",
+ "dropshot 0.11.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
  "futures",
  "internal-dns",
  "live-tests-macros",
@@ -6581,7 +6632,7 @@ dependencies = [
  "dns-server",
  "dns-service-client",
  "dpd-client",
- "dropshot 0.11.1-dev",
+ "dropshot 0.11.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
  "expectorate",
  "fatfs",
  "futures",
@@ -6650,7 +6701,7 @@ dependencies = [
  "petgraph",
  "pq-sys",
  "pretty_assertions",
- "progenitor-client 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=dependabot/cargo/reqwest-0.12.4)",
+ "progenitor-client 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
  "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?branch=hyper-v1)",
  "rand",
  "rcgen",
@@ -6707,7 +6758,7 @@ dependencies = [
  "crucible-agent-client",
  "csv",
  "diesel",
- "dropshot 0.11.1-dev",
+ "dropshot 0.11.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
  "dyn-clone",
  "expectorate",
  "futures",
@@ -6872,7 +6923,7 @@ dependencies = [
  "dns-server",
  "dns-service-client",
  "dpd-client",
- "dropshot 0.11.1-dev",
+ "dropshot 0.11.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
  "expectorate",
  "flate2",
  "flume",
@@ -6960,7 +7011,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "chrono",
- "dropshot 0.11.1-dev",
+ "dropshot 0.11.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
  "expectorate",
  "filetime",
  "futures",
@@ -7207,7 +7258,7 @@ dependencies = [
  "clickhouse-admin-api",
  "cockroach-admin-api",
  "dns-server-api",
- "dropshot 0.11.1-dev",
+ "dropshot 0.11.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
  "fs-err",
  "gateway-api",
  "indent_write",
@@ -7377,7 +7428,7 @@ dependencies = [
  "http 1.1.0",
  "hyper 1.4.1",
  "omicron-workspace-hack",
- "progenitor 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=dependabot/cargo/reqwest-0.12.4)",
+ "progenitor 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
  "rand",
  "regress 0.9.1",
  "reqwest 0.12.7",
@@ -7426,7 +7477,7 @@ name = "oximeter-api"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "dropshot 0.11.1-dev",
+ "dropshot 0.11.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
  "omicron-common",
  "omicron-workspace-hack",
  "schemars",
@@ -7442,7 +7493,7 @@ dependencies = [
  "futures",
  "omicron-common",
  "omicron-workspace-hack",
- "progenitor 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=dependabot/cargo/reqwest-0.12.4)",
+ "progenitor 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
  "reqwest 0.12.7",
  "serde",
  "slog",
@@ -7457,7 +7508,7 @@ dependencies = [
  "camino",
  "chrono",
  "clap",
- "dropshot 0.11.1-dev",
+ "dropshot 0.11.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
  "expectorate",
  "futures",
  "httpmock",
@@ -7507,7 +7558,7 @@ dependencies = [
  "criterion",
  "crossterm 0.28.1",
  "display-error-chain",
- "dropshot 0.11.1-dev",
+ "dropshot 0.11.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
  "expectorate",
  "futures",
  "gethostname",
@@ -7552,7 +7603,7 @@ version = "0.1.0"
 dependencies = [
  "cfg-if",
  "chrono",
- "dropshot 0.11.1-dev",
+ "dropshot 0.11.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
  "futures",
  "http 1.1.0",
  "hyper 1.4.1",
@@ -7588,7 +7639,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap",
- "dropshot 0.11.1-dev",
+ "dropshot 0.11.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
  "internal-dns",
  "nexus-client",
  "omicron-common",
@@ -8487,12 +8538,11 @@ dependencies = [
 [[package]]
 name = "progenitor"
 version = "0.7.0"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=main#c59c6d64ed2a206bbbc9949abd3457bc0e3810e2"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#ab69e4e7f5147f0f12deb84d03aa145e144d9e53"
 dependencies = [
  "progenitor-client 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
  "progenitor-impl 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
  "progenitor-macro 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
- "serde_json",
 ]
 
 [[package]]
@@ -8512,12 +8562,12 @@ dependencies = [
 [[package]]
 name = "progenitor-client"
 version = "0.7.0"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=main#c59c6d64ed2a206bbbc9949abd3457bc0e3810e2"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#ab69e4e7f5147f0f12deb84d03aa145e144d9e53"
 dependencies = [
  "bytes",
  "futures-core",
  "percent-encoding",
- "reqwest 0.11.27",
+ "reqwest 0.12.7",
  "serde",
  "serde_json",
  "serde_urlencoded",
@@ -8547,11 +8597,10 @@ dependencies = [
 [[package]]
 name = "progenitor-impl"
 version = "0.7.0"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=main#c59c6d64ed2a206bbbc9949abd3457bc0e3810e2"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#ab69e4e7f5147f0f12deb84d03aa145e144d9e53"
 dependencies = [
- "getopts",
  "heck 0.5.0",
- "http 0.2.12",
+ "http 1.1.0",
  "indexmap 2.5.0",
  "openapiv3",
  "proc-macro2",
@@ -8586,7 +8635,7 @@ dependencies = [
 [[package]]
 name = "progenitor-macro"
 version = "0.7.0"
-source = "git+https://github.com/oxidecomputer/progenitor?branch=main#c59c6d64ed2a206bbbc9949abd3457bc0e3810e2"
+source = "git+https://github.com/oxidecomputer/progenitor?branch=main#ab69e4e7f5147f0f12deb84d03aa145e144d9e53"
 dependencies = [
  "openapiv3",
  "proc-macro2",
@@ -8651,7 +8700,7 @@ dependencies = [
  "atty",
  "base64 0.21.7",
  "clap",
- "dropshot 0.11.1-dev",
+ "dropshot 0.11.1-dev (git+https://github.com/seanmonstar/dropshot?branch=hyper-v1-2.4-own-body)",
  "futures",
  "hyper 1.4.1",
  "progenitor 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=dependabot/cargo/reqwest-0.12.4)",
@@ -8973,7 +9022,7 @@ dependencies = [
  "camino-tempfile",
  "clap",
  "dns-service-client",
- "dropshot 0.11.1-dev",
+ "dropshot 0.11.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
  "expectorate",
  "humantime",
  "indexmap 2.5.0",
@@ -10303,7 +10352,7 @@ name = "sled-agent-api"
 version = "0.1.0"
 dependencies = [
  "camino",
- "dropshot 0.11.1-dev",
+ "dropshot 0.11.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
  "nexus-sled-agent-shared",
  "omicron-common",
  "omicron-uuid-kinds",
@@ -10327,7 +10376,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "oxnet",
- "progenitor 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=dependabot/cargo/reqwest-0.12.4)",
+ "progenitor 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
  "regress 0.9.1",
  "reqwest 0.12.7",
  "schemars",
@@ -10674,7 +10723,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "clap",
- "dropshot 0.11.1-dev",
+ "dropshot 0.11.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
  "futures",
  "gateway-messages",
  "gateway-types",
@@ -12124,7 +12173,7 @@ dependencies = [
  "clap",
  "debug-ignore",
  "display-error-chain",
- "dropshot 0.11.1-dev",
+ "dropshot 0.11.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
  "futures",
  "hex",
  "hubtools",
@@ -12593,7 +12642,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "dpd-client",
- "dropshot 0.11.1-dev",
+ "dropshot 0.11.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
  "gateway-client",
  "maplit",
  "omicron-common",
@@ -12649,7 +12698,7 @@ dependencies = [
  "debug-ignore",
  "display-error-chain",
  "dpd-client",
- "dropshot 0.11.1-dev",
+ "dropshot 0.11.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
  "either",
  "expectorate",
  "flate2",
@@ -12717,7 +12766,7 @@ name = "wicketd-api"
 version = "0.1.0"
 dependencies = [
  "bootstrap-agent-client",
- "dropshot 0.11.1-dev",
+ "dropshot 0.11.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
  "gateway-client",
  "omicron-common",
  "omicron-passwords",
@@ -12739,7 +12788,7 @@ dependencies = [
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "progenitor 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=dependabot/cargo/reqwest-0.12.4)",
+ "progenitor 0.7.0 (git+https://github.com/oxidecomputer/progenitor?branch=main)",
  "regress 0.9.1",
  "reqwest 0.12.7",
  "schemars",
@@ -13216,7 +13265,7 @@ dependencies = [
  "anyhow",
  "camino",
  "clap",
- "dropshot 0.11.1-dev",
+ "dropshot 0.11.1-dev (git+https://github.com/oxidecomputer/dropshot?branch=main)",
  "illumos-utils",
  "omicron-common",
  "omicron-sled-agent",
