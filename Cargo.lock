@@ -663,7 +663,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?branch=hyper-v1#9035d46325f70b7a3c5dffc170b4d32788ca5cfb"
+source = "git+https://github.com/oxidecomputer/propolis?branch=hyper-v1#156c0936f7fffdaf49cc1e7f993857a0e16165f2"
 dependencies = [
  "bhyve_api_sys",
  "libc",
@@ -673,7 +673,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?branch=hyper-v1#9035d46325f70b7a3c5dffc170b4d32788ca5cfb"
+source = "git+https://github.com/oxidecomputer/propolis?branch=hyper-v1#156c0936f7fffdaf49cc1e7f993857a0e16165f2"
 dependencies = [
  "libc",
  "strum",
@@ -1728,7 +1728,7 @@ dependencies = [
  "anyhow",
  "atty",
  "crucible-workspace-hack",
- "dropshot 0.10.2-dev",
+ "dropshot 0.12.1-dev",
  "nix 0.29.0",
  "rusqlite",
  "rustls-pemfile 1.0.4",
@@ -1975,12 +1975,12 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?branch=hyper-v1#1dbbe4944631efb962a311c13b70f883a6a845dc"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=9e0fe45ca3862176dc31ad8cc83f605f8a7e1a42#9e0fe45ca3862176dc31ad8cc83f605f8a7e1a42"
 dependencies = [
  "oxnet",
  "percent-encoding",
  "progenitor 0.7.0",
- "reqwest 0.12.7",
+ "reqwest 0.11.27",
  "serde",
  "serde_json",
  "slog",
@@ -2443,8 +2443,9 @@ dependencies = [
 
 [[package]]
 name = "dropshot"
-version = "0.10.2-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#06c8dab40e28d313f8bb0e15e1027eeace3bce89"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab804b8d4ab58d96e1e19c8ef87e1747a70d2819e92b659d6fe8d5ac5ac44d50"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -2453,12 +2454,14 @@ dependencies = [
  "camino",
  "chrono",
  "debug-ignore",
- "dropshot_endpoint 0.10.2-dev",
+ "dropshot_endpoint 0.12.0",
  "form_urlencoded",
  "futures",
  "hostname 0.4.0",
- "http 0.2.12",
- "hyper 0.14.30",
+ "http 1.1.0",
+ "http-body-util",
+ "hyper 1.4.1",
+ "hyper-util",
  "indexmap 2.5.0",
  "multer",
  "openapiv3",
@@ -2489,9 +2492,8 @@ dependencies = [
 
 [[package]]
 name = "dropshot"
-version = "0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab804b8d4ab58d96e1e19c8ef87e1747a70d2819e92b659d6fe8d5ac5ac44d50"
+version = "0.12.1-dev"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#7d8cd2205072e93119856d90e6766dae29554a22"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -2500,7 +2502,7 @@ dependencies = [
  "camino",
  "chrono",
  "debug-ignore",
- "dropshot_endpoint 0.12.0",
+ "dropshot_endpoint 0.12.1-dev",
  "form_urlencoded",
  "futures",
  "hostname 0.4.0",
@@ -2551,8 +2553,9 @@ dependencies = [
 
 [[package]]
 name = "dropshot_endpoint"
-version = "0.10.2-dev"
-source = "git+https://github.com/oxidecomputer/dropshot?branch=main#06c8dab40e28d313f8bb0e15e1027eeace3bce89"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "796be76b11b79de0decd7be2105add01220f8bbe04cf1f83214c0b801414a722"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -2564,9 +2567,8 @@ dependencies = [
 
 [[package]]
 name = "dropshot_endpoint"
-version = "0.12.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "796be76b11b79de0decd7be2105add01220f8bbe04cf1f83214c0b801414a722"
+version = "0.12.1-dev"
+source = "git+https://github.com/oxidecomputer/dropshot?branch=main#7d8cd2205072e93119856d90e6766dae29554a22"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -4051,7 +4053,7 @@ dependencies = [
  "httpdate",
  "itoa",
  "pin-project-lite",
- "socket2 0.5.7",
+ "socket2 0.4.10",
  "tokio",
  "tower-service",
  "tracing",
@@ -5215,13 +5217,13 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?branch=hyper-v1#1dbbe4944631efb962a311c13b70f883a6a845dc"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=9e0fe45ca3862176dc31ad8cc83f605f8a7e1a42#9e0fe45ca3862176dc31ad8cc83f605f8a7e1a42"
 dependencies = [
  "anyhow",
  "chrono",
  "percent-encoding",
  "progenitor 0.7.0",
- "reqwest 0.12.7",
+ "reqwest 0.11.27",
  "schemars",
  "serde",
  "serde_json",
@@ -6474,6 +6476,7 @@ dependencies = [
  "omicron-common",
  "omicron-workspace-hack",
  "progenitor-client 0.8.0",
+ "reqwest 0.11.27",
  "reqwest 0.12.7",
  "serde",
  "sled-hardware-types",
@@ -8668,7 +8671,7 @@ dependencies = [
 [[package]]
 name = "propolis-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/propolis?branch=hyper-v1#9035d46325f70b7a3c5dffc170b4d32788ca5cfb"
+source = "git+https://github.com/oxidecomputer/propolis?branch=hyper-v1#156c0936f7fffdaf49cc1e7f993857a0e16165f2"
 dependencies = [
  "async-trait",
  "base64 0.21.7",
@@ -8710,13 +8713,13 @@ dependencies = [
 [[package]]
 name = "propolis-mock-server"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?branch=hyper-v1#9035d46325f70b7a3c5dffc170b4d32788ca5cfb"
+source = "git+https://github.com/oxidecomputer/propolis?branch=hyper-v1#156c0936f7fffdaf49cc1e7f993857a0e16165f2"
 dependencies = [
  "anyhow",
  "atty",
  "base64 0.21.7",
  "clap",
- "dropshot 0.10.2-dev",
+ "dropshot 0.12.0",
  "futures",
  "hyper 1.4.1",
  "progenitor 0.8.0",
@@ -8752,7 +8755,7 @@ dependencies = [
 [[package]]
 name = "propolis_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?branch=hyper-v1#9035d46325f70b7a3c5dffc170b4d32788ca5cfb"
+source = "git+https://github.com/oxidecomputer/propolis?branch=hyper-v1#156c0936f7fffdaf49cc1e7f993857a0e16165f2"
 dependencies = [
  "schemars",
  "serde",

@@ -11,6 +11,7 @@ workspace = true
 either.workspace = true
 progenitor-client.workspace = true
 reqwest = { workspace = true, features = ["json", "stream", "rustls-tls"] }
+reqwest11 = { workspace = true, features = ["json", "stream", "rustls-tls"] }
 serde.workspace = true
 slog.workspace = true
 thiserror.workspace = true
