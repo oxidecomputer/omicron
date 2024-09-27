@@ -1023,6 +1023,10 @@ pub struct InstanceCreate {
     pub disks: Vec<InstanceDiskAttachment>,
 
     /// Choice of which disk this instance should boot from.
+    ///
+    /// If not provided, this instance will initially try to boot disks in PCI
+    /// device order, but ultimately boot according to the settings recorded in
+    /// guest-configured UEFI variables.
     #[serde(default)]
     pub boot_disk: Option<NameOrId>,
 
@@ -1050,6 +1054,9 @@ pub struct InstanceCreate {
 /// Parameters of an `Instance` that can be reconfigured after creation.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceUpdate {
+    /// Name or ID of the disk the instance should be instructed to boot from.
+    ///
+    /// If not provided, unset the instance's boot disk.
     pub boot_disk: Option<NameOrId>,
 }
 
