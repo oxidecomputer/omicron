@@ -1106,11 +1106,11 @@ impl DataStore {
                         .execute_async(&conn)
                         .await?;
 
-                    // TODO: dedupe this query and  `instance_fetch_with_vmm` At
-                    // the moment, we're only allowing instance reconfiguration
-                    // in states that would have no VMM, but load it anyway so
-                    // that we return correct data if this is relaxed in the
-                    // future...
+                    // TODO: dedupe this query and  `instance_fetch_with_vmm`.
+                    // At the moment, we're only allowing instance
+                    // reconfiguration in states that would have no VMM, but
+                    // load it anyway so that we return correct data if this is
+                    // relaxed in the future...
                     let (instance, vmm) = instance_dsl::instance
                         .filter(instance_dsl::id.eq(authz_instance.id()))
                         .filter(instance_dsl::time_deleted.is_null())
