@@ -466,7 +466,7 @@ omicron-rpaths = { path = "rpaths" }
 omicron-sled-agent = { path = "sled-agent" }
 omicron-test-utils = { path = "test-utils" }
 omicron-workspace-hack = "0.1.0"
-omicron-zone-package = "0.11.0"
+omicron-zone-package = "0.11.1"
 oxide-client = { path = "clients/oxide-client" }
 oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "76878de67229ea113d70503c441eab47ac5dc653", features = [ "api", "std" ] }
 oxlog = { path = "dev-tools/oxlog" }
