@@ -172,7 +172,6 @@ impl InstanceReincarnation {
                 );
                 break;
             }
-            let found = batch.len();
             for db_instance in batch {
                 let instance_id = db_instance.id();
                 info!(
