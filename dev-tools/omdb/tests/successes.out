@@ -524,7 +524,7 @@ task: "external_endpoints"
     TLS certificates: 0
 
 task: "instance_reincarnation"
-  configured period: every 1m
+  configured period: every 10m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
@@ -966,7 +966,7 @@ task: "external_endpoints"
     TLS certificates: 0
 
 task: "instance_reincarnation"
-  configured period: every 1m
+  configured period: every 10m
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
