@@ -21,5 +21,6 @@ cd /tmp
 cargo new --lib test-project
 cd test-project
 cargo add omicron-common --path /work/oxidecomputer/omicron/common
+cp /work/oxidecomputer/omicron/Cargo.lock Cargo.lock
 cargo check
 cargo build --release
