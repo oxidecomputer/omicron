@@ -7,6 +7,7 @@
 use crate::bootstrap::config::BOOTSTRAP_AGENT_RACK_INIT_PORT;
 use camino::Utf8PathBuf;
 use omicron_common::ledger::{self, Ledger, Ledgerable};
+use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::rack_init::back_compat::RackInitializeRequestV1 as ConfigV1;
@@ -142,7 +143,7 @@ impl Plan {
                     generation: 0,
                     schema_version: 1,
                     body: StartSledAgentRequestBody {
-                        id: Uuid::new_v4(),
+                        id: SledUuid::new_v4(),
                         subnet,
                         use_trust_quorum,
                         is_lrtq_learner: false,

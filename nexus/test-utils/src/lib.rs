@@ -133,7 +133,7 @@ pub struct ControlPlaneTestContext<N> {
 
 impl<N: NexusServer> ControlPlaneTestContext<N> {
     pub fn first_sled(&self) -> SledUuid {
-        SledUuid::from_untyped_uuid(self.sled_agent.sled_agent.id)
+        self.sled_agent.sled_agent.id
     }
 
     pub fn all_sled_agents(&self) -> impl Iterator<Item = &sim::Server> {
@@ -805,7 +805,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                 (self.sled_agent2.as_ref(), &self.blueprint_zones2),
             ] {
                 if let Some(sa) = maybe_sled_agent {
-                    let sled_id = SledUuid::from_untyped_uuid(sa.sled_agent.id);
+                    let sled_id = sa.sled_agent.id;
                     blueprint_zones.insert(
                         sled_id,
                         BlueprintZonesConfig {
@@ -1432,7 +1432,7 @@ pub async fn start_sled_agent(
     sim_mode: sim::SimMode,
 ) -> Result<sim::Server, String> {
     let config = sim::Config::for_testing(
-        id.into_untyped_uuid(),
+        id,
         sim_mode,
         Some(nexus_address),
         Some(update_directory),
