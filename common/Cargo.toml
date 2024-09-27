@@ -46,7 +46,6 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["full"] }
 uuid.workspace = true
 parse-display.workspace = true
-progenitor.workspace = true
 progenitor-client.workspace = true
 omicron-workspace-hack.workspace = true
 once_cell.workspace = true

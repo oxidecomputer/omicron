@@ -6383,7 +6383,6 @@ dependencies = [
  "once_cell",
  "oxnet",
  "parse-display",
- "progenitor 0.8.0",
  "progenitor-client 0.8.0",
  "proptest",
  "rand",
