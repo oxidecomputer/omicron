@@ -217,6 +217,8 @@ impl GatewayApi for GatewayImpl {
         const CABOOSE_KEY_BOARD: [u8; 4] = *b"BORD";
         const CABOOSE_KEY_NAME: [u8; 4] = *b"NAME";
         const CABOOSE_KEY_VERSION: [u8; 4] = *b"VERS";
+        const CABOOSE_KEY_SIGN: [u8; 4] = *b"SIGN";
+        const CABOOSE_KEY_EPOC: [u8; 4] = *b"EPOC";
 
         let apictx = rqctx.context();
         let PathSpComponent { sp, component } = path.into_inner();
@@ -287,8 +289,43 @@ impl GatewayApi for GatewayImpl {
             let name = from_utf8(&CABOOSE_KEY_NAME, name)?;
             let version = from_utf8(&CABOOSE_KEY_VERSION, version)?;
 
-            let caboose =
-                SpComponentCaboose { git_commit, board, name, version };
+            // Not all images include the SIGN or EPOC in the caboose, if it's not present
+            // don't treat it as an error
+
+            let sign = match sp
+                .read_component_caboose(
+                    component,
+                    firmware_slot,
+                    CABOOSE_KEY_SIGN,
+                )
+                .await
+                .ok()
+            {
+                None => None,
+                Some(v) => Some(from_utf8(&CABOOSE_KEY_SIGN, v)?),
+            };
+
+            let epoch = match sp
+                .read_component_caboose(
+                    component,
+                    firmware_slot,
+                    CABOOSE_KEY_EPOC,
+                )
+                .await
+                .ok()
+            {
+                None => None,
+                Some(v) => Some(from_utf8(&CABOOSE_KEY_EPOC, v)?),
+            };
+
+            let caboose = SpComponentCaboose {
+                git_commit,
+                board,
+                name,
+                version,
+                sign,
+                epoch,
+            };
 
             Ok(HttpResponseOk(caboose))
         };

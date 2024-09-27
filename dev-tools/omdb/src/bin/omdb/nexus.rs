@@ -2148,11 +2148,15 @@ async fn cmd_nexus_blueprints_list(
         }
     };
 
-    let rows: Vec<BlueprintRow> = client
+    let mut rows = client
         .blueprint_list_stream(None, None)
         .try_collect::<Vec<_>>()
         .await
-        .context("listing blueprints")?
+        .context("listing blueprints")?;
+
+    rows.sort_unstable_by_key(|blueprint| blueprint.time_created);
+
+    let rows: Vec<_> = rows
         .into_iter()
         .map(|blueprint| {
             let (is_target, enabled) = match &target {

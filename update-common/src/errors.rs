@@ -118,6 +118,12 @@ pub enum RepositoryError {
         #[source]
         error: hubtools::CabooseError,
     },
+    #[error("error reading sign from hubris caboose of {id:?}")]
+    ReadHubrisCabooseSign {
+        id: ArtifactId,
+        #[source]
+        error: hubtools::CabooseError,
+    },
 
     #[error(
         "error reading board from hubris caboose of {0:?}: non-utf8 value"
@@ -140,6 +146,14 @@ pub enum RepositoryError {
         "duplicate hash entries found in artifacts.json for kind `{}`, hash `{}`", .0.kind, .0.hash
     )]
     DuplicateHashEntry(ArtifactHashId),
+    #[error("error creating reader stream")]
+    CreateReaderStream(#[source] anyhow::Error),
+    #[error("error reading extracted archive kind {}, hash {}", .artifact.kind, .artifact.hash)]
+    ReadExtractedArchive {
+        artifact: ArtifactHashId,
+        #[source]
+        error: std::io::Error,
+    },
 }
 
 impl RepositoryError {
@@ -153,7 +167,9 @@ impl RepositoryError {
             | RepositoryError::TempFileCreate(_)
             | RepositoryError::TempFileWrite(_)
             | RepositoryError::TempFileFlush(_)
-            | RepositoryError::NamedTempFileCreate { .. } => {
+            | RepositoryError::NamedTempFileCreate { .. }
+            | RepositoryError::ReadExtractedArchive { .. }
+            | RepositoryError::CreateReaderStream { .. } => {
                 HttpError::for_unavail(None, message)
             }
 
@@ -176,6 +192,7 @@ impl RepositoryError {
             | RepositoryError::ParsingHubrisArchive { .. }
             | RepositoryError::ReadHubrisCaboose { .. }
             | RepositoryError::ReadHubrisCabooseBoard { .. }
+            | RepositoryError::ReadHubrisCabooseSign { .. }
             | RepositoryError::ReadHubrisCabooseBoardUtf8(_)
             | RepositoryError::MultipleVersionsPresent { .. } => {
                 HttpError::for_bad_request(None, message)

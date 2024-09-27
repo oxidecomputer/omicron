@@ -377,6 +377,23 @@ impl IntoRotPage for gateway_client::types::RotCfpa {
     }
 }
 
+/// Firmware reported for a physical NVMe disk.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct NvmeFirmware {
+    pub active_slot: u8,
+    pub next_active_slot: Option<u8>,
+    pub number_of_slots: u8,
+    pub slot1_is_read_only: bool,
+    pub slot_firmware_versions: Vec<Option<String>>,
+}
+
+/// Firmware reported by sled agent for a particular disk format.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub enum PhysicalDiskFirmware {
+    Unknown,
+    Nvme(NvmeFirmware),
+}
+
 /// A physical disk reported by a sled agent.
 ///
 /// This identifies that a physical disk appears in a Sled.
@@ -391,6 +408,7 @@ pub struct PhysicalDisk {
     pub identity: omicron_common::disk::DiskIdentity,
     pub variant: PhysicalDiskKind,
     pub slot: i64,
+    pub firmware: PhysicalDiskFirmware,
 }
 
 impl From<InventoryDisk> for PhysicalDisk {
@@ -399,6 +417,13 @@ impl From<InventoryDisk> for PhysicalDisk {
             identity: disk.identity,
             variant: disk.variant.into(),
             slot: disk.slot,
+            firmware: PhysicalDiskFirmware::Nvme(NvmeFirmware {
+                active_slot: disk.active_firmware_slot,
+                next_active_slot: disk.next_active_firmware_slot,
+                number_of_slots: disk.number_of_firmware_slots,
+                slot1_is_read_only: disk.slot1_is_read_only,
+                slot_firmware_versions: disk.slot_firmware_versions,
+            }),
         }
     }
 }
