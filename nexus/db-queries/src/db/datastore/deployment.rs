@@ -1516,8 +1516,6 @@ impl QueryFragment<Pg> for InsertTargetQuery {
         out.push_sql(",");
         out.push_identifier(dsl::time_made_target::NAME)?;
 
-        out.push_sql("), zzzzz AS (UPDATE bp_target SET enabled = not enabled WHERE blueprint_id IN (select blueprint_id from current_target) RETURNING 1");
-
         out.push_sql(") SELECT new_target.new_version, ");
         out.push_bind_param::<sql_types::Uuid, Uuid>(&self.target_id)?;
         out.push_sql(",");
