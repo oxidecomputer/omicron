@@ -130,7 +130,7 @@ impl ClickhouseAllocator {
         }
 
         // Now we need to configure the keepers. We can only add or remove
-        // one keeper at a time.
+        // one keeper at a time during a reconfiguration.
         //
         // We need to see if we have any keeper inventory so we can compare it
         // with our current configuration and see if any changes are required.
@@ -139,24 +139,27 @@ impl ClickhouseAllocator {
         // know whether a configuration is ongoing or not.
         //
         // There is an exception to this rule: on *new* clusters that have
-        // keeper zones deployed but do not have any keepers running we must
-        // start at least one keeper unconditionally. This is because we cannot
-        // retrieve keeper inventory if there are no keepers running.
+        // keeper zones deployed but do not have any keepers running we can
+        // create a full cluster configuration unconditionally. We can add
+        // more than one keeper because this is the initial configuration
+        // and not a "reconfiguration" that only allows adding or removing
+        // one node at a time. Furthermore, we have to start at leasat one
+        // keeper unconditionally in this case because we cannot retrieve
+        // keeper inventory if there are no keepers running. Without retrieving
+        // inventory, we cannot make further progress.
         let current_keepers: BTreeSet<_> =
             self.parent_config.keepers.values().cloned().collect();
         let Some(inventory_membership) = &self.inventory else {
-            // Are we a new cluster and do we have any active keeper zones?
-            if new_config.max_used_keeper_id == 0.into()
-                && !active_clickhouse_zones.keepers.is_empty()
-            {
-                // Unwrap safety: We check that there is at least one keeper in
-                // the `if` condition above.
-                let zone_id = active_clickhouse_zones.keepers.first().unwrap();
-                // Allocate a new `KeeperId` and map it to the first zone
-                new_config.max_used_keeper_id = 1.into();
-                new_config
-                    .keepers
-                    .insert(*zone_id, new_config.max_used_keeper_id);
+            // Are we a new cluster ?
+            if new_config.max_used_keeper_id == 0.into() {
+                // Generate our initial configuration
+                for zone_id in &active_clickhouse_zones.keepers {
+                    // Allocate a new `KeeperId` and map it to the zone_id
+                    new_config.max_used_keeper_id += 1.into();
+                    new_config
+                        .keepers
+                        .insert(*zone_id, new_config.max_used_keeper_id);
+                }
             }
             return bump_gen_if_necessary(new_config);
         };

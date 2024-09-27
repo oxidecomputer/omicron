@@ -2217,8 +2217,8 @@ mod test {
         logctx.cleanup_successful();
     }
 
-    /// Deploy all keeper nodes 1 at a time and all server nodes at once
-    /// starting from 0 deployed nodes
+    /// Deploy all keeper nodes server nodes at once for a new cluster.
+    /// Then add keeper nodes 1 at a time.
     #[test]
     fn test_plan_deploy_all_clickhouse_cluster_nodes() {
         static TEST_NAME: &str = "planner_deploy_all_keeper_nodes";
@@ -2233,9 +2233,7 @@ mod test {
         // We shouldn't have a clickhouse cluster config, as we don't have a
         // clickhouse policy set yet
         assert!(blueprint1.clickhouse_cluster_config.is_none());
-        // We'd typically use at least 3 servers here, but we're trying to keep
-        // this test reasonably short.
-        let target_keepers = 2;
+        let target_keepers = 3;
         let target_servers = 2;
 
         // Enable clickhouse clusters via policy
@@ -2260,7 +2258,7 @@ mod test {
         .plan()
         .expect("plan");
 
-        // We should see zones for 2 clickhouse keepers, and 2 servers created
+        // We should see zones for 3 clickhouse keepers, and 2 servers created
         let active_zones: Vec<_> = blueprint2
             .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
             .map(|(_, z)| z.clone())
@@ -2280,24 +2278,27 @@ mod test {
         assert_eq!(keeper_zone_ids.len(), target_keepers);
         assert_eq!(server_zone_ids.len(), target_servers);
 
-        // We should be attempting to allocate both servers and a single keeper
+        // We should be attempting to allocate all servers and a single keeper
         // until the inventory reflects a change in keeper membership.
         {
             let clickhouse_cluster_config =
                 blueprint2.clickhouse_cluster_config.as_ref().unwrap();
             assert_eq!(clickhouse_cluster_config.generation, 2.into());
-            assert_eq!(clickhouse_cluster_config.max_used_keeper_id, 1.into());
+            assert_eq!(
+                clickhouse_cluster_config.max_used_keeper_id,
+                (target_keepers as u64).into()
+            );
             assert_eq!(
                 clickhouse_cluster_config.max_used_server_id,
                 (target_servers as u64).into()
             );
-            assert_eq!(clickhouse_cluster_config.keepers.len(), 1);
+            assert_eq!(clickhouse_cluster_config.keepers.len(), target_keepers);
             assert_eq!(clickhouse_cluster_config.servers.len(), target_servers);
 
-            // Ensure that the added keeper is in a keeper zone
-            let zone_id =
-                &clickhouse_cluster_config.keepers.first_key_value().unwrap().0;
-            assert!(keeper_zone_ids.contains(zone_id));
+            // Ensure that the added keepers are in server zones
+            for zone_id in clickhouse_cluster_config.keepers.keys() {
+                assert!(keeper_zone_ids.contains(zone_id));
+            }
 
             // Ensure that the added servers are in server zones
             for zone_id in clickhouse_cluster_config.servers.keys() {
@@ -2324,8 +2325,9 @@ mod test {
             blueprint3.clickhouse_cluster_config
         );
 
-        // Updating the inventory to reflect the first keeper should result in a
-        // new configured keeper.
+        // Updating the inventory to reflect the keepers
+        // should result in the same state, except for the
+        // `highest_seen_keeper_leader_committed_log_index`
         let (zone_id, keeper_id) = blueprint3
             .clickhouse_cluster_config
             .as_ref()
@@ -2336,7 +2338,14 @@ mod test {
         let membership = ClickhouseKeeperClusterMembership {
             queried_keeper: *keeper_id,
             leader_committed_log_index: 1,
-            raft_config: [*keeper_id].into_iter().collect(),
+            raft_config: blueprint3
+                .clickhouse_cluster_config
+                .as_ref()
+                .unwrap()
+                .keepers
+                .values()
+                .cloned()
+                .collect(),
         };
         collection
             .clickhouse_keeper_cluster_membership
@@ -2354,36 +2363,36 @@ mod test {
         .plan()
         .expect("plan");
 
-        // We should be attempting to allocate 2 keepers now that one is running
-        // and returning inventory.
-        {
-            let clickhouse_cluster_config =
-                blueprint4.clickhouse_cluster_config.as_ref().unwrap();
-            assert_eq!(clickhouse_cluster_config.generation, 3.into());
-            assert_eq!(clickhouse_cluster_config.max_used_keeper_id, 2.into());
-            assert_eq!(clickhouse_cluster_config.keepers.len(), 2);
+        let bp3_config = blueprint3.clickhouse_cluster_config.as_ref().unwrap();
+        let bp4_config = blueprint4.clickhouse_cluster_config.as_ref().unwrap();
+        assert_eq!(bp4_config.generation, bp3_config.generation);
+        assert_eq!(
+            bp4_config.max_used_keeper_id,
+            bp3_config.max_used_keeper_id
+        );
+        assert_eq!(
+            bp4_config.max_used_server_id,
+            bp3_config.max_used_server_id
+        );
+        assert_eq!(bp4_config.keepers, bp3_config.keepers);
+        assert_eq!(bp4_config.servers, bp3_config.servers);
+        assert_eq!(
+            bp4_config.highest_seen_keeper_leader_committed_log_index,
+            1
+        );
 
-            // Ensure that the keepers are in keeper zones
-            for zone_id in clickhouse_cluster_config.keepers.keys() {
-                assert!(keeper_zone_ids.contains(zone_id));
-            }
-        }
-
-        // Fill in the inventory for the second keeper. We should not allocate
-        // a new keeper since we have reached our target count. However, we should update
-        // the `highests_seen_keeper_committed_log_index`;
-        for (zone_id, keeper_id) in
-            &blueprint4.clickhouse_cluster_config.as_ref().unwrap().keepers
-        {
-            let membership = ClickhouseKeeperClusterMembership {
-                queried_keeper: *keeper_id,
-                leader_committed_log_index: 2,
-                raft_config: [1.into(), 2.into()].into_iter().collect(),
-            };
-            collection
-                .clickhouse_keeper_cluster_membership
-                .insert(*zone_id, membership);
-        }
+        // Let's bump the clickhouse target to 5 via policy so that we can add
+        // more nodes one at a time. Initial configuration deploys all nodes,
+        // but reconfigurations may only add or remove one node at a time.
+        // Enable clickhouse clusters via policy
+        let target_keepers = 5;
+        let mut input_builder = input.into_builder();
+        input_builder.policy_mut().clickhouse_policy = Some(ClickhousePolicy {
+            deploy_with_standalone: true,
+            target_servers,
+            target_keepers,
+        });
+        let input = input_builder.build();
         let blueprint5 = Planner::new_based_on(
             log.clone(),
             &blueprint4,
@@ -2392,37 +2401,140 @@ mod test {
             &collection,
         )
         .expect("created planner")
-        .with_rng_seed((TEST_NAME, "bp4"))
+        .with_rng_seed((TEST_NAME, "bp5"))
         .plan()
         .expect("plan");
 
-        let clickhouse_cluster_config4 =
-            blueprint4.clickhouse_cluster_config.as_ref().unwrap();
-        let clickhouse_cluster_config5 =
-            blueprint5.clickhouse_cluster_config.as_ref().unwrap();
+        let active_zones: Vec<_> = blueprint5
+            .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+            .map(|(_, z)| z.clone())
+            .collect();
 
+        let new_keeper_zone_ids: BTreeSet<_> = active_zones
+            .iter()
+            .filter(|z| z.zone_type.is_clickhouse_keeper())
+            .map(|z| z.id)
+            .collect();
+
+        // We should have allocated 2 new keeper zones
+        assert_eq!(new_keeper_zone_ids.len(), target_keepers);
+        assert!(keeper_zone_ids.is_subset(&new_keeper_zone_ids));
+
+        // We should be trying to provision one new keeper for a keeper zone
+        let bp4_config = blueprint4.clickhouse_cluster_config.as_ref().unwrap();
+        let bp5_config = blueprint5.clickhouse_cluster_config.as_ref().unwrap();
+        assert_eq!(bp5_config.generation, bp4_config.generation.next());
         assert_eq!(
-            clickhouse_cluster_config4.generation,
-            clickhouse_cluster_config5.generation
+            bp5_config.max_used_keeper_id,
+            bp4_config.max_used_keeper_id + 1.into()
         );
         assert_eq!(
-            clickhouse_cluster_config4.max_used_keeper_id,
-            clickhouse_cluster_config5.max_used_keeper_id
+            bp5_config.keepers.len(),
+            bp5_config.max_used_keeper_id.0 as usize
+        );
+
+        // Planning again without updating inventory results in the same `ClickhouseClusterConfig`
+        let blueprint6 = Planner::new_based_on(
+            log.clone(),
+            &blueprint5,
+            &input,
+            "test_blueprint6",
+            &collection,
+        )
+        .expect("created planner")
+        .with_rng_seed((TEST_NAME, "bp6"))
+        .plan()
+        .expect("plan");
+
+        let bp6_config = blueprint6.clickhouse_cluster_config.as_ref().unwrap();
+        assert_eq!(bp5_config, bp6_config);
+
+        // Updating the inventory to include the 4th node should add another
+        // keeper node
+        let membership = ClickhouseKeeperClusterMembership {
+            queried_keeper: *keeper_id,
+            leader_committed_log_index: 2,
+            raft_config: blueprint6
+                .clickhouse_cluster_config
+                .as_ref()
+                .unwrap()
+                .keepers
+                .values()
+                .cloned()
+                .collect(),
+        };
+        collection
+            .clickhouse_keeper_cluster_membership
+            .insert(*zone_id, membership);
+
+        let blueprint7 = Planner::new_based_on(
+            log.clone(),
+            &blueprint6,
+            &input,
+            "test_blueprint7",
+            &collection,
+        )
+        .expect("created planner")
+        .with_rng_seed((TEST_NAME, "bp7"))
+        .plan()
+        .expect("plan");
+
+        let bp7_config = blueprint7.clickhouse_cluster_config.as_ref().unwrap();
+        assert_eq!(bp7_config.generation, bp6_config.generation.next());
+        assert_eq!(
+            bp7_config.max_used_keeper_id,
+            bp6_config.max_used_keeper_id + 1.into()
         );
         assert_eq!(
-            clickhouse_cluster_config4.keepers,
-            clickhouse_cluster_config5.keepers
+            bp7_config.keepers.len(),
+            bp7_config.max_used_keeper_id.0 as usize
         );
-        assert_ne!(
-            clickhouse_cluster_config4
-                .highest_seen_keeper_leader_committed_log_index,
-            clickhouse_cluster_config5
-                .highest_seen_keeper_leader_committed_log_index
-        );
+        assert_eq!(bp7_config.keepers.len(), target_keepers);
         assert_eq!(
-            clickhouse_cluster_config5
-                .highest_seen_keeper_leader_committed_log_index,
+            bp7_config.highest_seen_keeper_leader_committed_log_index,
             2
+        );
+
+        // Updating the inventory to reflect the newest keeper node should not
+        // increase the cluster size since we have reached the target.
+        let membership = ClickhouseKeeperClusterMembership {
+            queried_keeper: *keeper_id,
+            leader_committed_log_index: 3,
+            raft_config: blueprint7
+                .clickhouse_cluster_config
+                .as_ref()
+                .unwrap()
+                .keepers
+                .values()
+                .cloned()
+                .collect(),
+        };
+        collection
+            .clickhouse_keeper_cluster_membership
+            .insert(*zone_id, membership);
+        let blueprint8 = Planner::new_based_on(
+            log.clone(),
+            &blueprint7,
+            &input,
+            "test_blueprint8",
+            &collection,
+        )
+        .expect("created planner")
+        .with_rng_seed((TEST_NAME, "bp8"))
+        .plan()
+        .expect("plan");
+
+        let bp8_config = blueprint8.clickhouse_cluster_config.as_ref().unwrap();
+        assert_eq!(bp8_config.generation, bp7_config.generation);
+        assert_eq!(
+            bp8_config.max_used_keeper_id,
+            bp7_config.max_used_keeper_id
+        );
+        assert_eq!(bp8_config.keepers, bp7_config.keepers);
+        assert_eq!(bp7_config.keepers.len(), target_keepers);
+        assert_eq!(
+            bp8_config.highest_seen_keeper_leader_committed_log_index,
+            3
         );
 
         logctx.cleanup_successful();
