@@ -1069,6 +1069,18 @@ const INSTANCE4: Uuid = Uuid::from_u128(0x44441257_5c3d_4647_83b0_8f3515da7be1);
 // "67060115" -> "Prop"olis
 const PROPOLIS: Uuid = Uuid::from_u128(0x11116706_5c3d_4647_83b0_8f3515da7be1);
 
+// "7154"-> "Disk"
+const DISK1: Uuid = Uuid::from_u128(0x11117154_5c3d_4647_83b0_8f3515da7be1);
+const DISK2: Uuid = Uuid::from_u128(0x22227154_5c3d_4647_83b0_8f3515da7be1);
+const DISK3: Uuid = Uuid::from_u128(0x33337154_5c3d_4647_83b0_8f3515da7be1);
+const DISK4: Uuid = Uuid::from_u128(0x44447154_5c3d_4647_83b0_8f3515da7be1);
+
+// "566F" -> "Vo"lume. V is difficult, OK?
+const VOLUME1: Uuid = Uuid::from_u128(0x1111566f_5c3d_4647_83b0_8f3515da7be1);
+const VOLUME2: Uuid = Uuid::from_u128(0x2222566f_5c3d_4647_83b0_8f3515da7be1);
+const VOLUME3: Uuid = Uuid::from_u128(0x3333566f_5c3d_4647_83b0_8f3515da7be1);
+const VOLUME4: Uuid = Uuid::from_u128(0x4444566f_5c3d_4647_83b0_8f3515da7be1);
+
 fn before_23_0_0(client: &Client) -> BoxFuture<'_, ()> {
     Box::pin(async move {
         // Create two silos
@@ -1461,6 +1473,101 @@ fn after_101_0_0(client: &Client) -> BoxFuture<'_, ()> {
         );
     })
 }
+
+fn before_105_0_0(client: &Client) -> BoxFuture<'_, ()> {
+    Box::pin(async {
+        // An instance with no attached disks (4) gets a NULL boot disk.
+        // An instance with one attached disk (5) gets that disk as a boot disk.
+        // An instance with two attached disks (6) gets a NULL boot disk.
+        client
+            .batch_execute(&format!(
+                "
+        INSERT INTO disk (
+            id, name, description, time_created,
+            time_modified, time_deleted, rcgen, project_id,
+            volume_id, disk_state, attach_instance_id, state_generation,
+            slot, time_state_updated, size_bytes, block_size,
+            origin_snapshot, origin_image, pantry_address
+        ) VALUES
+
+        ('{DISK1}', 'disk1', '', now(),
+        now(), NULL, 1, '{PROJECT}',
+        '{VOLUME1}', 'attached', '{INSTANCE1}', 1,
+        4, now(), 65536, '512',
+        NULL, NULL, NULL),
+        ('{DISK2}', 'disk2', '', now(),
+        now(), NULL, 1, '{PROJECT}',
+        '{VOLUME2}', 'attached', '{INSTANCE2}', 1,
+        4, now(), 65536, '512',
+        NULL, NULL, NULL),
+        ('{DISK3}', 'disk3', '', now(),
+        now(), NULL, 1,'{PROJECT}',
+        '{VOLUME3}', 'attached', '{INSTANCE3}', 1,
+        4, now(), 65536, '512',
+        NULL, NULL, NULL),
+        ('{DISK4}', 'disk4', '', now(),
+        now(), NULL, 1,'{PROJECT}',
+        '{VOLUME4}', 'attached', '{INSTANCE3}', 1,
+        4, now(), 65536, '512',
+        NULL, NULL, NULL);"
+            ))
+            .await
+            .expect("failed to create disks");
+    })
+}
+
+fn after_105_0_0(client: &Client) -> BoxFuture<'_, ()> {
+    Box::pin(async {
+        let rows = client
+            .query(
+                &format!("SELECT id, boot_disk_id FROM instance ORDER BY id;"),
+                &[],
+            )
+            .await
+            .expect("failed to load instance boot disks");
+        let boot_disks = process_rows(&rows);
+
+        assert_eq!(
+            boot_disks[0].values,
+            vec![
+                ColumnValue::new("id", INSTANCE1),
+                ColumnValue::new("boot_disk_id", DISK1),
+            ],
+            "instance {INSTANCE1} should have one attached disk that has been \
+             made the boot disk"
+        );
+
+        assert_eq!(
+            boot_disks[1].values,
+            vec![
+                ColumnValue::new("id", INSTANCE2),
+                ColumnValue::new("boot_disk_id", DISK2),
+            ],
+            "instance {INSTANCE2} should have a different attached disk that \
+             has been made the boot disk"
+        );
+
+        assert_eq!(
+            boot_disks[2].values,
+            vec![
+                ColumnValue::new("id", INSTANCE3),
+                ColumnValue::null("boot_disk_id"),
+            ],
+            "instance {INSTANCE3} should have two attached disks, neither the \
+             the boot disk"
+        );
+
+        assert_eq!(
+            boot_disks[3].values,
+            vec![
+                ColumnValue::new("id", INSTANCE4),
+                ColumnValue::null("boot_disk_id"),
+            ],
+            "instance {INSTANCE4} should have no attached disks, so \
+             no boot disk"
+        );
+    })
+}
 // Lazily initializes all migration checks. The combination of Rust function
 // pointers and async makes defining a static table fairly painful, so we're
 // using lazy initialization instead.
@@ -1494,6 +1601,11 @@ fn get_migration_checks() -> BTreeMap<SemverVersion, DataMigrationFns> {
     map.insert(
         SemverVersion(semver::Version::parse("101.0.0").unwrap()),
         DataMigrationFns { before: Some(before_101_0_0), after: after_101_0_0 },
+    );
+
+    map.insert(
+        SemverVersion(semver::Version::parse("105.0.0").unwrap()),
+        DataMigrationFns { before: Some(before_105_0_0), after: after_105_0_0 },
     );
 
     map

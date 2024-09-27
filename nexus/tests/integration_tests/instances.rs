@@ -4117,10 +4117,7 @@ async fn test_boot_disk_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         .expect("can attempt to reconfigure the instance");
 
     let instance = response.parsed_body::<Instance>().unwrap();
-    assert_eq!(
-        instance.boot_disk_id,
-        Some(disks[1].identity.id)
-    );
+    assert_eq!(instance.boot_disk_id, Some(disks[1].identity.id));
 }
 
 // Create an instance without a boot disk, fail to set the boot disk to a
