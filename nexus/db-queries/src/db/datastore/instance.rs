@@ -1023,7 +1023,7 @@ impl DataStore {
                     //   last steps of instance creation, while the instance is
                     //   still in Creating, is to reconfigure the instance to
                     //   the desired boot disk.
-                    let ok_to_reconfigure_instance_states = vec![
+                    let ok_to_reconfigure_instance_states = [
                         InstanceState::NoVmm,
                         InstanceState::Failed,
                         InstanceState::Creating,
@@ -1043,10 +1043,10 @@ impl DataStore {
 
                             if !state_ok {
                                 return Err(err.bail(Error::conflict(
-                                    "instance must be stopped to update"
+                                    "instance must be stopped to update",
                                 )));
                             }
-                        },
+                        }
                         Err(diesel::NotFound) => {
                             // If the instance simply doesn't exist, we
                             // shouldn't retry. Bail with a useful error.
@@ -1054,7 +1054,7 @@ impl DataStore {
                                 ResourceType::Instance,
                                 &authz_instance.id(),
                             )));
-                        },
+                        }
                         Err(e) => {
                             return Err(e);
                         }
