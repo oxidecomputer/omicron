@@ -141,11 +141,11 @@ impl ClickhouseAllocator {
         // There is an exception to this rule: on *new* clusters that have
         // keeper zones deployed but do not have any keepers running we can
         // create a full cluster configuration unconditionally. We can add
-        // more than one keeper because this is the initial configuration
-        // and not a "reconfiguration" that only allows adding or removing
-        // one node at a time. Furthermore, we have to start at leasat one
-        // keeper unconditionally in this case because we cannot retrieve
-        // keeper inventory if there are no keepers running. Without retrieving
+        // more than one keeper because this is the initial configuration and
+        // not a "reconfiguration" that only allows adding or removing one
+        // node at a time. Furthermore, we have to start at last one keeper
+        // unconditionally in this case because we cannot retrieve keeper
+        // inventory if there are no keepers running. Without retrieving
         // inventory, we cannot make further progress.
         let current_keepers: BTreeSet<_> =
             self.parent_config.keepers.values().cloned().collect();

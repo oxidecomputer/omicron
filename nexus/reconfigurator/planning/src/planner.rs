@@ -2278,8 +2278,8 @@ mod test {
         assert_eq!(keeper_zone_ids.len(), target_keepers);
         assert_eq!(server_zone_ids.len(), target_servers);
 
-        // We should be attempting to allocate all servers and a single keeper
-        // until the inventory reflects a change in keeper membership.
+        // We should be attempting to allocate all servers and keepers since
+        // this the initial configuration
         {
             let clickhouse_cluster_config =
                 blueprint2.clickhouse_cluster_config.as_ref().unwrap();
