@@ -693,8 +693,7 @@ async fn test_instance_start_creates_networking_state(
 
     let mut checked = false;
     for agent in &sled_agents {
-        if Some(agent.id) == with_vmm.sled_id().map(SledUuid::into_untyped_uuid)
-        {
+        if Some(agent.id) == with_vmm.sled_id() {
             assert_sled_vpc_routes(
                 agent,
                 &opctx,
@@ -1010,8 +1009,7 @@ async fn test_instance_migrate_v2p_and_routes(
         assert_sled_v2p_mappings(sled_agent, &nics[0], guest_nics[0].vni).await;
     }
 
-    let testctx_sled_id =
-        SledUuid::from_untyped_uuid(cptestctx.sled_agent.sled_agent.id);
+    let testctx_sled_id = cptestctx.sled_agent.sled_agent.id;
     let dst_sled_id = if original_sled_id == testctx_sled_id {
         other_sleds[0].0
     } else {
@@ -1095,7 +1093,7 @@ async fn test_instance_migrate_v2p_and_routes(
         // updated here because Nexus presumes that the instance's new sled
         // agent will have updated any mappings there. Remove this bifurcation
         // when Nexus programs all mappings explicitly.
-        if sled_agent.id != dst_sled_id.into_untyped_uuid() {
+        if sled_agent.id != dst_sled_id {
             assert_sled_v2p_mappings(sled_agent, &nics[0], guest_nics[0].vni)
                 .await;
         } else {

@@ -5100,8 +5100,7 @@ mod test {
         .await;
 
         let v1 = Generation::new();
-        let found =
-            mgr.omicron_zones_list().await.expect("failed to list zones");
+        let found = mgr.omicron_zones_list().await;
         assert_eq!(found.generation, v1);
         assert!(found.zones.is_empty());
 
@@ -5115,8 +5114,7 @@ mod test {
         )
         .await;
 
-        let found =
-            mgr.omicron_zones_list().await.expect("failed to list zones");
+        let found = mgr.omicron_zones_list().await;
         assert_eq!(found.generation, v2);
         assert_eq!(found.zones.len(), 1);
         assert_eq!(found.zones[0].id, id);
@@ -5179,8 +5177,7 @@ mod test {
         .await;
 
         let v1 = Generation::new();
-        let found =
-            mgr.omicron_zones_list().await.expect("failed to list zones");
+        let found = mgr.omicron_zones_list().await;
         assert_eq!(found.generation, v1);
         assert!(found.zones.is_empty());
 
@@ -5268,8 +5265,7 @@ mod test {
         ensure_new_service(&mgr, id, v2, dir.clone()).await;
         let v3 = v2.next();
         ensure_existing_service(&mgr, id, v3, dir).await;
-        let found =
-            mgr.omicron_zones_list().await.expect("failed to list zones");
+        let found = mgr.omicron_zones_list().await;
         assert_eq!(found.generation, v3);
         assert_eq!(found.zones.len(), 1);
         assert_eq!(found.zones[0].id, id);
@@ -5398,8 +5394,7 @@ mod test {
         .await;
         illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
 
-        let found =
-            mgr.omicron_zones_list().await.expect("failed to list zones");
+        let found = mgr.omicron_zones_list().await;
         assert_eq!(found.generation, v2);
         assert_eq!(found.zones.len(), 1);
         assert_eq!(found.zones[0].id, id);
@@ -5467,8 +5462,7 @@ mod test {
         )
         .await;
 
-        let found =
-            mgr.omicron_zones_list().await.expect("failed to list zones");
+        let found = mgr.omicron_zones_list().await;
         assert_eq!(found.generation, v1);
         assert!(found.zones.is_empty());
 
@@ -5524,8 +5518,7 @@ mod test {
         .await
         .unwrap();
 
-        let found =
-            mgr.omicron_zones_list().await.expect("failed to list zones");
+        let found = mgr.omicron_zones_list().await;
         assert_eq!(found.generation, v2);
         assert_eq!(found.zones.len(), 1);
         assert_eq!(found.zones[0].id, id1);
@@ -5560,8 +5553,7 @@ mod test {
             Error::RequestedConfigOutdated { requested, current }
             if requested == v1 && current == v2
         ));
-        let found2 =
-            mgr.omicron_zones_list().await.expect("failed to list zones");
+        let found2 = mgr.omicron_zones_list().await;
         assert_eq!(found, found2);
 
         // Now try to apply that list with the same generation number that we
@@ -5577,8 +5569,7 @@ mod test {
             error,
             Error::RequestedConfigConflicts(vr) if vr == v2
         ));
-        let found3 =
-            mgr.omicron_zones_list().await.expect("failed to list zones");
+        let found3 = mgr.omicron_zones_list().await;
         assert_eq!(found, found3);
 
         // But we should be able to apply this new list of zones as long as we
@@ -5590,8 +5581,7 @@ mod test {
         )
         .await
         .expect("failed to remove all zones in a new generation");
-        let found4 =
-            mgr.omicron_zones_list().await.expect("failed to list zones");
+        let found4 = mgr.omicron_zones_list().await;
         assert_eq!(found4.generation, v3);
         let mut our_zones = zones;
         our_zones.sort_by(|a, b| a.id.cmp(&b.id));

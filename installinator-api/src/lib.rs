@@ -10,11 +10,11 @@
 
 use anyhow::{anyhow, Result};
 use dropshot::{
-    ConfigDropshot, FreeformBody, HandlerTaskMode, HttpError,
+    Body, ConfigDropshot, FreeformBody, HandlerTaskMode, HttpError,
     HttpResponseHeaders, HttpResponseOk, HttpResponseUpdatedNoContent,
     HttpServerStarter, Path, RequestContext, TypedBody,
 };
-use hyper::{header, Body, StatusCode};
+use hyper::{header, StatusCode};
 use installinator_common::EventReport;
 use omicron_common::update::ArtifactHashId;
 use schemars::JsonSchema;

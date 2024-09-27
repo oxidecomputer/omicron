@@ -973,8 +973,7 @@ impl Plan {
                         let is_scrimlet =
                             Self::is_sled_scrimlet(log, sled_address).await?;
                         Ok(SledInfo::new(
-                            // TODO-cleanup use TypedUuid everywhere
-                            SledUuid::from_untyped_uuid(sled_request.body.id),
+                            sled_request.body.id,
                             subnet,
                             sled_address,
                             inventory,

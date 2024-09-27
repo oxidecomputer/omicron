@@ -7,20 +7,19 @@
 //! This must be an exact subset of the Nexus internal interface
 //! to operate correctly.
 
+use dropshot::Body;
 use dropshot::{
     endpoint, ApiDescription, FreeformBody, HttpError, HttpResponseOk,
     HttpResponseUpdatedNoContent, Path, RequestContext, TypedBody,
 };
-use hyper::Body;
 use internal_dns::ServiceName;
 use nexus_client::types::SledAgentInfo;
 use omicron_common::api::external::Error;
 use omicron_common::api::internal::nexus::{SledVmmState, UpdateArtifactId};
-use omicron_uuid_kinds::{OmicronZoneUuid, PropolisUuid};
+use omicron_uuid_kinds::{OmicronZoneUuid, PropolisUuid, SledUuid};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use sled_agent_api::VmmPathParam;
-use uuid::Uuid;
 
 /// Implements a fake Nexus.
 ///
@@ -35,13 +34,16 @@ pub trait FakeNexusServer: Send + Sync {
         Err(Error::internal_error("Not implemented"))
     }
 
-    fn sled_agent_get(&self, _sled_id: Uuid) -> Result<SledAgentInfo, Error> {
+    fn sled_agent_get(
+        &self,
+        _sled_id: SledUuid,
+    ) -> Result<SledAgentInfo, Error> {
         Err(Error::internal_error("Not implemented"))
     }
 
     fn sled_agent_put(
         &self,
-        _sled_id: Uuid,
+        _sled_id: SledUuid,
         _info: SledAgentInfo,
     ) -> Result<(), Error> {
         Err(Error::internal_error("Not implemented"))
@@ -81,7 +83,7 @@ async fn cpapi_artifact_download(
 /// Path parameters for Sled Agent requests (internal API)
 #[derive(Deserialize, JsonSchema)]
 struct SledAgentPathParam {
-    sled_id: Uuid,
+    sled_id: SledUuid,
 }
 
 /// Return information about the given sled agent

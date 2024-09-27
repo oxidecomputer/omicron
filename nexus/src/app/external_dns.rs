@@ -10,8 +10,8 @@ use hickory_resolver::config::Protocol;
 use hickory_resolver::config::ResolverConfig;
 use hickory_resolver::config::ResolverOpts;
 use hickory_resolver::TokioAsyncResolver;
-use hyper::client::connect::dns::Name;
 use omicron_common::address::DNS_PORT;
+use reqwest::dns::Name;
 
 /// Wrapper around hickory-resolver to provide name resolution
 /// using a given set of DNS servers for use with reqwest.

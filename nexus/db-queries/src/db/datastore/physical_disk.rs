@@ -337,6 +337,7 @@ mod test {
     use omicron_common::api::external::ByteCount;
     use omicron_common::disk::{DiskIdentity, DiskVariant};
     use omicron_test_utils::dev;
+    use omicron_uuid_kinds::SledUuid;
     use std::net::{Ipv6Addr, SocketAddrV6};
     use std::num::NonZeroU32;
 
@@ -692,7 +693,7 @@ mod test {
                     reservoir_size: ByteCount::from(1024),
                     sled_role: SledRole::Gimlet,
                     sled_agent_address: "[::1]:56792".parse().unwrap(),
-                    sled_id: sled.id(),
+                    sled_id: SledUuid::from_untyped_uuid(sled.id()),
                     usable_hardware_threads: 10,
                     usable_physical_ram: ByteCount::from(1024 * 1024),
                     disks,

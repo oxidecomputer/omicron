@@ -70,10 +70,7 @@ impl CustomDnsResolver {
 }
 
 impl reqwest::dns::Resolve for CustomDnsResolver {
-    fn resolve(
-        &self,
-        name: hyper::client::connect::dns::Name,
-    ) -> reqwest::dns::Resolving {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
         let resolver = self.resolver.clone();
         async move {
             let list = resolver.lookup_ip(name.as_str()).await?;

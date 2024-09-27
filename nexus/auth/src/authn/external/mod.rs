@@ -276,7 +276,7 @@ mod test {
         let authn = Authenticator::new(vec![grunt1, grunt2]);
         let request = http::Request::builder()
             .uri("/unused")
-            .body(hyper::Body::empty())
+            .body(dropshot::Body::empty())
             .unwrap();
 
         let log = slog::Logger::root(slog::Discard, o!());

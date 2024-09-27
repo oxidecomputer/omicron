@@ -7,12 +7,12 @@
 use crate::updates::ConfigUpdates;
 use camino::Utf8Path;
 use dropshot::ConfigDropshot;
+use omicron_uuid_kinds::SledUuid;
 use serde::Deserialize;
 use serde::Serialize;
 pub use sled_hardware_types::Baseboard;
 use std::net::Ipv6Addr;
 use std::net::{IpAddr, SocketAddr};
-use uuid::Uuid;
 
 /// The reported amount of hardware threads for an emulated sled agent.
 pub const TEST_HARDWARE_THREADS: u32 = 16;
@@ -63,7 +63,7 @@ pub struct ConfigHardware {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Config {
     /// unique id for the sled
-    pub id: Uuid,
+    pub id: SledUuid,
     /// how to simulate asynchronous Instance and Disk transitions
     pub sim_mode: SimMode,
     /// IP address and TCP port for Nexus instance to register with
@@ -80,7 +80,7 @@ pub struct Config {
 
 impl Config {
     pub fn for_testing(
-        id: Uuid,
+        id: SledUuid,
         sim_mode: SimMode,
         nexus_address: Option<SocketAddr>,
         update_directory: Option<&Utf8Path>,
