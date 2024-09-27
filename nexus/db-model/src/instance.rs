@@ -4,7 +4,7 @@
 
 use super::{
     ByteCount, Disk, ExternalIp, Generation, InstanceAutoRestartPolicy,
-    InstanceCpuCount, InstanceState, Vmm,
+    InstanceCpuCount, InstanceState, Vmm, VmmState,
 };
 use crate::collection::DatastoreAttachTargetConfig;
 use crate::schema::{disk, external_ip, instance};
@@ -266,18 +266,36 @@ pub struct InstanceAutoRestart {
     pub cooldown: Option<TimeDelta>,
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct InstanceKarmicStatus {
+    /// Whether the instance is permitted to reincarnate if
+    /// `needs_reincarnation` is `true`.
+    pub can_reincarnate: Reincarnatability,
+    /// `true` if the instance is in a state in which it could reincarnate if
+    /// `can_reincarnate` would permit it to do so.
+    pub needs_reincarnation: bool,
+}
+
+impl InstanceKarmicStatus {
+    /// Returns `true` if this instance is in a state that requires
+    /// reincarnation, and is permitted to reincarnate immediately.
+    pub fn should_reincarnate(&self) -> bool {
+        self.needs_reincarnation
+            && self.can_reincarnate == Reincarnatability::WillReincarnate
+    }
+}
+
 /// Describes whether or not an instance can reincarnate.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum InstanceKarmicStatus {
-    /// The instance is ready to reincarnate.
-    Ready,
-    /// The instance does not need reincarnation, as it is not currently in the
-    /// `Failed` state.
-    NotFailed,
+pub enum Reincarnatability {
+    /// The instance remains bound to the cycle of saṃsāra and can return in the
+    /// next life.
+    WillReincarnate,
     /// The instance cannot reincarnate again until the specified time.
     CoolingDown(TimeDelta),
-    /// The instance's auto-restart policy forbids it from reincarnating.
-    Forbidden,
+    /// The instance's auto-restart policy indicates that it has attained
+    /// nirvāṇa and will not reincarnate.
+    Nirvana,
 }
 
 impl InstanceAutoRestart {
@@ -292,8 +310,7 @@ impl InstanceAutoRestart {
     pub const DEFAULT_POLICY: InstanceAutoRestartPolicy =
         InstanceAutoRestartPolicy::BestEffort;
 
-    /// Returns `true` if `self` permits an instance to reincarnate given the
-    /// provided `state`.
+    /// Returns an instance's karmic status.
     pub fn status(
         &self,
         state: &InstanceRuntimeState,
@@ -301,35 +318,50 @@ impl InstanceAutoRestart {
     ) -> InstanceKarmicStatus {
         // Instances only need to be automatically restarted if they are in the
         // `Failed` state, or if their active VMM is in the `SagaUnwound` state.
-        match (state.nexus_state, active_vmm) {
+        let needs_reincarnation = match (state.nexus_state, active_vmm) {
             (InstanceState::Failed, _vmm) => {
                 debug_assert!(
                     _vmm.is_none(),
                     "a Failed instance will never have an active VMM!"
                 );
+                true
             }
             (InstanceState::Vmm, Some(ref vmm)) => {
                 debug_assert_eq!(
                     state.propolis_id,
-                    vmm.id(),
+                    Some(vmm.id),
                     "don't call `InstanceAutoRestart::status with a VMM \
                      that isn't this instance's active VMM!?!?"
                 );
-                // Note that we *don't* reincarnate instances with `Failed`` active
+                // Note that we *don't* reincarnate instances with `Failed` active
                 // VMMs; in that case, an instance-update saga must first run to
                 // move the *instance* record to the `Failed` state.
-                if vmm.runtime.state != VmmState::SagaUnwound {
-                    return InstanceKarmicStatus::NotFailed;
-                }
+                vmm.runtime.state == VmmState::SagaUnwound
             }
-            _ => return InstanceKarmicStatus::NotFailed,
+            _ => false,
         };
 
+        InstanceKarmicStatus {
+            needs_reincarnation,
+            can_reincarnate: self.can_reincarnate(&state),
+        }
+    }
+
+    /// Returns whether or not this auto-restart configuration will permit an
+    /// instance with the provided `InstanceRuntimeState` to reincarnate.
+    ///
+    /// This does *not* indicate that the instance  currently needs
+    /// reincarnation, but instead, whether the instance will be permitted to
+    /// reincarnate should it be in such a state.
+    pub fn can_reincarnate(
+        &self,
+        state: &InstanceRuntimeState,
+    ) -> Reincarnatability {
         // Check if the instance's configured auto-restart policy permits the
         // control plane to automatically restart it.
         let policy = self.policy.unwrap_or(Self::DEFAULT_POLICY);
         if policy == InstanceAutoRestartPolicy::Never {
-            return InstanceKarmicStatus::Forbidden;
+            return Reincarnatability::Nirvana;
         }
 
         // If the instance is permitted to reincarnate, ensure that its last
@@ -341,15 +373,15 @@ impl InstanceAutoRestart {
             let cooldown = self.cooldown.unwrap_or(Self::DEFAULT_COOLDOWN);
             let time_since_last = Utc::now().signed_duration_since(last);
             if time_since_last >= cooldown {
-                return InstanceKarmicStatus::Ready;
+                return Reincarnatability::WillReincarnate;
             } else {
-                return InstanceKarmicStatus::CoolingDown(
+                return Reincarnatability::CoolingDown(
                     cooldown - time_since_last,
                 );
             }
         }
 
-        InstanceKarmicStatus::Ready
+        Reincarnatability::WillReincarnate
     }
 
     /// Filters a database query to include only instances whose auto-restart

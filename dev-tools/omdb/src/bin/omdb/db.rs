@@ -2882,7 +2882,8 @@ async fn cmd_db_instance_info(
         vmm::dsl as vmm_dsl,
     };
     use nexus_db_model::{
-        Instance, InstanceKarmicStatus, InstanceRuntimeState, Migration, Vmm,
+        Instance, InstanceKarmicStatus, InstanceRuntimeState, Migration,
+        Reincarnatability, Vmm,
     };
     let InstanceInfoArgs { id } = args;
 
@@ -2943,8 +2944,9 @@ async fn cmd_db_instance_info(
     const STATE: &'static str = "nexus state";
     const LAST_MODIFIED: &'static str = "last modified at";
     const LAST_UPDATED: &'static str = "last updated at";
-    const LAST_AUTO_RESTART: &'static str = "last auto-restarted at";
-    const KARMIC_STATUS: &'static str = "karmic status";
+    const LAST_AUTO_RESTART: &'static str = "  last reincarnated at";
+    const KARMIC_STATUS: &'static str = "  karmic status";
+    const NEEDS_REINCARNATION: &'static str = "needs reincarnation";
     const ACTIVE_VMM: &'static str = "active VMM ID";
     const TARGET_VMM: &'static str = "target VMM ID";
     const MIGRATION_ID: &'static str = "migration ID";
@@ -2968,6 +2970,7 @@ async fn cmd_db_instance_info(
         LAST_MODIFIED,
         LAST_AUTO_RESTART,
         KARMIC_STATUS,
+        NEEDS_REINCARNATION,
         ACTIVE_VMM,
         TARGET_VMM,
         MIGRATION_ID,
@@ -3026,25 +3029,32 @@ async fn cmd_db_instance_info(
         "    {LAST_UPDATED:>WIDTH$}: {time_updated:?} (generation {})",
         r#gen.0
     );
-    println!("    {LAST_AUTO_RESTART:>WIDTH$}: {time_last_auto_restarted:?}");
-    match instance
-        .auto_restart
-        .status(&instance.runtime_state, active_vmm.as_ref())
-    {
-        InstanceKarmicStatus::NotFailed => {}
-        InstanceKarmicStatus::Ready => {
-            println!("(i) {KARMIC_STATUS:>WIDTH$}: ready to reincarnate!");
+
+    // Reincarnation status
+    let InstanceKarmicStatus { needs_reincarnation, can_reincarnate } =
+        instance
+            .auto_restart
+            .status(&instance.runtime_state, active_vmm.as_ref());
+    println!(
+        "{} {NEEDS_REINCARNATION:>WIDTH$}: {needs_reincarnation}",
+        if needs_reincarnation { "(i)" } else { "   " }
+    );
+    match can_reincarnate {
+        Reincarnatability::WillReincarnate => {
+            println!("    {KARMIC_STATUS:>WIDTH$}: bound to saṃsāra");
         }
-        InstanceKarmicStatus::Forbidden => {
-            println!("(i) {KARMIC_STATUS:>WIDTH$}: reincarnation forbidden");
+        Reincarnatability::Nirvana => {
+            println!("    {KARMIC_STATUS:>WIDTH$}: attained nirvāṇa");
         }
-        InstanceKarmicStatus::CoolingDown(remaining) => {
+        Reincarnatability::CoolingDown(remaining) => {
             println!(
                 "/!\\ {KARMIC_STATUS:>WIDTH$}: cooling down \
                  ({remaining:?} remaining)"
             );
         }
     }
+    println!("    {LAST_AUTO_RESTART:>WIDTH$}: {time_last_auto_restarted:?}");
+
     println!("    {ACTIVE_VMM:>WIDTH$}: {propolis_id:?}");
     println!("    {TARGET_VMM:>WIDTH$}: {dst_propolis_id:?}");
     println!(
