@@ -540,25 +540,23 @@ pub trait ClientError: std::fmt::Debug {
 // external client, others may require, for example, retries with an alternate
 // service instance or additional interpretation to sanitize the output error.
 // This should be removed to avoid leaking data.
-impl<T: ClientError> From<progenitor::progenitor_client::Error<T>> for Error {
-    fn from(e: progenitor::progenitor_client::Error<T>) -> Self {
+impl<T: ClientError> From<progenitor_client::Error<T>> for Error {
+    fn from(e: progenitor_client::Error<T>) -> Self {
         match e {
             // For most error variants, we delegate to the display impl for the
             // Progenitor error type, but we pick apart an error response more
             // carefully.
-            progenitor::progenitor_client::Error::InvalidRequest(_)
-            | progenitor::progenitor_client::Error::CommunicationError(_)
-            | progenitor::progenitor_client::Error::InvalidResponsePayload(
-                ..,
-            )
-            | progenitor::progenitor_client::Error::UnexpectedResponse(_)
-            | progenitor::progenitor_client::Error::InvalidUpgrade(_)
-            | progenitor::progenitor_client::Error::ResponseBodyError(_)
-            | progenitor::progenitor_client::Error::PreHookError(_) => {
+            progenitor_client::Error::InvalidRequest(_)
+            | progenitor_client::Error::CommunicationError(_)
+            | progenitor_client::Error::InvalidResponsePayload(..)
+            | progenitor_client::Error::UnexpectedResponse(_)
+            | progenitor_client::Error::InvalidUpgrade(_)
+            | progenitor_client::Error::ResponseBodyError(_)
+            | progenitor_client::Error::PreHookError(_) => {
                 Error::internal_error(&e.to_string())
             }
             // This error represents an expected error from the remote service.
-            progenitor::progenitor_client::Error::ErrorResponse(rv) => {
+            progenitor_client::Error::ErrorResponse(rv) => {
                 let message = rv.message();
 
                 match rv.status() {
