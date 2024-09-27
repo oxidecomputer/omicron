@@ -91,7 +91,7 @@ regex = { version = "1.10.6" }
 regex-automata = { version = "0.4.6", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "unicode"] }
 regex-syntax = { version = "0.8.4" }
 reqwest-5ef9efb8ec2df382 = { package = "reqwest", version = "0.12.7", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
-reqwest-a6292c17cd707f01 = { package = "reqwest", version = "0.11.27", features = ["json", "rustls-tls", "stream"] }
+reqwest-a6292c17cd707f01 = { package = "reqwest", version = "0.11.27", default-features = false, features = ["rustls-tls", "stream"] }
 ring = { version = "0.17.8", features = ["std"] }
 rsa = { version = "0.9.6", features = ["serde", "sha2"] }
 schemars = { version = "0.8.21", features = ["bytes", "chrono", "uuid1"] }
@@ -202,7 +202,7 @@ regex = { version = "1.10.6" }
 regex-automata = { version = "0.4.6", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "unicode"] }
 regex-syntax = { version = "0.8.4" }
 reqwest-5ef9efb8ec2df382 = { package = "reqwest", version = "0.12.7", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
-reqwest-a6292c17cd707f01 = { package = "reqwest", version = "0.11.27", features = ["json", "rustls-tls", "stream"] }
+reqwest-a6292c17cd707f01 = { package = "reqwest", version = "0.11.27", default-features = false, features = ["rustls-tls", "stream"] }
 ring = { version = "0.17.8", features = ["std"] }
 rsa = { version = "0.9.6", features = ["serde", "sha2"] }
 schemars = { version = "0.8.21", features = ["bytes", "chrono", "uuid1"] }
@@ -250,7 +250,8 @@ linux-raw-sys = { version = "0.4.13", default-features = false, features = ["elf
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
 rustix = { version = "0.38.34", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
-rustls = { version = "0.23.10", default-features = false, features = ["logging", "ring", "std", "tls12"] }
+rustls-2b5c6dc72f624058 = { package = "rustls", version = "0.23.10", default-features = false, features = ["logging", "ring", "std", "tls12"] }
+rustls-647d43efb71741da = { package = "rustls", version = "0.21.12", features = ["dangerous_configuration"] }
 signal-hook-mio = { version = "0.2.4", default-features = false, features = ["support-v0_8", "support-v1_0"] }
 tokio-rustls = { version = "0.26.0", default-features = false, features = ["logging", "ring", "tls12"] }
 
@@ -264,7 +265,8 @@ linux-raw-sys = { version = "0.4.13", default-features = false, features = ["elf
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
 rustix = { version = "0.38.34", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
-rustls = { version = "0.23.10", default-features = false, features = ["logging", "ring", "std", "tls12"] }
+rustls-2b5c6dc72f624058 = { package = "rustls", version = "0.23.10", default-features = false, features = ["logging", "ring", "std", "tls12"] }
+rustls-647d43efb71741da = { package = "rustls", version = "0.21.12", features = ["dangerous_configuration"] }
 signal-hook-mio = { version = "0.2.4", default-features = false, features = ["support-v0_8", "support-v1_0"] }
 tokio-rustls = { version = "0.26.0", default-features = false, features = ["logging", "ring", "tls12"] }
 
@@ -276,7 +278,8 @@ hyper-util = { version = "0.1.9", features = ["full"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
 rustix = { version = "0.38.34", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
-rustls = { version = "0.23.10", default-features = false, features = ["logging", "ring", "std", "tls12"] }
+rustls-2b5c6dc72f624058 = { package = "rustls", version = "0.23.10", default-features = false, features = ["logging", "ring", "std", "tls12"] }
+rustls-647d43efb71741da = { package = "rustls", version = "0.21.12", features = ["dangerous_configuration"] }
 signal-hook-mio = { version = "0.2.4", default-features = false, features = ["support-v0_8", "support-v1_0"] }
 tokio-rustls = { version = "0.26.0", default-features = false, features = ["logging", "ring", "tls12"] }
 
@@ -288,7 +291,8 @@ hyper-util = { version = "0.1.9", features = ["full"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
 rustix = { version = "0.38.34", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
-rustls = { version = "0.23.10", default-features = false, features = ["logging", "ring", "std", "tls12"] }
+rustls-2b5c6dc72f624058 = { package = "rustls", version = "0.23.10", default-features = false, features = ["logging", "ring", "std", "tls12"] }
+rustls-647d43efb71741da = { package = "rustls", version = "0.21.12", features = ["dangerous_configuration"] }
 signal-hook-mio = { version = "0.2.4", default-features = false, features = ["support-v0_8", "support-v1_0"] }
 tokio-rustls = { version = "0.26.0", default-features = false, features = ["logging", "ring", "tls12"] }
 
@@ -300,7 +304,8 @@ hyper-util = { version = "0.1.9", features = ["full"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
 rustix = { version = "0.38.34", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
-rustls = { version = "0.23.10", default-features = false, features = ["logging", "ring", "std", "tls12"] }
+rustls-2b5c6dc72f624058 = { package = "rustls", version = "0.23.10", default-features = false, features = ["logging", "ring", "std", "tls12"] }
+rustls-647d43efb71741da = { package = "rustls", version = "0.21.12", features = ["dangerous_configuration"] }
 signal-hook-mio = { version = "0.2.4", default-features = false, features = ["support-v0_8", "support-v1_0"] }
 tokio-rustls = { version = "0.26.0", default-features = false, features = ["logging", "ring", "tls12"] }
 
@@ -312,7 +317,8 @@ hyper-util = { version = "0.1.9", features = ["full"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
 rustix = { version = "0.38.34", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
-rustls = { version = "0.23.10", default-features = false, features = ["logging", "ring", "std", "tls12"] }
+rustls-2b5c6dc72f624058 = { package = "rustls", version = "0.23.10", default-features = false, features = ["logging", "ring", "std", "tls12"] }
+rustls-647d43efb71741da = { package = "rustls", version = "0.21.12", features = ["dangerous_configuration"] }
 signal-hook-mio = { version = "0.2.4", default-features = false, features = ["support-v0_8", "support-v1_0"] }
 tokio-rustls = { version = "0.26.0", default-features = false, features = ["logging", "ring", "tls12"] }
 
@@ -325,8 +331,10 @@ hyper-util = { version = "0.1.9", features = ["full"] }
 indicatif = { version = "0.17.8", features = ["rayon"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
+reqwest-a6292c17cd707f01 = { package = "reqwest", version = "0.11.27", features = ["json"] }
 rustix = { version = "0.38.34", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
-rustls = { version = "0.23.10", default-features = false, features = ["logging", "ring", "std", "tls12"] }
+rustls-2b5c6dc72f624058 = { package = "rustls", version = "0.23.10", default-features = false, features = ["logging", "ring", "std", "tls12"] }
+rustls-647d43efb71741da = { package = "rustls", version = "0.21.12", features = ["dangerous_configuration"] }
 signal-hook-mio = { version = "0.2.4", default-features = false, features = ["support-v0_8", "support-v1_0"] }
 tokio-rustls = { version = "0.26.0", default-features = false, features = ["logging", "ring", "tls12"] }
 toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", features = ["serde"] }
@@ -340,8 +348,10 @@ hyper-util = { version = "0.1.9", features = ["full"] }
 indicatif = { version = "0.17.8", features = ["rayon"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
+reqwest-a6292c17cd707f01 = { package = "reqwest", version = "0.11.27", features = ["json"] }
 rustix = { version = "0.38.34", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
-rustls = { version = "0.23.10", default-features = false, features = ["logging", "ring", "std", "tls12"] }
+rustls-2b5c6dc72f624058 = { package = "rustls", version = "0.23.10", default-features = false, features = ["logging", "ring", "std", "tls12"] }
+rustls-647d43efb71741da = { package = "rustls", version = "0.21.12", features = ["dangerous_configuration"] }
 signal-hook-mio = { version = "0.2.4", default-features = false, features = ["support-v0_8", "support-v1_0"] }
 tokio-rustls = { version = "0.26.0", default-features = false, features = ["logging", "ring", "tls12"] }
 toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", features = ["serde"] }
