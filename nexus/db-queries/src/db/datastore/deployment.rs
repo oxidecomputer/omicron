@@ -860,7 +860,7 @@ impl DataStore {
                 let current_target = self
                     .blueprint_current_target_only(
                         &conn,
-                        SelectFlavor::ForUpdate,
+                        SelectFlavor::Standard,
                     )
                     .await
                     .map_err(|e| err.bail(e))?;
@@ -870,6 +870,10 @@ impl DataStore {
                         blueprint.id, current_target.target_id
                     ))));
                 }
+                eprintln!(
+                    "IN TXN: confirmed current target blueprint is {}",
+                    blueprint.id
+                );
 
                 // See the comment on this method; this lets us notify our test
                 // caller that we've performed our target blueprint check.
@@ -880,7 +884,38 @@ impl DataStore {
                         gate.store(true, Ordering::SeqCst);
                     }
                 }
+                eprintln!("IN TXN: told unit test it could proceed",);
 
+                // See the comment on this method; this lets us wait until our
+                // test caller is ready for us to return.
+                #[cfg(test)]
+                {
+                    use std::sync::atomic::Ordering;
+                    use std::time::Duration;
+                    if let Some(gate) = return_on_completion {
+                        while !gate.load(Ordering::SeqCst) {
+                            tokio::time::sleep(Duration::from_millis(50)).await;
+                        }
+                    }
+                }
+
+                eprintln!(
+                    "IN TXN: done ensuring resources for blueprint {}",
+                    blueprint.id
+                );
+                {
+                    use crate::db::model::Generation;
+                    use db::schema::bp_sled_omicron_zones::dsl;
+                    diesel::insert_into(dsl::bp_sled_omicron_zones)
+                        .values(BpSledOmicronZones {
+                            blueprint_id: Uuid::new_v4(),
+                            sled_id: SledUuid::new_v4().into(),
+                            generation: Generation::new(),
+                        })
+                        .execute_async(&conn)
+                        .await
+                        .expect("dummy insert succeeded");
+                }
                 // Deallocate external networking resources for
                 // non-externally-reachable zones before allocating resources
                 // for reachable zones. This will allow allocation to succeed if
@@ -909,19 +944,6 @@ impl DataStore {
                 )
                 .await
                 .map_err(|e| err.bail(e))?;
-
-                // See the comment on this method; this lets us wait until our
-                // test caller is ready for us to return.
-                #[cfg(test)]
-                {
-                    use std::sync::atomic::Ordering;
-                    use std::time::Duration;
-                    if let Some(gate) = return_on_completion {
-                        while !gate.load(Ordering::SeqCst) {
-                            tokio::time::sleep(Duration::from_millis(50)).await;
-                        }
-                    }
-                }
 
                 Ok(())
             }
@@ -973,6 +995,7 @@ impl DataStore {
             .execute_async(conn)
             .await
             .map_err(|e| Error::from(query.decode_error(e)))?;
+        eprintln!("successfully set blueprint target to {}", target.target_id);
 
         Ok(())
     }
@@ -1492,6 +1515,9 @@ impl QueryFragment<Pg> for InsertTargetQuery {
         out.push_identifier(dsl::enabled::NAME)?;
         out.push_sql(",");
         out.push_identifier(dsl::time_made_target::NAME)?;
+
+        out.push_sql("), zzzzz AS (UPDATE bp_target SET enabled = not enabled WHERE blueprint_id IN (select blueprint_id from current_target) RETURNING 1");
+
         out.push_sql(") SELECT new_target.new_version, ");
         out.push_bind_param::<sql_types::Uuid, Uuid>(&self.target_id)?;
         out.push_sql(",");
@@ -2319,6 +2345,8 @@ mod tests {
             "unexpected error: {err}"
         );
 
+        eprintln!("----- unit test setup done -----");
+
         // Create flags to control method execution.
         let target_check_done = Arc::new(AtomicBool::new(false));
         let return_on_completion = Arc::new(AtomicBool::new(false));
@@ -2358,6 +2386,7 @@ mod tests {
         .await
         .expect("`target_check_done` not set to true");
 
+        /*
         // Spawn another task that tries to read the current target. This should
         // block at the database level due to the `SELECT ... FOR UPDATE` inside
         // `blueprint_ensure_external_networking_resources`.
@@ -2372,10 +2401,14 @@ mod tests {
                     .expect("read current target")
             }
         });
+        */
 
         // Spawn another task that tries to set the current target. This should
         // block at the database level due to the `SELECT ... FOR UPDATE` inside
         // `blueprint_ensure_external_networking_resources`.
+        eprintln!(
+            "unit test: spawning task to change current target blueprint"
+        );
         let mut update_target_task = tokio::spawn({
             let datastore = datastore.clone();
             let opctx =
@@ -2384,67 +2417,95 @@ mod tests {
                 datastore.blueprint_target_set_current(&opctx, bp2_target).await
             }
         });
+        tokio::time::timeout(Duration::from_secs(10), update_target_task)
+            .await
+            .expect("time out waiting for `blueprint_target_set_current`")
+            .expect("panic in `blueprint_target_set_current")
+            .expect("updated target to blueprint 2");
+        eprintln!("unit test: done with task that set new target blueprint");
+        let current_target = datastore
+            .blueprint_target_get_current(&opctx)
+            .await
+            .expect("read current target");
+        eprintln!("unit test: read current target of {current_target:?}");
 
-        // None of our spawned tasks should be able to make progress:
-        // `ensure_resources_task` is waiting for us to set
-        // `return_on_completion` to true, and the other two should be
-        // queued by Cockroach, because
-        // `blueprint_ensure_external_networking_resources` should have
-        // performed a `SELECT ... FOR UPDATE` on the current target, forcing
-        // the query that wants to change it to wait until the transaction
-        // completes.
-        //
-        // We'll somewhat haphazardly test this by trying to wait for any
-        // task to finish, and succeeding on a timeout of a few seconds. This
-        // could spuriously succeed if we're executing on a very overloaded
-        // system where we hit the timeout even though one of the tasks is
-        // actually making progress, but hopefully will fail often enough if
-        // we've gotten this wrong.
-        tokio::select! {
-            result = &mut ensure_resources_task => {
-                panic!(
-                    "unexpected completion of \
-                     `blueprint_ensure_external_networking_resources`: \
-                     {result:?}",
-                );
+        /*
+            // None of our spawned tasks should be able to make progress:
+            // `ensure_resources_task` is waiting for us to set
+            // `return_on_completion` to true, and the other two should be
+            // queued by Cockroach, because
+            // `blueprint_ensure_external_networking_resources` should have
+            // performed a `SELECT ... FOR UPDATE` on the current target, forcing
+            // the query that wants to change it to wait until the transaction
+            // completes.
+            //
+            // We'll somewhat haphazardly test this by trying to wait for any
+            // task to finish, and succeeding on a timeout of a few seconds. This
+            // could spuriously succeed if we're executing on a very overloaded
+            // system where we hit the timeout even though one of the tasks is
+            // actually making progress, but hopefully will fail often enough if
+            // we've gotten this wrong.
+            tokio::select! {
+                result = &mut ensure_resources_task => {
+                    panic!(
+                        "unexpected completion of \
+                         `blueprint_ensure_external_networking_resources`: \
+                         {result:?}",
+                    );
+                }
+                /*
+                result = &mut update_target_task => {
+                    eprintln!(
+                        "completion of \
+                         `blueprint_target_set_current`: {result:?}",
+                    );
+                }
+                */
+                /*
+                result = &mut current_target_task => {
+                    panic!(
+                        "unexpected completion of \
+                         `blueprint_target_get_current`: {result:?}",
+                    );
+                }
+                */
+                _ = tokio::time::sleep(Duration::from_secs(5)) => (),
             }
-            result = &mut update_target_task => {
-                panic!(
-                    "unexpected completion of \
-                     `blueprint_target_set_current`: {result:?}",
-                );
-            }
-            result = &mut current_target_task => {
-                panic!(
-                    "unexpected completion of \
-                     `blueprint_target_get_current`: {result:?}",
-                );
-            }
-            _ = tokio::time::sleep(Duration::from_secs(5)) => (),
-        }
+        */
 
         // Release `ensure_resources_task` to finish.
         return_on_completion.store(true, Ordering::SeqCst);
 
-        tokio::time::timeout(Duration::from_secs(10), ensure_resources_task)
-            .await
-            .expect(
-                "time out waiting for \
+        let result = tokio::time::timeout(
+            Duration::from_secs(10),
+            ensure_resources_task,
+        )
+        .await
+        .expect(
+            "time out waiting for \
                 `blueprint_ensure_external_networking_resources`",
-            )
-            .expect("panic in `blueprint_ensure_external_networking_resources")
-            .expect("ensured networking resources for empty blueprint 2");
+        )
+        .expect("panic in `blueprint_ensure_external_networking_resources")
+        .expect("ensured networking resources for empty blueprint 1");
+        eprintln!("ensuring networking done: {result:?}");
 
+        /*
         // Our other tasks should now also complete.
         tokio::time::timeout(Duration::from_secs(10), update_target_task)
             .await
             .expect("time out waiting for `blueprint_target_set_current`")
             .expect("panic in `blueprint_target_set_current")
             .expect("updated target to blueprint 2");
+            */
+        /*
         tokio::time::timeout(Duration::from_secs(10), current_target_task)
             .await
             .expect("time out waiting for `blueprint_target_get_current`")
             .expect("panic in `blueprint_target_get_current");
+            */
+        if 1 > 0 {
+            panic!("intentional panic");
+        }
 
         // Clean up.
         db.cleanup().await.unwrap();
