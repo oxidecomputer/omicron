@@ -4,7 +4,7 @@
 
 use super::{
     ByteCount, Disk, ExternalIp, Generation, InstanceAutoRestartPolicy,
-    InstanceCpuCount, InstanceState,
+    InstanceCpuCount, InstanceState, Vmm,
 };
 use crate::collection::DatastoreAttachTargetConfig;
 use crate::schema::{disk, external_ip, instance};
@@ -294,12 +294,36 @@ impl InstanceAutoRestart {
 
     /// Returns `true` if `self` permits an instance to reincarnate given the
     /// provided `state`.
-    pub fn status(&self, state: &InstanceRuntimeState) -> InstanceKarmicStatus {
+    pub fn status(
+        &self,
+        state: &InstanceRuntimeState,
+        active_vmm: Option<&Vmm>,
+    ) -> InstanceKarmicStatus {
         // Instances only need to be automatically restarted if they are in the
-        // `Failed` state.
-        if state.nexus_state != InstanceState::Failed {
-            return InstanceKarmicStatus::NotFailed;
-        }
+        // `Failed` state, or if their active VMM is in the `SagaUnwound` state.
+        match (state.nexus_state, active_vmm) {
+            (InstanceState::Failed, _vmm) => {
+                debug_assert!(
+                    _vmm.is_none(),
+                    "a Failed instance will never have an active VMM!"
+                );
+            }
+            (InstanceState::Vmm, Some(ref vmm)) => {
+                debug_assert_eq!(
+                    state.propolis_id,
+                    vmm.id(),
+                    "don't call `InstanceAutoRestart::status with a VMM \
+                     that isn't this instance's active VMM!?!?"
+                );
+                // Note that we *don't* reincarnate instances with `Failed`` active
+                // VMMs; in that case, an instance-update saga must first run to
+                // move the *instance* record to the `Failed` state.
+                if vmm.runtime.state != VmmState::SagaUnwound {
+                    return InstanceKarmicStatus::NotFailed;
+                }
+            }
+            _ => return InstanceKarmicStatus::NotFailed,
+        };
 
         // Check if the instance's configured auto-restart policy permits the
         // control plane to automatically restart it.

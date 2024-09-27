@@ -1289,7 +1289,10 @@ async fn siu_chain_successor_saga(
             // it does, activate the instance-reincarnation background task to
             // automatically restart it.
             let auto_restart = new_state.instance.auto_restart;
-            match auto_restart.status(&new_state.instance.runtime_state) {
+            match auto_restart.status(
+                &new_state.instance.runtime_state,
+                new_state.active_vmm.as_ref(),
+            ) {
                 InstanceKarmicStatus::Ready => {
                     info!(
                         log,

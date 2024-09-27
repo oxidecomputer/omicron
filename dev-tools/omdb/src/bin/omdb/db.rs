@@ -3027,7 +3027,10 @@ async fn cmd_db_instance_info(
         r#gen.0
     );
     println!("    {LAST_AUTO_RESTART:>WIDTH$}: {time_last_auto_restarted:?}");
-    match instance.auto_restart.status(&instance.runtime_state) {
+    match instance
+        .auto_restart
+        .status(&instance.runtime_state, active_vmm.as_ref())
+    {
         InstanceKarmicStatus::NotFailed => {}
         InstanceKarmicStatus::Ready => {
             println!("(i) {KARMIC_STATUS:>WIDTH$}: ready to reincarnate!");
