@@ -1474,7 +1474,7 @@ fn after_101_0_0(client: &Client) -> BoxFuture<'_, ()> {
     })
 }
 
-fn before_105_0_0(client: &Client) -> BoxFuture<'_, ()> {
+fn before_107_0_0(client: &Client) -> BoxFuture<'_, ()> {
     Box::pin(async {
         // An instance with no attached disks (4) gets a NULL boot disk.
         // An instance with one attached disk (5) gets that disk as a boot disk.
@@ -1516,11 +1516,11 @@ fn before_105_0_0(client: &Client) -> BoxFuture<'_, ()> {
     })
 }
 
-fn after_105_0_0(client: &Client) -> BoxFuture<'_, ()> {
+fn after_107_0_0(client: &Client) -> BoxFuture<'_, ()> {
     Box::pin(async {
         let rows = client
             .query(
-                &format!("SELECT id, boot_disk_id FROM instance ORDER BY id;"),
+                "SELECT id, boot_disk_id FROM instance ORDER BY id;",
                 &[],
             )
             .await
@@ -1604,8 +1604,8 @@ fn get_migration_checks() -> BTreeMap<SemverVersion, DataMigrationFns> {
     );
 
     map.insert(
-        SemverVersion(semver::Version::parse("105.0.0").unwrap()),
-        DataMigrationFns { before: Some(before_105_0_0), after: after_105_0_0 },
+        SemverVersion(semver::Version::parse("107.0.0").unwrap()),
+        DataMigrationFns { before: Some(before_107_0_0), after: after_107_0_0 },
     );
 
     map
