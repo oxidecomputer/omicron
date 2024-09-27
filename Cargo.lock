@@ -1975,12 +1975,12 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=9e0fe45ca3862176dc31ad8cc83f605f8a7e1a42#9e0fe45ca3862176dc31ad8cc83f605f8a7e1a42"
+source = "git+https://github.com/oxidecomputer/maghemite?branch=hyper-v1-no-merge#b13b5b240f3967de753fd589b1036745d2770b52"
 dependencies = [
  "oxnet",
  "percent-encoding",
- "progenitor 0.7.0",
- "reqwest 0.11.27",
+ "progenitor 0.8.0",
+ "reqwest 0.12.7",
  "serde",
  "serde_json",
  "slog",
@@ -5156,13 +5156,13 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?rev=9e0fe45ca3862176dc31ad8cc83f605f8a7e1a42#9e0fe45ca3862176dc31ad8cc83f605f8a7e1a42"
+source = "git+https://github.com/oxidecomputer/maghemite?branch=hyper-v1-no-merge#b13b5b240f3967de753fd589b1036745d2770b52"
 dependencies = [
  "anyhow",
  "chrono",
  "percent-encoding",
- "progenitor 0.7.0",
- "reqwest 0.11.27",
+ "progenitor 0.8.0",
+ "reqwest 0.12.7",
  "schemars",
  "serde",
  "serde_json",
@@ -6417,7 +6417,6 @@ dependencies = [
  "omicron-common",
  "omicron-workspace-hack",
  "progenitor-client 0.8.0",
- "reqwest 0.11.27",
  "reqwest 0.12.7",
  "serde",
  "sled-hardware-types",
@@ -7097,6 +7096,7 @@ dependencies = [
  "ring 0.17.8",
  "rsa",
  "rustix",
+ "rustls 0.21.12",
  "rustls 0.23.10",
  "schemars",
  "scopeguard",
