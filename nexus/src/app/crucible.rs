@@ -43,7 +43,10 @@ enum WaitError {
 /// Convert an error returned from the ProgenitorOperationRetry loops in this
 /// file into an external Error
 fn into_external_error(
-    e: ProgenitorOperationRetryError<crucible_agent_client::types::Error>,
+    e: ProgenitorOperationRetryError<
+        crucible_agent_client::types::Error,
+        Error,
+    >,
 ) -> Error {
     match e {
         ProgenitorOperationRetryError::Gone => Error::Gone,

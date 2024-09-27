@@ -21,3 +21,6 @@ prettyplease.workspace = true
 syn.workspace = true
 toml.workspace = true
 uuid.workspace = true
+
+[features]
+omicron-internal = ["oximeter-types/omicron-internal"]

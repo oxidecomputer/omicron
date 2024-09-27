@@ -14,8 +14,6 @@ use gateway_messages::DeviceCapabilities;
 use gateway_sp_comms::SingleSp;
 use gateway_sp_comms::SpComponent;
 use gateway_sp_comms::VersionedSpState;
-use omicron_common::api::internal::nexus::ProducerEndpoint;
-use omicron_common::api::internal::nexus::ProducerKind;
 use omicron_common::backoff;
 use oximeter::types::Cumulative;
 use oximeter::types::ProducerRegistry;
@@ -1095,9 +1093,10 @@ impl ServerManager {
                     // Listen on any available socket, using the provided underlay IP.
                     let address = SocketAddr::new(ip.into(), 0);
 
-                    let server_info = ProducerEndpoint {
+                    let server_info = oximeter_producer::EndpointConfig {
                         id,
-                        kind: ProducerKind::ManagementGateway,
+                        kind:
+                            oximeter_producer::ProducerKind::ManagementGateway,
                         address,
                         interval: OXIMETER_COLLECTION_INTERVAL,
                     };

@@ -21,6 +21,7 @@ members = [
     "cockroach-admin/api",
     "cockroach-admin/types",
     "common",
+    "common/external",
     "dev-tools/cert-dev",
     "dev-tools/ch-dev",
     "dev-tools/crdb-seed",
@@ -141,6 +142,7 @@ default-members = [
     "cockroach-admin/api",
     "cockroach-admin/types",
     "common",
+    "common/external",
     "dev-tools/cert-dev",
     "dev-tools/ch-dev",
     "dev-tools/crdb-seed",
@@ -456,6 +458,7 @@ omicron-clickhouse-admin = { path = "clickhouse-admin" }
 omicron-certificates = { path = "certificates" }
 omicron-cockroach-admin = { path = "cockroach-admin" }
 omicron-common = { path = "common" }
+omicron-common-external = { path = "common/external" }
 omicron-dev-lib = { path = "dev-tools/omicron-dev-lib" }
 omicron-gateway = { path = "gateway" }
 omicron-nexus = { path = "nexus" }
@@ -850,3 +853,4 @@ path = "workspace-hack"
 [patch."https://github.com/oxidecomputer/omicron"]
 omicron-uuid-kinds = { path = "uuid-kinds" }
 omicron-common = { path = "common" }
+omicron-common-external = { path = "common/external" }

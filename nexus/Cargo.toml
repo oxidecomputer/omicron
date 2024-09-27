@@ -46,7 +46,7 @@ itertools.workspace = true
 macaddr.workspace = true
 # Not under "dev-dependencies"; these also need to be implemented for
 # integration tests.
-nexus-client.workspace = true
+nexus-client = { workspace = true, features = ["omicron-internal"] }
 nexus-config.workspace = true
 nexus-external-api.workspace = true
 nexus-internal-api.workspace = true

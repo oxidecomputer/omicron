@@ -709,6 +709,7 @@ pub enum MetricsError {
     },
 }
 
+#[cfg(feature = "omicron-internal")]
 impl From<MetricsError> for omicron_common::api::external::Error {
     fn from(e: MetricsError) -> Self {
         omicron_common::api::external::Error::internal_error(&e.to_string())

@@ -53,8 +53,6 @@ use omicron_common::api::external::UserId;
 use omicron_common::api::external::Vni;
 use omicron_common::api::external::{IdentityMetadata, Name};
 use omicron_common::api::internal::nexus::Certificate;
-use omicron_common::api::internal::nexus::ProducerEndpoint;
-use omicron_common::api::internal::nexus::ProducerKind;
 use omicron_common::api::internal::shared::DatasetKind;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
@@ -1514,9 +1512,9 @@ pub fn start_producer_server(
     // This listens on any available port, and the server internally updates this to the actual
     // bound port of the Dropshot HTTP server.
     let producer_address = SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0);
-    let server_info = ProducerEndpoint {
+    let server_info = oximeter_producer::EndpointConfig {
         id,
-        kind: ProducerKind::Service,
+        kind: oximeter_producer::ProducerKind::Service,
         address: producer_address,
         interval: Duration::from_secs(1),
     };

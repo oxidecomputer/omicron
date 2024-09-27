@@ -12,7 +12,7 @@ bytes = { workspace = true, features = [ "serde" ] }
 chrono.workspace = true
 float-ord.workspace = true
 num.workspace = true
-omicron-common.workspace = true
+omicron-common = { workspace = true, optional = true }
 omicron-workspace-hack.workspace = true
 regex.workspace = true
 schemars = { workspace = true, features = [ "uuid1", "bytes", "chrono" ] }
@@ -31,6 +31,9 @@ rand_distr.workspace = true
 rstest.workspace = true
 serde_json.workspace = true
 trybuild.workspace = true
+
+[features]
+omicron-internal = ["dep:omicron-common"]
 
 [[bench]]
 name = "quantile"
