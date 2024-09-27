@@ -422,8 +422,10 @@ macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
 mockall = "0.13"
 newtype_derive = "0.1.6"
-mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "9e0fe45ca3862176dc31ad8cc83f605f8a7e1a42" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "9e0fe45ca3862176dc31ad8cc83f605f8a7e1a42" }
+# mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "9e0fe45ca3862176dc31ad8cc83f605f8a7e1a42" }
+# ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "9e0fe45ca3862176dc31ad8cc83f605f8a7e1a42" }
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", branch = "hyper-v1-no-merge" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", branch = "hyper-v1-no-merge" }
 multimap = "0.10.0"
 nexus-auth = { path = "nexus/auth" }
 nexus-client = { path = "clients/nexus-client" }
@@ -527,7 +529,6 @@ ref-cast = "1.0"
 regex = "1.10.6"
 regress = "0.9.1"
 reqwest = { version = "0.12", default-features = false }
-reqwest11 = { package = "reqwest", version = "0.11", default-features = false }
 ring = "0.17.8"
 rpassword = "7.3.1"
 rstest = "0.22.0"
