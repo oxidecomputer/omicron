@@ -1519,10 +1519,7 @@ fn before_107_0_0(client: &Client) -> BoxFuture<'_, ()> {
 fn after_107_0_0(client: &Client) -> BoxFuture<'_, ()> {
     Box::pin(async {
         let rows = client
-            .query(
-                "SELECT id, boot_disk_id FROM instance ORDER BY id;",
-                &[],
-            )
+            .query("SELECT id, boot_disk_id FROM instance ORDER BY id;", &[])
             .await
             .expect("failed to load instance boot disks");
         let boot_disks = process_rows(&rows);

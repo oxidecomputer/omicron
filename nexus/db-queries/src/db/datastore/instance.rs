@@ -1029,24 +1029,33 @@ impl DataStore {
                         InstanceState::Creating,
                     ];
 
-                    let updatable = instance_dsl::instance
+                    let instance_state = instance_dsl::instance
                         .filter(instance_dsl::id.eq(authz_instance.id()))
-                        .filter(
-                            instance_dsl::state
-                                .eq_any(ok_to_reconfigure_instance_states),
-                        )
                         .filter(instance_dsl::time_deleted.is_null())
-                        .select(instance_dsl::id)
-                        .first_async::<Uuid>(&conn)
+                        .select(instance_dsl::state)
+                        .first_async::<InstanceState>(&conn)
                         .await;
 
-                    if let Err(e) = updatable {
-                        if e == diesel::NotFound {
+                    match instance_state {
+                        Ok(state) => {
+                            let state_ok = ok_to_reconfigure_instance_states
+                                .contains(&state);
+
+                            if !state_ok {
+                                return Err(err.bail(Error::conflict(
+                                    "instance must be stopped to update"
+                                )));
+                            }
+                        },
+                        Err(diesel::NotFound) => {
+                            // If the instance simply doesn't exist, we
+                            // shouldn't retry. Bail with a useful error.
                             return Err(err.bail(Error::not_found_by_id(
                                 ResourceType::Instance,
                                 &authz_instance.id(),
                             )));
-                        } else {
+                        },
+                        Err(e) => {
                             return Err(e);
                         }
                     }
