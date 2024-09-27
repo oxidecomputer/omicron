@@ -33,6 +33,7 @@ use omicron_common::backoff;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_common::NoDebug;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid};
+use propolis_api_types::ErrorCode as PropolisErrorCode;
 use propolis_client::Client as PropolisClient;
 use rand::prelude::IteratorRandom;
 use rand::SeedableRng;
@@ -64,7 +65,7 @@ pub enum Error {
     VnicCreation(#[from] illumos_utils::dladm::CreateVnicError),
 
     #[error("Failure from Propolis Client: {0}")]
-    Propolis(#[from] propolis_client::Error<propolis_client::types::Error>),
+    Propolis(#[from] PropolisClientError),
 
     // TODO: Remove this error; prefer to retry notifications.
     #[error("Notifying Nexus failed: {0}")]
@@ -129,6 +130,10 @@ pub enum Error {
     #[error("Instance is terminating")]
     Terminating,
 }
+
+// Make this less gross.
+type PropolisClientError =
+    propolis_client::Error<propolis_client::types::Error>;
 
 // Issues read-only, idempotent HTTP requests at propolis until it responds with
 // an acknowledgement. This provides a hacky mechanism to "wait until the HTTP
@@ -655,7 +660,7 @@ impl InstanceRunner {
 
         if let Err(e) = &res {
             error!(self.log, "Error from Propolis client: {:?}", e;
-                   "status" => ?e.status());
+               "status" => ?e.status());
         }
 
         res?;
@@ -957,6 +962,29 @@ impl InstanceRunner {
         )?;
 
         Ok(())
+    }
+}
+
+fn propolis_error_code(
+    log: &slog::Logger,
+    &error: PropolisClientError,
+) -> Option<PropolisErrorCode> {
+    // Is this a structured error response from the Propolis server?
+    let propolis_client::Error::ErrorResponse(ref rv) = &error else {
+        return None;
+    };
+
+    let code = rv.error_code.as_deref()?;
+    match code.parse::<PropolisErrorCode>() {
+        Err(parse_error) => {
+            error!(log, "Propolis returned an unknown error code: {code:?}";
+                "status" => ?error.status(),
+                "error" => %error,
+                "code" => ?code,
+                "parse_error" => ?parse_error);
+            None
+        }
+        Ok(code) => Some(code),
     }
 }
 
@@ -1358,7 +1386,30 @@ impl InstanceRunner {
         };
 
         if let Some(p) = propolis_state {
-            self.propolis_state_put(p).await?;
+            if let Err(e) = self.propolis_state_put(p).await {
+                match propolis_error_code(&self.log, e) {
+                    Some(
+                        code @ PropolisErrorCode::NoInstance
+                        | code @ PropolisErrorCode::CreateFailed,
+                    ) => {
+                        error!(self.log,
+                            "Propolis error code indicates VMM failure";
+                            "code" => ?code,
+                        );
+                        self.terminate(true).await;
+                        // We've transitioned to `Failed`, so just return the
+                        // failed state normally. We return early here instead
+                        // of falling through because we don't want to overwrite
+                        // that with the published VMM state determined above.
+                        return Ok(self.state.sled_instance_state());
+                    }
+                    _ => {
+                        return Err(Error::Propolis(e));
+                    }
+                }
+            } else {
+                return Err(Error::Propolis(e));
+            }
         }
         if let Some(s) = next_published {
             self.state.transition_vmm(s, Utc::now());
