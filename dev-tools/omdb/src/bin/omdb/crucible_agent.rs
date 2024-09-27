@@ -143,8 +143,7 @@ async fn cmd_snapshot_list(
             Err(e) => {
                 println!(
                     "Error {} looking at region {} for snapshots",
-                    e,
-                    region.id.to_string()
+                    e, region.id,
                 );
                 continue;
             }

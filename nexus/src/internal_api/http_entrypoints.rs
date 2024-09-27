@@ -7,6 +7,7 @@
 use super::params::{OximeterInfo, RackInitializationRequest};
 use crate::context::ApiContext;
 use dropshot::ApiDescription;
+use dropshot::Body;
 use dropshot::FreeformBody;
 use dropshot::HttpError;
 use dropshot::HttpResponseCreated;
@@ -18,7 +19,6 @@ use dropshot::Query;
 use dropshot::RequestContext;
 use dropshot::ResultsPage;
 use dropshot::TypedBody;
-use hyper::Body;
 use nexus_internal_api::*;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
@@ -81,8 +81,10 @@ impl NexusInternalApi for NexusInternalApiImpl {
         let path = path_params.into_inner();
         let sled_id = &path.sled_id;
         let handler = async {
-            let (.., sled) =
-                nexus.sled_lookup(&opctx, sled_id)?.fetch().await?;
+            let (.., sled) = nexus
+                .sled_lookup(&opctx, &sled_id.into_untyped_uuid())?
+                .fetch()
+                .await?;
             Ok(HttpResponseOk(sled.into()))
         };
         apictx
@@ -103,7 +105,9 @@ impl NexusInternalApi for NexusInternalApiImpl {
         let info = sled_info.into_inner();
         let sled_id = &path.sled_id;
         let handler = async {
-            nexus.upsert_sled(&opctx, *sled_id, info).await?;
+            nexus
+                .upsert_sled(&opctx, sled_id.into_untyped_uuid(), info)
+                .await?;
             Ok(HttpResponseUpdatedNoContent())
         };
         apictx
@@ -122,7 +126,12 @@ impl NexusInternalApi for NexusInternalApiImpl {
         let path = path_params.into_inner();
         let sled_id = &path.sled_id;
         let handler = async {
-            nexus.sled_request_firewall_rules(&opctx, *sled_id).await?;
+            nexus
+                .sled_request_firewall_rules(
+                    &opctx,
+                    sled_id.into_untyped_uuid(),
+                )
+                .await?;
             Ok(HttpResponseUpdatedNoContent())
         };
         apictx

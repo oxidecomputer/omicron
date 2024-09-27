@@ -43,6 +43,7 @@ pub struct SledSystemHardware {
 /// Database representation of a Sled.
 #[derive(Queryable, Insertable, Debug, Clone, Selectable, Asset)]
 #[diesel(table_name = sled)]
+// TODO-cleanup: use #[asset(uuid_kind = SledKind)]
 pub struct Sled {
     #[diesel(embed)]
     pub identity: SledIdentity,

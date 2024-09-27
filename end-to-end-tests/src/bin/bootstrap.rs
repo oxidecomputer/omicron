@@ -151,9 +151,12 @@ async fn main() -> Result<()> {
 async fn deserialize_byte_stream<T: DeserializeOwned>(
     response: oxide_client::ResponseValue<oxide_client::ByteStream>,
 ) -> Result<T> {
-    let body = hyper::Body::wrap_stream(response.into_inner_stream());
-    let bytes = hyper::body::to_bytes(body).await?;
-    Ok(serde_json::from_slice(&bytes)?)
+    use bytes::buf::Buf;
+    use futures::TryStreamExt;
+
+    let bytes =
+        response.into_inner_stream().try_collect::<bytes::BytesMut>().await?;
+    Ok(serde_json::from_reader(bytes.reader())?)
 }
 
 #[derive(Deserialize)]

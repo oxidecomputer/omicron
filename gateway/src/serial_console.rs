@@ -8,6 +8,7 @@ use crate::error::SpCommsError;
 use crate::SpIdentifier;
 use dropshot::WebsocketChannelResult;
 use dropshot::WebsocketConnection;
+use dropshot::WebsocketConnectionRaw;
 use futures::stream::SplitSink;
 use futures::stream::SplitStream;
 use futures::SinkExt;
@@ -15,7 +16,6 @@ use futures::StreamExt;
 use gateway_messages::SERIAL_CONSOLE_IDLE_TIMEOUT;
 use gateway_sp_comms::AttachedSerialConsole;
 use gateway_sp_comms::AttachedSerialConsoleSend;
-use hyper::upgrade::Upgraded;
 use slog::error;
 use slog::info;
 use slog::warn;
@@ -155,7 +155,7 @@ pub(crate) async fn run(
 }
 
 async fn ws_sink_task(
-    mut ws_sink: SplitSink<WebSocketStream<Upgraded>, Message>,
+    mut ws_sink: SplitSink<WebSocketStream<WebsocketConnectionRaw>, Message>,
     mut messages: mpsc::Receiver<Message>,
 ) -> Result<(), SerialTaskError> {
     while let Some(message) = messages.recv().await {
@@ -166,7 +166,7 @@ async fn ws_sink_task(
 
 async fn ws_recv_task(
     sp: SpIdentifier,
-    mut ws_stream: SplitStream<WebSocketStream<Upgraded>>,
+    mut ws_stream: SplitStream<WebSocketStream<WebsocketConnectionRaw>>,
     mut console_tx: DetachOnDrop,
     log: Logger,
 ) -> Result<(), SerialTaskError> {
