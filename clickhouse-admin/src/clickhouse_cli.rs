@@ -4,7 +4,7 @@
 
 use anyhow::Result;
 use camino::Utf8PathBuf;
-use clickhouse_admin_types::{Lgif, RaftConfig};
+use clickhouse_admin_types::{KeeperConf, Lgif, RaftConfig};
 use dropshot::HttpError;
 use illumos_utils::{output_to_exec_error, ExecutionError};
 use slog::Logger;
@@ -87,6 +87,16 @@ impl ClickhouseCli {
             "get /keeper/config",
             "Retrieve raft configuration information",
             RaftConfig::parse,
+            self.log.clone().unwrap(),
+        )
+        .await
+    }
+
+    pub async fn keeper_conf(&self) -> Result<KeeperConf, ClickhouseCliError> {
+        self.keeper_client_non_interactive(
+            "conf",
+            "Retrieve keeper node configuration information",
+            KeeperConf::parse,
             self.log.clone().unwrap(),
         )
         .await

@@ -40,6 +40,7 @@ use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::VnicUuid;
 use reedline::{Reedline, Signal};
+use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::io::BufRead;
 use swrite::{swriteln, SWrite};
@@ -690,12 +691,23 @@ fn cmd_blueprint_list(
     #[tabled(rename_all = "SCREAMING_SNAKE_CASE")]
     struct BlueprintRow {
         id: Uuid,
+        parent: Cow<'static, str>,
+        time_created: String,
     }
 
-    let rows = sim
-        .blueprints
-        .values()
-        .map(|blueprint| BlueprintRow { id: blueprint.id });
+    let mut rows = sim.blueprints.values().collect::<Vec<_>>();
+    rows.sort_unstable_by_key(|blueprint| blueprint.time_created);
+    let rows = rows.into_iter().map(|blueprint| BlueprintRow {
+        id: blueprint.id,
+        parent: blueprint
+            .parent_blueprint_id
+            .map(|s| Cow::Owned(s.to_string()))
+            .unwrap_or(Cow::Borrowed("<none>")),
+        time_created: humantime::format_rfc3339_millis(
+            blueprint.time_created.into(),
+        )
+        .to_string(),
+    });
     let table = tabled::Table::new(rows)
         .with(tabled::settings::Style::empty())
         .with(tabled::settings::Padding::new(0, 1, 0, 0))

@@ -13,6 +13,7 @@
 [libraries."libgcc_s.so.1"]
 [libraries."libipcc.so.1"]
 [libraries."libkstat.so.1"]
+[libraries."liblzma.so.5"]
 [libraries."libm.so.2"]
 [libraries."libnsl.so.1"]
 [libraries."libnvpair.so.1"]

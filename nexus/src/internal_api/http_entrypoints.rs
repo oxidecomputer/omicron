@@ -7,6 +7,7 @@
 use super::params::{OximeterInfo, RackInitializationRequest};
 use crate::context::ApiContext;
 use dropshot::ApiDescription;
+use dropshot::Body;
 use dropshot::FreeformBody;
 use dropshot::HttpError;
 use dropshot::HttpResponseCreated;
@@ -18,7 +19,6 @@ use dropshot::Query;
 use dropshot::RequestContext;
 use dropshot::ResultsPage;
 use dropshot::TypedBody;
-use hyper::Body;
 use nexus_internal_api::*;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;

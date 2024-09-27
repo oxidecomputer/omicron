@@ -91,7 +91,6 @@ use std::time::Duration;
 pub mod link;
 mod sampler;
 
-pub use link::SledDataLink;
 pub use sampler::CollectionDetails;
 pub use sampler::ExpirationBehavior;
 pub use sampler::KstatSampler;
