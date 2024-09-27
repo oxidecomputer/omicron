@@ -259,7 +259,7 @@ impl SledAgentApi for SledAgentImpl {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<OmicronZonesConfig>, HttpError> {
         let sa = rqctx.context();
-        Ok(HttpResponseOk(sa.omicron_zones_list().await?))
+        Ok(HttpResponseOk(sa.omicron_zones_list().await))
     }
 
     async fn omicron_zones_put(

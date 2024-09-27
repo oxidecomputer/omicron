@@ -3316,9 +3316,7 @@ impl ServiceManager {
     }
 
     /// Returns the current Omicron zone configuration
-    pub async fn omicron_zones_list(
-        &self,
-    ) -> Result<OmicronZonesConfig, Error> {
+    pub async fn omicron_zones_list(&self) -> OmicronZonesConfig {
         let log = &self.inner.log;
 
         // We need to take the lock in order for the information in the ledger
@@ -3337,7 +3335,7 @@ impl ServiceManager {
             None => OmicronZonesConfigLocal::initial(),
         };
 
-        Ok(ledger_data.to_omicron_zones_config())
+        ledger_data.to_omicron_zones_config()
     }
 
     /// Ensures that particular Omicron zones are running
