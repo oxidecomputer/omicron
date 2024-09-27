@@ -114,6 +114,15 @@ async fn component_list() {
                 presence: SpComponentPresence::Present,
             },
             SpComponentInfo {
+                component: "dev-46".to_string(),
+                device: "sbtsi".to_string(),
+                serial_number: None,
+                description: "CPU temperature sensor".to_string(),
+                capabilities: DeviceCapabilities::HAS_MEASUREMENT_CHANNELS
+                    .bits(),
+                presence: SpComponentPresence::Present,
+            },
+            SpComponentInfo {
                 component: "dev-53".to_string(),
                 device: "max31790".to_string(),
                 serial_number: None,
@@ -200,6 +209,15 @@ async fn component_list() {
                 device: "tmp451".to_string(),
                 serial_number: None,
                 description: "FAKE T6 temperature sensor".to_string(),
+                capabilities: DeviceCapabilities::HAS_MEASUREMENT_CHANNELS
+                    .bits(),
+                presence: SpComponentPresence::Present,
+            },
+            SpComponentInfo {
+                component: "dev-46".to_string(),
+                device: "sbtsi".to_string(),
+                serial_number: None,
+                description: "CPU temperature sensor".to_string(),
                 capabilities: DeviceCapabilities::HAS_MEASUREMENT_CHANNELS
                     .bits(),
                 presence: SpComponentPresence::Present,

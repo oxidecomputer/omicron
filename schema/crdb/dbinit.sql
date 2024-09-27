@@ -512,7 +512,8 @@ CREATE TYPE IF NOT EXISTS omicron.public.dataset_kind AS ENUM (
   'internal_dns',
   'zone_root',
   'zone',
-  'debug'
+  'debug',
+  'update'
 );
 
 /*
@@ -3244,10 +3245,39 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_physical_disk (
 
     variant omicron.public.physical_disk_kind NOT NULL,
 
-    -- FK consisting of:
+    -- PK consisting of:
     -- - Which collection this was
     -- - The sled reporting the disk
     -- - The slot in which this disk was found
+    PRIMARY KEY (inv_collection_id, sled_id, slot)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_nvme_disk_firmware (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+
+    -- unique id for this sled (should be foreign keys into `sled` table, though
+    -- it's conceivable a sled will report an id that we don't know about)
+    sled_id UUID NOT NULL,
+    -- The slot where this disk was last observed
+    slot INT8 CHECK (slot >= 0) NOT NULL,
+
+    -- total number of firmware slots the device has
+    number_of_slots INT2 CHECK (number_of_slots BETWEEN 1 AND 7) NOT NULL,
+    active_slot INT2 CHECK (active_slot BETWEEN 1 AND 7) NOT NULL,
+    -- staged firmware slot to be active on reset
+    next_active_slot INT2 CHECK (next_active_slot BETWEEN 1 AND 7),
+    -- slot1 is distinct in the NVMe spec in the sense that it can be read only
+    slot1_is_read_only BOOLEAN,
+    -- the firmware version string for each NVMe slot (0 indexed), a NULL means the
+    -- slot exists but is empty
+    slot_firmware_versions STRING(8)[] CHECK (array_length(slot_firmware_versions, 1) BETWEEN 1 AND 7),
+    
+    -- PK consisting of:
+    -- - Which collection this was
+    -- - The sled reporting the disk
+    -- - The slot in which the disk was found
     PRIMARY KEY (inv_collection_id, sled_id, slot)
 );
 
@@ -4389,7 +4419,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '105.0.0', NULL)
+    (TRUE, NOW(), NOW(), '107.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

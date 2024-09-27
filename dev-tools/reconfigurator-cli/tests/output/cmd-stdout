@@ -5,12 +5,12 @@ ID NZPOOLS SUBNET
 ID NERRORS TIME_DONE 
 
 > blueprint-list
-ID 
+ID PARENT TIME_CREATED 
 
 > 
 
 > sled-show ..........<REDACTED_UUID>...........
-error: no sled with id ..........<REDACTED_UUID>...........
+error: sled ..........<REDACTED_UUID>........... was not found in the planning input
 
 > sled-add ..........<REDACTED_UUID>...........
 added sled

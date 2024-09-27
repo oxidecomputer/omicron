@@ -58,6 +58,7 @@ use nexus_db_model::HwBaseboardId;
 use nexus_db_model::Image;
 use nexus_db_model::Instance;
 use nexus_db_model::InvCollection;
+use nexus_db_model::InvNvmeDiskFirmware;
 use nexus_db_model::InvPhysicalDisk;
 use nexus_db_model::IpAttachState;
 use nexus_db_model::IpKind;
@@ -4666,36 +4667,62 @@ async fn cmd_db_inventory_physical_disks(
         model: String,
         serial: String,
         variant: String,
+        firmware: String,
+        next_firmware: String,
     }
 
-    use db::schema::inv_physical_disk::dsl;
-    let mut query = dsl::inv_physical_disk.into_boxed();
+    use db::schema::inv_nvme_disk_firmware::dsl as firmware_dsl;
+    use db::schema::inv_physical_disk::dsl as disk_dsl;
+
+    let mut query = disk_dsl::inv_physical_disk.into_boxed();
     query = query.limit(i64::from(u32::from(limit)));
 
     if let Some(collection_id) = args.collection_id {
         query = query.filter(
-            dsl::inv_collection_id.eq(collection_id.into_untyped_uuid()),
+            disk_dsl::inv_collection_id.eq(collection_id.into_untyped_uuid()),
         );
     }
 
     if let Some(sled_id) = args.sled_id {
-        query = query.filter(dsl::sled_id.eq(sled_id.into_untyped_uuid()));
+        query = query.filter(disk_dsl::sled_id.eq(sled_id.into_untyped_uuid()));
     }
 
     let disks = query
-        .select(InvPhysicalDisk::as_select())
+        .left_join(
+            firmware_dsl::inv_nvme_disk_firmware.on(
+                firmware_dsl::inv_collection_id
+                    .eq(disk_dsl::inv_collection_id)
+                    .and(firmware_dsl::sled_id.eq(disk_dsl::sled_id))
+                    .and(firmware_dsl::slot.eq(disk_dsl::slot)),
+            ),
+        )
+        .select((
+            InvPhysicalDisk::as_select(),
+            Option::<InvNvmeDiskFirmware>::as_select(),
+        ))
         .load_async(&**conn)
         .await
         .context("loading physical disks")?;
 
-    let rows = disks.into_iter().map(|disk| DiskRow {
-        inv_collection_id: disk.inv_collection_id.into_untyped_uuid(),
-        sled_id: disk.sled_id.into_untyped_uuid(),
-        slot: disk.slot,
-        vendor: disk.vendor,
-        model: disk.model.clone(),
-        serial: disk.serial.clone(),
-        variant: format!("{:?}", disk.variant),
+    let rows = disks.into_iter().map(|(disk, firmware)| {
+        let (active_firmware, next_firmware) =
+            if let Some(firmware) = firmware.as_ref() {
+                (firmware.current_version(), firmware.next_version())
+            } else {
+                (None, None)
+            };
+
+        DiskRow {
+            inv_collection_id: disk.inv_collection_id.into_untyped_uuid(),
+            sled_id: disk.sled_id.into_untyped_uuid(),
+            slot: disk.slot,
+            vendor: disk.vendor,
+            model: disk.model.clone(),
+            serial: disk.serial.clone(),
+            variant: format!("{:?}", disk.variant),
+            firmware: active_firmware.unwrap_or("UNKNOWN").to_string(),
+            next_firmware: next_firmware.unwrap_or("").to_string(),
+        }
     });
 
     let table = tabled::Table::new(rows)
@@ -5101,6 +5128,7 @@ fn inv_collection_print_sleds(collection: &Collection) {
                 identity,
                 variant,
                 slot,
+                ..
             } = disk;
             println!("      {variant:?}: {identity:?} in {slot}");
         }

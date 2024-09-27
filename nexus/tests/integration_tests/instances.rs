@@ -1179,6 +1179,44 @@ async fn test_instance_failed_after_sled_agent_forgets_vmm_can_be_deleted(
     expect_instance_delete_ok(client, instance_name).await;
 }
 
+// Verifies that if a request to reboot or stop an instance fails because of a
+// 404 error from sled agent, then the instance moves to the Failed state, and
+// can then be Stopped once it has transitioned to Failed.
+#[nexus_test]
+async fn test_instance_failed_after_sled_agent_forgets_vmm_can_be_stopped(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let instance_name = "losing-is-fun";
+    let instance_id = make_forgotten_instance(
+        &cptestctx,
+        instance_name,
+        InstanceAutoRestartPolicy::Never,
+    )
+    .await;
+
+    // Attempting to reboot the forgotten instance will result in a 404
+    // NO_SUCH_INSTANCE from the sled-agent, which Nexus turns into a 503.
+    expect_instance_reboot_fail(
+        client,
+        instance_name,
+        http::StatusCode::SERVICE_UNAVAILABLE,
+    )
+    .await;
+
+    // Wait for the instance to transition to Failed.
+    instance_wait_for_state(client, instance_id, InstanceState::Failed).await;
+
+    // Now, it should be possible to stop the instance.
+    let instance_next =
+        instance_post(&client, instance_name, InstanceOp::Stop).await;
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Stopped);
+
+    // Now, the Stopped nstance should be deleteable..
+    expect_instance_delete_ok(client, instance_name).await;
+}
+
 // Verifies that the instance-watcher background task transitions an instance
 // to Failed when the sled-agent returns a 404, and that the instance can be
 // deleted after it transitions to Failed.
