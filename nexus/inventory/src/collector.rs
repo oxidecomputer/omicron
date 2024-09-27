@@ -15,8 +15,6 @@ use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageWhich;
-use omicron_uuid_kinds::GenericUuid;
-use omicron_uuid_kinds::SledUuid;
 use slog::o;
 use slog::{debug, error};
 use std::sync::Arc;
@@ -351,7 +349,7 @@ impl<'a> Collector<'a> {
             }
         };
 
-        let sled_id = SledUuid::from_untyped_uuid(inventory.sled_id);
+        let sled_id = inventory.sled_id;
         self.in_progress.found_sled_inventory(&sled_agent_url, inventory)?;
 
         let maybe_config =
@@ -385,12 +383,12 @@ mod test {
     use omicron_common::zpool_name::ZpoolName;
     use omicron_sled_agent::sim;
     use omicron_uuid_kinds::OmicronZoneUuid;
+    use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use std::fmt::Write;
     use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;
     use std::sync::Arc;
-    use uuid::Uuid;
 
     fn dump_collection(collection: &Collection) -> String {
         // Construct a stable, human-readable summary of the Collection
@@ -532,7 +530,7 @@ mod test {
 
     async fn sim_sled_agent(
         log: slog::Logger,
-        sled_id: Uuid,
+        sled_id: SledUuid,
         zone_id: OmicronZoneUuid,
     ) -> sim::Server {
         // Start a simulated sled agent.

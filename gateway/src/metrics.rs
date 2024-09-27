@@ -766,6 +766,24 @@ impl SpPoller {
                     };
                     let sensor: Cow<'static, str> = Cow::Owned(m.name);
 
+                    // Temperature measurements which have the sensor name "CPU"
+                    // and are from the SB-TSI device kind are CPU Tctl values.
+                    // These are neither Fahrenheit nor Celsius, but a secret
+                    // third thing, which is  not actually a "temperature
+                    // measurement" in the sense that you probably imagined when
+                    // you saw the words "temperature" and "measurement".
+                    // Instead, it's a dimensionless value in the range from
+                    // 0-100 that's  calculated by the CPU's thermal control
+                    // loop.
+                    //
+                    // Therefore, we report it as a different metric from the
+                    // `hardware_component:temperature` metric, which is
+                    // in degrees Celsius.
+                    //
+                    // See this comment for details on what Tctl values mean:
+                    // https://github.com/illumos/illumos-gate/blob/6cf3cc9d1e40f89e90135a48f74f03f879fce639/usr/src/uts/intel/io/amdzen/smntemp.c#L21-L57
+                    let is_tctl =
+                        sensor == "CPU" && target.component_kind == "sbtsi";
                     // First, if there's a measurement error, increment the
                     // error count metric. We will synthesize a missing sample
                     // for the sensor's metric as well, after we produce the
@@ -776,6 +794,9 @@ impl SpPoller {
                     // cloning it in *case* there's an error.
                     if let Err(error) = m.value {
                         let kind = match m.kind {
+                            MeasurementKind::Temperature if is_tctl => {
+                                "amd_cpu_tctl"
+                            }
                             MeasurementKind::Temperature => "temperature",
                             MeasurementKind::Current => "current",
                             MeasurementKind::Voltage => "voltage",
@@ -827,10 +848,29 @@ impl SpPoller {
                     // something to produce a datum from both the `Ok` and
                     // `Error` cases...
                     let sample = match (m.value, m.kind) {
+                        // The CPU's Tctl value gets reported as a separate
+                        // metric, as it is dimensionless.
+                        (Ok(datum), MeasurementKind::Temperature)
+                            if is_tctl =>
+                        {
+                            Sample::new(
+                                target,
+                                &metric::AmdCpuTctl { sensor, datum },
+                            )
+                        }
+                        // Other measurements with the "temperature" measurement
+                        // kind are physical temperatures that actually exist in
+                        // reality (and are always in Celsius).
                         (Ok(datum), MeasurementKind::Temperature) => {
                             Sample::new(
                                 target,
                                 &metric::Temperature { sensor, datum },
+                            )
+                        }
+                        (Err(_), MeasurementKind::Temperature) if is_tctl => {
+                            Sample::new_missing(
+                                target,
+                                &metric::AmdCpuTctl { sensor, datum: 0.0 },
                             )
                         }
                         (Err(_), MeasurementKind::Temperature) => {

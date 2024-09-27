@@ -11,9 +11,10 @@ workspace = true
 anyhow = { workspace = true, features = ["backtrace"] }
 async-trait.workspace = true
 base64.workspace = true
+bytes.workspace = true
 chrono.workspace = true
 http.workspace = true
-hyper.workspace = true
+futures.workspace = true
 omicron-sled-agent.workspace = true
 omicron-test-utils.workspace = true
 oxide-client.workspace = true
