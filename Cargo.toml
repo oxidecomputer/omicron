@@ -626,7 +626,7 @@ wicket = { path = "wicket" }
 wicket-common = { path = "wicket-common" }
 wicketd-api = { path = "wicketd-api" }
 wicketd-client = { path = "clients/wicketd-client" }
-zeroize = { version = "1.7.0", features = ["zeroize_derive", "std"] }
+zeroize = { version = "1.8.1", features = ["zeroize_derive", "std"] }
 zip = { version = "0.6.6", default-features = false, features = ["deflate","bzip2"] }
 zone = { version = "0.3", default-features = false, features = ["async"] }
 
