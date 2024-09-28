@@ -918,10 +918,8 @@ impl SledAgent {
     }
 
     /// List the Omicron zone configuration that's currently running
-    pub async fn omicron_zones_list(
-        &self,
-    ) -> Result<OmicronZonesConfig, Error> {
-        Ok(self.inner.services.omicron_zones_list().await?)
+    pub async fn omicron_zones_list(&self) -> OmicronZonesConfig {
+        self.inner.services.omicron_zones_list().await
     }
 
     /// Ensures that the specific set of Omicron zones are running as configured
