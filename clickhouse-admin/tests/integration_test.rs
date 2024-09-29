@@ -83,11 +83,11 @@ async fn test_raft_config_parsing() -> anyhow::Result<()> {
     // We spin up several replicated clusters and must use a
     // separate set of ports in case the tests run concurrently.
     let base_ports = BasePorts {
-        keeper: 39000,
-        raft: 39100,
-        clickhouse_tcp: 39200,
-        clickhouse_http: 39300,
-        clickhouse_interserver_http: 39400,
+        keeper: 29500,
+        raft: 29600,
+        clickhouse_tcp: 29700,
+        clickhouse_http: 29800,
+        clickhouse_interserver_http: 29900,
     };
 
     let config = DeploymentConfig {
@@ -114,7 +114,7 @@ async fn test_raft_config_parsing() -> anyhow::Result<()> {
 
     let clickhouse_cli = ClickhouseCli::new(
         Utf8PathBuf::from_str("clickhouse").unwrap(),
-        SocketAddrV6::new(Ipv6Addr::LOCALHOST, 39001, 0, 0),
+        SocketAddrV6::new(Ipv6Addr::LOCALHOST, 29501, 0, 0),
     )
     .with_log(log.clone());
 
@@ -123,7 +123,7 @@ async fn test_raft_config_parsing() -> anyhow::Result<()> {
     let mut keeper_servers = BTreeSet::new();
 
     for i in 1..=num_keepers {
-        let raft_port = u16::try_from(39100 + i).unwrap();
+        let raft_port = u16::try_from(29600 + i).unwrap();
         keeper_servers.insert(KeeperServerInfo {
             server_id: clickhouse_admin_types::KeeperId(i),
             host: ClickhouseHost::Ipv6("::1".parse().unwrap()),
@@ -156,11 +156,11 @@ async fn test_keeper_conf_parsing() -> anyhow::Result<()> {
     // We spin up several replicated clusters and must use a
     // separate set of ports in case the tests run concurrently.
     let base_ports = BasePorts {
-        keeper: 49000,
-        raft: 49100,
-        clickhouse_tcp: 49200,
-        clickhouse_http: 49300,
-        clickhouse_interserver_http: 49400,
+        keeper: 30000,
+        raft: 30100,
+        clickhouse_tcp: 30200,
+        clickhouse_http: 30300,
+        clickhouse_interserver_http: 30400,
     };
 
     let config = DeploymentConfig {
@@ -183,7 +183,7 @@ async fn test_keeper_conf_parsing() -> anyhow::Result<()> {
 
     let clickhouse_cli = ClickhouseCli::new(
         Utf8PathBuf::from_str("clickhouse").unwrap(),
-        SocketAddrV6::new(Ipv6Addr::LOCALHOST, 49001, 0, 0),
+        SocketAddrV6::new(Ipv6Addr::LOCALHOST, 30001, 0, 0),
     )
     .with_log(log.clone());
 
