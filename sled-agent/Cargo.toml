@@ -59,7 +59,7 @@ oximeter.workspace = true
 oximeter-instruments.workspace = true
 oximeter-producer.workspace = true
 oxnet.workspace = true
-propolis-api-types.workspace = true
+propolis_api_types.workspace = true
 propolis-client.workspace = true
 propolis-mock-server.workspace = true # Only used by the simulated sled agent
 rand = { workspace = true, features = ["getrandom"] }

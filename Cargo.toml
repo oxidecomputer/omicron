@@ -514,7 +514,7 @@ progenitor-client = "0.8.0"
 bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "fae5334bcad5e864794332c6fed5e6bb9ec88831" }
 # TODO(eliza): `propolis-client` should maybe re-export the needed types from
 # this crate?
-propolis-api-types = { git = "https://github.com/oxidecomputer/propolis", rev = "fae5334bcad5e864794332c6fed5e6bb9ec88831" }
+propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = "fae5334bcad5e864794332c6fed5e6bb9ec88831" }
 propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "fae5334bcad5e864794332c6fed5e6bb9ec88831" }
 propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "fae5334bcad5e864794332c6fed5e6bb9ec88831" }
 proptest = "1.5.0"

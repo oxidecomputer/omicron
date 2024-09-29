@@ -253,25 +253,27 @@ enum InstanceRequest {
 struct InstanceMonitorRunner {
     client: Arc<PropolisClient>,
     tx_monitor: mpsc::Sender<InstanceMonitorRequest>,
+    log: slog::Logger,
+    generation: i32,
 }
 
 impl InstanceMonitorRunner {
     async fn run(self) -> Result<(), anyhow::Error> {
         let mut gen = 0;
         loop {
-            // State monitoring always returns the most recent state/gen pair
-            // known to Propolis.
-            let response = self
-                .client
-                .instance_state_monitor()
-                .body(propolis_client::types::InstanceStateMonitorRequest {
-                    gen,
-                })
-                .send()
-                .await?
-                .into_inner();
-            let observed_gen = response.gen;
-
+            let update = backoff::retry_notify(
+                backoff::retry_policy_local(),
+                || self.monitor(),
+                |error, delay| {
+                    warn!(
+                        self.log,
+                        "failed to poll Propolis state";
+                        "error" => %error
+                        "retry_in" => ?delay,
+                    );
+                },
+            )
+            .await?;
             // Now that we have the response from Propolis' HTTP server, we
             // forward that to the InstanceRunner.
             //
@@ -279,25 +281,60 @@ impl InstanceMonitorRunner {
             // and possibly identify if we should terminate.
             let (tx, rx) = oneshot::channel();
             self.tx_monitor
-                .send(InstanceMonitorRequest::Update { state: response, tx })
+                .send(InstanceMonitorRequest::Update { update, tx })
                 .await?;
 
             if let Reaction::Terminate = rx.await? {
                 return Ok(());
             }
+        }
+    }
 
-            // Update the generation number we're asking for, to ensure the
-            // Propolis will only return more recent values.
-            gen = observed_gen + 1;
+    async fn monitor(
+        &self,
+    ) -> Result<InstanceMonitorUpdate, backoff::Error<PropolisClientError>>
+    {
+        // State monitoring always returns the most recent state/gen pair
+        // known to Propolis.
+        let result = self
+            .client
+            .instance_state_monitor()
+            .body(propolis_client::types::InstanceStateMonitorRequest {
+                r#gen: self.generation,
+            })
+            .send()
+            .await;
+        match result {
+            Ok(response) => {
+                let state = response.into_inner();
+
+                // Update the generation number we're asking for, to ensure the
+                // Propolis will only return more recent values.
+                self.generation = response.r#gen + 1;
+
+                Ok(InstanceMonitorUpdate::State(state))
+            }
+            // If the channel has closed, then there's nothing left for us to do
+            // here. Go die.
+            Err(e) if self.tx_monitor.is_closed() => {
+                Err(backoff::Error::permanent(e))
+            }
+            Err(e) if let Some(code) = propolis_error_code(&self.log, &e) => {
+                Ok(InstanceMonitorUpdate::Error(code))
+            }
+            Err(e) => Err(backoff::Error::transient(e)),
         }
     }
 }
 
-enum InstanceMonitorRequest {
-    Update {
-        state: propolis_client::types::InstanceStateMonitorResponse,
-        tx: oneshot::Sender<Reaction>,
-    },
+enum InstanceMonitorUpdate {
+    State(propolis_client::types::InstanceStateMonitorResponse),
+    Error(PropolisErrorCode),
+}
+
+struct InstanceMonitorRequest {
+    update: InstanceMonitorUpdate,
+    tx: oneshot::Sender<Reaction>,
 }
 
 struct InstanceRunner {
@@ -375,9 +412,9 @@ impl InstanceRunner {
 
                 // Handle messages from our own "Monitor the VMM" task.
                 request = self.rx_monitor.recv() => {
-                    use InstanceMonitorRequest::*;
+                    use InstanceMonitorUpdate::*;
                     match request {
-                        Some(Update { state, tx }) => {
+                        Some(InstanceMonitorRequest { update: State(state), tx }) => {
                             let observed = ObservedPropolisState::new(&state);
                             let reaction = self.observe_state(&observed).await;
                             self.publish_state_to_nexus().await;
@@ -388,6 +425,12 @@ impl InstanceRunner {
                             // next iteration of the loop.
                             if let Err(_) = tx.send(reaction) {
                                 warn!(self.log, "InstanceRunner failed to send to InstanceMonitorRunner");
+
+
+
+
+
+                                
                             }
                         },
                         // NOTE: This case shouldn't really happen, as we keep a copy
@@ -777,6 +820,7 @@ impl InstanceRunner {
         let runner = InstanceMonitorRunner {
             client: client.clone(),
             tx_monitor: self.tx_monitor.clone(),
+            log: self.log.clone(),
         };
         let log = self.log.clone();
         let monitor_handle = tokio::task::spawn(async move {
@@ -977,7 +1021,7 @@ fn propolis_error_code(
     let code = rv.error_code.as_deref()?;
     match code.parse::<PropolisErrorCode>() {
         Err(parse_error) => {
-            error!(log, "Propolis returned an unknown error code: {code:?}";
+            warn!(log, "Propolis returned an unknown error code: {code:?}";
                 "status" => ?error.status(),
                 "error" => %error,
                 "code" => ?code,
