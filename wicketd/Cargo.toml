@@ -31,7 +31,7 @@ http-body-util.workspace = true
 hubtools.workspace = true
 hyper.workspace = true
 illumos-utils.workspace = true
-internal-dns.workspace = true
+internal-dns = { workspace = true, features = ["omicron-internal"] }
 itertools.workspace = true
 once_cell.workspace = true
 oxnet.workspace = true

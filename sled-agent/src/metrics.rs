@@ -5,8 +5,6 @@
 //! Metrics produced by the sled-agent for collection by oximeter.
 
 use illumos_utils::running_zone::RunningZone;
-use omicron_common::api::internal::nexus::ProducerEndpoint;
-use omicron_common::api::internal::nexus::ProducerKind;
 use omicron_common::api::internal::shared::SledIdentifiers;
 use oximeter_instruments::kstat::link::SledDataLink;
 use oximeter_instruments::kstat::link::SledDataLinkTarget;
@@ -521,9 +519,9 @@ fn start_producer_server(
     // Resolve Nexus via DNS.
     let registration_address = None;
     let config = oximeter_producer::Config {
-        server_info: ProducerEndpoint {
+        server_info: oximeter_producer::EndpointConfig {
             id: sled_id,
-            kind: ProducerKind::SledAgent,
+            kind: oximeter_producer::ProducerKind::SledAgent,
             address,
             interval: METRIC_COLLECTION_INTERVAL,
         },

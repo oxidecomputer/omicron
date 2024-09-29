@@ -22,82 +22,21 @@
 
 pub mod address;
 pub mod api;
-pub mod backoff;
 pub mod cmd;
 pub mod disk;
 pub mod ledger;
 pub mod policy;
-pub mod progenitor_operation_retry;
 pub mod update;
 pub mod vlan;
 pub mod zpool_name;
 
+pub use omicron_common_external::backoff;
+pub use omicron_common_external::progenitor as progenitor_operation_retry;
+pub use omicron_common_external::progenitor::retry_until_known_result;
+pub use omicron_common_external::FileKv;
 pub use update::hex_schema;
 
-/// A type that allows adding file and line numbers to log messages
-/// automatically. It should be instantiated at the root logger of each
-/// executable that desires this functionality, as in the following example.
-/// ```ignore
-///     slog::Logger::root(drain, o!(FileKv))
-/// ```
-pub struct FileKv;
-
-impl slog::KV for FileKv {
-    fn serialize(
-        &self,
-        record: &slog::Record,
-        serializer: &mut dyn slog::Serializer,
-    ) -> slog::Result {
-        // Only log file information when severity is at least info level
-        if record.level() > slog::Level::Info {
-            return Ok(());
-        }
-        serializer.emit_arguments(
-            "file".into(),
-            &format_args!("{}:{}", record.file(), record.line()),
-        )
-    }
-}
-
 pub const OMICRON_DPD_TAG: &str = "omicron";
-
-use crate::api::external::Error;
-use crate::progenitor_operation_retry::ProgenitorOperationRetry;
-use crate::progenitor_operation_retry::ProgenitorOperationRetryError;
-use std::future::Future;
-
-/// Retry a progenitor client operation until a known result is returned.
-///
-/// See [`ProgenitorOperationRetry`] for more information.
-// TODO mark this deprecated, `never_bail` is a bad idea
-pub async fn retry_until_known_result<F, T, E, Fut>(
-    log: &slog::Logger,
-    f: F,
-) -> Result<T, progenitor_client::Error<E>>
-where
-    F: FnMut() -> Fut,
-    Fut: Future<Output = Result<T, progenitor_client::Error<E>>>,
-    E: std::fmt::Debug,
-{
-    match ProgenitorOperationRetry::new(f, never_bail).run(log).await {
-        Ok(v) => Ok(v),
-
-        Err(e) => match e {
-            ProgenitorOperationRetryError::ProgenitorError(e) => Err(e),
-
-            ProgenitorOperationRetryError::Gone
-            | ProgenitorOperationRetryError::GoneCheckError(_) => {
-                // ProgenitorOperationRetry::new called with `never_bail` as the
-                // bail check should never return these variants!
-                unreachable!();
-            }
-        },
-    }
-}
-
-async fn never_bail() -> Result<bool, Error> {
-    Ok(false)
-}
 
 /// A wrapper struct that does nothing other than elide the inner value from
 /// [`std::fmt::Debug`] output.

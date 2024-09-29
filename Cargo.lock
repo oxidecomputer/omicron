@@ -4437,6 +4437,7 @@ dependencies = [
  "hickory-resolver",
  "hyper 1.4.1",
  "omicron-common",
+ "omicron-common-external",
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -6332,7 +6333,6 @@ dependencies = [
  "anyhow",
  "api_identity",
  "async-trait",
- "backoff",
  "camino",
  "camino-tempfile",
  "chrono",
@@ -6345,6 +6345,7 @@ dependencies = [
  "libc",
  "macaddr",
  "mg-admin-client",
+ "omicron-common-external",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "once_cell",
@@ -6370,6 +6371,19 @@ dependencies = [
  "tokio",
  "toml 0.8.19",
  "uuid",
+]
+
+[[package]]
+name = "omicron-common-external"
+version = "0.0.0"
+dependencies = [
+ "backoff",
+ "futures",
+ "omicron-workspace-hack",
+ "progenitor",
+ "progenitor-client",
+ "reqwest 0.12.7",
+ "slog",
 ]
 
 [[package]]
@@ -7027,6 +7041,7 @@ dependencies = [
  "indexmap 2.5.0",
  "indicatif",
  "inout",
+ "ipnetwork",
  "itertools 0.10.5",
  "itertools 0.12.1",
  "lalrpop-util",
@@ -7557,7 +7572,7 @@ dependencies = [
  "dropshot 0.12.0",
  "internal-dns",
  "nexus-client",
- "omicron-common",
+ "omicron-common-external",
  "omicron-test-utils",
  "omicron-workspace-hack",
  "oximeter",

@@ -47,7 +47,7 @@ key-manager.workspace = true
 libc.workspace = true
 macaddr.workspace = true
 mg-admin-client.workspace = true
-nexus-client.workspace = true
+nexus-client = { workspace = true, features = ["omicron-internal"] }
 nexus-config.workspace = true
 nexus-sled-agent-shared.workspace = true
 nexus-types.workspace = true

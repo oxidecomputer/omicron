@@ -12,8 +12,6 @@ use chrono::Utc;
 use clap::Parser;
 use dropshot::ConfigLogging;
 use dropshot::ConfigLoggingLevel;
-use omicron_common::api::internal::nexus::ProducerEndpoint;
-use omicron_common::api::internal::nexus::ProducerKind;
 use oximeter::types::Cumulative;
 use oximeter::types::ProducerRegistry;
 use oximeter::types::Sample;
@@ -22,7 +20,9 @@ use oximeter::MetricsError;
 use oximeter::Producer;
 use oximeter::Target;
 use oximeter_producer::Config;
+use oximeter_producer::EndpointConfig;
 use oximeter_producer::LogConfig;
+use oximeter_producer::ProducerKind;
 use oximeter_producer::Server;
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -116,7 +116,7 @@ async fn main() -> anyhow::Result<()> {
     let registry = ProducerRegistry::new();
     let producer = CpuBusyProducer::new(4);
     registry.register_producer(producer).unwrap();
-    let server_info = ProducerEndpoint {
+    let server_info = EndpointConfig {
         id: registry.producer_id(),
         kind: ProducerKind::Service,
         address: args.address,

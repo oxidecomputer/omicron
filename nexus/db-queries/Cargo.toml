@@ -60,7 +60,7 @@ nexus-types.workspace = true
 omicron-common.workspace = true
 omicron-passwords.workspace = true
 omicron-uuid-kinds.workspace = true
-oximeter.workspace = true
+oximeter = { workspace = true, features = ["omicron-internal"] }
 omicron-workspace-hack.workspace = true
 
 # only enabled during tests or via the `testing` feature

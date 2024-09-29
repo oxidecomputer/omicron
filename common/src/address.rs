@@ -716,6 +716,31 @@ mod test {
     }
 
     #[test]
+    fn test_dns_addresses_external() {
+        // Because omicron-common-external contains a (rough) clone of the logic
+        // used to calculate internal DNS addresses in a rack, we check to
+        // confirm that it emits the same data as the logic here.
+
+        // First check that the cloned constants are the same
+        assert_eq!(AZ_PREFIX, omicron_common_external::address::AZ_PREFIX);
+        assert_eq!(RACK_PREFIX, omicron_common_external::address::RACK_PREFIX);
+        assert_eq!(SLED_PREFIX, omicron_common_external::address::SLED_PREFIX);
+        assert_eq!(
+            INTERNAL_DNS_REDUNDANCY,
+            omicron_common_external::address::INTERNAL_DNS_REDUNDANCY
+        );
+
+        // Then confirm that the logic works properly
+        let test_addr = "fd00:1122:3344:0100::".parse::<Ipv6Addr>().unwrap();
+        let ours = get_internal_dns_server_addresses(test_addr);
+        let external =
+            omicron_common_external::address::get_internal_dns_server_addresses(
+                test_addr,
+            );
+        assert_eq!(ours, external);
+    }
+
+    #[test]
     fn test_sled_address() {
         let subnet = Ipv6Subnet::<SLED_PREFIX>::new(
             "fd00:1122:3344:0101::".parse::<Ipv6Addr>().unwrap(),

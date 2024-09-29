@@ -17,7 +17,6 @@ workspace = true
 anyhow.workspace = true
 api_identity.workspace = true
 async-trait.workspace = true
-backoff.workspace = true
 camino.workspace = true
 chrono.workspace = true
 dropshot.workspace = true
@@ -27,6 +26,7 @@ http.workspace = true
 ipnetwork.workspace = true
 macaddr.workspace = true
 mg-admin-client.workspace = true
+omicron-common-external.workspace = true
 omicron-uuid-kinds.workspace = true
 oxnet.workspace = true
 proptest = { workspace = true, optional = true }

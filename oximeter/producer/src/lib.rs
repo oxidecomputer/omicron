@@ -18,11 +18,11 @@ use dropshot::RequestContext;
 use internal_dns::resolver::ResolveError;
 use internal_dns::resolver::Resolver;
 use internal_dns::ServiceName;
-use nexus_client::types::ProducerEndpoint as ApiProducerEndpoint;
-use omicron_common::api::internal::nexus::ProducerEndpoint;
-use omicron_common::backoff;
-use omicron_common::backoff::BackoffError;
-use omicron_common::FileKv;
+use nexus_client::types::ProducerEndpoint;
+pub use nexus_client::types::ProducerKind;
+use omicron_common_external::backoff;
+use omicron_common_external::backoff::BackoffError;
+use omicron_common_external::FileKv;
 use oximeter::types::ProducerRegistry;
 use oximeter::types::ProducerResults;
 use schemars::JsonSchema;
@@ -82,11 +82,29 @@ pub enum LogConfig {
     Logger(Logger),
 }
 
+#[derive(Debug, Clone)]
+pub struct EndpointConfig {
+    pub address: SocketAddr,
+    pub id: Uuid,
+    pub interval: Duration,
+    pub kind: ProducerKind,
+}
+impl From<&EndpointConfig> for ProducerEndpoint {
+    fn from(value: &EndpointConfig) -> Self {
+        Self {
+            address: value.address.to_string(),
+            id: value.id,
+            interval: value.interval.into(),
+            kind: value.kind,
+        }
+    }
+}
+
 /// Information used to configure a [`Server`]
 #[derive(Debug, Clone)]
 pub struct Config {
     /// The information for contacting this server, and collecting its metrics.
-    pub server_info: ProducerEndpoint,
+    pub server_info: EndpointConfig,
     /// The address at which we attempt to register as a producer.
     ///
     /// If the address is not provided, the address of Nexus will be resolved
@@ -207,7 +225,7 @@ impl Server {
     // Create a new server registering with Nexus.
     fn new_impl(
         registry: ProducerRegistry,
-        mut server_info: ProducerEndpoint,
+        mut server_info: EndpointConfig,
         registration_address: Option<&SocketAddr>,
         request_body_max_bytes: usize,
         log: &LogConfig,
@@ -274,11 +292,10 @@ impl Server {
 
         // Spawn the task that will register with Nexus in the background.
         debug!(log, "starting producer registration task");
-        let info = ApiProducerEndpoint::from(&server_info);
         let registration_task = tokio::task::spawn(registration_task(
             find_nexus,
             log.new(o!("component" => "producer-registration-task")),
-            info,
+            server_info.clone(),
         ));
         info!(
             log,
@@ -312,7 +329,7 @@ const RENEWAL_RATE: u32 = 4;
 async fn registration_task(
     find_nexus: FindNexus,
     log: Logger,
-    endpoint: ApiProducerEndpoint,
+    endpoint: EndpointConfig,
 ) {
     loop {
         debug!(
@@ -418,7 +435,7 @@ async fn resolve_nexus_with_backoff(
 async fn register_with_backoff(
     addr: SocketAddr,
     log: &Logger,
-    endpoint: &ApiProducerEndpoint,
+    endpoint: &EndpointConfig,
 ) -> Duration {
     let log_failure = |error, delay| {
         warn!(
@@ -455,8 +472,8 @@ async fn register_with_backoff(
 #[cfg(test)]
 mod tests {
     use super::Config;
+    use super::EndpointConfig;
     use super::LogConfig;
-    use super::ProducerEndpoint;
     use super::Server;
     use dropshot::endpoint;
     use dropshot::ApiDescription;
@@ -466,8 +483,8 @@ mod tests {
     use dropshot::HttpServer;
     use dropshot::HttpServerStarter;
     use dropshot::RequestContext;
-    use omicron_common::api::internal::nexus::ProducerKind;
-    use omicron_common::api::internal::nexus::ProducerRegistrationResponse;
+    use nexus_client::types::ProducerKind;
+    use nexus_client::types::ProducerRegistrationResponse;
     use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
     use slog::Drain;
     use slog::Logger;
@@ -502,7 +519,7 @@ mod tests {
     {
         rqctx.context().fetch_add(1, Ordering::SeqCst);
         Ok(HttpResponseCreated(ProducerRegistrationResponse {
-            lease_duration: INTERVAL,
+            lease_duration: INTERVAL.into(),
         }))
     }
 
@@ -536,7 +553,7 @@ mod tests {
 
         let address = "[::1]:0".parse().unwrap();
         let config = Config {
-            server_info: ProducerEndpoint {
+            server_info: EndpointConfig {
                 id: Uuid::new_v4(),
                 kind: ProducerKind::Service,
                 address,

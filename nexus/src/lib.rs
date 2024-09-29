@@ -37,13 +37,12 @@ use nexus_types::internal_api::params::{
 use nexus_types::inventory::Collection;
 use omicron_common::address::IpRange;
 use omicron_common::api::external::Error;
-use omicron_common::api::internal::nexus::{ProducerEndpoint, ProducerKind};
 use omicron_common::api::internal::shared::{
     AllowedSourceIps, ExternalPortDiscovery, RackNetworkConfig, SwitchLocation,
 };
 use omicron_common::FileKv;
 use oximeter::types::ProducerRegistry;
-use oximeter_producer::Server as ProducerServer;
+use oximeter_producer::{ProducerKind, Server as ProducerServer};
 use slog::Logger;
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV6};
@@ -437,7 +436,7 @@ fn start_producer_server(
     // address for the producer server and the registration address use the
     // same IP.
     let config = oximeter_producer::Config {
-        server_info: ProducerEndpoint {
+        server_info: oximeter_producer::EndpointConfig {
             id: registry.producer_id(),
             kind: ProducerKind::Service,
             address,

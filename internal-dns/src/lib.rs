@@ -4,11 +4,17 @@
 
 //! Working with Omicron-internal DNS (see RFD 248)
 
-pub mod config;
 pub mod names;
 pub mod resolver;
 
 // We export these names out to the root for compatibility.
-pub use config::DnsConfigBuilder;
 pub use names::ServiceName;
 pub use names::DNS_ZONE;
+
+// The DNS zone configuration is only require inside omicron, not for external
+// consumers querying said DNS service.
+
+#[cfg(feature = "omicron-internal")]
+pub mod config;
+#[cfg(feature = "omicron-internal")]
+pub use config::DnsConfigBuilder;

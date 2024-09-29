@@ -10,9 +10,9 @@ workspace = true
 [dependencies]
 chrono.workspace = true
 futures.workspace = true
-nexus-types.workspace = true
-nexus-sled-agent-shared.workspace = true
-omicron-common.workspace = true
+nexus-types = { workspace = true, optional = true }
+nexus-sled-agent-shared = { workspace = true, optional = true }
+omicron-common = { workspace = true, optional = true }
 omicron-passwords.workspace = true
 oxnet.workspace = true
 progenitor.workspace = true
@@ -25,3 +25,6 @@ slog.workspace = true
 uuid.workspace = true
 omicron-workspace-hack.workspace = true
 omicron-uuid-kinds.workspace = true
+
+[features]
+omicron-internal = ["dep:omicron-common", "dep:nexus-types", "dep:nexus-sled-agent-shared"]

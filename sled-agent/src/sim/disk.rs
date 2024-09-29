@@ -14,8 +14,6 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::internal::nexus::DiskRuntimeState;
-use omicron_common::api::internal::nexus::ProducerEndpoint;
-use omicron_common::api::internal::nexus::ProducerKind;
 use oximeter_producer::LogConfig;
 use oximeter_producer::Server as ProducerServer;
 use propolis_client::types::DiskAttachmentState as PropolisDiskState;
@@ -166,9 +164,9 @@ impl SimDisk {
         // This listens on any available port, and the server internally updates this to the actual
         // bound port of the Dropshot HTTP server.
         let producer_address = SocketAddr::new(Ipv6Addr::LOCALHOST.into(), 0);
-        let server_info = ProducerEndpoint {
+        let server_info = oximeter_producer::EndpointConfig {
             id,
-            kind: ProducerKind::SledAgent,
+            kind: oximeter_producer::ProducerKind::SledAgent,
             address: producer_address,
             interval: Duration::from_millis(200),
         };

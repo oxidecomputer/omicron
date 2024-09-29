@@ -13,7 +13,8 @@ chrono.workspace = true
 dns-service-client.workspace = true
 futures.workspace = true
 hyper.workspace = true
-omicron-common.workspace = true
+omicron-common = { workspace = true, optional = true }
+omicron-common-external.workspace = true
 omicron-uuid-kinds.workspace = true
 reqwest = { workspace = true, features = ["rustls-tls", "stream"] }
 slog.workspace = true
@@ -34,3 +35,6 @@ serde_json.workspace = true
 sled.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = [ "full" ] }
+
+[features]
+omicron-internal = ["dep:omicron-common"]

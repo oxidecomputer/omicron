@@ -6,32 +6,31 @@ use futures::Future;
 use slog::warn;
 use slog::Logger;
 
-use crate::api::external::Error;
+//use crate::api::external::Error;
 use crate::backoff::retry_notify;
 use crate::backoff::retry_policy_internal_service;
 use crate::backoff::BackoffError;
 
 #[derive(Debug)]
-pub enum ProgenitorOperationRetryError<E> {
+pub enum ProgenitorOperationRetryError<E, GE: std::fmt::Debug> {
     /// Nexus determined that the operation will never return a known result
     /// because the remote server is gone.
     Gone,
 
     /// Attempting to check if the retry loop should be stopped failed
-    GoneCheckError(Error),
+    GoneCheckError(GE),
 
     /// The retry loop progenitor operation saw a permanent client error
     ProgenitorError(progenitor_client::Error<E>),
 }
 
-impl<E> ProgenitorOperationRetryError<E> {
+impl<E, GE: std::fmt::Debug> ProgenitorOperationRetryError<E, GE> {
     pub fn is_not_found(&self) -> bool {
         match &self {
             ProgenitorOperationRetryError::ProgenitorError(e) => match e {
                 progenitor_client::Error::ErrorResponse(rv) => {
                     match rv.status() {
-                        http::StatusCode::NOT_FOUND => true,
-
+                        reqwest::StatusCode::NOT_FOUND => true,
                         _ => false,
                     }
                 }
@@ -68,7 +67,8 @@ pub struct ProgenitorOperationRetry<
     F: FnMut() -> Fut,
     Fut: Future<Output = Result<T, progenitor_client::Error<E>>>,
     BF: FnMut() -> BFut,
-    BFut: Future<Output = Result<bool, Error>>,
+    BErr: std::fmt::Debug,
+    BFut: Future<Output = Result<bool, BErr>>,
 > {
     operation: F,
 
@@ -77,13 +77,15 @@ pub struct ProgenitorOperationRetry<
     gone_check: BF,
 }
 
-impl<T, E, F, Fut, BF, BFut> ProgenitorOperationRetry<T, E, F, Fut, BF, BFut>
+impl<T, E, F, Fut, BF, BErr, BFut>
+    ProgenitorOperationRetry<T, E, F, Fut, BF, BErr, BFut>
 where
     E: std::fmt::Debug,
     F: FnMut() -> Fut,
     Fut: Future<Output = Result<T, progenitor_client::Error<E>>>,
     BF: FnMut() -> BFut,
-    BFut: Future<Output = Result<bool, Error>>,
+    BErr: std::fmt::Debug,
+    BFut: Future<Output = Result<bool, BErr>>,
 {
     pub fn new(operation: F, gone_check: BF) -> Self {
         Self { operation, gone_check }
@@ -92,7 +94,7 @@ where
     pub async fn run(
         mut self,
         log: &Logger,
-    ) -> Result<T, ProgenitorOperationRetryError<E>> {
+    ) -> Result<T, ProgenitorOperationRetryError<E, BErr>> {
         retry_notify(
             retry_policy_internal_service(),
             move || {
@@ -136,8 +138,8 @@ where
                         )) => {
                             match response_value.status() {
                                 // Retry on 503 or 429
-                                http::StatusCode::SERVICE_UNAVAILABLE
-                                | http::StatusCode::TOO_MANY_REQUESTS => {
+                                reqwest::StatusCode::SERVICE_UNAVAILABLE
+                                | reqwest::StatusCode::TOO_MANY_REQUESTS => {
                                     Err(BackoffError::transient(
                                         ProgenitorOperationRetryError::ProgenitorError(
                                             progenitor_client::Error::ErrorResponse(
@@ -170,7 +172,7 @@ where
                     }
                 }
             },
-            |error: ProgenitorOperationRetryError<E>, delay| {
+            |error: ProgenitorOperationRetryError<E, BErr>, delay| {
                 warn!(
                     log,
                     "failed external call ({:?}), will retry in {:?}", error, delay,
@@ -179,4 +181,37 @@ where
         )
         .await
     }
+}
+
+/// Retry a progenitor client operation until a known result is returned.
+///
+/// See [`ProgenitorOperationRetry`] for more information.
+// TODO mark this deprecated, `never_bail` is a bad idea
+pub async fn retry_until_known_result<F, T, E, Fut>(
+    log: &slog::Logger,
+    f: F,
+) -> Result<T, progenitor_client::Error<E>>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<T, progenitor_client::Error<E>>>,
+    E: std::fmt::Debug,
+{
+    match ProgenitorOperationRetry::new(f, never_bail).run(log).await {
+        Ok(v) => Ok(v),
+
+        Err(e) => match e {
+            ProgenitorOperationRetryError::ProgenitorError(e) => Err(e),
+
+            ProgenitorOperationRetryError::Gone
+            | ProgenitorOperationRetryError::GoneCheckError(_) => {
+                // ProgenitorOperationRetry::new called with `never_bail` as the
+                // bail check should never return these variants!
+                unreachable!();
+            }
+        },
+    }
+}
+
+async fn never_bail() -> Result<bool, ()> {
+    Ok(false)
 }

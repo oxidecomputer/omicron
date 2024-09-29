@@ -7,9 +7,7 @@ use hickory_resolver::config::{
 };
 use hickory_resolver::lookup::SrvLookup;
 use hickory_resolver::TokioAsyncResolver;
-use omicron_common::address::{
-    Ipv6Subnet, ReservedRackSubnet, AZ_PREFIX, DNS_PORT,
-};
+use omicron_common_external::address::get_internal_dns_server_addresses;
 use slog::{debug, error, info, trace};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
 
@@ -96,15 +94,21 @@ impl Resolver {
         Ok(Self { log, resolver })
     }
 
-    /// Convenience wrapper for [`Resolver::new_from_subnet`] that determines
-    /// the subnet based on a provided IP address and then uses the DNS
-    /// resolvers for that subnet.
+    /// Create a DNS resolver using the implied DNS servers within the subnet of
+    /// the provided address.
+    ///
+    /// The addresses of the DNS servers are inferred within an Availability
+    /// Zone's subnet: normally, each rack within an AZ (/48) gets a unique
+    /// subnet (/56), but the FIRST /56 is reserved for internal DNS servers.
     pub fn new_from_ip(
         log: slog::Logger,
         address: Ipv6Addr,
     ) -> Result<Self, ResolveError> {
-        let subnet = Ipv6Subnet::<AZ_PREFIX>::new(address);
-        Self::new_from_subnet(log, subnet)
+        let addrs = get_internal_dns_server_addresses(address)
+            .into_iter()
+            .map(|addr| SocketAddr::new(addr, 53))
+            .collect::<Vec<_>>();
+        Self::new_from_addrs(log, &addrs)
     }
 
     /// Return a resolver that uses the system configuration (usually
@@ -114,44 +118,6 @@ impl Resolver {
         resolver: TokioAsyncResolver,
     ) -> Self {
         Self { log, resolver }
-    }
-
-    // TODO-correctness This function and its callers make assumptions about how
-    // many internal DNS servers there are on the subnet and where they are.  Is
-    // that okay?  It would seem more flexible not to assume this.  Instead, we
-    // could make a best effort to distribute the list of DNS servers as
-    // configuration and then use new_from_addrs().  Further, we should use a
-    // mechanism like node-cueball's "bootstrap resolvers", where the set of
-    // nameservers is _itself_ provided by a DNS name.  We would periodically
-    // re-resolve this.  That's how we'd learn about dynamic changes to the set
-    // of DNS servers.
-    pub fn servers_from_subnet(
-        subnet: Ipv6Subnet<AZ_PREFIX>,
-    ) -> Vec<SocketAddr> {
-        ReservedRackSubnet::new(subnet)
-            .get_dns_subnets()
-            .into_iter()
-            .map(|dns_subnet| {
-                let ip_addr = IpAddr::V6(dns_subnet.dns_address());
-                SocketAddr::new(ip_addr, DNS_PORT)
-            })
-            .collect()
-    }
-
-    /// Create a DNS resolver using the implied DNS servers within this subnet.
-    ///
-    /// The addresses of the DNS servers are inferred within an Availability
-    /// Zone's subnet: normally, each rack within an AZ (/48) gets a unique
-    /// subnet (/56), but the FIRST /56 is reserved for internal DNS servers.
-    ///
-    /// For more details on this "reserved" rack subnet, refer to
-    /// [omicron_common::address::ReservedRackSubnet].
-    pub fn new_from_subnet(
-        log: slog::Logger,
-        subnet: Ipv6Subnet<AZ_PREFIX>,
-    ) -> Result<Self, ResolveError> {
-        let dns_ips = Self::servers_from_subnet(subnet);
-        Resolver::new_from_addrs(log, &dns_ips)
     }
 
     /// Remove all entries from the resolver's cache.
@@ -363,6 +329,51 @@ impl Resolver {
                 }
             })
             .flatten()
+    }
+}
+
+#[cfg(feature = "omicron-internal")]
+use omicron_common::address::{Ipv6Subnet, ReservedRackSubnet, AZ_PREFIX};
+
+#[cfg(feature = "omicron-internal")]
+impl Resolver {
+    // TODO-correctness This function and its callers make assumptions about how
+    // many internal DNS servers there are on the subnet and where they are.  Is
+    // that okay?  It would seem more flexible not to assume this.  Instead, we
+    // could make a best effort to distribute the list of DNS servers as
+    // configuration and then use new_from_addrs().  Further, we should use a
+    // mechanism like node-cueball's "bootstrap resolvers", where the set of
+    // nameservers is _itself_ provided by a DNS name.  We would periodically
+    // re-resolve this.  That's how we'd learn about dynamic changes to the set
+    // of DNS servers.
+    pub fn servers_from_subnet(
+        subnet: Ipv6Subnet<AZ_PREFIX>,
+    ) -> Vec<SocketAddr> {
+        let dns_port = omicron_common_external::address::DNS_PORT;
+        ReservedRackSubnet::new(subnet)
+            .get_dns_subnets()
+            .into_iter()
+            .map(|dns_subnet| {
+                let ip_addr = IpAddr::V6(dns_subnet.dns_address());
+                SocketAddr::new(ip_addr, dns_port)
+            })
+            .collect()
+    }
+
+    /// Create a DNS resolver using the implied DNS servers within this subnet.
+    ///
+    /// The addresses of the DNS servers are inferred within an Availability
+    /// Zone's subnet: normally, each rack within an AZ (/48) gets a unique
+    /// subnet (/56), but the FIRST /56 is reserved for internal DNS servers.
+    ///
+    /// For more details on this "reserved" rack subnet, refer to
+    /// [omicron_common::address::ReservedRackSubnet].
+    pub fn new_from_subnet(
+        log: slog::Logger,
+        subnet: Ipv6Subnet<AZ_PREFIX>,
+    ) -> Result<Self, ResolveError> {
+        let dns_ips = Self::servers_from_subnet(subnet);
+        Resolver::new_from_addrs(log, &dns_ips)
     }
 }
 
