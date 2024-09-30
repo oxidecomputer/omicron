@@ -535,7 +535,7 @@ pub trait NexusInternalApi {
 /// Path parameters for Sled Agent requests (internal API)
 #[derive(Deserialize, JsonSchema)]
 pub struct SledAgentPathParam {
-    pub sled_id: Uuid,
+    pub sled_id: SledUuid,
 }
 
 /// Path parameters for Disk requests (internal API)

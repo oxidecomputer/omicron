@@ -233,15 +233,47 @@ async fn sis_destroy_vmm_record(
         &params.serialized_authn,
     );
 
+    let db_instance = params.db_instance;
     let propolis_id = sagactx.lookup::<PropolisUuid>("propolis_id")?;
     info!(
         osagactx.log(),
         "destroying vmm record for start saga unwind";
+        "instance_id" => %db_instance.id(),
         "propolis_id" => %propolis_id,
         "start_reason" => ?params.reason,
     );
 
     osagactx.datastore().vmm_mark_saga_unwound(&opctx, &propolis_id).await?;
+
+    // Now that the VMM record has been marked as `SagaUnwound`, the instance
+    // may be permitted to reincarnate. If it is, activate the instance
+    // reincarnation background task to help it along.
+    let karmic_status =
+        db_instance.auto_restart.can_reincarnate(db_instance.runtime());
+    if karmic_status == db::model::Reincarnatability::WillReincarnate {
+        info!(
+            osagactx.log(),
+            "start saga unwound; instance may reincarnate";
+            "instance_id" => %db_instance.id(),
+            "auto_restart_config" => ?db_instance.auto_restart,
+            "start_reason" => ?params.reason,
+        );
+        osagactx
+            .nexus()
+            .background_tasks
+            .task_instance_reincarnation
+            .activate();
+    } else {
+        debug!(
+            osagactx.log(),
+            "start saga unwound; but instance will not reincarnate";
+            "instance_id" => %db_instance.id(),
+            "auto_restart_config" => ?db_instance.auto_restart,
+            "start_reason" => ?params.reason,
+            "karmic_status" => ?karmic_status,
+        );
+    }
+
     Ok(())
 }
 

@@ -9,9 +9,7 @@
 pub use gateway_messages::SpComponent;
 
 // We specifically want to allow consumers, such as `wicketd`, to embed
-// inventory datatypes into their own APIs, rather than recreate structs. For
-// this purpose, we copied the `omicron_common::generate_logging_api!` macro
-// body and added a  `derives = [schemars::JsonSchema]` line at the bottom.
+// inventory datatypes into their own APIs, rather than recreate structs.
 //
 // We did not add this functionality to `omicron_common` because, in the common
 // case, we want to prohibit users from accidentally exposing implementation
