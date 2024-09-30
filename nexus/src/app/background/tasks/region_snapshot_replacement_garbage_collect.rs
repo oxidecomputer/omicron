@@ -42,7 +42,7 @@ impl RegionSnapshotReplacementGarbageCollect {
         RegionSnapshotReplacementGarbageCollect {
             datastore,
             sagas,
-            disabled: false,
+            disabled: true,
         }
     }
 
