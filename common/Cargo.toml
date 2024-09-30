@@ -7,12 +7,6 @@ license = "MPL-2.0"
 [lints]
 workspace = true
 
-# NOTE:
-#
-# This crate is depended on by several other workspaces! Be careful of adding
-# new regular or build dependencies here, as they will be added to those crates
-# as well. (Dev-dependencies are fine.)
-
 [dependencies]
 anyhow.workspace = true
 api_identity.workspace = true

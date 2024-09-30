@@ -5,6 +5,32 @@
 //! Interface for making API requests to the Oxide control plane at large
 //! from within the control plane
 
+// # Nexus client and `omicron-internal`
+//
+// The nexus-client crate is used by consumers inside the Omicron consolidation
+// as well as those outside of it (namely Crucible and Propolis).  Those in the
+// former category make frequent use of the types and logic found in the
+// `omicron-common` crate, and thus benefits from type replacements stemming
+// from that crate in the Progenitor-generated client.
+//
+// For consumers outside of Omicron, these same type replacements do not hold
+// the same value, and are in fact a productivity hindrance, since
+// `omicron-common` drags in a vast swath of dependencies which are unrelated
+// and unused for those projects.
+//
+// In order to preserve the useful type replacements inside Omicron, while
+// severing the `omicron-common` dependency for external consumers, we generate
+// different Progenitor clients based on the presence or absence of the
+// `omicron-internal` feature.  When the feature is asserted, all of the
+// `omicron-common` replacements are enabled, along with their accompanying data
+// conversions.
+//
+// A notable outlier in the type replacement split is the collection of typed
+// UUIDs.  Those replacements are enabled for both internal and external
+// consumers, and thus should be maintained in both Progenitor invocations
+// if/when additions are made.
+
+
 #[cfg(feature = "omicron-internal")]
 progenitor::generate_api!(
     spec = "../../openapi/nexus-internal.json",
@@ -501,8 +527,3 @@ mod internal_conversions {
         }
     }
 }
-
-// #[cfg(not(feature = "omicron-internal"))]
-// mod conversions {
-//     use super::types;
-// }
