@@ -410,7 +410,6 @@ struct InstanceRunner {
 impl InstanceRunner {
     async fn run(mut self) {
         use InstanceRequest::*;
-        let mut has_ever_seen_a_good_state = false;
         while !self.should_terminate {
             tokio::select! {
                 biased;
@@ -420,7 +419,6 @@ impl InstanceRunner {
                     use InstanceMonitorUpdate::*;
                     match request {
                         Some(InstanceMonitorRequest { update: State(state), tx }) => {
-                            has_ever_seen_a_good_state = true;
                             let observed = ObservedPropolisState::new(&state);
                             let reaction = self.observe_state(&observed).await;
                             self.publish_state_to_nexus().await;
@@ -434,29 +432,36 @@ impl InstanceRunner {
                             }
                         },
                          Some(InstanceMonitorRequest { update: Error(code), tx }) => {
-                            // TODO(eliza): this is kinda jank but Propolis
-                            // currently could return the same error when the
-                            // instance has not been ensured and when it's still
-                            // coming up, which is sad. I'm not sure whether
-                            // that happens IRL or not --- investigate this.
-                            let reaction = if has_ever_seen_a_good_state {
-                                info!(
+                            let reaction = if code == PropolisErrorCode::NoInstance {
+                                // If we see a `NoInstance` error code from
+                                // Propolis after the instance has been ensured,
+                                // this means that Propolis must have crashed
+                                // and been restarted, and now no longer
+                                // remembers that it once had a VM. In that
+                                // case, this Propolis is permanently busted, so
+                                // mark it as Failed and tear down the zone.
+                                warn!(
                                     self.log,
-                                    "Error code from Propolis after instance initialized, assuming it's gone";
-                                    "error" => ?code,
+                                    "Propolis has lost track of its instance! \
+                                     It must have crashed. Moving to Failed";
+                                    "error_code" => ?code,
                                 );
                                 self.terminate(true).await;
-                                self.publish_state_to_nexus().await;
                                 Reaction::Terminate
                             } else {
-                                debug!(
+                                // The other error codes we know of are not
+                                // expected here --- they all relate to the
+                                // instance-creation APIs. So I guess we'll just
+                                // whine about it and then keep trying to
+                                // monitor the instance.
+                                warn!(
                                     self.log,
-                                    "Error code from Propolis before initialization";
-                                    "error" => ?code,
+                                    "Propolis state monitor returned an \
+                                     unexpected error code";
+                                    "error_code" => ?code,
                                 );
                                 Reaction::Continue
                             };
-
                             if let Err(_) = tx.send(reaction) {
                                 warn!(self.log, "InstanceRunner failed to send to InstanceMonitorRunner");
                             }
