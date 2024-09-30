@@ -693,8 +693,7 @@ async fn test_instance_start_creates_networking_state(
 
     let mut checked = false;
     for agent in &sled_agents {
-        if Some(agent.id) == with_vmm.sled_id().map(SledUuid::into_untyped_uuid)
-        {
+        if Some(agent.id) == with_vmm.sled_id() {
             assert_sled_vpc_routes(
                 agent,
                 &opctx,
@@ -1010,8 +1009,7 @@ async fn test_instance_migrate_v2p_and_routes(
         assert_sled_v2p_mappings(sled_agent, &nics[0], guest_nics[0].vni).await;
     }
 
-    let testctx_sled_id =
-        SledUuid::from_untyped_uuid(cptestctx.sled_agent.sled_agent.id);
+    let testctx_sled_id = cptestctx.sled_agent.sled_agent.id;
     let dst_sled_id = if original_sled_id == testctx_sled_id {
         other_sleds[0].0
     } else {
@@ -1095,7 +1093,7 @@ async fn test_instance_migrate_v2p_and_routes(
         // updated here because Nexus presumes that the instance's new sled
         // agent will have updated any mappings there. Remove this bifurcation
         // when Nexus programs all mappings explicitly.
-        if sled_agent.id != dst_sled_id.into_untyped_uuid() {
+        if sled_agent.id != dst_sled_id {
             assert_sled_v2p_mappings(sled_agent, &nics[0], guest_nics[0].vni)
                 .await;
         } else {
@@ -1174,6 +1172,44 @@ async fn test_instance_failed_after_sled_agent_forgets_vmm_can_be_deleted(
     instance_wait_for_state(client, instance_id, InstanceState::Failed).await;
 
     // Now, the instance should be deleteable.
+    expect_instance_delete_ok(client, instance_name).await;
+}
+
+// Verifies that if a request to reboot or stop an instance fails because of a
+// 404 error from sled agent, then the instance moves to the Failed state, and
+// can then be Stopped once it has transitioned to Failed.
+#[nexus_test]
+async fn test_instance_failed_after_sled_agent_forgets_vmm_can_be_stopped(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+
+    let instance_name = "losing-is-fun";
+    let instance_id = make_forgotten_instance(
+        &cptestctx,
+        instance_name,
+        InstanceAutoRestartPolicy::Never,
+    )
+    .await;
+
+    // Attempting to reboot the forgotten instance will result in a 404
+    // NO_SUCH_INSTANCE from the sled-agent, which Nexus turns into a 503.
+    expect_instance_reboot_fail(
+        client,
+        instance_name,
+        http::StatusCode::SERVICE_UNAVAILABLE,
+    )
+    .await;
+
+    // Wait for the instance to transition to Failed.
+    instance_wait_for_state(client, instance_id, InstanceState::Failed).await;
+
+    // Now, it should be possible to stop the instance.
+    let instance_next =
+        instance_post(&client, instance_name, InstanceOp::Stop).await;
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Stopped);
+
+    // Now, the Stopped nstance should be deleteable..
     expect_instance_delete_ok(client, instance_name).await;
 }
 

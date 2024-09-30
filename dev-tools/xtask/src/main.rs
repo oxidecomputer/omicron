@@ -51,6 +51,9 @@ enum Cmds {
     /// Utilities for working with CockroachDB databases.
     DbDev(external::External),
 
+    /// Show information about Progenitor-based APIs
+    LsApis(external::External),
+
     /// Check that all features are flagged correctly
     CheckFeatures(check_features::Args),
     /// Check that dependencies are not duplicated in any packages in the
@@ -133,6 +136,7 @@ fn main() -> Result<()> {
             }
         }
         Cmds::LiveTests(args) => live_tests::run_cmd(args),
+        Cmds::LsApis(external) => external.exec_bin("ls-apis"),
         Cmds::MgsDev(external) => external.exec_bin("mgs-dev"),
         Cmds::OmicronDev(external) => external.exec_bin("omicron-dev"),
         Cmds::Openapi(external) => external.exec_bin("openapi-manager"),

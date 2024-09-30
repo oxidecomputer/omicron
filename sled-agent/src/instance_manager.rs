@@ -650,24 +650,8 @@ impl InstanceManagerRunner {
         target: VmmStateRequested,
     ) -> Result<(), Error> {
         let Some(instance) = self.get_propolis(propolis_id) else {
-            match target {
-                // If the instance isn't registered, then by definition it
-                // isn't running here. Allow requests to stop or destroy the
-                // instance to succeed to provide idempotency. This has to
-                // be handled here (that is, on the "instance not found"
-                // path) to handle the case where a stop request arrived,
-                // Propolis handled it, sled agent unregistered the
-                // instance, and only then did a second stop request
-                // arrive.
-                VmmStateRequested::Stopped => {
-                    tx.send(Ok(VmmPutStateResponse { updated_runtime: None }))
-                        .map_err(|_| Error::FailedSendClientClosed)?;
-                }
-                _ => {
-                    tx.send(Err(Error::NoSuchVmm(propolis_id)))
-                        .map_err(|_| Error::FailedSendClientClosed)?;
-                }
-            }
+            tx.send(Err(Error::NoSuchVmm(propolis_id)))
+                .map_err(|_| Error::FailedSendClientClosed)?;
             return Ok(());
         };
         instance.put_state(tx, target).await?;

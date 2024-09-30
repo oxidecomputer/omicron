@@ -12,6 +12,7 @@ use nexus_test_utils::resource_helpers::DiskTestBuilder;
 use nexus_test_utils::SLED_AGENT_UUID;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::SledFilter;
 use nexus_types::deployment::UnstableReconfiguratorState;
 use omicron_common::api::external::Error;
 use omicron_test_utils::dev::poll::wait_for_condition;
@@ -129,7 +130,10 @@ async fn test_blueprint_edit(cptestctx: &ControlPlaneTestContext) {
 
     // Smoke check the initial state.
     let sled_id: SledUuid = SLED_AGENT_UUID.parse().unwrap();
-    assert!(state1.planning_input.sled_resources(&sled_id).is_some());
+    state1
+        .planning_input
+        .sled_lookup(SledFilter::Commissioned, sled_id)
+        .expect("state1 has initial sled");
     assert!(!state1.planning_input.service_ip_pool_ranges().is_empty());
     assert!(!state1.silo_names.is_empty());
     assert!(!state1.external_dns_zone_names.is_empty());

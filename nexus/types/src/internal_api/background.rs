@@ -4,7 +4,7 @@
 
 use serde::Deserialize;
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use uuid::Uuid;
 
 /// The status of a `region_replacement` background task activation
@@ -120,15 +120,74 @@ impl InstanceUpdaterStatus {
 /// The status of an `instance_reincarnation` background task activation.
 #[derive(Default, Serialize, Deserialize, Debug)]
 pub struct InstanceReincarnationStatus {
+    /// If `true`, then instance reincarnation has been explicitly disabled by
+    /// the config file.
+    pub disabled: bool,
     /// Total number of instances in need of reincarnation on this activation.
-    pub instances_found: usize,
+    /// This is broken down by the reason that the instance needed
+    /// reincarnation.
+    pub instances_found: BTreeMap<ReincarnationReason, usize>,
     /// UUIDs of instances reincarnated successfully by this activation.
-    pub instances_reincarnated: Vec<Uuid>,
+    pub instances_reincarnated: Vec<ReincarnatableInstance>,
     /// UUIDs of instances which changed state before they could be
     /// reincarnated.
-    pub changed_state: Vec<Uuid>,
-    /// Any error that occured while finding instances in need of reincarnation.
-    pub query_error: Option<String>,
+    pub changed_state: Vec<ReincarnatableInstance>,
+    /// Any errors that occured while finding instances in need of reincarnation.
+    pub errors: Vec<String>,
     /// Errors that occurred while restarting individual instances.
-    pub restart_errors: HashMap<Uuid, String>,
+    pub restart_errors: Vec<(ReincarnatableInstance, String)>,
+}
+
+impl InstanceReincarnationStatus {
+    pub fn total_instances_found(&self) -> usize {
+        self.instances_found.values().sum()
+    }
+
+    pub fn total_errors(&self) -> usize {
+        self.errors.len() + self.restart_errors.len()
+    }
+
+    pub fn total_sagas_started(&self) -> usize {
+        self.instances_reincarnated.len()
+            + self.changed_state.len()
+            + self.restart_errors.len()
+    }
+}
+
+/// Describes a reason why an instance needs reincarnation.
+#[derive(
+    Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize, Ord, PartialOrd,
+)]
+pub enum ReincarnationReason {
+    /// The instance is Failed.
+    Failed,
+    /// A previous instance-start saga for this instance has failed.
+    SagaUnwound,
+}
+
+impl std::fmt::Display for ReincarnationReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Failed => "instance failed",
+            Self::SagaUnwound => "start saga failed",
+        })
+    }
+}
+
+/// An instance eligible for reincarnation
+#[derive(
+    Debug, Copy, Clone, Eq, PartialEq, Serialize, Deserialize, Ord, PartialOrd,
+)]
+pub struct ReincarnatableInstance {
+    /// The instance's UUID
+    pub instance_id: Uuid,
+    /// Why the instance required reincarnation
+    pub reason: ReincarnationReason,
+}
+
+impl std::fmt::Display for ReincarnatableInstance {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { instance_id, reason } = self;
+        write!(f, "{instance_id} ({reason})")
+    }
 }

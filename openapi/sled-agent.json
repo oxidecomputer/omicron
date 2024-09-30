@@ -3362,8 +3362,7 @@
             "type": "string"
           },
           "sled_id": {
-            "type": "string",
-            "format": "uuid"
+            "$ref": "#/components/schemas/TypedUuidForSledKind"
           },
           "sled_role": {
             "$ref": "#/components/schemas/SledRole"
@@ -3463,20 +3462,50 @@
         "description": "Identifies information about disks which may be attached to Sleds.",
         "type": "object",
         "properties": {
+          "active_firmware_slot": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
           "identity": {
             "$ref": "#/components/schemas/DiskIdentity"
+          },
+          "next_active_firmware_slot": {
+            "nullable": true,
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
+          },
+          "number_of_firmware_slots": {
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
           },
           "slot": {
             "type": "integer",
             "format": "int64"
+          },
+          "slot1_is_read_only": {
+            "type": "boolean"
+          },
+          "slot_firmware_versions": {
+            "type": "array",
+            "items": {
+              "nullable": true,
+              "type": "string"
+            }
           },
           "variant": {
             "$ref": "#/components/schemas/DiskVariant"
           }
         },
         "required": [
+          "active_firmware_slot",
           "identity",
+          "number_of_firmware_slots",
           "slot",
+          "slot1_is_read_only",
+          "slot_firmware_versions",
           "variant"
         ]
       },
@@ -4957,8 +4986,11 @@
         "properties": {
           "id": {
             "description": "Uuid of the Sled Agent to be created.",
-            "type": "string",
-            "format": "uuid"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForSledKind"
+              }
+            ]
           },
           "is_lrtq_learner": {
             "description": "Is this node an LRTQ learner node?\n\nWe only put the node into learner mode if `use_trust_quorum` is also true.",
@@ -5083,6 +5115,10 @@
         "format": "uuid"
       },
       "TypedUuidForOmicronZoneKind": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "TypedUuidForSledKind": {
         "type": "string",
         "format": "uuid"
       },

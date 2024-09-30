@@ -1392,7 +1392,7 @@ fn build_sled_configs_by_id(
     let mut sled_configs = BTreeMap::new();
     for sled_request in sled_plan.sleds.values() {
         let sled_addr = get_sled_address(sled_request.body.subnet);
-        let sled_id = SledUuid::from_untyped_uuid(sled_request.body.id);
+        let sled_id = sled_request.body.id;
         let entry = match sled_configs.entry(sled_id) {
             btree_map::Entry::Vacant(entry) => entry,
             btree_map::Entry::Occupied(_) => {
@@ -1597,7 +1597,7 @@ mod test {
         api::external::{ByteCount, Generation},
         disk::{DiskIdentity, DiskVariant},
     };
-    use omicron_uuid_kinds::{GenericUuid, SledUuid};
+    use omicron_uuid_kinds::SledUuid;
 
     fn make_sled_info(
         sled_id: SledUuid,
@@ -1610,7 +1610,7 @@ mod test {
             subnet,
             sled_agent_address,
             Inventory {
-                sled_id: sled_id.into_untyped_uuid(),
+                sled_id,
                 sled_agent_address,
                 sled_role: SledRole::Scrimlet,
                 baseboard: Baseboard::Unknown,
@@ -1626,6 +1626,11 @@ mod test {
                         },
                         variant: DiskVariant::U2,
                         slot: i.try_into().unwrap(),
+                        active_firmware_slot: 1,
+                        next_active_firmware_slot: None,
+                        number_of_firmware_slots: 1,
+                        slot1_is_read_only: true,
+                        slot_firmware_versions: vec![Some("TEST1".to_string())],
                     })
                     .collect(),
                 zpools: vec![],

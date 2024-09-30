@@ -1435,6 +1435,20 @@ table! {
 }
 
 table! {
+    inv_nvme_disk_firmware (inv_collection_id, sled_id, slot) {
+        inv_collection_id -> Uuid,
+        sled_id -> Uuid,
+        slot -> Int8,
+
+        number_of_slots -> Int2,
+        active_slot -> Int2,
+        next_active_slot -> Nullable<Int2>,
+        slot1_is_read_only -> Bool,
+        slot_firmware_versions -> Array<Nullable<Text>>,
+    }
+}
+
+table! {
     inv_zpool (inv_collection_id, sled_id, id) {
         inv_collection_id -> Uuid,
         time_collected -> Timestamptz,
@@ -1895,6 +1909,7 @@ allow_tables_to_appear_in_same_query!(
     network_interface,
     instance_network_interface,
     inv_physical_disk,
+    inv_nvme_disk_firmware,
     service_network_interface,
     oximeter,
     physical_disk,

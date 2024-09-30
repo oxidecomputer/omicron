@@ -4,7 +4,7 @@
 
 use clickhouse_admin_types::config::{KeeperConfig, ReplicaConfig};
 use clickhouse_admin_types::{
-    KeeperSettings, Lgif, RaftConfig, ServerSettings,
+    KeeperConf, KeeperSettings, Lgif, RaftConfig, ServerSettings,
 };
 use dropshot::{
     HttpError, HttpResponseCreated, HttpResponseOk, RequestContext, TypedBody,
@@ -75,4 +75,13 @@ pub trait ClickhouseAdminApi {
     async fn raft_config(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<RaftConfig>, HttpError>;
+
+    /// Retrieve configuration information from a keeper node.
+    #[endpoint {
+        method = GET,
+        path = "/keeper/conf",
+    }]
+    async fn keeper_conf(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<KeeperConf>, HttpError>;
 }

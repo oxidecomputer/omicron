@@ -133,7 +133,7 @@ pub struct ControlPlaneTestContext<N> {
 
 impl<N: NexusServer> ControlPlaneTestContext<N> {
     pub fn first_sled(&self) -> SledUuid {
-        SledUuid::from_untyped_uuid(self.sled_agent.sled_agent.id)
+        self.sled_agent.sled_agent.id
     }
 
     pub fn all_sled_agents(&self) -> impl Iterator<Item = &sim::Server> {
@@ -258,6 +258,32 @@ impl RackInitRequestBuilder {
         self.internal_dns_config
             .service_backend_zone(service_name, &zone, address.port())
             .expect("Failed to set up DNS for {kind}");
+    }
+
+    // Special handling of ClickHouse, which has multiple SRV records for its
+    // single zone.
+    fn add_clickhouse_dataset(
+        &mut self,
+        zpool_id: ZpoolUuid,
+        dataset_id: Uuid,
+        address: SocketAddrV6,
+    ) {
+        self.datasets.push(DatasetCreateRequest {
+            zpool_id: zpool_id.into_untyped_uuid(),
+            dataset_id,
+            request: DatasetPutRequest {
+                address,
+                kind: DatasetKind::Clickhouse,
+            },
+        });
+        self.internal_dns_config
+            .host_zone_clickhouse(
+                OmicronZoneUuid::from_untyped_uuid(dataset_id),
+                *address.ip(),
+                internal_dns::ServiceName::Clickhouse,
+                address.port(),
+            )
+            .expect("Failed to setup ClickHouse DNS");
     }
 }
 
@@ -453,29 +479,29 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             )
             .await
             .unwrap();
-        let port = clickhouse.http_address().port();
 
         let zpool_id = ZpoolUuid::new_v4();
         let dataset_id = Uuid::new_v4();
-        let address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, port, 0, 0);
-        self.rack_init_builder.add_dataset(
+        let http_address = clickhouse.http_address();
+        let http_port = http_address.port();
+        self.rack_init_builder.add_clickhouse_dataset(
             zpool_id,
             dataset_id,
-            address,
-            DatasetKind::Clickhouse,
-            internal_dns::ServiceName::Clickhouse,
+            http_address,
         );
         self.clickhouse = Some(clickhouse);
 
         // NOTE: We could pass this port information via DNS, rather than
         // requiring it to be known before Nexus starts.
+        //
+        // See https://github.com/oxidecomputer/omicron/issues/6407.
         self.config
             .pkg
             .timeseries_db
             .address
             .as_mut()
             .expect("Tests expect to set a port of Clickhouse")
-            .set_port(port);
+            .set_port(http_port);
 
         let pool_name = illumos_utils::zpool::ZpoolName::new_external(zpool_id)
             .to_string()
@@ -484,11 +510,11 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         self.blueprint_zones.push(BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: OmicronZoneUuid::from_untyped_uuid(dataset_id),
-            underlay_address: *address.ip(),
+            underlay_address: *http_address.ip(),
             filesystem_pool: Some(ZpoolName::new_external(zpool_id)),
             zone_type: BlueprintZoneType::Clickhouse(
                 blueprint_zone_type::Clickhouse {
-                    address,
+                    address: http_address,
                     dataset: OmicronZoneDataset { pool_name },
                 },
             ),
@@ -779,7 +805,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                 (self.sled_agent2.as_ref(), &self.blueprint_zones2),
             ] {
                 if let Some(sa) = maybe_sled_agent {
-                    let sled_id = SledUuid::from_untyped_uuid(sa.sled_agent.id);
+                    let sled_id = sa.sled_agent.id;
                     blueprint_zones.insert(
                         sled_id,
                         BlueprintZonesConfig {
@@ -1406,7 +1432,7 @@ pub async fn start_sled_agent(
     sim_mode: sim::SimMode,
 ) -> Result<sim::Server, String> {
     let config = sim::Config::for_testing(
-        id.into_untyped_uuid(),
+        id,
         sim_mode,
         Some(nexus_address),
         Some(update_directory),
