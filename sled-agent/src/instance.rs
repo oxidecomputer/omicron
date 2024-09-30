@@ -17,7 +17,6 @@ use crate::profile::*;
 use crate::zone_bundle::BundleError;
 use crate::zone_bundle::ZoneBundler;
 use anyhow::anyhow;
-use backoff::BackoffError;
 use chrono::Utc;
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
@@ -30,6 +29,7 @@ use omicron_common::api::internal::shared::{
     NetworkInterface, ResolvedVpcFirewallRule, SledIdentifiers, SourceNatConfig,
 };
 use omicron_common::backoff;
+use omicron_common::backoff::BackoffError;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_common::NoDebug;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid};
@@ -254,26 +254,32 @@ struct InstanceMonitorRunner {
     client: Arc<PropolisClient>,
     tx_monitor: mpsc::Sender<InstanceMonitorRequest>,
     log: slog::Logger,
-    generation: i32,
 }
 
 impl InstanceMonitorRunner {
     async fn run(self) -> Result<(), anyhow::Error> {
-        let mut gen = 0;
+        let mut generation = 0;
         loop {
             let update = backoff::retry_notify(
                 backoff::retry_policy_local(),
-                || self.monitor(),
+                || self.monitor(generation),
                 |error, delay| {
                     warn!(
                         self.log,
-                        "failed to poll Propolis state";
+                        "Failed to poll Propolis state";
                         "error" => %error,
                         "retry_in" => ?delay,
+                        "generation" => generation,
                     );
                 },
             )
             .await?;
+
+            // Update the state generation for the next poll.
+            if let InstanceMonitorUpdate::State(ref state) = update {
+                generation = state.r#gen + 1;
+            }
+
             // Now that we have the response from Propolis' HTTP server, we
             // forward that to the InstanceRunner.
             //
@@ -281,7 +287,7 @@ impl InstanceMonitorRunner {
             // and possibly identify if we should terminate.
             let (tx, rx) = oneshot::channel();
             self.tx_monitor
-                .send(InstanceMonitorRequest::Update { update, tx })
+                .send(InstanceMonitorRequest { update, tx })
                 .await?;
 
             if let Reaction::Terminate = rx.await? {
@@ -292,7 +298,8 @@ impl InstanceMonitorRunner {
 
     async fn monitor(
         &self,
-    ) -> Result<InstanceMonitorUpdate, backoff::Error<PropolisClientError>>
+        generation: u64,
+    ) -> Result<InstanceMonitorUpdate, BackoffError<PropolisClientError>>
     {
         // State monitoring always returns the most recent state/gen pair
         // known to Propolis.
@@ -300,7 +307,7 @@ impl InstanceMonitorRunner {
             .client
             .instance_state_monitor()
             .body(propolis_client::types::InstanceStateMonitorRequest {
-                r#gen: self.generation,
+                r#gen: generation,
             })
             .send()
             .await;
@@ -308,21 +315,21 @@ impl InstanceMonitorRunner {
             Ok(response) => {
                 let state = response.into_inner();
 
-                // Update the generation number we're asking for, to ensure the
-                // Propolis will only return more recent values.
-                self.generation = response.r#gen + 1;
-
                 Ok(InstanceMonitorUpdate::State(state))
             }
             // If the channel has closed, then there's nothing left for us to do
             // here. Go die.
             Err(e) if self.tx_monitor.is_closed() => {
-                Err(backoff::Error::permanent(e))
+                Err(BackoffError::permanent(e))
             }
-            Err(e) if let Some(code) = propolis_error_code(&self.log, &e) => {
-                Ok(InstanceMonitorUpdate::Error(code))
-            }
-            Err(e) => Err(backoff::Error::transient(e)),
+            // Otherwise, was there a known error code from Propolis?
+            Err(e) => propolis_error_code(&self.log, &e)
+                // If we were able to parse a known error code, send it along to
+                // the instance runner task.
+                .map(InstanceMonitorUpdate::Error)
+                // Otherwise, just keep trying until we see a good state or
+                // known error code.
+                .ok_or_else(|| BackoffError::transient(e)),
         }
     }
 }
@@ -431,16 +438,18 @@ impl InstanceRunner {
                         },
                          Some(InstanceMonitorRequest { update: Error(code), tx }) => {
                             // TODO(eliza): this is kinda jank but Propolis
-                            // currently returns the same error when the
+                            // currently could return the same error when the
                             // instance has not been ensured and when it's still
-                            // coming up, which is sad...
+                            // coming up, which is sad. I'm not sure whether
+                            // that happens IRL or not --- investigate this.
                             let reaction = if has_ever_seen_a_good_state {
                                 info!(
                                     self.log,
                                     "Error code from Propolis after instance initialized, assuming it's gone";
                                     "error" => ?code,
                                 );
-                                self.terminate(mark_failed).await;
+                                self.terminate(true).await;
+                                self.publish_state_to_nexus().await;
                                 Reaction::Terminate
                             } else {
                                 debug!(
@@ -712,7 +721,7 @@ impl InstanceRunner {
     async fn propolis_state_put(
         &self,
         request: propolis_client::types::InstanceStateRequested,
-    ) -> Result<(), Error> {
+    ) -> Result<(), PropolisClientError> {
         let res = self
             .running_state
             .as_ref()
@@ -728,8 +737,7 @@ impl InstanceRunner {
                "status" => ?e.status());
         }
 
-        res?;
-        Ok(())
+        res.map(|_| ())
     }
 
     /// Sends an instance ensure request to this instance's Propolis.
@@ -843,7 +851,6 @@ impl InstanceRunner {
             client: client.clone(),
             tx_monitor: self.tx_monitor.clone(),
             log: self.log.clone(),
-            generation: 0,
         };
         let log = self.log.clone();
         let monitor_handle = tokio::task::spawn(async move {
@@ -1034,7 +1041,7 @@ impl InstanceRunner {
 
 fn propolis_error_code(
     log: &slog::Logger,
-    &error: PropolisClientError,
+    error: &PropolisClientError,
 ) -> Option<PropolisErrorCode> {
     // Is this a structured error response from the Propolis server?
     let propolis_client::Error::ErrorResponse(ref rv) = &error else {
@@ -1454,7 +1461,7 @@ impl InstanceRunner {
 
         if let Some(p) = propolis_state {
             if let Err(e) = self.propolis_state_put(p).await {
-                match propolis_error_code(&self.log, e) {
+                match propolis_error_code(&self.log, &e) {
                     Some(
                         code @ PropolisErrorCode::NoInstance
                         | code @ PropolisErrorCode::CreateFailed,
@@ -1474,8 +1481,6 @@ impl InstanceRunner {
                         return Err(Error::Propolis(e));
                     }
                 }
-            } else {
-                return Err(Error::Propolis(e));
             }
         }
         if let Some(s) = next_published {
