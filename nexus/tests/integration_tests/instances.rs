@@ -3242,10 +3242,10 @@ async fn test_attach_one_disk_to_instance(cptestctx: &ControlPlaneTestContext) {
         ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
-        disks: vec![params::InstanceDiskAttachment::Attach(
+        boot_disk: Some(params::InstanceDiskAttachment::Attach(
             params::InstanceDiskAttach { name: disk_name.clone() },
-        )],
-        boot_disk: Some(disk_name.into()),
+        )),
+        disks: Vec::new(),
         start: true,
         auto_restart_policy: Default::default(),
     };
@@ -3302,12 +3302,27 @@ async fn test_instance_create_attach_disks(
         ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
-        disks: vec![
-            params::InstanceDiskAttachment::Create(params::DiskCreate {
+        boot_disk: Some(params::InstanceDiskAttachment::Create(
+            params::DiskCreate {
                 identity: IdentityMetadataCreateParams {
                     name: Name::try_from(String::from("created-disk")).unwrap(),
                     description: String::from(
-                        "A disk that was created by instance create",
+                        "A boot disk that was created by instance create",
+                    ),
+                },
+                size: ByteCount::from_gibibytes_u32(4),
+                disk_source: params::DiskSource::Blank {
+                    block_size: params::BlockSize::try_from(512).unwrap(),
+                },
+            },
+        )),
+        disks: vec![
+            params::InstanceDiskAttachment::Create(params::DiskCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: Name::try_from(String::from("created-disk2"))
+                        .unwrap(),
+                    description: String::from(
+                        "A data disk that was created by instance create",
                     ),
                 },
                 size: ByteCount::from_gibibytes_u32(4),
@@ -3321,7 +3336,6 @@ async fn test_instance_create_attach_disks(
                 },
             ),
         ],
-        boot_disk: Some(attachable_disk.identity.name.into()),
         start: true,
         auto_restart_policy: Default::default(),
     };
@@ -3345,7 +3359,7 @@ async fn test_instance_create_attach_disks(
             .await
             .expect("failed to list disks")
             .all_items;
-    assert_eq!(disks.len(), 2);
+    assert_eq!(disks.len(), 3);
 
     for disk in disks {
         assert_eq!(disk.state, DiskState::Attached(instance.identity.id));
@@ -3488,7 +3502,12 @@ async fn test_attach_eight_disks_to_instance(
         ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
-        disks: (0..8)
+        boot_disk: Some(params::InstanceDiskAttachment::Attach(
+            params::InstanceDiskAttach {
+                name: Name::try_from("probablydata0".to_string()).unwrap(),
+            },
+        )),
+        disks: (1..8)
             .map(|i| {
                 params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
@@ -3498,7 +3517,6 @@ async fn test_attach_eight_disks_to_instance(
                 )
             })
             .collect(),
-        boot_disk: Some("probablydata0".parse().unwrap()),
         start: true,
         auto_restart_policy: Default::default(),
     };
@@ -3571,7 +3589,12 @@ async fn test_cannot_attach_nine_disks_to_instance(
         ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
-        disks: (0..9)
+        boot_disk: Some(params::InstanceDiskAttachment::Attach(
+            params::InstanceDiskAttach {
+                name: Name::try_from("probablydata0".to_string()).unwrap(),
+            },
+        )),
+        disks: (1..9)
             .map(|i| {
                 params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
@@ -3581,7 +3604,6 @@ async fn test_cannot_attach_nine_disks_to_instance(
                 )
             })
             .collect(),
-        boot_disk: Some("probablydata0".parse().unwrap()),
         start: true,
         auto_restart_policy: Default::default(),
     };
@@ -3668,7 +3690,12 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
         ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
-        disks: (0..8)
+        boot_disk: Some(params::InstanceDiskAttachment::Attach(
+            params::InstanceDiskAttach {
+                name: Name::try_from("probablydata0".to_string()).unwrap(),
+            },
+        )),
+        disks: (1..8)
             .map(|i| {
                 params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
@@ -3678,7 +3705,6 @@ async fn test_cannot_attach_faulted_disks(cptestctx: &ControlPlaneTestContext) {
                 )
             })
             .collect(),
-        boot_disk: Some("probablydata0".parse().unwrap()),
         start: true,
         auto_restart_policy: Default::default(),
     };
@@ -3754,7 +3780,12 @@ async fn test_disks_detached_when_instance_destroyed(
         ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
-        disks: (0..8)
+        boot_disk: Some(params::InstanceDiskAttachment::Attach(
+            params::InstanceDiskAttach {
+                name: Name::try_from("probablydata0".to_string()).unwrap(),
+            },
+        )),
+        disks: (1..8)
             .map(|i| {
                 params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
@@ -3764,7 +3795,6 @@ async fn test_disks_detached_when_instance_destroyed(
                 )
             })
             .collect(),
-        boot_disk: Some("probablydata0".parse().unwrap()),
         start: true,
         auto_restart_policy: Default::default(),
     };
@@ -3847,7 +3877,12 @@ async fn test_disks_detached_when_instance_destroyed(
         ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
-        disks: (0..8)
+        boot_disk: Some(params::InstanceDiskAttachment::Attach(
+            params::InstanceDiskAttach {
+                name: Name::try_from("probablydata0".to_string()).unwrap(),
+            },
+        )),
+        disks: (1..8)
             .map(|i| {
                 params::InstanceDiskAttachment::Attach(
                     params::InstanceDiskAttach {
@@ -3857,7 +3892,6 @@ async fn test_disks_detached_when_instance_destroyed(
                 )
             })
             .collect(),
-        boot_disk: Some("probablydata0".parse().unwrap()),
         start: true,
         auto_restart_policy: Default::default(),
     };
@@ -3886,21 +3920,24 @@ async fn test_disks_detached_when_instance_destroyed(
     }
 }
 
-// Attempt and fail to create an instance with a non-attached disk as its boot
-// device.
+// Surprising but true: mentioning a disk multiple times for attachment is just
+// fine. This means that having a disk in the boot_disk field and disks list
+// will succeed as well.
+//
+// Test here to ensure we're not caught by surprise if this behavior is changed,
+// rather than to assert that this is a specific desired behavior.
 #[nexus_test]
-async fn test_cannot_have_nonexistent_boot_disk(
+async fn test_duplicate_disk_attach_requests_ok(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
-    let instance_name = "nifs";
 
     // Test pre-reqs
     DiskTest::new(&cptestctx).await;
     create_project_and_pool(&client).await;
 
-    // Create the "probablydata" disk
     create_disk(&client, PROJECT_NAME, "probablydata").await;
+    create_disk(&client, PROJECT_NAME, "alsodata").await;
 
     // Verify disk is there and currently detached
     let disks: Vec<Disk> =
@@ -3908,13 +3945,14 @@ async fn test_cannot_have_nonexistent_boot_disk(
             .await
             .expect("failed to list disks")
             .all_items;
-    assert_eq!(disks.len(), 1);
+    assert_eq!(disks.len(), 2);
     assert_eq!(disks[0].state, DiskState::Detached);
+    assert_eq!(disks[1].state, DiskState::Detached);
 
-    // Create the instance
+    // Create the instance with a duplicate disks entry
     let instance_params = params::InstanceCreate {
         identity: IdentityMetadataCreateParams {
-            name: instance_name.parse().unwrap(),
+            name: "nfs".parse().unwrap(),
             description: String::from("probably serving data"),
         },
         ncpus: InstanceCpuCount::try_from(2).unwrap(),
@@ -3924,8 +3962,19 @@ async fn test_cannot_have_nonexistent_boot_disk(
         ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
-        disks: vec![],
-        boot_disk: Some("probablydata".parse().unwrap()),
+        disks: vec![
+            params::InstanceDiskAttachment::Attach(
+                params::InstanceDiskAttach {
+                    name: Name::try_from(String::from("probablydata")).unwrap(),
+                },
+            ),
+            params::InstanceDiskAttachment::Attach(
+                params::InstanceDiskAttach {
+                    name: Name::try_from(String::from("probablydata")).unwrap(),
+                },
+            ),
+        ],
+        boot_disk: None,
         start: true,
         auto_restart_policy: Default::default(),
     };
@@ -3933,17 +3982,62 @@ async fn test_cannot_have_nonexistent_boot_disk(
     let builder =
         RequestBuilder::new(client, http::Method::POST, &get_instances_url())
             .body(Some(&instance_params))
-            .expect_status(Some(http::StatusCode::CONFLICT));
+            .expect_status(Some(http::StatusCode::CREATED));
     let response = NexusRequest::new(builder)
         .authn_as(AuthnMode::PrivilegedUser)
         .execute()
         .await
         .expect("can attempt to create instance");
 
-    let err = response
-        .parsed_body::<HttpErrorResponseBody>()
+    let instance = response
+        .parsed_body::<Instance>()
         .expect("Failed to parse error response body");
-    assert_eq!(err.message, "boot disk must be attached");
+    assert_eq!(instance.boot_disk_id, None);
+
+    // Create the instance with a disk mentioned both as a data disk and a boot
+    // disk
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "nfs2".parse().unwrap(),
+            description: String::from("probably serving data"),
+        },
+        ncpus: InstanceCpuCount::try_from(2).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(4),
+        hostname: "nfs2".parse().unwrap(),
+        user_data: vec![],
+        ssh_public_keys: None,
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![],
+        boot_disk: Some(params::InstanceDiskAttachment::Attach(
+            params::InstanceDiskAttach {
+                name: Name::try_from(String::from("alsodata")).unwrap(),
+            },
+        )),
+        disks: vec![params::InstanceDiskAttachment::Attach(
+            params::InstanceDiskAttach {
+                name: Name::try_from(String::from("alsodata")).unwrap(),
+            },
+        )],
+        start: true,
+        auto_restart_policy: Default::default(),
+    };
+
+    let builder =
+        RequestBuilder::new(client, http::Method::POST, &get_instances_url())
+            .body(Some(&instance_params))
+            .expect_status(Some(http::StatusCode::CREATED));
+    let response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("can attempt to create instance");
+
+    let instance = response
+        .parsed_body::<Instance>()
+        .expect("Failed to parse error response body");
+    let expected_disk =
+        disks.iter().find(|d| d.identity.name.as_str() == "alsodata").unwrap();
+    assert_eq!(instance.boot_disk_id, Some(expected_disk.identity.id));
 }
 
 // Create an instance with a boot disk, try and fail to detach it, change the
@@ -3974,12 +4068,12 @@ async fn test_cannot_detach_boot_disk(cptestctx: &ControlPlaneTestContext) {
         ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
-        disks: vec![params::InstanceDiskAttachment::Attach(
+        boot_disk: Some(params::InstanceDiskAttachment::Attach(
             params::InstanceDiskAttach {
                 name: Name::try_from(String::from("probablydata0")).unwrap(),
             },
-        )],
-        boot_disk: Some("probablydata0".parse().unwrap()),
+        )),
+        disks: Vec::new(),
         start: false,
         auto_restart_policy: Default::default(),
     };
@@ -4196,21 +4290,16 @@ async fn test_boot_disk_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
-        disks: vec![
-            params::InstanceDiskAttachment::Attach(
-                params::InstanceDiskAttach {
-                    name: Name::try_from(String::from("probablydata0"))
-                        .unwrap(),
-                },
-            ),
-            params::InstanceDiskAttachment::Attach(
-                params::InstanceDiskAttach {
-                    name: Name::try_from(String::from("probablydata1"))
-                        .unwrap(),
-                },
-            ),
-        ],
-        boot_disk: Some("probablydata0".parse().unwrap()),
+        boot_disk: Some(params::InstanceDiskAttachment::Attach(
+            params::InstanceDiskAttach {
+                name: Name::try_from(String::from("probablydata0")).unwrap(),
+            },
+        )),
+        disks: vec![params::InstanceDiskAttachment::Attach(
+            params::InstanceDiskAttach {
+                name: Name::try_from(String::from("probablydata1")).unwrap(),
+            },
+        )],
         start: false,
         auto_restart_policy: Default::default(),
     };

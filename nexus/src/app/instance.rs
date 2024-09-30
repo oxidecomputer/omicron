@@ -345,14 +345,17 @@ impl super::Nexus {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
 
+        let all_disks: Vec<&params::InstanceDiskAttachment> =
+            params.boot_disk.iter().chain(params.disks.iter()).collect();
+
         // Validate parameters
-        if params.disks.len() > MAX_DISKS_PER_INSTANCE as usize {
+        if all_disks.len() > MAX_DISKS_PER_INSTANCE as usize {
             return Err(Error::invalid_request(&format!(
                 "cannot attach more than {} disks to instance",
                 MAX_DISKS_PER_INSTANCE
             )));
         }
-        for disk in &params.disks {
+        for disk in all_disks.iter() {
             if let params::InstanceDiskAttachment::Create(create) = disk {
                 self.validate_disk_create_params(opctx, &authz_project, create)
                     .await?;
