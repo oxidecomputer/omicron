@@ -79,14 +79,14 @@ pub async fn start_servers(
         let http_api = http_server::api();
         let http_api_context = http_server::Context::new(store);
 
-        dropshot::HttpServerStarter::new(
-            dropshot_config,
+        dropshot::ServerBuilder::new(
             http_api,
             http_api_context,
-            &log.new(o!("component" => "http")),
+            log.new(o!("component" => "http")),
         )
-        .map_err(|error| anyhow!("setting up HTTP server: {:#}", error))?
+        .config(dropshot_config.clone())
         .start()
+        .map_err(|error| anyhow!("setting up HTTP server: {:#}", error))?
     };
 
     Ok((dns_server, dropshot_server))

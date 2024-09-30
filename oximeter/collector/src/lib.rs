@@ -10,7 +10,7 @@ use dropshot::ConfigDropshot;
 use dropshot::ConfigLogging;
 use dropshot::HttpError;
 use dropshot::HttpServer;
-use dropshot::HttpServerStarter;
+use dropshot::ServerBuilder;
 use internal_dns::resolver::ResolveError;
 use internal_dns::resolver::Resolver;
 use internal_dns::ServiceName;
@@ -239,17 +239,17 @@ impl Oximeter {
         .expect("Expected an infinite retry loop initializing the timeseries database");
 
         let dropshot_log = log.new(o!("component" => "dropshot"));
-        let server = HttpServerStarter::new(
-            &ConfigDropshot {
-                bind_address: SocketAddr::V6(args.address),
-                ..Default::default()
-            },
+        let server = ServerBuilder::new(
             oximeter_api(),
             Arc::clone(&agent),
-            &dropshot_log,
+            dropshot_log,
         )
-        .map_err(|e| Error::Server(e.to_string()))?
-        .start();
+        .config(ConfigDropshot {
+            bind_address: SocketAddr::V6(args.address),
+            ..Default::default()
+        })
+        .start()
+        .map_err(|e| Error::Server(e.to_string()))?;
 
         // Notify Nexus that this oximeter instance is available.
         let our_info = nexus_client::types::OximeterInfo {
@@ -333,17 +333,17 @@ impl Oximeter {
         );
 
         let dropshot_log = log.new(o!("component" => "dropshot"));
-        let server = HttpServerStarter::new(
-            &ConfigDropshot {
-                bind_address: SocketAddr::V6(args.address),
-                ..Default::default()
-            },
+        let server = ServerBuilder::new(
             oximeter_api(),
             Arc::clone(&agent),
-            &dropshot_log,
+            dropshot_log,
         )
-        .map_err(|e| Error::Server(e.to_string()))?
-        .start();
+        .config(ConfigDropshot {
+            bind_address: SocketAddr::V6(args.address),
+            ..Default::default()
+        })
+        .start()
+        .map_err(|e| Error::Server(e.to_string()))?;
         info!(log, "started oximeter standalone server");
 
         // Notify the standalone nexus.

@@ -776,9 +776,10 @@ mod test {
             bind_address: "[::1]:0".parse().unwrap(),
             ..Default::default()
         };
-        dropshot::HttpServerStarter::new(&config_dropshot, api(), label, &log)
-            .unwrap()
+        dropshot::ServerBuilder::new(api(), label, log)
+            .config(config_dropshot)
             .start()
+            .unwrap()
     }
 
     #[tokio::test]

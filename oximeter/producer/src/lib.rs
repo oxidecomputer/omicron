@@ -12,9 +12,9 @@ use dropshot::ConfigDropshot;
 use dropshot::HttpError;
 use dropshot::HttpResponseOk;
 use dropshot::HttpServer;
-use dropshot::HttpServerStarter;
 use dropshot::Path;
 use dropshot::RequestContext;
+use dropshot::ServerBuilder;
 use internal_dns::resolver::ResolveError;
 use internal_dns::resolver::Resolver;
 use internal_dns::ServiceName;
@@ -194,14 +194,10 @@ impl Server {
         dropshot: &ConfigDropshot,
     ) -> Result<HttpServer<ProducerRegistry>, Error> {
         let dropshot_log = log.new(o!("component" => "dropshot"));
-        HttpServerStarter::new(
-            dropshot,
-            metric_server_api(),
-            registry.clone(),
-            &dropshot_log,
-        )
-        .map_err(|e| Error::Server(e.to_string()))
-        .map(HttpServerStarter::start)
+        ServerBuilder::new(metric_server_api(), registry.clone(), dropshot_log)
+            .config(dropshot.clone())
+            .start()
+            .map_err(|e| Error::Server(e.to_string()))
     }
 
     // Create a new server registering with Nexus.
@@ -464,8 +460,8 @@ mod tests {
     use dropshot::HttpError;
     use dropshot::HttpResponseCreated;
     use dropshot::HttpServer;
-    use dropshot::HttpServerStarter;
     use dropshot::RequestContext;
+    use dropshot::ServerBuilder;
     use omicron_common::api::internal::nexus::ProducerKind;
     use omicron_common::api::internal::nexus::ProducerRegistrationResponse;
     use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
@@ -510,18 +506,14 @@ mod tests {
     fn spawn_fake_nexus_server(log: &Logger) -> HttpServer<Context> {
         let mut api = ApiDescription::new();
         api.register(register_producer).expect("Expected to register endpoint");
-        HttpServerStarter::new(
-            &ConfigDropshot {
+        ServerBuilder::new(api, Arc::new(AtomicU32::new(0)), log.clone())
+            .config(ConfigDropshot {
                 bind_address: "[::1]:0".parse().unwrap(),
                 request_body_max_bytes: 2048,
                 ..Default::default()
-            },
-            api,
-            Arc::new(AtomicU32::new(0)),
-            log,
-        )
-        .expect("Expected to start Dropshot server")
-        .start()
+            })
+            .start()
+            .expect("Expected to start Dropshot server")
     }
 
     #[tokio::test]

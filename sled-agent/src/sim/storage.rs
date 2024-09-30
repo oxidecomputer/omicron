@@ -784,14 +784,14 @@ impl CrucibleServer {
         };
         let dropshot_log = log
             .new(o!("component" => "Simulated CrucibleAgent Dropshot Server"));
-        let server = dropshot::HttpServerStarter::new(
-            &config,
+        let server = dropshot::ServerBuilder::new(
             super::http_entrypoints_storage::api(),
             data.clone(),
-            &dropshot_log,
+            dropshot_log,
         )
-        .expect("Could not initialize server")
-        .start();
+        .config(config)
+        .start()
+        .expect("Could not initialize server");
         info!(&log, "Created Simulated Crucible Server"; "address" => server.local_addr());
 
         CrucibleServer { server, data }
@@ -1348,21 +1348,21 @@ impl PantryServer {
     ) -> Self {
         let pantry = Arc::new(Pantry::new(sled_agent));
 
-        let server = dropshot::HttpServerStarter::new(
-            &dropshot::ConfigDropshot {
-                bind_address: SocketAddr::new(ip, 0),
-                // This has to be large enough to support:
-                // - bulk writes into disks
-                request_body_max_bytes: 8192 * 1024,
-                default_handler_task_mode: HandlerTaskMode::Detached,
-                log_headers: vec![],
-            },
+        let server = dropshot::ServerBuilder::new(
             super::http_entrypoints_pantry::api(),
             pantry.clone(),
-            &log.new(o!("component" => "dropshot")),
+            log.new(o!("component" => "dropshot")),
         )
-        .expect("Could not initialize pantry server")
-        .start();
+        .config(dropshot::ConfigDropshot {
+            bind_address: SocketAddr::new(ip, 0),
+            // This has to be large enough to support:
+            // - bulk writes into disks
+            request_body_max_bytes: 8192 * 1024,
+            default_handler_task_mode: HandlerTaskMode::Detached,
+            log_headers: vec![],
+        })
+        .start()
+        .expect("Could not initialize pantry server");
 
         info!(&log, "Started Simulated Crucible Pantry"; "address" => server.local_addr());
 

@@ -1323,14 +1323,9 @@ mod test {
         let logctx = omicron_test_utils::dev::test_setup_log("test_authority");
         let mut api = dropshot::ApiDescription::new();
         api.register(echo_server_name).unwrap();
-        let server = dropshot::HttpServerStarter::new(
-            &dropshot::ConfigDropshot::default(),
-            api,
-            (),
-            &logctx.log,
-        )
-        .expect("failed to create dropshot server")
-        .start();
+        let server = dropshot::ServerBuilder::new(api, (), logctx.log.clone())
+            .start()
+            .expect("failed to create dropshot server");
         let local_addr = server.local_addr();
         let port = local_addr.port();
 

@@ -796,16 +796,15 @@ impl SledAgent {
         let dropshot_log = log.new(o!("component" => "dropshot"));
         let mock_api = propolis_mock_server::api();
 
-        let srv = dropshot::HttpServerStarter::new(
-            &dropshot_config,
-            mock_api,
-            private,
-            &dropshot_log,
-        )
-        .map_err(|error| {
-            Error::unavail(&format!("initializing propolis-server: {}", error))
-        })?
-        .start();
+        let srv = dropshot::ServerBuilder::new(mock_api, private, dropshot_log)
+            .config(dropshot_config)
+            .start()
+            .map_err(|error| {
+                Error::unavail(&format!(
+                    "initializing propolis-server: {}",
+                    error
+                ))
+            })?;
         let addr = srv.local_addr();
         let client = propolis_client::Client::new(&format!("http://{}", addr));
         *mock_lock = Some((srv, client));

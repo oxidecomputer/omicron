@@ -1733,14 +1733,10 @@ mod tests {
         let dropshot_log = log.new(o!("component" => "dropshot"));
         let mock_api = propolis_mock_server::api();
 
-        let srv = dropshot::HttpServerStarter::new(
-            &dropshot_config,
-            mock_api,
-            private,
-            &dropshot_log,
-        )
-        .expect("couldn't create mock propolis-server")
-        .start();
+        let srv = dropshot::ServerBuilder::new(mock_api, private, dropshot_log)
+            .config(dropshot_config)
+            .start()
+            .expect("couldn't create mock propolis-server");
 
         let client = propolis_client::Client::new(&format!(
             "http://{}",
