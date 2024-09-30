@@ -201,6 +201,14 @@ impl Ipadm {
     /// Set TCP recv_buf to 1 MB.
     pub fn set_tcp_recv_buf() -> Result<(), ExecutionError> {
         let mut cmd = std::process::Command::new(PFEXEC);
+
+        // This is to improve single-connection throughput on large uploads
+        // from clients, e.g., images. Modern browsers will almost always use
+        // HTTP/2, which will multiplex concurrent writes to the same host over
+        // a single TCP connection. The small default receive window size is a
+        // major bottleneck, see
+        // https://github.com/oxidecomputer/console/issues/2096 for further
+        // details.
         let cmd = cmd.args(&[
             IPADM,
             "set-prop",
