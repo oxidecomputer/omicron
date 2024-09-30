@@ -2245,9 +2245,9 @@ impl DataStore {
             })
     }
 
-    /// Fetch all active custom routers (and their parent subnets)
+    /// Fetch all active custom routers (and their associated subnets)
     /// in a VPC.
-    pub async fn vpc_get_active_custom_routers(
+    pub async fn vpc_get_active_custom_routers_with_associated_subnets(
         &self,
         opctx: &OpContext,
         vpc_id: Uuid,
@@ -2266,6 +2266,31 @@ impl DataStore {
             .filter(router_dsl::time_deleted.is_null())
             .filter(router_dsl::vpc_id.eq(vpc_id))
             .select((VpcSubnet::as_select(), VpcRouter::as_select()))
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Vpc,
+                        LookupType::ById(vpc_id),
+                    ),
+                )
+            })
+    }
+
+    /// Fetch all custom routers in a VPC.
+    pub async fn vpc_get_custom_routers(
+        &self,
+        opctx: &OpContext,
+        vpc_id: Uuid,
+    ) -> ListResultVec<VpcRouter> {
+        use db::schema::vpc_router::dsl as router_dsl;
+
+        router_dsl::vpc_router
+            .filter(router_dsl::time_deleted.is_null())
+            .filter(router_dsl::vpc_id.eq(vpc_id))
+            .select(VpcRouter::as_select())
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e| {

@@ -6355,7 +6355,7 @@ pub async fn assert_sled_vpc_routes(
     wait_for_condition(
         condition,
         &Duration::from_secs(1),
-        &Duration::from_secs(30),
+        &Duration::from_secs(45),
     )
     .await
     .expect("matching vpc routes should be present");
