@@ -667,12 +667,8 @@ impl DataStore {
             .transaction_async(|conn| async move {
                 // Ensure that blueprint we're about to delete is not the
                 // current target.
-                let current_target = self
-                    .blueprint_current_target_only(
-                        &conn,
-                        SelectFlavor::Standard,
-                    )
-                    .await?;
+                let current_target =
+                    self.blueprint_current_target_only(&conn).await?;
                 if current_target.target_id == blueprint_id {
                     return Err(TransactionError::CustomError(
                         Error::conflict(format!(
@@ -858,10 +854,7 @@ impl DataStore {
             async move {
                 // Bail out if `blueprint` isn't the current target.
                 let current_target = self
-                    .blueprint_current_target_only(
-                        &conn,
-                        SelectFlavor::ForUpdate,
-                    )
+                    .blueprint_current_target_only(&conn)
                     .await
                     .map_err(|e| err.bail(e))?;
                 if current_target.target_id != blueprint.id {
@@ -1079,9 +1072,7 @@ impl DataStore {
         opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
 
         let conn = self.pool_connection_authorized(opctx).await?;
-        let target = self
-            .blueprint_current_target_only(&conn, SelectFlavor::Standard)
-            .await?;
+        let target = self.blueprint_current_target_only(&conn).await?;
 
         // The blueprint for the current target cannot be deleted while it is
         // the current target, but it's possible someone else (a) made a new
@@ -1102,7 +1093,7 @@ impl DataStore {
     ) -> Result<BlueprintTarget, Error> {
         opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
         let conn = self.pool_connection_authorized(opctx).await?;
-        self.blueprint_current_target_only(&conn, SelectFlavor::Standard).await
+        self.blueprint_current_target_only(&conn).await
     }
 
     // Helper to fetch the current blueprint target (without fetching the entire
@@ -1112,26 +1103,13 @@ impl DataStore {
     async fn blueprint_current_target_only(
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
-        select_flavor: SelectFlavor,
     ) -> Result<BlueprintTarget, Error> {
         use db::schema::bp_target::dsl;
 
-        let query_result = match select_flavor {
-            SelectFlavor::ForUpdate => {
-                dsl::bp_target
-                    .order_by(dsl::version.desc())
-                    .for_update()
-                    .first_async::<BpTarget>(conn)
-                    .await
-            }
-            SelectFlavor::Standard => {
-                dsl::bp_target
-                    .order_by(dsl::version.desc())
-                    .first_async::<BpTarget>(conn)
-                    .await
-            }
-        };
-        let current_target = query_result
+        let current_target = dsl::bp_target
+            .order_by(dsl::version.desc())
+            .first_async::<BpTarget>(conn)
+            .await
             .optional()
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
@@ -1146,14 +1124,6 @@ impl DataStore {
 
         Ok(current_target.into())
     }
-}
-
-#[derive(Debug, Clone, Copy)]
-enum SelectFlavor {
-    /// A normal `SELECT`.
-    Standard,
-    /// Acquire a database-level write lock via `SELECT ... FOR UPDATE`.
-    ForUpdate,
 }
 
 // Helper to create an `authz::Blueprint` for a specific blueprint ID
@@ -1512,6 +1482,8 @@ impl RunQueryDsl<DbConnection> for InsertTargetQuery {}
 mod tests {
     use super::*;
     use crate::db::datastore::test_utils::datastore_test;
+    use futures::future::FusedFuture;
+    use futures::FutureExt;
     use nexus_inventory::now_db_precision;
     use nexus_inventory::CollectionBuilder;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
@@ -2358,9 +2330,11 @@ mod tests {
         .await
         .expect("`target_check_done` not set to true");
 
-        // Spawn another task that tries to read the current target. This should
-        // block at the database level due to the `SELECT ... FOR UPDATE` inside
-        // `blueprint_ensure_external_networking_resources`.
+        // Spawn another task that tries to read the current target.
+        //
+        // Without `SELECT ... FOR UPDATE`, we don't expect this to block --
+        // it'll either be ordered before or after the next tokio::task which
+        // updates the blueprint target.
         let mut current_target_task = tokio::spawn({
             let datastore = datastore.clone();
             let opctx =
@@ -2371,11 +2345,14 @@ mod tests {
                     .await
                     .expect("read current target")
             }
-        });
+        })
+        .fuse();
 
-        // Spawn another task that tries to set the current target. This should
-        // block at the database level due to the `SELECT ... FOR UPDATE` inside
-        // `blueprint_ensure_external_networking_resources`.
+        // Spawn another task that tries to set the current target.
+        //
+        // Without `SELECT ... FOR UPDATE`, we don't expect this to block,
+        // but it will perform a read-modify-write on the blueprint target
+        // table.
         let mut update_target_task = tokio::spawn({
             let datastore = datastore.clone();
             let opctx =
@@ -2383,44 +2360,51 @@ mod tests {
             async move {
                 datastore.blueprint_target_set_current(&opctx, bp2_target).await
             }
-        });
+        })
+        .fuse();
 
-        // None of our spawned tasks should be able to make progress:
-        // `ensure_resources_task` is waiting for us to set
-        // `return_on_completion` to true, and the other two should be
-        // queued by Cockroach, because
-        // `blueprint_ensure_external_networking_resources` should have
-        // performed a `SELECT ... FOR UPDATE` on the current target, forcing
-        // the query that wants to change it to wait until the transaction
-        // completes.
+        // We expect to have the following reads/writes:
         //
-        // We'll somewhat haphazardly test this by trying to wait for any
-        // task to finish, and succeeding on a timeout of a few seconds. This
-        // could spuriously succeed if we're executing on a very overloaded
-        // system where we hit the timeout even though one of the tasks is
-        // actually making progress, but hopefully will fail often enough if
-        // we've gotten this wrong.
-        tokio::select! {
-            result = &mut ensure_resources_task => {
-                panic!(
-                    "unexpected completion of \
-                     `blueprint_ensure_external_networking_resources`: \
-                     {result:?}",
-                );
+        // | Ensure Resources | Get current target | Set current target   |
+        // | -----------------|--------------------|----------------------|
+        // | BEGIN            |                    |                      |
+        // | R(target)        |                    |                      |
+        // --->  target_check_done set to true
+        // | W(data)          | R(target)          | R(target), W(target) |
+        // ---> return_on_completion set to true
+        // | COMMIT           |                    |                      |
+        //
+        // With this ordering, to satisfy "Read-Write", "Write-Read" and
+        // "Write-Write" conflicts, the following ordering must happen:
+        //
+        // - "Get current target" and "Set current target" are concurrent,
+        // but both run to completion before "Ensure resources" commits.
+        // - "Ensure resources" can only COMMIT after we've finished the
+        // other background tasks, requiring that they hav COMMIT-ed.
+
+        loop {
+            // Keep running until our background tasks are done
+            if update_target_task.is_terminated()
+                && current_target_task.is_terminated()
+            {
+                break;
             }
-            result = &mut update_target_task => {
-                panic!(
-                    "unexpected completion of \
-                     `blueprint_target_set_current`: {result:?}",
-                );
+
+            tokio::select! {
+                result = &mut ensure_resources_task => {
+                    panic!(
+                        "unexpected completion of \
+                         `blueprint_ensure_external_networking_resources`: \
+                         {result:?}",
+                    );
+                }
+                result = &mut update_target_task => {
+                    println!("blueprint_target_set_current result: {result:?}");
+                }
+                result = &mut current_target_task => {
+                    println!("blueprint_target_get_current result: {result:?}");
+                }
             }
-            result = &mut current_target_task => {
-                panic!(
-                    "unexpected completion of \
-                     `blueprint_target_get_current`: {result:?}",
-                );
-            }
-            _ = tokio::time::sleep(Duration::from_secs(5)) => (),
         }
 
         // Release `ensure_resources_task` to finish.
@@ -2434,17 +2418,6 @@ mod tests {
             )
             .expect("panic in `blueprint_ensure_external_networking_resources")
             .expect("ensured networking resources for empty blueprint 2");
-
-        // Our other tasks should now also complete.
-        tokio::time::timeout(Duration::from_secs(10), update_target_task)
-            .await
-            .expect("time out waiting for `blueprint_target_set_current`")
-            .expect("panic in `blueprint_target_set_current")
-            .expect("updated target to blueprint 2");
-        tokio::time::timeout(Duration::from_secs(10), current_target_task)
-            .await
-            .expect("time out waiting for `blueprint_target_get_current`")
-            .expect("panic in `blueprint_target_get_current");
 
         // Clean up.
         db.cleanup().await.unwrap();
