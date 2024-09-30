@@ -286,9 +286,7 @@ impl InstanceMonitorRunner {
             // It will decide the new state, provide that info to Nexus,
             // and possibly identify if we should terminate.
             let (tx, rx) = oneshot::channel();
-            self.tx_monitor
-                .send(InstanceMonitorRequest { update, tx })
-                .await?;
+            self.tx_monitor.send(InstanceMonitorRequest { update, tx }).await?;
 
             if let Reaction::Terminate = rx.await? {
                 return Ok(());
@@ -299,8 +297,7 @@ impl InstanceMonitorRunner {
     async fn monitor(
         &self,
         generation: u64,
-    ) -> Result<InstanceMonitorUpdate, BackoffError<PropolisClientError>>
-    {
+    ) -> Result<InstanceMonitorUpdate, BackoffError<PropolisClientError>> {
         // State monitoring always returns the most recent state/gen pair
         // known to Propolis.
         let result = self
