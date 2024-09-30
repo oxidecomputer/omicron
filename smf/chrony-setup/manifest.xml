@@ -34,7 +34,8 @@
     <propval name="boundary_pool" type="astring" value="" />
     <!--
         Upstream NTP server. May be specifid more than once. (At least one is
-        required.)
+        required for boundary NTP zones; internal NTP zones instead use
+        `boundary_pool` above to find the boundary NTP servers.)
     -->
     <propval name="server" type="astring" value="" />
     <!-- Allowed IPv6 range for clients (typically the rack subnet) -->

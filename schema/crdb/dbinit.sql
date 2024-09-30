@@ -3411,7 +3411,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone (
     dns_gz_address INET,
     dns_gz_address_index INT8,
 
-    -- Properties common to both kinds of NTP zones
+    -- Properties for boundary NTP zones
+    -- these define upstream servers we need to contact
     ntp_ntp_servers TEXT[],
     ntp_dns_servers INET[],
     ntp_domain TEXT,
@@ -3649,7 +3650,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone (
     dns_gz_address INET,
     dns_gz_address_index INT8,
 
-    -- Properties common to both kinds of NTP zones
+    -- Properties for boundary NTP zones
+    -- these define upstream servers we need to contact
     ntp_ntp_servers TEXT[],
     ntp_dns_servers INET[],
     ntp_domain TEXT,

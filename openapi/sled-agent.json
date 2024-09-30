@@ -4263,23 +4263,6 @@
               "address": {
                 "type": "string"
               },
-              "dns_servers": {
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "format": "ip"
-                }
-              },
-              "domain": {
-                "nullable": true,
-                "type": "string"
-              },
-              "ntp_servers": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -4289,8 +4272,6 @@
             },
             "required": [
               "address",
-              "dns_servers",
-              "ntp_servers",
               "type"
             ]
           },
