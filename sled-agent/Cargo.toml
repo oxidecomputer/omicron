@@ -40,7 +40,7 @@ hyper-staticfile.workspace = true
 gateway-client.workspace = true
 illumos-utils.workspace = true
 installinator-common.workspace = true
-internal-dns.workspace = true
+internal-dns = { workspace = true, features = ["omicron-internal"] }
 ipnetwork.workspace = true
 itertools.workspace = true
 key-manager.workspace = true
