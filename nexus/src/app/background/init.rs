@@ -778,7 +778,7 @@ impl BackgroundTasksInitializer {
                 "detect if region snapshots need replacement and begin the \
                 process",
             period: config.region_snapshot_replacement_start.period_secs,
-            // XXX temporarily disabled
+            // XXX temporarily disabled, see oxidecomputer/omicron#6353
             task_impl: Box::new(RegionSnapshotReplacementDetector::disabled(
                 datastore.clone(),
                 sagas.clone(),
@@ -795,7 +795,7 @@ impl BackgroundTasksInitializer {
             period: config
                 .region_snapshot_replacement_garbage_collection
                 .period_secs,
-            // XXX temporarily disabled
+            // XXX temporarily disabled, see oxidecomputer/omicron#6353
             task_impl: Box::new(
                 RegionSnapshotReplacementGarbageCollect::disabled(
                     datastore.clone(),
@@ -813,7 +813,7 @@ impl BackgroundTasksInitializer {
                 "detect what volumes were affected by a region snapshot \
                 replacement, and run the step saga for them",
             period: config.region_snapshot_replacement_step.period_secs,
-            // XXX temporarily disabled
+            // XXX temporarily disabled, see oxidecomputer/omicron#6353
             task_impl: Box::new(
                 RegionSnapshotReplacementFindAffected::disabled(
                     datastore.clone(),
@@ -831,7 +831,7 @@ impl BackgroundTasksInitializer {
                 "complete a region snapshot replacement if all the steps are \
                 done",
             period: config.region_snapshot_replacement_finish.period_secs,
-            // XXX temporarily disabled
+            // XXX temporarily disabled, see oxidecomputer/omicron#6353
             task_impl: Box::new(
                 RegionSnapshotReplacementFinishDetector::disabled(datastore),
             ),
