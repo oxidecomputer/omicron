@@ -42,8 +42,8 @@ use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
-use diesel::sql_types;
 use nexus_db_model::Disk;
+use nexus_types::internal_api::background::ReincarnationReason;
 use omicron_common::api;
 use omicron_common::api::external;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -156,19 +156,19 @@ impl InstanceAndActiveVmm {
                 InstanceState::Vmm,
                 Some(VmmState::Stopped | VmmState::Destroyed),
             ) => external::InstanceState::Stopping,
-            // - An instance with a "saga unwound" VMM, on the other hand, can
-            //   be treated as "stopped", since --- unlike "destroyed" --- a new
-            //   start saga can run at any time by just clearing out the old VMM
-            //   ID.
-            (InstanceState::Vmm, Some(VmmState::SagaUnwound)) => {
-                external::InstanceState::Stopped
-            }
             // - An instance with a "failed" VMM should *not* be counted as
             //   failed until the VMM is unlinked, because a start saga must be
-            //   able to run "failed" instance. Until then, it will continue to
-            //   appear "stopping".
+            //   able to run for a "failed" instance. Until then, it will
+            //   continue to appear "stopping".
             (InstanceState::Vmm, Some(VmmState::Failed)) => {
                 external::InstanceState::Stopping
+            }
+            // - An instance with a "saga unwound" VMM, on the other hand, can
+            //   be treated as "failed", since --- unlike an instance with a
+            //   "failed" active VMM --- a new start saga can run at any time by
+            //   just clearing out the old VMM ID.
+            (InstanceState::Vmm, Some(VmmState::SagaUnwound)) => {
+                external::InstanceState::Failed
             }
             // - An instance with no VMM is always "stopped" (as long as it's
             //   not "starting" etc.)
@@ -500,33 +500,46 @@ impl DataStore {
     pub async fn find_reincarnatable_instances(
         &self,
         opctx: &OpContext,
+        reason: ReincarnationReason,
         pagparams: &DataPageParams<'_, Uuid>,
     ) -> ListResultVec<Instance> {
         use db::schema::instance::dsl;
+        use db::schema::vmm::dsl as vmm_dsl;
 
-        define_sql_function!(fn random() -> sql_types::Float);
-
-        paginated(dsl::instance, dsl::id, &pagparams)
+        let q = paginated(dsl::instance, dsl::id, &pagparams)
             // Select only those instances which may be reincarnated.
-            .filter(InstanceAutoRestart::filter_reincarnatable())
-            // Deleted instances may not be reincarnated.
-            .filter(dsl::time_deleted.is_null())
-            // If the instance is currently in the process of being updated,
-            // let's not mess with it for now and try to restart it on another
-            // pass.
-            .filter(dsl::updater_id.is_null())
-            // N.B. that it's tempting to also filter out instances that have no
-            // active VMM, since they're only valid targets for instance-start
-            // sagas once the active VMM is unlinked, *or* if the active VMM is
-            // `SagaUnwound`. However, checking for the second case
-            // (SagaUnwound) would require joining with the VMM table, so let's
-            // not bother.
-            .select(Instance::as_select())
-            .load_async::<Instance>(
-                &*self.pool_connection_authorized(opctx).await?,
-            )
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .filter(InstanceAutoRestart::filter_reincarnatable());
+
+        match reason {
+            ReincarnationReason::Failed => {
+                // The instance must be in the Failed state.
+                q.filter(dsl::state.eq(InstanceState::Failed))
+                    .filter(dsl::active_propolis_id.is_null())
+                    .select(Instance::as_select())
+                    .load_async::<Instance>(
+                        &*self.pool_connection_authorized(opctx).await?,
+                    )
+                    .await
+            }
+            ReincarnationReason::SagaUnwound => {
+                // The instance must have an active VMM.
+                q.filter(dsl::state.eq(InstanceState::Vmm))
+                    .inner_join(
+                        vmm_dsl::vmm
+                            .on(dsl::active_propolis_id
+                                .eq(vmm_dsl::id.nullable())),
+                    )
+                    // The instance's active VMM must be in the `SagaUnwound`
+                    // state.
+                    .filter(vmm_dsl::state.eq(VmmState::SagaUnwound))
+                    .select(Instance::as_select())
+                    .load_async::<Instance>(
+                        &*self.pool_connection_authorized(opctx).await?,
+                    )
+                    .await
+            }
+        }
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Fetches information about an Instance that the caller has previously

@@ -41,7 +41,6 @@ use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::DiskVariant;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_common::policy::NEXUS_REDUNDANCY;
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -551,7 +550,7 @@ impl Sled {
                 reservoir_size: ByteCount::from(1024),
                 sled_role,
                 sled_agent_address,
-                sled_id: sled_id.into_untyped_uuid(),
+                sled_id,
                 usable_hardware_threads: 10,
                 usable_physical_ram: ByteCount::from(1024 * 1024),
                 // Populate disks, appearing like a real device.
@@ -705,7 +704,7 @@ impl Sled {
             reservoir_size: inv_sled_agent.reservoir_size,
             sled_role: inv_sled_agent.sled_role,
             sled_agent_address: inv_sled_agent.sled_agent_address,
-            sled_id: sled_id.into_untyped_uuid(),
+            sled_id,
             usable_hardware_threads: inv_sled_agent.usable_hardware_threads,
             usable_physical_ram: inv_sled_agent.usable_physical_ram,
             disks: vec![],

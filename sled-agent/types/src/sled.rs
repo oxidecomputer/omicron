@@ -11,6 +11,7 @@ use omicron_common::{
     address::{self, Ipv6Subnet, SLED_PREFIX},
     ledger::Ledgerable,
 };
+use omicron_uuid_kinds::SledUuid;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sha3::{Digest, Sha3_256};
@@ -115,7 +116,7 @@ impl Ledgerable for StartSledAgentRequest {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct StartSledAgentRequestBody {
     /// Uuid of the Sled Agent to be created.
-    pub id: Uuid,
+    pub id: SledUuid,
 
     /// Uuid of the rack to which this sled agent belongs.
     pub rack_id: Uuid,
@@ -137,7 +138,7 @@ pub struct StartSledAgentRequestBody {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct StartSledAgentRequestV0 {
     /// Uuid of the Sled Agent to be created.
-    pub id: Uuid,
+    pub id: SledUuid,
 
     /// Uuid of the rack to which this sled agent belongs.
     pub rack_id: Uuid,
@@ -191,7 +192,7 @@ mod tests {
     fn serialize_start_sled_agent_v0_deserialize_v1() {
         let v0 = PersistentSledAgentRequest {
             request: StartSledAgentRequestV0 {
-                id: Uuid::new_v4(),
+                id: SledUuid::new_v4(),
                 rack_id: Uuid::new_v4(),
                 ntp_servers: vec![String::from("test.pool.example.com")],
                 dns_servers: vec!["1.1.1.1".parse().unwrap()],

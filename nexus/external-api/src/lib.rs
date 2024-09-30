@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use anyhow::anyhow;
+use dropshot::Body;
 use dropshot::{
     EmptyScanParams, EndpointTagPolicy, HttpError, HttpResponseAccepted,
     HttpResponseCreated, HttpResponseDeleted, HttpResponseFound,
@@ -10,7 +11,6 @@ use dropshot::{
     WebsocketChannelResult, WebsocketConnection,
 };
 use http::Response;
-use hyper::Body;
 use ipnetwork::IpNetwork;
 use nexus_types::{
     authn::cookies::Cookies,

@@ -31,7 +31,6 @@ use nexus_types::inventory::ServiceProcessor;
 use nexus_types::inventory::SledAgent;
 use nexus_types::inventory::Zpool;
 use omicron_uuid_kinds::CollectionKind;
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -477,7 +476,7 @@ impl CollectionBuilder {
         source: &str,
         inventory: Inventory,
     ) -> Result<(), anyhow::Error> {
-        let sled_id = SledUuid::from_untyped_uuid(inventory.sled_id);
+        let sled_id = inventory.sled_id;
 
         let baseboard_id = match inventory.baseboard {
             Baseboard::Pc { .. } => None,

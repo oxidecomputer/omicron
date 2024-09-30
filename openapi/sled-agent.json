@@ -3398,8 +3398,7 @@
             "type": "string"
           },
           "sled_id": {
-            "type": "string",
-            "format": "uuid"
+            "$ref": "#/components/schemas/TypedUuidForSledKind"
           },
           "sled_role": {
             "$ref": "#/components/schemas/SledRole"
@@ -5023,8 +5022,11 @@
         "properties": {
           "id": {
             "description": "Uuid of the Sled Agent to be created.",
-            "type": "string",
-            "format": "uuid"
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TypedUuidForSledKind"
+              }
+            ]
           },
           "is_lrtq_learner": {
             "description": "Is this node an LRTQ learner node?\n\nWe only put the node into learner mode if `use_trust_quorum` is also true.",
@@ -5149,6 +5151,10 @@
         "format": "uuid"
       },
       "TypedUuidForOmicronZoneKind": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "TypedUuidForSledKind": {
         "type": "string",
         "format": "uuid"
       },

@@ -883,7 +883,7 @@ impl<'a, N: NexusServer> DiskTestBuilder<'a, N> {
         Self {
             cptestctx,
             sled_agents: WhichSledAgents::Specific(
-                SledUuid::from_untyped_uuid(cptestctx.sled_agent.sled_agent.id),
+                cptestctx.sled_agent.sled_agent.id,
             ),
             zpool_count: DiskTest::<'a, N>::DEFAULT_ZPOOL_COUNT,
         }
@@ -987,7 +987,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
             }
             WhichSledAgents::All => cptestctx
                 .all_sled_agents()
-                .map(|agent| SledUuid::from_untyped_uuid(agent.sled_agent.id))
+                .map(|agent| agent.sled_agent.id)
                 .collect(),
         };
 
@@ -1025,7 +1025,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
         sleds
             .into_iter()
             .find_map(|server| {
-                if server.sled_agent.id == sled_id.into_untyped_uuid() {
+                if server.sled_agent.id == sled_id {
                     Some(server.sled_agent.clone())
                 } else {
                     None
@@ -1089,7 +1089,7 @@ impl<'a, N: NexusServer> DiskTest<'a, N> {
         let sled_agent = sleds
             .into_iter()
             .find_map(|server| {
-                if server.sled_agent.id == sled_id.into_untyped_uuid() {
+                if server.sled_agent.id == sled_id {
                     Some(server.sled_agent.clone())
                 } else {
                     None

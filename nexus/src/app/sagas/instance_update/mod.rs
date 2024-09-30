@@ -350,7 +350,6 @@ use crate::app::db::datastore::VmmStateUpdateResult;
 use crate::app::db::lookup::LookupPath;
 use crate::app::db::model::ByteCount;
 use crate::app::db::model::Generation;
-use crate::app::db::model::InstanceKarmicStatus;
 use crate::app::db::model::InstanceRuntimeState;
 use crate::app::db::model::InstanceState;
 use crate::app::db::model::MigrationState;
@@ -1288,37 +1287,30 @@ async fn siu_chain_successor_saga(
             // auto-restart policy allows it to be automatically restarted. If
             // it does, activate the instance-reincarnation background task to
             // automatically restart it.
-            let auto_restart = new_state.instance.auto_restart;
-            match auto_restart.status(&new_state.instance.runtime_state) {
-                InstanceKarmicStatus::Ready => {
-                    info!(
-                        log,
-                        "instance update: instance transitioned to Failed, \
-                         but can be automatically restarted; activating \
-                         reincarnation.";
-                        "instance_id" => %instance_id,
-                        "auto_restart" => ?auto_restart,
-                        "runtime_state" => ?new_state.instance.runtime_state,
-                    );
-                    nexus
-                        .background_tasks
-                        .task_instance_reincarnation
-                        .activate();
-                }
-                InstanceKarmicStatus::CoolingDown(remaining) => {
-                    info!(
-                        log,
-                        "instance update: instance transitioned to Failed, \
-                         but is still in cooldown from a previous \
-                         reincarnation";
-                        "instance_id" => %instance_id,
-                        "auto_restart" => ?auto_restart,
-                        "cooldown_remaining" => ?remaining,
-                        "runtime_state" => ?new_state.instance.runtime_state,
-                    );
-                }
-                InstanceKarmicStatus::Forbidden
-                | InstanceKarmicStatus::NotFailed => {}
+            let karmic_state = new_state.instance.auto_restart.status(
+                &new_state.instance.runtime_state,
+                new_state.active_vmm.as_ref(),
+            );
+            if karmic_state.should_reincarnate() {
+                info!(
+                    log,
+                    "instance update: instance transitioned to Failed, \
+                     but can be automatically restarted; activating \
+                     reincarnation.";
+                    "instance_id" => %instance_id,
+                    "auto_restart_config" => ?new_state.instance.auto_restart,
+                    "runtime_state" => ?new_state.instance.runtime_state,
+                );
+                nexus.background_tasks.task_instance_reincarnation.activate();
+            } else {
+                debug!(
+                    log,
+                    "instance update: instance will not reincarnate";
+                    "instance_id" => %instance_id,
+                    "auto_restart_config" => ?new_state.instance.auto_restart,
+                    "needs_reincarnation" => karmic_state.needs_reincarnation,
+                    "karmic_state" => ?karmic_state.can_reincarnate,
+                )
             }
         }
 
