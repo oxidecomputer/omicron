@@ -406,6 +406,7 @@ struct InstanceRunner {
 impl InstanceRunner {
     async fn run(mut self) {
         use InstanceRequest::*;
+        let mut has_ever_seen_a_good_state = false;
         while !self.should_terminate {
             tokio::select! {
                 biased;
@@ -415,6 +416,7 @@ impl InstanceRunner {
                     use InstanceMonitorUpdate::*;
                     match request {
                         Some(InstanceMonitorRequest { update: State(state), tx }) => {
+                            has_ever_seen_a_good_state = true;
                             let observed = ObservedPropolisState::new(&state);
                             let reaction = self.observe_state(&observed).await;
                             self.publish_state_to_nexus().await;
@@ -425,12 +427,32 @@ impl InstanceRunner {
                             // next iteration of the loop.
                             if let Err(_) = tx.send(reaction) {
                                 warn!(self.log, "InstanceRunner failed to send to InstanceMonitorRunner");
+                            }
+                        },
+                         Some(InstanceMonitorRequest { update: Error(code), tx }) => {
+                            // TODO(eliza): this is kinda jank but Propolis
+                            // currently returns the same error when the
+                            // instance has not been ensured and when it's still
+                            // coming up, which is sad...
+                            let reaction = if has_ever_seen_a_good_state {
+                                info!(
+                                    self.log,
+                                    "Error code from Propolis after instance initialized, assuming it's gone";
+                                    "error" => ?code,
+                                );
+                                self.terminate(mark_failed).await;
+                                Reaction::Terminate
+                            } else {
+                                debug!(
+                                    self.log,
+                                    "Error code from Propolis before initialization";
+                                    "error" => ?code,
+                                );
+                                Reaction::Continue
+                            };
 
-
-
-
-
-                                
+                            if let Err(_) = tx.send(reaction) {
+                                warn!(self.log, "InstanceRunner failed to send to InstanceMonitorRunner");
                             }
                         },
                         // NOTE: This case shouldn't really happen, as we keep a copy
@@ -821,6 +843,7 @@ impl InstanceRunner {
             client: client.clone(),
             tx_monitor: self.tx_monitor.clone(),
             log: self.log.clone(),
+            generation: 0,
         };
         let log = self.log.clone();
         let monitor_handle = tokio::task::spawn(async move {
