@@ -268,7 +268,7 @@ impl InstanceMonitorRunner {
                     warn!(
                         self.log,
                         "failed to poll Propolis state";
-                        "error" => %error
+                        "error" => %error,
                         "retry_in" => ?delay,
                     );
                 },
