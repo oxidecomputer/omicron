@@ -516,9 +516,6 @@ mod test {
                 zone_type: BlueprintZoneType::InternalNtp(
                     blueprint_zone_type::InternalNtp {
                         address: "[::1]:0".parse().unwrap(),
-                        dns_servers: vec!["::1".parse().unwrap()],
-                        domain: None,
-                        ntp_servers: vec!["some-ntp-server-addr".into()],
                     },
                 ),
             });
