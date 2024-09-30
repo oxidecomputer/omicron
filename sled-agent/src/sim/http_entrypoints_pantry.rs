@@ -27,15 +27,12 @@ pub fn api() -> CruciblePantryApiDescription {
         api.register(volume_status)?;
         api.register(attach)?;
         api.register(attach_activate_background)?;
-        // api.register(replace)?;
         api.register(is_job_finished)?;
         api.register(job_result_ok)?;
         api.register(import_from_url)?;
         api.register(snapshot)?;
         api.register(bulk_write)?;
-        // api.register(bulk_read)?;
         api.register(scrub)?;
-        // api.register(validate)?;
         api.register(detach)?;
 
         Ok(())
