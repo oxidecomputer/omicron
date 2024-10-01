@@ -22,9 +22,9 @@ use crate::db::model::Generation;
 use crate::db::model::Instance;
 use crate::db::model::InstanceAutoRestart;
 use crate::db::model::InstanceAutoRestartPolicy;
+use crate::db::model::InstanceReconfigure;
 use crate::db::model::InstanceRuntimeState;
 use crate::db::model::InstanceState;
-use crate::db::model::InstanceUpdate;
 use crate::db::model::Migration;
 use crate::db::model::MigrationState;
 use crate::db::model::Name;
@@ -1009,7 +1009,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
-        update: InstanceUpdate,
+        update: InstanceReconfigure,
     ) -> Result<InstanceAndActiveVmm, Error> {
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
 

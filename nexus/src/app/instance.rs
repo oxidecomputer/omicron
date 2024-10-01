@@ -19,7 +19,7 @@ use crate::external_api::params;
 use cancel_safe_futures::prelude::*;
 use futures::future::Fuse;
 use futures::{FutureExt, SinkExt, StreamExt};
-use nexus_db_model::InstanceUpdate;
+use nexus_db_model::InstanceReconfigure;
 use nexus_db_model::IpAttachState;
 use nexus_db_model::IpKind;
 use nexus_db_model::Vmm as DbVmm;
@@ -330,7 +330,7 @@ impl super::Nexus {
             None => None,
         };
 
-        let update = InstanceUpdate { boot_disk_id };
+        let update = InstanceReconfigure { boot_disk_id };
         self.datastore()
             .instance_reconfigure(opctx, &authz_instance, update)
             .await
