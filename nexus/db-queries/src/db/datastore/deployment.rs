@@ -2478,7 +2478,7 @@ mod tests {
         //
         // We expect to have the following reads/writes:
         //
-        // | Ensure Resources |  Set current target  |
+        // | Ensure Resources |  Unit test  |
         // | -----------------|----------------------|
         // | BEGIN            |                      |
         // | R(target)        |                      |
