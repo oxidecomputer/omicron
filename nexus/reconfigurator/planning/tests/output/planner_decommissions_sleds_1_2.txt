@@ -126,7 +126,7 @@ to:   blueprint 1ac2d88f-27dd-4506-8585-6b2be832528e
     internal_dns   a308d3e1-118c-440a-947a-8b6ab7d833ab   in service    fd00:1122:3344:3::1   
     internal_ntp   4f8ce495-21dd-48a1-859c-80d34ce394ed   in service    fd00:1122:3344:102::21
     nexus          a1ae92ac-e1f1-4654-ab54-5b75ba7c44d6   in service    fd00:1122:3344:102::22
-+   internal_dns   c8851a11-a4f7-4b21-9281-6182fd15dc8d   in service    fd00:1122:3344:4::1   
++   internal_dns   c8851a11-a4f7-4b21-9281-6182fd15dc8d   in service    fd00:1122:3344:1::1   
 
 
  COCKROACHDB SETTINGS:

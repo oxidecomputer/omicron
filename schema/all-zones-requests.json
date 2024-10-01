@@ -562,32 +562,11 @@
           "type": "object",
           "required": [
             "address",
-            "dns_servers",
-            "ntp_servers",
             "type"
           ],
           "properties": {
             "address": {
               "type": "string"
-            },
-            "dns_servers": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "format": "ip"
-              }
-            },
-            "domain": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "ntp_servers": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
             },
             "type": {
               "type": "string",
