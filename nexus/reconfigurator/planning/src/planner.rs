@@ -769,12 +769,10 @@ mod test {
     use omicron_common::api::external::Generation;
     use omicron_common::disk::DiskIdentity;
     use omicron_test_utils::dev::test_setup_log;
-    use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use std::collections::HashMap;
-    use std::mem;
     use std::net::IpAddr;
     use typed_rng::TypedUuidRng;
 
@@ -983,41 +981,21 @@ mod test {
             blueprint.blueprint_zones.retain(|k, _v| keep_sled_id == *k);
             blueprint.blueprint_disks.retain(|k, _v| keep_sled_id == *k);
 
-            // Also remove all the networking resources for the zones we just
-            // stripped out; i.e., only keep those for `keep_sled_id`.
-            let mut new_network_resources = OmicronZoneNetworkResources::new();
-            let old_network_resources = builder.network_resources_mut();
-            for old_ip in old_network_resources.omicron_zone_external_ips() {
-                if blueprint.all_omicron_zones(BlueprintZoneFilter::All).any(
-                    |(_, zone)| {
-                        zone.zone_type
-                            .external_networking()
-                            .map(|(ip, _nic)| ip.id() == old_ip.ip.id())
-                            .unwrap_or(false)
-                    },
-                ) {
-                    new_network_resources
-                        .add_external_ip(old_ip.zone_id, old_ip.ip)
-                        .expect("copied IP to new input");
-                }
-            }
-            for old_nic in old_network_resources.omicron_zone_nics() {
-                if blueprint.all_omicron_zones(BlueprintZoneFilter::All).any(
-                    |(_, zone)| {
-                        zone.zone_type
-                            .external_networking()
-                            .map(|(_ip, nic)| {
-                                nic.id == old_nic.nic.id.into_untyped_uuid()
-                            })
-                            .unwrap_or(false)
-                    },
-                ) {
-                    new_network_resources
-                        .add_nic(old_nic.zone_id, old_nic.nic)
-                        .expect("copied NIC to new input");
-                }
-            }
-            mem::swap(old_network_resources, &mut &mut new_network_resources);
+            // Previously, we would clear out any network resources from the
+            // planning input that were assigned to sleds other than
+            // `keep_sled_id`. However, currently, while constructing the
+            // example system, network resources do not make their way into the
+            // planning input! So we just check that it's empty. (Using
+            // `assert_eq!` shows `Debug` output, which is nice.)
+            //
+            // TODO: This is arguably a bug in how ExampleSystem is generated,
+            // and will hopefully be addressed in the future.
+            assert_eq!(
+                builder.network_resources_mut(),
+                &OmicronZoneNetworkResources::new(),
+                "input network resources should be empty -- \
+                 has the ExampleSystem logic been updated to populate them?"
+            );
 
             (keep_sled_id, blueprint, collection, builder.build())
         };

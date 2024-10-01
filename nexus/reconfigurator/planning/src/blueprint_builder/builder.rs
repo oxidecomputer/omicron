@@ -2073,14 +2073,21 @@ pub mod test {
         let logctx = test_setup_log(TEST_NAME);
         let (collection, input, _) =
             example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
-        let input = {
-            // Clear out the external networking records from `input`, since
-            // we're building an empty blueprint.
-            let mut builder = input.into_builder();
-            *builder.network_resources_mut() =
-                OmicronZoneNetworkResources::new();
-            builder.build()
-        };
+
+        // Previously, we would clear out network resources from the planning
+        // input. However, currently, while constructing the example system,
+        // network resources do not make their way into the planning input! So
+        // we just check that it's empty. (Using `assert_eq!` shows `Debug`
+        // output, which is nice.)
+        //
+        // TODO: This is arguably a bug and will hopefully be addressed in the
+        // future.
+        assert_eq!(
+            input.network_resources(),
+            &OmicronZoneNetworkResources::new(),
+            "input network resources should be empty -- \
+             has the ExampleSystem logic been updated to populate them?"
+        );
 
         // Start with an empty blueprint (sleds with no zones).
         let parent = BlueprintBuilder::build_empty_with_sleds_seeded(
@@ -2155,14 +2162,22 @@ pub mod test {
         // Discard the example blueprint and start with an empty one.
         let (collection, input, _) =
             example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
-        let input = {
-            // Clear out the external networking records from `input`, since
-            // we're building an empty blueprint.
-            let mut builder = input.into_builder();
-            *builder.network_resources_mut() =
-                OmicronZoneNetworkResources::new();
-            builder.build()
-        };
+
+        // Previously, we would clear out network resources from the planning
+        // input. However, currently, while constructing the example system,
+        // network resources do not make their way into the planning input! So
+        // we just check that it's empty. (Using `assert_eq!` shows `Debug`
+        // output, which is nice.)
+        //
+        // TODO: This is arguably a bug in how ExampleSystem is generated, and
+        // will hopefully be addressed in the future.
+        assert_eq!(
+            input.network_resources(),
+            &OmicronZoneNetworkResources::new(),
+            "input network resources should be empty -- \
+             has the ExampleSystem logic been updated to populate them?"
+        );
+
         let parent = BlueprintBuilder::build_empty_with_sleds_seeded(
             input.all_sled_ids(SledFilter::Commissioned),
             "test",
@@ -2540,14 +2555,22 @@ pub mod test {
         // Discard the example blueprint and start with an empty one.
         let (collection, input, _) =
             example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
-        let input = {
-            // Clear out the external networking records from `input`, since
-            // we're building an empty blueprint.
-            let mut builder = input.into_builder();
-            *builder.network_resources_mut() =
-                OmicronZoneNetworkResources::new();
-            builder.build()
-        };
+
+        // Previously, we would clear out network resources from the planning
+        // input. However, currently, while constructing the example system,
+        // network resources do not make their way into the planning input! So
+        // we just check that it's empty. (Using `assert_eq!` shows `Debug`
+        // output, which is nice.)
+        //
+        // TODO: This is arguably a bug in how ExampleSystem is generated, and
+        // will hopefully be addressed in the future.
+        assert_eq!(
+            input.network_resources(),
+            &OmicronZoneNetworkResources::new(),
+            "input network resources should be empty -- \
+             has the ExampleSystem logic changed?"
+        );
+
         let parent = BlueprintBuilder::build_empty_with_sleds_seeded(
             input.all_sled_ids(SledFilter::Commissioned),
             "test",
