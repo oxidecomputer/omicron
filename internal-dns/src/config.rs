@@ -63,13 +63,13 @@
 use crate::names::{ServiceName, BOUNDARY_NTP_DNS_NAME, DNS_ZONE};
 use anyhow::{anyhow, ensure};
 use core::fmt;
-use std::net::SocketAddrV6;
 use dns_service_client::types::{DnsConfigParams, DnsConfigZone, DnsRecord};
 use omicron_common::address::{CLICKHOUSE_ADMIN_PORT, CLICKHOUSE_TCP_PORT};
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::{OmicronZoneUuid, SledUuid};
 use std::collections::BTreeMap;
 use std::net::Ipv6Addr;
+use std::net::SocketAddrV6;
 
 /// Used to construct the DNS name for a control plane host
 #[derive(Clone, Debug, PartialEq, PartialOrd)]

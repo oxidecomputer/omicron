@@ -2133,10 +2133,7 @@ pub mod test {
 
         // All zones' underlay addresses ought to be on the sled's subnet.
         for z in &new_sled_zones.zones {
-            assert!(new_sled_resources
-                .subnet
-                .net()
-                .contains(z.underlay_ip()));
+            assert!(new_sled_resources.subnet.net().contains(z.underlay_ip()));
         }
 
         // Check for an NTP zone.  Its sockaddr's IP should also be on the

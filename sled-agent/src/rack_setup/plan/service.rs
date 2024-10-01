@@ -662,11 +662,7 @@ impl Plan {
             let http_port = omicron_common::address::CLICKHOUSE_HTTP_PORT;
             let http_address = SocketAddrV6::new(ip, http_port, 0, 0);
             dns_builder
-                .host_zone_clickhouse(
-                    id,
-                    ServiceName::Clickhouse,
-                    http_address,
-                )
+                .host_zone_clickhouse(id, ServiceName::Clickhouse, http_address)
                 .unwrap();
             let dataset_name =
                 sled.alloc_dataset_from_u2s(DatasetKind::Clickhouse)?;

@@ -288,11 +288,7 @@ pub fn blueprint_internal_dns_config(
                     ServiceName::ClickhouseServer
                 };
                 dns_builder
-                    .host_zone_clickhouse(
-                        zone.id,
-                        http_service,
-                        *address,
-                    )
+                    .host_zone_clickhouse(zone.id, http_service, *address)
                     .map_err(|e| Error::InternalError {
                         internal_message: e.to_string(),
                     })?;
@@ -340,11 +336,7 @@ pub fn blueprint_internal_dns_config(
             ) => (ServiceName::InternalDns, http_address),
         };
         dns_builder
-            .host_zone_with_one_backend(
-                zone.id,
-                service_name,
-                address,
-            )
+            .host_zone_with_one_backend(zone.id, service_name, address)
             .map_err(|e| Error::InternalError {
                 internal_message: e.to_string(),
             })?;
