@@ -10,6 +10,7 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
+async-trait.workspace = true
 camino.workspace = true
 chrono.workspace = true
 clap.workspace = true
@@ -22,6 +23,7 @@ oximeter.workspace = true
 oximeter-api.workspace = true
 oximeter-client.workspace = true
 oximeter-db.workspace = true
+qorb.workspace = true
 rand.workspace = true
 reqwest = { workspace = true, features = [ "json" ] }
 schemars.workspace = true
