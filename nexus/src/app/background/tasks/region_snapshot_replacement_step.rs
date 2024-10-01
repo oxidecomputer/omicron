@@ -42,11 +42,28 @@ use std::sync::Arc;
 pub struct RegionSnapshotReplacementFindAffected {
     datastore: Arc<DataStore>,
     sagas: Arc<dyn StartSaga>,
+    disabled: bool,
 }
 
 impl RegionSnapshotReplacementFindAffected {
+    #[allow(dead_code)]
     pub fn new(datastore: Arc<DataStore>, sagas: Arc<dyn StartSaga>) -> Self {
-        RegionSnapshotReplacementFindAffected { datastore, sagas }
+        RegionSnapshotReplacementFindAffected {
+            datastore,
+            sagas,
+            disabled: false,
+        }
+    }
+
+    pub fn disabled(
+        datastore: Arc<DataStore>,
+        sagas: Arc<dyn StartSaga>,
+    ) -> Self {
+        RegionSnapshotReplacementFindAffected {
+            datastore,
+            sagas,
+            disabled: true,
+        }
     }
 
     async fn send_start_request(
@@ -434,6 +451,10 @@ impl BackgroundTask for RegionSnapshotReplacementFindAffected {
     ) -> BoxFuture<'a, serde_json::Value> {
         async move {
             let mut status = RegionSnapshotReplacementStepStatus::default();
+
+            if self.disabled {
+                return json!(status);
+            }
 
             // Importantly, clean old steps up before finding affected volumes!
             // Otherwise, will continue to find the snapshot in volumes to

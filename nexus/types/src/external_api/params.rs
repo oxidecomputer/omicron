@@ -946,6 +946,16 @@ pub enum InstanceDiskAttachment {
     Attach(InstanceDiskAttach),
 }
 
+impl InstanceDiskAttachment {
+    /// Get the name of the disk described by this attachment.
+    pub fn name(&self) -> Name {
+        match self {
+            Self::Create(create) => create.identity.name.clone(),
+            Self::Attach(InstanceDiskAttach { name }) => name.clone(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct InstanceDiskAttach {
     /// A disk name to attach
@@ -1022,6 +1032,22 @@ pub struct InstanceCreate {
     #[serde(default)]
     pub disks: Vec<InstanceDiskAttachment>,
 
+    /// The disk this instance should boot into. This disk can either be
+    /// attached if it already exists, or created, if it should be a new disk.
+    ///
+    /// It is strongly recommended to either provide a boot disk at instance
+    /// creation, or update the instance after creation to set a boot disk.
+    ///
+    /// An instance without an explicit boot disk can be booted: the options are
+    /// as managed by UEFI, and as controlled by the guest OS, but with some
+    /// risk.  If this instance later has a disk attached or detached, it is
+    /// possible that boot options can end up reordered, with the intended boot
+    /// disk moved after the EFI shell in boot priority. This may result in an
+    /// instance that only boots to the EFI shell until the desired disk is set
+    /// as an explicit boot disk and the instance rebooted.
+    #[serde(default)]
+    pub boot_disk: Option<InstanceDiskAttachment>,
+
     /// An allowlist of SSH public keys to be transferred to the instance via
     /// cloud-init during instance creation.
     ///
@@ -1041,6 +1067,15 @@ pub struct InstanceCreate {
     /// has been configured for this instance by the user.
     #[serde(default)]
     pub auto_restart_policy: Option<InstanceAutoRestartPolicy>,
+}
+
+/// Parameters of an `Instance` that can be reconfigured after creation.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InstanceUpdate {
+    /// Name or ID of the disk the instance should be instructed to boot from.
+    ///
+    /// If not provided, unset the instance's boot disk.
+    pub boot_disk: Option<NameOrId>,
 }
 
 #[inline]

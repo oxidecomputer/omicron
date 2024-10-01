@@ -4,7 +4,7 @@
 
 use super::{
     ByteCount, Disk, ExternalIp, Generation, InstanceAutoRestartPolicy,
-    InstanceCpuCount, InstanceState,
+    InstanceCpuCount, InstanceState, Vmm, VmmState,
 };
 use crate::collection::DatastoreAttachTargetConfig;
 use crate::schema::{disk, external_ip, instance};
@@ -62,6 +62,10 @@ pub struct Instance {
     #[diesel(embed)]
     pub auto_restart: InstanceAutoRestart,
 
+    /// The primary boot disk for this instance.
+    #[diesel(column_name = boot_disk_id)]
+    pub boot_disk_id: Option<Uuid>,
+
     #[diesel(embed)]
     pub runtime_state: InstanceRuntimeState,
 
@@ -115,6 +119,9 @@ impl Instance {
             memory: params.memory.into(),
             hostname: params.hostname.to_string(),
             auto_restart,
+            // Intentionally ignore `params.boot_disk_id` here: we can't set
+            // `boot_disk_id` until the referenced disk is attached.
+            boot_disk_id: None,
 
             runtime_state,
 
@@ -266,18 +273,36 @@ pub struct InstanceAutoRestart {
     pub cooldown: Option<TimeDelta>,
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct InstanceKarmicStatus {
+    /// Whether the instance is permitted to reincarnate if
+    /// `needs_reincarnation` is `true`.
+    pub can_reincarnate: Reincarnatability,
+    /// `true` if the instance is in a state in which it could reincarnate if
+    /// `can_reincarnate` would permit it to do so.
+    pub needs_reincarnation: bool,
+}
+
+impl InstanceKarmicStatus {
+    /// Returns `true` if this instance is in a state that requires
+    /// reincarnation, and is permitted to reincarnate immediately.
+    pub fn should_reincarnate(&self) -> bool {
+        self.needs_reincarnation
+            && self.can_reincarnate == Reincarnatability::WillReincarnate
+    }
+}
+
 /// Describes whether or not an instance can reincarnate.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum InstanceKarmicStatus {
-    /// The instance is ready to reincarnate.
-    Ready,
-    /// The instance does not need reincarnation, as it is not currently in the
-    /// `Failed` state.
-    NotFailed,
+pub enum Reincarnatability {
+    /// The instance remains bound to the cycle of saṃsāra and can return in the
+    /// next life.
+    WillReincarnate,
     /// The instance cannot reincarnate again until the specified time.
     CoolingDown(TimeDelta),
-    /// The instance's auto-restart policy forbids it from reincarnating.
-    Forbidden,
+    /// The instance's auto-restart policy indicates that it has attained
+    /// nirvāṇa and will not reincarnate.
+    Nirvana,
 }
 
 impl InstanceAutoRestart {
@@ -292,20 +317,58 @@ impl InstanceAutoRestart {
     pub const DEFAULT_POLICY: InstanceAutoRestartPolicy =
         InstanceAutoRestartPolicy::BestEffort;
 
-    /// Returns `true` if `self` permits an instance to reincarnate given the
-    /// provided `state`.
-    pub fn status(&self, state: &InstanceRuntimeState) -> InstanceKarmicStatus {
+    /// Returns an instance's karmic status.
+    pub fn status(
+        &self,
+        state: &InstanceRuntimeState,
+        active_vmm: Option<&Vmm>,
+    ) -> InstanceKarmicStatus {
         // Instances only need to be automatically restarted if they are in the
-        // `Failed` state.
-        if state.nexus_state != InstanceState::Failed {
-            return InstanceKarmicStatus::NotFailed;
-        }
+        // `Failed` state, or if their active VMM is in the `SagaUnwound` state.
+        let needs_reincarnation = match (state.nexus_state, active_vmm) {
+            (InstanceState::Failed, _vmm) => {
+                debug_assert!(
+                    _vmm.is_none(),
+                    "a Failed instance will never have an active VMM!"
+                );
+                true
+            }
+            (InstanceState::Vmm, Some(ref vmm)) => {
+                debug_assert_eq!(
+                    state.propolis_id,
+                    Some(vmm.id),
+                    "don't call `InstanceAutoRestart::status with a VMM \
+                     that isn't this instance's active VMM!?!?"
+                );
+                // Note that we *don't* reincarnate instances with `Failed` active
+                // VMMs; in that case, an instance-update saga must first run to
+                // move the *instance* record to the `Failed` state.
+                vmm.runtime.state == VmmState::SagaUnwound
+            }
+            _ => false,
+        };
 
+        InstanceKarmicStatus {
+            needs_reincarnation,
+            can_reincarnate: self.can_reincarnate(&state),
+        }
+    }
+
+    /// Returns whether or not this auto-restart configuration will permit an
+    /// instance with the provided `InstanceRuntimeState` to reincarnate.
+    ///
+    /// This does *not* indicate that the instance  currently needs
+    /// reincarnation, but instead, whether the instance will be permitted to
+    /// reincarnate should it be in such a state.
+    pub fn can_reincarnate(
+        &self,
+        state: &InstanceRuntimeState,
+    ) -> Reincarnatability {
         // Check if the instance's configured auto-restart policy permits the
         // control plane to automatically restart it.
         let policy = self.policy.unwrap_or(Self::DEFAULT_POLICY);
         if policy == InstanceAutoRestartPolicy::Never {
-            return InstanceKarmicStatus::Forbidden;
+            return Reincarnatability::Nirvana;
         }
 
         // If the instance is permitted to reincarnate, ensure that its last
@@ -317,15 +380,15 @@ impl InstanceAutoRestart {
             let cooldown = self.cooldown.unwrap_or(Self::DEFAULT_COOLDOWN);
             let time_since_last = Utc::now().signed_duration_since(last);
             if time_since_last >= cooldown {
-                return InstanceKarmicStatus::Ready;
+                return Reincarnatability::WillReincarnate;
             } else {
-                return InstanceKarmicStatus::CoolingDown(
+                return Reincarnatability::CoolingDown(
                     cooldown - time_since_last,
                 );
             }
         }
 
-        InstanceKarmicStatus::Ready
+        Reincarnatability::WillReincarnate
     }
 
     /// Filters a database query to include only instances whose auto-restart
@@ -348,22 +411,17 @@ impl InstanceAutoRestart {
 
         let now = diesel::dsl::now.into_sql::<pg::sql_types::Timestamptz>();
 
-        dsl::state
-            // Only attempt to restart Failed instances.
-            .eq(InstanceState::Failed)
-            // The instance's auto-restart policy must allow the control plane
-            // to restart it automatically.
-            //
-            // N.B. that this may become more complex in the future if we grow
-            // additional auto-restart policies that require additional logic
-            // (such as restart limits...)
-            .and(
-                dsl::auto_restart_policy
-                    .eq(InstanceAutoRestartPolicy::BestEffort)
-                    // If the auto-restart policy is null, then it should
-                    // default to "best effort".
-                    .or(dsl::auto_restart_policy.is_null()),
-            )
+        // The instance's auto-restart policy must allow the control plane
+        // to restart it automatically.
+        //
+        // N.B. that this may become more complex in the future if we grow
+        // additional auto-restart policies that require additional logic
+        // (such as restart limits...)
+        (dsl::auto_restart_policy
+            .eq(InstanceAutoRestartPolicy::BestEffort)
+                // If the auto-restart policy is null, then it should
+                // default to "best effort".
+                .or(dsl::auto_restart_policy.is_null()))
             // An instance whose last reincarnation was within the cooldown
             // interval from now must remain in _bardo_ --- the liminal
             // state between death and rebirth --- before its next
@@ -385,6 +443,12 @@ impl InstanceAutoRestart {
                             .le((now - Self::DEFAULT_COOLDOWN).nullable()),
                     )),
             )
+            // Deleted instances may not be reincarnated.
+            .and(dsl::time_deleted.is_null())
+            // If the instance is currently in the process of being updated,
+            // let's not mess with it for now and try to restart it on another
+            // pass.
+            .and(dsl::updater_id.is_null())
     }
 }
 
@@ -465,4 +529,12 @@ mod optional_time_delta {
             .map(|&delta| SerdeTimeDelta::from(delta))
             .serialize(serializer)
     }
+}
+
+/// The parts of an Instance that can be directly updated after creation.
+#[derive(Clone, Debug, AsChangeset, Serialize, Deserialize)]
+#[diesel(table_name = instance, treat_none_as_null = true)]
+pub struct InstanceUpdate {
+    #[diesel(column_name = boot_disk_id)]
+    pub boot_disk_id: Option<Uuid>,
 }

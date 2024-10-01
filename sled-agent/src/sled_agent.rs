@@ -56,7 +56,7 @@ use omicron_common::disk::{
     OmicronPhysicalDisksConfig,
 };
 use omicron_ddm_admin_client::Client as DdmAdminClient;
-use omicron_uuid_kinds::{GenericUuid, PropolisUuid};
+use omicron_uuid_kinds::{GenericUuid, PropolisUuid, SledUuid};
 use sled_agent_api::Zpool;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::EarlyNetworkConfig;
@@ -294,7 +294,7 @@ impl From<InventoryError> for dropshot::HttpError {
 /// Contains both a connection to the Nexus, as well as managed instances.
 struct SledAgentInner {
     // ID of the Sled
-    id: Uuid,
+    id: SledUuid,
 
     // Subnet of the Sled's underlay.
     //
@@ -445,7 +445,7 @@ impl SledAgent {
         let baseboard = long_running_task_handles.hardware_manager.baseboard();
         let identifiers = SledIdentifiers {
             rack_id: request.body.rack_id,
-            sled_id: request.body.id,
+            sled_id: request.body.id.into_untyped_uuid(),
             model: baseboard.model().to_string(),
             revision: baseboard.revision(),
             serial: baseboard.identifier().to_string(),
@@ -498,7 +498,7 @@ impl SledAgent {
         let updates = UpdateManager::new(update_config);
 
         let svc_config = services::Config::new(
-            request.body.id,
+            request.body.id.into_untyped_uuid(),
             config.sidecar_revision.clone(),
         );
 
@@ -573,7 +573,7 @@ impl SledAgent {
         });
 
         let probes = ProbeManager::new(
-            request.body.id,
+            request.body.id.into_untyped_uuid(),
             nexus_client.clone(),
             etherstub.clone(),
             storage_manager.clone(),
@@ -678,7 +678,7 @@ impl SledAgent {
         (self.inner.switch_zone_ip(), self.inner.rack_network_config.as_ref())
     }
 
-    pub fn id(&self) -> Uuid {
+    pub fn id(&self) -> SledUuid {
         self.inner.id
     }
 
@@ -918,10 +918,8 @@ impl SledAgent {
     }
 
     /// List the Omicron zone configuration that's currently running
-    pub async fn omicron_zones_list(
-        &self,
-    ) -> Result<OmicronZonesConfig, Error> {
-        Ok(self.inner.services.omicron_zones_list().await?)
+    pub async fn omicron_zones_list(&self) -> OmicronZonesConfig {
+        self.inner.services.omicron_zones_list().await
     }
 
     /// Ensures that the specific set of Omicron zones are running as configured
@@ -1200,7 +1198,7 @@ impl SledAgent {
         let baseboard = self.inner.hardware.baseboard();
         SledIdentifiers {
             rack_id: self.inner.start_request.body.rack_id,
-            sled_id: self.inner.id,
+            sled_id: self.inner.id.into_untyped_uuid(),
             model: baseboard.model().to_string(),
             revision: baseboard.revision(),
             serial: baseboard.identifier().to_string(),

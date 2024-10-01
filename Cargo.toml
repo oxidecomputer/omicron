@@ -325,10 +325,10 @@ cookie = "0.18"
 criterion = { version = "0.5.1", features = [ "async_tokio" ] }
 crossbeam = "0.8"
 crossterm = { version = "0.28.1", features = ["event-stream"] }
-crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "a551f245e8a26f52098382903ccf0a982b7c54fa"}
-crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "a551f245e8a26f52098382903ccf0a982b7c54fa"}
-crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "a551f245e8a26f52098382903ccf0a982b7c54fa"}
-crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "a551f245e8a26f52098382903ccf0a982b7c54fa"}
+crucible-agent-client = { git = "https://github.com/oxidecomputer/crucible", rev = "2b88ab88461fb06aaf2aab11c5e381a3cad25eac" }
+crucible-pantry-client = { git = "https://github.com/oxidecomputer/crucible", rev = "2b88ab88461fb06aaf2aab11c5e381a3cad25eac" }
+crucible-smf = { git = "https://github.com/oxidecomputer/crucible", rev = "2b88ab88461fb06aaf2aab11c5e381a3cad25eac" }
+crucible-common = { git = "https://github.com/oxidecomputer/crucible", rev = "2b88ab88461fb06aaf2aab11c5e381a3cad25eac" }
 csv = "1.3.0"
 curve25519-dalek = "4"
 datatest-stable = "0.2.9"
@@ -345,13 +345,13 @@ dns-server = { path = "dns-server" }
 dns-server-api = { path = "dns-server-api" }
 dns-service-client = { path = "clients/dns-service-client" }
 dpd-client = { path = "clients/dpd-client" }
-dropshot = { git = "https://github.com/oxidecomputer/dropshot", branch = "main", features = [ "usdt-probes" ] }
+dropshot = { version = "0.12.0", features = [ "usdt-probes" ] }
 dyn-clone = "1.0.17"
 either = "1.13.0"
 expectorate = "1.1.0"
 fatfs = "0.3.6"
 filetime = "0.2.25"
-flate2 = "1.0.33"
+flate2 = "1.0.34"
 float-ord = "0.3.2"
 flume = "0.11.0"
 foreign-types = "0.3.2"
@@ -374,7 +374,7 @@ gateway-types = { path = "gateway-types" }
 gethostname = "0.5.0"
 glob = "0.3.1"
 guppy = "0.17.7"
-headers = "0.3.9"
+headers = "0.4.0"
 heck = "0.5"
 hex = "0.4.3"
 hex-literal = "0.4.1"
@@ -384,17 +384,19 @@ hickory-resolver = "0.24.1"
 hickory-server = "0.24.1"
 highway = "1.2.0"
 hkdf = "0.12.4"
-http = "0.2.12"
+http = "1.1.0"
+http-body-util = "0.1.2"
 httpmock = "0.8.0-alpha.1"
 httptest = "0.16.1"
 hubtools = { git = "https://github.com/oxidecomputer/hubtools.git", branch = "main" }
 humantime = "2.1.0"
-hyper = "0.14"
+hyper = "1.4.1"
+hyper-util = "0.1.9"
 hyper-rustls = "0.26.0"
-hyper-staticfile = "0.9.5"
+hyper-staticfile = "0.10.0"
 illumos-utils = { path = "illumos-utils" }
 indent_write = "2.2.0"
-indexmap = "2.4.0"
+indexmap = "2.5.0"
 indicatif = { version = "0.17.8", features = ["rayon"] }
 indoc = "2.0.5"
 installinator = { path = "installinator" }
@@ -412,7 +414,7 @@ key-manager = { path = "key-manager" }
 kstat-rs = "0.2.4"
 libc = "0.2.159"
 libipcc = { git = "https://github.com/oxidecomputer/libipcc", rev = "fdffa212373a8f92473ea5f411088912bf458d5f" }
-libfalcon = { git = "https://github.com/oxidecomputer/falcon", rev = "e69694a1f7cc9fe31fab27f321017280531fb5f7" }
+libfalcon = { git = "https://github.com/oxidecomputer/falcon", branch = "main" }
 libnvme = { git = "https://github.com/oxidecomputer/libnvme", rev = "dd5bb221d327a1bc9287961718c3c10d6bd37da0" }
 linear-map = "1.2.0"
 live-tests-macros = { path = "live-tests/macros" }
@@ -420,8 +422,10 @@ macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
 mockall = "0.13"
 newtype_derive = "0.1.6"
-mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "9e0fe45ca3862176dc31ad8cc83f605f8a7e1a42" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "9e0fe45ca3862176dc31ad8cc83f605f8a7e1a42" }
+# mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "9e0fe45ca3862176dc31ad8cc83f605f8a7e1a42" }
+# ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "9e0fe45ca3862176dc31ad8cc83f605f8a7e1a42" }
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", branch = "hyper-v1-no-merge" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", branch = "hyper-v1-no-merge" }
 multimap = "0.10.0"
 nexus-auth = { path = "nexus/auth" }
 nexus-client = { path = "clients/nexus-client" }
@@ -462,7 +466,7 @@ omicron-rpaths = { path = "rpaths" }
 omicron-sled-agent = { path = "sled-agent" }
 omicron-test-utils = { path = "test-utils" }
 omicron-workspace-hack = "0.1.0"
-omicron-zone-package = "0.11.0"
+omicron-zone-package = "0.11.1"
 oxide-client = { path = "clients/oxide-client" }
 oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "76878de67229ea113d70503c441eab47ac5dc653", features = [ "api", "std" ] }
 oxlog = { path = "dev-tools/oxlog" }
@@ -505,11 +509,11 @@ pretty_assertions = "1.4.1"
 pretty-hex = "0.4.1"
 prettyplease = { version = "0.2.22", features = ["verbatim"] }
 proc-macro2 = "1.0"
-progenitor = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
-progenitor-client = { git = "https://github.com/oxidecomputer/progenitor", branch = "main" }
-bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "24a74d0c76b6a63961ecef76acb1516b6e66c5c9" }
-propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "a9c5fdac442fa6fd5a65e413ea874fe3c62c3fd9" }
-propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "a9c5fdac442fa6fd5a65e413ea874fe3c62c3fd9" }
+progenitor = "0.8.0"
+progenitor-client = "0.8.0"
+bhyve_api = { git = "https://github.com/oxidecomputer/propolis", rev = "11371b0f3743f8df5b047dc0edc2699f4bdf3927" }
+propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "11371b0f3743f8df5b047dc0edc2699f4bdf3927" }
+propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "11371b0f3743f8df5b047dc0edc2699f4bdf3927" }
 proptest = "1.5.0"
 qorb = { git = "https://github.com/oxidecomputer/qorb", branch = "master" }
 quote = "1.0"
@@ -524,7 +528,7 @@ reedline = "0.33.0"
 ref-cast = "1.0"
 regex = "1.10.6"
 regress = "0.9.1"
-reqwest = { version = "0.11", default-features = false }
+reqwest = { version = "0.12", default-features = false }
 ring = "0.17.8"
 rpassword = "7.3.1"
 rstest = "0.22.0"
@@ -599,7 +603,7 @@ tofino = { git = "https://github.com/oxidecomputer/tofino", branch = "main" }
 tokio = "1.39.3"
 tokio-postgres = { version = "0.7", features = [ "with-chrono-0_4", "with-uuid-1" ] }
 tokio-stream = "0.1.16"
-tokio-tungstenite = "0.20"
+tokio-tungstenite = "0.23.1"
 tokio-util = { version = "0.7.12", features = ["io", "io-util"] }
 toml = "0.8.19"
 toml_edit = "0.22.22"
@@ -622,7 +626,7 @@ wicket = { path = "wicket" }
 wicket-common = { path = "wicket-common" }
 wicketd-api = { path = "wicketd-api" }
 wicketd-client = { path = "clients/wicketd-client" }
-zeroize = { version = "1.7.0", features = ["zeroize_derive", "std"] }
+zeroize = { version = "1.8.1", features = ["zeroize_derive", "std"] }
 zip = { version = "0.6.6", default-features = false, features = ["deflate","bzip2"] }
 zone = { version = "0.3", default-features = false, features = ["async"] }
 

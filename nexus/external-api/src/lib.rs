@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use anyhow::anyhow;
+use dropshot::Body;
 use dropshot::{
     EmptyScanParams, EndpointTagPolicy, HttpError, HttpResponseAccepted,
     HttpResponseCreated, HttpResponseDeleted, HttpResponseFound,
@@ -10,7 +11,6 @@ use dropshot::{
     WebsocketChannelResult, WebsocketConnection,
 };
 use http::Response;
-use hyper::Body;
 use ipnetwork::IpNetwork;
 use nexus_types::{
     authn::cookies::Cookies,
@@ -1116,6 +1116,19 @@ pub trait NexusExternalApi {
         query_params: Query<params::OptionalProjectSelector>,
         path_params: Path<params::InstancePath>,
     ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// Update instance
+    #[endpoint {
+        method = PUT,
+        path = "/v1/instances/{instance}",
+        tags = ["instances"],
+    }]
+    async fn instance_update(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::OptionalProjectSelector>,
+        path_params: Path<params::InstancePath>,
+        instance_config: TypedBody<params::InstanceUpdate>,
+    ) -> Result<HttpResponseOk<Instance>, HttpError>;
 
     /// Reboot an instance
     #[endpoint {

@@ -138,7 +138,15 @@ lookup_region_port.period_secs = 60
 instance_updater.disable = true
 instance_updater.period_secs = 60
 # How frequently to attempt to restart Failed instances?
-instance_reincarnation.period_secs = 60
+#
+# The default activation period for this task is once every sixty seconds.
+# However, the task's unit tests rely on explicit activations of the task
+# finding all instances eligible for reincarnation. Thus, we don't want the
+# periodic activation to occur whilst running those tests, since it may
+# reincarnate instances that we expect an explicit activation to reincarnate,
+# removing them from the set of instances eligible for reincarnation. Thus, set
+# the period much longer than the default for test purposes.
+instance_reincarnation.period_secs = 600
 region_snapshot_replacement_start.period_secs = 30
 region_snapshot_replacement_garbage_collection.period_secs = 30
 region_snapshot_replacement_step.period_secs = 30
