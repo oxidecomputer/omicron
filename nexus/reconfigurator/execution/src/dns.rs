@@ -778,7 +778,7 @@ mod test {
         Ok(BlueprintZoneConfig {
             disposition,
             id: config.id,
-            underlay_address: config.underlay_address,
+            underlay_address: todo!("FIXME-john"),
             filesystem_pool: config.filesystem_pool,
             zone_type,
         })

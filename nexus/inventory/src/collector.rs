@@ -558,7 +558,6 @@ mod test {
                 generation: Generation::from(3),
                 zones: vec![OmicronZoneConfig {
                     id: zone_id,
-                    underlay_address: *zone_address.ip(),
                     zone_type: OmicronZoneType::Oximeter {
                         address: zone_address,
                     },

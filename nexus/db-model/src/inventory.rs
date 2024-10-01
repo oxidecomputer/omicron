@@ -1306,7 +1306,6 @@ pub struct InvOmicronZone {
     pub inv_collection_id: DbTypedUuid<CollectionKind>,
     pub sled_id: DbTypedUuid<SledKind>,
     pub id: DbTypedUuid<OmicronZoneKind>,
-    pub underlay_address: ipv6::Ipv6Addr,
     pub zone_type: ZoneType,
     pub primary_service_ip: ipv6::Ipv6Addr,
     pub primary_service_port: SqlU16,
@@ -1341,7 +1340,6 @@ impl InvOmicronZone {
             inv_collection_id: inv_collection_id.into(),
             sled_id: sled_id.into(),
             id: zone.id.into(),
-            underlay_address: zone.underlay_address.into(),
             filesystem_pool: zone
                 .filesystem_pool
                 .as_ref()
@@ -1657,7 +1655,6 @@ impl InvOmicronZone {
 
         Ok(OmicronZoneConfig {
             id: self.id.into(),
-            underlay_address: self.underlay_address.into(),
             filesystem_pool: self
                 .filesystem_pool
                 .map(|id| ZpoolName::new_external(id.into())),

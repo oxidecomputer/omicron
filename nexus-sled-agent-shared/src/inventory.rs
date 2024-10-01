@@ -150,7 +150,6 @@ impl OmicronZonesConfig {
 )]
 pub struct OmicronZoneConfig {
     pub id: OmicronZoneUuid,
-    pub underlay_address: Ipv6Addr,
 
     /// The pool on which we'll place this zone's root filesystem.
     ///
@@ -158,6 +157,16 @@ pub struct OmicronZoneConfig {
     /// permitted to destroy this dataset each time the zone is initialized.
     pub filesystem_pool: Option<ZpoolName>,
     pub zone_type: OmicronZoneType,
+}
+
+impl OmicronZoneConfig {
+    /// Returns the underlay IP address associated with this zone.
+    ///
+    /// Assumes all zone have exactly one underlay IP address (which is
+    /// currently true).
+    pub fn underlay_ip(&self) -> Ipv6Addr {
+        self.zone_type.underlay_ip()
+    }
 }
 
 /// Describes a persistent ZFS dataset associated with an Omicron zone
@@ -304,6 +313,37 @@ impl OmicronZoneType {
             | OmicronZoneType::InternalNtp { .. }
             | OmicronZoneType::InternalDns { .. } => false,
             _ => true,
+        }
+    }
+
+    /// Returns the underlay IP address associated with this zone.
+    ///
+    /// Assumes all zone have exactly one underlay IP address (which is
+    /// currently true).
+    pub fn underlay_ip(&self) -> Ipv6Addr {
+        match self {
+            OmicronZoneType::BoundaryNtp { address, .. }
+            | OmicronZoneType::Clickhouse { address, .. }
+            | OmicronZoneType::ClickhouseKeeper { address, .. }
+            | OmicronZoneType::ClickhouseServer { address, .. }
+            | OmicronZoneType::CockroachDb { address, .. }
+            | OmicronZoneType::Crucible { address, .. }
+            | OmicronZoneType::CruciblePantry { address }
+            | OmicronZoneType::ExternalDns { http_address: address, .. }
+            | OmicronZoneType::InternalNtp { address }
+            | OmicronZoneType::Nexus { internal_address: address, .. }
+            | OmicronZoneType::Oximeter { address } => *address.ip(),
+            OmicronZoneType::InternalDns {
+                http_address: address,
+                dns_address,
+                ..
+            } => {
+                // InternalDns is the only variant that carries two
+                // `SocketAddrV6`s that are both on the underlay network. We
+                // expect these to have the same IP address.
+                debug_assert_eq!(address.ip(), dns_address.ip());
+                *address.ip()
+            }
         }
     }
 

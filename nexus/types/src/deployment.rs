@@ -657,7 +657,6 @@ impl From<BlueprintZoneConfig> for OmicronZoneConfig {
     fn from(z: BlueprintZoneConfig) -> Self {
         Self {
             id: z.id,
-            underlay_address: z.underlay_address,
             filesystem_pool: z.filesystem_pool,
             zone_type: z.zone_type.into(),
         }
@@ -1002,9 +1001,7 @@ impl BlueprintOrCollectionZoneConfig {
 
     pub fn underlay_address(&self) -> Ipv6Addr {
         match self {
-            BlueprintOrCollectionZoneConfig::Collection(z) => {
-                z.underlay_address
-            }
+            BlueprintOrCollectionZoneConfig::Collection(z) => z.underlay_ip(),
             BlueprintOrCollectionZoneConfig::Blueprint(z) => z.underlay_address,
         }
     }
