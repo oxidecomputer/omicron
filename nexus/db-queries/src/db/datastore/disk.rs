@@ -335,7 +335,11 @@ impl DataStore {
                 .into_boxed()
                 .filter(instance::dsl::state
                         .eq_any(ok_to_detach_instance_states)
-                        .and(instance::dsl::active_propolis_id.is_null())),
+                        .and(instance::dsl::active_propolis_id.is_null())
+                        .and(
+                            instance::dsl::boot_disk_id.ne(authz_disk.id())
+                                .or(instance::dsl::boot_disk_id.is_null())
+                        )),
             disk::table
                 .into_boxed()
                 .filter(disk::dsl::disk_state.eq_any(ok_to_detach_disk_state_labels)),
@@ -388,6 +392,12 @@ impl DataStore {
                                 // Ok-to-be-detached instance states:
                                 api::external::InstanceState::Creating |
                                 api::external::InstanceState::Stopped => {
+                                    if collection.boot_disk_id == Some(authz_disk.id()) {
+                                        return Err(Error::conflict(
+                                            "boot disk cannot be detached"
+                                        ));
+                                    }
+
                                     // We can't detach, but the error hasn't
                                     // helped us infer why.
                                     return Err(Error::internal_error(

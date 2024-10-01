@@ -62,6 +62,10 @@ pub struct Instance {
     #[diesel(embed)]
     pub auto_restart: InstanceAutoRestart,
 
+    /// The primary boot disk for this instance.
+    #[diesel(column_name = boot_disk_id)]
+    pub boot_disk_id: Option<Uuid>,
+
     #[diesel(embed)]
     pub runtime_state: InstanceRuntimeState,
 
@@ -115,6 +119,9 @@ impl Instance {
             memory: params.memory.into(),
             hostname: params.hostname.to_string(),
             auto_restart,
+            // Intentionally ignore `params.boot_disk_id` here: we can't set
+            // `boot_disk_id` until the referenced disk is attached.
+            boot_disk_id: None,
 
             runtime_state,
 
@@ -519,4 +526,12 @@ mod optional_time_delta {
             .map(|&delta| SerdeTimeDelta::from(delta))
             .serialize(serializer)
     }
+}
+
+/// The parts of an Instance that can be directly updated after creation.
+#[derive(Clone, Debug, AsChangeset, Serialize, Deserialize)]
+#[diesel(table_name = instance, treat_none_as_null = true)]
+pub struct InstanceUpdate {
+    #[diesel(column_name = boot_disk_id)]
+    pub boot_disk_id: Option<Uuid>,
 }

@@ -523,6 +523,7 @@ pub async fn create_instance_with(
     auto_restart_policy: Option<InstanceAutoRestartPolicy>,
 ) -> Instance {
     let url = format!("/v1/instances?project={}", project_name);
+
     object_create(
         client,
         &url,
@@ -541,6 +542,7 @@ pub async fn create_instance_with(
             network_interfaces: nics.clone(),
             external_ips,
             disks,
+            boot_disk: None,
             start,
             auto_restart_policy,
         },

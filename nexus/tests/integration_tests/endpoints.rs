@@ -429,9 +429,12 @@ pub static DEMO_INSTANCE_CREATE: Lazy<params::InstanceCreate> =
             pool: Some(DEMO_IP_POOL_NAME.clone().into()),
         }],
         disks: vec![],
+        boot_disk: None,
         start: true,
         auto_restart_policy: Default::default(),
     });
+pub static DEMO_INSTANCE_UPDATE: Lazy<params::InstanceUpdate> =
+    Lazy::new(|| params::InstanceUpdate { boot_disk: None });
 
 // The instance needs a network interface, too.
 pub static DEMO_INSTANCE_NIC_NAME: Lazy<Name> =
@@ -1797,6 +1800,9 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
             allowed_methods: vec![
                 AllowedMethod::Get,
                 AllowedMethod::Delete,
+                AllowedMethod::Put(
+                    serde_json::to_value(&*DEMO_INSTANCE_UPDATE).unwrap()
+                ),
             ],
         },
 
