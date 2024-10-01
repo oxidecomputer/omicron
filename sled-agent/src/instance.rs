@@ -131,7 +131,6 @@ pub enum Error {
     Terminating,
 }
 
-// Make this less gross.
 type PropolisClientError =
     propolis_client::Error<propolis_client::types::Error>;
 
@@ -1476,7 +1475,8 @@ impl InstanceRunner {
                         // We've transitioned to `Failed`, so just return the
                         // failed state normally. We return early here instead
                         // of falling through because we don't want to overwrite
-                        // that with the published VMM state determined above.
+                        // `self.state` with the published VMM state determined
+                        // above.
                         return Ok(self.state.sled_instance_state());
                     }
                     _ => {
