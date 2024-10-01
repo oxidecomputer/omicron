@@ -809,9 +809,7 @@ impl DataStore {
             opctx,
             blueprint,
             #[cfg(test)]
-            None,
-            #[cfg(test)]
-            None,
+            tests::NetworkResourceControlFlow::default(),
         )
         .await
     }
@@ -822,21 +820,17 @@ impl DataStore {
     //
     // 1. Check that `blueprint` is the current target blueprint
     // 2. Set `target_check_done` is set to true (the test can wait on this)
-    // 3. Run remainder of transaction to allocate/deallocate resources
-    // 4. Wait until `return_on_completion` is set to true
-    // 5. Return
+    // 3. Wait until `should_write_data` is set to true (the test can wait on this).
+    // 4. Run remainder of transaction to allocate/deallocate resources
+    // 5. Wait until `should_commit` is set to true
+    // 6. Return
     //
-    // If either of these arguments are `None`, steps 2 or 4 will be skipped.
+    // If any of the test-only control flow parameters are "None", they are skipped.
     async fn blueprint_ensure_external_networking_resources_impl(
         &self,
         opctx: &OpContext,
         blueprint: &Blueprint,
-        #[cfg(test)] target_check_done: Option<
-            std::sync::Arc<std::sync::atomic::AtomicBool>,
-        >,
-        #[cfg(test)] return_on_completion: Option<
-            std::sync::Arc<std::sync::atomic::AtomicBool>,
-        >,
+        #[cfg(test)] test_control_flow: tests::NetworkResourceControlFlow,
     ) -> Result<(), Error> {
         let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
@@ -847,16 +841,24 @@ impl DataStore {
         .transaction(&conn, |conn| {
             let err = err.clone();
             #[cfg(test)]
-            let target_check_done = target_check_done.clone();
+            let target_check_done = test_control_flow.target_check_done.clone();
             #[cfg(test)]
-            let return_on_completion = return_on_completion.clone();
+            let should_write_data = test_control_flow.should_write_data.clone();
+            #[cfg(test)]
+            let should_commit = test_control_flow.should_commit.clone();
 
             async move {
+                println!("blueprint_ensure_external_networking_resources");
+
                 // Bail out if `blueprint` isn't the current target.
                 let current_target = self
                     .blueprint_current_target_only(&conn)
                     .await
                     .map_err(|e| err.bail(e))?;
+                println!(
+                    "Checking that current target {} is expected {}",
+                    current_target.target_id, blueprint.id
+                );
                 if current_target.target_id != blueprint.id {
                     return Err(err.bail(Error::invalid_request(format!(
                         "blueprint {} is not the current target blueprint ({})",
@@ -871,6 +873,18 @@ impl DataStore {
                     use std::sync::atomic::Ordering;
                     if let Some(gate) = target_check_done {
                         gate.store(true, Ordering::SeqCst);
+                    }
+                }
+                // See the comment on this method; this lets us wait until our
+                // test caller is ready for us to write data.
+                #[cfg(test)]
+                {
+                    use std::sync::atomic::Ordering;
+                    use std::time::Duration;
+                    if let Some(gate) = should_write_data {
+                        while !gate.load(Ordering::SeqCst) {
+                            tokio::time::sleep(Duration::from_millis(50)).await;
+                        }
                     }
                 }
 
@@ -909,7 +923,7 @@ impl DataStore {
                 {
                     use std::sync::atomic::Ordering;
                     use std::time::Duration;
-                    if let Some(gate) = return_on_completion {
+                    if let Some(gate) = should_commit {
                         while !gate.load(Ordering::SeqCst) {
                             tokio::time::sleep(Duration::from_millis(50)).await;
                         }
@@ -961,6 +975,8 @@ impl DataStore {
             enabled: target.enabled,
             time_made_target: target.time_made_target,
         };
+
+        println!("updating target to {}", target.target_id);
 
         query
             .execute_async(conn)
@@ -1481,9 +1497,9 @@ impl RunQueryDsl<DbConnection> for InsertTargetQuery {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::db::raw_query_builder::QueryBuilder;
     use crate::db::datastore::test_utils::datastore_test;
-    use futures::future::FusedFuture;
-    use futures::FutureExt;
     use nexus_inventory::now_db_precision;
     use nexus_inventory::CollectionBuilder;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
@@ -1491,8 +1507,13 @@ mod tests {
     use nexus_reconfigurator_planning::blueprint_builder::EnsureMultiple;
     use nexus_reconfigurator_planning::example::example;
     use nexus_test_utils::db::test_setup_database;
+    use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::deployment::BlueprintZoneDisposition;
+    use nexus_types::deployment::BlueprintZoneConfig;
+    use nexus_types::deployment::BlueprintZonesConfig;
     use nexus_types::deployment::BlueprintZoneFilter;
+    use nexus_types::deployment::BlueprintZoneType;
+    use nexus_types::deployment::OmicronZoneExternalFloatingIp;
     use nexus_types::deployment::PlanningInput;
     use nexus_types::deployment::PlanningInputBuilder;
     use nexus_types::deployment::SledDetails;
@@ -1504,20 +1525,33 @@ mod tests {
     use nexus_types::external_api::views::SledPolicy;
     use nexus_types::inventory::Collection;
     use omicron_common::address::Ipv6Subnet;
+    use omicron_common::address::IpRange;
+    use omicron_common::api::internal::shared::NetworkInterface;
+    use omicron_common::api::internal::shared::NetworkInterfaceKind;
+    use omicron_common::api::external::MacAddr;
+    use omicron_common::api::external::Name;
+    use omicron_common::api::external::Vni;
     use omicron_common::disk::DiskIdentity;
     use omicron_test_utils::dev;
     use omicron_test_utils::dev::poll::wait_for_condition;
     use omicron_test_utils::dev::poll::CondCheckError;
+    use omicron_uuid_kinds::ExternalIpUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
+    use omicron_uuid_kinds::OmicronZoneUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use once_cell::sync::Lazy;
+    use oxnet::IpNet;
     use pretty_assertions::assert_eq;
     use rand::thread_rng;
     use rand::Rng;
     use slog::Logger;
     use std::mem;
+    use std::net::IpAddr;
+    use std::net::Ipv4Addr;
     use std::net::Ipv6Addr;
+    use std::net::SocketAddrV6;
+    use std::str::FromStr;
     use std::sync::atomic::AtomicBool;
     use std::sync::atomic::Ordering;
     use std::sync::Arc;
@@ -1525,6 +1559,13 @@ mod tests {
 
     static EMPTY_PLANNING_INPUT: Lazy<PlanningInput> =
         Lazy::new(|| PlanningInputBuilder::empty_input());
+
+    #[derive(Default)]
+    pub struct NetworkResourceControlFlow {
+        pub target_check_done: Option<Arc<AtomicBool>>,
+        pub should_write_data: Option<Arc<AtomicBool>>,
+        pub should_commit: Option<Arc<AtomicBool>>,
+    }
 
     // This is a not-super-future-maintainer-friendly helper to check that all
     // the subtables related to blueprints have been pruned of a specific
@@ -2239,10 +2280,76 @@ mod tests {
         let collection = CollectionBuilder::new("test").build();
 
         // Create an initial blueprint and a child.
-        let blueprint1 = BlueprintBuilder::build_empty_with_sleds(
-            std::iter::empty(),
+        let sled_id = SledUuid::new_v4();
+        let mut blueprint1 = BlueprintBuilder::build_empty_with_sleds(
+            [sled_id].into_iter(),
             "test1",
         );
+
+        // To observe realistic database behavior, we need the invocation of
+        // "blueprint_ensure_external_networking_resources" to actually write something
+        // back to the database.
+        //
+        // While this is *mostly* made-up blueprint contents, the part that matters
+        // is that it's provisioning a zone (Nexus) which does have resources
+        // to be allocated.
+        let ip_range = IpRange::try_from((
+            Ipv4Addr::new(10, 0, 0, 1),
+            Ipv4Addr::new(10, 0, 0, 10),
+        ))
+        .unwrap();
+        let (service_ip_pool, _) = datastore
+            .ip_pools_service_lookup(&opctx)
+            .await
+            .expect("lookup service ip pool");
+        datastore
+            .ip_pool_add_range(&opctx, &service_ip_pool, &ip_range)
+            .await
+            .expect("add range to service ip pool");
+        let zone_id = OmicronZoneUuid::new_v4();
+        blueprint1.blueprint_zones.insert(
+            sled_id,
+            BlueprintZonesConfig {
+                generation: omicron_common::api::external::Generation::new(),
+                zones: vec![
+                    BlueprintZoneConfig {
+                        disposition: BlueprintZoneDisposition::InService,
+                        id: zone_id,
+                        underlay_address: Ipv6Addr::LOCALHOST,
+                        filesystem_pool: None,
+                        zone_type: BlueprintZoneType::Nexus(
+                            blueprint_zone_type::Nexus {
+                                internal_address: SocketAddrV6::new(
+                                    Ipv6Addr::LOCALHOST, 0, 0, 0
+                                ),
+                                external_ip: OmicronZoneExternalFloatingIp {
+                                    id: ExternalIpUuid::new_v4(),
+                                    ip: "10.0.0.1".parse().unwrap(),
+                                },
+                                nic: NetworkInterface {
+                                    id: Uuid::new_v4(),
+                                    kind: NetworkInterfaceKind::Service {
+                                        id: *zone_id.as_untyped_uuid(),
+                                    },
+                                    name: Name::from_str("mynic").unwrap(),
+                                    ip: "fd77:e9d2:9cd9:2::8".parse().unwrap(),
+                                    mac: MacAddr::random_system(),
+                                    subnet: IpNet::host_net(IpAddr::V6(Ipv6Addr::LOCALHOST)),
+                                    vni: Vni::random(),
+                                    primary: true,
+                                    slot: 1,
+                                    transit_ips: vec![],
+                                },
+                                external_tls: false,
+                                external_dns_servers: vec![],
+                            }
+                        )
+                    }
+                ],
+            }
+        );
+
+
         let blueprint2 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
@@ -2274,26 +2381,10 @@ mod tests {
             .await
             .unwrap();
 
-        // Attempting to ensure the (empty) resources for bp1 should succeed.
-        datastore
-            .blueprint_ensure_external_networking_resources(&opctx, &blueprint1)
-            .await
-            .expect("ensured networking resources for empty blueprint 1");
-
-        // Attempting to ensure the (empty) resources for bp2 should fail,
-        // because it isn't the target blueprint.
-        let err = datastore
-            .blueprint_ensure_external_networking_resources(&opctx, &blueprint2)
-            .await
-            .expect_err("failed because blueprint 2 isn't the target");
-        assert!(
-            err.to_string().contains("is not the current target blueprint"),
-            "unexpected error: {err}"
-        );
-
         // Create flags to control method execution.
         let target_check_done = Arc::new(AtomicBool::new(false));
-        let return_on_completion = Arc::new(AtomicBool::new(false));
+        let should_write_data = Arc::new(AtomicBool::new(false));
+        let should_commit = Arc::new(AtomicBool::new(false));
 
         // Spawn a task to execute our method.
         let mut ensure_resources_task = tokio::spawn({
@@ -2301,14 +2392,17 @@ mod tests {
             let opctx =
                 OpContext::for_tests(logctx.log.clone(), datastore.clone());
             let target_check_done = target_check_done.clone();
-            let return_on_completion = return_on_completion.clone();
+            let should_commit = should_commit.clone();
             async move {
                 datastore
                     .blueprint_ensure_external_networking_resources_impl(
                         &opctx,
                         &blueprint1,
-                        Some(target_check_done),
-                        Some(return_on_completion),
+                        NetworkResourceControlFlow {
+                            target_check_done: Some(target_check_done),
+                            should_write_data: Some(should_write_data),
+                            should_commit: Some(should_commit),
+                        },
                     )
                     .await
             }
@@ -2330,38 +2424,35 @@ mod tests {
         .await
         .expect("`target_check_done` not set to true");
 
+        // Set the current target.
+        datastore.blueprint_target_set_current(&opctx, bp2_target).await.unwrap();
+
         // Spawn another task that tries to read the current target.
-        //
-        // Without `SELECT ... FOR UPDATE`, we don't expect this to block --
-        // it'll either be ordered before or after the next tokio::task which
-        // updates the blueprint target.
         let mut current_target_task = tokio::spawn({
             let datastore = datastore.clone();
             let opctx =
                 OpContext::for_tests(logctx.log.clone(), datastore.clone());
             async move {
-                datastore
-                    .blueprint_target_get_current(&opctx)
+                let conn = datastore.pool_connection_authorized(&opctx)
                     .await
-                    .expect("read current target")
-            }
-        })
-        .fuse();
+                    .expect("failed to get connection");
 
-        // Spawn another task that tries to set the current target.
-        //
-        // Without `SELECT ... FOR UPDATE`, we don't expect this to block,
-        // but it will perform a read-modify-write on the blueprint target
-        // table.
-        let mut update_target_task = tokio::spawn({
-            let datastore = datastore.clone();
-            let opctx =
-                OpContext::for_tests(logctx.log.clone(), datastore.clone());
-            async move {
-                datastore.blueprint_target_set_current(&opctx, bp2_target).await
+                let current_target = datastore
+                    .blueprint_current_target_only(&conn)
+                    .await
+                    .expect("read current target");
+
+                println!("Observed blueprint: {}", current_target.target_id);
+
+                let external_ips = QueryBuilder::new()
+                    .sql("SELECT id FROM omicron.public.external_ip WHERE time_deleted IS NULL")
+                    .query::<diesel::sql_types::Uuid>()
+                    .load_async::<uuid::Uuid>(&*conn)
+                    .await
+                    .expect("SELECT external IPs");
+                println!("Observed external IPs: {external_ips:?}");
             }
-        })
-        .fuse();
+        });
 
         // We expect to have the following reads/writes:
         //
@@ -2369,46 +2460,59 @@ mod tests {
         // | -----------------|--------------------|----------------------|
         // | BEGIN            |                    |                      |
         // | R(target)        |                    |                      |
-        // --->  target_check_done set to true
-        // | W(data)          | R(target)          | R(target), W(target) |
-        // ---> return_on_completion set to true
+        // |                  |                    | BEGIN                |
+        // |                  |                    | R(target), W(target) |
+        // |                  |                    | COMMIT               |
+        // |                  | R(target), R(data) |                      |
+        // | W(data)          |                    |                      |
         // | COMMIT           |                    |                      |
         //
-        // With this ordering, to satisfy "Read-Write", "Write-Read" and
-        // "Write-Write" conflicts, the following ordering must happen:
+        // With this ordering, and an eye on "Read-Write", "Write-Read", and
+        // "Write-Write" conflicts:
         //
-        // - "Get current target" and "Set current target" are concurrent,
-        // but both run to completion before "Ensure resources" commits.
-        // - "Ensure resources" can only COMMIT after we've finished the
-        // other background tasks, requiring that they hav COMMIT-ed.
+        // - (R->W) "Ensure Resources" must be ordered before "Set current target", because of access to
+        // "target".
+        // - (W->R) "Set current target" must be ordered before "Get current target", because of
+        // access to "target".
+        // - (R->W) "Get current target" must be ordered before "Ensure Resources", because of
+        // access to "data".
+        //
+        // This creates a circular dependency, and therefore means "Ensure Resources"
+        // cannot commit. We expect that this ordering will force CockroachDB
+        // to retry the "Ensure Resources" transaction, which will cause it to
+        // see the new target:
+        //
+        // | Ensure Resources | Get current target | Set current target   |
+        // | -----------------|--------------------|----------------------|
+        // |                  |                    | BEGIN                |
+        // |                  |                    | R(target), W(target) |
+        // |                  |                    | COMMIT               |
+        // |                  | R(target), R(data) |                      |
+        // | BEGIN            |                    |                      |
+        // | R(target)        |                    |                      |
+        //
+        // This should cause it to abort the current transaction, as the target no longer matches.
+        //
+        //
+        // == WHY ARE WE DOING THIS?
+        //
+        //
 
-        loop {
-            // Keep running until our background tasks are done
-            if update_target_task.is_terminated()
-                && current_target_task.is_terminated()
-            {
-                break;
+        tokio::select! {
+            result = &mut ensure_resources_task => {
+                panic!(
+                    "unexpected completion of \
+                     `blueprint_ensure_external_networking_resources`: \
+                     {result:?}",
+                );
             }
-
-            tokio::select! {
-                result = &mut ensure_resources_task => {
-                    panic!(
-                        "unexpected completion of \
-                         `blueprint_ensure_external_networking_resources`: \
-                         {result:?}",
-                    );
-                }
-                result = &mut update_target_task => {
-                    println!("blueprint_target_set_current result: {result:?}");
-                }
-                result = &mut current_target_task => {
-                    println!("blueprint_target_get_current result: {result:?}");
-                }
+            result = &mut current_target_task => {
+                println!("blueprint_target_get_current result: {result:?}");
             }
         }
 
         // Release `ensure_resources_task` to finish.
-        return_on_completion.store(true, Ordering::SeqCst);
+        should_commit.store(true, Ordering::SeqCst);
 
         tokio::time::timeout(Duration::from_secs(10), ensure_resources_task)
             .await
@@ -2418,6 +2522,8 @@ mod tests {
             )
             .expect("panic in `blueprint_ensure_external_networking_resources")
             .expect("ensured networking resources for empty blueprint 2");
+
+        panic!("hi");
 
         // Clean up.
         db.cleanup().await.unwrap();
