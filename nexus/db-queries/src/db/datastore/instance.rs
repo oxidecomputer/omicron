@@ -223,16 +223,23 @@ impl From<InstanceAndActiveVmm> for external::Instance {
                     },
                 );
 
-            let policy = value
-                .instance
-                .auto_restart
-                .policy
-                .unwrap_or(InstanceAutoRestart::DEFAULT_POLICY);
-            let enabled = match policy {
+            let policy = value.instance.auto_restart.policy;
+            // The active policy for this instance --- either its configured
+            // policy or the default. We report the configured policy as the
+            // instance's policy, but we must use this to determine whether it
+            // will be auto-restarted, since it may have no configured policy.
+            let active_policy =
+                policy.unwrap_or(InstanceAutoRestart::DEFAULT_POLICY);
+
+            let enabled = match active_policy {
                 InstanceAutoRestartPolicy::Never => false,
                 InstanceAutoRestartPolicy::BestEffort => true,
             };
-            external::InstanceAutoRestartStatus { enabled, cooldown_expiration }
+            external::InstanceAutoRestartStatus {
+                enabled,
+                policy: policy.map(Into::into),
+                cooldown_expiration,
+            }
         };
 
         Self {

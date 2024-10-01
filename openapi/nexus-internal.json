@@ -3382,6 +3382,15 @@
             "description": "`true` if this instance's auto-restart policy will permit the control plane to automatically restart it if it enters the `Failed` state.",
             "type": "boolean"
           },
+          "auto_restart_policy": {
+            "nullable": true,
+            "description": "The auto-restart policy configured for this instance, or `None` if no explicit policy is configured.\n\nIf this is not present, then this instance uses the default auto-restart policy, which may or may not allow it to be restarted. The `auto_restart_enabled` field indicates whether the instance will be automatically restarted.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceAutoRestartPolicy"
+              }
+            ]
+          },
           "boot_disk_id": {
             "nullable": true,
             "description": "the ID of the disk used to boot this Instance, if a specific one is assigned.",
@@ -3467,6 +3476,25 @@
           "time_created",
           "time_modified",
           "time_run_state_updated"
+        ]
+      },
+      "InstanceAutoRestartPolicy": {
+        "description": "A policy determining when an instance should be automatically restarted by the control plane.",
+        "oneOf": [
+          {
+            "description": "The instance should not be automatically restarted by the control plane if it fails.",
+            "type": "string",
+            "enum": [
+              "never"
+            ]
+          },
+          {
+            "description": "If this instance is running and unexpectedly fails (e.g. due to a host software crash or unexpected host reboot), the control plane will make a best-effort attempt to restart it. The control plane may choose not to restart the instance to preserve the overall availability of the system.",
+            "type": "string",
+            "enum": [
+              "best_effort"
+            ]
+          }
         ]
       },
       "InstanceCpuCount": {

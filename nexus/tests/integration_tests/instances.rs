@@ -4161,7 +4161,10 @@ async fn test_cannot_detach_boot_disk(cptestctx: &ControlPlaneTestContext) {
 
     let builder =
         RequestBuilder::new(client, http::Method::PUT, &url_instance_update)
-            .body(Some(&params::InstanceUpdate { boot_disk: None }))
+            .body(Some(&params::InstanceUpdate {
+                boot_disk: None,
+                auto_restart_policy: None,
+            }))
             .expect_status(Some(http::StatusCode::OK));
     let response = NexusRequest::new(builder)
         .authn_as(AuthnMode::PrivilegedUser)
@@ -4238,7 +4241,10 @@ async fn test_updating_running_instance_is_conflict(
 
     let builder =
         RequestBuilder::new(client, http::Method::PUT, &url_instance_update)
-            .body(Some(&params::InstanceUpdate { boot_disk: None }))
+            .body(Some(&params::InstanceUpdate {
+                boot_disk: None,
+                auto_restart_policy: None,
+            }))
             .expect_status(Some(http::StatusCode::CONFLICT));
 
     let response = NexusRequest::new(builder)
@@ -4264,7 +4270,10 @@ async fn test_updating_missing_instance_is_not_found(
 
     let builder =
         RequestBuilder::new(client, http::Method::PUT, &url_instance_update)
-            .body(Some(&params::InstanceUpdate { boot_disk: None }))
+            .body(Some(&params::InstanceUpdate {
+                boot_disk: None,
+                auto_restart_policy: None,
+            }))
             .expect_status(Some(http::StatusCode::NOT_FOUND));
 
     let response = NexusRequest::new(builder)
@@ -4353,6 +4362,7 @@ async fn test_boot_disk_can_be_changed(cptestctx: &ControlPlaneTestContext) {
         RequestBuilder::new(client, http::Method::PUT, &url_instance_update)
             .body(Some(&params::InstanceUpdate {
                 boot_disk: Some(disks[1].identity.id.into()),
+                auto_restart_policy: None,
             }))
             .expect_status(Some(http::StatusCode::OK));
 
@@ -4424,6 +4434,7 @@ async fn test_boot_disk_must_be_attached(cptestctx: &ControlPlaneTestContext) {
         RequestBuilder::new(client, http::Method::PUT, &url_instance_update)
             .body(Some(&params::InstanceUpdate {
                 boot_disk: Some(disks[0].identity.id.into()),
+                auto_restart_policy: None,
             }))
             .expect_status(Some(http::StatusCode::CONFLICT));
     let response = NexusRequest::new(builder)
@@ -4459,6 +4470,7 @@ async fn test_boot_disk_must_be_attached(cptestctx: &ControlPlaneTestContext) {
         RequestBuilder::new(client, http::Method::PUT, &url_instance_update)
             .body(Some(&params::InstanceUpdate {
                 boot_disk: Some(disks[0].identity.id.into()),
+                auto_restart_policy: None,
             }))
             .expect_status(Some(http::StatusCode::OK));
     let response = NexusRequest::new(builder)
