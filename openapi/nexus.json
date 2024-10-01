@@ -12718,7 +12718,7 @@
             "type": "string"
           },
           "disk_source": {
-            "description": "initial source for this disk",
+            "description": "The initial source for this disk.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/DiskSource"
@@ -12729,7 +12729,7 @@
             "$ref": "#/components/schemas/Name"
           },
           "size": {
-            "description": "total size of the Disk in bytes",
+            "description": "The total size of the Disk (in bytes).",
             "allOf": [
               {
                 "$ref": "#/components/schemas/ByteCount"
@@ -15312,16 +15312,31 @@
             }
           },
           "hostname": {
-            "$ref": "#/components/schemas/Hostname"
+            "description": "The hostname to be assigned to the instance.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Hostname"
+              }
+            ]
           },
           "memory": {
-            "$ref": "#/components/schemas/ByteCount"
+            "description": "The amount of RAM (in bytes) to be allocated to the instance.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
           },
           "name": {
             "$ref": "#/components/schemas/Name"
           },
           "ncpus": {
-            "$ref": "#/components/schemas/InstanceCpuCount"
+            "description": "The number of vCPUs to be allocated to the instance.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceCpuCount"
+              }
+            ]
           },
           "network_interfaces": {
             "description": "The network interfaces to be created for this instance.",
@@ -15373,7 +15388,7 @@
                 "type": "string"
               },
               "disk_source": {
-                "description": "initial source for this disk",
+                "description": "The initial source for this disk.",
                 "allOf": [
                   {
                     "$ref": "#/components/schemas/DiskSource"
@@ -15384,7 +15399,7 @@
                 "$ref": "#/components/schemas/Name"
               },
               "size": {
-                "description": "total size of the Disk in bytes",
+                "description": "The total size of the Disk (in bytes).",
                 "allOf": [
                   {
                     "$ref": "#/components/schemas/ByteCount"
