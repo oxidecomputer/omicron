@@ -727,19 +727,11 @@ mod test {
                     gz_address_index,
                 },
             ),
-            OmicronZoneType::InternalNtp {
-                address,
-                dns_servers,
-                domain,
-                ntp_servers,
-            } => BlueprintZoneType::InternalNtp(
-                blueprint_zone_type::InternalNtp {
-                    address,
-                    ntp_servers,
-                    dns_servers,
-                    domain,
-                },
-            ),
+            OmicronZoneType::InternalNtp { address } => {
+                BlueprintZoneType::InternalNtp(
+                    blueprint_zone_type::InternalNtp { address },
+                )
+            }
             OmicronZoneType::Nexus {
                 external_dns_servers,
                 external_ip,

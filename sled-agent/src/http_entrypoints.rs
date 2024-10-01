@@ -11,7 +11,7 @@ use bootstore::schemes::v0::NetworkConfig;
 use camino::Utf8PathBuf;
 use display_error_chain::DisplayErrorChain;
 use dropshot::{
-    ApiDescription, FreeformBody, HttpError, HttpResponseCreated,
+    ApiDescription, Body, FreeformBody, HttpError, HttpResponseCreated,
     HttpResponseDeleted, HttpResponseHeaders, HttpResponseOk,
     HttpResponseUpdatedNoContent, Path, Query, RequestContext, StreamingBody,
     TypedBody,
@@ -133,8 +133,11 @@ impl SledAgentApi for SledAgentImpl {
                 path, e,
             ))
         })?;
-        let stream = hyper_staticfile::FileBytesStream::new(f);
-        let body = FreeformBody(stream.into_body());
+        let file_access = hyper_staticfile::vfs::TokioFileAccess::new(f);
+        let file_stream =
+            hyper_staticfile::util::FileBytesStream::new(file_access);
+        let body = Body::wrap(hyper_staticfile::Body::Full(file_stream));
+        let body = FreeformBody(body);
         let mut response =
             HttpResponseHeaders::new_unnamed(HttpResponseOk(body));
         response.headers_mut().append(
@@ -259,7 +262,7 @@ impl SledAgentApi for SledAgentImpl {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<OmicronZonesConfig>, HttpError> {
         let sa = rqctx.context();
-        Ok(HttpResponseOk(sa.omicron_zones_list().await?))
+        Ok(HttpResponseOk(sa.omicron_zones_list().await))
     }
 
     async fn omicron_zones_put(

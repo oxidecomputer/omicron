@@ -75,6 +75,7 @@ progenitor::generate_api!(
         TypedUuidForInstanceKind = omicron_uuid_kinds::InstanceUuid,
         TypedUuidForOmicronZoneKind = omicron_uuid_kinds::OmicronZoneUuid,
         TypedUuidForPropolisKind = omicron_uuid_kinds::PropolisUuid,
+        TypedUuidForSledKind = omicron_uuid_kinds::SledUuid,
         TypedUuidForZpoolKind = omicron_uuid_kinds::ZpoolUuid,
         Vni = omicron_common::api::external::Vni,
         ZpoolKind = omicron_common::zpool_name::ZpoolKind,

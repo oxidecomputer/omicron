@@ -65,7 +65,6 @@ use nexus_config::{ConfigDropshotWithTls, DeploymentConfig};
 use nexus_sled_agent_shared::inventory::{
     OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig, ZoneKind,
 };
-use omicron_common::address::CLICKHOUSE_ADMIN_PORT;
 use omicron_common::address::CLICKHOUSE_HTTP_PORT;
 use omicron_common::address::CLICKHOUSE_KEEPER_TCP_PORT;
 use omicron_common::address::COCKROACH_PORT;
@@ -80,6 +79,9 @@ use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::address::WICKETD_NEXUS_PROXY_PORT;
 use omicron_common::address::WICKETD_PORT;
+use omicron_common::address::{
+    get_internal_dns_server_addresses, CLICKHOUSE_ADMIN_PORT,
+};
 use omicron_common::address::{Ipv6Subnet, NEXUS_TECHPORT_EXTERNAL_PORT};
 use omicron_common::address::{AZ_PREFIX, OXIMETER_PORT};
 use omicron_common::address::{BOOTSTRAP_ARTIFACT_PORT, COCKROACH_ADMIN_PORT};
@@ -917,7 +919,10 @@ impl ServiceManager {
         rack_network_config: Option<RackNetworkConfig>,
         metrics_queue: MetricsRequestQueue,
     ) -> Result<(), Error> {
-        info!(&self.inner.log, "sled agent started"; "underlay_address" => underlay_address.to_string());
+        info!(
+            &self.inner.log, "sled agent started";
+            "underlay_address" => underlay_address.to_string(),
+        );
         self.inner
             .sled_info
             .set(SledAgentInfo {
@@ -1329,40 +1334,27 @@ impl ServiceManager {
     async fn dns_install(
         info: &SledAgentInfo,
         ip_addrs: Option<Vec<IpAddr>>,
-        domain: &Option<String>,
+        domain: Option<&str>,
     ) -> Result<ServiceBuilder, Error> {
-        // We want to configure the dns/install SMF service inside the
-        // zone with the list of DNS nameservers.  This will cause
-        // /etc/resolv.conf to be populated inside the zone.  To do
-        // this, we need the full list of nameservers.  Fortunately, the
-        // nameservers provide a DNS name for the full list of
-        // nameservers.
+        // We want to configure the dns/install SMF service inside the zone with
+        // the list of DNS nameservers. This will cause /etc/resolv.conf to be
+        // populated inside the zone. We will populate it with the small number
+        // of fixed DNS addresses that should always exist. If clients want to
+        // expand to a wider range of DNS servers, they can bootstrap from the
+        // fixed addresses by looking up additional internal DNS servers from
+        // those addresses.
         //
-        // Note that when we configure the dns/install service, we're
-        // supplying values for an existing property group on the SMF
-        // *service*.  We're not creating a new property group, nor are
-        // we configuring a property group on the instance.
-
-        // Users may decide to provide specific addresses to set as
-        // nameservers, or this information can be retrieved from
-        // from SledAgentInfo.
-        let nameservers = match ip_addrs {
-            None => {
-                let addrs = info
-                    .resolver
-                    .lookup_all_ipv6(internal_dns::ServiceName::InternalDns)
-                    .await?;
-
-                let mut servers: Vec<IpAddr> = vec![];
-                for a in addrs {
-                    let ip = IpAddr::V6(a);
-                    servers.push(ip);
-                }
-
-                servers
-            }
-            Some(servers) => servers,
-        };
+        // Note that when we configure the dns/install service, we're supplying
+        // values for an existing property group on the SMF *service*.  We're
+        // not creating a new property group, nor are we configuring a property
+        // group on the instance.
+        //
+        // Callers may decide to provide specific addresses to set as
+        // nameservers; e.g., boundary NTP zones need to specify upstream DNS
+        // servers to resolve customer-provided NTP server names.
+        let nameservers = ip_addrs.unwrap_or_else(|| {
+            get_internal_dns_server_addresses(info.underlay_address)
+        });
 
         let mut dns_config_builder = PropertyGroupBuilder::new("install_props");
         for ns_addr in &nameservers {
@@ -1583,7 +1575,7 @@ impl ServiceManager {
                     &[listen_addr],
                 )?;
 
-                let dns_service = Self::dns_install(info, None, &None).await?;
+                let dns_service = Self::dns_install(info, None, None).await?;
 
                 let config = PropertyGroupBuilder::new("config")
                     .add_property(
@@ -1664,7 +1656,7 @@ impl ServiceManager {
                     &[listen_addr],
                 )?;
 
-                let dns_service = Self::dns_install(info, None, &None).await?;
+                let dns_service = Self::dns_install(info, None, None).await?;
 
                 let config = PropertyGroupBuilder::new("config")
                     .add_property(
@@ -1749,7 +1741,7 @@ impl ServiceManager {
                     &[listen_addr],
                 )?;
 
-                let dns_service = Self::dns_install(info, None, &None).await?;
+                let dns_service = Self::dns_install(info, None, None).await?;
 
                 let config = PropertyGroupBuilder::new("config")
                     .add_property(
@@ -1842,7 +1834,7 @@ impl ServiceManager {
                     &[crdb_listen_ip],
                 )?;
 
-                let dns_service = Self::dns_install(info, None, &None).await?;
+                let dns_service = Self::dns_install(info, None, None).await?;
 
                 // Configure the CockroachDB service.
                 let cockroachdb_config = PropertyGroupBuilder::new("config")
@@ -2119,21 +2111,6 @@ impl ServiceManager {
                         ..
                     },
                 ..
-            })
-            | ZoneArgs::Omicron(OmicronZoneConfigLocal {
-                zone:
-                    OmicronZoneConfig {
-                        zone_type:
-                            OmicronZoneType::InternalNtp {
-                                dns_servers,
-                                ntp_servers,
-                                domain,
-                                ..
-                            },
-                        underlay_address,
-                        ..
-                    },
-                ..
             }) => {
                 let Some(info) = self.inner.sled_info.get() else {
                     return Err(Error::SledAgentNotReady);
@@ -2145,28 +2122,21 @@ impl ServiceManager {
                     &[*underlay_address],
                 )?;
 
-                let is_boundary = matches!(
-                    // It's safe to unwrap here as we already know it's one of InternalNTP or BoundaryNtp.
-                    request.omicron_type().unwrap(),
-                    OmicronZoneType::BoundaryNtp { .. }
-                );
-
                 let rack_net =
                     Ipv6Subnet::<RACK_PREFIX>::new(info.underlay_address)
                         .net()
                         .to_string();
 
-                let dns_install_service =
-                    Self::dns_install(info, Some(dns_servers.to_vec()), domain)
-                        .await?;
+                let dns_install_service = Self::dns_install(
+                    info,
+                    Some(dns_servers.to_vec()),
+                    domain.as_deref(),
+                )
+                .await?;
 
                 let mut chrony_config = PropertyGroupBuilder::new("config")
                     .add_property("allow", "astring", &rack_net)
-                    .add_property(
-                        "boundary",
-                        "boolean",
-                        is_boundary.to_string(),
-                    )
+                    .add_property("boundary", "boolean", "true")
                     .add_property(
                         "boundary_pool",
                         "astring",
@@ -2194,20 +2164,79 @@ impl ServiceManager {
                             .add_property_group(chrony_config),
                     );
 
-                let mut profile = ProfileBuilder::new("omicron")
+                let opte_interface_setup =
+                    Self::opte_interface_set_up_install(&installed_zone)?;
+
+                let profile = ProfileBuilder::new("omicron")
                     .add_service(nw_setup_service)
                     .add_service(chrony_setup_service)
                     .add_service(disabled_ssh_service)
                     .add_service(dns_install_service)
                     .add_service(dns_client_service)
-                    .add_service(ntp_service);
+                    .add_service(ntp_service)
+                    .add_service(opte_interface_setup);
 
-                // Only Boundary NTP needs an OPTE interface and port configured.
-                if is_boundary {
-                    let opte_interface_setup =
-                        Self::opte_interface_set_up_install(&installed_zone)?;
-                    profile = profile.add_service(opte_interface_setup)
-                }
+                profile
+                    .add_to_zone(&self.inner.log, &installed_zone)
+                    .await
+                    .map_err(|err| {
+                        Error::io("Failed to set up NTP profile", err)
+                    })?;
+
+                RunningZone::boot(installed_zone).await?
+            }
+            ZoneArgs::Omicron(OmicronZoneConfigLocal {
+                zone:
+                    OmicronZoneConfig {
+                        zone_type: OmicronZoneType::InternalNtp { .. },
+                        underlay_address,
+                        ..
+                    },
+                ..
+            }) => {
+                let Some(info) = self.inner.sled_info.get() else {
+                    return Err(Error::SledAgentNotReady);
+                };
+
+                let nw_setup_service = Self::zone_network_setup_install(
+                    Some(&info.underlay_address),
+                    &installed_zone,
+                    &[*underlay_address],
+                )?;
+
+                let rack_net =
+                    Ipv6Subnet::<RACK_PREFIX>::new(info.underlay_address)
+                        .net()
+                        .to_string();
+
+                let dns_install_service =
+                    Self::dns_install(info, None, None).await?;
+
+                let chrony_config = PropertyGroupBuilder::new("config")
+                    .add_property("allow", "astring", &rack_net)
+                    .add_property("boundary", "boolean", "false")
+                    .add_property(
+                        "boundary_pool",
+                        "astring",
+                        format!("{BOUNDARY_NTP_DNS_NAME}.{DNS_ZONE}"),
+                    );
+
+                let ntp_service = ServiceBuilder::new("oxide/ntp")
+                    .add_instance(ServiceInstanceBuilder::new("default"));
+
+                let chrony_setup_service =
+                    ServiceBuilder::new("oxide/chrony-setup").add_instance(
+                        ServiceInstanceBuilder::new("default")
+                            .add_property_group(chrony_config),
+                    );
+
+                let profile = ProfileBuilder::new("omicron")
+                    .add_service(nw_setup_service)
+                    .add_service(chrony_setup_service)
+                    .add_service(disabled_ssh_service)
+                    .add_service(dns_install_service)
+                    .add_service(enabled_dns_client_service)
+                    .add_service(ntp_service);
 
                 profile
                     .add_to_zone(&self.inner.log, &installed_zone)
@@ -3314,9 +3343,7 @@ impl ServiceManager {
     }
 
     /// Returns the current Omicron zone configuration
-    pub async fn omicron_zones_list(
-        &self,
-    ) -> Result<OmicronZonesConfig, Error> {
+    pub async fn omicron_zones_list(&self) -> OmicronZonesConfig {
         let log = &self.inner.log;
 
         // We need to take the lock in order for the information in the ledger
@@ -3335,7 +3362,7 @@ impl ServiceManager {
             None => OmicronZonesConfigLocal::initial(),
         };
 
-        Ok(ledger_data.to_omicron_zones_config())
+        ledger_data.to_omicron_zones_config()
     }
 
     /// Ensures that particular Omicron zones are running
@@ -4631,7 +4658,7 @@ impl ServiceManager {
 }
 
 #[cfg(all(test, target_os = "illumos"))]
-mod test {
+mod illumos_tests {
     use crate::metrics;
 
     use super::*;
@@ -4856,12 +4883,7 @@ mod test {
             mgr,
             id,
             generation,
-            OmicronZoneType::InternalNtp {
-                address,
-                ntp_servers: vec![],
-                dns_servers: vec![],
-                domain: None,
-            },
+            OmicronZoneType::InternalNtp { address },
             tmp_dir,
         )
         .await
@@ -4911,12 +4933,7 @@ mod test {
                 zones: vec![OmicronZoneConfig {
                     id,
                     underlay_address: Ipv6Addr::LOCALHOST,
-                    zone_type: OmicronZoneType::InternalNtp {
-                        address,
-                        ntp_servers: vec![],
-                        dns_servers: vec![],
-                        domain: None,
-                    },
+                    zone_type: OmicronZoneType::InternalNtp { address },
                     filesystem_pool: None,
                 }],
             },
@@ -5100,8 +5117,7 @@ mod test {
         .await;
 
         let v1 = Generation::new();
-        let found =
-            mgr.omicron_zones_list().await.expect("failed to list zones");
+        let found = mgr.omicron_zones_list().await;
         assert_eq!(found.generation, v1);
         assert!(found.zones.is_empty());
 
@@ -5115,8 +5131,7 @@ mod test {
         )
         .await;
 
-        let found =
-            mgr.omicron_zones_list().await.expect("failed to list zones");
+        let found = mgr.omicron_zones_list().await;
         assert_eq!(found.generation, v2);
         assert_eq!(found.zones.len(), 1);
         assert_eq!(found.zones[0].id, id);
@@ -5179,8 +5194,7 @@ mod test {
         .await;
 
         let v1 = Generation::new();
-        let found =
-            mgr.omicron_zones_list().await.expect("failed to list zones");
+        let found = mgr.omicron_zones_list().await;
         assert_eq!(found.generation, v1);
         assert!(found.zones.is_empty());
 
@@ -5228,12 +5242,7 @@ mod test {
             &mgr,
             id,
             v2,
-            OmicronZoneType::InternalNtp {
-                address,
-                ntp_servers: vec![],
-                dns_servers: vec![],
-                domain: None,
-            },
+            OmicronZoneType::InternalNtp { address },
             String::from(test_config.config_dir.path().as_str()),
         )
         .await
@@ -5268,8 +5277,7 @@ mod test {
         ensure_new_service(&mgr, id, v2, dir.clone()).await;
         let v3 = v2.next();
         ensure_existing_service(&mgr, id, v3, dir).await;
-        let found =
-            mgr.omicron_zones_list().await.expect("failed to list zones");
+        let found = mgr.omicron_zones_list().await;
         assert_eq!(found.generation, v3);
         assert_eq!(found.zones.len(), 1);
         assert_eq!(found.zones[0].id, id);
@@ -5398,8 +5406,7 @@ mod test {
         .await;
         illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
 
-        let found =
-            mgr.omicron_zones_list().await.expect("failed to list zones");
+        let found = mgr.omicron_zones_list().await;
         assert_eq!(found.generation, v2);
         assert_eq!(found.zones.len(), 1);
         assert_eq!(found.zones[0].id, id);
@@ -5467,8 +5474,7 @@ mod test {
         )
         .await;
 
-        let found =
-            mgr.omicron_zones_list().await.expect("failed to list zones");
+        let found = mgr.omicron_zones_list().await;
         assert_eq!(found.generation, v1);
         assert!(found.zones.is_empty());
 
@@ -5507,12 +5513,7 @@ mod test {
         let mut zones = vec![OmicronZoneConfig {
             id: id1,
             underlay_address: Ipv6Addr::LOCALHOST,
-            zone_type: OmicronZoneType::InternalNtp {
-                address,
-                ntp_servers: vec![],
-                dns_servers: vec![],
-                domain: None,
-            },
+            zone_type: OmicronZoneType::InternalNtp { address },
             filesystem_pool: None,
         }];
 
@@ -5524,8 +5525,7 @@ mod test {
         .await
         .unwrap();
 
-        let found =
-            mgr.omicron_zones_list().await.expect("failed to list zones");
+        let found = mgr.omicron_zones_list().await;
         assert_eq!(found.generation, v2);
         assert_eq!(found.zones.len(), 1);
         assert_eq!(found.zones[0].id, id1);
@@ -5536,12 +5536,7 @@ mod test {
         zones.push(OmicronZoneConfig {
             id: id2,
             underlay_address: Ipv6Addr::LOCALHOST,
-            zone_type: OmicronZoneType::InternalNtp {
-                address,
-                ntp_servers: vec![],
-                dns_servers: vec![],
-                domain: None,
-            },
+            zone_type: OmicronZoneType::InternalNtp { address },
             filesystem_pool: None,
         });
 
@@ -5560,8 +5555,7 @@ mod test {
             Error::RequestedConfigOutdated { requested, current }
             if requested == v1 && current == v2
         ));
-        let found2 =
-            mgr.omicron_zones_list().await.expect("failed to list zones");
+        let found2 = mgr.omicron_zones_list().await;
         assert_eq!(found, found2);
 
         // Now try to apply that list with the same generation number that we
@@ -5577,8 +5571,7 @@ mod test {
             error,
             Error::RequestedConfigConflicts(vr) if vr == v2
         ));
-        let found3 =
-            mgr.omicron_zones_list().await.expect("failed to list zones");
+        let found3 = mgr.omicron_zones_list().await;
         assert_eq!(found, found3);
 
         // But we should be able to apply this new list of zones as long as we
@@ -5590,8 +5583,7 @@ mod test {
         )
         .await
         .expect("failed to remove all zones in a new generation");
-        let found4 =
-            mgr.omicron_zones_list().await.expect("failed to list zones");
+        let found4 = mgr.omicron_zones_list().await;
         assert_eq!(found4.generation, v3);
         let mut our_zones = zones;
         our_zones.sort_by(|a, b| a.id.cmp(&b.id));
@@ -5605,6 +5597,11 @@ mod test {
         helper.cleanup().await;
         logctx.cleanup_successful();
     }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
 
     #[test]
     fn test_bootstrap_addr_to_techport_prefixes() {

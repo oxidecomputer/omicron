@@ -37,12 +37,10 @@ use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Generation;
-use omicron_common::disk::DatasetConfig;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::DiskVariant;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_common::policy::NEXUS_REDUNDANCY;
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
@@ -261,11 +259,16 @@ impl SystemDescription {
     }
 
     /// Add a sled to the system based on information that came from the
-    /// database of an existing system
+    /// database of an existing system.
+    ///
+    /// Note that `sled_policy` and `sled_state` are currently not checked for
+    /// internal consistency! This is to permit testing of the Planner with
+    /// invalid inputs.
     pub fn sled_full(
         &mut self,
         sled_id: SledUuid,
         sled_policy: SledPolicy,
+        sled_state: SledState,
         sled_resources: SledResources,
         inventory_sp: Option<SledHwInventory<'_>>,
         inventory_sled_agent: &nexus_types::inventory::SledAgent,
@@ -280,6 +283,7 @@ impl SystemDescription {
             Sled::new_full(
                 sled_id,
                 sled_policy,
+                sled_state,
                 sled_resources,
                 inventory_sp,
                 inventory_sled_agent,
@@ -346,11 +350,8 @@ impl SystemDescription {
         for sled in self.sleds.values() {
             let sled_details = SledDetails {
                 policy: sled.policy,
-                state: SledState::Active,
-                resources: SledResources {
-                    zpools: sled.zpools.clone(),
-                    subnet: sled.sled_subnet,
-                },
+                state: sled.state,
+                resources: sled.resources.clone(),
             };
             builder.add_sled(sled.sled_id, sled_details)?;
         }
@@ -457,11 +458,11 @@ pub struct SledHwInventory<'a> {
 #[derive(Clone, Debug)]
 struct Sled {
     sled_id: SledUuid,
-    sled_subnet: Ipv6Subnet<SLED_PREFIX>,
     inventory_sp: Option<(u16, SpState)>,
     inventory_sled_agent: Inventory,
-    zpools: BTreeMap<ZpoolUuid, (SledDisk, Vec<DatasetConfig>)>,
     policy: SledPolicy,
+    state: SledState,
+    resources: SledResources,
 }
 
 impl Sled {
@@ -553,7 +554,7 @@ impl Sled {
                 reservoir_size: ByteCount::from(1024),
                 sled_role,
                 sled_agent_address,
-                sled_id: sled_id.into_untyped_uuid(),
+                sled_id,
                 usable_hardware_threads: 10,
                 usable_physical_ram: ByteCount::from(1024 * 1024),
                 // Populate disks, appearing like a real device.
@@ -582,13 +583,13 @@ impl Sled {
 
         Sled {
             sled_id,
-            sled_subnet,
             inventory_sp,
             inventory_sled_agent,
-            zpools,
             policy: SledPolicy::InService {
                 provision_policy: SledProvisionPolicy::Provisionable,
             },
+            state: SledState::Active,
+            resources: SledResources { subnet: sled_subnet, zpools },
         }
     }
 
@@ -597,6 +598,7 @@ impl Sled {
     fn new_full(
         sled_id: SledUuid,
         sled_policy: SledPolicy,
+        sled_state: SledState,
         sled_resources: SledResources,
         inventory_sp: Option<SledHwInventory<'_>>,
         inv_sled_agent: &nexus_types::inventory::SledAgent,
@@ -707,7 +709,7 @@ impl Sled {
             reservoir_size: inv_sled_agent.reservoir_size,
             sled_role: inv_sled_agent.sled_role,
             sled_agent_address: inv_sled_agent.sled_agent_address,
-            sled_id: sled_id.into_untyped_uuid(),
+            sled_id,
             usable_hardware_threads: inv_sled_agent.usable_hardware_threads,
             usable_physical_ram: inv_sled_agent.usable_physical_ram,
             disks: vec![],
@@ -717,11 +719,11 @@ impl Sled {
 
         Sled {
             sled_id,
-            sled_subnet: sled_resources.subnet,
-            zpools: sled_resources.zpools.into_iter().collect(),
             inventory_sp,
             inventory_sled_agent,
             policy: sled_policy,
+            state: sled_state,
+            resources: sled_resources,
         }
     }
 

@@ -197,12 +197,9 @@ impl From<BlueprintZoneType> for OmicronZoneType {
                 gz_address: zone.gz_address,
                 gz_address_index: zone.gz_address_index,
             },
-            BlueprintZoneType::InternalNtp(zone) => Self::InternalNtp {
-                address: zone.address,
-                ntp_servers: zone.ntp_servers,
-                dns_servers: zone.dns_servers,
-                domain: zone.domain,
-            },
+            BlueprintZoneType::InternalNtp(zone) => {
+                Self::InternalNtp { address: zone.address }
+            }
             BlueprintZoneType::Nexus(zone) => Self::Nexus {
                 internal_address: zone.internal_address,
                 external_ip: zone.external_ip.ip,
@@ -350,9 +347,6 @@ pub mod blueprint_zone_type {
     )]
     pub struct InternalNtp {
         pub address: SocketAddrV6,
-        pub ntp_servers: Vec<String>,
-        pub dns_servers: Vec<IpAddr>,
-        pub domain: Option<String>,
     }
 
     #[derive(

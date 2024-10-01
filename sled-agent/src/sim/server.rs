@@ -43,7 +43,6 @@ use omicron_common::disk::DiskIdentity;
 use omicron_common::FileKv;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
-use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use oxnet::Ipv6Net;
 use sled_agent_types::rack_init::RecoverySiloConfig;
@@ -543,7 +542,7 @@ pub async fn run_standalone_server(
 
     let mut sled_configs = BTreeMap::new();
     sled_configs.insert(
-        SledUuid::from_untyped_uuid(config.id),
+        config.id,
         SledConfig {
             disks: server.sled_agent.omicron_physical_disks_list().await?,
             datasets: server.sled_agent.datasets_config_list().await?,

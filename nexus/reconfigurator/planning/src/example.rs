@@ -12,6 +12,7 @@ use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::inventory::Collection;
+use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_uuid_kinds::SledKind;
 use typed_rng::TypedUuidRng;
 
@@ -71,8 +72,8 @@ impl ExampleSystem {
         )
         .unwrap();
         builder.set_rng_seed((test_name, "ExampleSystem make_zones"));
-        for (sled_id, sled_resources) in
-            base_input.all_sled_resources(SledFilter::Commissioned)
+        for (i, (sled_id, sled_resources)) in
+            base_input.all_sled_resources(SledFilter::Commissioned).enumerate()
         {
             let _ = builder.sled_ensure_zone_ntp(sled_id).unwrap();
             let _ = builder
@@ -83,9 +84,11 @@ impl ExampleSystem {
                     vec![],
                 )
                 .unwrap();
-            let _ = builder
-                .sled_ensure_zone_multiple_internal_dns(sled_id, 1)
-                .unwrap();
+            if i < INTERNAL_DNS_REDUNDANCY {
+                let _ = builder
+                    .sled_ensure_zone_multiple_internal_dns(sled_id, 1)
+                    .unwrap();
+            }
             let _ = builder.sled_ensure_disks(sled_id, sled_resources).unwrap();
             for pool_name in sled_resources.zpools.keys() {
                 let _ = builder

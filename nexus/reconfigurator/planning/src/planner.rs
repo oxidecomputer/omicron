@@ -30,7 +30,6 @@ use nexus_types::inventory::Collection;
 use omicron_uuid_kinds::SledUuid;
 use slog::error;
 use slog::{info, warn, Logger};
-use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::hash::Hash;
@@ -615,21 +614,15 @@ impl<'a> Planner<'a> {
             }
         }
 
-        // Double check that we didn't make any arithmetic mistakes.
-        // It's not an error to place fewer zones than requested;
-        // maybe they'll be added in the next round of planning.
-        match new_zones_added.cmp(&num_zones_to_add) {
-            Ordering::Less => {
-                warn!(
-                    self.log, "added fewer {kind:?} zones than requested";
-                    "added" => new_zones_added,
-                    "requested" => num_zones_to_add
-                );
-                Ok(())
-            }
-            Ordering::Equal => Ok(()),
-            Ordering::Greater => Err(Error::TooManyZones { kind: kind.into() }),
-        }
+        // Double check that we didn't make any arithmetic mistakes. If we've
+        // arrived here, we think we've added the number of `kind` zones we
+        // needed to.
+        assert_eq!(
+            new_zones_added, num_zones_to_add,
+            "internal error counting {kind:?} zones"
+        );
+
+        Ok(())
     }
 
     fn do_plan_cockroachdb_settings(&mut self) {
@@ -826,7 +819,6 @@ mod test {
     use nexus_types::inventory::OmicronZonesFound;
     use omicron_common::api::external::Generation;
     use omicron_common::disk::DiskIdentity;
-    use omicron_common::policy::MAX_INTERNAL_DNS_REDUNDANCY;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -1241,10 +1233,11 @@ mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Use our example system as a starting point.
-        let (collection, input, blueprint1) =
+        let (collection, input, mut blueprint1) =
             example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
 
-        // This blueprint should have exactly 3 internal DNS zones: one on each sled.
+        // This blueprint should have exactly 3 internal DNS zones: one on each
+        // sled.
         assert_eq!(blueprint1.blueprint_zones.len(), 3);
         for sled_config in blueprint1.blueprint_zones.values() {
             assert_eq!(
@@ -1261,25 +1254,33 @@ mod test {
         // it will fail because the target is > MAX_DNS_REDUNDANCY.
         let mut builder = input.clone().into_builder();
         builder.policy_mut().target_internal_dns_zone_count = 14;
-        assert!(
-            Planner::new_based_on(
-                logctx.log.clone(),
-                &blueprint1,
-                &builder.build(),
-                "test_blueprint2",
-                &collection,
-            )
-            .is_err(),
-            "too many DNS zones"
-        );
+        match Planner::new_based_on(
+            logctx.log.clone(),
+            &blueprint1,
+            &builder.build(),
+            "test_blueprint2",
+            &collection,
+        )
+        .expect("created planner")
+        .plan()
+        {
+            Ok(_) => panic!("unexpected success"),
+            Err(err) => {
+                let err = format!("{err:#}");
+                assert!(
+                    err.contains("can only have ")
+                        && err.contains(" internal DNS servers"),
+                    "unexpected error: {err}"
+                );
+            }
+        }
 
-        // Try again with a reasonable number.
-        let input = {
-            let mut builder = input.into_builder();
-            builder.policy_mut().target_internal_dns_zone_count =
-                MAX_INTERNAL_DNS_REDUNDANCY;
-            builder.build()
-        };
+        // Remove two of the internal DNS zones; the planner should put new
+        // zones back in their places.
+        for (_sled_id, zones) in blueprint1.blueprint_zones.iter_mut().take(2) {
+            zones.zones.retain(|z| !z.zone_type.is_internal_dns());
+        }
+
         let blueprint2 = Planner::new_based_on(
             logctx.log.clone(),
             &blueprint1,
@@ -1568,11 +1569,14 @@ mod test {
         );
 
         // Expunge the first sled and re-plan. That gets us two expunged
-        // external DNS zones ...
+        // external DNS zones; two external DNS zones should then be added to
+        // the remaining sleds.
         let mut input_builder = input.into_builder();
-        let (&sled_id, details) =
-            input_builder.sleds_mut().iter_mut().next().expect("no sleds");
-        details.policy = SledPolicy::Expunged;
+        input_builder
+            .sleds_mut()
+            .get_mut(&sled_1)
+            .expect("found sled 1 again")
+            .policy = SledPolicy::Expunged;
         let input = input_builder.build();
         let blueprint3 = Planner::new_based_on(
             logctx.log.clone(),
@@ -1600,25 +1604,9 @@ mod test {
             2
         );
 
-        // ... which we can pick up after one more round of planning.
-        let blueprint4 = Planner::new_based_on(
-            logctx.log.clone(),
-            &blueprint3,
-            &input,
-            "test_blueprint4",
-            &collection,
-        )
-        .expect("failed to create planner")
-        .with_rng_seed((TEST_NAME, "bp4"))
-        .plan()
-        .expect("failed to re-re-plan");
-
-        let diff = blueprint4.diff_since_blueprint(&blueprint3);
-        println!("3 -> 4 (expunged zones):\n{}", diff.display());
-
         // The IP addresses of the new external DNS zones should be the
         // same as the original set that we "found".
-        let mut ips = blueprint4
+        let mut ips = blueprint3
             .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
             .filter_map(|(_id, zone)| {
                 zone.zone_type.is_external_dns().then(|| {
@@ -1635,7 +1623,7 @@ mod test {
         // Test a no-op planning iteration.
         assert_planning_makes_no_changes(
             &logctx.log,
-            &blueprint4,
+            &blueprint3,
             &input,
             TEST_NAME,
         );
@@ -2032,6 +2020,10 @@ mod test {
         // * of the remaining 3 sleds, only 2 are eligible for provisioning
         // * each of those 2 sleds should get exactly 3 new Nexuses
         builder.policy_mut().target_nexus_zone_count = 9;
+
+        // Disable addition of internal DNS zones.
+        builder.policy_mut().target_internal_dns_zone_count = 0;
+
         let input = builder.build();
         let mut blueprint2 = Planner::new_based_on(
             logctx.log.clone(),
@@ -2096,7 +2088,7 @@ mod test {
             let zones = &diff.zones.added.get(&sled_id).unwrap().zones;
             for zone in zones {
                 if ZoneKind::Nexus != zone.kind() {
-                    panic!("unexpectedly added a non-Crucible zone: {zone:?}");
+                    panic!("unexpectedly added a non-Nexus zone: {zone:?}");
                 };
             }
             if zones.len() == 3 {

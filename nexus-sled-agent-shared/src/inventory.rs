@@ -14,16 +14,14 @@ use omicron_common::{
     disk::DiskVariant,
     zpool_name::ZpoolName,
 };
-use omicron_uuid_kinds::DatasetUuid;
-use omicron_uuid_kinds::OmicronZoneUuid;
-use omicron_uuid_kinds::ZpoolUuid;
+use omicron_uuid_kinds::{DatasetUuid, OmicronZoneUuid};
+use omicron_uuid_kinds::{SledUuid, ZpoolUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 // Export this type for convenience -- this way, dependents don't have to
 // depend on sled-hardware-types.
 pub use sled_hardware_types::Baseboard;
 use strum::EnumIter;
-use uuid::Uuid;
 
 /// Identifies information about disks which may be attached to Sleds.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
@@ -94,7 +92,7 @@ impl From<illumos_utils::zfs::DatasetProperties> for InventoryDataset {
 /// Identity and basic status information about this sled agent
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct Inventory {
-    pub sled_id: Uuid,
+    pub sled_id: SledUuid,
     pub sled_agent_address: SocketAddrV6,
     pub sled_role: SledRole,
     pub baseboard: Baseboard,
@@ -247,9 +245,6 @@ pub enum OmicronZoneType {
     },
     InternalNtp {
         address: SocketAddrV6,
-        ntp_servers: Vec<String>,
-        dns_servers: Vec<IpAddr>,
-        domain: Option<String>,
     },
     Nexus {
         /// The address at which the internal nexus server is reachable.
