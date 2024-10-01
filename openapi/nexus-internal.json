@@ -2410,23 +2410,6 @@
               "address": {
                 "type": "string"
               },
-              "dns_servers": {
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "format": "ip"
-                }
-              },
-              "domain": {
-                "nullable": true,
-                "type": "string"
-              },
-              "ntp_servers": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              },
               "type": {
                 "type": "string",
                 "enum": [
@@ -2436,8 +2419,6 @@
             },
             "required": [
               "address",
-              "dns_servers",
-              "ntp_servers",
               "type"
             ]
           },
@@ -3323,6 +3304,12 @@
           "auto_restart_enabled": {
             "description": "`true` if this instance's auto-restart policy will permit the control plane to automatically restart it if it enters the `Failed` state.",
             "type": "boolean"
+          },
+          "boot_disk_id": {
+            "nullable": true,
+            "description": "the ID of the disk used to boot this Instance, if a specific one is assigned.",
+            "type": "string",
+            "format": "uuid"
           },
           "description": {
             "description": "human-readable free-form text about a resource",

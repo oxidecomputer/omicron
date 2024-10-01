@@ -1015,6 +1015,7 @@ mod tests {
                 network_interfaces: Default::default(),
                 external_ips: vec![],
                 disks: vec![],
+                boot_disk: None,
                 start: false,
                 auto_restart_policy: Default::default(),
             });

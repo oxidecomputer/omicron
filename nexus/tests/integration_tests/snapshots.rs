@@ -139,9 +139,10 @@ async fn test_snapshot_basic(cptestctx: &ControlPlaneTestContext) {
             ssh_public_keys: Some(Vec::new()),
             network_interfaces:
                 params::InstanceNetworkInterfaceAttachment::None,
-            disks: vec![params::InstanceDiskAttachment::Attach(
+            boot_disk: Some(params::InstanceDiskAttachment::Attach(
                 params::InstanceDiskAttach { name: base_disk_name.clone() },
-            )],
+            )),
+            disks: Vec::new(),
             external_ips: vec![],
             start: true,
             auto_restart_policy: Default::default(),
@@ -343,9 +344,10 @@ async fn test_snapshot_stopped_instance(cptestctx: &ControlPlaneTestContext) {
             ssh_public_keys: Some(Vec::new()),
             network_interfaces:
                 params::InstanceNetworkInterfaceAttachment::None,
-            disks: vec![params::InstanceDiskAttachment::Attach(
+            boot_disk: Some(params::InstanceDiskAttachment::Attach(
                 params::InstanceDiskAttach { name: base_disk_name.clone() },
-            )],
+            )),
+            disks: Vec::new(),
             external_ips: vec![],
             start: false,
             auto_restart_policy: Default::default(),
