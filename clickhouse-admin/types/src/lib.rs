@@ -900,6 +900,21 @@ impl KeeperConf {
     }
 }
 
+/// The configuration of the clickhouse keeper raft cluster returned from a
+/// single keeper node
+///
+/// Each keeper is asked for its known raft configuration via `clickhouse-admin`
+/// dropshot servers running in `ClickhouseKeeper` zones. state. We include the
+/// leader committed log index known to the current keeper node (whether or not
+/// it is the leader) to determine which configuration is newest.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct ClickhouseKeeperClusterMembership {
+    pub queried_keeper: KeeperId,
+    pub leader_committed_log_index: u64,
+    pub raft_config: BTreeSet<KeeperId>,
+}
+
 #[cfg(test)]
 mod tests {
     use camino::Utf8PathBuf;
