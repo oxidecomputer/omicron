@@ -22,12 +22,75 @@ use serde::{Deserialize, Serialize, Serializer};
 #[derive_where(Clone, Debug, Default)]
 pub(crate) struct TriMap<T: TriMapEntry> {
     entries: Vec<T>,
-    // Invariant: the value (usize) in these maps are valid indexes into
+    // Invariant: the values (usize) in these maps are valid indexes into
     // `entries`, and are a 1:1 mapping.
     k1_to_entry: HashMap<T::K1, usize>,
     k2_to_entry: HashMap<T::K2, usize>,
     k3_to_entry: HashMap<T::K3, usize>,
 }
+
+impl<T: TriMapEntry + PartialEq> PartialEq for TriMap<T> {
+    fn eq(&self, other: &Self) -> bool {
+        // Implementing PartialEq for TriMap is tricky because TriMap is not
+        // semantically like an IndexMap: two maps are equivalent even if their
+        // entries are in a different order. In other words, any permutation of
+        // entries is equivalent.
+        //
+        // We also can't sort the entries because they're not necessarily Ord.
+        //
+        // So we write a custom equality check that checks that each key in one
+        // map points to the same entry as in the other map.
+
+        if self.entries.len() != other.entries.len() {
+            return false;
+        }
+
+        // Walk over all the entries in the first map and check that they point
+        // to the same entry in the second map.
+        for (ix, entry) in self.entries.iter().enumerate() {
+            let k1 = entry.key1();
+            let k2 = entry.key2();
+            let k3 = entry.key3();
+
+            // Check that the indexes are the same in the other map.
+            let Some(other_ix1) = other.k1_to_entry.get(&k1).copied() else {
+                return false;
+            };
+            let Some(other_ix2) = other.k2_to_entry.get(&k2).copied() else {
+                return false;
+            };
+            let Some(other_ix3) = other.k3_to_entry.get(&k3).copied() else {
+                return false;
+            };
+
+            if other_ix1 != other_ix2 || other_ix1 != other_ix3 {
+                // All the keys were present but they didn't point to the same
+                // entry.
+                return false;
+            }
+
+            // Check that the other map's entry is the same as this map's
+            // entry. (This is what we use the `PartialEq` bound on T for.)
+            //
+            // Because we've checked that other_ix1, other_ix2 and other_ix3
+            // are Some(ix), we know that ix is valid and points to the
+            // expected entry.
+            let other_entry = &other.entries[other_ix1];
+            if entry != other_entry {
+                eprintln!(
+                    "mismatch: ix: {}, entry: {:?}, other_entry: {:?}",
+                    ix, entry, other_entry
+                );
+                return false;
+            }
+        }
+
+        true
+    }
+}
+
+// The Eq bound on T ensures that the TriMap forms an equivalence class.
+impl<T: TriMapEntry + Eq> Eq for TriMap<T> {}
 
 // Note: Eq and PartialEq are not implemented for TriMap. Implementing them
 // would need to be done with care, because TriMap is not semantically like an
@@ -90,6 +153,10 @@ impl<T: TriMapEntry> TriMap<T> {
             k2_to_entry: HashMap::new(),
             k3_to_entry: HashMap::new(),
         }
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.entries.is_empty()
     }
 
     pub(crate) fn iter(&self) -> impl Iterator<Item = &T> {
@@ -255,6 +322,7 @@ impl<T: TriMapEntry> std::error::Error for DuplicateEntry<T> {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use prop::sample::SizeRange;
     use proptest::prelude::*;
     use test_strategy::{proptest, Arbitrary};
 
@@ -511,5 +579,214 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[proptest(cases = 16)]
+    fn proptest_permutation_eq(
+        #[strategy(test_entry_permutation_strategy(0..256))] entries: (
+            Vec<TestEntry>,
+            Vec<TestEntry>,
+        ),
+    ) {
+        let (entries1, entries2) = entries;
+        let mut map1 = TriMap::<TestEntry>::new();
+        let mut map2 = TriMap::<TestEntry>::new();
+
+        for entry in entries1 {
+            map1.insert_no_dups(entry.clone()).unwrap();
+        }
+        for entry in entries2 {
+            map2.insert_no_dups(entry.clone()).unwrap();
+        }
+
+        assert_eq_props(map1, map2);
+    }
+
+    // Returns a pair of permutations of a set of unique entries.
+    fn test_entry_permutation_strategy(
+        size: impl Into<SizeRange>,
+    ) -> impl Strategy<Value = (Vec<TestEntry>, Vec<TestEntry>)> {
+        prop::collection::vec(any::<TestEntry>(), size.into()).prop_perturb(
+            |v, mut rng| {
+                // It is possible (likely even) that the input vector has
+                // duplicates. How can we remove them? The easiest way is to
+                // use the TriMap logic that already exists to check for
+                // duplicates. Insert all the entries one by one, then get the
+                // list.
+                let mut map = TriMap::<TestEntry>::new();
+                for entry in v {
+                    // The error case here is expected -- we're actively
+                    // de-duping entries right now.
+                    _ = map.insert_no_dups(entry);
+                }
+                let v = map.entries;
+
+                // Now shuffle the entries. This is a simple Fisher-Yates
+                // shuffle (Durstenfeld variant, low to high).
+                let mut v2 = v.clone();
+                if v.len() < 2 {
+                    return (v, v2);
+                }
+                for i in 0..v2.len() - 2 {
+                    let j = rng.gen_range(i..v2.len());
+                    v2.swap(i, j);
+                }
+
+                (v, v2)
+            },
+        )
+    }
+
+    // Test various conditions for non-equality.
+    //
+    // It's somewhat hard to capture mutations in a proptest (partly because
+    // `TriMap` doesn't support mutating existing entries at the moment), so
+    // this is a small example-based test.
+    #[test]
+    fn test_permutation_eq_examples() {
+        let mut map1 = TriMap::<TestEntry>::new();
+        let mut map2 = TriMap::<TestEntry>::new();
+
+        // Two empty maps are equal.
+        assert_eq!(map1, map2);
+
+        // Insert a single entry into one map.
+        let entry = TestEntry {
+            key1: 0,
+            key2: 'a',
+            key3: "x".to_string(),
+            value: "v".to_string(),
+        };
+        map1.insert_no_dups(entry.clone()).unwrap();
+
+        // The maps are not equal.
+        assert_ne_props(&map1, &map2);
+
+        // Insert the same entry into the other map.
+        map2.insert_no_dups(entry.clone()).unwrap();
+
+        // The maps are now equal.
+        assert_eq_props(&map1, &map2);
+
+        {
+            // Insert an entry with the same key2 and key3 but a different
+            // key1.
+            let mut map1 = map1.clone();
+            map1.insert_no_dups(TestEntry {
+                key1: 1,
+                key2: 'b',
+                key3: "y".to_string(),
+                value: "v".to_string(),
+            })
+            .unwrap();
+            assert_ne_props(&map1, &map2);
+
+            let mut map2 = map2.clone();
+            map2.insert_no_dups(TestEntry {
+                key1: 2,
+                key2: 'b',
+                key3: "y".to_string(),
+                value: "v".to_string(),
+            })
+            .unwrap();
+            assert_ne_props(&map1, &map2);
+        }
+
+        {
+            // Insert an entry with the same key1 and key3 but a different
+            // key2.
+            let mut map1 = map1.clone();
+            map1.insert_no_dups(TestEntry {
+                key1: 1,
+                key2: 'b',
+                key3: "y".to_string(),
+                value: "v".to_string(),
+            })
+            .unwrap();
+            assert_ne_props(&map1, &map2);
+
+            let mut map2 = map2.clone();
+            map2.insert_no_dups(TestEntry {
+                key1: 1,
+                key2: 'c',
+                key3: "y".to_string(),
+                value: "v".to_string(),
+            })
+            .unwrap();
+            assert_ne_props(&map1, &map2);
+        }
+
+        {
+            // Insert an entry with the same key1 and key2 but a different
+            // key3.
+            let mut map1 = map1.clone();
+            map1.insert_no_dups(TestEntry {
+                key1: 1,
+                key2: 'b',
+                key3: "y".to_string(),
+                value: "v".to_string(),
+            })
+            .unwrap();
+            assert_ne_props(&map1, &map2);
+
+            let mut map2 = map2.clone();
+            map2.insert_no_dups(TestEntry {
+                key1: 1,
+                key2: 'b',
+                key3: "z".to_string(),
+                value: "v".to_string(),
+            })
+            .unwrap();
+            assert_ne_props(&map1, &map2);
+        }
+
+        {
+            // Insert an entry where all the keys are the same, but the value is
+            // different.
+            let mut map1 = map1.clone();
+            map1.insert_no_dups(TestEntry {
+                key1: 1,
+                key2: 'b',
+                key3: "y".to_string(),
+                value: "w".to_string(),
+            })
+            .unwrap();
+            assert_ne_props(&map1, &map2);
+
+            let mut map2 = map2.clone();
+            map2.insert_no_dups(TestEntry {
+                key1: 1,
+                key2: 'b',
+                key3: "y".to_string(),
+                value: "x".to_string(),
+            })
+            .unwrap();
+            assert_ne_props(&map1, &map2);
+        }
+    }
+
+    /// Assert equality properties.
+    ///
+    /// The PartialEq algorithm is not obviously symmetric or reflexive, so we
+    /// must ensure in our tests that it is.
+    #[allow(clippy::eq_op)]
+    fn assert_eq_props<T: Eq + fmt::Debug>(a: T, b: T) {
+        assert_eq!(a, a, "a == a");
+        assert_eq!(b, b, "b == b");
+        assert_eq!(a, b, "a == b");
+        assert_eq!(b, a, "b == a");
+    }
+
+    /// Assert inequality properties.
+    ///
+    /// The PartialEq algorithm is not obviously symmetric or reflexive, so we
+    /// must ensure in our tests that it is.
+    #[allow(clippy::eq_op)]
+    fn assert_ne_props<T: Eq + fmt::Debug>(a: T, b: T) {
+        // Also check reflexivity while we're here.
+        assert_eq!(a, a, "a == a");
+        assert_eq!(b, b, "b == b");
+        assert_ne!(a, b, "a != b");
+        assert_ne!(b, a, "b != a");
     }
 }
