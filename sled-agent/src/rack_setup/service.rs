@@ -1590,7 +1590,8 @@ mod test {
     use super::{Config, OmicronZonesConfigGenerator};
     use crate::rack_setup::plan::service::{Plan as ServicePlan, SledInfo};
     use nexus_sled_agent_shared::inventory::{
-        Baseboard, Inventory, InventoryDisk, OmicronZoneType, SledRole,
+        Baseboard, Inventory, InventoryDisk, OmicronZoneType,
+        OmicronZonesConfig, SledRole,
     };
     use omicron_common::{
         address::{get_sled_address, Ipv6Subnet, SLED_PREFIX},
@@ -1617,6 +1618,10 @@ mod test {
                 usable_hardware_threads: 32,
                 usable_physical_ram: ByteCount::from_gibibytes_u32(16),
                 reservoir_size: ByteCount::from_gibibytes_u32(0),
+                omicron_zones: OmicronZonesConfig {
+                    generation: Generation::new(),
+                    zones: vec![],
+                },
                 disks: (0..u2_count)
                     .map(|i| InventoryDisk {
                         identity: DiskIdentity {

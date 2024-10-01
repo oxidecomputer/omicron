@@ -1624,8 +1624,7 @@ mod tests {
         test_name: &str,
     ) -> (Collection, PlanningInput, Blueprint) {
         // We'll start with an example system.
-        let (mut base_collection, planning_input, mut blueprint) =
-            example(log, test_name, 3);
+        let (example, mut blueprint) = example(log, test_name, 3);
 
         // Take a more thorough collection representative (includes SPs,
         // etc.)...
@@ -1634,6 +1633,7 @@ mod tests {
 
         // ... and replace its sled agent and Omicron zones with those from our
         // example system.
+        let mut base_collection = example.collection.clone();
         mem::swap(
             &mut collection.sled_agents,
             &mut base_collection.sled_agents,

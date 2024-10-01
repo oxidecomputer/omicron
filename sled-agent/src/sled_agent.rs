@@ -917,11 +917,6 @@ impl SledAgent {
         Ok(disk_result)
     }
 
-    /// List the Omicron zone configuration that's currently running
-    pub async fn omicron_zones_list(&self) -> OmicronZonesConfig {
-        self.inner.services.omicron_zones_list().await
-    }
-
     /// Ensures that the specific set of Omicron zones are running as configured
     /// (and that no other zones are running)
     pub async fn omicron_zones_ensure(
@@ -1225,7 +1220,10 @@ impl SledAgent {
         let mut disks = vec![];
         let mut zpools = vec![];
         let mut datasets = vec![];
-        let all_disks = self.storage().get_latest_disks().await;
+        let (all_disks, omicron_zones) = tokio::join!(
+            self.storage().get_latest_disks(),
+            self.inner.services.omicron_zones_list()
+        );
         for (identity, variant, slot, firmware) in all_disks.iter_all() {
             disks.push(InventoryDisk {
                 identity: identity.clone(),
@@ -1309,6 +1307,7 @@ impl SledAgent {
             usable_hardware_threads,
             usable_physical_ram: ByteCount::try_from(usable_physical_ram)?,
             reservoir_size,
+            omicron_zones,
             disks,
             zpools,
             datasets,

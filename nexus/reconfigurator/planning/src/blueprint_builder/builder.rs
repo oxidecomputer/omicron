@@ -1687,8 +1687,6 @@ impl<'a> BlueprintDisksBuilder<'a> {
 pub mod test {
     use super::*;
     use crate::example::example;
-    use crate::example::ExampleSystem;
-    use crate::system::SledBuilder;
     use expectorate::assert_contents;
     use nexus_inventory::CollectionBuilder;
     use nexus_types::deployment::BlueprintOrCollectionZoneConfig;
@@ -1699,7 +1697,6 @@ pub mod test {
     use omicron_test_utils::dev::test_setup_log;
     use slog_error_chain::InlineErrorChain;
     use std::collections::BTreeSet;
-    use std::mem;
 
     pub const DEFAULT_N_SLEDS: usize = 3;
 
@@ -1791,11 +1788,12 @@ pub mod test {
         // describes no changes.
         static TEST_NAME: &str = "blueprint_builder_test_initial";
         let logctx = test_setup_log(TEST_NAME);
-        let (collection, input, blueprint_initial) =
+        let (example, blueprint_initial) =
             example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
         verify_blueprint(&blueprint_initial);
 
-        let diff = blueprint_initial.diff_since_collection(&collection);
+        let diff =
+            blueprint_initial.diff_since_collection(example.collection());
         // There are some differences with even a no-op diff between a
         // collection and a blueprint, such as new data being added to
         // blueprints like DNS generation numbers.
@@ -1816,7 +1814,7 @@ pub mod test {
         assert_planning_makes_no_changes(
             &logctx.log,
             &blueprint_initial,
-            &input,
+            example.planning_input(),
             TEST_NAME,
         );
 
@@ -1827,16 +1825,15 @@ pub mod test {
     fn test_basic() {
         static TEST_NAME: &str = "blueprint_builder_test_basic";
         let logctx = test_setup_log(TEST_NAME);
-        let mut example =
-            ExampleSystem::new(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
-        let blueprint1 = &example.blueprint;
-        verify_blueprint(blueprint1);
+        let (mut example, blueprint1) =
+            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+        verify_blueprint(&blueprint1);
 
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
-            blueprint1,
-            &example.input,
-            &example.collection,
+            &blueprint1,
+            example.planning_input(),
+            example.collection(),
             "test_basic",
         )
         .expect("failed to create builder");
@@ -1844,8 +1841,9 @@ pub mod test {
         // The example blueprint should have internal NTP zones on all the
         // existing sleds, plus Crucible zones on all pools.  So if we ensure
         // all these zones exist, we should see no change.
-        for (sled_id, sled_resources) in
-            example.input.all_sled_resources(SledFilter::Commissioned)
+        for (sled_id, sled_resources) in example
+            .planning_input()
+            .all_sled_resources(SledFilter::Commissioned)
         {
             builder.sled_ensure_zone_ntp(sled_id).unwrap();
             for pool_id in sled_resources.zpools.keys() {
@@ -1865,20 +1863,18 @@ pub mod test {
         assert_eq!(diff.sleds_modified.len(), 0);
 
         // The next step is adding these zones to a new sled.
-        let new_sled_id = example.sled_rng.next();
-        let _ =
-            example.system.sled(SledBuilder::new().id(new_sled_id)).unwrap();
-        let input = example.system.to_planning_input_builder().unwrap().build();
+        let new_sled_id = example.add_empty_sled();
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint2,
-            &input,
-            &example.collection,
+            example.planning_input(),
+            example.collection(),
             "test_basic",
         )
         .expect("failed to create builder");
         builder.sled_ensure_zone_ntp(new_sled_id).unwrap();
-        let new_sled_resources = &input
+        let new_sled_resources = &example
+            .planning_input()
             .sled_lookup(SledFilter::Commissioned, new_sled_id)
             .unwrap()
             .resources;
@@ -1973,7 +1969,7 @@ pub mod test {
         assert_planning_makes_no_changes(
             &logctx.log,
             &blueprint3,
-            &input,
+            example.planning_input(),
             TEST_NAME,
         );
 
@@ -1985,27 +1981,27 @@ pub mod test {
         static TEST_NAME: &str =
             "blueprint_builder_test_prune_decommissioned_sleds";
         let logctx = test_setup_log(TEST_NAME);
-        let (collection, input, mut blueprint1) =
+        let (mut example, mut blueprint1) =
             example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
         verify_blueprint(&blueprint1);
 
         // Mark one sled as having a desired state of decommissioned.
-        let decommision_sled_id = blueprint1
+        let decommissioned_sled_id = blueprint1
             .sled_state
             .keys()
             .copied()
             .next()
             .expect("at least one sled");
-        *blueprint1.sled_state.get_mut(&decommision_sled_id).unwrap() =
+        *blueprint1.sled_state.get_mut(&decommissioned_sled_id).unwrap() =
             SledState::Decommissioned;
 
         // Change the input to note that the sled is expunged, but still active.
-        let mut builder = input.into_builder();
-        builder.sleds_mut().get_mut(&decommision_sled_id).unwrap().policy =
-            SledPolicy::Expunged;
-        builder.sleds_mut().get_mut(&decommision_sled_id).unwrap().state =
-            SledState::Active;
-        let input = builder.build();
+        example
+            .system_mut()
+            .sled_set_policy(decommissioned_sled_id, SledPolicy::Expunged)
+            .unwrap()
+            .sled_set_state(decommissioned_sled_id, SledState::Active)
+            .unwrap();
 
         // Generate a new blueprint. This sled should still be included: even
         // though the desired state is decommissioned, the current state is
@@ -2013,8 +2009,8 @@ pub mod test {
         let blueprint2 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint1,
-            &input,
-            &collection,
+            example.planning_input(),
+            example.collection(),
             "test_prune_decommissioned_sleds",
         )
         .expect("created builder")
@@ -2023,16 +2019,16 @@ pub mod test {
 
         // We carried forward the desired state.
         assert_eq!(
-            blueprint2.sled_state.get(&decommision_sled_id).copied(),
+            blueprint2.sled_state.get(&decommissioned_sled_id).copied(),
             Some(SledState::Decommissioned)
         );
 
-        // Change the input to mark the sled decommissioned. (Normally realizing
-        // blueprint2 would make this change.)
-        let mut builder = input.into_builder();
-        builder.sleds_mut().get_mut(&decommision_sled_id).unwrap().state =
-            SledState::Decommissioned;
-        let input = builder.build();
+        // Change the system description to mark the sled decommissioned.
+        // (Normally, realizing blueprint2 would make this change.)
+        example
+            .system_mut()
+            .sled_set_state(decommissioned_sled_id, SledState::Decommissioned)
+            .unwrap();
 
         // Generate a new blueprint. This desired sled state should no longer be
         // present: it has reached the terminal decommissioned state, so there's
@@ -2040,8 +2036,8 @@ pub mod test {
         let blueprint3 = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint2,
-            &input,
-            &collection,
+            example.planning_input(),
+            example.collection(),
             "test_prune_decommissioned_sleds",
         )
         .expect("created builder")
@@ -2052,7 +2048,7 @@ pub mod test {
         // _zones_ for it that need cleanup work, but all state transitions for
         // it are complete.)
         assert_eq!(
-            blueprint3.sled_state.get(&decommision_sled_id).copied(),
+            blueprint3.sled_state.get(&decommissioned_sled_id).copied(),
             None,
         );
 
@@ -2060,7 +2056,7 @@ pub mod test {
         assert_planning_makes_no_changes(
             &logctx.log,
             &blueprint3,
-            &input,
+            example.planning_input(),
             TEST_NAME,
         );
 
@@ -2071,20 +2067,27 @@ pub mod test {
     fn test_add_physical_disks() {
         static TEST_NAME: &str = "blueprint_builder_test_add_physical_disks";
         let logctx = test_setup_log(TEST_NAME);
-        let (collection, input, _) =
-            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
-        let input = {
-            // Clear out the external networking records from `input`, since
-            // we're building an empty blueprint.
-            let mut builder = input.into_builder();
-            *builder.network_resources_mut() =
-                OmicronZoneNetworkResources::new();
-            builder.build()
-        };
+        let (example, _) = example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+
+        // Previously, we would clear out network resources from the planning
+        // input here. However, currently, while constructing the example
+        // system, network resources do not make their way into the planning
+        // input. So that operation was a no-op.
+        //
+        // For now, we just check that the network resources are empty.
+        //
+        // TODO: This is arguably a bug in how planning inputs are generated,
+        // and will hopefully be addressed in the future.
+        assert_eq!(
+            example.planning_input().network_resources(),
+            &OmicronZoneNetworkResources::new(),
+            "input network resources should be empty -- \
+             has the ExampleSystem logic been updated to populate them?"
+        );
 
         // Start with an empty blueprint (sleds with no zones).
         let parent = BlueprintBuilder::build_empty_with_sleds_seeded(
-            input.all_sled_ids(SledFilter::Commissioned),
+            example.planning_input().all_sled_ids(SledFilter::Commissioned),
             "test",
             TEST_NAME,
         );
@@ -2094,8 +2097,8 @@ pub mod test {
             let mut builder = BlueprintBuilder::new_based_on(
                 &logctx.log,
                 &parent,
-                &input,
-                &collection,
+                example.planning_input(),
+                example.collection(),
                 "test",
             )
             .expect("failed to create builder");
@@ -2103,8 +2106,9 @@ pub mod test {
             assert!(builder.disks.changed_disks.is_empty());
             assert!(builder.disks.parent_disks.is_empty());
 
-            for (sled_id, sled_resources) in
-                input.all_sled_resources(SledFilter::InService)
+            for (sled_id, sled_resources) in example
+                .planning_input()
+                .all_sled_resources(SledFilter::InService)
             {
                 assert_eq!(
                     builder
@@ -2127,8 +2131,7 @@ pub mod test {
         static TEST_NAME: &str =
             "blueprint_builder_test_zone_filesystem_zpool_colocated";
         let logctx = test_setup_log(TEST_NAME);
-        let (_, _, blueprint) =
-            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+        let (_, blueprint) = example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
 
         for (_, zone_config) in &blueprint.blueprint_zones {
             for zone in &zone_config.zones {
@@ -2153,18 +2156,26 @@ pub mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Discard the example blueprint and start with an empty one.
-        let (collection, input, _) =
-            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
-        let input = {
-            // Clear out the external networking records from `input`, since
-            // we're building an empty blueprint.
-            let mut builder = input.into_builder();
-            *builder.network_resources_mut() =
-                OmicronZoneNetworkResources::new();
-            builder.build()
-        };
+        let (example, _) = example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+
+        // Previously, we would clear out network resources from the planning
+        // input here. However, currently, while constructing the example
+        // system, network resources do not make their way into the planning
+        // input! So that operation was a no-op.
+        //
+        // For now, we just check that the network resources are empty.
+        //
+        // TODO: This is arguably a bug in how planning inputs are generated,
+        // and will hopefully be addressed in the future.
+        assert_eq!(
+            example.planning_input().network_resources(),
+            &OmicronZoneNetworkResources::new(),
+            "input network resources should be empty -- \
+             has the ExampleSystem logic been updated to populate them?"
+        );
+
         let parent = BlueprintBuilder::build_empty_with_sleds_seeded(
-            input.all_sled_ids(SledFilter::Commissioned),
+            example.planning_input().all_sled_ids(SledFilter::Commissioned),
             "test",
             TEST_NAME,
         );
@@ -2175,23 +2186,16 @@ pub mod test {
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &parent,
-            &input,
-            &collection,
+            example.planning_input(),
+            example.collection(),
             "test",
         )
         .expect("failed to create builder");
 
-        let err = builder
-            .sled_ensure_zone_multiple_nexus(
-                collection
-                    .omicron_zones
-                    .keys()
-                    .next()
-                    .copied()
-                    .expect("no sleds present"),
-                1,
-            )
-            .unwrap_err();
+        let sled_id =
+            example.system().sled_ids().next().expect("at least one sled");
+        let err =
+            builder.sled_ensure_zone_multiple_nexus(sled_id, 1).unwrap_err();
 
         assert!(
             matches!(err, Error::NoNexusZonesInParentBlueprint),
@@ -2205,7 +2209,7 @@ pub mod test {
     fn test_add_nexus_error_cases() {
         static TEST_NAME: &str = "blueprint_builder_test_add_nexus_error_cases";
         let logctx = test_setup_log(TEST_NAME);
-        let (mut collection, mut input, mut parent) =
+        let (mut example, parent) =
             example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
 
         // Remove the Nexus zone from one of the sleds so that
@@ -2213,56 +2217,42 @@ pub mod test {
         // `sled_id`.
         let sled_id = {
             let mut selected_sled_id = None;
-            for (sled_id, zones) in &mut collection.omicron_zones {
-                let nzones_before_retain = zones.zones.zones.len();
-                zones.zones.zones.retain(|z| !z.zone_type.is_nexus());
-                if zones.zones.zones.len() < nzones_before_retain {
+            for (sled_id, sa) in &mut collection.sled_agents {
+                let zones = &mut sa.omicron_zones;
+                let nzones_before_retain = zones.zones.len();
+                zones.zones.retain(|z| !z.zone_type.is_nexus());
+                if zones.zones.len() < nzones_before_retain {
                     selected_sled_id = Some(*sled_id);
                     // Also remove this zone from the blueprint.
-                    let mut removed_nexus = None;
                     parent
                         .blueprint_zones
                         .get_mut(sled_id)
                         .expect("missing sled")
                         .zones
                         .retain(|z| match &z.zone_type {
-                            BlueprintZoneType::Nexus(z) => {
-                                removed_nexus = Some(z.clone());
-                                false
-                            }
+                            BlueprintZoneType::Nexus(_) => false,
                             _ => true,
                         });
-                    let removed_nexus =
-                        removed_nexus.expect("removed Nexus from blueprint");
 
-                    // Also remove this Nexus's external networking resources
-                    // from `input`.
-                    let mut builder = input.into_builder();
-                    let mut new_network_resources =
-                        OmicronZoneNetworkResources::new();
-                    let old_network_resources = builder.network_resources_mut();
-                    for ip in old_network_resources.omicron_zone_external_ips()
-                    {
-                        if ip.ip.id() != removed_nexus.external_ip.id {
-                            new_network_resources
-                                .add_external_ip(ip.zone_id, ip.ip)
-                                .expect("copied IP to new input");
-                        }
-                    }
-                    for nic in old_network_resources.omicron_zone_nics() {
-                        if nic.nic.id.into_untyped_uuid()
-                            != removed_nexus.nic.id
-                        {
-                            new_network_resources
-                                .add_nic(nic.zone_id, nic.nic)
-                                .expect("copied NIC to new input");
-                        }
-                    }
-                    mem::swap(
-                        old_network_resources,
-                        &mut new_network_resources,
+                    // Previously, we would clear out network resources from
+                    // the planning input assigned to the removed zone.
+                    // However, currently, while constructing the example
+                    // system, network resources do not make their way into the
+                    // planning input. So that operation was a no-op.
+                    //
+                    // For now, we just check that the network resources are
+                    // empty.
+                    //
+                    // TODO: This is arguably a bug in how planning inputs are
+                    // generated, and will hopefully be addressed in the
+                    // future.
+                    assert_eq!(
+                        input.network_resources(),
+                        &OmicronZoneNetworkResources::new(),
+                        "input network resources should be empty -- \
+                         has the ExampleSystem logic been updated to \
+                         populate them?"
                     );
-                    input = builder.build();
 
                     break;
                 }
@@ -2540,14 +2530,23 @@ pub mod test {
         // Discard the example blueprint and start with an empty one.
         let (collection, input, _) =
             example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
-        let input = {
-            // Clear out the external networking records from `input`, since
-            // we're building an empty blueprint.
-            let mut builder = input.into_builder();
-            *builder.network_resources_mut() =
-                OmicronZoneNetworkResources::new();
-            builder.build()
-        };
+
+        // Previously, we would clear out network resources from the planning
+        // input here. However, currently, while constructing the example
+        // system, network resources do not make their way into the planning
+        // input. So that operation was a no-op.
+        //
+        // For now, we just check that the network resources are empty.
+        //
+        // TODO: This is arguably a bug in how planning inputs are generated,
+        // and will hopefully be addressed in the future.
+        assert_eq!(
+            input.network_resources(),
+            &OmicronZoneNetworkResources::new(),
+            "input network resources should be empty -- \
+             has the ExampleSystem logic changed?"
+        );
+
         let parent = BlueprintBuilder::build_empty_with_sleds_seeded(
             input.all_sled_ids(SledFilter::Commissioned),
             "test",

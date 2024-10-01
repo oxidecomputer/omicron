@@ -330,7 +330,7 @@ mod test {
     use dropshot::PaginationOrder;
     use nexus_db_model::Generation;
     use nexus_sled_agent_shared::inventory::{
-        Baseboard, Inventory, InventoryDisk, SledRole,
+        Baseboard, Inventory, InventoryDisk, OmicronZonesConfig, SledRole,
     };
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::identity::Asset;
@@ -696,6 +696,10 @@ mod test {
                     sled_id: SledUuid::from_untyped_uuid(sled.id()),
                     usable_hardware_threads: 10,
                     usable_physical_ram: ByteCount::from(1024 * 1024),
+                    omicron_zones: OmicronZonesConfig {
+                        generation: Generation::new(),
+                        zones: vec![],
+                    },
                     disks,
                     zpools: vec![],
                     datasets: vec![],

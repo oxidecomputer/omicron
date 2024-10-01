@@ -60,6 +60,7 @@ use nexus_db_model::SqlU16;
 use nexus_db_model::SqlU32;
 use nexus_db_model::SwCaboose;
 use nexus_db_model::SwRotPage;
+use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::PhysicalDiskFirmware;
@@ -160,6 +161,31 @@ impl DataStore {
             }
         }
 
+        // Pull Omicron zone-related metadata out of all sled agents.
+        //
+        // TODO: InvSledOmicronZones is a vestigial table kept for backwards
+        // compatibility -- the only unique data within it (the generation
+        // number) can be moved into `InvSledAgent` in the future.
+        let sled_omicron_zones = collection
+            .sled_agents
+            .values()
+            .map(|sled_agent| {
+                InvSledOmicronZones::new(collection_id, sled_agent)
+            })
+            .collect::<Vec<_>>();
+
+        // Pull Omicron zones out of all sled agents.
+        let omicron_zones: Vec<_> = collection
+            .sled_agents
+            .iter()
+            .flat_map(|(sled_id, sled_agent)| {
+                sled_agent.omicron_zones.zones.iter().map(|zone| {
+                    InvOmicronZone::new(collection_id, *sled_id, zone)
+                        .map_err(|e| Error::internal_error(&e.to_string()))
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
         // Pull disks out of all sled agents
         let disks: Vec<_> = collection
             .sled_agents
@@ -212,30 +238,11 @@ impl DataStore {
             })
             .collect::<Result<Vec<_>, Error>>()?;
 
-        let sled_omicron_zones = collection
-            .omicron_zones
-            .values()
-            .map(|found| InvSledOmicronZones::new(collection_id, found))
-            .collect::<Vec<_>>();
-        let omicron_zones = collection
-            .omicron_zones
-            .values()
-            .flat_map(|found| {
-                found.zones.zones.iter().map(|found_zone| {
-                    InvOmicronZone::new(
-                        collection_id,
-                        found.sled_id,
-                        found_zone,
-                    )
-                    .map_err(|e| Error::internal_error(&e.to_string()))
-                })
-            })
-            .collect::<Result<Vec<_>, Error>>()?;
         let omicron_zone_nics = collection
-            .omicron_zones
+            .sled_agents
             .values()
-            .flat_map(|found| {
-                found.zones.zones.iter().filter_map(|found_zone| {
+            .flat_map(|sled_agent| {
+                sled_agent.omicron_zones.zones.iter().filter_map(|found_zone| {
                     InvOmicronZoneNic::new(collection_id, found_zone)
                         .with_context(|| format!("zone {:?}", found_zone.id))
                         .map_err(|e| Error::internal_error(&format!("{:#}", e)))
@@ -1862,56 +1869,6 @@ impl DataStore {
                     })
             })
             .collect::<Result<BTreeMap<_, _>, _>>()?;
-        let sled_agents: BTreeMap<_, _> = sled_agent_rows
-            .into_iter()
-            .map(|s: InvSledAgent| {
-                let sled_id = SledUuid::from(s.sled_id);
-                let baseboard_id = s
-                    .hw_baseboard_id
-                    .map(|id| {
-                        baseboards_by_id.get(&id).cloned().ok_or_else(|| {
-                            Error::internal_error(
-                                "missing baseboard that we should have fetched",
-                            )
-                        })
-                    })
-                    .transpose()?;
-                let sled_agent = nexus_types::inventory::SledAgent {
-                    time_collected: s.time_collected,
-                    source: s.source,
-                    sled_id,
-                    baseboard_id,
-                    sled_agent_address: std::net::SocketAddrV6::new(
-                        std::net::Ipv6Addr::from(s.sled_agent_ip),
-                        u16::from(s.sled_agent_port),
-                        0,
-                        0,
-                    ),
-                    sled_role: s.sled_role.into(),
-                    usable_hardware_threads: u32::from(
-                        s.usable_hardware_threads,
-                    ),
-                    usable_physical_ram: s.usable_physical_ram.into(),
-                    reservoir_size: s.reservoir_size.into(),
-                    disks: physical_disks
-                        .get(&sled_id)
-                        .map(|disks| disks.to_vec())
-                        .unwrap_or_default(),
-                    zpools: zpools
-                        .get(sled_id.as_untyped_uuid())
-                        .map(|zpools| zpools.to_vec())
-                        .unwrap_or_default(),
-                    datasets: datasets
-                        .get(sled_id.as_untyped_uuid())
-                        .map(|datasets| datasets.to_vec())
-                        .unwrap_or_default(),
-                };
-                Ok((sled_id, sled_agent))
-            })
-            .collect::<Result<
-                BTreeMap<SledUuid, nexus_types::inventory::SledAgent>,
-                Error,
-            >>()?;
 
         // Fetch records of cabooses found.
         let inv_caboose_rows = {
@@ -2153,7 +2110,10 @@ impl DataStore {
                 zones.extend(batch.into_iter().map(|sled_zones_config| {
                     (
                         sled_zones_config.sled_id.into(),
-                        sled_zones_config.into_uninit_zones_found(),
+                        OmicronZonesConfig {
+                            generation: sled_zones_config.generation.into(),
+                            zones: Vec::new(),
+                        },
                     )
                 }))
             }
@@ -2261,7 +2221,7 @@ impl DataStore {
                 .map_err(|e| {
                     Error::internal_error(&format!("{:#}", e.to_string()))
                 })?;
-            map.zones.zones.push(zone);
+            map.zones.push(zone);
         }
 
         bail_unless!(
@@ -2269,6 +2229,85 @@ impl DataStore {
             "found extra Omicron zone NICs: {:?}",
             omicron_zone_nics.keys()
         );
+
+        // Finally, build up the sled-agent map using the sled agent and
+        // omicron zone rows. A for loop is easier to understand than into_iter
+        // + filter_map + return Result + collect.
+        let mut sled_agents = BTreeMap::new();
+        for s in sled_agent_rows {
+            let sled_id = SledUuid::from(s.sled_id);
+            let baseboard_id = s
+                .hw_baseboard_id
+                .map(|id| {
+                    baseboards_by_id.get(&id).cloned().ok_or_else(|| {
+                        Error::internal_error(
+                            "missing baseboard that we should have fetched",
+                        )
+                    })
+                })
+                .transpose()?;
+
+            // Look up the Omicron zones.
+            //
+            // Previously, during collection, fetched the Omicron zones in a
+            // separate request from the other sled agent data. It's possible
+            // that for a given (collection, sled) pair, one of those queries
+            // succeeded while the other failed. But this has since been
+            // changed to fetch all the data in a single query, which means
+            // that newer collections will either have both sets of data or
+            // neither of them.
+            //
+            // If it _is_ the case that one of the pieces of data is missing,
+            // log that as a warning and drop the sled from the collection.
+            // This should only happen for old collections.
+
+            let Some(omicron_zones) = omicron_zones.remove(&sled_id) else {
+                warn!(
+                    self.log,
+                    "no sled Omicron zone data present -- assuming that collection was done
+                     by an old Nexus version and dropping sled from it";
+                    "collection" => %id,
+                    "sled_id" => %sled_id,
+                );
+                continue;
+            };
+
+            let sled_agent = nexus_types::inventory::SledAgent {
+                time_collected: s.time_collected,
+                source: s.source,
+                sled_id,
+                baseboard_id,
+                sled_agent_address: std::net::SocketAddrV6::new(
+                    std::net::Ipv6Addr::from(s.sled_agent_ip),
+                    u16::from(s.sled_agent_port),
+                    0,
+                    0,
+                ),
+                sled_role: s.sled_role.into(),
+                usable_hardware_threads: u32::from(s.usable_hardware_threads),
+                usable_physical_ram: s.usable_physical_ram.into(),
+                reservoir_size: s.reservoir_size.into(),
+                omicron_zones,
+                // TODO: the unwrap_or_defaults here look incorrect -- all the
+                // data should be present because for as long as we've been
+                // doing inventory collections, sled-agent has returned all of
+                // these atomically. In other words, we must produce an error
+                // here.
+                disks: physical_disks
+                    .get(&sled_id)
+                    .map(|disks| disks.to_vec())
+                    .unwrap_or_default(),
+                zpools: zpools
+                    .get(sled_id.as_untyped_uuid())
+                    .map(|zpools| zpools.to_vec())
+                    .unwrap_or_default(),
+                datasets: datasets
+                    .get(sled_id.as_untyped_uuid())
+                    .map(|datasets| datasets.to_vec())
+                    .unwrap_or_default(),
+            };
+            sled_agents.insert(sled_id, sled_agent);
+        }
 
         Ok(Collection {
             id,
@@ -2284,7 +2323,6 @@ impl DataStore {
             cabooses_found,
             rot_pages_found,
             sled_agents,
-            omicron_zones,
             // Currently unused
             // See: https://github.com/oxidecomputer/omicron/issues/6578
             clickhouse_keeper_cluster_membership: BTreeMap::new(),

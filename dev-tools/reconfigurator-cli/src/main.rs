@@ -657,24 +657,8 @@ fn cmd_inventory_list(
 fn cmd_inventory_generate(
     sim: &mut ReconfiguratorSim,
 ) -> anyhow::Result<Option<String>> {
-    let mut builder =
+    let builder =
         sim.system.to_collection_builder().context("generating inventory")?;
-    // For an inventory we just generated from thin air, pretend like each sled
-    // has no zones on it.
-    let planning_input =
-        sim.system.to_planning_input_builder().unwrap().build();
-    for sled_id in planning_input.all_sled_ids(SledFilter::Commissioned) {
-        builder
-            .found_sled_omicron_zones(
-                "fake sled agent",
-                sled_id,
-                OmicronZonesConfig {
-                    generation: Generation::new(),
-                    zones: vec![],
-                },
-            )
-            .context("recording Omicron zones")?;
-    }
     let inventory = builder.build();
     let rv = format!(
         "generated inventory collection {} from configured sleds",

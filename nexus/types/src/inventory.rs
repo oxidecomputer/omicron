@@ -117,9 +117,6 @@ pub struct Collection {
     /// Sled Agent information, by *sled* id
     pub sled_agents: BTreeMap<SledUuid, SledAgent>,
 
-    /// Omicron zones found, by *sled* id
-    pub omicron_zones: BTreeMap<SledUuid, OmicronZonesFound>,
-
     /// The raft configuration (cluster membership) of the clickhouse keeper
     /// cluster as returned from each available keeper via `clickhouse-admin` in
     /// the `ClickhouseKeeper` zone
@@ -152,7 +149,7 @@ impl Collection {
     pub fn all_omicron_zones(
         &self,
     ) -> impl Iterator<Item = &OmicronZoneConfig> {
-        self.omicron_zones.values().flat_map(|z| z.zones.zones.iter())
+        self.sled_agents.values().flat_map(|sa| sa.omicron_zones.zones.iter())
     }
 
     /// Iterate over the sled ids of sleds identified as Scrimlets
@@ -500,17 +497,10 @@ pub struct SledAgent {
     pub usable_hardware_threads: u32,
     pub usable_physical_ram: ByteCount,
     pub reservoir_size: ByteCount,
+    pub omicron_zones: OmicronZonesConfig,
     pub disks: Vec<PhysicalDisk>,
     pub zpools: Vec<Zpool>,
     pub datasets: Vec<Dataset>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct OmicronZonesFound {
-    pub time_collected: DateTime<Utc>,
-    pub source: String,
-    pub sled_id: SledUuid,
-    pub zones: OmicronZonesConfig,
 }
 
 /// The configuration of the clickhouse keeper raft cluster returned from a

@@ -13,6 +13,7 @@ use nexus_inventory::CollectionBuilder;
 use nexus_sled_agent_shared::inventory::Baseboard;
 use nexus_sled_agent_shared::inventory::Inventory;
 use nexus_sled_agent_shared::inventory::InventoryDisk;
+use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbSettings;
@@ -84,6 +85,7 @@ pub struct SystemDescription {
     target_internal_dns_zone_count: usize,
     target_cockroachdb_zone_count: usize,
     target_cockroachdb_cluster_version: CockroachDbClusterVersion,
+    cockroachdb_settings: CockroachDbSettings,
     service_ip_pool_ranges: Vec<IpRange>,
     internal_dns_version: Generation,
     external_dns_version: Generation,
@@ -161,6 +163,7 @@ impl SystemDescription {
             target_internal_dns_zone_count,
             target_cockroachdb_zone_count,
             target_cockroachdb_cluster_version,
+            cockroachdb_settings: CockroachDbSettings::empty(),
             service_ip_pool_ranges,
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
@@ -201,11 +204,35 @@ impl SystemDescription {
         self
     }
 
+    pub fn get_target_nexus_zone_count(&self) -> usize {
+        self.target_nexus_zone_count
+    }
+
+    pub fn target_internal_dns_zone_count(
+        &mut self,
+        count: usize,
+    ) -> &mut Self {
+        self.target_internal_dns_zone_count = count;
+        self
+    }
+
     pub fn service_ip_pool_ranges(
         &mut self,
         ranges: Vec<IpRange>,
     ) -> &mut Self {
         self.service_ip_pool_ranges = ranges;
+        self
+    }
+
+    pub fn get_service_ip_pool_ranges(&self) -> &[IpRange] {
+        &self.service_ip_pool_ranges
+    }
+
+    pub fn cockroachdb_settings(
+        &mut self,
+        settings: CockroachDbSettings,
+    ) -> &mut Self {
+        self.cockroachdb_settings = settings;
         self
     }
 
@@ -252,6 +279,7 @@ impl SystemDescription {
             sled.unique,
             sled.hardware,
             hardware_slot,
+            sled.omicron_zones,
             sled.npools,
         );
         self.sleds.insert(sled_id, sled);
@@ -290,6 +318,108 @@ impl SystemDescription {
             ),
         );
         Ok(self)
+    }
+
+    /// Returns sled IDs known to the system.
+    pub fn sled_ids(&self) -> impl ExactSizeIterator<Item = SledUuid> + '_ {
+        self.sleds.keys().copied()
+    }
+
+    /// Set operator policy for an existing sled.
+    ///
+    /// This does not currently check for consistency with the sled state.
+    ///
+    /// Returns an error if the sled is not found.
+    pub fn sled_set_policy(
+        &mut self,
+        sled_id: SledUuid,
+        policy: SledPolicy,
+    ) -> anyhow::Result<&mut Self> {
+        let sled = self.sleds.get_mut(&sled_id).with_context(|| {
+            format!("attempted to access sled {} not found in system", sled_id)
+        })?;
+        sled.policy = policy;
+        Ok(self)
+    }
+
+    /// Set the internal state of an existing sled.
+    ///
+    /// This does not currently check for consistency with the sled policy.
+    ///
+    /// Returns an error if the sled is not found.
+    pub fn sled_set_state(
+        &mut self,
+        sled_id: SledUuid,
+        state: SledState,
+    ) -> anyhow::Result<&mut Self> {
+        let sled = self.sleds.get_mut(&sled_id).with_context(|| {
+            format!("attempted to access sled {} not found in system", sled_id)
+        })?;
+        sled.state = state;
+        Ok(self)
+    }
+
+    /// Get a mutable reference to a sled's resources.
+    ///
+    /// Returns an error if the sled is not found.
+    pub fn sled_get_resources_mut(
+        &mut self,
+        sled_id: SledUuid,
+    ) -> anyhow::Result<&mut SledResources> {
+        self.sleds
+            .get_mut(&sled_id)
+            .map(|sled| &mut sled.resources)
+            .with_context(|| {
+                format!(
+                    "attempted to access sled {} not found in system",
+                    sled_id
+                )
+            })
+    }
+
+    /// Set Omicron zones for a sled.
+    ///
+    /// Returns an error if the sled is not found.
+    ///
+    /// # Notes
+    ///
+    /// While bootstrapping an example system, the order is:
+    ///
+    /// 1. Create a collection with sleds with no zones.
+    /// 2. From the collection, generate a blueprint with zones.
+    /// 3. Seed the system with zones from the blueprint.
+    ///
+    /// This method is used in step 3.
+    pub fn sled_set_omicron_zones(
+        &mut self,
+        sled_id: SledUuid,
+        omicron_zones: OmicronZonesConfig,
+    ) -> anyhow::Result<&mut Self> {
+        let sled = self.sleds.get_mut(&sled_id).with_context(|| {
+            format!("attempted to access sled {} not found in system", sled_id)
+        })?;
+        sled.inventory_sled_agent.omicron_zones = omicron_zones;
+        Ok(self)
+    }
+
+    /// Remove a sled from the system.
+    ///
+    /// Returns an error if the sled is not found.
+    pub fn sled_remove(&mut self, sled_id: SledUuid) -> anyhow::Result<()> {
+        self.sleds.shift_remove(&sled_id).with_context(|| {
+            format!("attempted to remove sled {sled_id} not found in system")
+        })?;
+        Ok(())
+    }
+
+    /// Retain sleds matching a predicate.
+    ///
+    /// Useful for clearing out a system to be "all but a few" sleds.
+    pub fn retain_sled_ids<F>(&mut self, mut f: F)
+    where
+        F: FnMut(SledUuid) -> bool,
+    {
+        self.sleds.retain(|id, _| f(*id));
     }
 
     pub fn to_collection_builder(&self) -> anyhow::Result<CollectionBuilder> {
@@ -344,7 +474,7 @@ impl SystemDescription {
             policy,
             self.internal_dns_version,
             self.external_dns_version,
-            CockroachDbSettings::empty(),
+            self.cockroachdb_settings.clone(),
         );
 
         for sled in self.sleds.values() {
@@ -375,6 +505,7 @@ pub struct SledBuilder {
     hardware: SledHardware,
     hardware_slot: Option<u16>,
     sled_role: SledRole,
+    omicron_zones: OmicronZonesConfig,
     npools: u8,
 }
 
@@ -387,6 +518,11 @@ impl SledBuilder {
             hardware: SledHardware::Gimlet,
             hardware_slot: None,
             sled_role: SledRole::Gimlet,
+            omicron_zones: OmicronZonesConfig {
+                // The initial generation is the one with no zones.
+                generation: OmicronZonesConfig::INITIAL_GENERATION,
+                zones: vec![],
+            },
             npools: 10,
         }
     }
@@ -408,6 +544,12 @@ impl SledBuilder {
         String: From<S>,
     {
         self.unique = Some(String::from(unique));
+        self
+    }
+
+    /// Set the Omicron zone configuration for this sled
+    pub fn omicron_zones(mut self, omicron_zones: OmicronZonesConfig) -> Self {
+        self.omicron_zones = omicron_zones;
         self
     }
 
@@ -474,6 +616,7 @@ impl Sled {
         unique: Option<String>,
         hardware: SledHardware,
         hardware_slot: u16,
+        omicron_zones: OmicronZonesConfig,
         nzpools: u8,
     ) -> Sled {
         use typed_rng::TypedUuidRng;
@@ -556,6 +699,7 @@ impl Sled {
                 sled_id,
                 usable_hardware_threads: 10,
                 usable_physical_ram: ByteCount::from(1024 * 1024),
+                omicron_zones,
                 // Populate disks, appearing like a real device.
                 disks: zpools
                     .values()
@@ -711,6 +855,9 @@ impl Sled {
             sled_id,
             usable_hardware_threads: inv_sled_agent.usable_hardware_threads,
             usable_physical_ram: inv_sled_agent.usable_physical_ram,
+            omicron_zones: inv_sled_agent.omicron_zones.clone(),
+            // TODO: should we copy over disks, zpools and datasets from the
+            // existing sled agent?
             disks: vec![],
             zpools: vec![],
             datasets: vec![],
