@@ -605,7 +605,7 @@ mod test {
 
         // Create an instance in the `Failed` state that's eligible to be
         // restarted.
-        let instance_id = create_instance(
+        let instance = create_instance(
             &cptestctx,
             &opctx,
             "my-cool-instance",
@@ -617,16 +617,13 @@ mod test {
         // Activate the task again, and check that our instance had an
         // instance-start saga started.
         let status = assert_activation_ok!(task.activate(&opctx).await);
-        assert_eq!(status.instances_found, 1);
-        assert_eq!(
-            status.instances_reincarnated,
-            vec![instance_id.into_untyped_uuid()]
-        );
+        assert_eq!(status.total_instances_found(), 1);
+        assert_eq!(status.instances_reincarnated, vec![failed(instance.id())]);
         assert_eq!(status.changed_state, Vec::new());
 
         test_helpers::instance_wait_for_state(
             &cptestctx,
-            instance_id,
+            InstanceUuid::from_untyped_uuid(instance.id()),
             InstanceState::Vmm,
         )
         .await;

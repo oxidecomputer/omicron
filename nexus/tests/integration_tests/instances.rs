@@ -1294,7 +1294,7 @@ async fn test_instance_failed_when_on_expunged_sled(
             let instance = create_instance_with(
                 client,
                 PROJECT_NAME,
-                instance_name,
+                name,
                 &params::InstanceNetworkInterfaceAttachment::Default,
                 // Disks=
                 Vec::<params::InstanceDiskAttachment>::new(),
