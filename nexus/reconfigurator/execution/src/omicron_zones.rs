@@ -189,7 +189,7 @@ async fn oximeter_cleanup(
 ) -> anyhow::Result<()> {
     // Record that this Oximeter instance is gone.
     datastore
-        .oximeter_delete(opctx, zone_id.into_untyped_uuid())
+        .oximeter_expunge(opctx, zone_id.into_untyped_uuid())
         .await
         .context("failed to mark Oximeter instance deleted")?;
 
