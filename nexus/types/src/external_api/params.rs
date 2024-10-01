@@ -998,11 +998,11 @@ pub enum ExternalIpDetach {
 pub struct InstanceCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
-    /// The number of vCPUs to be allocated to the instance.
+    /// The number of vCPUs to be allocated to the instance
     pub ncpus: InstanceCpuCount,
-    /// The amount of RAM (in bytes) to be allocated to the instance.
+    /// The amount of RAM (in bytes) to be allocated to the instance
     pub memory: ByteCount,
-    /// The hostname to be assigned to the instance.
+    /// The hostname to be assigned to the instance
     pub hostname: Hostname,
 
     /// User data for instance initialization systems (such as cloud-init).
@@ -1409,12 +1409,12 @@ pub enum DiskSource {
 /// Create-time parameters for a `Disk`
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct DiskCreate {
-    /// The common identifying metadata for the disk.
+    /// The common identifying metadata for the disk
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
-    /// The initial source for this disk.
+    /// The initial source for this disk
     pub disk_source: DiskSource,
-    /// The total size of the Disk (in bytes).
+    /// The total size of the Disk (in bytes)
     pub size: ByteCount,
 }
 
