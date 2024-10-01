@@ -1699,7 +1699,6 @@ pub mod test {
     use omicron_test_utils::dev::test_setup_log;
     use slog_error_chain::InlineErrorChain;
     use std::collections::BTreeSet;
-    use std::mem;
 
     pub const DEFAULT_N_SLEDS: usize = 3;
 
@@ -2075,13 +2074,14 @@ pub mod test {
             example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
 
         // Previously, we would clear out network resources from the planning
-        // input. However, currently, while constructing the example system,
-        // network resources do not make their way into the planning input! So
-        // we just check that it's empty. (Using `assert_eq!` shows `Debug`
-        // output, which is nice.)
+        // input here. However, currently, while constructing the example
+        // system, network resources do not make their way into the planning
+        // input. So that operation was a no-op.
         //
-        // TODO: This is arguably a bug and will hopefully be addressed in the
-        // future.
+        // For now, we just check that the network resources are empty.
+        //
+        // TODO: This is arguably a bug in how planning inputs are generated,
+        // and will hopefully be addressed in the future.
         assert_eq!(
             input.network_resources(),
             &OmicronZoneNetworkResources::new(),
@@ -2164,13 +2164,14 @@ pub mod test {
             example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
 
         // Previously, we would clear out network resources from the planning
-        // input. However, currently, while constructing the example system,
-        // network resources do not make their way into the planning input! So
-        // we just check that it's empty. (Using `assert_eq!` shows `Debug`
-        // output, which is nice.)
+        // input here. However, currently, while constructing the example
+        // system, network resources do not make their way into the planning
+        // input! So that operation was a no-op.
         //
-        // TODO: This is arguably a bug in how ExampleSystem is generated, and
-        // will hopefully be addressed in the future.
+        // For now, we just check that the network resources are empty.
+        //
+        // TODO: This is arguably a bug in how planning inputs are generated,
+        // and will hopefully be addressed in the future.
         assert_eq!(
             input.network_resources(),
             &OmicronZoneNetworkResources::new(),
@@ -2220,7 +2221,7 @@ pub mod test {
     fn test_add_nexus_error_cases() {
         static TEST_NAME: &str = "blueprint_builder_test_add_nexus_error_cases";
         let logctx = test_setup_log(TEST_NAME);
-        let (mut collection, mut input, mut parent) =
+        let (mut collection, input, mut parent) =
             example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
 
         // Remove the Nexus zone from one of the sleds so that
@@ -2234,50 +2235,35 @@ pub mod test {
                 if zones.zones.zones.len() < nzones_before_retain {
                     selected_sled_id = Some(*sled_id);
                     // Also remove this zone from the blueprint.
-                    let mut removed_nexus = None;
                     parent
                         .blueprint_zones
                         .get_mut(sled_id)
                         .expect("missing sled")
                         .zones
                         .retain(|z| match &z.zone_type {
-                            BlueprintZoneType::Nexus(z) => {
-                                removed_nexus = Some(z.clone());
-                                false
-                            }
+                            BlueprintZoneType::Nexus(_) => false,
                             _ => true,
                         });
-                    let removed_nexus =
-                        removed_nexus.expect("removed Nexus from blueprint");
 
-                    // Also remove this Nexus's external networking resources
-                    // from `input`.
-                    let mut builder = input.into_builder();
-                    let mut new_network_resources =
-                        OmicronZoneNetworkResources::new();
-                    let old_network_resources = builder.network_resources_mut();
-                    for ip in old_network_resources.omicron_zone_external_ips()
-                    {
-                        if ip.ip.id() != removed_nexus.external_ip.id {
-                            new_network_resources
-                                .add_external_ip(ip.zone_id, ip.ip)
-                                .expect("copied IP to new input");
-                        }
-                    }
-                    for nic in old_network_resources.omicron_zone_nics() {
-                        if nic.nic.id.into_untyped_uuid()
-                            != removed_nexus.nic.id
-                        {
-                            new_network_resources
-                                .add_nic(nic.zone_id, nic.nic)
-                                .expect("copied NIC to new input");
-                        }
-                    }
-                    mem::swap(
-                        old_network_resources,
-                        &mut new_network_resources,
+                    // Previously, we would clear out network resources from
+                    // the planning input assigned to the removed zone.
+                    // However, currently, while constructing the example
+                    // system, network resources do not make their way into the
+                    // planning input. So that operation was a no-op.
+                    //
+                    // For now, we just check that the network resources are
+                    // empty.
+                    //
+                    // TODO: This is arguably a bug in how planning inputs are
+                    // generated, and will hopefully be addressed in the
+                    // future.
+                    assert_eq!(
+                        input.network_resources(),
+                        &OmicronZoneNetworkResources::new(),
+                        "input network resources should be empty -- \
+                         has the ExampleSystem logic been updated to \
+                         populate them?"
                     );
-                    input = builder.build();
 
                     break;
                 }
@@ -2557,13 +2543,14 @@ pub mod test {
             example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
 
         // Previously, we would clear out network resources from the planning
-        // input. However, currently, while constructing the example system,
-        // network resources do not make their way into the planning input! So
-        // we just check that it's empty. (Using `assert_eq!` shows `Debug`
-        // output, which is nice.)
+        // input here. However, currently, while constructing the example
+        // system, network resources do not make their way into the planning
+        // input. So that operation was a no-op.
         //
-        // TODO: This is arguably a bug in how ExampleSystem is generated, and
-        // will hopefully be addressed in the future.
+        // For now, we just check that the network resources are empty.
+        //
+        // TODO: This is arguably a bug in how planning inputs are generated,
+        // and will hopefully be addressed in the future.
         assert_eq!(
             input.network_resources(),
             &OmicronZoneNetworkResources::new(),

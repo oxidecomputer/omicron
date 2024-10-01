@@ -409,6 +409,7 @@ table! {
         hostname -> Text,
         auto_restart_policy -> Nullable<crate::InstanceAutoRestartPolicyEnum>,
         auto_restart_cooldown -> Nullable<Interval>,
+        boot_disk_id -> Nullable<Uuid>,
         time_state_updated -> Timestamptz,
         state_generation -> Int8,
         active_propolis_id -> Nullable<Uuid>,

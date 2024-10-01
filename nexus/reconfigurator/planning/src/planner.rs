@@ -985,8 +985,9 @@ mod test {
             // planning input that were assigned to sleds other than
             // `keep_sled_id`. However, currently, while constructing the
             // example system, network resources do not make their way into the
-            // planning input! So we just check that it's empty. (Using
-            // `assert_eq!` shows `Debug` output, which is nice.)
+            // planning input! So that operation was a no-op.
+            //
+            // For now, we just check that the network resources are empty.
             //
             // TODO: This is arguably a bug in how ExampleSystem is generated,
             // and will hopefully be addressed in the future.

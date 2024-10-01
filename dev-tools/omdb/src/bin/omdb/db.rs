@@ -2941,6 +2941,7 @@ async fn cmd_db_instance_info(
     const VCPUS: &'static str = "vCPUs";
     const MEMORY: &'static str = "memory";
     const HOSTNAME: &'static str = "hostname";
+    const BOOT_DISK: &'static str = "boot disk";
     const AUTO_RESTART: &'static str = "auto-restart";
     const STATE: &'static str = "nexus state";
     const LAST_MODIFIED: &'static str = "last modified at";
@@ -2963,6 +2964,7 @@ async fn cmd_db_instance_info(
         DELETED,
         VCPUS,
         MEMORY,
+        BOOT_DISK,
         HOSTNAME,
         AUTO_RESTART,
         STATE,
@@ -3006,6 +3008,7 @@ async fn cmd_db_instance_info(
     println!("    {VCPUS:>WIDTH$}: {}", instance.ncpus.0 .0);
     println!("    {MEMORY:>WIDTH$}: {}", instance.memory.0);
     println!("    {HOSTNAME:>WIDTH$}: {}", instance.hostname);
+    println!("    {BOOT_DISK:>WIDTH$}: {:?}", instance.boot_disk_id);
     print_multiline_debug(AUTO_RESTART, &instance.auto_restart);
     println!("\n{:=<80}", "== RUNTIME STATE ");
     let InstanceRuntimeState {
