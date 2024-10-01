@@ -348,6 +348,7 @@ impl SledAgent {
                     properties,
                     nics: vec![],
                     disks: vec![],
+                    boot_settings: None,
                     migrate: None,
                     cloud_init_bytes: None,
                 };

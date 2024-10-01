@@ -1876,6 +1876,34 @@
           }
         ]
       },
+      "BootOrderEntry": {
+        "description": "An entry in a list of boot options.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"An entry in a list of boot options.\", \"type\": \"object\", \"required\": [ \"name\" ], \"properties\": { \"name\": { \"description\": \"The name of the device to attempt booting from.\", \"type\": \"string\" } } } ``` </details>",
+        "type": "object",
+        "properties": {
+          "name": {
+            "description": "The name of the device to attempt booting from.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "BootSettings": {
+        "description": "BootSettings\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"order\" ], \"properties\": { \"order\": { \"type\": \"array\", \"items\": { \"$ref\": \"#/components/schemas/BootOrderEntry\" } } } } ``` </details>",
+        "type": "object",
+        "properties": {
+          "order": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BootOrderEntry"
+            }
+          }
+        },
+        "required": [
+          "order"
+        ]
+      },
       "BootstoreStatus": {
         "type": "object",
         "properties": {
@@ -3219,6 +3247,14 @@
         "description": "Describes the instance hardware.",
         "type": "object",
         "properties": {
+          "boot_settings": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BootSettings"
+              }
+            ]
+          },
           "cloud_init_bytes": {
             "nullable": true,
             "type": "string"

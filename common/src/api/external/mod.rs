@@ -348,6 +348,16 @@ impl TryFrom<String> for NameOrId {
     }
 }
 
+impl FromStr for NameOrId {
+    // TODO: We should have better error types here.
+    // See https://github.com/oxidecomputer/omicron/issues/347
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        NameOrId::try_from(String::from(value))
+    }
+}
+
 impl From<Name> for NameOrId {
     fn from(name: Name) -> Self {
         NameOrId::Name(name)
@@ -1182,6 +1192,9 @@ pub struct Instance {
     pub memory: ByteCount,
     /// RFC1035-compliant hostname for the Instance.
     pub hostname: String,
+
+    /// the ID of the disk used to boot this Instance, if a specific one is assigned.
+    pub boot_disk_id: Option<Uuid>,
 
     #[serde(flatten)]
     pub runtime: InstanceRuntimeState,
