@@ -1202,6 +1202,7 @@ fn cmd_load(
         let result = sim.system.sled_full(
             sled_id,
             sled_details.policy,
+            sled_details.state,
             sled_details.resources.clone(),
             inventory_sp,
             inventory_sled_agent,
