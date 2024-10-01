@@ -6,12 +6,11 @@ use crate::context::ServerContext;
 use clickhouse_admin_api::*;
 use clickhouse_admin_types::config::{KeeperConfig, ReplicaConfig};
 use clickhouse_admin_types::{
-    ClickhouseKeeperClusterMembership, KeeperConf, KeeperId, Lgif, RaftConfig,
+    ClickhouseKeeperClusterMembership, KeeperConf, Lgif, RaftConfig,
 };
 use dropshot::{
     HttpError, HttpResponseCreated, HttpResponseOk, RequestContext, TypedBody,
 };
-use std::collections::BTreeSet;
 use std::sync::Arc;
 
 type ClickhouseApiDescription = dropshot::ApiDescription<Arc<ServerContext>>;
@@ -80,16 +79,7 @@ impl ClickhouseAdminApi for ClickhouseAdminImpl {
     ) -> Result<HttpResponseOk<ClickhouseKeeperClusterMembership>, HttpError>
     {
         let ctx = rqctx.context();
-        let lgif_output = ctx.clickhouse_cli().lgif().await?;
-        let conf_output = ctx.clickhouse_cli().keeper_conf().await?;
-        let raft_output = ctx.clickhouse_cli().raft_config().await?;
-        let raft_config: BTreeSet<KeeperId> =
-            raft_output.keeper_servers.iter().map(|s| s.server_id).collect();
-
-        Ok(HttpResponseOk(ClickhouseKeeperClusterMembership {
-            queried_keeper: conf_output.server_id,
-            leader_committed_log_index: lgif_output.leader_committed_log_idx,
-            raft_config,
-        }))
+        let output = ctx.clickhouse_cli().keeper_cluster_membership().await?;
+        Ok(HttpResponseOk(output))
     }
 }
