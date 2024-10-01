@@ -454,6 +454,7 @@ mod test {
                             params::InstanceNetworkInterfaceAttachment::None,
                         external_ips: Vec::new(),
                         disks: Vec::new(),
+                        boot_disk: None,
                         ssh_public_keys: None,
                         start: false,
                         auto_restart_policy: Default::default(),

@@ -336,6 +336,7 @@ struct InstanceRunner {
 
     // Disk related properties
     requested_disks: Vec<propolis_client::types::DiskRequest>,
+    boot_settings: Option<propolis_client::types::BootSettings>,
     cloud_init_bytes: Option<NoDebug<String>>,
 
     // Internal State management
@@ -735,6 +736,7 @@ impl InstanceRunner {
                 .cloned()
                 .map(Into::into)
                 .collect(),
+            boot_settings: self.boot_settings.clone(),
             migrate,
             cloud_init_bytes: self.cloud_init_bytes.clone().map(|x| x.0),
         };
@@ -1105,6 +1107,7 @@ impl Instance {
             dhcp_config,
             requested_disks: hardware.disks,
             cloud_init_bytes: hardware.cloud_init_bytes,
+            boot_settings: hardware.boot_settings,
             state: InstanceStates::new(vmm_runtime, migration_id),
             running_state: None,
             nexus_client,
@@ -1836,6 +1839,7 @@ mod tests {
                 search_domains: vec![],
             },
             disks: vec![],
+            boot_settings: None,
             cloud_init_bytes: None,
         };
 

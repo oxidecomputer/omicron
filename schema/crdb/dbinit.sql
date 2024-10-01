@@ -1108,7 +1108,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
      * by the control plane.
      */
     auto_restart_policy omicron.public.instance_auto_restart,
-
     /*
      * The cooldown period that must elapse between consecutive auto restart
      * attempts. If this is NULL, no cooldown period is explicitly configured
@@ -1116,6 +1115,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
      */
      auto_restart_cooldown INTERVAL,
 
+    /*
+     * Which disk, if any, is the one this instance should be directed to boot
+     * from. With a boot device selected, guest OSes cannot configure their
+     * boot policy for future boots, so also permit NULL to indicate a guest
+     * does not want our policy, and instead should be permitted control over
+     * its boot-time fates.
+     */
+    boot_disk_id UUID,
 
     CONSTRAINT vmm_iff_active_propolis CHECK (
         ((state = 'vmm') AND (active_propolis_id IS NOT NULL)) OR
@@ -4414,7 +4421,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '106.0.0', NULL)
+    (TRUE, NOW(), NOW(), '107.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
