@@ -1705,7 +1705,7 @@ mod tests {
         let logctx =
             test_setup_log("correctly_negate_field_predicate_expression");
         let schema = test_schema();
-        let now = NaiveDate::from_ymd_opt(2024, 01, 01)
+        let now = NaiveDate::from_ymd_opt(2024, 1, 1)
             .unwrap()
             .and_hms_opt(0, 0, 0)
             .unwrap()
