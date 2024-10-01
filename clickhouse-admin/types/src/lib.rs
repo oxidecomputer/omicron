@@ -910,8 +910,11 @@ impl KeeperConf {
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct ClickhouseKeeperClusterMembership {
+    /// Keeper ID of the keeper being queried
     pub queried_keeper: KeeperId,
+    /// Index of the last committed log entry from the leader's perspective
     pub leader_committed_log_index: u64,
+    /// Keeper IDs of all keepers in the cluster
     pub raft_config: BTreeSet<KeeperId>,
 }
 

@@ -5,12 +5,11 @@
 //! A mechanism for allocating clickhouse keeper and server nodes for clustered
 //! clickhouse setups during blueprint planning
 
-use clickhouse_admin_types::KeeperId;
+use clickhouse_admin_types::{ClickhouseKeeperClusterMembership, KeeperId};
 use nexus_types::deployment::{
     Blueprint, BlueprintZoneFilter, BlueprintZoneType, BlueprintZonesConfig,
     ClickhouseClusterConfig,
 };
-use nexus_types::inventory::ClickhouseKeeperClusterMembership;
 use omicron_uuid_kinds::{OmicronZoneUuid, SledUuid};
 use slog::{error, Logger};
 use std::collections::{BTreeMap, BTreeSet};
