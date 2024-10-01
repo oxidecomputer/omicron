@@ -44,7 +44,6 @@ pub(crate) struct Params {
     pub create_params: params::InstanceCreate,
     pub boundary_switches: HashSet<SwitchLocation>,
 }
-
 // Several nodes in this saga are wrapped in their own subsaga so that they can
 // have a parameter that denotes which node they are (e.g., which NIC or which
 // external IP).  They also need the outer saga's parameters.
@@ -1077,8 +1076,12 @@ async fn sic_set_boot_disk(
         .await
         .map_err(ActionError::action_failed)?;
 
-    let initial_configuration =
-        nexus_db_model::InstanceUpdate { boot_disk_id: Some(authz_disk.id()) };
+    let initial_configuration = nexus_db_model::InstanceUpdate {
+        boot_disk_id: Some(authz_disk.id()),
+        // If this is `None`, whatever previous value was set when creating the
+        // instance will be unset and replaced with `NULL`. So don't do that!
+        auto_restart_policy: params.auto_restart_policy(),
+    };
 
     datastore
         .instance_reconfigure(&opctx, &authz_instance, initial_configuration)
@@ -1109,8 +1112,14 @@ async fn sic_set_boot_disk_undo(
 
     // If there was a boot disk, clear it. If there was not a boot disk,
     // this is a no-op.
-    let undo_configuration =
-        nexus_db_model::InstanceUpdate { boot_disk_id: None };
+    let undo_configuration = nexus_db_model::InstanceUpdate {
+        boot_disk_id: None,
+        // It would probably be fine to leave this as a `None` and clobber
+        // whatever's there with a NULL, since we are undoing the instance
+        // creation anyway, but it seems more proper to leave it untouched and
+        // only undo the boot disk configuration.
+        auto_restart_policy: params.auto_restart_policy(),
+    };
 
     datastore
         .instance_reconfigure(&opctx, &authz_instance, undo_configuration)
@@ -1157,6 +1166,15 @@ async fn sic_move_to_stopped(
     Ok(())
 }
 
+impl Params {
+    /// Returns the desired auto-restart policy for the created instance, or
+    /// `None` if one was not specified.
+    fn auto_restart_policy(
+        &self,
+    ) -> Option<db::model::InstanceAutoRestartPolicy> {
+        self.create_params.auto_restart_policy.map(Into::into)
+    }
+}
 #[cfg(test)]
 pub mod test {
     use crate::{
