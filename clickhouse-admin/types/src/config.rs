@@ -137,6 +137,13 @@ impl ReplicaConfig {
         </default>
     </quotas>
 
+    <query_log>
+        <database>system</database>
+        <table>query_log</table>
+        <engine>Engine = MergeTree ORDER BY event_time TTL event_date + INTERVAL 7 DAY</engine>
+        <flush_interval_milliseconds>10000</flush_interval_milliseconds>
+    </query_log>
+
     <tmp_path>{temp_files_path}</tmp_path>
     <user_files_path>{user_files_path}</user_files_path>
     <default_profile>default</default_profile>
