@@ -8,15 +8,15 @@ use crate::http_testing::NexusRequest;
 use dropshot::test_util::ClientTestContext;
 use nexus_client::types::BackgroundTask;
 use nexus_client::types::CurrentStatus;
-use nexus_client::types::CurrentStatusRunning;
 use nexus_client::types::LastResult;
 use nexus_client::types::LastResultCompleted;
 use nexus_types::internal_api::background::*;
 use omicron_test_utils::dev::poll::{wait_for_condition, CondCheckError};
 use std::time::Duration;
 
-/// Return the most recent start time for a background task
-fn most_recent_start_time(
+/// Return the most recent activate time for a background task, returning None
+/// if it has never been started or is currently running.
+fn most_recent_activate_time(
     task: &BackgroundTask,
 ) -> Option<chrono::DateTime<chrono::Utc>> {
     match task.current {
@@ -24,11 +24,11 @@ fn most_recent_start_time(
             LastResult::Completed(LastResultCompleted {
                 start_time, ..
             }) => Some(start_time),
+
             LastResult::NeverCompleted => None,
         },
-        CurrentStatus::Running(CurrentStatusRunning { start_time, .. }) => {
-            Some(start_time)
-        }
+
+        CurrentStatus::Running(..) => None,
     }
 }
 
@@ -45,7 +45,7 @@ pub async fn activate_background_task(
     .execute_and_parse_unwrap::<BackgroundTask>()
     .await;
 
-    let last_start = most_recent_start_time(&task);
+    let last_activate = most_recent_activate_time(&task);
 
     internal_client
         .make_request(
@@ -69,10 +69,45 @@ pub async fn activate_background_task(
             .execute_and_parse_unwrap::<BackgroundTask>()
             .await;
 
-            if matches!(&task.current, CurrentStatus::Idle)
-                && most_recent_start_time(&task) > last_start
-            {
-                Ok(task)
+            // Wait until the task has actually run and then is idle
+            if matches!(&task.current, CurrentStatus::Idle) {
+                let current_activate = most_recent_activate_time(&task);
+                match (current_activate, last_activate) {
+                    (None, None) => {
+                        // task is idle but it hasn't started yet, and it was
+                        // never previously activated
+                        Err(CondCheckError::<()>::NotYet)
+                    }
+
+                    (Some(_), None) => {
+                        // task was activated for the first time by this
+                        // function call, and it's done now (because the task is
+                        // idle)
+                        Ok(task)
+                    }
+
+                    (None, Some(_)) => {
+                        // the task is idle (due to the check above) but
+                        // `most_recent_activate_time` returned None, implying
+                        // that the LastResult is NeverCompleted? the Some in
+                        // the second part of the tuple means this ran before,
+                        // so panic here.
+                        panic!("task is idle, but there's no activate time?!");
+                    }
+
+                    (Some(current_activation), Some(last_activation)) => {
+                        // the task is idle, it started ok, and it was
+                        // previously activated: compare times to make sure we
+                        // didn't observe the same BackgroundTask object
+                        if current_activation > last_activation {
+                            Ok(task)
+                        } else {
+                            // the task hasn't started yet, we observed the same
+                            // BackgroundTask object
+                            Err(CondCheckError::<()>::NotYet)
+                        }
+                    }
+                }
             } else {
                 Err(CondCheckError::<()>::NotYet)
             }
