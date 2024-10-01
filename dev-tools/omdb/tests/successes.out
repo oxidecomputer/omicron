@@ -150,6 +150,7 @@ SP DETAILS: type "Sled" slot 0
         dev-7        FAKE U.2 Sharkfin A hot swap controller  max5970         Present  None   
         dev-8        FAKE U.2 A NVMe Basic Management Command nvme_bmc        Present  None   
         dev-39       FAKE T6 temperature sensor               tmp451          Present  None   
+        dev-46       CPU temperature sensor                   sbtsi           Present  None   
         dev-53       FAKE Fan controller                      max31790        Present  None   
 
     CABOOSES: none found
@@ -183,6 +184,7 @@ SP DETAILS: type "Sled" slot 1
         dev-7        FAKE U.2 Sharkfin A hot swap controller  max5970      Present  None   
         dev-8        FAKE U.2 A NVMe Basic Management Command nvme_bmc     Present  None   
         dev-39       FAKE T6 temperature sensor               tmp451       Present  None   
+        dev-46       CPU temperature sensor                   sbtsi        Present  None   
         dev-53       FAKE Fan controller                      max31790     Present  None   
 
     CABOOSES: none found
@@ -300,6 +302,11 @@ task: "external_endpoints"
     reads config for silos and TLS certificates to determine the right set of
     HTTP endpoints, their HTTP server names, and which TLS certificates to use
     on each one
+
+
+task: "instance_reincarnation"
+    schedules start sagas for failed instances that can be automatically
+    restarted
 
 
 task: "instance_updater"
@@ -517,6 +524,18 @@ task: "external_endpoints"
         warning: silo ..........<REDACTED_UUID>........... with DNS name "test-suite-silo.sys.oxide-dev.test" has no usable certificates
 
     TLS certificates: 0
+
+task: "instance_reincarnation"
+  configured period: every 10m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    instances eligible for reincarnation:                          0
+      instance failed instances:                                   0
+      start saga failed instances:                                 0
+    instances reincarnated successfully:                           0
+    instances which changed state before they could reincarnate:   0
+    instances which failed to reincarnate:                         0
 
 task: "instance_updater"
   configured period: every <REDACTED_DURATION>s
@@ -947,6 +966,18 @@ task: "external_endpoints"
         warning: silo ..........<REDACTED_UUID>........... with DNS name "test-suite-silo.sys.oxide-dev.test" has no usable certificates
 
     TLS certificates: 0
+
+task: "instance_reincarnation"
+  configured period: every 10m
+  currently executing: no
+  last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
+    started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
+    instances eligible for reincarnation:                          0
+      instance failed instances:                                   0
+      start saga failed instances:                                 0
+    instances reincarnated successfully:                           0
+    instances which changed state before they could reincarnate:   0
+    instances which failed to reincarnate:                         0
 
 task: "instance_updater"
   configured period: every <REDACTED_DURATION>s

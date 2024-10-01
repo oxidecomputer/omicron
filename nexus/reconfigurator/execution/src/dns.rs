@@ -60,7 +60,7 @@ pub(crate) async fn deploy_dns(
 
     // Next, construct the DNS config represented by the blueprint.
     let internal_dns_zone_blueprint =
-        blueprint_internal_dns_config(blueprint, sleds_by_id, overrides);
+        blueprint_internal_dns_config(blueprint, sleds_by_id, overrides)?;
     let silos = datastore
         .silo_list_all_batched(opctx, Discoverability::All)
         .await
@@ -250,7 +250,7 @@ pub fn blueprint_internal_dns_config(
     blueprint: &Blueprint,
     sleds_by_id: &BTreeMap<SledUuid, Sled>,
     overrides: &Overridables,
-) -> DnsConfigZone {
+) -> Result<DnsConfigZone, Error> {
     // The DNS names configured here should match what RSS configures for the
     // same zones.  It's tricky to have RSS share the same code because it uses
     // Sled Agent's _internal_ `OmicronZoneConfig` (and friends), whereas we're
@@ -259,7 +259,7 @@ pub fn blueprint_internal_dns_config(
     // the details.
     let mut dns_builder = DnsConfigBuilder::new();
 
-    for (_, zone) in
+    'all_zones: for (_, zone) in
         blueprint.all_omicron_zones(BlueprintZoneFilter::ShouldBeInInternalDns)
     {
         let (service_name, port) = match &zone.zone_type {
@@ -271,13 +271,37 @@ pub fn blueprint_internal_dns_config(
             ) => (ServiceName::InternalNtp, address.port()),
             BlueprintZoneType::Clickhouse(
                 blueprint_zone_type::Clickhouse { address, .. },
-            ) => (ServiceName::Clickhouse, address.port()),
+            )
+            | BlueprintZoneType::ClickhouseServer(
+                blueprint_zone_type::ClickhouseServer { address, .. },
+            ) => {
+                // Add the HTTP and native TCP interfaces for ClickHouse data
+                // replicas. This adds the zone itself, so we need to continue
+                // back up to the loop over all the Omicron zones, rather than
+                // falling through to call `host_zone_with_one_backend()`.
+                let http_service = if matches!(
+                    &zone.zone_type,
+                    BlueprintZoneType::Clickhouse(_)
+                ) {
+                    ServiceName::Clickhouse
+                } else {
+                    ServiceName::ClickhouseServer
+                };
+                dns_builder
+                    .host_zone_clickhouse(
+                        zone.id,
+                        zone.underlay_address,
+                        http_service,
+                        address.port(),
+                    )
+                    .map_err(|e| Error::InternalError {
+                        internal_message: e.to_string(),
+                    })?;
+                continue 'all_zones;
+            }
             BlueprintZoneType::ClickhouseKeeper(
                 blueprint_zone_type::ClickhouseKeeper { address, .. },
             ) => (ServiceName::ClickhouseKeeper, address.port()),
-            BlueprintZoneType::ClickhouseServer(
-                blueprint_zone_type::ClickhouseServer { address, .. },
-            ) => (ServiceName::ClickhouseServer, address.port()),
             BlueprintZoneType::CockroachDb(
                 blueprint_zone_type::CockroachDb { address, .. },
             ) => (ServiceName::Cockroach, address.port()),
@@ -302,9 +326,6 @@ pub fn blueprint_internal_dns_config(
                 blueprint_zone_type::InternalDns { http_address, .. },
             ) => (ServiceName::InternalDns, http_address.port()),
         };
-
-        // This unwrap is safe because this function only fails if we provide
-        // the same zone id twice, which should not be possible here.
         dns_builder
             .host_zone_with_one_backend(
                 zone.id,
@@ -312,14 +333,15 @@ pub fn blueprint_internal_dns_config(
                 service_name,
                 port,
             )
-            .unwrap();
+            .map_err(|e| Error::InternalError {
+                internal_message: e.to_string(),
+            })?;
     }
 
     let scrimlets = sleds_by_id.values().filter(|sled| sled.is_scrimlet);
     for scrimlet in scrimlets {
         let sled_subnet = scrimlet.subnet();
         let switch_zone_ip = overrides.switch_zone_ip(scrimlet.id, sled_subnet);
-        // unwrap(): see above.
         dns_builder
             .host_zone_switch(
                 scrimlet.id,
@@ -328,10 +350,12 @@ pub fn blueprint_internal_dns_config(
                 overrides.mgs_port(scrimlet.id),
                 overrides.mgd_port(scrimlet.id),
             )
-            .unwrap();
+            .map_err(|e| Error::InternalError {
+                internal_message: e.to_string(),
+            })?;
     }
 
-    dns_builder.build_zone()
+    Ok(dns_builder.build_zone())
 }
 
 pub fn blueprint_external_dns_config(
@@ -703,19 +727,11 @@ mod test {
                     gz_address_index,
                 },
             ),
-            OmicronZoneType::InternalNtp {
-                address,
-                dns_servers,
-                domain,
-                ntp_servers,
-            } => BlueprintZoneType::InternalNtp(
-                blueprint_zone_type::InternalNtp {
-                    address,
-                    ntp_servers,
-                    dns_servers,
-                    domain,
-                },
-            ),
+            OmicronZoneType::InternalNtp { address } => {
+                BlueprintZoneType::InternalNtp(
+                    blueprint_zone_type::InternalNtp { address },
+                )
+            }
             OmicronZoneType::Nexus {
                 external_dns_servers,
                 external_ip,
@@ -763,7 +779,8 @@ mod test {
             &blueprint,
             &BTreeMap::new(),
             &Default::default(),
-        );
+        )
+        .unwrap();
         assert!(blueprint_dns.records.is_empty());
     }
 
@@ -888,7 +905,8 @@ mod test {
             &blueprint,
             &sleds_by_id,
             &Default::default(),
-        );
+        )
+        .unwrap();
         assert_eq!(blueprint_dns_zone.zone_name, DNS_ZONE);
 
         // Now, verify a few different properties about the generated DNS
@@ -1055,6 +1073,7 @@ mod test {
         // Tfport).
         let mut srv_kinds_expected = BTreeSet::from([
             ServiceName::Clickhouse,
+            ServiceName::ClickhouseNative,
             ServiceName::Cockroach,
             ServiceName::InternalDns,
             ServiceName::ExternalDns,

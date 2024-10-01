@@ -1661,6 +1661,15 @@
             "items": {
               "$ref": "#/components/schemas/ArtifactHashId"
             }
+          },
+          "sign": {
+            "nullable": true,
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint8",
+              "minimum": 0
+            }
           }
         },
         "required": [
@@ -3413,16 +3422,24 @@
         ]
       },
       "SpComponentCaboose": {
-        "description": "SpComponentCaboose\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"board\", \"git_commit\", \"name\", \"version\" ], \"properties\": { \"board\": { \"type\": \"string\" }, \"git_commit\": { \"type\": \"string\" }, \"name\": { \"type\": \"string\" }, \"version\": { \"type\": \"string\" } } } ``` </details>",
+        "description": "SpComponentCaboose\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"board\", \"git_commit\", \"name\", \"version\" ], \"properties\": { \"board\": { \"type\": \"string\" }, \"epoch\": { \"type\": [ \"string\", \"null\" ] }, \"git_commit\": { \"type\": \"string\" }, \"name\": { \"type\": \"string\" }, \"sign\": { \"type\": [ \"string\", \"null\" ] }, \"version\": { \"type\": \"string\" } } } ``` </details>",
         "type": "object",
         "properties": {
           "board": {
+            "type": "string"
+          },
+          "epoch": {
+            "nullable": true,
             "type": "string"
           },
           "git_commit": {
             "type": "string"
           },
           "name": {
+            "type": "string"
+          },
+          "sign": {
+            "nullable": true,
             "type": "string"
           },
           "version": {

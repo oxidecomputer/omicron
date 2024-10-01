@@ -19,6 +19,7 @@ pub(crate) enum DiscretionaryOmicronZone {
     ClickhouseServer,
     CockroachDb,
     InternalDns,
+    ExternalDns,
     Nexus,
     // TODO expand this enum as we start to place more services
 }
@@ -37,11 +38,11 @@ impl DiscretionaryOmicronZone {
             }
             BlueprintZoneType::CockroachDb(_) => Some(Self::CockroachDb),
             BlueprintZoneType::InternalDns(_) => Some(Self::InternalDns),
+            BlueprintZoneType::ExternalDns(_) => Some(Self::ExternalDns),
             BlueprintZoneType::Nexus(_) => Some(Self::Nexus),
             // Zones that we should place but don't yet.
             BlueprintZoneType::Clickhouse(_)
             | BlueprintZoneType::CruciblePantry(_)
-            | BlueprintZoneType::ExternalDns(_)
             | BlueprintZoneType::Oximeter(_) => None,
             // Zones that get special handling for placement (all sleds get
             // them, although internal NTP has some interactions with boundary
@@ -64,6 +65,7 @@ impl From<DiscretionaryOmicronZone> for ZoneKind {
             }
             DiscretionaryOmicronZone::CockroachDb => Self::CockroachDb,
             DiscretionaryOmicronZone::InternalDns => Self::InternalDns,
+            DiscretionaryOmicronZone::ExternalDns => Self::ExternalDns,
             DiscretionaryOmicronZone::Nexus => Self::Nexus,
         }
     }

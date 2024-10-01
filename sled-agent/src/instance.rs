@@ -17,7 +17,6 @@ use crate::profile::*;
 use crate::zone_bundle::BundleError;
 use crate::zone_bundle::ZoneBundler;
 use anyhow::anyhow;
-use backoff::BackoffError;
 use chrono::Utc;
 use illumos_utils::dladm::Etherstub;
 use illumos_utils::link::VnicAllocator;
@@ -30,9 +29,11 @@ use omicron_common::api::internal::shared::{
     NetworkInterface, ResolvedVpcFirewallRule, SledIdentifiers, SourceNatConfig,
 };
 use omicron_common::backoff;
+use omicron_common::backoff::BackoffError;
 use omicron_common::zpool_name::ZpoolName;
 use omicron_common::NoDebug;
 use omicron_uuid_kinds::{GenericUuid, InstanceUuid, PropolisUuid};
+use propolis_api_types::ErrorCode as PropolisErrorCode;
 use propolis_client::Client as PropolisClient;
 use rand::prelude::IteratorRandom;
 use rand::SeedableRng;
@@ -64,7 +65,7 @@ pub enum Error {
     VnicCreation(#[from] illumos_utils::dladm::CreateVnicError),
 
     #[error("Failure from Propolis Client: {0}")]
-    Propolis(#[from] propolis_client::Error<propolis_client::types::Error>),
+    Propolis(#[from] PropolisClientError),
 
     // TODO: Remove this error; prefer to retry notifications.
     #[error("Notifying Nexus failed: {0}")]
@@ -129,6 +130,9 @@ pub enum Error {
     #[error("Instance is terminating")]
     Terminating,
 }
+
+type PropolisClientError =
+    propolis_client::Error<propolis_client::types::Error>;
 
 // Issues read-only, idempotent HTTP requests at propolis until it responds with
 // an acknowledgement. This provides a hacky mechanism to "wait until the HTTP
@@ -248,24 +252,32 @@ enum InstanceRequest {
 struct InstanceMonitorRunner {
     client: Arc<PropolisClient>,
     tx_monitor: mpsc::Sender<InstanceMonitorRequest>,
+    log: slog::Logger,
 }
 
 impl InstanceMonitorRunner {
     async fn run(self) -> Result<(), anyhow::Error> {
-        let mut gen = 0;
+        let mut generation = 0;
         loop {
-            // State monitoring always returns the most recent state/gen pair
-            // known to Propolis.
-            let response = self
-                .client
-                .instance_state_monitor()
-                .body(propolis_client::types::InstanceStateMonitorRequest {
-                    gen,
-                })
-                .send()
-                .await?
-                .into_inner();
-            let observed_gen = response.gen;
+            let update = backoff::retry_notify(
+                backoff::retry_policy_local(),
+                || self.monitor(generation),
+                |error, delay| {
+                    warn!(
+                        self.log,
+                        "Failed to poll Propolis state";
+                        "error" => %error,
+                        "retry_in" => ?delay,
+                        "generation" => generation,
+                    );
+                },
+            )
+            .await?;
+
+            // Update the state generation for the next poll.
+            if let InstanceMonitorUpdate::State(ref state) = update {
+                generation = state.r#gen + 1;
+            }
 
             // Now that we have the response from Propolis' HTTP server, we
             // forward that to the InstanceRunner.
@@ -273,26 +285,59 @@ impl InstanceMonitorRunner {
             // It will decide the new state, provide that info to Nexus,
             // and possibly identify if we should terminate.
             let (tx, rx) = oneshot::channel();
-            self.tx_monitor
-                .send(InstanceMonitorRequest::Update { state: response, tx })
-                .await?;
+            self.tx_monitor.send(InstanceMonitorRequest { update, tx }).await?;
 
             if let Reaction::Terminate = rx.await? {
                 return Ok(());
             }
+        }
+    }
 
-            // Update the generation number we're asking for, to ensure the
-            // Propolis will only return more recent values.
-            gen = observed_gen + 1;
+    async fn monitor(
+        &self,
+        generation: u64,
+    ) -> Result<InstanceMonitorUpdate, BackoffError<PropolisClientError>> {
+        // State monitoring always returns the most recent state/gen pair
+        // known to Propolis.
+        let result = self
+            .client
+            .instance_state_monitor()
+            .body(propolis_client::types::InstanceStateMonitorRequest {
+                r#gen: generation,
+            })
+            .send()
+            .await;
+        match result {
+            Ok(response) => {
+                let state = response.into_inner();
+
+                Ok(InstanceMonitorUpdate::State(state))
+            }
+            // If the channel has closed, then there's nothing left for us to do
+            // here. Go die.
+            Err(e) if self.tx_monitor.is_closed() => {
+                Err(BackoffError::permanent(e))
+            }
+            // Otherwise, was there a known error code from Propolis?
+            Err(e) => propolis_error_code(&self.log, &e)
+                // If we were able to parse a known error code, send it along to
+                // the instance runner task.
+                .map(InstanceMonitorUpdate::Error)
+                // Otherwise, just keep trying until we see a good state or
+                // known error code.
+                .ok_or_else(|| BackoffError::transient(e)),
         }
     }
 }
 
-enum InstanceMonitorRequest {
-    Update {
-        state: propolis_client::types::InstanceStateMonitorResponse,
-        tx: oneshot::Sender<Reaction>,
-    },
+enum InstanceMonitorUpdate {
+    State(propolis_client::types::InstanceStateMonitorResponse),
+    Error(PropolisErrorCode),
+}
+
+struct InstanceMonitorRequest {
+    update: InstanceMonitorUpdate,
+    tx: oneshot::Sender<Reaction>,
 }
 
 struct InstanceRunner {
@@ -336,6 +381,7 @@ struct InstanceRunner {
 
     // Disk related properties
     requested_disks: Vec<propolis_client::types::DiskRequest>,
+    boot_settings: Option<propolis_client::types::BootSettings>,
     cloud_init_bytes: Option<NoDebug<String>>,
 
     // Internal State management
@@ -370,9 +416,9 @@ impl InstanceRunner {
 
                 // Handle messages from our own "Monitor the VMM" task.
                 request = self.rx_monitor.recv() => {
-                    use InstanceMonitorRequest::*;
+                    use InstanceMonitorUpdate::*;
                     match request {
-                        Some(Update { state, tx }) => {
+                        Some(InstanceMonitorRequest { update: State(state), tx }) => {
                             let observed = ObservedPropolisState::new(&state);
                             let reaction = self.observe_state(&observed).await;
                             self.publish_state_to_nexus().await;
@@ -381,6 +427,41 @@ impl InstanceRunner {
                             // InstanceMonitorRunner has stopped running for
                             // some reason. We'd presumably handle that on the
                             // next iteration of the loop.
+                            if let Err(_) = tx.send(reaction) {
+                                warn!(self.log, "InstanceRunner failed to send to InstanceMonitorRunner");
+                            }
+                        },
+                         Some(InstanceMonitorRequest { update: Error(code), tx }) => {
+                            let reaction = if code == PropolisErrorCode::NoInstance {
+                                // If we see a `NoInstance` error code from
+                                // Propolis after the instance has been ensured,
+                                // this means that Propolis must have crashed
+                                // and been restarted, and now no longer
+                                // remembers that it once had a VM. In that
+                                // case, this Propolis is permanently busted, so
+                                // mark it as Failed and tear down the zone.
+                                warn!(
+                                    self.log,
+                                    "Propolis has lost track of its instance! \
+                                     It must have crashed. Moving to Failed";
+                                    "error_code" => ?code,
+                                );
+                                self.terminate(true).await;
+                                Reaction::Terminate
+                            } else {
+                                // The other error codes we know of are not
+                                // expected here --- they all relate to the
+                                // instance-creation APIs. So I guess we'll just
+                                // whine about it and then keep trying to
+                                // monitor the instance.
+                                warn!(
+                                    self.log,
+                                    "Propolis state monitor returned an \
+                                     unexpected error code";
+                                    "error_code" => ?code,
+                                );
+                                Reaction::Continue
+                            };
                             if let Err(_) = tx.send(reaction) {
                                 warn!(self.log, "InstanceRunner failed to send to InstanceMonitorRunner");
                             }
@@ -642,7 +723,7 @@ impl InstanceRunner {
     async fn propolis_state_put(
         &self,
         request: propolis_client::types::InstanceStateRequested,
-    ) -> Result<(), Error> {
+    ) -> Result<(), PropolisClientError> {
         let res = self
             .running_state
             .as_ref()
@@ -655,11 +736,10 @@ impl InstanceRunner {
 
         if let Err(e) = &res {
             error!(self.log, "Error from Propolis client: {:?}", e;
-                   "status" => ?e.status());
+               "status" => ?e.status());
         }
 
-        res?;
-        Ok(())
+        res.map(|_| ())
     }
 
     /// Sends an instance ensure request to this instance's Propolis.
@@ -735,6 +815,7 @@ impl InstanceRunner {
                 .cloned()
                 .map(Into::into)
                 .collect(),
+            boot_settings: self.boot_settings.clone(),
             migrate,
             cloud_init_bytes: self.cloud_init_bytes.clone().map(|x| x.0),
         };
@@ -772,6 +853,7 @@ impl InstanceRunner {
         let runner = InstanceMonitorRunner {
             client: client.clone(),
             tx_monitor: self.tx_monitor.clone(),
+            log: self.log.clone(),
         };
         let log = self.log.clone();
         let monitor_handle = tokio::task::spawn(async move {
@@ -960,6 +1042,29 @@ impl InstanceRunner {
     }
 }
 
+fn propolis_error_code(
+    log: &slog::Logger,
+    error: &PropolisClientError,
+) -> Option<PropolisErrorCode> {
+    // Is this a structured error response from the Propolis server?
+    let propolis_client::Error::ErrorResponse(ref rv) = &error else {
+        return None;
+    };
+
+    let code = rv.error_code.as_deref()?;
+    match code.parse::<PropolisErrorCode>() {
+        Err(parse_error) => {
+            warn!(log, "Propolis returned an unknown error code: {code:?}";
+                "status" => ?error.status(),
+                "error" => %error,
+                "code" => ?code,
+                "parse_error" => ?parse_error);
+            None
+        }
+        Ok(code) => Some(code),
+    }
+}
+
 /// Describes a single Propolis server that incarnates a specific instance.
 pub struct Instance {
     id: InstanceUuid,
@@ -1105,6 +1210,7 @@ impl Instance {
             dhcp_config,
             requested_disks: hardware.disks,
             cloud_init_bytes: hardware.cloud_init_bytes,
+            boot_settings: hardware.boot_settings,
             state: InstanceStates::new(vmm_runtime, migration_id),
             running_state: None,
             nexus_client,
@@ -1358,7 +1464,29 @@ impl InstanceRunner {
         };
 
         if let Some(p) = propolis_state {
-            self.propolis_state_put(p).await?;
+            if let Err(e) = self.propolis_state_put(p).await {
+                match propolis_error_code(&self.log, &e) {
+                    Some(
+                        code @ PropolisErrorCode::NoInstance
+                        | code @ PropolisErrorCode::CreateFailed,
+                    ) => {
+                        error!(self.log,
+                            "Propolis error code indicates VMM failure";
+                            "code" => ?code,
+                        );
+                        self.terminate(true).await;
+                        // We've transitioned to `Failed`, so just return the
+                        // failed state normally. We return early here instead
+                        // of falling through because we don't want to overwrite
+                        // `self.state` with the published VMM state determined
+                        // above.
+                        return Ok(self.state.sled_instance_state());
+                    }
+                    _ => {
+                        return Err(Error::Propolis(e));
+                    }
+                }
+            }
         }
         if let Some(s) = next_published {
             self.state.transition_vmm(s, Utc::now());
@@ -1836,6 +1964,7 @@ mod tests {
                 search_domains: vec![],
             },
             disks: vec![],
+            boot_settings: None,
             cloud_init_bytes: None,
         };
 

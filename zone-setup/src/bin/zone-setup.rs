@@ -4,7 +4,7 @@
 
 //! CLI to set up zone configuration
 
-use anyhow::{anyhow, Context};
+use anyhow::{anyhow, bail, Context};
 use clap::builder::{
     NonEmptyStringValueParser, StringValueParser, TypedValueParser,
 };
@@ -94,10 +94,14 @@ struct ChronySetupArgs {
     #[arg(short, long, action = ArgAction::Set)]
     boundary: bool,
     /// list of NTP servers
+    ///
+    /// At least one must be provided if this is a boundary NTP zone. Ignored if
+    /// this is an internal NTP zone: internal NTP zones find their servers, the
+    /// boundary NTP zones, via DNS.
     #[arg(
         short,
         long,
-        num_args = 1..,
+        num_args = 0..,
         value_parser = NonEmptyStringValueParser::default(),
     )]
     servers: Vec<String>,
@@ -467,6 +471,13 @@ maxslewrate 2708.333
     new_config = new_config.replace("@ALLOW@", &allow.to_string());
 
     if is_boundary {
+        if servers.is_empty() {
+            bail!(
+                "at least one upstream server must be provided for \
+                 boundary NTP zones"
+            );
+        }
+
         for s in servers {
             writeln!(
                 &mut new_config,
@@ -475,14 +486,6 @@ maxslewrate 2708.333
             .expect("write to String is infallible");
         }
     } else {
-        // TODO-cleanup: Remove specific boundary NTP servers after R10 is cut;
-        // once all racks are setting up the boundary NTP pool we can drop
-        // individual server lines:
-        // https://github.com/oxidecomputer/omicron/issues/6261
-        for s in servers {
-            writeln!(&mut new_config, "server {s} iburst minpoll 0 maxpoll 4")
-                .expect("write to String is infallible");
-        }
         writeln!(
             &mut new_config,
             "pool {boundary_pool} iburst maxdelay 0.1 maxsources 16",
@@ -559,6 +562,17 @@ async fn common_nw_set_up(
     );
     Ipadm::set_interface_mtu(&datalink)
         .with_context(|| format!("failed to set MTU on datalink {datalink}"))?;
+
+    info!(
+        log, "Setting TCP recv_buf size to 1 MB";
+    );
+    Ipadm::set_tcp_recv_buf().context("failed to set TCP recv_buf")?;
+
+    info!(
+        log, "Setting TCP congestion control algorithm to cubic";
+    );
+    Ipadm::set_tcp_congestion_control()
+        .context("failed to set TCP congestion_control")?;
 
     if static_addrs.is_empty() {
         info!(

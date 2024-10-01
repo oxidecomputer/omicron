@@ -1531,9 +1531,6 @@ mod test {
                     zone_type: BlueprintZoneType::InternalNtp(
                         blueprint_zone_type::InternalNtp {
                             address: "[::1]:80".parse().unwrap(),
-                            ntp_servers: vec![],
-                            dns_servers: vec![],
-                            domain: None,
                         },
                     ),
                 }],

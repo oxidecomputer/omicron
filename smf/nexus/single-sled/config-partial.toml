@@ -65,6 +65,8 @@ abandoned_vmm_reaper.period_secs = 60
 saga_recovery.period_secs = 600
 lookup_region_port.period_secs = 60
 instance_updater.period_secs = 30
+# How frequently to attempt to restart Failed instances?
+instance_reincarnation.period_secs = 60
 region_snapshot_replacement_start.period_secs = 30
 region_snapshot_replacement_garbage_collection.period_secs = 30
 region_snapshot_replacement_step.period_secs = 30

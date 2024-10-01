@@ -20,7 +20,11 @@ use crate::db::identity::Resource;
 use crate::db::lookup::LookupPath;
 use crate::db::model::Generation;
 use crate::db::model::Instance;
+use crate::db::model::InstanceAutoRestart;
+use crate::db::model::InstanceAutoRestartPolicy;
 use crate::db::model::InstanceRuntimeState;
+use crate::db::model::InstanceState;
+use crate::db::model::InstanceUpdate;
 use crate::db::model::Migration;
 use crate::db::model::MigrationState;
 use crate::db::model::Name;
@@ -34,10 +38,12 @@ use crate::db::pool::DbConnection;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateAndQueryResult;
 use crate::db::update_and_check::UpdateStatus;
+use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
 use nexus_db_model::Disk;
+use nexus_types::internal_api::background::ReincarnationReason;
 use omicron_common::api;
 use omicron_common::api::external;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -50,6 +56,7 @@ use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
 use omicron_common::api::external::MessagePair;
 use omicron_common::api::external::ResourceType;
+use omicron_common::api::external::UpdateResult;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::InstanceUuid;
@@ -149,19 +156,19 @@ impl InstanceAndActiveVmm {
                 InstanceState::Vmm,
                 Some(VmmState::Stopped | VmmState::Destroyed),
             ) => external::InstanceState::Stopping,
-            // - An instance with a "saga unwound" VMM, on the other hand, can
-            //   be treated as "stopped", since --- unlike "destroyed" --- a new
-            //   start saga can run at any time by just clearing out the old VMM
-            //   ID.
-            (InstanceState::Vmm, Some(VmmState::SagaUnwound)) => {
-                external::InstanceState::Stopped
-            }
             // - An instance with a "failed" VMM should *not* be counted as
             //   failed until the VMM is unlinked, because a start saga must be
-            //   able to run "failed" instance. Until then, it will continue to
-            //   appear "stopping".
+            //   able to run for a "failed" instance. Until then, it will
+            //   continue to appear "stopping".
             (InstanceState::Vmm, Some(VmmState::Failed)) => {
                 external::InstanceState::Stopping
+            }
+            // - An instance with a "saga unwound" VMM, on the other hand, can
+            //   be treated as "failed", since --- unlike an instance with a
+            //   "failed" active VMM --- a new start saga can run at any time by
+            //   just clearing out the old VMM ID.
+            (InstanceState::Vmm, Some(VmmState::SagaUnwound)) => {
+                external::InstanceState::Failed
             }
             // - An instance with no VMM is always "stopped" (as long as it's
             //   not "starting" etc.)
@@ -194,6 +201,39 @@ impl From<InstanceAndActiveVmm> for external::Instance {
             .as_ref()
             .map(|vmm| vmm.runtime.time_state_updated)
             .unwrap_or(value.instance.runtime_state.time_updated);
+        let auto_restart_status = {
+            let cooldown_expiration =
+                value.instance.runtime_state.time_last_auto_restarted.map(
+                    |t| {
+                        // The instance may or may not explicitly override the cooldown and
+                        // auto-restart policy settings. If it does not, return whatever
+                        // default values Nexus is currently using, so that they can be
+                        // displayed in the UI.
+                        //
+                        // Eventually, these fields may have project-level defaults, so if the
+                        // instance doesn't provide a value we'll have to use the
+                        // project's default if one exists. For now, though, fall back
+                        // to the hard- coded default if the instance hasn't overridden
+                        // it.
+                        let cooldown_duration =
+                            value.instance.auto_restart.cooldown.unwrap_or(
+                                InstanceAutoRestart::DEFAULT_COOLDOWN,
+                            );
+                        t + cooldown_duration
+                    },
+                );
+
+            let policy = value
+                .instance
+                .auto_restart
+                .policy
+                .unwrap_or(InstanceAutoRestart::DEFAULT_POLICY);
+            let enabled = match policy {
+                InstanceAutoRestartPolicy::Never => false,
+                InstanceAutoRestartPolicy::BestEffort => true,
+            };
+            external::InstanceAutoRestartStatus { enabled, cooldown_expiration }
+        };
 
         Self {
             identity: value.instance.identity(),
@@ -205,10 +245,17 @@ impl From<InstanceAndActiveVmm> for external::Instance {
                 .hostname
                 .parse()
                 .expect("found invalid hostname in the database"),
+            boot_disk_id: value.instance.boot_disk_id,
             runtime: external::InstanceRuntimeState {
                 run_state: value.effective_state(),
                 time_run_state_updated,
+                time_last_auto_restarted: value
+                    .instance
+                    .runtime_state
+                    .time_last_auto_restarted,
             },
+
+            auto_restart_status,
         }
     }
 }
@@ -433,6 +480,66 @@ impl DataStore {
             )
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// List all instances in the [`Failed`](InstanceState::Failed) state with an
+    /// auto-restart policy that permits them to be automatically restarted by
+    /// the control plane.
+    ///
+    /// This is used by the `instance_reincarnation` RPW to ensure that that any
+    /// such instances are restarted.
+    ///
+    /// This query returns `n` randomly-ordered instances which are eligible for
+    /// reincarnation. Because reincarnating an instance changes its state so
+    /// that it no longer matches this query, it isn't necessary to use
+    /// pagination to avoid the query returning the same instance multiple
+    /// times: instead, we just actually reincarnate it to remove it from the
+    /// result set. Randomizing the order in which instances are returned allows
+    /// a nicer distribution of work across multiple Nexus replicas'
+    /// `instance_reincarnation` tasks.
+    pub async fn find_reincarnatable_instances(
+        &self,
+        opctx: &OpContext,
+        reason: ReincarnationReason,
+        pagparams: &DataPageParams<'_, Uuid>,
+    ) -> ListResultVec<Instance> {
+        use db::schema::instance::dsl;
+        use db::schema::vmm::dsl as vmm_dsl;
+
+        let q = paginated(dsl::instance, dsl::id, &pagparams)
+            // Select only those instances which may be reincarnated.
+            .filter(InstanceAutoRestart::filter_reincarnatable());
+
+        match reason {
+            ReincarnationReason::Failed => {
+                // The instance must be in the Failed state.
+                q.filter(dsl::state.eq(InstanceState::Failed))
+                    .filter(dsl::active_propolis_id.is_null())
+                    .select(Instance::as_select())
+                    .load_async::<Instance>(
+                        &*self.pool_connection_authorized(opctx).await?,
+                    )
+                    .await
+            }
+            ReincarnationReason::SagaUnwound => {
+                // The instance must have an active VMM.
+                q.filter(dsl::state.eq(InstanceState::Vmm))
+                    .inner_join(
+                        vmm_dsl::vmm
+                            .on(dsl::active_propolis_id
+                                .eq(vmm_dsl::id.nullable())),
+                    )
+                    // The instance's active VMM must be in the `SagaUnwound`
+                    // state.
+                    .filter(vmm_dsl::state.eq(VmmState::SagaUnwound))
+                    .select(Instance::as_select())
+                    .load_async::<Instance>(
+                        &*self.pool_connection_authorized(opctx).await?,
+                    )
+                    .await
+            }
+        }
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     /// Fetches information about an Instance that the caller has previously
@@ -898,6 +1005,156 @@ impl DataStore {
         Ok(result)
     }
 
+    pub async fn instance_reconfigure(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+        update: InstanceUpdate,
+    ) -> Result<InstanceAndActiveVmm, Error> {
+        opctx.authorize(authz::Action::Modify, authz_instance).await?;
+
+        use crate::db::model::InstanceState;
+
+        use db::schema::disk::dsl as disk_dsl;
+        use db::schema::instance::dsl as instance_dsl;
+        use db::schema::vmm::dsl as vmm_dsl;
+
+        let err = OptionalError::new();
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let (instance, vmm) = self
+            .transaction_retry_wrapper("reconfigure_instance")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                let update = update.clone();
+                async move {
+                    // * Allow reconfiguration in NoVmm because there is no VMM
+                    //   to contend with.
+                    // * Allow reconfiguration in Failed to allow changing the
+                    //   boot disk of a failed instance and free its boot disk
+                    //   for detach.
+                    // * Allow reconfiguration in Creating because one of the
+                    //   last steps of instance creation, while the instance is
+                    //   still in Creating, is to reconfigure the instance to
+                    //   the desired boot disk.
+                    let ok_to_reconfigure_instance_states = [
+                        InstanceState::NoVmm,
+                        InstanceState::Failed,
+                        InstanceState::Creating,
+                    ];
+
+                    let instance_state = instance_dsl::instance
+                        .filter(instance_dsl::id.eq(authz_instance.id()))
+                        .filter(instance_dsl::time_deleted.is_null())
+                        .select(instance_dsl::state)
+                        .first_async::<InstanceState>(&conn)
+                        .await;
+
+                    match instance_state {
+                        Ok(state) => {
+                            let state_ok = ok_to_reconfigure_instance_states
+                                .contains(&state);
+
+                            if !state_ok {
+                                return Err(err.bail(Error::conflict(
+                                    "instance must be stopped to update",
+                                )));
+                            }
+                        }
+                        Err(diesel::NotFound) => {
+                            // If the instance simply doesn't exist, we
+                            // shouldn't retry. Bail with a useful error.
+                            return Err(err.bail(Error::not_found_by_id(
+                                ResourceType::Instance,
+                                &authz_instance.id(),
+                            )));
+                        }
+                        Err(e) => {
+                            return Err(e);
+                        }
+                    }
+
+                    if let Some(disk_id) = update.boot_disk_id {
+                        // Ensure the disk is currently attached before updating
+                        // the database.
+                        let expected_state = api::external::DiskState::Attached(
+                            authz_instance.id(),
+                        );
+
+                        let attached_disk: Option<Uuid> = disk_dsl::disk
+                            .filter(disk_dsl::id.eq(disk_id))
+                            .filter(
+                                disk_dsl::attach_instance_id
+                                    .eq(authz_instance.id()),
+                            )
+                            .filter(
+                                disk_dsl::disk_state.eq(expected_state.label()),
+                            )
+                            .select(disk_dsl::id)
+                            .first_async::<Uuid>(&conn)
+                            .await
+                            .optional()?;
+
+                        if attached_disk.is_none() {
+                            return Err(err.bail(Error::conflict(
+                                "boot disk must be attached",
+                            )));
+                        }
+                    }
+
+                    // if and when `Update` can update other fields, set them
+                    // here.
+                    //
+                    // NOTE: from this point forward it is OK if we update the
+                    // instance's `boot_disk_id` column with the updated value
+                    // again. It will have already been assigned with constraint
+                    // checking performed above, so updates will just be
+                    // repetitive, not harmful.
+
+                    // Update the row. We don't care about the returned
+                    // UpdateStatus, either way the database has been updated
+                    // with the state we're setting.
+                    diesel::update(instance_dsl::instance)
+                        .filter(instance_dsl::id.eq(authz_instance.id()))
+                        .set(update)
+                        .execute_async(&conn)
+                        .await?;
+
+                    // TODO: dedupe this query and  `instance_fetch_with_vmm`.
+                    // At the moment, we're only allowing instance
+                    // reconfiguration in states that would have no VMM, but
+                    // load it anyway so that we return correct data if this is
+                    // relaxed in the future...
+                    let (instance, vmm) = instance_dsl::instance
+                        .filter(instance_dsl::id.eq(authz_instance.id()))
+                        .filter(instance_dsl::time_deleted.is_null())
+                        .left_join(
+                            vmm_dsl::vmm.on(vmm_dsl::id
+                                .nullable()
+                                .eq(instance_dsl::active_propolis_id)
+                                .and(vmm_dsl::time_deleted.is_null())),
+                        )
+                        .select((
+                            Instance::as_select(),
+                            Option::<Vmm>::as_select(),
+                        ))
+                        .get_result_async(&conn)
+                        .await?;
+
+                    Ok((instance, vmm))
+                }
+            })
+            .await
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    return err;
+                }
+
+                public_error_from_diesel(e, ErrorHandler::Server)
+            })?;
+
+        Ok(InstanceAndActiveVmm { instance, vmm })
+    }
+
     pub async fn project_delete_instance(
         &self,
         opctx: &OpContext,
@@ -909,12 +1166,11 @@ impl DataStore {
         // instance must be "stopped" or "failed" in order to delete it.  The
         // delete operation sets "time_deleted" (just like with other objects)
         // and also sets the state to "destroyed".
-        use db::model::InstanceState as DbInstanceState;
         use db::schema::{disk, instance};
 
-        let stopped = DbInstanceState::NoVmm;
-        let failed = DbInstanceState::Failed;
-        let destroyed = DbInstanceState::Destroyed;
+        let stopped = InstanceState::NoVmm;
+        let failed = InstanceState::Failed;
+        let destroyed = InstanceState::Destroyed;
         let ok_to_delete_instance_states = vec![stopped, failed];
 
         let detached_label = api::external::DiskState::Detached.label();
@@ -1577,6 +1833,51 @@ impl DataStore {
             },
         }
     }
+
+    /// Sets an instance's auto-restart cooldown period to the provided
+    /// `TimeDelta`.
+    ///
+    /// This method returns `Error::Conflict` if the auto-restart cooldown
+    /// period has already been set.
+    ///
+    /// At present, this is only used for tests. If a future
+    /// external API for configuring this and other instance properties is
+    /// added, tests using this should be updated to use that instead.
+    pub async fn instance_set_auto_restart_cooldown(
+        &self,
+        opctx: &OpContext,
+        instance_id: &InstanceUuid,
+        cooldown: chrono::TimeDelta,
+    ) -> UpdateResult<bool> {
+        use db::schema::instance::dsl;
+        let id = instance_id.into_untyped_uuid();
+
+        let r = diesel::update(dsl::instance)
+            .filter(dsl::id.eq(id))
+            .filter(dsl::auto_restart_cooldown.is_null())
+            .set(dsl::auto_restart_cooldown.eq(cooldown))
+            .check_if_exists::<Instance>(id)
+            .execute_and_check(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Instance,
+                        LookupType::ById(id),
+                    ),
+                )
+            })?;
+        if r.status == UpdateStatus::Updated {
+            Ok(true)
+        } else if r.found.auto_restart.cooldown == Some(cooldown) {
+            Ok(false)
+        } else {
+            Err(Error::conflict(
+                "instance auto-restart cooldown is already set",
+            ))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1650,8 +1951,10 @@ mod tests {
                             params::InstanceNetworkInterfaceAttachment::None,
                         external_ips: Vec::new(),
                         disks: Vec::new(),
+                        boot_disk: None,
                         ssh_public_keys: None,
                         start: false,
+                        auto_restart_policy: Default::default(),
                     },
                 ),
             )
@@ -1933,6 +2236,7 @@ mod tests {
                     dst_propolis_id: None,
                     migration_id: None,
                     nexus_state: InstanceState::NoVmm,
+                    time_last_auto_restarted: None,
                 },
             )
             .await
@@ -1994,6 +2298,7 @@ mod tests {
             dst_propolis_id: None,
             migration_id: None,
             nexus_state: InstanceState::Vmm,
+            time_last_auto_restarted: None,
         };
 
         let updated = dbg!(
@@ -2095,6 +2400,7 @@ mod tests {
             dst_propolis_id: Some(Uuid::new_v4()),
             migration_id: Some(Uuid::new_v4()),
             nexus_state: InstanceState::Vmm,
+            time_last_auto_restarted: None,
         };
         let updated = dbg!(
             datastore
@@ -2123,6 +2429,7 @@ mod tests {
                         dst_propolis_id: None,
                         migration_id: None,
                         nexus_state: InstanceState::NoVmm,
+                        time_last_auto_restarted: None,
                     },
                 )
                 .await
@@ -2293,6 +2600,7 @@ mod tests {
                     propolis_id: Some(active_vmm.id),
                     dst_propolis_id: Some(target_vmm.id),
                     migration_id: Some(migration.id),
+                    time_last_auto_restarted: None,
                 },
             )
             .await
@@ -2663,6 +2971,7 @@ mod tests {
                             propolis_id: Some(vmm_id),
                             dst_propolis_id: None,
                             migration_id: None,
+                            time_last_auto_restarted: None,
                         },
                     )
                     .await

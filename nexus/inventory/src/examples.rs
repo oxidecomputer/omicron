@@ -24,7 +24,6 @@ use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageWhich;
 use omicron_common::api::external::ByteCount;
 use omicron_common::disk::DiskVariant;
-use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
 use std::sync::Arc;
 use strum::IntoEnumIterator;
@@ -280,6 +279,7 @@ pub fn representative() -> Representative {
     // This first one will match "sled1_bb"'s baseboard information.
     let sled_agent_id_basic =
         "c5aec1df-b897-49e4-8085-ccd975f9b529".parse().unwrap();
+
     // Add some disks to this first sled.
     let disks = vec![
         // Let's say we have one manufacturer for our M.2...
@@ -291,6 +291,11 @@ pub fn representative() -> Representative {
             },
             variant: DiskVariant::M2,
             slot: 0,
+            active_firmware_slot: 1,
+            next_active_firmware_slot: None,
+            number_of_firmware_slots: 1,
+            slot1_is_read_only: true,
+            slot_firmware_versions: vec![Some("EXAMP1".to_string())],
         },
         // ... and a couple different vendors for our U.2s
         InventoryDisk {
@@ -301,6 +306,11 @@ pub fn representative() -> Representative {
             },
             variant: DiskVariant::U2,
             slot: 1,
+            active_firmware_slot: 1,
+            next_active_firmware_slot: None,
+            number_of_firmware_slots: 1,
+            slot1_is_read_only: true,
+            slot_firmware_versions: vec![Some("EXAMP1".to_string())],
         },
         InventoryDisk {
             identity: omicron_common::disk::DiskIdentity {
@@ -310,6 +320,11 @@ pub fn representative() -> Representative {
             },
             variant: DiskVariant::U2,
             slot: 2,
+            active_firmware_slot: 1,
+            next_active_firmware_slot: None,
+            number_of_firmware_slots: 1,
+            slot1_is_read_only: true,
+            slot_firmware_versions: vec![Some("EXAMP1".to_string())],
         },
         InventoryDisk {
             identity: omicron_common::disk::DiskIdentity {
@@ -319,10 +334,26 @@ pub fn representative() -> Representative {
             },
             variant: DiskVariant::U2,
             slot: 3,
+            active_firmware_slot: 1,
+            next_active_firmware_slot: None,
+            number_of_firmware_slots: 1,
+            slot1_is_read_only: true,
+            slot_firmware_versions: vec![Some("EXAMP1".to_string())],
         },
     ];
-    let zpools = vec![];
-    let datasets = vec![];
+    let zpools = vec![InventoryZpool {
+        id: "283f5475-2606-4e83-b001-9a025dbcb8a0".parse().unwrap(),
+        total_size: ByteCount::from(4096),
+    }];
+    let datasets = vec![InventoryDataset {
+        id: Some("afc00483-0d7b-4181-87d5-0def937d3cd7".parse().unwrap()),
+        name: "mydataset".to_string(),
+        available: ByteCount::from(1024),
+        used: ByteCount::from(0),
+        quota: None,
+        reservation: None,
+        compression: "lz4".to_string(),
+    }];
 
     builder
         .found_sled_inventory(
@@ -501,6 +532,8 @@ pub fn caboose(unique: &str) -> SpComponentCaboose {
         git_commit: format!("git_commit_{}", unique),
         name: format!("name_{}", unique),
         version: format!("version_{}", unique),
+        sign: None,
+        epoch: None,
     }
 }
 
@@ -524,7 +557,7 @@ pub fn sled_agent(
         reservoir_size: ByteCount::from(1024),
         sled_role,
         sled_agent_address: "[::1]:56792".parse().unwrap(),
-        sled_id: sled_id.into_untyped_uuid(),
+        sled_id,
         usable_hardware_threads: 10,
         usable_physical_ram: ByteCount::from(1024 * 1024),
         disks,

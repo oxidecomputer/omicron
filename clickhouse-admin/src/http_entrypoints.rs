@@ -5,7 +5,7 @@
 use crate::context::ServerContext;
 use clickhouse_admin_api::*;
 use clickhouse_admin_types::config::{KeeperConfig, ReplicaConfig};
-use clickhouse_admin_types::Lgif;
+use clickhouse_admin_types::{KeeperConf, Lgif, RaftConfig};
 use dropshot::{
     HttpError, HttpResponseCreated, HttpResponseOk, RequestContext, TypedBody,
 };
@@ -53,6 +53,22 @@ impl ClickhouseAdminApi for ClickhouseAdminImpl {
     ) -> Result<HttpResponseOk<Lgif>, HttpError> {
         let ctx = rqctx.context();
         let output = ctx.clickhouse_cli().lgif().await?;
+        Ok(HttpResponseOk(output))
+    }
+
+    async fn raft_config(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<RaftConfig>, HttpError> {
+        let ctx = rqctx.context();
+        let output = ctx.clickhouse_cli().raft_config().await?;
+        Ok(HttpResponseOk(output))
+    }
+
+    async fn keeper_conf(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<KeeperConf>, HttpError> {
+        let ctx = rqctx.context();
+        let output = ctx.clickhouse_cli().keeper_conf().await?;
         Ok(HttpResponseOk(output))
     }
 }

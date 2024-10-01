@@ -50,6 +50,11 @@ set -o xtrace
 cargo --version
 rustc --version
 
+# Before we do _anything_, quickly check that Cargo.lock is properly locked.
+# Most of our tools (including releng!) eventually call `cargo xtask`, which
+# runs without `--locked` and will update the lockfile.
+cargo tree --locked >/dev/null
+
 ptime -m ./tools/install_builder_prerequisites.sh -yp
 source ./tools/include/force-git-over-https.sh
 

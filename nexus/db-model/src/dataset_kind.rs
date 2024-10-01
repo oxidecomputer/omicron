@@ -26,6 +26,7 @@ impl_enum_type!(
     ZoneRoot => b"zone_root"
     Zone => b"zone"
     Debug => b"debug"
+    Update => b"update"
 );
 
 impl From<&internal::shared::DatasetKind> for DatasetKind {
@@ -55,6 +56,7 @@ impl From<&internal::shared::DatasetKind> for DatasetKind {
             // The zone name, if it exists, is stored in a separate column.
             internal::shared::DatasetKind::Zone { .. } => DatasetKind::Zone,
             internal::shared::DatasetKind::Debug => DatasetKind::Debug,
+            internal::shared::DatasetKind::Update => DatasetKind::Update,
         }
     }
 }

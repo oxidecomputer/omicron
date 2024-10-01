@@ -34,26 +34,6 @@ pub mod zpool_name;
 
 pub use update::hex_schema;
 
-#[macro_export]
-macro_rules! generate_logging_api {
-    ($path:literal) => {
-        progenitor::generate_api!(
-            spec = $path,
-            inner_type = slog::Logger,
-            pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
-                slog::debug!(log, "client request";
-                    "method" => %request.method(),
-                    "uri" => %request.url(),
-                    "body" => ?&request.body(),
-                );
-            }),
-            post_hook = (|log: &slog::Logger, result: &Result<_, _>| {
-                slog::debug!(log, "client response"; "result" => ?result);
-            }),
-        );
-    };
-}
-
 /// A type that allows adding file and line numbers to log messages
 /// automatically. It should be instantiated at the root logger of each
 /// executable that desires this functionality, as in the following example.

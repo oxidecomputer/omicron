@@ -860,6 +860,8 @@ pub enum DatasetKind {
 
     // Other datasets
     Debug,
+    // Stores update artifacts (the "TUF Repo Depot")
+    Update,
 }
 
 impl Serialize for DatasetKind {
@@ -920,7 +922,7 @@ impl DatasetKind {
         match self {
             Cockroach | Crucible | Clickhouse | ClickhouseKeeper
             | ClickhouseServer | ExternalDns | InternalDns => true,
-            ZoneRoot | Zone { .. } | Debug => false,
+            ZoneRoot | Zone { .. } | Debug | Update => false,
         }
     }
 
@@ -958,6 +960,7 @@ impl fmt::Display for DatasetKind {
                 return Ok(());
             }
             Debug => "debug",
+            Update => "update",
         };
         write!(f, "{}", s)
     }
@@ -984,6 +987,7 @@ impl FromStr for DatasetKind {
             "internal_dns" => InternalDns,
             "zone" => ZoneRoot,
             "debug" => Debug,
+            "update" => Update,
             other => {
                 if let Some(name) = other.strip_prefix("zone/") {
                     Zone { name: name.to_string() }
@@ -1079,6 +1083,7 @@ mod tests {
             DatasetKind::ZoneRoot,
             DatasetKind::Zone { name: String::from("myzone") },
             DatasetKind::Debug,
+            DatasetKind::Update,
         ];
 
         assert_eq!(kinds.len(), DatasetKind::COUNT);

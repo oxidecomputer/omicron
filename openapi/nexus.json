@@ -1913,6 +1913,60 @@
           }
         }
       },
+      "put": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "Update instance",
+        "operationId": "instance_update",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "instance",
+            "description": "Name or ID of the instance",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstanceUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Instance"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
       "delete": {
         "tags": [
           "instances"
@@ -15092,6 +15146,22 @@
         "description": "View of an Instance",
         "type": "object",
         "properties": {
+          "auto_restart_cooldown_expiration": {
+            "nullable": true,
+            "description": "The time at which the auto-restart cooldown period for this instance completes, permitting it to be automatically restarted again. If the instance enters the `Failed` state, it will not be restarted until after this time.\n\nIf this is not present, then either the instance has never been automatically restarted, or the cooldown period has already expired, allowing the instance to be restarted immediately if it fails.",
+            "type": "string",
+            "format": "date-time"
+          },
+          "auto_restart_enabled": {
+            "description": "`true` if this instance's auto-restart policy will permit the control plane to automatically restart it if it enters the `Failed` state.",
+            "type": "boolean"
+          },
+          "boot_disk_id": {
+            "nullable": true,
+            "description": "the ID of the disk used to boot this Instance, if a specific one is assigned.",
+            "type": "string",
+            "format": "uuid"
+          },
           "description": {
             "description": "human-readable free-form text about a resource",
             "type": "string"
@@ -15142,6 +15212,12 @@
             "type": "string",
             "format": "date-time"
           },
+          "time_last_auto_restarted": {
+            "nullable": true,
+            "description": "The timestamp of the most recent time this instance was automatically restarted by the control plane.\n\nIf this is not present, then this instance has not been automatically restarted.",
+            "type": "string",
+            "format": "date-time"
+          },
           "time_modified": {
             "description": "timestamp when this resource was last modified",
             "type": "string",
@@ -15153,6 +15229,7 @@
           }
         },
         "required": [
+          "auto_restart_enabled",
           "description",
           "hostname",
           "id",
@@ -15166,6 +15243,25 @@
           "time_run_state_updated"
         ]
       },
+      "InstanceAutoRestartPolicy": {
+        "description": "A policy determining when an instance should be automatically restarted by the control plane.",
+        "oneOf": [
+          {
+            "description": "The instance should not be automatically restarted by the control plane if it fails.",
+            "type": "string",
+            "enum": [
+              "never"
+            ]
+          },
+          {
+            "description": "If this instance is running and unexpectedly fails (e.g. due to a host software crash or unexpected host reboot), the control plane will make a best-effort attempt to restart it. The control plane may choose not to restart the instance to preserve the overall availability of the system.",
+            "type": "string",
+            "enum": [
+              "best_effort"
+            ]
+          }
+        ]
+      },
       "InstanceCpuCount": {
         "description": "The number of CPUs in an Instance",
         "type": "integer",
@@ -15176,6 +15272,26 @@
         "description": "Create-time parameters for an `Instance`",
         "type": "object",
         "properties": {
+          "auto_restart_policy": {
+            "nullable": true,
+            "description": "The auto-restart policy for this instance.\n\nThis indicates whether the instance should be automatically restarted by the control plane on failure. If this is `null`, no auto-restart policy has been configured for this instance by the user.",
+            "default": null,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceAutoRestartPolicy"
+              }
+            ]
+          },
+          "boot_disk": {
+            "nullable": true,
+            "description": "The disk this instance should boot into. This disk can either be attached if it already exists, or created, if it should be a new disk.\n\nIt is strongly recommended to either provide a boot disk at instance creation, or update the instance after creation to set a boot disk.\n\nAn instance without an explicit boot disk can be booted: the options are as managed by UEFI, and as controlled by the guest OS, but with some risk.  If this instance later has a disk attached or detached, it is possible that boot options can end up reordered, with the intended boot disk moved after the EFI shell in boot priority. This may result in an instance that only boots to the EFI shell until the desired disk is set as an explicit boot disk and the instance rebooted.",
+            "default": null,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceDiskAttachment"
+              }
+            ]
+          },
           "description": {
             "type": "string"
           },
@@ -15671,6 +15787,21 @@
             ]
           }
         ]
+      },
+      "InstanceUpdate": {
+        "description": "Parameters of an `Instance` that can be reconfigured after creation.",
+        "type": "object",
+        "properties": {
+          "boot_disk": {
+            "nullable": true,
+            "description": "Name or ID of the disk the instance should be instructed to boot from.\n\nIf not provided, unset the instance's boot disk.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NameOrId"
+              }
+            ]
+          }
+        }
       },
       "IpNet": {
         "x-rust-type": {

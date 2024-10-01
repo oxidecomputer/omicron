@@ -98,6 +98,7 @@ use super::tasks::dns_config;
 use super::tasks::dns_propagation;
 use super::tasks::dns_servers;
 use super::tasks::external_endpoints;
+use super::tasks::instance_reincarnation;
 use super::tasks::instance_updater;
 use super::tasks::instance_watcher;
 use super::tasks::inventory_collection;
@@ -161,6 +162,7 @@ pub struct BackgroundTasks {
     pub task_region_replacement_driver: Activator,
     pub task_instance_watcher: Activator,
     pub task_instance_updater: Activator,
+    pub task_instance_reincarnation: Activator,
     pub task_service_firewall_propagation: Activator,
     pub task_abandoned_vmm_reaper: Activator,
     pub task_vpc_route_manager: Activator,
@@ -246,6 +248,7 @@ impl BackgroundTasksInitializer {
             task_region_replacement_driver: Activator::new(),
             task_instance_watcher: Activator::new(),
             task_instance_updater: Activator::new(),
+            task_instance_reincarnation: Activator::new(),
             task_service_firewall_propagation: Activator::new(),
             task_abandoned_vmm_reaper: Activator::new(),
             task_vpc_route_manager: Activator::new(),
@@ -312,6 +315,7 @@ impl BackgroundTasksInitializer {
             task_region_replacement_driver,
             task_instance_watcher,
             task_instance_updater,
+            task_instance_reincarnation,
             task_service_firewall_propagation,
             task_abandoned_vmm_reaper,
             task_vpc_route_manager,
@@ -670,6 +674,27 @@ impl BackgroundTasksInitializer {
             });
         }
 
+        // Background task: schedule restart sagas for failed instances that can
+        // be automatically restarted.
+        {
+            let reincarnator =
+                instance_reincarnation::InstanceReincarnation::new(
+                    datastore.clone(),
+                    sagas.clone(),
+                    config.instance_reincarnation.disable,
+                );
+            driver.register(TaskDefinition {
+                name: "instance_reincarnation",
+                description: "schedules start sagas for failed instances that \
+                    can be automatically restarted",
+                period: config.instance_reincarnation.period_secs,
+                task_impl: Box::new(reincarnator),
+                opctx: opctx.child(BTreeMap::new()),
+                watchers: vec![],
+                activator: task_instance_reincarnation,
+            });
+        }
+
         // Background task: service firewall rule propagation
         driver.register(TaskDefinition {
             name: "service_firewall_rule_propagation",
@@ -753,7 +778,8 @@ impl BackgroundTasksInitializer {
                 "detect if region snapshots need replacement and begin the \
                 process",
             period: config.region_snapshot_replacement_start.period_secs,
-            task_impl: Box::new(RegionSnapshotReplacementDetector::new(
+            // XXX temporarily disabled, see oxidecomputer/omicron#6353
+            task_impl: Box::new(RegionSnapshotReplacementDetector::disabled(
                 datastore.clone(),
                 sagas.clone(),
             )),
@@ -769,10 +795,13 @@ impl BackgroundTasksInitializer {
             period: config
                 .region_snapshot_replacement_garbage_collection
                 .period_secs,
-            task_impl: Box::new(RegionSnapshotReplacementGarbageCollect::new(
-                datastore.clone(),
-                sagas.clone(),
-            )),
+            // XXX temporarily disabled, see oxidecomputer/omicron#6353
+            task_impl: Box::new(
+                RegionSnapshotReplacementGarbageCollect::disabled(
+                    datastore.clone(),
+                    sagas.clone(),
+                ),
+            ),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
             activator: task_region_snapshot_replacement_garbage_collection,
@@ -784,10 +813,13 @@ impl BackgroundTasksInitializer {
                 "detect what volumes were affected by a region snapshot \
                 replacement, and run the step saga for them",
             period: config.region_snapshot_replacement_step.period_secs,
-            task_impl: Box::new(RegionSnapshotReplacementFindAffected::new(
-                datastore.clone(),
-                sagas.clone(),
-            )),
+            // XXX temporarily disabled, see oxidecomputer/omicron#6353
+            task_impl: Box::new(
+                RegionSnapshotReplacementFindAffected::disabled(
+                    datastore.clone(),
+                    sagas.clone(),
+                ),
+            ),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
             activator: task_region_snapshot_replacement_step,
@@ -799,9 +831,10 @@ impl BackgroundTasksInitializer {
                 "complete a region snapshot replacement if all the steps are \
                 done",
             period: config.region_snapshot_replacement_finish.period_secs,
-            task_impl: Box::new(RegionSnapshotReplacementFinishDetector::new(
-                datastore,
-            )),
+            // XXX temporarily disabled, see oxidecomputer/omicron#6353
+            task_impl: Box::new(
+                RegionSnapshotReplacementFinishDetector::disabled(datastore),
+            ),
             opctx: opctx.child(BTreeMap::new()),
             watchers: vec![],
             activator: task_region_snapshot_replacement_finish,

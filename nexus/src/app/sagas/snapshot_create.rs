@@ -2109,6 +2109,11 @@ mod test {
         disks_to_attach: Vec<InstanceDiskAttachment>,
     ) -> InstanceAndActiveVmm {
         let instances_url = format!("/v1/instances?project={}", PROJECT_NAME,);
+
+        let mut disks_iter = disks_to_attach.into_iter();
+        let boot_disk = disks_iter.next();
+        let data_disks: Vec<InstanceDiskAttachment> = disks_iter.collect();
+
         let instance: Instance = object_create(
             client,
             &instances_url,
@@ -2126,9 +2131,11 @@ mod test {
                 ssh_public_keys:  Some(Vec::new()),
                 network_interfaces:
                     params::InstanceNetworkInterfaceAttachment::None,
-                disks: disks_to_attach,
+                boot_disk,
+                disks: data_disks,
                 external_ips: vec![],
                 start: true,
+                auto_restart_policy: Default::default(),
             },
         )
         .await;

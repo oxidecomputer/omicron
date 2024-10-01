@@ -66,9 +66,10 @@ async fn instance_launch() -> Result<()> {
             hostname: "localshark".parse().unwrap(), // 🦈
             memory: ByteCount(1024 * 1024 * 1024),
             ncpus: InstanceCpuCount(2),
-            disks: vec![InstanceDiskAttachment::Attach {
+            boot_disk: Some(InstanceDiskAttachment::Attach {
                 name: disk_name.clone(),
-            }],
+            }),
+            disks: Vec::new(),
             network_interfaces: InstanceNetworkInterfaceAttachment::Default,
             external_ips: vec![ExternalIpCreate::Ephemeral { pool: None }],
             user_data: String::new(),
@@ -76,6 +77,7 @@ async fn instance_launch() -> Result<()> {
                 ssh_key_name.clone(),
             )]),
             start: true,
+            auto_restart_policy: Default::default(),
         })
         .send()
         .await?;

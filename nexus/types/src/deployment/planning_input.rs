@@ -31,6 +31,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
+use std::error;
 use std::fmt;
 use strum::IntoEnumIterator;
 
@@ -65,6 +66,9 @@ pub struct PlanningInput {
     cockroachdb_settings: CockroachDbSettings,
 
     /// per-sled policy and resources
+    ///
+    /// This includes decommissioned sleds -- we always make callers pass in a
+    /// filter to ensure that they're working within the right subset of sleds.
     sleds: BTreeMap<SledUuid, SledDetails>,
 
     /// per-zone network resources
@@ -159,12 +163,34 @@ impl PlanningInput {
             .map(|(sled_id, details)| (sled_id, &details.resources))
     }
 
-    pub fn sled_policy(&self, sled_id: &SledUuid) -> Option<SledPolicy> {
-        self.sleds.get(sled_id).map(|details| details.policy)
-    }
-
-    pub fn sled_resources(&self, sled_id: &SledUuid) -> Option<&SledResources> {
-        self.sleds.get(sled_id).map(|details| &details.resources)
+    /// Look up a sled in the planning input, returning an error if it is
+    /// missing or filtered out.
+    ///
+    /// This accepts a [`SledFilter`] to ensure that callers are working within
+    /// the right subset of sleds.
+    pub fn sled_lookup(
+        &self,
+        filter: SledFilter,
+        sled_id: SledUuid,
+    ) -> Result<&SledDetails, SledLookupError> {
+        match self.sleds.get(&sled_id) {
+            Some(details) => {
+                if filter
+                    .matches_policy_and_state(details.policy, details.state)
+                {
+                    Ok(details)
+                } else {
+                    Err(SledLookupError {
+                        sled_id,
+                        kind: SledLookupErrorKind::Filtered { filter },
+                    })
+                }
+            }
+            None => Err(SledLookupError {
+                sled_id,
+                kind: SledLookupErrorKind::Missing,
+            }),
+        }
     }
 
     pub fn network_resources(&self) -> &OmicronZoneNetworkResources {
@@ -185,6 +211,64 @@ impl PlanningInput {
             network_resources: self.network_resources,
         }
     }
+}
+
+/// Error type for sled lookups in a [`PlanningInput`].
+///
+/// If looking up a sled in a [`PlanningInput`] fails, it can be either a
+/// missing sled, or a sled that was filtered out by the provided filter. This
+/// error type distinguishes between those two cases.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SledLookupError {
+    sled_id: SledUuid,
+    kind: SledLookupErrorKind,
+}
+
+impl SledLookupError {
+    /// Returns the ID of the sled that was looked up.
+    pub fn sled_id(&self) -> SledUuid {
+        self.sled_id
+    }
+
+    /// Returns the kind of error that occurred during the lookup.
+    pub fn kind(&self) -> SledLookupErrorKind {
+        self.kind
+    }
+}
+
+impl fmt::Display for SledLookupError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.kind {
+            SledLookupErrorKind::Filtered { filter } => {
+                write!(
+                    f,
+                    "sled {} was filtered out by the {:?} filter",
+                    self.sled_id, filter
+                )
+            }
+            SledLookupErrorKind::Missing => {
+                write!(
+                    f,
+                    "sled {} was not found in the planning input",
+                    self.sled_id
+                )
+            }
+        }
+    }
+}
+
+impl error::Error for SledLookupError {}
+
+/// The error kind for a sled lookup.
+///
+/// Returned by [`SledLookupError::kind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SledLookupErrorKind {
+    /// The sled was filtered out by the provided filter.
+    Filtered { filter: SledFilter },
+
+    /// The sled was not found in the planning input.
+    Missing,
 }
 
 /// Describes the current values for any CockroachDB settings that we care
@@ -541,6 +625,11 @@ pub enum SledFilter {
     // ---
     // Prefer to keep this list in alphabetical order.
     // ---
+    /// All sleds in the system, regardless of policy or state.
+    ///
+    /// This returns both commissioned and decommissioned sleds. Use with care.
+    All,
+
     /// All sleds that are currently part of the control plane cluster.
     ///
     /// Intentionally omits decommissioned sleds, but is otherwise the filter to
@@ -619,6 +708,7 @@ impl SledPolicy {
             SledPolicy::InService {
                 provision_policy: SledProvisionPolicy::Provisionable,
             } => match filter {
+                SledFilter::All => true,
                 SledFilter::Commissioned => true,
                 SledFilter::Decommissioned => false,
                 SledFilter::Discretionary => true,
@@ -631,6 +721,7 @@ impl SledPolicy {
             SledPolicy::InService {
                 provision_policy: SledProvisionPolicy::NonProvisionable,
             } => match filter {
+                SledFilter::All => true,
                 SledFilter::Commissioned => true,
                 SledFilter::Decommissioned => false,
                 SledFilter::Discretionary => false,
@@ -641,6 +732,7 @@ impl SledPolicy {
                 SledFilter::VpcFirewall => true,
             },
             SledPolicy::Expunged => match filter {
+                SledFilter::All => true,
                 SledFilter::Commissioned => true,
                 SledFilter::Decommissioned => true,
                 SledFilter::Discretionary => false,
@@ -673,6 +765,7 @@ impl SledState {
         // See `SledFilter::matches` above for some notes.
         match self {
             SledState::Active => match filter {
+                SledFilter::All => true,
                 SledFilter::Commissioned => true,
                 SledFilter::Decommissioned => false,
                 SledFilter::Discretionary => true,
@@ -683,6 +776,7 @@ impl SledState {
                 SledFilter::VpcFirewall => true,
             },
             SledState::Decommissioned => match filter {
+                SledFilter::All => true,
                 SledFilter::Commissioned => false,
                 SledFilter::Decommissioned => true,
                 SledFilter::Discretionary => false,
@@ -734,8 +828,9 @@ pub struct Policy {
     pub target_nexus_zone_count: usize,
 
     /// desired total number of internal DNS zones.
-    /// Must be <= [`omicron_common::policy::MAX_INTERNAL_DNS_REDUNDANCY`],
-    /// and should be >= [`omicron_common::policy::INTERNAL_DNS_REDUNDANCY`].
+    /// Must be <= [`omicron_common::policy::INTERNAL_DNS_REDUNDANCY`]; we
+    /// expect it to be exactly equal in general (i.e., we should be running an
+    /// internal DNS server on each of the expected reserved addresses).
     pub target_internal_dns_zone_count: usize,
 
     /// desired total number of deployed CockroachDB zones

@@ -36,7 +36,7 @@ use omicron_common::disk::{
     DatasetsConfig, DatasetsManagementResult, DiskIdentity, DiskVariant,
     DisksManagementResult, OmicronPhysicalDisksConfig,
 };
-use omicron_uuid_kinds::{GenericUuid, PropolisUuid, ZpoolUuid};
+use omicron_uuid_kinds::{GenericUuid, PropolisUuid, SledUuid, ZpoolUuid};
 use oxnet::Ipv6Net;
 use propolis_client::{
     types::VolumeConstructionRequest, Client as PropolisClient,
@@ -66,7 +66,7 @@ use uuid::Uuid;
 /// server.  The tighter the coupling that exists now, the harder this will be to
 /// move later.
 pub struct SledAgent {
-    pub id: Uuid,
+    pub id: SledUuid,
     pub ip: IpAddr,
     /// collection of simulated VMMs, indexed by Propolis uuid
     vmms: Arc<SimCollection<SimInstance>>,
@@ -179,7 +179,7 @@ impl SledAgent {
                 sim_mode,
             )),
             storage: Mutex::new(Storage::new(
-                id,
+                id.into_untyped_uuid(),
                 config.storage.ip,
                 storage_log,
             )),
@@ -319,7 +319,7 @@ impl SledAgent {
                 let metadata = propolis_client::types::InstanceMetadata {
                     project_id: metadata.project_id,
                     silo_id: metadata.silo_id,
-                    sled_id: self.id,
+                    sled_id: self.id.into_untyped_uuid(),
                     sled_model: self
                         .config
                         .hardware
@@ -348,6 +348,7 @@ impl SledAgent {
                     properties,
                     nics: vec![],
                     disks: vec![],
+                    boot_settings: None,
                     migrate: None,
                     cloud_init_bytes: None,
                 };
@@ -845,6 +846,11 @@ impl SledAgent {
                     identity: info.identity.clone(),
                     variant: info.variant,
                     slot: info.slot,
+                    active_firmware_slot: 1,
+                    next_active_firmware_slot: None,
+                    number_of_firmware_slots: 1,
+                    slot1_is_read_only: true,
+                    slot_firmware_versions: vec![Some("SIMUL1".to_string())],
                 })
                 .collect(),
             zpools: storage
