@@ -793,7 +793,6 @@ impl<'a> BlueprintBuilder<'a> {
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: self.rng.zone_rng.next(),
-            underlay_address: address,
             filesystem_pool: Some(zpool),
             zone_type,
         };
@@ -878,7 +877,6 @@ impl<'a> BlueprintBuilder<'a> {
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id,
-            underlay_address,
             filesystem_pool: Some(pool_name),
             zone_type,
         };
@@ -951,7 +949,6 @@ impl<'a> BlueprintBuilder<'a> {
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: self.rng.zone_rng.next(),
-            underlay_address: ip,
             filesystem_pool: Some(filesystem_pool),
             zone_type,
         };
@@ -1008,7 +1005,6 @@ impl<'a> BlueprintBuilder<'a> {
         let zone = BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
             id: self.rng.zone_rng.next(),
-            underlay_address: ip,
             filesystem_pool: Some(filesystem_pool),
             zone_type,
         };
@@ -1136,7 +1132,6 @@ impl<'a> BlueprintBuilder<'a> {
             let zone = BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id: nexus_id,
-                underlay_address: ip,
                 filesystem_pool: Some(filesystem_pool),
                 zone_type,
             };
@@ -1182,7 +1177,6 @@ impl<'a> BlueprintBuilder<'a> {
             let zone = BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id: oximeter_id,
-                underlay_address: ip,
                 filesystem_pool: Some(filesystem_pool),
                 zone_type,
             };
@@ -1238,7 +1232,6 @@ impl<'a> BlueprintBuilder<'a> {
             let zone = BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id: zone_id,
-                underlay_address: underlay_ip,
                 filesystem_pool: Some(filesystem_pool),
                 zone_type,
             };
@@ -1290,7 +1283,6 @@ impl<'a> BlueprintBuilder<'a> {
             let zone = BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id: zone_id,
-                underlay_address: underlay_ip,
                 filesystem_pool: Some(filesystem_pool),
                 zone_type,
             };
@@ -1346,7 +1338,6 @@ impl<'a> BlueprintBuilder<'a> {
             let zone = BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id: zone_id,
-                underlay_address: underlay_ip,
                 filesystem_pool: Some(filesystem_pool),
                 zone_type,
             };
@@ -1482,7 +1473,6 @@ impl<'a> BlueprintBuilder<'a> {
             BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id: new_zone_id,
-                underlay_address: underlay_ip,
                 filesystem_pool: Some(filesystem_pool),
                 zone_type,
             },
@@ -1556,13 +1546,13 @@ impl<'a> BlueprintBuilder<'a> {
                 assert!(minimum > switch_zone_addr);
                 assert!(maximum > switch_zone_addr);
 
-                // Record each of the sled's zones' underlay addresses as
+                // Record each of the sled's zones' underlay IPs as
                 // allocated.
                 for (z, _) in self
                     .zones
                     .current_sled_zones(sled_id, BlueprintZoneFilter::All)
                 {
-                    allocator.reserve(z.underlay_address);
+                    allocator.reserve(z.underlay_ip());
                 }
 
                 allocator
@@ -1952,13 +1942,13 @@ pub mod test {
             blueprint.all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
         {
             if let Some(previous) =
-                underlay_ips.insert(zone.underlay_address, zone)
+                underlay_ips.insert(zone.underlay_ip(), zone)
             {
                 panic!(
                     "found duplicate underlay IP {} in zones {} and {}\
                     \n\n\
                     blueprint: {}",
-                    zone.underlay_address,
+                    zone.underlay_ip(),
                     zone.id,
                     previous.id,
                     blueprint.display(),
@@ -2146,7 +2136,7 @@ pub mod test {
             assert!(new_sled_resources
                 .subnet
                 .net()
-                .contains(z.underlay_address()));
+                .contains(z.underlay_ip()));
         }
 
         // Check for an NTP zone.  Its sockaddr's IP should also be on the

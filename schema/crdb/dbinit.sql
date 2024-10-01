@@ -3678,7 +3678,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone (
 
     -- unique id for this zone
     id UUID NOT NULL,
-    underlay_address INET NOT NULL,
     zone_type omicron.public.zone_type NOT NULL,
 
     -- SocketAddr of the "primary" service for this zone

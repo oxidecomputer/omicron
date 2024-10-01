@@ -262,13 +262,13 @@ pub fn blueprint_internal_dns_config(
     'all_zones: for (_, zone) in
         blueprint.all_omicron_zones(BlueprintZoneFilter::ShouldBeInInternalDns)
     {
-        let (service_name, port) = match &zone.zone_type {
+        let (service_name, &address) = match &zone.zone_type {
             BlueprintZoneType::BoundaryNtp(
                 blueprint_zone_type::BoundaryNtp { address, .. },
-            ) => (ServiceName::BoundaryNtp, address.port()),
+            ) => (ServiceName::BoundaryNtp, address),
             BlueprintZoneType::InternalNtp(
                 blueprint_zone_type::InternalNtp { address, .. },
-            ) => (ServiceName::InternalNtp, address.port()),
+            ) => (ServiceName::InternalNtp, address),
             BlueprintZoneType::Clickhouse(
                 blueprint_zone_type::Clickhouse { address, .. },
             )
@@ -290,9 +290,8 @@ pub fn blueprint_internal_dns_config(
                 dns_builder
                     .host_zone_clickhouse(
                         zone.id,
-                        zone.underlay_address,
                         http_service,
-                        address.port(),
+                        *address,
                     )
                     .map_err(|e| Error::InternalError {
                         internal_message: e.to_string(),
@@ -308,9 +307,8 @@ pub fn blueprint_internal_dns_config(
                 dns_builder
                     .host_zone_clickhouse_keeper(
                         zone.id,
-                        zone.underlay_address,
                         ServiceName::ClickhouseKeeper,
-                        address.port(),
+                        *address,
                     )
                     .map_err(|e| Error::InternalError {
                         internal_message: e.to_string(),
@@ -319,34 +317,33 @@ pub fn blueprint_internal_dns_config(
             }
             BlueprintZoneType::CockroachDb(
                 blueprint_zone_type::CockroachDb { address, .. },
-            ) => (ServiceName::Cockroach, address.port()),
+            ) => (ServiceName::Cockroach, address),
             BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 internal_address,
                 ..
-            }) => (ServiceName::Nexus, internal_address.port()),
+            }) => (ServiceName::Nexus, internal_address),
             BlueprintZoneType::Crucible(blueprint_zone_type::Crucible {
                 address,
                 ..
-            }) => (ServiceName::Crucible(zone.id), address.port()),
+            }) => (ServiceName::Crucible(zone.id), address),
             BlueprintZoneType::CruciblePantry(
                 blueprint_zone_type::CruciblePantry { address },
-            ) => (ServiceName::CruciblePantry, address.port()),
+            ) => (ServiceName::CruciblePantry, address),
             BlueprintZoneType::Oximeter(blueprint_zone_type::Oximeter {
                 address,
-            }) => (ServiceName::Oximeter, address.port()),
+            }) => (ServiceName::Oximeter, address),
             BlueprintZoneType::ExternalDns(
                 blueprint_zone_type::ExternalDns { http_address, .. },
-            ) => (ServiceName::ExternalDns, http_address.port()),
+            ) => (ServiceName::ExternalDns, http_address),
             BlueprintZoneType::InternalDns(
                 blueprint_zone_type::InternalDns { http_address, .. },
-            ) => (ServiceName::InternalDns, http_address.port()),
+            ) => (ServiceName::InternalDns, http_address),
         };
         dns_builder
             .host_zone_with_one_backend(
                 zone.id,
-                zone.underlay_address,
                 service_name,
-                port,
+                address,
             )
             .map_err(|e| Error::InternalError {
                 internal_message: e.to_string(),
@@ -778,7 +775,6 @@ mod test {
         Ok(BlueprintZoneConfig {
             disposition,
             id: config.id,
-            underlay_address: todo!("FIXME-john"),
             filesystem_pool: config.filesystem_pool,
             zone_type,
         })
@@ -879,7 +875,6 @@ mod test {
             BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::Quiesced,
                 id: out_of_service_id,
-                underlay_address: out_of_service_addr,
                 filesystem_pool: Some(ZpoolName::new_external(
                     ZpoolUuid::new_v4(),
                 )),
@@ -955,7 +950,7 @@ mod test {
         // Omicron zone.
         let mut omicron_zones_by_ip: BTreeMap<_, _> = blueprint
             .all_omicron_zones(BlueprintZoneFilter::ShouldBeInInternalDns)
-            .map(|(_, zone)| (zone.underlay_address, zone.id))
+            .map(|(_, zone)| (zone.underlay_ip(), zone.id))
             .collect();
         println!("omicron zones by IP: {:#?}", omicron_zones_by_ip);
 
