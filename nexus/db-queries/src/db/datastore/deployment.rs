@@ -2478,21 +2478,21 @@ mod tests {
         //
         // We expect to have the following reads/writes:
         //
-        // | Ensure Resources |  Unit test  |
-        // | -----------------|----------------------|
-        // | BEGIN            |                      |
-        // | R(target)        |                      |
-        // |                  | W(target)            |
-        // |                  | R(data)              |
-        // | W(data)          |                      |
-        // | COMMIT           |                      |
+        // | Ensure Resources | Unit test |
+        // | -----------------|-----------|
+        // | BEGIN            |           |
+        // | R(target)        |           |
+        // |                  | W(target) |
+        // |                  | R(data)   |
+        // | W(data)          |           |
+        // | COMMIT           |           |
         //
         // With this ordering, and an eye on "Read-Write", "Write-Read", and
         // "Write-Write" conflicts:
         //
-        // - (R->W) "Ensure Resources" must be ordered before "Set current target", because of access to
+        // - (R->W) "Ensure Resources" must be ordered before "Unit test", because of access to
         // "target".
-        // - (R->W) "Set current target" must be ordered before "Ensure Resources", because of
+        // - (R->W) "Unit test" must be ordered before "Ensure Resources", because of
         // access to "data".
         //
         // This creates a circular dependency, and therefore means "Ensure Resources"
@@ -2500,12 +2500,12 @@ mod tests {
         // to retry the "Ensure Resources" transaction, which will cause it to
         // see the new target:
         //
-        // | Ensure Resources |  Set current target  |
-        // | -----------------|----------------------|
-        // |                  | W(target)            |
-        // |                  | R(data)              |
-        // | BEGIN            |                      |
-        // | R(target)        |                      |
+        // | Ensure Resources | Unit Test |
+        // | -----------------|-----------|
+        // |                  | W(target) |
+        // |                  | R(data)   |
+        // | BEGIN            |           |
+        // | R(target)        |           |
         //
         // This should cause it to abort the current transaction, as the target no longer matches.
         //
