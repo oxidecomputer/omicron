@@ -1486,8 +1486,8 @@ pub(crate) fn build_initial_blueprint_from_sled_configs(
         cockroachdb_fingerprint: String::new(),
         cockroachdb_setting_preserve_downgrade:
             CockroachDbPreserveDowngrade::DoNotModify,
-        // TODO: Allocate keepers and servers from the plan if there is a policy,
-        // or just do it all in reconfigurator after RSS?
+        // We do not create clickhouse clusters in RSS. We create them via
+        // reconfigurator only.
         clickhouse_cluster_config: None,
         time_created: Utc::now(),
         creator: "RSS".to_string(),
