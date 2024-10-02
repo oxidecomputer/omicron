@@ -1177,8 +1177,6 @@ impl DataStore {
         authz_instance: &authz::Instance,
         boot_disk_id: Option<Uuid>,
     ) -> Result<(), diesel::result::Error> {
-        use crate::db::model::InstanceState;
-
         use db::schema::disk::dsl as disk_dsl;
         use db::schema::instance::dsl as instance_dsl;
 
