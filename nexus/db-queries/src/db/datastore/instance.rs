@@ -579,6 +579,27 @@ impl DataStore {
     ) -> LookupResult<InstanceAndActiveVmm> {
         opctx.authorize(authz::Action::Read, authz_instance).await?;
 
+        self.instance_fetch_with_vmm_on_conn(
+            &*self.pool_connection_authorized(opctx).await?,
+            authz_instance,
+        )
+        .await
+        .map_err(|e| {
+            public_error_from_diesel(
+                e,
+                ErrorHandler::NotFoundByLookup(
+                    ResourceType::Instance,
+                    LookupType::ById(authz_instance.id()),
+                ),
+            )
+        })
+    }
+
+    async fn instance_fetch_with_vmm_on_conn(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        authz_instance: &authz::Instance,
+    ) -> Result<InstanceAndActiveVmm, diesel::result::Error> {
         use db::schema::instance::dsl as instance_dsl;
         use db::schema::vmm::dsl as vmm_dsl;
 
@@ -592,19 +613,8 @@ impl DataStore {
                     .and(vmm_dsl::time_deleted.is_null())),
             )
             .select((Instance::as_select(), Option::<Vmm>::as_select()))
-            .get_result_async::<(Instance, Option<Vmm>)>(
-                &*self.pool_connection_authorized(opctx).await?,
-            )
-            .await
-            .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::NotFoundByLookup(
-                        ResourceType::Instance,
-                        LookupType::ById(authz_instance.id()),
-                    ),
-                )
-            })?;
+            .get_result_async::<(Instance, Option<Vmm>)>(conn)
+            .await?;
 
         Ok(InstanceAndActiveVmm { instance, vmm })
     }
@@ -1021,17 +1031,17 @@ impl DataStore {
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
 
         use db::schema::instance::dsl as instance_dsl;
-        use db::schema::vmm::dsl as vmm_dsl;
 
         let err = OptionalError::new();
         let conn = self.pool_connection_authorized(opctx).await?;
-        let (instance, vmm) = self
+        let instance_and_vmm = self
             .transaction_retry_wrapper("reconfigure_instance")
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 let update = update.clone();
                 async move {
-                    self.instance_set_boot_disk_on_txn(
+                    // Set the boot disk.
+                    self.instance_set_boot_disk_on_conn(
                         &conn,
                         &err,
                         authz_instance,
@@ -1039,6 +1049,7 @@ impl DataStore {
                     )
                     .await?;
 
+                    // Next, set the auto-restart policy.
                     diesel::update(instance_dsl::instance)
                         .filter(instance_dsl::id.eq(authz_instance.id()))
                         .set(
@@ -1048,28 +1059,9 @@ impl DataStore {
                         .execute_async(&conn)
                         .await?;
 
-                    // TODO: dedupe this query and `instance_fetch_with_vmm`.
-                    // At the moment, we're only allowing instance
-                    // reconfiguration in states that would have no VMM, but
-                    // load it anyway so that we return correct data if this is
-                    // relaxed in the future...
-                    let (instance, vmm) = instance_dsl::instance
-                        .filter(instance_dsl::id.eq(authz_instance.id()))
-                        .filter(instance_dsl::time_deleted.is_null())
-                        .left_join(
-                            vmm_dsl::vmm.on(vmm_dsl::id
-                                .nullable()
-                                .eq(instance_dsl::active_propolis_id)
-                                .and(vmm_dsl::time_deleted.is_null())),
-                        )
-                        .select((
-                            Instance::as_select(),
-                            Option::<Vmm>::as_select(),
-                        ))
-                        .get_result_async(&conn)
-                        .await?;
-
-                    Ok((instance, vmm))
+                    // Finally, fetch the new instance state.
+                    self.instance_fetch_with_vmm_on_conn(&conn, authz_instance)
+                        .await
                 }
             })
             .await
@@ -1081,7 +1073,7 @@ impl DataStore {
                 public_error_from_diesel(e, ErrorHandler::Server)
             })?;
 
-        Ok(InstanceAndActiveVmm { instance, vmm })
+        Ok(instance_and_vmm)
     }
 
     pub async fn instance_set_boot_disk(
@@ -1098,7 +1090,7 @@ impl DataStore {
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 async move {
-                    self.instance_set_boot_disk_on_txn(
+                    self.instance_set_boot_disk_on_conn(
                         &conn,
                         &err,
                         authz_instance,
@@ -1125,7 +1117,7 @@ impl DataStore {
     /// [`DataStore::instance_reconfigure`], which mutates many instance fields,
     /// and [`DataStore::instance_set_boot_disk`], which only touches the boot
     /// disk.
-    async fn instance_set_boot_disk_on_txn(
+    async fn instance_set_boot_disk_on_conn(
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         err: &OptionalError<Error>,
