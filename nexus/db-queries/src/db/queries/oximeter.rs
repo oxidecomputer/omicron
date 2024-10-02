@@ -18,9 +18,13 @@ use uuid::Uuid;
 ///
 /// If this query succeeds but returns 0 rows inserted/updated, there are no
 /// non-expunged `Oximeter` instances to choose.
+///
+/// Returns the oximeter ID assigned to this producer (either the
+/// randomly-chosen one, if newly inserted, or the previously-chosen, if
+/// updated).
 pub fn upsert_producer(
     producer: &internal::nexus::ProducerEndpoint,
-) -> TypedSqlQuery<()> {
+) -> TypedSqlQuery<sql_types::Uuid> {
     let builder = QueryBuilder::new();
 
     // Choose a random non-expunged Oximeter instance.
@@ -85,6 +89,13 @@ pub fn upsert_producer(
           ip = excluded.ip,
           port = excluded.port,
           interval = excluded.interval
+    "#,
+    );
+
+    // Finally, return this producer's assigned collector ID.
+    let builder = builder.sql(
+        r#"
+        RETURNING oximeter_id
     "#,
     );
 

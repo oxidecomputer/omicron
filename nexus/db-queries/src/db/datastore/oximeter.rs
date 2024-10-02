@@ -172,24 +172,24 @@ impl DataStore {
     /// If the endpoint is being created, a randomly-chosen Oximeter instance
     /// will be assigned. If the endpoint is being updated, it will keep its
     /// existing Oximeter assignment.
+    ///
+    /// Returns the oximeter ID assigned to this producer (either the
+    /// randomly-chosen one, if newly inserted, or the previously-chosen, if
+    /// updated).
     pub async fn producer_endpoint_create(
         &self,
         opctx: &OpContext,
         producer: &internal::nexus::ProducerEndpoint,
-    ) -> Result<(), Error> {
-        let n = queries::oximeter::upsert_producer(producer)
-            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+    ) -> Result<Uuid, Error> {
+        match queries::oximeter::upsert_producer(producer)
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
-
-        match n {
-            0 => Err(Error::unavail(
+        {
+            Ok(id) => Ok(id),
+            Err(DieselError::NotFound) => Err(Error::unavail(
                 "no Oximeter instances available for assignment",
             )),
-            1 => Ok(()),
-            _ => Err(Error::internal_error(&format!(
-                "multiple rows inserted ({n}) in `producer_endpoint_create`"
-            ))),
+            Err(e) => Err(public_error_from_diesel(e, ErrorHandler::Server)),
         }
     }
 
@@ -451,37 +451,6 @@ mod tests {
         logctx.cleanup_successful();
     }
 
-    // Helper function to insert a producer then read the ID of the collector to
-    // which it was assigned.
-    async fn create_producer_returning_collector(
-        datastore: &DataStore,
-        opctx: &OpContext,
-        producer: &nexus::ProducerEndpoint,
-    ) -> Uuid {
-        datastore
-            .producer_endpoint_create(&opctx, &producer)
-            .await
-            .expect("created producer");
-
-        let conn = datastore
-            .pool_connection_authorized(opctx)
-            .await
-            .expect("acquired db connection");
-
-        let inserted: ProducerEndpoint = {
-            use db::schema::metric_producer::dsl;
-
-            dsl::metric_producer
-                .find(producer.id)
-                .select(ProducerEndpoint::as_select())
-                .first_async(&*conn)
-                .await
-                .expect("found producer")
-        };
-
-        inserted.oximeter_id
-    }
-
     #[tokio::test]
     async fn test_producer_endpoint_create_rejects_expunged_oximeters() {
         // Setup
@@ -515,10 +484,10 @@ mod tests {
                 address: "[::1]:0".parse().unwrap(), // unused
                 interval: Duration::from_secs(0),    // unused
             };
-            let collector_id = create_producer_returning_collector(
-                &datastore, &opctx, &producer,
-            )
-            .await;
+            let collector_id = datastore
+                .producer_endpoint_create(&opctx, &producer)
+                .await
+                .expect("inserted producer");
             let i = collector_ids
                 .iter()
                 .position(|id| *id == collector_id)
@@ -545,10 +514,10 @@ mod tests {
                 address: "[::1]:0".parse().unwrap(), // unused
                 interval: Duration::from_secs(0),    // unused
             };
-            let collector_id = create_producer_returning_collector(
-                &datastore, &opctx, &producer,
-            )
-            .await;
+            let collector_id = datastore
+                .producer_endpoint_create(&opctx, &producer)
+                .await
+                .expect("inserted producer");
             let i = collector_ids
                 .iter()
                 .position(|id| *id == collector_id)
@@ -620,10 +589,10 @@ mod tests {
                 address: "[::1]:0".parse().unwrap(), // unused
                 interval: Duration::from_secs(0),    // unused
             };
-            let collector_id = create_producer_returning_collector(
-                &datastore, &opctx, &producer,
-            )
-            .await;
+            let collector_id = datastore
+                .producer_endpoint_create(&opctx, &producer)
+                .await
+                .expect("inserted producer");
             let i = collector_ids
                 .iter()
                 .position(|id| *id == collector_id)
@@ -725,10 +694,10 @@ mod tests {
                 address: "[::1]:0".parse().unwrap(), // unused
                 interval: Duration::from_secs(0),    // unused
             };
-            let collector_id = create_producer_returning_collector(
-                &datastore, &opctx, &producer,
-            )
-            .await;
+            let collector_id = datastore
+                .producer_endpoint_create(&opctx, &producer)
+                .await
+                .expect("inserted producer");
             let i = collector_ids
                 .iter()
                 .position(|id| *id == collector_id)

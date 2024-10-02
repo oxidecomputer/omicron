@@ -19,3 +19,5 @@ DO
     ip = excluded.ip,
     port = excluded.port,
     "interval" = excluded.interval
+RETURNING
+  oximeter_id
