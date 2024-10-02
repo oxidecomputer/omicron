@@ -2,6 +2,8 @@
     <logger>
         <level>trace</level>
         <console>true</console>
+        <log>/var/tmp/clickhouse-server.log</log>
+        <errorlog>/var/tmp/clickhouse-server.errlog</errorlog>
     </logger>
 
     <query_log>
