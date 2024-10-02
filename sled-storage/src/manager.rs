@@ -18,7 +18,7 @@ use illumos_utils::zfs::{Mountpoint, Zfs};
 use illumos_utils::zpool::{ZpoolName, ZPOOL_MOUNTPOINT_ROOT};
 use key_manager::StorageKeyRequester;
 use omicron_common::disk::{
-    DatasetConfig, DatasetManagementStatus, DatasetName, DatasetsConfig,
+    DatasetConfig, DatasetManagementStatus, DatasetsConfig,
     DatasetsManagementResult, DiskIdentity, DiskVariant, DisksManagementResult,
     OmicronPhysicalDisksConfig,
 };
@@ -29,7 +29,6 @@ use slog::{error, info, o, warn, Logger};
 use std::future::Future;
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::{interval, Duration, MissedTickBehavior};
-use uuid::Uuid;
 
 // The size of the mpsc bounded channel used to communicate
 // between the `StorageHandle` and `StorageManager`.
@@ -93,13 +92,6 @@ enum StorageManagerState {
 }
 
 #[derive(Debug)]
-pub(crate) struct NewFilesystemRequest {
-    dataset_id: Uuid,
-    dataset_name: DatasetName,
-    responder: DebugIgnore<oneshot::Sender<Result<(), Error>>>,
-}
-
-#[derive(Debug)]
 pub(crate) enum StorageRequest {
     // Requests to manage which devices the sled considers active.
     // These are manipulated by hardware management.
@@ -142,9 +134,6 @@ pub(crate) enum StorageRequest {
             oneshot::Sender<Result<OmicronPhysicalDisksConfig, Error>>,
         >,
     },
-
-    // Requests the creation of a new dataset within a managed disk.
-    NewFilesystem(NewFilesystemRequest),
 
     KeyManagerReady,
 
@@ -362,25 +351,6 @@ impl StorageHandle {
             .unwrap();
         rx.await.unwrap()
     }
-
-    // TODO(https://github.com/oxidecomputer/omicron/issues/6043):
-    //
-    // Deprecate usage of this function, prefer to call "datasets_ensure"
-    // and ask for the set of all datasets from Nexus.
-    pub async fn upsert_filesystem(
-        &self,
-        dataset_id: Uuid,
-        dataset_name: DatasetName,
-    ) -> Result<(), Error> {
-        let (tx, rx) = oneshot::channel();
-        let request = NewFilesystemRequest {
-            dataset_id,
-            dataset_name,
-            responder: tx.into(),
-        };
-        self.tx.send(StorageRequest::NewFilesystem(request)).await.unwrap();
-        rx.await.unwrap()
-    }
 }
 /// The storage manager responsible for the state of the storage
 /// on a sled. The storage manager runs in its own task and is interacted
@@ -485,13 +455,6 @@ impl StorageManager {
             }
             StorageRequest::OmicronPhysicalDisksList { tx } => {
                 let _ = tx.0.send(self.omicron_physical_disks_list().await);
-            }
-            StorageRequest::NewFilesystem(request) => {
-                let result = self.add_dataset(&request).await;
-                if let Err(ref err) = &result {
-                    warn!(self.log, "Failed to add dataset"; "err" => ?err);
-                }
-                let _ = request.responder.0.send(result);
             }
             StorageRequest::KeyManagerReady => {
                 self.key_manager_ready().await?;
@@ -1050,60 +1013,6 @@ impl StorageManager {
 
         Ok(())
     }
-
-    // Attempts to add a dataset within a zpool, according to `request`.
-    async fn add_dataset(
-        &mut self,
-        request: &NewFilesystemRequest,
-    ) -> Result<(), Error> {
-        info!(self.log, "add_dataset"; "request" => ?request);
-        if !self
-            .resources
-            .disks()
-            .iter_managed()
-            .any(|(_, disk)| disk.zpool_name() == request.dataset_name.pool())
-        {
-            return Err(Error::ZpoolNotFound(format!(
-                "{}",
-                request.dataset_name.pool(),
-            )));
-        }
-
-        let zoned = true;
-        let fs_name = &request.dataset_name.full_name();
-        let do_format = true;
-        let encryption_details = None;
-        let size_details = None;
-        Zfs::ensure_filesystem(
-            fs_name,
-            Mountpoint::Path(Utf8PathBuf::from("/data")),
-            zoned,
-            do_format,
-            encryption_details,
-            size_details,
-            None,
-        )?;
-        // Ensure the dataset has a usable UUID.
-        if let Ok(id_str) = Zfs::get_oxide_value(&fs_name, "uuid") {
-            if let Ok(id) = id_str.parse::<Uuid>() {
-                if id != request.dataset_id {
-                    return Err(Error::UuidMismatch {
-                        name: Box::new(request.dataset_name.clone()),
-                        old: id,
-                        new: request.dataset_id,
-                    });
-                }
-                return Ok(());
-            }
-        }
-        Zfs::set_oxide_value(
-            &fs_name,
-            "uuid",
-            &request.dataset_id.to_string(),
-        )?;
-
-        Ok(())
-    }
 }
 
 /// All tests only use synthetic disks, but are expected to be run on illumos
@@ -1561,40 +1470,6 @@ mod tests {
         let actual: HashSet<_> =
             all_disks.iter_all().map(|(identity, _, _, _)| identity).collect();
         assert_eq!(expected, actual);
-
-        harness.cleanup().await;
-        logctx.cleanup_successful();
-    }
-
-    #[tokio::test]
-    async fn upsert_filesystem() {
-        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
-        let logctx = test_setup_log("upsert_filesystem");
-        let mut harness = StorageManagerTestHarness::new(&logctx.log).await;
-
-        // Test setup: Add a U.2 and M.2, adopt them into the "control plane"
-        // for usage.
-        harness.handle().key_manager_ready().await;
-        let raw_disks =
-            harness.add_vdevs(&["u2_under_test.vdev", "m2_helping.vdev"]).await;
-        let config = harness.make_config(1, &raw_disks);
-        let result = harness
-            .handle()
-            .omicron_physical_disks_ensure(config.clone())
-            .await
-            .expect("Ensuring disks should work after key manager is ready");
-        assert!(!result.has_error(), "{:?}", result);
-
-        // Create a filesystem on the newly formatted U.2
-        let dataset_id = Uuid::new_v4();
-        let zpool_name = ZpoolName::new_external(config.disks[0].pool_id);
-        let dataset_name =
-            DatasetName::new(zpool_name.clone(), DatasetKind::Crucible);
-        harness
-            .handle()
-            .upsert_filesystem(dataset_id, dataset_name)
-            .await
-            .unwrap();
 
         harness.cleanup().await;
         logctx.cleanup_successful();
