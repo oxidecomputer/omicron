@@ -1020,9 +1020,6 @@ impl DataStore {
     ) -> Result<InstanceAndActiveVmm, Error> {
         opctx.authorize(authz::Action::Modify, authz_instance).await?;
 
-        use crate::db::model::InstanceState;
-
-        use db::schema::disk::dsl as disk_dsl;
         use db::schema::instance::dsl as instance_dsl;
         use db::schema::vmm::dsl as vmm_dsl;
 
@@ -1034,99 +1031,24 @@ impl DataStore {
                 let err = err.clone();
                 let update = update.clone();
                 async move {
-                    // * Allow reconfiguration in NoVmm because there is no VMM
-                    //   to contend with.
-                    // * Allow reconfiguration in Failed to allow changing the
-                    //   boot disk of a failed instance and free its boot disk
-                    //   for detach.
-                    // * Allow reconfiguration in Creating because one of the
-                    //   last steps of instance creation, while the instance is
-                    //   still in Creating, is to reconfigure the instance to
-                    //   the desired boot disk.
-                    let ok_to_reconfigure_instance_states = [
-                        InstanceState::NoVmm,
-                        InstanceState::Failed,
-                        InstanceState::Creating,
-                    ];
+                    self.instance_set_boot_disk_on_txn(
+                        &conn,
+                        &err,
+                        authz_instance,
+                        update.boot_disk_id,
+                    )
+                    .await?;
 
-                    let instance_state = instance_dsl::instance
-                        .filter(instance_dsl::id.eq(authz_instance.id()))
-                        .filter(instance_dsl::time_deleted.is_null())
-                        .select(instance_dsl::state)
-                        .first_async::<InstanceState>(&conn)
-                        .await;
-
-                    match instance_state {
-                        Ok(state) => {
-                            let state_ok = ok_to_reconfigure_instance_states
-                                .contains(&state);
-
-                            if !state_ok {
-                                return Err(err.bail(Error::conflict(
-                                    "instance must be stopped to update",
-                                )));
-                            }
-                        }
-                        Err(diesel::NotFound) => {
-                            // If the instance simply doesn't exist, we
-                            // shouldn't retry. Bail with a useful error.
-                            return Err(err.bail(Error::not_found_by_id(
-                                ResourceType::Instance,
-                                &authz_instance.id(),
-                            )));
-                        }
-                        Err(e) => {
-                            return Err(e);
-                        }
-                    }
-
-                    if let Some(disk_id) = update.boot_disk_id {
-                        // Ensure the disk is currently attached before updating
-                        // the database.
-                        let expected_state = api::external::DiskState::Attached(
-                            authz_instance.id(),
-                        );
-
-                        let attached_disk: Option<Uuid> = disk_dsl::disk
-                            .filter(disk_dsl::id.eq(disk_id))
-                            .filter(
-                                disk_dsl::attach_instance_id
-                                    .eq(authz_instance.id()),
-                            )
-                            .filter(
-                                disk_dsl::disk_state.eq(expected_state.label()),
-                            )
-                            .select(disk_dsl::id)
-                            .first_async::<Uuid>(&conn)
-                            .await
-                            .optional()?;
-
-                        if attached_disk.is_none() {
-                            return Err(err.bail(Error::conflict(
-                                "boot disk must be attached",
-                            )));
-                        }
-                    }
-
-                    // if and when `Update` can update other fields, set them
-                    // here.
-                    //
-                    // NOTE: from this point forward it is OK if we update the
-                    // instance's `boot_disk_id` column with the updated value
-                    // again. It will have already been assigned with constraint
-                    // checking performed above, so updates will just be
-                    // repetitive, not harmful.
-
-                    // Update the row. We don't care about the returned
-                    // UpdateStatus, either way the database has been updated
-                    // with the state we're setting.
                     diesel::update(instance_dsl::instance)
                         .filter(instance_dsl::id.eq(authz_instance.id()))
-                        .set(update)
+                        .set(
+                            instance_dsl::auto_restart_policy
+                                .eq(update.auto_restart_policy),
+                        )
                         .execute_async(&conn)
                         .await?;
 
-                    // TODO: dedupe this query and  `instance_fetch_with_vmm`.
+                    // TODO: dedupe this query and `instance_fetch_with_vmm`.
                     // At the moment, we're only allowing instance
                     // reconfiguration in states that would have no VMM, but
                     // load it anyway so that we return correct data if this is
@@ -1160,6 +1082,144 @@ impl DataStore {
             })?;
 
         Ok(InstanceAndActiveVmm { instance, vmm })
+    }
+
+    pub async fn instance_set_boot_disk(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+        boot_disk_id: Option<Uuid>,
+    ) -> Result<(), Error> {
+        opctx.authorize(authz::Action::Modify, authz_instance).await?;
+
+        let err = OptionalError::new();
+        let conn = self.pool_connection_authorized(opctx).await?;
+        self.transaction_retry_wrapper("instance_set_boot_disk")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                async move {
+                    self.instance_set_boot_disk_on_txn(
+                        &conn,
+                        &err,
+                        authz_instance,
+                        boot_disk_id,
+                    )
+                    .await?;
+                    Ok(())
+                }
+            })
+            .await
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    return err;
+                }
+
+                public_error_from_diesel(e, ErrorHandler::Server)
+            })
+    }
+
+    /// Set an instance's boot disk to the provided `boot_disk_id` (or unset it,
+    /// if `boot_disk_id` is `None`), within an existing transaction.
+    ///
+    /// This is factored out as it is used by both
+    /// [`DataStore::instance_reconfigure`], which mutates many instance fields,
+    /// and [`DataStore::instance_set_boot_disk`], which only touches the boot
+    /// disk.
+    async fn instance_set_boot_disk_on_txn(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        err: &OptionalError<Error>,
+        authz_instance: &authz::Instance,
+        boot_disk_id: Option<Uuid>,
+    ) -> Result<(), diesel::result::Error> {
+        use crate::db::model::InstanceState;
+
+        use db::schema::disk::dsl as disk_dsl;
+        use db::schema::instance::dsl as instance_dsl;
+
+        // * Allow reconfiguration in NoVmm because there is no VMM
+        //   to contend with.
+        // * Allow reconfiguration in Failed to allow changing the
+        //   boot disk of a failed instance and free its boot disk
+        //   for detach.
+        // * Allow reconfiguration in Creating because one of the
+        //   last steps of instance creation, while the instance is
+        //   still in Creating, is to reconfigure the instance to
+        //   the desired boot disk.
+        let ok_to_reconfigure_instance_states = [
+            InstanceState::NoVmm,
+            InstanceState::Failed,
+            InstanceState::Creating,
+        ];
+
+        let instance_state = instance_dsl::instance
+            .filter(instance_dsl::id.eq(authz_instance.id()))
+            .filter(instance_dsl::time_deleted.is_null())
+            .select(instance_dsl::state)
+            .first_async::<InstanceState>(conn)
+            .await;
+
+        match instance_state {
+            Ok(state) => {
+                let state_ok =
+                    ok_to_reconfigure_instance_states.contains(&state);
+
+                if !state_ok {
+                    return Err(err.bail(Error::conflict(
+                        "instance must be stopped to update",
+                    )));
+                }
+            }
+            Err(diesel::NotFound) => {
+                // If the instance simply doesn't exist, we
+                // shouldn't retry. Bail with a useful error.
+                return Err(err.bail(Error::not_found_by_id(
+                    ResourceType::Instance,
+                    &authz_instance.id(),
+                )));
+            }
+            Err(e) => {
+                return Err(e);
+            }
+        }
+
+        if let Some(disk_id) = boot_disk_id {
+            // Ensure the disk is currently attached before updating
+            // the database.
+            let expected_state =
+                api::external::DiskState::Attached(authz_instance.id());
+
+            let attached_disk: Option<Uuid> = disk_dsl::disk
+                .filter(disk_dsl::id.eq(disk_id))
+                .filter(disk_dsl::attach_instance_id.eq(authz_instance.id()))
+                .filter(disk_dsl::disk_state.eq(expected_state.label()))
+                .select(disk_dsl::id)
+                .first_async::<Uuid>(conn)
+                .await
+                .optional()?;
+
+            if attached_disk.is_none() {
+                return Err(
+                    err.bail(Error::conflict("boot disk must be attached"))
+                );
+            }
+        }
+        //
+        // NOTE: from this point forward it is OK if we update the
+        // instance's `boot_disk_id` column with the updated value
+        // again. It will have already been assigned with constraint
+        // checking performed above, so updates will just be
+        // repetitive, not harmful.
+
+        // Update the row. We don't care about the returned
+        // UpdateStatus, either way the database has been updated
+        // with the state we're setting.
+        diesel::update(instance_dsl::instance)
+            .filter(instance_dsl::id.eq(authz_instance.id()))
+            .set(instance_dsl::boot_disk_id.eq(boot_disk_id))
+            .execute_async(conn)
+            .await?;
+        Ok(())
     }
 
     pub async fn project_delete_instance(
