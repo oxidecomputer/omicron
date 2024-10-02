@@ -114,8 +114,28 @@ impl PlanningInput {
         self.policy.target_cockroachdb_cluster_version
     }
 
+    pub fn target_clickhouse_server_zone_count(&self) -> usize {
+        self.policy
+            .clickhouse_policy
+            .as_ref()
+            .map(|policy| policy.target_servers)
+            .unwrap_or(0)
+    }
+
+    pub fn target_clickhouse_keeper_zone_count(&self) -> usize {
+        self.policy
+            .clickhouse_policy
+            .as_ref()
+            .map(|policy| policy.target_keepers)
+            .unwrap_or(0)
+    }
+
     pub fn service_ip_pool_ranges(&self) -> &[IpRange] {
         &self.policy.service_ip_pool_ranges
+    }
+
+    pub fn clickhouse_cluster_enabled(&self) -> bool {
+        self.policy.clickhouse_policy.is_some()
     }
 
     pub fn all_sleds(
