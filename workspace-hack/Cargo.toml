@@ -86,6 +86,7 @@ pkcs8 = { version = "0.10.2", default-features = false, features = ["encryption"
 postgres-types = { version = "0.2.8", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 predicates = { version = "3.1.2" }
 proc-macro2 = { version = "1.0.86" }
+qorb = { git = "https://github.com/oxidecomputer/qorb", branch = "master", features = ["qtop"] }
 quote = { version = "1.0.37" }
 regex = { version = "1.10.6" }
 regex-automata = { version = "0.4.6", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "unicode"] }
@@ -196,6 +197,7 @@ pkcs8 = { version = "0.10.2", default-features = false, features = ["encryption"
 postgres-types = { version = "0.2.8", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 predicates = { version = "3.1.2" }
 proc-macro2 = { version = "1.0.86" }
+qorb = { git = "https://github.com/oxidecomputer/qorb", branch = "master", features = ["qtop"] }
 quote = { version = "1.0.37" }
 regex = { version = "1.10.6" }
 regex-automata = { version = "0.4.6", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "unicode"] }

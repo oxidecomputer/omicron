@@ -7067,6 +7067,7 @@ dependencies = [
  "postgres-types",
  "predicates",
  "proc-macro2",
+ "qorb",
  "quote",
  "regex",
  "regex-automata",
