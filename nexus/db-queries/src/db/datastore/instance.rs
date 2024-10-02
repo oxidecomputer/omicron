@@ -1038,14 +1038,15 @@ impl DataStore {
             .transaction_retry_wrapper("reconfigure_instance")
             .transaction(&conn, |conn| {
                 let err = err.clone();
-                let update = update.clone();
+                let InstanceUpdate { boot_disk_id, auto_restart_policy } =
+                    update.clone();
                 async move {
                     // Set the boot disk.
                     self.instance_set_boot_disk_on_conn(
                         &conn,
                         &err,
                         authz_instance,
-                        update.boot_disk_id,
+                        boot_disk_id,
                     )
                     .await?;
 
@@ -1054,7 +1055,7 @@ impl DataStore {
                         .filter(instance_dsl::id.eq(authz_instance.id()))
                         .set(
                             instance_dsl::auto_restart_policy
-                                .eq(update.auto_restart_policy),
+                                .eq(auto_restart_policy),
                         )
                         .execute_async(&conn)
                         .await?;
