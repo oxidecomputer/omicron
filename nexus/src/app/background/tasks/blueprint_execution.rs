@@ -282,6 +282,34 @@ mod test {
         // sleds to CRDB.
         let mut s1 = httptest::Server::run();
         let mut s2 = httptest::Server::run();
+
+        // The only sled-agent endpoint we care about in this test is `PUT
+        // /omicron-zones`. Add a closure to avoid repeating it multiple times
+        // below. We don't do a careful check of the _contents_ of what's being
+        // sent; for that, see the tests in nexus-reconfigurator-execution.
+        let match_put_omicron_zones =
+            || request::method_path("PUT", "/omicron-zones");
+
+        // Helper for our mock sled-agent http servers to blanket ignore and
+        // return 200 OK for anything _except_ `PUT /omciron-zones`, which is
+        // the endpoint we care about in this test.
+        //
+        // Other Nexus background tasks created by our test context may notice
+        // the sled-agent records we're about to insert into CRDB and query them
+        // (e.g., for inventory, vpc routing info, ...). We don't want those to
+        // cause spurious test failures, so just tell our sled-agents to accept
+        // any number of them.
+        let mock_server_ignore_spurious_http_requests =
+            |s: &mut httptest::Server| {
+                s.expect(
+                    Expectation::matching(not(match_put_omicron_zones()))
+                        .times(..)
+                        .respond_with(status_code(200)),
+                );
+            };
+        mock_server_ignore_spurious_http_requests(&mut s1);
+        mock_server_ignore_spurious_http_requests(&mut s2);
+
         let sled_id1 = SledUuid::new_v4();
         let sled_id2 = SledUuid::new_v4();
         let rack_id = Uuid::new_v4();
@@ -409,33 +437,6 @@ mod test {
             generation,
         )
         .await;
-
-        // The only sled-agent endpoint we care about in this test is `PUT
-        // /omicron-zones`. Add a closure to avoid repeating it multiple times
-        // below. We don't do a careful check of the _contents_ of what's being
-        // sent; for that, see the tests in nexus-reconfigurator-execution.
-        let match_put_omicron_zones =
-            || request::method_path("PUT", "/omicron-zones");
-
-        // Helper for our mock sled-agent http servers to blanket ignore and
-        // return 200 OK for anything _except_ `PUT /omciron-zones`, which is
-        // the endpoint we care about in this test.
-        //
-        // Other Nexus background tasks created by our test context may notice
-        // the sled-agent records we're about to insert into CRDB and query them
-        // (e.g., for inventory, vpc routing info, ...). We don't want those to
-        // cause spurious test failures, so just tell our sled-agents to accept
-        // any number of them.
-        let mock_server_ignore_spurious_http_requests =
-            |s: &mut httptest::Server| {
-                s.expect(
-                    Expectation::matching(not(match_put_omicron_zones()))
-                        .times(..)
-                        .respond_with(status_code(200)),
-                );
-            };
-        mock_server_ignore_spurious_http_requests(&mut s1);
-        mock_server_ignore_spurious_http_requests(&mut s2);
 
         // Insert records for the zpools backing the datasets in these zones.
         for (sled_id, config) in
