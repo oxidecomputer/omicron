@@ -1129,6 +1129,14 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                     println!("    > {line}");
                 }
 
+                println!(
+                    "    region replacement requests set to completed ok: {}",
+                    status.requests_completed_ok.len()
+                );
+                for line in &status.requests_completed_ok {
+                    println!("    > {line}");
+                }
+
                 println!("    errors: {}", status.errors.len());
                 for line in &status.errors {
                     println!("    > {line}");
