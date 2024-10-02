@@ -15,8 +15,8 @@ use nexus_types::{
     identity::Resource,
 };
 use omicron_common::api::internal::shared::{
-    ResolvedVpcRoute, ResolvedVpcRouteSet, RouterId, RouterKind, RouterTarget,
-    RouterVersion, SledTarget,
+    ExternalIpGatewayMap, ResolvedVpcRoute, ResolvedVpcRouteSet, RouterId,
+    RouterKind, RouterTarget, RouterVersion,
 };
 use serde_json::json;
 use std::collections::hash_map::Entry;
@@ -104,6 +104,41 @@ impl BackgroundTask for VpcRouteManager {
                     );
                     continue;
                 };
+
+                // Map each external IP in use by the sled to the Internet Gateway(s)
+                // which are allowed to make use of it.
+                // TODO: this should really not be the responsibility of this RPW.
+                // I would expect this belongs in a future external IPs RPW, but until
+                // then it lives here since it's a core part of the Internet Gateways
+                // system.
+                match self.datastore.vpc_resolve_sled_external_ips_to_gateways(opctx, sled.id()).await {
+                    Ok(mappings) => {
+                        info!(
+                            log,
+                            "computed internet gateway mappings for sled";
+                            "sled" => sled.serial_number(),
+                            "assocs" => ?mappings
+                        );
+                        let param = ExternalIpGatewayMap {mappings};
+                        if let Err(e) = client.set_eip_gateways(&param).await {
+                            error!(
+                                log,
+                                "failed to push internet gateway assignments for sled";
+                                "sled" => sled.serial_number(),
+                                "err" => ?e
+                            );
+                            continue;
+                        };
+                    }
+                    Err(e) => {
+                        error!(
+                            log,
+                            "failed to produce EIP Internet Gateway mappings for sled";
+                            "sled" => sled.serial_number(),
+                            "err" => ?e
+                        );
+                    }
+                }
 
                 let route_sets = route_sets.into_inner();
 
@@ -360,17 +395,6 @@ impl BackgroundTask for VpcRouteManager {
                 }
 
                 if !to_push.is_empty() {
-                    for set in &mut to_push {
-                        set.routes.retain(|x| match x.sled {
-                            SledTarget::Any => true,
-                            SledTarget::Only { sled: id, interface: _ }
-                                if id == sled.id() =>
-                            {
-                                true
-                            }
-                            _ => false,
-                        });
-                    }
                     if let Err(e) = client.set_vpc_routes(&to_push).await {
                         error!(
                             log,

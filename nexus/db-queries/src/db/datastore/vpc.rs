@@ -13,7 +13,6 @@ use crate::db::collection_attach::AttachError;
 use crate::db::collection_attach::DatastoreAttachTarget;
 use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
-use crate::db::datastore::InstanceAndActiveVmm;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Resource;
@@ -69,7 +68,6 @@ use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
 use omicron_common::api::external::LookupType;
-use omicron_common::api::external::MessagePair;
 use omicron_common::api::external::ResourceType;
 use omicron_common::api::external::RouteDestination;
 use omicron_common::api::external::RouteTarget;
@@ -78,7 +76,6 @@ use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vni as ExternalVni;
 use omicron_common::api::internal::shared::ResolvedVpcRoute;
 use omicron_common::api::internal::shared::RouterTarget;
-use omicron_common::api::internal::shared::SledTarget;
 use oxnet::IpNet;
 use ref_cast::RefCast;
 use std::collections::BTreeMap;
@@ -2304,101 +2301,91 @@ impl DataStore {
             })
     }
 
-    pub async fn homes_for_external_ip(
+    // XXX: maybe wants to live in external IP?
+    // XXX: this assumes that only one IGW can be associated
+    //      with each IP per VPC. I would be... surprised if
+    //      we allow a pool to be referenced by several IGWs
+    //      in the same VPC? But maybe that's worth discussion.
+    //      There's nothing stopping us from changing OPTE to
+    //      insert several nat rules if there exists >1 IGW value
+    //      (or just implementing an OR predicate).
+    /// Returns a (Ip, NicId) -> InetGwId map which identifies, for a given sled:
+    /// * a) which external IPs belong to any of its services/instances/probe NICs.
+    /// * b) whether each IP is linked to an Internet Gateway via its parent pool.
+    pub async fn vpc_resolve_sled_external_ips_to_gateways(
         &self,
-        conn: &async_bb8_diesel::Connection<crate::db::DbConnection>,
-        ip: IpAddr,
-    ) -> Result<Vec<ExternalIpHome>, Error> {
+        opctx: &OpContext,
+        sled_id: Uuid,
+    ) -> Result<HashMap<Uuid, HashMap<IpAddr, Uuid>>, Error> {
+        // TODO: give GW-bound addresses preferential treatment.
         use db::schema::external_ip as eip;
         use db::schema::external_ip::dsl as eip_dsl;
-        use db::schema::inv_collection as inv;
-        use db::schema::inv_collection::dsl as inv_dsl;
-        use db::schema::inv_omicron_zone as ioz;
-        use db::schema::inv_omicron_zone::dsl as ioz_dsl;
-        use db::schema::inv_omicron_zone_nic as iozn;
+        use db::schema::internet_gateway as igw;
+        use db::schema::internet_gateway::dsl as igw_dsl;
+        use db::schema::internet_gateway_ip_pool as igw_pool;
+        use db::schema::internet_gateway_ip_pool::dsl as igw_pool_dsl;
         use db::schema::network_interface as ni;
-        use db::schema::network_interface::dsl as ni_dsl;
         use db::schema::vmm;
-        use db::schema::vmm::dsl as vmm_dsl;
 
-        let ip = IpNetwork::from(ip);
+        // We don't know at first glance which VPC ID each IP addr has.
+        // VPC info is necessary to map back to the intended gateway.
+        // Goal is to join sled-specific
+        //  (IP, IP pool ID, VPC ID) X (IGW, IP pool ID)
+        let conn = self.pool_connection_authorized(opctx).await?;
 
-        // look for an instance association
+        let mut out = HashMap::new();
 
-        match eip_dsl::external_ip
+        let instance_mappings = eip_dsl::external_ip
             .inner_join(
-                vmm::table.on(vmm::instance_id.nullable().eq(eip::parent_id)),
+                vmm::table.on(vmm::instance_id
+                    .nullable()
+                    .eq(eip::parent_id)
+                    .and(vmm::sled_id.eq(sled_id))),
             )
             .inner_join(
                 ni::table.on(ni::parent_id.nullable().eq(eip::parent_id)),
             )
-            .filter(eip::time_deleted.is_null())
-            .filter(ni::time_deleted.is_null())
-            .filter(eip::ip.eq(ip))
-            .filter(vmm::time_deleted.is_null())
-            .filter(ni::is_primary.eq(true))
-            .select((vmm_dsl::sled_id, ni_dsl::id))
-            // Becuase snat ips can be split across multiple homes, we need to
-            // return all of them.
-            .load_async::<(Uuid, Uuid)>(conn)
-            .await
-        {
-            Ok(results) => {
-                if !results.is_empty() {
-                    return Ok(results
-                        .into_iter()
-                        .map(|(sled, interface)| ExternalIpHome {
-                            sled,
-                            interface,
-                        })
-                        .collect());
-                }
-            }
-            Err(_) => {}
-        };
-
-        // look for a service association
-        match eip_dsl::external_ip
             .inner_join(
-                ioz::table.on(ioz::primary_service_ip
-                    .eq(eip::ip)
-                    .or(ioz::second_service_ip.eq(eip::ip.nullable()))
-                    .or(ioz::snat_ip.eq(eip::ip.nullable()))),
+                igw_pool::table
+                    .on(eip_dsl::ip_pool_id.eq(igw_pool_dsl::ip_pool_id)),
             )
-            .inner_join(iozn::table.on(ioz::nic_id.eq(iozn::id.nullable())))
-            .inner_join(ni::table.on(ni::mac.eq(iozn::mac)))
+            .inner_join(
+                igw::table.on(igw_dsl::id
+                    .eq(igw_pool_dsl::internet_gateway_id)
+                    .and(igw_dsl::vpc_id.eq(ni::vpc_id))),
+            )
             .filter(eip::time_deleted.is_null())
             .filter(ni::time_deleted.is_null())
-            .filter(eip::ip.eq(ip))
-            .filter(
-                ioz::inv_collection_id.eq_any(
-                    inv_dsl::inv_collection
-                        .select(inv::id)
-                        .order_by(inv::time_done.desc())
-                        .limit(1),
-                ),
-            )
-            .filter(
-                iozn::inv_collection_id.eq_any(
-                    inv_dsl::inv_collection
-                        .select(inv::id)
-                        .order_by(inv::time_done.desc())
-                        .limit(1),
-                ),
-            )
-            .select((ioz_dsl::sled_id, ni_dsl::id))
-            .load_async::<(Uuid, Uuid)>(conn)
-            .await
-        {
-            Ok(results) => Ok(results
-                .into_iter()
-                .map(|(sled, interface)| ExternalIpHome { sled, interface })
-                .collect()),
-            Err(e) => Err(Error::NotFound {
-                message: MessagePair::new(format!(
-                    "sled not found for ip {ip}: {e}"
-                )),
-            }),
+            .filter(ni::is_primary.eq(true))
+            .filter(vmm::time_deleted.is_null())
+            .filter(igw_dsl::time_deleted.is_null())
+            .filter(igw_pool_dsl::time_deleted.is_null())
+            .select((eip_dsl::ip, ni::id, igw_dsl::id))
+            .load_async::<(IpNetwork, Uuid, Uuid)>(&*conn)
+            .await;
+
+        // TODO: service & probe mappings.
+        //       note that the current sled-agent design
+        //       does not yet allow us to re-ensure the set of
+        //       external IPs for non-instance entities.
+        //       if we insert those here, we need to be sure that
+        //       the mappings are ignored by sled-agent for new
+        //       services/probes/etc.
+
+        match instance_mappings {
+            Ok(map) => {
+                for (ip, nic_id, inet_gw_id) in map {
+                    let per_nic: &mut HashMap<_, _> =
+                        out.entry(nic_id).or_default();
+
+                    per_nic.insert(ip.ip(), inet_gw_id);
+                }
+
+                Ok(out)
+            }
+            Err(e) => Err(Error::non_resourcetype_not_found(&format!(
+                "unable to find IGW mappings for sled {sled_id}: {e}"
+            ))),
         }
     }
 
@@ -2494,6 +2481,19 @@ impl DataStore {
                     .await
                     .ok()
                     .map(|(.., vpc)| (name, vpc))
+            })
+            .collect::<HashMap<_, _>>()
+            .await;
+
+        let inetgws = stream::iter(inetgw_names)
+            .filter_map(|name| async {
+                db::lookup::LookupPath::new(opctx, self)
+                    .vpc_id(authz_vpc.id())
+                    .internet_gateway_name(Name::ref_cast(&name))
+                    .fetch()
+                    .await
+                    .ok()
+                    .map(|(.., igw)| (name, igw))
             })
             .collect::<HashMap<_, _>>()
             .await;
@@ -2594,7 +2594,19 @@ impl DataStore {
 
                 // There can be multiple targets per internet gateway, so these
                 // are handled below.
-                RouteTarget::InternetGateway(_) => (None, None),
+                // TODO(kyle): vpc_resolve_sled_external_ips_to_gateways
+                //             is to be used to sync EIP<->IGW mappings
+                //             down to OPTE so that it can accurately select
+                //             which source NAT IP addresses are valid.
+                RouteTarget::InternetGateway(n) => inetgws
+                    .get(&n)
+                    .map(|igw| {
+                        (
+                            Some(RouterTarget::InternetGateway(Some(igw.id()))),
+                            Some(RouterTarget::InternetGateway(Some(igw.id()))),
+                        )
+                    })
+                    .unwrap_or_default(),
 
                 // TODO: VPC Peering.
                 RouteTarget::Vpc(_) => (None, None),
@@ -2607,345 +2619,11 @@ impl DataStore {
             //      It would be really useful to raise collisions and
             //      misses to users, somehow.
             if let (Some(dest), Some(target)) = (v4_dest, v4_target) {
-                out.insert(ResolvedVpcRoute {
-                    dest,
-                    target,
-                    sled: SledTarget::Any,
-                });
+                out.insert(ResolvedVpcRoute { dest, target });
             }
 
             if let (Some(dest), Some(target)) = (v6_dest, v6_target) {
-                out.insert(ResolvedVpcRoute {
-                    dest,
-                    target,
-                    sled: SledTarget::Any,
-                });
-            }
-
-            // The OPTE model for internet gateway routes is that a VPC
-            // route points at an internet gateway object. That internet
-            // gateway object contains the source address that is to be
-            // used for the route.
-            //
-            // Therefore, here what we are doing is ...
-            // 1. Look up the intergnet gateway (igw).
-            // 2. Fetch the IP pools associated with the igw.
-            // 3. Look up the external IPs in the vpc.
-            // 4. For each external IP, see if it belongs to an IP pool
-            //    associated with an internet gateway (yeah, this is
-            //    quadratic, but the number of ip pool associations is
-            //    unlikely to be more than a couple?)
-            // 5. If the external IP does belong to an IP pool that is
-            //    associated with the gateway target, install the
-            //    destination -> target rule where the target is the
-            //    internet gateway parameterized by the external ip.
-            if let RouteTarget::InternetGateway(name) = &rule.target.0 {
-                info!(
-                    opctx.log,
-                    "Internet gateway resolving targets";
-                    "name" => name.to_string(),
-                    "vpc" => authz_vpc.id().to_string(),
-                );
-                let conn = self.pool_connection_authorized(opctx).await?;
-                let igw = db::lookup::LookupPath::new(opctx, self)
-                    .vpc_id(authz_vpc.id())
-                    .internet_gateway_name(&(name.clone().into()))
-                    .fetch()
-                    .await;
-
-                let (.., authz_igw, _db_igw) = match igw {
-                    Ok(value) => value,
-                    Err(e) => {
-                        warn!(
-                            opctx.log,
-                            "Internet gateway lookup failed \
-                            when resolving vpc router rules:";
-                            "error" => e.to_string(),
-                            "name" => name.to_string(),
-                            "vpc" => authz_vpc.id().to_string(),
-                        );
-                        continue;
-                    }
-                };
-
-                use db::schema::internet_gateway_ip_pool::dsl as igwp;
-                let igw_pools = igwp::internet_gateway_ip_pool
-                    .filter(igwp::time_deleted.is_null())
-                    .filter(igwp::internet_gateway_id.eq(authz_igw.id()))
-                    .select(InternetGatewayIpPool::as_select())
-                    .load_async::<InternetGatewayIpPool>(&*conn)
-                    .await;
-
-                let igw_pools = match igw_pools {
-                    Ok(value) => value,
-                    Err(e) => {
-                        warn!(
-                            opctx.log,
-                            "Internet gateway pool lookup failed \
-                            when resolving vpc router rules:";
-                            "error" => e.to_string(),
-                            "name" => name.to_string(),
-                            "vpc" => authz_vpc.id().to_string(),
-                            "igw" => authz_igw.id().to_string(),
-                        );
-                        continue;
-                    }
-                };
-                info!(
-                    opctx.log,
-                    "Internet gateway found {} pools",
-                    igw_pools.len();
-                    "name" => name.to_string(),
-                    "vpc" => authz_vpc.id().to_string(),
-                    "igw" => authz_igw.id().to_string(),
-                );
-
-                let parents: Vec<Uuid> = if authz_vpc.id() == *SERVICES_VPC_ID {
-                    self.service_network_interfaces_all_list_batched(opctx)
-                        .await?
-                        .iter()
-                        .map(|x| x.service_id)
-                        .collect()
-                } else {
-                    let mut instances = Vec::new();
-                    let mut paginator = Paginator::new(SQL_BATCH_SIZE);
-                    while let Some(p) = paginator.next() {
-                        let batch = self
-                            .instance_list(
-                                opctx,
-                                &authz_project,
-                                &PaginatedBy::Id(p.current_pagparams()),
-                            )
-                            .await?;
-                        paginator = p.found_batch(
-                            &batch,
-                            &|s: &InstanceAndActiveVmm| s.instance.id(),
-                        );
-                        instances
-                            .extend(batch.into_iter().map(|x| x.instance.id()));
-                    }
-                    instances
-                };
-
-                info!(
-                    opctx.log,
-                    "Internet gateway found {} parents",
-                    parents.len();
-                    "name" => name.to_string(),
-                    "vpc" => authz_vpc.id().to_string(),
-                );
-
-                for igw_pool in &igw_pools {
-                    use db::schema::ip_pool_range::dsl as ipr;
-                    let prs = match ipr::ip_pool_range
-                        .filter(ipr::time_deleted.is_null())
-                        .filter(ipr::ip_pool_id.eq(igw_pool.ip_pool_id))
-                        .select(IpPoolRange::as_select())
-                        .load_async::<IpPoolRange>(&*conn)
-                        .await
-                    {
-                        Ok(value) => value,
-                        Err(e) => {
-                            warn!(
-                                opctx.log,
-                                "Internet gateway pool range lookup failed \
-                                when resolving vpc router rules";
-                                "name" => name.to_string(),
-                                "vpc" => authz_vpc.id().to_string(),
-                                "ip_pool" => igw_pool.ip_pool_id.to_string(),
-                                "error" => e.to_string(),
-                            );
-                            continue;
-                        }
-                    };
-
-                    info!(
-                        opctx.log,
-                        "Internet gateway found {} ip pool ranges",
-                        instances.len();
-                        "name" => name.to_string(),
-                        "vpc" => authz_vpc.id().to_string(),
-                        "ip_pool" => igw_pool.ip_pool_id.to_string(),
-                    );
-
-                    for parent_id in &parents {
-                        use db::schema::external_ip::dsl as xip;
-                        let ext_ips = xip::external_ip
-                            .filter(xip::time_deleted.is_null())
-                            .filter(xip::parent_id.eq(*parent_id))
-                            .select(ExternalIp::as_select())
-                            .load_async::<ExternalIp>(&*conn)
-                            .await;
-
-                        let ext_ips = match ext_ips {
-                            Ok(value) => value,
-                            Err(e) => {
-                                warn!(
-                                    opctx.log,
-                                    "Internet gateway external ip look \
-                                    up failed when resolving vpc router rules";
-                                    "name" => name.to_string(),
-                                    "vpc" => authz_vpc.id().to_string(),
-                                    "parent" => parent_id.to_string(),
-                                    "error" => e.to_string(),
-                                );
-                                continue;
-                            }
-                        };
-
-                        info!(
-                            opctx.log,
-                            "Internet gateway found {} external_ips for parent",
-                            ext_ips.len();
-                            "name" => name.to_string(),
-                            "vpc" => authz_vpc.id().to_string(),
-                            "parent" => parent_id.to_string(),
-                        );
-
-                        for ext_ip in &ext_ips {
-                            info!(
-                                opctx.log,
-                                "Internet gateway \
-                                v4_dest: {v4_dest:?}, v6_dest: {v6_dest:?}, ext_ip: {}",
-                                ext_ip.ip.ip();
-                                "name" => name.to_string(),
-                                "vpc" => authz_vpc.id().to_string(),
-                                "parent" => parent_id.to_string(),
-                            );
-
-                            match ext_ip.ip.ip() {
-                                IpAddr::V4(v4) => {
-                                    if let Some(dest) = v4_dest {
-                                        let mut found = false;
-                                        for pr in &prs {
-                                            if ext_ip.ip.ip()
-                                                >= pr.first_address.ip()
-                                                && ext_ip.ip.ip()
-                                                    <= pr.last_address.ip()
-                                            {
-                                                let homes = match self
-                                                    .homes_for_external_ip(
-                                                        &conn,
-                                                        ext_ip.ip.ip(),
-                                                    )
-                                                    .await
-                                                {
-                                                    Ok(id) => id,
-                                                    Err(e) => {
-                                                        warn!(
-                                                            opctx.log,
-                                                            "Internet gateway find sled id for ip {}: {e}",
-                                                            ext_ip.ip.ip();
-                                                            "name" => name.to_string(),
-                                                            "vpc" => authz_vpc.id().to_string(),
-                                                            "parent" => parent_id.to_string(),
-                                                        );
-                                                        continue;
-                                                    }
-                                                };
-                                                for home in &homes {
-                                                    out.insert(ResolvedVpcRoute{
-                                                        dest,
-                                                        target: RouterTarget::InternetGateway(
-                                                            v4.into(),
-                                                        ),
-                                                        sled: SledTarget::Only{sled: home.sled, interface: home.interface},
-                                                    });
-                                                }
-                                                info!(
-                                                    opctx.log,
-                                                    "Internet gateway adding route \
-                                                    {dest} -> {v4}";
-                                                    "name" => name.to_string(),
-                                                    "vpc" => authz_vpc.id().to_string(),
-                                                    "parent" => parent_id.to_string(),
-                                                );
-                                                found = true;
-                                                break;
-                                            }
-                                        }
-                                        if !found {
-                                            warn!(
-                                                opctx.log,
-                                                "Internet gateway no suitable \
-                                                ipv4 range found for {} in pool",
-                                                ext_ip.ip.ip();
-                                                "name" => name.to_string(),
-                                                "vpc" => authz_vpc.id().to_string(),
-                                                "parent" => parent_id.to_string(),
-                                                "pool" => igw_pool.ip_pool_id.to_string(),
-                                            );
-                                        }
-                                    }
-                                }
-                                IpAddr::V6(v6) => {
-                                    if let Some(dest) = v6_dest {
-                                        let mut found = false;
-                                        for pr in &prs {
-                                            if ext_ip.ip.ip()
-                                                >= pr.first_address.ip()
-                                                && ext_ip.ip.ip()
-                                                    <= pr.last_address.ip()
-                                            {
-                                                let homes = match self
-                                                    .homes_for_external_ip(
-                                                        &conn,
-                                                        ext_ip.ip.ip(),
-                                                    )
-                                                    .await
-                                                {
-                                                    Ok(id) => id,
-                                                    Err(e) => {
-                                                        warn!(
-                                                            opctx.log,
-                                                            "Internet gateway find sled id for ip {}: {e}",
-                                                            ext_ip.ip.ip();
-                                                            "name" => name.to_string(),
-                                                            "vpc" => authz_vpc.id().to_string(),
-                                                            "parent" => parent_id.to_string(),
-                                                        );
-                                                        continue;
-                                                    }
-                                                };
-                                                for home in &homes {
-                                                    out.insert(ResolvedVpcRoute{
-                                                        dest,
-                                                        target: RouterTarget::InternetGateway(
-                                                            v6.into(),
-                                                        ),
-                                                        sled: SledTarget::Only{ sled: home.sled, interface: home.interface },
-                                                    });
-                                                }
-                                                info!(
-                                                    opctx.log,
-                                                    "Internet gateway adding route \
-                                                    {dest} -> {v6}";
-                                                    "name" => name.to_string(),
-                                                    "vpc" => authz_vpc.id().to_string(),
-                                                    "parent" => parent_id.to_string(),
-                                                );
-                                                found = true;
-                                                break;
-                                            }
-                                        }
-                                        if !found {
-                                            warn!(
-                                                opctx.log,
-                                                "Internet gateway no suitable \
-                                                ipv4 range found for {} in pool",
-                                                ext_ip.ip.ip();
-                                                "name" => name.to_string(),
-                                                "vpc" => authz_vpc.id().to_string(),
-                                                "parent" => parent_id.to_string(),
-                                                "pool" => igw_pool.ip_pool_id.to_string(),
-                                            );
-                                        }
-                                    }
-                                }
-                            };
-                        }
-                    }
-                }
+                out.insert(ResolvedVpcRoute { dest, target });
             }
         }
 
@@ -4020,9 +3698,4 @@ mod tests {
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
-}
-
-pub struct ExternalIpHome {
-    pub sled: Uuid,
-    pub interface: Uuid,
 }

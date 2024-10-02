@@ -714,16 +714,6 @@ impl TryFrom<&[ipnetwork::IpNetwork]> for IpAllowList {
     }
 }
 
-/// A VPC route resolved potentially to a particular sled
-#[derive(
-    Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
-)]
-#[serde(tag = "type", rename_all = "snake_case", content = "value")]
-pub enum SledTarget {
-    Any,
-    Only { sled: Uuid, interface: Uuid },
-}
-
 /// A VPC route resolved into a concrete target.
 #[derive(
     Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq, Hash,
@@ -731,7 +721,6 @@ pub enum SledTarget {
 pub struct ResolvedVpcRoute {
     pub dest: IpNet,
     pub target: RouterTarget,
-    pub sled: SledTarget,
 }
 
 /// VPC firewall rule after object name resolution has been performed by Nexus
@@ -788,7 +777,7 @@ pub struct DhcpConfig {
 #[serde(tag = "type", rename_all = "snake_case", content = "value")]
 pub enum RouterTarget {
     Drop,
-    InternetGateway(IpAddr),
+    InternetGateway(Option<Uuid>),
     Ip(IpAddr),
     VpcSubnet(IpNet),
 }
@@ -846,6 +835,13 @@ pub struct ResolvedVpcRouteSet {
     pub id: RouterId,
     pub version: Option<RouterVersion>,
     pub routes: HashSet<ResolvedVpcRoute>,
+}
+
+/// Per-NIC mappings from external IP addresses to the Internet Gateways
+/// which can choose to them as a source.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+pub struct ExternalIpGatewayMap {
+    pub mappings: HashMap<Uuid, HashMap<IpAddr, Uuid>>,
 }
 
 /// Describes the purpose of the dataset.

@@ -276,6 +276,33 @@
         }
       }
     },
+    "/eip-gateways": {
+      "put": {
+        "summary": "Update per-NIC IP address <-> internet gateway mappings.",
+        "operationId": "set_eip_gateways",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExternalIpGatewayMap"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/inventory": {
       "get": {
         "summary": "Fetch basic information about this sled",
@@ -3010,6 +3037,25 @@
           "baseboard"
         ]
       },
+      "ExternalIpGatewayMap": {
+        "description": "Per-NIC mappings from external IP addresses to the Internet Gateways which can choose to them as a source.",
+        "type": "object",
+        "properties": {
+          "mappings": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "format": "uuid"
+              }
+            }
+          }
+        },
+        "required": [
+          "mappings"
+        ]
+      },
       "Generation": {
         "description": "Generation numbers stored in the database, used for optimistic concurrency control",
         "type": "integer",
@@ -4606,16 +4652,12 @@
           "dest": {
             "$ref": "#/components/schemas/IpNet"
           },
-          "sled": {
-            "$ref": "#/components/schemas/SledTarget"
-          },
           "target": {
             "$ref": "#/components/schemas/RouterTarget"
           }
         },
         "required": [
           "dest",
-          "sled",
           "target"
         ]
       },
@@ -4785,8 +4827,9 @@
                 ]
               },
               "value": {
+                "nullable": true,
                 "type": "string",
-                "format": "ip"
+                "format": "uuid"
               }
             },
             "required": [
@@ -4908,57 +4951,6 @@
             "type": "string",
             "enum": [
               "scrimlet"
-            ]
-          }
-        ]
-      },
-      "SledTarget": {
-        "description": "A VPC route resolved potentially to a particular sled",
-        "oneOf": [
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "any"
-                ]
-              }
-            },
-            "required": [
-              "type"
-            ]
-          },
-          {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "enum": [
-                  "only"
-                ]
-              },
-              "value": {
-                "type": "object",
-                "properties": {
-                  "interface": {
-                    "type": "string",
-                    "format": "uuid"
-                  },
-                  "sled": {
-                    "type": "string",
-                    "format": "uuid"
-                  }
-                },
-                "required": [
-                  "interface",
-                  "sled"
-                ]
-              }
-            },
-            "required": [
-              "type",
-              "value"
             ]
           }
         ]

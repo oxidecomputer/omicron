@@ -136,7 +136,7 @@ z_swadm () {
 
 # only set this if you want to override the version of opte/xde installed by the
 # install_opte.sh script
-OPTE_COMMIT="929183da9a31235db57006c2af492690d99df50d"
+OPTE_COMMIT="7bba530f897f69755723be2218de2628af0eb771"
 if [[ "x$OPTE_COMMIT" != "x" ]]; then
 	curl  -sSfOL https://buildomat.eng.oxide.computer/public/file/oxidecomputer/opte/module/$OPTE_COMMIT/xde
 	pfexec rem_drv xde || true

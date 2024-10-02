@@ -13,6 +13,7 @@ use crate::opte::Port;
 use crate::opte::Vni;
 use ipnetwork::IpNetwork;
 use omicron_common::api::external;
+use omicron_common::api::internal::shared::ExternalIpGatewayMap;
 use omicron_common::api::internal::shared::NetworkInterface;
 use omicron_common::api::internal::shared::NetworkInterfaceKind;
 use omicron_common::api::internal::shared::ResolvedVpcFirewallRule;
@@ -22,7 +23,6 @@ use omicron_common::api::internal::shared::ResolvedVpcRouteState;
 use omicron_common::api::internal::shared::RouterId;
 use omicron_common::api::internal::shared::RouterTarget as ApiRouterTarget;
 use omicron_common::api::internal::shared::RouterVersion;
-use omicron_common::api::internal::shared::SledTarget;
 use omicron_common::api::internal::shared::SourceNatConfig;
 use omicron_common::api::internal::shared::VirtualNetworkInterfaceHost;
 use oxide_vpc::api::AddRouterEntryReq;
@@ -47,7 +47,6 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::net::IpAddr;
-use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
@@ -79,6 +78,12 @@ struct PortManagerInner {
 
     /// Map of all current resolved routes.
     routes: Mutex<HashMap<RouterId, RouteSet>>,
+
+    /// Mappings of associated Internet Gateways for all External IPs
+    /// attached to each NIC.
+    ///
+    /// IGW IDs are specific to the VPC of each NIC.
+    eip_gateways: Mutex<HashMap<Uuid, HashMap<IpAddr, Uuid>>>,
 }
 
 impl PortManagerInner {
@@ -118,6 +123,7 @@ impl PortManager {
             underlay_ip,
             ports: Mutex::new(BTreeMap::new()),
             routes: Mutex::new(Default::default()),
+            eip_gateways: Mutex::new(Default::default()),
         });
 
         Self { inner }
@@ -332,15 +338,11 @@ impl PortManager {
         // those routes.
         let mut routes = self.inner.routes.lock().unwrap();
         let system_routes = match &ip_cfg {
-            IpCfg::Ipv4(cfg) => {
-                system_routes_v4(cfg, is_service, &mut routes, &port)
-            }
-            IpCfg::Ipv6(cfg) => {
-                system_routes_v6(cfg, is_service, &mut routes, &port)
-            }
-            IpCfg::DualStack { ipv4, ipv6 } => {
-                system_routes_v4(ipv4, is_service, &mut routes, &port);
-                system_routes_v6(ipv6, is_service, &mut routes, &port)
+            IpCfg::Ipv4(_) => system_routes_v4(is_service, &mut routes, &port),
+            IpCfg::Ipv6(_) => system_routes_v6(is_service, &mut routes, &port),
+            IpCfg::DualStack { .. } => {
+                system_routes_v4(is_service, &mut routes, &port);
+                system_routes_v6(is_service, &mut routes, &port)
             }
         };
 
@@ -366,7 +368,16 @@ impl PortManager {
                     class,
                     port_name: port_name.clone(),
                     dest: super::net_to_cidr(route.dest),
-                    target: super::router_target_opte(&route.target),
+                    target: super::router_target_opte(
+                        &route.target,
+                        // This option doesn't make any difference here:
+                        // We don't yet know any associated InetGw IDs for
+                        // the IPs attached to this interface.
+                        // We might have this knowledge at create-time in
+                        // future, but assume for now that the control plane
+                        // will backfill this.
+                        false,
+                    ),
                 };
 
                 #[cfg(target_os = "illumos")]
@@ -492,6 +503,9 @@ impl PortManager {
             let custom_id = port.custom_router_key();
             let custom_delta = deltas.get(&custom_id);
 
+            let is_instance =
+                matches!(interface_id.1, NetworkInterfaceKind::Instance { .. });
+
             #[cfg_attr(not(target_os = "illumos"), allow(unused_variables))]
             for (class, delta) in [
                 (RouterClass::System, system_delta),
@@ -510,7 +524,10 @@ impl PortManager {
                         class,
                         port_name: port.name().into(),
                         dest: super::net_to_cidr(route.dest),
-                        target: super::router_target_opte(&route.target),
+                        target: super::router_target_opte(
+                            &route.target,
+                            is_instance,
+                        ),
                     };
 
                     #[cfg(target_os = "illumos")]
@@ -525,25 +542,14 @@ impl PortManager {
                 }
 
                 for route in to_add {
-                    match route.sled {
-                        SledTarget::Only { sled: _, interface }
-                            if interface != interface_id.0 =>
-                        {
-                            info!(self.inner.log,
-                                "skipping route entry not for this interface";
-                                "this_interface" => interface_id.0.to_string(),
-                                "route_interface" => interface.to_string(),
-                                "skipped" => format!("{route:#?}"),
-                            );
-                            continue;
-                        }
-                        _ => {}
-                    }
                     let route = AddRouterEntryReq {
                         class,
                         port_name: port.name().into(),
                         dest: super::net_to_cidr(route.dest),
-                        target: super::router_target_opte(&route.target),
+                        target: super::router_target_opte(
+                            &route.target,
+                            is_instance,
+                        ),
                     };
 
                     #[cfg(target_os = "illumos")]
@@ -578,6 +584,20 @@ impl PortManager {
         Ok(())
     }
 
+    /// Set Internet Gateway mappings for all external IPs in use
+    /// by attached `NetworkInterface`s.
+    ///
+    /// Returns whether the internal mappings were changed.
+    pub fn set_eip_gateways(&self, mappings: ExternalIpGatewayMap) -> bool {
+        let mut gateways = self.inner.eip_gateways.lock().unwrap();
+
+        let changed = &*gateways != &mappings.mappings;
+
+        *gateways = mappings.mappings;
+
+        changed
+    }
+
     /// Ensure external IPs for an OPTE port are up to date.
     #[cfg_attr(not(target_os = "illumos"), allow(unused_variables))]
     pub fn external_ips_ensure(
@@ -588,6 +608,10 @@ impl PortManager {
         ephemeral_ip: Option<IpAddr>,
         floating_ips: &[IpAddr],
     ) -> Result<(), Error> {
+        let egw_lock = self.inner.eip_gateways.lock().unwrap();
+        let inet_gw_map = egw_lock.get(&nic_id).cloned();
+        drop(egw_lock);
+
         let ports = self.inner.ports.lock().unwrap();
         let port = ports.get(&(nic_id, nic_kind)).ok_or_else(|| {
             Error::ExternalIpUpdateMissingPort(nic_id, nic_kind)
@@ -678,10 +702,18 @@ impl PortManager {
             }
         }
 
+        let inet_gw_map = if let Some(map) = inet_gw_map {
+            Some(map.into_iter().map(|(k, v)| (k.into(), v)).collect())
+        } else {
+            None
+        };
+
         let req = SetExternalIpsReq {
             port_name: port.name().into(),
             external_ips_v4: v4_cfg,
             external_ips_v6: v6_cfg,
+            // TODO:
+            inet_gw_map,
         };
 
         #[cfg(target_os = "illumos")]
@@ -974,91 +1006,41 @@ impl Drop for PortTicket {
 }
 
 fn system_routes_v4<'a>(
-    cfg: &Ipv4Cfg,
     is_service: bool,
     routes: &'a mut HashMap<RouterId, RouteSet>,
     port: &Port,
 ) -> &'a mut RouteSet {
-    routes.entry(port.system_router_key()).or_insert_with(|| {
-        let mut routes = HashSet::new();
-        if let Some(ref snat) = cfg.external_ips.snat {
-            if is_service {
-                routes.insert(ResolvedVpcRoute {
-                    dest: "0.0.0.0/0".parse().unwrap(),
-                    target: ApiRouterTarget::InternetGateway(IpAddr::V4(
-                        Ipv4Addr::from(snat.external_ip),
-                    )),
-                    sled: SledTarget::Any,
-                });
-            }
-        }
-        if let Some(ref ephemeral) = cfg.external_ips.ephemeral_ip {
-            if is_service {
-                routes.insert(ResolvedVpcRoute {
-                    dest: "0.0.0.0/0".parse().unwrap(),
-                    target: ApiRouterTarget::InternetGateway(IpAddr::V4(
-                        Ipv4Addr::from(*ephemeral),
-                    )),
-                    sled: SledTarget::Any,
-                });
-            }
-        }
-        if is_service {
-            for fip in &cfg.external_ips.floating_ips {
-                routes.insert(ResolvedVpcRoute {
-                    dest: "0.0.0.0/0".parse().unwrap(),
-                    target: ApiRouterTarget::InternetGateway(IpAddr::V4(
-                        Ipv4Addr::from(*fip),
-                    )),
-                    sled: SledTarget::Any,
-                });
-            }
-        }
+    let routes = routes.entry(port.system_router_key()).or_insert_with(|| {
+        let routes = HashSet::new();
         RouteSet { version: None, routes, active_ports: 0 }
-    })
+    });
+
+    if is_service {
+        routes.routes.insert(ResolvedVpcRoute {
+            dest: "0.0.0.0/0".parse().unwrap(),
+            target: ApiRouterTarget::InternetGateway(None),
+        });
+    }
+
+    routes
 }
 
 fn system_routes_v6<'a>(
-    cfg: &Ipv6Cfg,
     is_service: bool,
     routes: &'a mut HashMap<RouterId, RouteSet>,
     port: &Port,
 ) -> &'a mut RouteSet {
-    routes.entry(port.system_router_key()).or_insert_with(|| {
-        let mut routes = HashSet::new();
-        if let Some(ref snat) = cfg.external_ips.snat {
-            if is_service {
-                routes.insert(ResolvedVpcRoute {
-                    dest: "0.0.0.0/0".parse().unwrap(),
-                    target: ApiRouterTarget::InternetGateway(IpAddr::V6(
-                        Ipv6Addr::from(snat.external_ip),
-                    )),
-                    sled: SledTarget::Any,
-                });
-            }
-        }
-        if let Some(ref ephemeral) = cfg.external_ips.ephemeral_ip {
-            if is_service {
-                routes.insert(ResolvedVpcRoute {
-                    dest: "0.0.0.0/0".parse().unwrap(),
-                    target: ApiRouterTarget::InternetGateway(IpAddr::V6(
-                        Ipv6Addr::from(*ephemeral),
-                    )),
-                    sled: SledTarget::Any,
-                });
-            }
-        }
-        if is_service {
-            for fip in &cfg.external_ips.floating_ips {
-                routes.insert(ResolvedVpcRoute {
-                    dest: "0.0.0.0/0".parse().unwrap(),
-                    target: ApiRouterTarget::InternetGateway(IpAddr::V6(
-                        Ipv6Addr::from(*fip),
-                    )),
-                    sled: SledTarget::Any,
-                });
-            }
-        }
+    let routes = routes.entry(port.system_router_key()).or_insert_with(|| {
+        let routes = HashSet::new();
         RouteSet { version: None, routes, active_ports: 0 }
-    })
+    });
+
+    if is_service {
+        routes.routes.insert(ResolvedVpcRoute {
+            dest: "::/0".parse().unwrap(),
+            target: ApiRouterTarget::InternetGateway(None),
+        });
+    }
+
+    routes
 }

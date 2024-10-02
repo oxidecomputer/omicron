@@ -1976,6 +1976,9 @@ allow_tables_to_appear_in_same_query!(
     role_builtin,
     role_assignment,
     probe,
+    internet_gateway,
+    internet_gateway_ip_pool,
+    internet_gateway_ip_address,
 );
 
 allow_tables_to_appear_in_same_query!(dns_zone, dns_version, dns_name);
@@ -1995,6 +1998,9 @@ allow_tables_to_appear_in_same_query!(network_interface, inv_collection);
 allow_tables_to_appear_in_same_query!(inv_omicron_zone, inv_collection);
 allow_tables_to_appear_in_same_query!(inv_omicron_zone_nic, inv_collection);
 allow_tables_to_appear_in_same_query!(external_ip, inv_collection);
+allow_tables_to_appear_in_same_query!(external_ip, internet_gateway);
+allow_tables_to_appear_in_same_query!(external_ip, internet_gateway_ip_pool);
+allow_tables_to_appear_in_same_query!(external_ip, internet_gateway_ip_address);
 
 allow_tables_to_appear_in_same_query!(
     switch_port,
