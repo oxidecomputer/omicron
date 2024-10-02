@@ -779,6 +779,7 @@ mod test {
     use chrono::NaiveDateTime;
     use chrono::TimeZone;
     use chrono::Utc;
+    use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
     use clickhouse_admin_types::KeeperId;
     use expectorate::assert_contents;
     use nexus_inventory::now_db_precision;
@@ -799,7 +800,6 @@ mod test {
     use nexus_types::external_api::views::SledPolicy;
     use nexus_types::external_api::views::SledProvisionPolicy;
     use nexus_types::external_api::views::SledState;
-    use nexus_types::inventory::ClickhouseKeeperClusterMembership;
     use nexus_types::inventory::OmicronZonesFound;
     use omicron_common::api::external::Generation;
     use omicron_common::disk::DiskIdentity;

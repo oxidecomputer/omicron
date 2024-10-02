@@ -11,6 +11,7 @@
 use anyhow::anyhow;
 use chrono::DateTime;
 use chrono::Utc;
+use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;
 use gateway_client::types::SpType;
@@ -21,7 +22,6 @@ use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::Caboose;
 use nexus_types::inventory::CabooseFound;
 use nexus_types::inventory::CabooseWhich;
-use nexus_types::inventory::ClickhouseKeeperClusterMembership;
 use nexus_types::inventory::Collection;
 use nexus_types::inventory::OmicronZonesFound;
 use nexus_types::inventory::RotPage;
