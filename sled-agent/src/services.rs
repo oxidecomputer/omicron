@@ -4890,7 +4890,6 @@ mod illumos_tests {
                     generation,
                     zones: vec![OmicronZoneConfig {
                         id,
-                        underlay_address: Ipv6Addr::LOCALHOST,
                         zone_type,
                         filesystem_pool: None,
                     }],
@@ -4917,7 +4916,6 @@ mod illumos_tests {
                 generation,
                 zones: vec![OmicronZoneConfig {
                     id,
-                    underlay_address: Ipv6Addr::LOCALHOST,
                     zone_type: OmicronZoneType::InternalNtp { address },
                     filesystem_pool: None,
                 }],
@@ -5497,7 +5495,6 @@ mod illumos_tests {
             SocketAddrV6::new(Ipv6Addr::LOCALHOST, EXPECTED_PORT, 0, 0);
         let mut zones = vec![OmicronZoneConfig {
             id: id1,
-            underlay_address: Ipv6Addr::LOCALHOST,
             zone_type: OmicronZoneType::InternalNtp { address },
             filesystem_pool: None,
         }];
@@ -5520,7 +5517,6 @@ mod illumos_tests {
         let id2 = OmicronZoneUuid::new_v4();
         zones.push(OmicronZoneConfig {
             id: id2,
-            underlay_address: Ipv6Addr::LOCALHOST,
             zone_type: OmicronZoneType::InternalNtp { address },
             filesystem_pool: None,
         });
