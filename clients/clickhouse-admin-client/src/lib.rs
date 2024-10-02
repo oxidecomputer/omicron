@@ -21,5 +21,7 @@ progenitor::generate_api!(
     derives = [schemars::JsonSchema],
     replace = {
         TypedUuidForOmicronZoneKind = omicron_uuid_kinds::OmicronZoneUuid,
+        KeeperConfigurableSettings = clickhouse_admin_api::KeeperConfigurableSettings,
+        ServerConfigurableSettings = clickhouse_admin_api::ServerConfigurableSettings,
     }
 );

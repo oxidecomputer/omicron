@@ -3,29 +3,29 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Deployment of Clickhouse keeper and server nodes via clickhouse-admin running in
-//! deployed clickhouse zones.
+//! deployed omicron zones.
 
 use anyhow::anyhow;
-use anyhow::Context;
 use camino::Utf8PathBuf;
 use clickhouse_admin_api::KeeperConfigurableSettings;
 use clickhouse_admin_api::ServerConfigurableSettings;
 use clickhouse_admin_client::Client;
 use clickhouse_admin_types::config::ClickhouseHost;
 use clickhouse_admin_types::config::RaftServerSettings;
-use clickhouse_admin_types::KeeperId;
 use clickhouse_admin_types::KeeperSettings;
 use clickhouse_admin_types::ServerSettings;
 use nexus_db_queries::context::OpContext;
-use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::ClickhouseClusterConfig;
 use omicron_common::address::CLICKHOUSE_ADMIN_PORT;
-use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
+use slog::error;
+use slog::warn;
 use std::collections::BTreeMap;
 use std::net::Ipv6Addr;
+use std::net::SocketAddr;
+use std::net::SocketAddrV6;
 use std::str::FromStr;
 
 const CLICKHOUSE_SERVER_CONFIG_DIR: &str =
@@ -42,7 +42,15 @@ pub(crate) async fn deploy_nodes(
     let keeper_configs = match keeper_configs(zones, clickhouse_cluster_config)
     {
         Ok(keeper_configs) => keeper_configs,
-        Err(e) => return Err(vec![e]),
+        Err(e) => {
+            // We can't proceed if we fail to generate configs.
+            // Let's be noisy about it.
+            error!(
+                opctx.log,
+                "failed to generate clickhouse keeper configs: {e}"
+            );
+            return Err(vec![e]);
+        }
     };
 
     let keeper_hosts: Vec<_> = keeper_configs
@@ -53,16 +61,83 @@ pub(crate) async fn deploy_nodes(
     let server_configs =
         match server_configs(zones, clickhouse_cluster_config, keeper_hosts) {
             Ok(server_configs) => server_configs,
-            Err(e) => return Err(vec![e]),
+            Err(e) => {
+                // We can't proceed if we fail to generate configs.
+                // Let's be noisy about it.
+                error!(
+                    opctx.log,
+                    "Failed to generate clickhouse server configs: {e}"
+                );
+                return Err(vec![e]);
+            }
         };
 
-    // Inform each clickhouse keeper about its configuration
-    for keeper in keeper_configs {}
+    let mut errors = vec![];
+
+    // Inform each clickhouse-admin server in a keeper zone about its keeper's
+    // configuration
+    for config in keeper_configs {
+        let admin_addr = SocketAddr::V6(SocketAddrV6::new(
+            config.settings.listen_addr,
+            CLICKHOUSE_ADMIN_PORT,
+            0,
+            0,
+        ));
+        let admin_url = format!("http://{admin_addr}");
+        let log = opctx.log.new(slog::o!("admin_url" => admin_url.clone()));
+        let client = Client::new(&admin_url, log.clone());
+        if let Err(e) = client.generate_keeper_config(&config).await {
+            warn!(
+                log,
+                "Failed to send config for keeper {} to clickhouse-admin: {e}",
+                config.settings.id
+            );
+            errors.push(anyhow!(
+                concat!(
+                    "failed to send keeper config for keeper {} ",
+                    "to clickhouse-admin; admin_url = {}, error = {}",
+                ),
+                config.settings.id,
+                admin_url,
+                e
+            ));
+        }
+    }
 
     // Inform each clickhouse server about its configuration
-    for server in server_configs {}
+    for config in server_configs {
+        let admin_addr = SocketAddr::V6(SocketAddrV6::new(
+            config.settings.listen_addr,
+            CLICKHOUSE_ADMIN_PORT,
+            0,
+            0,
+        ));
+        let admin_url = format!("http://{admin_addr}");
+        let log = opctx.log.new(slog::o!("admin_url" => admin_url.clone()));
+        let client = Client::new(&admin_url, log.clone());
+        if let Err(e) = client.generate_server_config(&config).await {
+            warn!(
+                log,
+                "Failed to send config for keeper {} to clickhouse-admin: {e}",
+                config.settings.id
+            );
+            errors.push(anyhow!(
+                concat!(
+                    "failed to send clickhouse server config for server {} ",
+                    "to clickhouse-admin; admin_url = {}, error = {}",
+                ),
+                config.settings.id,
+                admin_url,
+                e
+            ));
+        }
+    }
 
-    todo!()
+    if !errors.is_empty() {
+        return Err(errors);
+    }
+
+    Ok(())
 }
 
 fn server_configs(

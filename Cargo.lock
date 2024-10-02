@@ -1300,6 +1300,7 @@ name = "clickhouse-admin-client"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "clickhouse-admin-api",
  "clickhouse-admin-types",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
