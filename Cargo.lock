@@ -5708,7 +5708,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-bb8-diesel",
+ "camino",
  "chrono",
+ "clickhouse-admin-api",
+ "clickhouse-admin-types",
  "cockroach-admin-client",
  "diesel",
  "dns-service-client",

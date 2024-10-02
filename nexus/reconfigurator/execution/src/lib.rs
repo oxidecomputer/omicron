@@ -31,6 +31,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use update_engine::merge_anyhow_list;
 
+mod clickhouse;
 mod cockroachdb;
 mod datasets;
 mod dns;
