@@ -97,7 +97,7 @@ banner ls-apis
 # rather than a buildomat timeout.  See oxidecomputer/buildomat#8.
 #
 banner test
-ptime -m timeout 2h cargo nextest run --profile ci --locked --verbose
+ptime -m timeout 2h cargo nextest run --profile ci --locked --verbose --release
 
 #
 # https://github.com/nextest-rs/nextest/issues/16
