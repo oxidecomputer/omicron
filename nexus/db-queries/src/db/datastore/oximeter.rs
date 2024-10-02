@@ -461,7 +461,7 @@ mod tests {
         let (opctx, datastore) =
             datastore_test(&logctx, &db, Uuid::new_v4()).await;
 
-        // Insert a couple Oximeter collectors.
+        // Insert a few Oximeter collectors.
         let collector_ids = (0..4).map(|_| Uuid::new_v4()).collect::<Vec<_>>();
         for &collector_id in &collector_ids {
             let info = OximeterInfo::new(&params::OximeterInfo {
