@@ -6,7 +6,90 @@
 
 use crate::db::raw_query_builder::{QueryBuilder, TypedSqlQuery};
 use diesel::sql_types;
+use ipnetwork::IpNetwork;
+use nexus_db_model::{ProducerKind, ProducerKindEnum, SqlU16};
+use omicron_common::api::internal;
 use uuid::Uuid;
+
+/// Upsert a metric producer.
+///
+/// If the producer is being inserted for the first time, a random Oximeter will
+/// be chosen from among all non-expunged entries in the `oximeter` table.
+///
+/// If this query succeeds but returns 0 rows inserted/updated, there are no
+/// non-expunged `Oximeter` instances to choose.
+pub fn upsert_producer(
+    producer: &internal::nexus::ProducerEndpoint,
+) -> TypedSqlQuery<()> {
+    let builder = QueryBuilder::new();
+
+    // Choose a random non-expunged Oximeter instance.
+    let builder = builder.sql(
+        r#"
+        WITH chosen_oximeter AS (
+          SELECT
+            id AS oximeter_id
+          FROM oximeter
+          WHERE time_expunged IS NULL
+          ORDER BY random()
+          LIMIT 1
+        )
+    "#,
+    );
+
+    // Build the INSERT for new producers...
+    let builder = builder.sql(
+        r#"
+        INSERT INTO metric_producer (
+            id,
+            time_created,
+            time_modified,
+            kind,
+            ip,
+            port,
+            interval,
+            oximeter_id
+        )
+    "#,
+    );
+
+    // ... by querying our chosen oximeter ID and the values from `producer`.
+    let builder = builder
+        .sql("SELECT ")
+        .param()
+        .bind::<sql_types::Uuid, _>(producer.id)
+        .sql(", now()") // time_created
+        .sql(", now()") // time_modified
+        .sql(", ")
+        .param()
+        .bind::<ProducerKindEnum, ProducerKind>(producer.kind.into())
+        .sql(", ")
+        .param()
+        .bind::<sql_types::Inet, IpNetwork>(producer.address.ip().into())
+        .sql(", ")
+        .param()
+        .bind::<sql_types::Int4, SqlU16>(producer.address.port().into())
+        .sql(", ")
+        .param()
+        .bind::<sql_types::Float, _>(producer.interval.as_secs_f32())
+        .sql(", oximeter_id FROM chosen_oximeter");
+
+    // If the producer already exists, update a subset of the fields,
+    // intentionally omitting `time_created` and `oximeter_id`.
+    let builder = builder.sql(
+        r#"
+        ON CONFLICT (id)
+        DO UPDATE SET
+          time_modified = now(),
+          kind = excluded.kind,
+          ip = excluded.ip,
+          port = excluded.port,
+          interval = excluded.interval
+    "#,
+    );
+
+    builder.query()
+}
 
 /// For a given Oximeter instance (which is presumably no longer running),
 /// reassign any producers assigned to it to a different Oximeter. Each
@@ -70,13 +153,32 @@ mod test {
     use crate::db::raw_query_builder::expectorate_query_contents;
     use nexus_test_utils::db::test_setup_database;
     use omicron_test_utils::dev;
+    use std::time::Duration;
     use uuid::Uuid;
 
-    // This test is a bit of a "change detector", but it's here to help with
-    // debugging too. If you change this query, it can be useful to see exactly
+    // These tests are a bit of a "change detector", but it's here to help with
+    // debugging too. If you change these query, it can be useful to see exactly
     // how the output SQL has been altered.
     #[tokio::test]
-    async fn expectorate_query() {
+    async fn expectorate_query_upsert_producer() {
+        let producer = internal::nexus::ProducerEndpoint {
+            id: Uuid::nil(),
+            kind: ProducerKind::SledAgent.into(),
+            address: "[::1]:0".parse().unwrap(),
+            interval: Duration::from_secs(30),
+        };
+
+        let query = upsert_producer(&producer);
+
+        expectorate_query_contents(
+            &query,
+            "tests/output/oximeter_upsert_producer.sql",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn expectorate_query_reassign_producers() {
         let oximeter_id = Uuid::nil();
 
         let query = reassign_producers_query(oximeter_id);
@@ -88,10 +190,36 @@ mod test {
         .await;
     }
 
-    // Explain the SQL query to ensure that it creates a valid SQL string.
+    // Explain the SQL queries to ensure that they create valid SQL strings.
     #[tokio::test]
-    async fn explainable() {
-        let logctx = dev::test_setup_log("explainable");
+    async fn explainable_upsert_producer() {
+        let logctx = dev::test_setup_log("explainable_upsert_producer");
+        let log = logctx.log.new(o!());
+        let mut db = test_setup_database(&log).await;
+        let cfg = crate::db::Config { url: db.pg_config().clone() };
+        let pool = crate::db::Pool::new_single_host(&logctx.log, &cfg);
+        let conn = pool.claim().await.unwrap();
+
+        let producer = internal::nexus::ProducerEndpoint {
+            id: Uuid::nil(),
+            kind: ProducerKind::SledAgent.into(),
+            address: "[::1]:0".parse().unwrap(),
+            interval: Duration::from_secs(30),
+        };
+
+        let query = upsert_producer(&producer);
+        let _ = query
+            .explain_async(&conn)
+            .await
+            .expect("Failed to explain query - is it valid SQL?");
+
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn explainable_reassign_producers() {
+        let logctx = dev::test_setup_log("explainable_reassign_producers");
         let log = logctx.log.new(o!());
         let mut db = test_setup_database(&log).await;
         let cfg = crate::db::Config { url: db.pg_config().clone() };
