@@ -174,7 +174,7 @@ impl DataStore {
     /// the assigned Oximeter to match `producer.oximeter_id` if it differs from
     /// the existing record in the database. We currently only expect a single
     /// Oximeter instance to be running at a time:
-    /// https://github.com/oxidecomputer/omicron/issues/323
+    /// <https://github.com/oxidecomputer/omicron/issues/323>
     pub async fn producer_endpoint_create(
         &self,
         opctx: &OpContext,
