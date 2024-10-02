@@ -1283,29 +1283,51 @@ async fn test_instance_failed_when_on_expunged_sled(
     let nexus = &apictx.nexus;
     let instance1_name = "romeo";
     let instance2_name = "juliet";
+    let instance3_name = "mercutio";
 
     create_project_and_pool(&client).await;
 
     // Create and start the test instances.
-    let mk_instance = |name: &'static str| async move {
-        let instance_url = get_instance_url(name);
-        let instance = create_instance(client, PROJECT_NAME, name).await;
-        let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
-        instance_simulate(nexus, &instance_id).await;
-        let instance_next = instance_get(&client, &instance_url).await;
-        assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
+    let mk_instance =
+        |name: &'static str, auto_restart: InstanceAutoRestartPolicy| async move {
+            let instance_url = get_instance_url(name);
+            let instance = create_instance_with(
+                client,
+                PROJECT_NAME,
+                name,
+                &params::InstanceNetworkInterfaceAttachment::Default,
+                // Disks=
+                Vec::<params::InstanceDiskAttachment>::new(),
+                // External IPs=
+                Vec::<params::ExternalIpCreate>::new(),
+                true,
+                Some(auto_restart),
+            )
+            .await;
+            let instance_id =
+                InstanceUuid::from_untyped_uuid(instance.identity.id);
+            instance_simulate(nexus, &instance_id).await;
+            let instance_next = instance_get(&client, &instance_url).await;
+            assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
 
-        slog::info!(
-            &cptestctx.logctx.log,
-            "test instance is running";
-            "instance_name" => %name,
-            "instance_id" => %instance_id,
-        );
+            slog::info!(
+                &cptestctx.logctx.log,
+                "test instance is running";
+                "instance_name" => %name,
+                "instance_id" => %instance_id,
+            );
 
-        instance_id
-    };
-    let instance1_id = mk_instance(instance1_name).await;
-    let instance2_id = mk_instance(instance2_name).await;
+            instance_id
+        };
+    // We are going to manually attempt to delete/restart these instances when
+    // they go to `Failed`, so don't allow them to reincarnate.
+    let instance1_id =
+        mk_instance(instance1_name, InstanceAutoRestartPolicy::Never).await;
+    let instance2_id =
+        mk_instance(instance2_name, InstanceAutoRestartPolicy::Never).await;
+    let instance3_id =
+        mk_instance(instance3_name, InstanceAutoRestartPolicy::BestEffort)
+            .await;
 
     // Create a second sled for instances on the Expunged sled to be assigned
     // to.
@@ -1351,11 +1373,17 @@ async fn test_instance_failed_when_on_expunged_sled(
     // ...or restartable.
     expect_instance_start_ok(client, instance2_name).await;
 
-    // The restarted instance shoild now transition back to `Running`, on its
+    // The restarted instance should now transition back to `Running`, on its
     // new sled.
     instance_wait_for_vmm_registration(cptestctx, &instance2_id).await;
     instance_simulate(nexus, &instance2_id).await;
     instance_wait_for_state(client, instance2_id, InstanceState::Running).await;
+
+    // The auto-restartable instance should be...restarted automatically.
+
+    instance_wait_for_vmm_registration(cptestctx, &instance3_id).await;
+    instance_simulate(nexus, &instance3_id).await;
+    instance_wait_for_state(client, instance3_id, InstanceState::Running).await;
 }
 
 // Verifies that the instance-watcher background task transitions an instance
