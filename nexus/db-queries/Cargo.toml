@@ -16,6 +16,7 @@ async-bb8-diesel.workspace = true
 async-trait.workspace = true
 camino.workspace = true
 chrono.workspace = true
+clickhouse-admin-types.workspace = true
 const_format.workspace = true
 diesel.workspace = true
 diesel-dtrace.workspace = true

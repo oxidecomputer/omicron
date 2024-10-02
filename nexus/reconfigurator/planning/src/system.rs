@@ -14,6 +14,7 @@ use nexus_sled_agent_shared::inventory::Baseboard;
 use nexus_sled_agent_shared::inventory::Inventory;
 use nexus_sled_agent_shared::inventory::InventoryDisk;
 use nexus_sled_agent_shared::inventory::SledRole;
+use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbSettings;
 use nexus_types::deployment::PlanningInputBuilder;
@@ -87,6 +88,7 @@ pub struct SystemDescription {
     service_ip_pool_ranges: Vec<IpRange>,
     internal_dns_version: Generation,
     external_dns_version: Generation,
+    clickhouse_policy: Option<ClickhousePolicy>,
 }
 
 impl SystemDescription {
@@ -164,6 +166,7 @@ impl SystemDescription {
             service_ip_pool_ranges,
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
+            clickhouse_policy: None,
         }
     }
 
@@ -206,6 +209,12 @@ impl SystemDescription {
         ranges: Vec<IpRange>,
     ) -> &mut Self {
         self.service_ip_pool_ranges = ranges;
+        self
+    }
+
+    /// Set the clickhouse policy
+    pub fn clickhouse_policy(&mut self, policy: ClickhousePolicy) -> &mut Self {
+        self.clickhouse_policy = Some(policy);
         self
     }
 
@@ -338,7 +347,7 @@ impl SystemDescription {
             target_cockroachdb_zone_count: self.target_cockroachdb_zone_count,
             target_cockroachdb_cluster_version: self
                 .target_cockroachdb_cluster_version,
-            clickhouse_policy: None,
+            clickhouse_policy: self.clickhouse_policy.clone(),
         };
         let mut builder = PlanningInputBuilder::new(
             policy,
