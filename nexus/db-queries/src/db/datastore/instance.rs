@@ -1041,6 +1041,58 @@ impl DataStore {
                 let InstanceUpdate { boot_disk_id, auto_restart_policy } =
                     update.clone();
                 async move {
+                    // * Allow reconfiguration in NoVmm because there is no VMM
+                    //   to contend with.
+                    // * Allow reconfiguration in Failed to allow changing the
+                    //   boot disk of a failed instance and free its boot disk
+                    //   for detach.
+                    //
+                    // N.B. that it should be okay to change an instance's
+                    // auto-restart policy in any state. However, we don't
+                    // currently allow instance updates that change just the
+                    // auto-restart policy; they always change both the boot
+                    // disk and restart policy. Potentially, we could check
+                    // whether the desired boot disk is the _same_ as the
+                    // current boot disk, and elide this check if the boot disk
+                    // part of the reconfigure call is a no-op. In order to do
+                    // that, though, we would need to make the update
+                    // conditional on the boot disk having not changed, and
+                    // retry if it has, which makes this already-complex
+                    // transaction even more so...
+                    let ok_to_reconfigure_instance_states =
+                        [InstanceState::NoVmm, InstanceState::Failed];
+
+                    let instance_state = instance_dsl::instance
+                        .filter(instance_dsl::id.eq(authz_instance.id()))
+                        .filter(instance_dsl::time_deleted.is_null())
+                        .select(instance_dsl::state)
+                        .first_async::<InstanceState>(&conn)
+                        .await;
+
+                    match instance_state {
+                        Ok(state) => {
+                            let state_ok = ok_to_reconfigure_instance_states
+                                .contains(&state);
+
+                            if !state_ok {
+                                return Err(err.bail(Error::conflict(
+                                    "instance must be stopped to update",
+                                )));
+                            }
+                        }
+                        Err(diesel::NotFound) => {
+                            // If the instance simply doesn't exist, we
+                            // shouldn't retry. Bail with a useful error.
+                            return Err(err.bail(Error::not_found_by_id(
+                                ResourceType::Instance,
+                                &authz_instance.id(),
+                            )));
+                        }
+                        Err(e) => {
+                            return Err(e);
+                        }
+                    }
+
                     // Set the boot disk.
                     self.instance_set_boot_disk_on_conn(
                         &conn,
@@ -1129,52 +1181,6 @@ impl DataStore {
 
         use db::schema::disk::dsl as disk_dsl;
         use db::schema::instance::dsl as instance_dsl;
-
-        // * Allow reconfiguration in NoVmm because there is no VMM
-        //   to contend with.
-        // * Allow reconfiguration in Failed to allow changing the
-        //   boot disk of a failed instance and free its boot disk
-        //   for detach.
-        // * Allow reconfiguration in Creating because one of the
-        //   last steps of instance creation, while the instance is
-        //   still in Creating, is to reconfigure the instance to
-        //   the desired boot disk.
-        let ok_to_reconfigure_instance_states = [
-            InstanceState::NoVmm,
-            InstanceState::Failed,
-            InstanceState::Creating,
-        ];
-
-        let instance_state = instance_dsl::instance
-            .filter(instance_dsl::id.eq(authz_instance.id()))
-            .filter(instance_dsl::time_deleted.is_null())
-            .select(instance_dsl::state)
-            .first_async::<InstanceState>(conn)
-            .await;
-
-        match instance_state {
-            Ok(state) => {
-                let state_ok =
-                    ok_to_reconfigure_instance_states.contains(&state);
-
-                if !state_ok {
-                    return Err(err.bail(Error::conflict(
-                        "instance must be stopped to update",
-                    )));
-                }
-            }
-            Err(diesel::NotFound) => {
-                // If the instance simply doesn't exist, we
-                // shouldn't retry. Bail with a useful error.
-                return Err(err.bail(Error::not_found_by_id(
-                    ResourceType::Instance,
-                    &authz_instance.id(),
-                )));
-            }
-            Err(e) => {
-                return Err(e);
-            }
-        }
 
         if let Some(disk_id) = boot_disk_id {
             // Ensure the disk is currently attached before updating
