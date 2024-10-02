@@ -9,12 +9,13 @@ use anyhow::anyhow;
 use anyhow::Context;
 use camino::Utf8PathBuf;
 use clickhouse_admin_api::KeeperConfigurableSettings;
+use clickhouse_admin_api::ServerConfigurableSettings;
 use clickhouse_admin_types::config::ClickhouseHost;
 use clickhouse_admin_types::config::RaftServerSettings;
 use clickhouse_admin_types::KeeperId;
 use clickhouse_admin_types::KeeperSettings;
+use clickhouse_admin_types::ServerSettings;
 use nexus_db_queries::context::OpContext;
-use nexus_reconfigurator_planning::blueprint_builder::ClickhouseZonesThatShouldBeRunning;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::ClickhouseClusterConfig;
@@ -37,7 +38,76 @@ pub(crate) async fn deploy_nodes(
     zones: &BTreeMap<SledUuid, BlueprintZonesConfig>,
     clickhouse_cluster_config: &ClickhouseClusterConfig,
 ) -> Result<(), anyhow::Error> {
+    let keeper_configs = keeper_configs(zones, clickhouse_cluster_config)?;
+    let keeper_hosts: Vec<_> = keeper_configs
+        .iter()
+        .map(|s| ClickhouseHost::Ipv6(s.settings.listen_addr))
+        .collect();
+    let server_configs =
+        server_configs(zones, clickhouse_cluster_config, keeper_hosts)?;
+
     todo!()
+}
+
+fn server_configs(
+    zones: &BTreeMap<SledUuid, BlueprintZonesConfig>,
+    clickhouse_cluster_config: &ClickhouseClusterConfig,
+    keepers: Vec<ClickhouseHost>,
+) -> Result<Vec<ServerConfigurableSettings>, anyhow::Error> {
+    let server_ips: BTreeMap<OmicronZoneUuid, Ipv6Addr> = zones
+        .values()
+        .flat_map(|zones_config| {
+            zones_config
+                .zones
+                .iter()
+                .filter(|zone_config| {
+                    clickhouse_cluster_config
+                        .servers
+                        .contains_key(&zone_config.id)
+                })
+                .map(|zone_config| {
+                    (zone_config.id, zone_config.underlay_address)
+                })
+        })
+        .collect();
+
+    let mut remote_servers =
+        Vec::with_capacity(clickhouse_cluster_config.servers.len());
+
+    for (zone_id, server_id) in &clickhouse_cluster_config.servers {
+        remote_servers.push(ClickhouseHost::Ipv6(
+            *server_ips.get(zone_id).ok_or_else(|| {
+                anyhow!(
+                    "Failed to retrieve zone {} for server id {}",
+                    zone_id,
+                    server_id
+                )
+            })?,
+        ));
+    }
+
+    let mut server_configs =
+        Vec::with_capacity(clickhouse_cluster_config.servers.len());
+
+    for (zone_id, server_id) in &clickhouse_cluster_config.servers {
+        server_configs.push(ServerConfigurableSettings {
+            generation: clickhouse_cluster_config.generation,
+            settings: ServerSettings {
+                config_dir: Utf8PathBuf::from_str(CLICKHOUSE_SERVER_CONFIG_DIR)
+                    .unwrap(),
+                id: *server_id,
+                datastore_path: Utf8PathBuf::from_str(CLICKHOUSE_DATA_DIR)
+                    .unwrap(),
+                // SAFETY: We already successfully performed the same lookup to compute
+                // `remote_servers` above.
+                listen_addr: *server_ips.get(zone_id).unwrap(),
+                keepers: keepers.clone(),
+                remote_servers: remote_servers.clone(),
+            },
+        });
+    }
+
+    Ok(server_configs)
 }
 
 fn keeper_configs(
@@ -55,7 +125,6 @@ fn keeper_configs(
                         .keepers
                         .contains_key(&zone_config.id)
                 })
-                .cloned()
                 .map(|zone_config| {
                     (zone_config.id, zone_config.underlay_address)
                 })
