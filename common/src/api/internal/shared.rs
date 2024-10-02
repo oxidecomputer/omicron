@@ -838,7 +838,7 @@ pub struct ResolvedVpcRouteSet {
 }
 
 /// Per-NIC mappings from external IP addresses to the Internet Gateways
-/// which can choose to them as a source.
+/// which can choose them as a source.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 pub struct ExternalIpGatewayMap {
     pub mappings: HashMap<Uuid, HashMap<IpAddr, Uuid>>,

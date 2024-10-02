@@ -712,7 +712,6 @@ impl PortManager {
             port_name: port.name().into(),
             external_ips_v4: v4_cfg,
             external_ips_v6: v6_cfg,
-            // TODO:
             inet_gw_map,
         };
 

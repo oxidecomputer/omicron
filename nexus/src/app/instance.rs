@@ -2022,7 +2022,7 @@ impl super::Nexus {
 
         // The VPC routing RPW currently has double-duty on ensuring that
         // sled-agents have up-to-date mappings between the EIPs they should
-        // know about and its intended function.
+        // know about and keeping routes up-to-date.
         // Trigger the RPW so that OPTE can accurately select the IP ASAP.
         self.vpc_needed_notify_sleds();
 

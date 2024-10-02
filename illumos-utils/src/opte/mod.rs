@@ -91,7 +91,7 @@ fn net_to_cidr(net: IpNet) -> IpCidr {
 /// non-instance NICs, because we need to actively store the full set
 /// (and division of) SNAT/ephemeral/floating IPs.
 /// Sled-agent only holds this today for instances, because these are
-/// reconfigurable!
+/// reconfigurable at run-time (whereas services and probes are fixed).
 fn router_target_opte(
     target: &shared::RouterTarget,
     is_instance: bool,

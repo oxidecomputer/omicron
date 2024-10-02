@@ -3038,7 +3038,7 @@
         ]
       },
       "ExternalIpGatewayMap": {
-        "description": "Per-NIC mappings from external IP addresses to the Internet Gateways which can choose to them as a source.",
+        "description": "Per-NIC mappings from external IP addresses to the Internet Gateways which can choose them as a source.",
         "type": "object",
         "properties": {
           "mappings": {

@@ -2592,12 +2592,8 @@ impl DataStore {
                     (Some(RouterTarget::Drop), Some(RouterTarget::Drop))
                 }
 
-                // There can be multiple targets per internet gateway, so these
-                // are handled below.
-                // TODO(kyle): vpc_resolve_sled_external_ips_to_gateways
-                //             is to be used to sync EIP<->IGW mappings
-                //             down to OPTE so that it can accurately select
-                //             which source NAT IP addresses are valid.
+                // Internet gateways tag matching packets with their ID, for
+                // NAT IP selection.
                 RouteTarget::InternetGateway(n) => inetgws
                     .get(&n)
                     .map(|igw| {
