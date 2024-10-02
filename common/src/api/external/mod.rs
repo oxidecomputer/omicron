@@ -1247,7 +1247,9 @@ pub struct InstanceAutoRestartStatus {
 
 /// A policy determining when an instance should be automatically restarted by
 /// the control plane.
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum InstanceAutoRestartPolicy {
     /// The instance should not be automatically restarted by the control plane

@@ -4289,6 +4289,102 @@ async fn test_updating_missing_instance_is_not_found(
     );
 }
 
+async fn expect_instance_reconfigure_ok(
+    external_client: &ClientTestContext,
+    instance_id: &Uuid,
+    update: params::InstanceUpdate,
+) -> Instance {
+    let url_instance_update = format!("/v1/instances/{instance_id}");
+
+    let builder = RequestBuilder::new(
+        external_client,
+        http::Method::PUT,
+        &url_instance_update,
+    )
+    .body(Some(&update))
+    .expect_status(Some(http::StatusCode::OK));
+
+    let response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("can attempt to reconfigure the instance");
+
+    response
+        .parsed_body::<Instance>()
+        .expect("response should be parsed as an instance")
+}
+
+// Test reconfiguring an instance's auto-restart policy.
+#[nexus_test]
+async fn test_auto_restart_policy_can_be_changed(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let instance_name = "reincarnation-station";
+
+    create_project_and_pool(&client).await;
+
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: instance_name.parse().unwrap(),
+            description: String::from("stuff"),
+        },
+        ncpus: InstanceCpuCount::try_from(2).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(4),
+        hostname: instance_name.parse().unwrap(),
+        user_data: vec![],
+        ssh_public_keys: None,
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![],
+        boot_disk: None,
+        disks: Vec::new(),
+        start: false,
+        // Start out with None
+        auto_restart_policy: None,
+    };
+
+    let builder =
+        RequestBuilder::new(client, http::Method::POST, &get_instances_url())
+            .body(Some(&instance_params))
+            .expect_status(Some(http::StatusCode::CREATED));
+    let response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Expected instance creation to work!");
+
+    let instance = response.parsed_body::<Instance>().unwrap();
+
+    // Starts out as None.
+    assert_eq!(instance.auto_restart_status.policy, None);
+
+    let assert_reconfigured = |auto_restart_policy| async move {
+        let instance = expect_instance_reconfigure_ok(
+            client,
+            &instance.identity.id,
+            dbg!(params::InstanceUpdate {
+                auto_restart_policy,
+                boot_disk: None,
+            }),
+        )
+        .await;
+        assert_eq!(
+            dbg!(instance).auto_restart_status.policy,
+            auto_restart_policy,
+        );
+    };
+
+    // Reconfigure to Never.
+    assert_reconfigured(Some(InstanceAutoRestartPolicy::Never)).await;
+
+    // Reconfigure to BestEffort
+    assert_reconfigured(Some(InstanceAutoRestartPolicy::BestEffort)).await;
+
+    // Reconfigure back to None.
+    assert_reconfigured(None).await;
+}
+
 // Create an instance with boot disk set to one of its attached disks, then set
 // it to the other disk.
 #[nexus_test]
