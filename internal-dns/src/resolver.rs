@@ -7,9 +7,8 @@ use hickory_resolver::config::{
 };
 use hickory_resolver::lookup::SrvLookup;
 use hickory_resolver::TokioAsyncResolver;
-use hyper::client::connect::dns::Name;
 use omicron_common::address::{
-    Ipv6Subnet, ReservedRackSubnet, AZ_PREFIX, DNS_PORT,
+    get_internal_dns_server_addresses, Ipv6Subnet, AZ_PREFIX, DNS_PORT,
 };
 use slog::{debug, error, info, trace};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
@@ -41,7 +40,7 @@ type BoxError = Box<dyn std::error::Error + Send + Sync>;
 // By implementing this trait, [Resolver] can be used as an argument to
 // [reqwest::ClientBuilder::dns_resolver].
 impl reqwest::dns::Resolve for Resolver {
-    fn resolve(&self, name: Name) -> reqwest::dns::Resolving {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
         let this = self.clone();
         Box::pin(async move {
             this.lookup_sockets_v6_raw(name.as_str())
@@ -129,13 +128,9 @@ impl Resolver {
     pub fn servers_from_subnet(
         subnet: Ipv6Subnet<AZ_PREFIX>,
     ) -> Vec<SocketAddr> {
-        ReservedRackSubnet::new(subnet)
-            .get_dns_subnets()
+        get_internal_dns_server_addresses(subnet.net().addr())
             .into_iter()
-            .map(|dns_subnet| {
-                let ip_addr = IpAddr::V6(dns_subnet.dns_address());
-                SocketAddr::new(ip_addr, DNS_PORT)
-            })
+            .map(|ip_addr| SocketAddr::new(ip_addr, DNS_PORT))
             .collect()
     }
 
@@ -834,8 +829,8 @@ mod test {
         // The DNS server is running, but has no records. Expect a failure.
         let err = client.test_endpoint().await.unwrap_err();
         assert!(
-            err.to_string().contains("no record found"),
-            "Unexpected Error (expected 'no record found'): {err}",
+            err.to_string().contains("error sending request"),
+            "Unexpected Error (expected 'error sending request'): {err}",
         );
 
         // Add a record for the new service.
@@ -914,8 +909,8 @@ mod test {
         // The DNS server is running, but has no records. Expect a failure.
         let err = client.test_endpoint().await.unwrap_err();
         assert!(
-            err.to_string().contains("no record found"),
-            "Unexpected Error (expected 'no record found'): {err}",
+            err.to_string().contains("error sending request"),
+            "Unexpected Error (expected 'error sending request'): {err}",
         );
 
         // Add a record for the new service, but only to the second DNS server.

@@ -90,9 +90,29 @@ impl BlueprintZoneType {
         matches!(self, BlueprintZoneType::InternalDns(_))
     }
 
+    /// Identifies whether this is an external DNS zone
+    pub fn is_external_dns(&self) -> bool {
+        matches!(self, BlueprintZoneType::ExternalDns(_))
+    }
+
     /// Identifies whether this a Crucible (not Crucible pantry) zone
     pub fn is_crucible(&self) -> bool {
         matches!(self, BlueprintZoneType::Crucible(_))
+    }
+
+    /// Identifies whether this is a clickhouse keeper zone
+    pub fn is_clickhouse_keeper(&self) -> bool {
+        matches!(self, BlueprintZoneType::ClickhouseKeeper(_))
+    }
+
+    /// Identifies whether this is a clickhouse server zone
+    pub fn is_clickhouse_server(&self) -> bool {
+        matches!(self, BlueprintZoneType::ClickhouseServer(_))
+    }
+
+    /// Identifies whether this is a single-node clickhouse zone
+    pub fn is_clickhouse(&self) -> bool {
+        matches!(self, BlueprintZoneType::Clickhouse(_))
     }
 
     /// Returns the durable dataset associated with this zone, if any exists.
@@ -192,12 +212,9 @@ impl From<BlueprintZoneType> for OmicronZoneType {
                 gz_address: zone.gz_address,
                 gz_address_index: zone.gz_address_index,
             },
-            BlueprintZoneType::InternalNtp(zone) => Self::InternalNtp {
-                address: zone.address,
-                ntp_servers: zone.ntp_servers,
-                dns_servers: zone.dns_servers,
-                domain: zone.domain,
-            },
+            BlueprintZoneType::InternalNtp(zone) => {
+                Self::InternalNtp { address: zone.address }
+            }
             BlueprintZoneType::Nexus(zone) => Self::Nexus {
                 internal_address: zone.internal_address,
                 external_ip: zone.external_ip.ip,
@@ -345,9 +362,6 @@ pub mod blueprint_zone_type {
     )]
     pub struct InternalNtp {
         pub address: SocketAddrV6,
-        pub ntp_servers: Vec<String>,
-        pub dns_servers: Vec<IpAddr>,
-        pub domain: Option<String>,
     }
 
     #[derive(

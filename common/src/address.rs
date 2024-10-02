@@ -8,7 +8,7 @@
 //! and Nexus, who need to agree upon addressing schemes.
 
 use crate::api::external::{self, Error};
-use crate::policy::{INTERNAL_DNS_REDUNDANCY, MAX_INTERNAL_DNS_REDUNDANCY};
+use crate::policy::INTERNAL_DNS_REDUNDANCY;
 use ipnetwork::Ipv6Network;
 use once_cell::sync::Lazy;
 use oxnet::{Ipv4Net, Ipv6Net};
@@ -306,10 +306,10 @@ impl ReservedRackSubnet {
 
     /// Returns the DNS addresses from this reserved rack subnet.
     ///
-    /// These addresses will come from the first [`MAX_INTERNAL_DNS_REDUNDANCY`]
+    /// These addresses will come from the first [`INTERNAL_DNS_REDUNDANCY`]
     /// `/64s` of the [`RACK_PREFIX`] subnet.
     pub fn get_dns_subnets(&self) -> Vec<DnsSubnet> {
-        (0..MAX_INTERNAL_DNS_REDUNDANCY)
+        (0..INTERNAL_DNS_REDUNDANCY)
             .map(|idx| self.get_dns_subnet(u8::try_from(idx + 1).unwrap()))
             .collect()
     }
@@ -319,10 +319,8 @@ impl ReservedRackSubnet {
 /// subnet
 pub fn get_internal_dns_server_addresses(addr: Ipv6Addr) -> Vec<IpAddr> {
     let az_subnet = Ipv6Subnet::<AZ_PREFIX>::new(addr);
-    let reserved_rack_subnet = ReservedRackSubnet::new(az_subnet);
-    let dns_subnets =
-        &reserved_rack_subnet.get_dns_subnets()[0..INTERNAL_DNS_REDUNDANCY];
-    dns_subnets
+    ReservedRackSubnet::new(az_subnet)
+        .get_dns_subnets()
         .iter()
         .map(|dns_subnet| IpAddr::from(dns_subnet.dns_address()))
         .collect()
@@ -702,7 +700,7 @@ mod test {
 
         // Observe the first DNS subnet within this reserved rack subnet.
         let dns_subnets = rack_subnet.get_dns_subnets();
-        assert_eq!(MAX_INTERNAL_DNS_REDUNDANCY, dns_subnets.len());
+        assert_eq!(INTERNAL_DNS_REDUNDANCY, dns_subnets.len());
 
         // The DNS address and GZ address should be only differing by one.
         assert_eq!(

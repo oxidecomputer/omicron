@@ -38,7 +38,7 @@ use omicron_common::disk::{
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_common::policy::{
     BOUNDARY_NTP_REDUNDANCY, COCKROACHDB_REDUNDANCY, INTERNAL_DNS_REDUNDANCY,
-    MAX_INTERNAL_DNS_REDUNDANCY, NEXUS_REDUNDANCY,
+    NEXUS_REDUNDANCY, RESERVED_INTERNAL_DNS_REDUNDANCY,
 };
 use omicron_uuid_kinds::{
     ExternalIpUuid, GenericUuid, OmicronZoneUuid, SledUuid, ZpoolUuid,
@@ -471,14 +471,9 @@ impl Plan {
         // Provision internal DNS zones, striping across Sleds.
         let reserved_rack_subnet = ReservedRackSubnet::new(config.az_subnet());
         static_assertions::const_assert!(
-            INTERNAL_DNS_REDUNDANCY <= MAX_INTERNAL_DNS_REDUNDANCY
+            INTERNAL_DNS_REDUNDANCY <= RESERVED_INTERNAL_DNS_REDUNDANCY
         );
-        let dns_subnets =
-            &reserved_rack_subnet.get_dns_subnets()[0..INTERNAL_DNS_REDUNDANCY];
-        let rack_dns_servers = dns_subnets
-            .into_iter()
-            .map(|dns_subnet| dns_subnet.dns_address().into())
-            .collect::<Vec<IpAddr>>();
+        let dns_subnets = reserved_rack_subnet.get_dns_subnets();
         for i in 0..dns_subnets.len() {
             let dns_subnet = &dns_subnets[i];
             let ip = dns_subnet.dns_address();
@@ -708,14 +703,14 @@ impl Plan {
             };
             let id = OmicronZoneUuid::new_v4();
             let ip = sled.addr_alloc.next().expect("Not enough addrs");
-            let port = omicron_common::address::CLICKHOUSE_HTTP_PORT;
-            let address = SocketAddrV6::new(ip, port, 0, 0);
+            let http_port = omicron_common::address::CLICKHOUSE_HTTP_PORT;
+            let http_address = SocketAddrV6::new(ip, http_port, 0, 0);
             dns_builder
-                .host_zone_with_one_backend(
+                .host_zone_clickhouse(
                     id,
                     ip,
                     ServiceName::Clickhouse,
-                    port,
+                    http_port,
                 )
                 .unwrap();
             let dataset_name =
@@ -727,7 +722,7 @@ impl Plan {
                 underlay_address: ip,
                 zone_type: BlueprintZoneType::Clickhouse(
                     blueprint_zone_type::Clickhouse {
-                        address,
+                        address: http_address,
                         dataset: OmicronZoneDataset {
                             pool_name: dataset_name.pool().clone(),
                         },
@@ -751,14 +746,14 @@ impl Plan {
             let ip = sled.addr_alloc.next().expect("Not enough addrs");
             // TODO: This may need to be a different port if/when to have single node
             // and replicated running side by side as per stage 1 of RFD 468.
-            let port = omicron_common::address::CLICKHOUSE_HTTP_PORT;
-            let address = SocketAddrV6::new(ip, port, 0, 0);
+            let http_port = omicron_common::address::CLICKHOUSE_HTTP_PORT;
+            let http_address = SocketAddrV6::new(ip, http_port, 0, 0);
             dns_builder
-                .host_zone_with_one_backend(
+                .host_zone_clickhouse(
                     id,
                     ip,
                     ServiceName::ClickhouseServer,
-                    port,
+                    http_port,
                 )
                 .unwrap();
             let dataset_name =
@@ -770,7 +765,7 @@ impl Plan {
                 underlay_address: ip,
                 zone_type: BlueprintZoneType::ClickhouseServer(
                     blueprint_zone_type::ClickhouseServer {
-                        address,
+                        address: http_address,
                         dataset: OmicronZoneDataset {
                             pool_name: dataset_name.pool().clone(),
                         },
@@ -923,9 +918,6 @@ impl Plan {
                     BlueprintZoneType::InternalNtp(
                         blueprint_zone_type::InternalNtp {
                             address: ntp_address,
-                            ntp_servers: boundary_ntp_servers.clone(),
-                            dns_servers: rack_dns_servers.clone(),
-                            domain: None,
                         },
                     ),
                     ServiceName::InternalNtp,
@@ -973,8 +965,7 @@ impl Plan {
                         let is_scrimlet =
                             Self::is_sled_scrimlet(log, sled_address).await?;
                         Ok(SledInfo::new(
-                            // TODO-cleanup use TypedUuid everywhere
-                            SledUuid::from_untyped_uuid(sled_request.body.id),
+                            sled_request.body.id,
                             subnet,
                             sled_address,
                             inventory,

@@ -123,6 +123,17 @@ presence = "Present"
 sensors = [
     { name = "t6", kind = "Temperature", last_data.value = 70.625, last_data.timestamp = 1234 },
 ]
+
+[[simulated_sps.gimlet.components]]
+id = "dev-46"
+device = "sbtsi"
+description = "CPU temperature sensor"
+capabilities = 2
+presence = "Present"
+sensors = [
+    { name = "CPU", kind = "Temperature", last_data.value = 64.5, last_data.timestamp = 1234 },
+]
+
 [[simulated_sps.gimlet.components]]
 id = "dev-53"
 device = "max31790"
@@ -222,6 +233,17 @@ presence = "Present"
 sensors = [
     { name = "t6", kind = "Temperature", last_data.value = 70.625, last_data.timestamp = 1234 },
 ]
+
+[[simulated_sps.gimlet.components]]
+id = "dev-46"
+device = "sbtsi"
+description = "CPU temperature sensor"
+capabilities = 2
+presence = "Present"
+sensors = [
+    { name = "CPU", kind = "Temperature", last_data.value = 62.6, last_data.timestamp = 1234 },
+]
+
 [[simulated_sps.gimlet.components]]
 id = "dev-53"
 device = "max31790"

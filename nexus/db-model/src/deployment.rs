@@ -431,22 +431,10 @@ impl BpOmicronZone {
                     Some(SqlU32::from(*gz_address_index));
             }
             BlueprintZoneType::InternalNtp(
-                blueprint_zone_type::InternalNtp {
-                    address,
-                    ntp_servers,
-                    dns_servers,
-                    domain,
-                },
+                blueprint_zone_type::InternalNtp { address },
             ) => {
                 // Set the common fields
                 bp_omicron_zone.set_primary_service_ip_and_port(address);
-
-                // Set the zone specific fields
-                bp_omicron_zone.ntp_ntp_servers = Some(ntp_servers.clone());
-                bp_omicron_zone.ntp_dns_servers = Some(
-                    dns_servers.iter().cloned().map(IpNetwork::from).collect(),
-                );
-                bp_omicron_zone.ntp_domain.clone_from(domain);
             }
             BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
                 internal_address,
@@ -649,12 +637,7 @@ impl BpOmicronZone {
                 },
             ),
             ZoneType::InternalNtp => BlueprintZoneType::InternalNtp(
-                blueprint_zone_type::InternalNtp {
-                    address: primary_address,
-                    ntp_servers: ntp_servers?,
-                    dns_servers: ntp_dns_servers?,
-                    domain: self.ntp_domain,
-                },
+                blueprint_zone_type::InternalNtp { address: primary_address },
             ),
             ZoneType::Nexus => {
                 BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
@@ -830,18 +813,20 @@ impl BpClickhouseClusterConfig {
                 .max_used_server_id
                 .0
                 .try_into()
-                .context("more than 2^63 IDs in use")?,
+                .context("more than 2^63 clickhouse server IDs in use")?,
             max_used_keeper_id: config
                 .max_used_keeper_id
                 .0
                 .try_into()
-                .context("more than 2^63 IDs in use")?,
+                .context("more than 2^63 clickhouse keeper IDs in use")?,
             cluster_name: config.cluster_name.clone(),
             cluster_secret: config.cluster_secret.clone(),
             highest_seen_keeper_leader_committed_log_index: config
                 .highest_seen_keeper_leader_committed_log_index
                 .try_into()
-                .context("more than 2^63 IDs in use")?,
+                .context(
+                    "more than 2^63 clickhouse keeper log indexes in use",
+                )?,
         })
     }
 }

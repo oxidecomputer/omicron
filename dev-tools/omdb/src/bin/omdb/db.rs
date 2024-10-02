@@ -58,6 +58,7 @@ use nexus_db_model::HwBaseboardId;
 use nexus_db_model::Image;
 use nexus_db_model::Instance;
 use nexus_db_model::InvCollection;
+use nexus_db_model::InvNvmeDiskFirmware;
 use nexus_db_model::InvPhysicalDisk;
 use nexus_db_model::IpAttachState;
 use nexus_db_model::IpKind;
@@ -2882,7 +2883,8 @@ async fn cmd_db_instance_info(
         vmm::dsl as vmm_dsl,
     };
     use nexus_db_model::{
-        Instance, InstanceKarmicStatus, InstanceRuntimeState, Migration, Vmm,
+        Instance, InstanceKarmicStatus, InstanceRuntimeState, Migration,
+        Reincarnatability, Vmm,
     };
     let InstanceInfoArgs { id } = args;
 
@@ -2939,12 +2941,14 @@ async fn cmd_db_instance_info(
     const VCPUS: &'static str = "vCPUs";
     const MEMORY: &'static str = "memory";
     const HOSTNAME: &'static str = "hostname";
+    const BOOT_DISK: &'static str = "boot disk";
     const AUTO_RESTART: &'static str = "auto-restart";
     const STATE: &'static str = "nexus state";
     const LAST_MODIFIED: &'static str = "last modified at";
     const LAST_UPDATED: &'static str = "last updated at";
-    const LAST_AUTO_RESTART: &'static str = "last auto-restarted at";
-    const KARMIC_STATUS: &'static str = "karmic status";
+    const LAST_AUTO_RESTART: &'static str = "  last reincarnated at";
+    const KARMIC_STATUS: &'static str = "  karmic status";
+    const NEEDS_REINCARNATION: &'static str = "needs reincarnation";
     const ACTIVE_VMM: &'static str = "active VMM ID";
     const TARGET_VMM: &'static str = "target VMM ID";
     const MIGRATION_ID: &'static str = "migration ID";
@@ -2960,6 +2964,7 @@ async fn cmd_db_instance_info(
         DELETED,
         VCPUS,
         MEMORY,
+        BOOT_DISK,
         HOSTNAME,
         AUTO_RESTART,
         STATE,
@@ -2968,6 +2973,7 @@ async fn cmd_db_instance_info(
         LAST_MODIFIED,
         LAST_AUTO_RESTART,
         KARMIC_STATUS,
+        NEEDS_REINCARNATION,
         ACTIVE_VMM,
         TARGET_VMM,
         MIGRATION_ID,
@@ -3002,6 +3008,7 @@ async fn cmd_db_instance_info(
     println!("    {VCPUS:>WIDTH$}: {}", instance.ncpus.0 .0);
     println!("    {MEMORY:>WIDTH$}: {}", instance.memory.0);
     println!("    {HOSTNAME:>WIDTH$}: {}", instance.hostname);
+    println!("    {BOOT_DISK:>WIDTH$}: {:?}", instance.boot_disk_id);
     print_multiline_debug(AUTO_RESTART, &instance.auto_restart);
     println!("\n{:=<80}", "== RUNTIME STATE ");
     let InstanceRuntimeState {
@@ -3026,22 +3033,32 @@ async fn cmd_db_instance_info(
         "    {LAST_UPDATED:>WIDTH$}: {time_updated:?} (generation {})",
         r#gen.0
     );
-    println!("    {LAST_AUTO_RESTART:>WIDTH$}: {time_last_auto_restarted:?}");
-    match instance.auto_restart.status(&instance.runtime_state) {
-        InstanceKarmicStatus::NotFailed => {}
-        InstanceKarmicStatus::Ready => {
-            println!("(i) {KARMIC_STATUS:>WIDTH$}: ready to reincarnate!");
+
+    // Reincarnation status
+    let InstanceKarmicStatus { needs_reincarnation, can_reincarnate } =
+        instance
+            .auto_restart
+            .status(&instance.runtime_state, active_vmm.as_ref());
+    println!(
+        "{} {NEEDS_REINCARNATION:>WIDTH$}: {needs_reincarnation}",
+        if needs_reincarnation { "(i)" } else { "   " }
+    );
+    match can_reincarnate {
+        Reincarnatability::WillReincarnate => {
+            println!("    {KARMIC_STATUS:>WIDTH$}: bound to saṃsāra");
         }
-        InstanceKarmicStatus::Forbidden => {
-            println!("(i) {KARMIC_STATUS:>WIDTH$}: reincarnation forbidden");
+        Reincarnatability::Nirvana => {
+            println!("    {KARMIC_STATUS:>WIDTH$}: attained nirvāṇa");
         }
-        InstanceKarmicStatus::CoolingDown(remaining) => {
+        Reincarnatability::CoolingDown(remaining) => {
             println!(
                 "/!\\ {KARMIC_STATUS:>WIDTH$}: cooling down \
                  ({remaining:?} remaining)"
             );
         }
     }
+    println!("    {LAST_AUTO_RESTART:>WIDTH$}: {time_last_auto_restarted:?}");
+
     println!("    {ACTIVE_VMM:>WIDTH$}: {propolis_id:?}");
     println!("    {TARGET_VMM:>WIDTH$}: {dst_propolis_id:?}");
     println!(
@@ -4666,36 +4683,62 @@ async fn cmd_db_inventory_physical_disks(
         model: String,
         serial: String,
         variant: String,
+        firmware: String,
+        next_firmware: String,
     }
 
-    use db::schema::inv_physical_disk::dsl;
-    let mut query = dsl::inv_physical_disk.into_boxed();
+    use db::schema::inv_nvme_disk_firmware::dsl as firmware_dsl;
+    use db::schema::inv_physical_disk::dsl as disk_dsl;
+
+    let mut query = disk_dsl::inv_physical_disk.into_boxed();
     query = query.limit(i64::from(u32::from(limit)));
 
     if let Some(collection_id) = args.collection_id {
         query = query.filter(
-            dsl::inv_collection_id.eq(collection_id.into_untyped_uuid()),
+            disk_dsl::inv_collection_id.eq(collection_id.into_untyped_uuid()),
         );
     }
 
     if let Some(sled_id) = args.sled_id {
-        query = query.filter(dsl::sled_id.eq(sled_id.into_untyped_uuid()));
+        query = query.filter(disk_dsl::sled_id.eq(sled_id.into_untyped_uuid()));
     }
 
     let disks = query
-        .select(InvPhysicalDisk::as_select())
+        .left_join(
+            firmware_dsl::inv_nvme_disk_firmware.on(
+                firmware_dsl::inv_collection_id
+                    .eq(disk_dsl::inv_collection_id)
+                    .and(firmware_dsl::sled_id.eq(disk_dsl::sled_id))
+                    .and(firmware_dsl::slot.eq(disk_dsl::slot)),
+            ),
+        )
+        .select((
+            InvPhysicalDisk::as_select(),
+            Option::<InvNvmeDiskFirmware>::as_select(),
+        ))
         .load_async(&**conn)
         .await
         .context("loading physical disks")?;
 
-    let rows = disks.into_iter().map(|disk| DiskRow {
-        inv_collection_id: disk.inv_collection_id.into_untyped_uuid(),
-        sled_id: disk.sled_id.into_untyped_uuid(),
-        slot: disk.slot,
-        vendor: disk.vendor,
-        model: disk.model.clone(),
-        serial: disk.serial.clone(),
-        variant: format!("{:?}", disk.variant),
+    let rows = disks.into_iter().map(|(disk, firmware)| {
+        let (active_firmware, next_firmware) =
+            if let Some(firmware) = firmware.as_ref() {
+                (firmware.current_version(), firmware.next_version())
+            } else {
+                (None, None)
+            };
+
+        DiskRow {
+            inv_collection_id: disk.inv_collection_id.into_untyped_uuid(),
+            sled_id: disk.sled_id.into_untyped_uuid(),
+            slot: disk.slot,
+            vendor: disk.vendor,
+            model: disk.model.clone(),
+            serial: disk.serial.clone(),
+            variant: format!("{:?}", disk.variant),
+            firmware: active_firmware.unwrap_or("UNKNOWN").to_string(),
+            next_firmware: next_firmware.unwrap_or("").to_string(),
+        }
     });
 
     let table = tabled::Table::new(rows)
@@ -5101,6 +5144,7 @@ fn inv_collection_print_sleds(collection: &Collection) {
                 identity,
                 variant,
                 slot,
+                ..
             } = disk;
             println!("      {variant:?}: {identity:?} in {slot}");
         }

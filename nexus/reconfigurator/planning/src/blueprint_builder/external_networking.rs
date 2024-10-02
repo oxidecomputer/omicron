@@ -8,6 +8,7 @@ use debug_ignore::DebugIgnore;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::deployment::OmicronZoneExternalIp;
@@ -41,6 +42,12 @@ pub(super) struct BuilderExternalNetworking<'a> {
     boundary_ntp_v6_ips: AvailableIterator<'static, Ipv6Addr>,
     nexus_v4_ips: AvailableIterator<'static, Ipv4Addr>,
     nexus_v6_ips: AvailableIterator<'static, Ipv6Addr>,
+    external_dns_v4_ips: AvailableIterator<'static, Ipv4Addr>,
+    external_dns_v6_ips: AvailableIterator<'static, Ipv6Addr>,
+
+    // External DNS server addresses currently only come from RSS;
+    // see https://github.com/oxidecomputer/omicron/issues/3732
+    available_external_dns_ips: BTreeSet<IpAddr>,
 
     // Allocator for external IPs for service zones
     external_ip_alloc: ExternalIpAllocator<'a>,
@@ -50,11 +57,13 @@ pub(super) struct BuilderExternalNetworking<'a> {
 }
 
 impl<'a> BuilderExternalNetworking<'a> {
-    pub(super) fn new(
+    pub(super) fn new<'b>(
         parent_blueprint: &'a Blueprint,
+        running_omicron_zones: impl Iterator<Item = &'b BlueprintZoneConfig>,
+        expunged_omicron_zones: impl Iterator<Item = &'b BlueprintZoneConfig>,
         input: &'a PlanningInput,
     ) -> anyhow::Result<Self> {
-        // Scan through the parent blueprint and build several sets of "used
+        // Scan through the running zones and build several sets of "used
         // resources". When adding new control plane zones to a sled, we may
         // need to allocate new resources to that zone. However, allocation at
         // this point is entirely optimistic and theoretical: our caller may
@@ -65,11 +74,10 @@ impl<'a> BuilderExternalNetworking<'a> {
         // and when we become the target, but we cannot _actually_ perform
         // resource allocation.
         //
-        // To do this, we look at our parent blueprint's used resources, and
-        // then choose new resources that aren't already in use (if possible;
-        // if we need to allocate a new resource and the parent blueprint
-        // appears to be using all the resources of that kind, our blueprint
-        // generation will fail).
+        // To do this, we look at our currently-used resources, and then choose
+        // new resources that aren't already in use (if possible; if we need to
+        // allocate a new resource and we're already using all the resources of
+        // that kind, our blueprint generation will fail).
         //
         // For example, RSS assigns Nexus NIC IPs by stepping through a list of
         // addresses based on `NEXUS_OPTE_IPVx_SUBNET` (as in the iterators
@@ -77,21 +85,12 @@ impl<'a> BuilderExternalNetworking<'a> {
         // filter out the existing IPs for any Nexus instances that already
         // exist.
         //
-        // Note that by building these iterators up front based on
-        // `parent_blueprint`, we cannot reuse resources in a case where we
-        // remove a zone that used a resource and then add another zone that
-        // wants the same kind of resource. That is mostly okay, but there are
-        // some cases in which we may have to do that -- particularly external
-        // DNS zones, which tend to have a small number of fixed IPs. Solving
-        // that is a TODO.
-        //
         // Also note that currently, we don't perform any kind of garbage
         // collection on sleds and zones that no longer have any attached
         // resources. Once a sled or zone is marked expunged, it will always
         // stay in that state.
         // https://github.com/oxidecomputer/omicron/issues/5552 tracks
-        // implementing this kind of garbage collection, and we should do it
-        // very soon.
+        // implementing this kind of garbage collection.
 
         let mut existing_nexus_v4_ips: HashSet<Ipv4Addr> = HashSet::new();
         let mut existing_nexus_v6_ips: HashSet<Ipv6Addr> = HashSet::new();
@@ -99,13 +98,16 @@ impl<'a> BuilderExternalNetworking<'a> {
             HashSet::new();
         let mut existing_boundary_ntp_v6_ips: HashSet<Ipv6Addr> =
             HashSet::new();
+        let mut existing_external_dns_v4_ips: HashSet<Ipv4Addr> =
+            HashSet::new();
+        let mut existing_external_dns_v6_ips: HashSet<Ipv6Addr> =
+            HashSet::new();
         let mut external_ip_alloc =
             ExternalIpAllocator::new(input.service_ip_pool_ranges());
         let mut used_macs: HashSet<MacAddr> = HashSet::new();
+        let mut used_external_dns_ips: HashSet<IpAddr> = HashSet::new();
 
-        for (_, z) in parent_blueprint
-            .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
-        {
+        for z in running_omicron_zones {
             let zone_type = &z.zone_type;
             match zone_type {
                 BlueprintZoneType::BoundaryNtp(ntp) => match ntp.nic.ip {
@@ -132,6 +134,27 @@ impl<'a> BuilderExternalNetworking<'a> {
                         }
                     }
                 },
+                BlueprintZoneType::ExternalDns(dns) => {
+                    if !used_external_dns_ips.insert(dns.dns_address.addr.ip())
+                    {
+                        bail!(
+                            "duplicate external DNS external IP: {}",
+                            dns.dns_address.addr
+                        );
+                    }
+                    match dns.nic.ip {
+                        IpAddr::V4(ip) => {
+                            if !existing_external_dns_v4_ips.insert(ip) {
+                                bail!("duplicate external DNS IP: {ip}");
+                            }
+                        }
+                        IpAddr::V6(ip) => {
+                            if !existing_external_dns_v6_ips.insert(ip) {
+                                bail!("duplicate external DNS IP: {ip}");
+                            }
+                        }
+                    }
+                }
                 _ => (),
             }
 
@@ -148,6 +171,21 @@ impl<'a> BuilderExternalNetworking<'a> {
                 }
             }
         }
+
+        // Recycle the IP addresses of expunged external DNS zones,
+        // ensuring that those addresses aren't currently in use.
+        // TODO: Remove when external DNS addresses come from policy.
+        let available_external_dns_ips = expunged_omicron_zones
+            .filter_map(|zone| {
+                if let BlueprintZoneType::ExternalDns(dns) = &zone.zone_type {
+                    let ip = dns.dns_address.addr.ip();
+                    if !used_external_dns_ips.contains(&ip) {
+                        return Some(ip);
+                    }
+                }
+                None
+            })
+            .collect::<BTreeSet<IpAddr>>();
 
         // Check the planning input: there shouldn't be any external networking
         // resources in the database (the source of `input`) that we don't know
@@ -192,6 +230,16 @@ impl<'a> BuilderExternalNetworking<'a> {
             NTP_OPTE_IPV6_SUBNET.iter().skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),
             existing_boundary_ntp_v6_ips,
         );
+        let external_dns_v4_ips = AvailableIterator::new(
+            DNS_OPTE_IPV4_SUBNET
+                .addr_iter()
+                .skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),
+            existing_external_dns_v4_ips,
+        );
+        let external_dns_v6_ips = AvailableIterator::new(
+            DNS_OPTE_IPV6_SUBNET.iter().skip(NUM_INITIAL_RESERVED_IP_ADDRESSES),
+            existing_external_dns_v6_ips,
+        );
         let available_system_macs =
             AvailableIterator::new(MacAddr::iter_system(), used_macs);
 
@@ -200,6 +248,9 @@ impl<'a> BuilderExternalNetworking<'a> {
             boundary_ntp_v6_ips,
             nexus_v4_ips,
             nexus_v6_ips,
+            external_dns_v4_ips,
+            external_dns_v6_ips,
+            available_external_dns_ips,
             external_ip_alloc,
             available_system_macs,
         })
@@ -274,6 +325,59 @@ impl<'a> BuilderExternalNetworking<'a> {
             nic_mac,
         })
     }
+
+    pub(super) fn for_new_external_dns(
+        &mut self,
+    ) -> Result<ExternalNetworkingChoice, Error> {
+        let external_ip = self
+            .available_external_dns_ips
+            .pop_first()
+            .ok_or(Error::NoExternalDnsIpAvailable)?;
+
+        let (nic_ip, nic_subnet) = match external_ip {
+            IpAddr::V4(_) => (
+                self.external_dns_v4_ips
+                    .next()
+                    .ok_or(Error::ExhaustedOpteIps {
+                        kind: ZoneKind::ExternalDns,
+                    })?
+                    .into(),
+                IpNet::from(*DNS_OPTE_IPV4_SUBNET),
+            ),
+            IpAddr::V6(_) => (
+                self.external_dns_v6_ips
+                    .next()
+                    .ok_or(Error::ExhaustedOpteIps {
+                        kind: ZoneKind::ExternalDns,
+                    })?
+                    .into(),
+                IpNet::from(*DNS_OPTE_IPV6_SUBNET),
+            ),
+        };
+        let nic_mac = self
+            .available_system_macs
+            .next()
+            .ok_or(Error::NoSystemMacAddressAvailable)?;
+
+        Ok(ExternalNetworkingChoice {
+            external_ip,
+            nic_ip,
+            nic_subnet,
+            nic_mac,
+        })
+    }
+
+    /// Allow a test to manually add an external DNS address,
+    /// which could otherwise only be added via RSS.
+    ///
+    /// TODO-cleanup: Remove when external DNS addresses are in the policy.
+    #[cfg(test)]
+    pub fn add_external_dns_ip(&mut self, addr: IpAddr) {
+        assert!(
+            self.available_external_dns_ips.insert(addr),
+            "duplicate external DNS IP address"
+        );
+    }
 }
 
 // Helper to validate that the system hasn't gone off the rails. There should
@@ -314,6 +418,7 @@ fn ensure_input_records_appear_in_parent_blueprint(
     let mut all_macs: HashSet<MacAddr> = HashSet::new();
     let mut all_nexus_nic_ips: HashSet<IpAddr> = HashSet::new();
     let mut all_boundary_ntp_nic_ips: HashSet<IpAddr> = HashSet::new();
+    let mut all_external_dns_nic_ips: HashSet<IpAddr> = HashSet::new();
     let mut all_external_ips: HashSet<OmicronZoneExternalIp> = HashSet::new();
 
     // Unlike the construction of the external IP allocator and existing IPs
@@ -329,7 +434,9 @@ fn ensure_input_records_appear_in_parent_blueprint(
             BlueprintZoneType::Nexus(nexus) => {
                 all_nexus_nic_ips.insert(nexus.nic.ip);
             }
-            // TODO: external-dns
+            BlueprintZoneType::ExternalDns(dns) => {
+                all_external_dns_nic_ips.insert(dns.nic.ip);
+            }
             _ => (),
         }
 
@@ -380,7 +487,12 @@ fn ensure_input_records_appear_in_parent_blueprint(
                 }
             }
             IpAddr::V4(ip) if DNS_OPTE_IPV4_SUBNET.contains(ip) => {
-                // TODO check all_dns_nic_ips, once it exists
+                if !all_external_dns_nic_ips.contains(&ip.into()) {
+                    bail!(
+                        "planning input contains unexpected NIC \
+                         (IP not found in parent blueprint): {nic_entry:?}"
+                    );
+                }
             }
             IpAddr::V6(ip) if NEXUS_OPTE_IPV6_SUBNET.contains(ip) => {
                 if !all_nexus_nic_ips.contains(&ip.into()) {
@@ -399,7 +511,12 @@ fn ensure_input_records_appear_in_parent_blueprint(
                 }
             }
             IpAddr::V6(ip) if DNS_OPTE_IPV6_SUBNET.contains(ip) => {
-                // TODO check all_dns_nic_ips, once it exists
+                if !all_external_dns_nic_ips.contains(&ip.into()) {
+                    bail!(
+                        "planning input contains unexpected NIC \
+                         (IP not found in parent blueprint): {nic_entry:?}"
+                    );
+                }
             }
             _ => {
                 bail!(

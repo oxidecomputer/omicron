@@ -351,6 +351,7 @@ mod test {
                 internal_dns_version: Generation::new(),
                 external_dns_version: Generation::new(),
                 cockroachdb_fingerprint: String::new(),
+                clickhouse_cluster_config: None,
                 time_created: chrono::Utc::now(),
                 creator: "test".to_string(),
                 comment: "test blueprint".to_string(),
@@ -516,9 +517,6 @@ mod test {
                 zone_type: BlueprintZoneType::InternalNtp(
                     blueprint_zone_type::InternalNtp {
                         address: "[::1]:0".parse().unwrap(),
-                        dns_servers: vec!["::1".parse().unwrap()],
-                        domain: None,
-                        ntp_servers: vec!["some-ntp-server-addr".into()],
                     },
                 ),
             });

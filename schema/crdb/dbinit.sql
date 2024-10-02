@@ -512,7 +512,8 @@ CREATE TYPE IF NOT EXISTS omicron.public.dataset_kind AS ENUM (
   'internal_dns',
   'zone_root',
   'zone',
-  'debug'
+  'debug',
+  'update'
 );
 
 /*
@@ -1107,7 +1108,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
      * by the control plane.
      */
     auto_restart_policy omicron.public.instance_auto_restart,
-
     /*
      * The cooldown period that must elapse between consecutive auto restart
      * attempts. If this is NULL, no cooldown period is explicitly configured
@@ -1115,6 +1115,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.instance (
      */
      auto_restart_cooldown INTERVAL,
 
+    /*
+     * Which disk, if any, is the one this instance should be directed to boot
+     * from. With a boot device selected, guest OSes cannot configure their
+     * boot policy for future boots, so also permit NULL to indicate a guest
+     * does not want our policy, and instead should be permitted control over
+     * its boot-time fates.
+     */
+    boot_disk_id UUID,
 
     CONSTRAINT vmm_iff_active_propolis CHECK (
         ((state = 'vmm') AND (active_propolis_id IS NOT NULL)) OR
@@ -3237,10 +3245,39 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_physical_disk (
 
     variant omicron.public.physical_disk_kind NOT NULL,
 
-    -- FK consisting of:
+    -- PK consisting of:
     -- - Which collection this was
     -- - The sled reporting the disk
     -- - The slot in which this disk was found
+    PRIMARY KEY (inv_collection_id, sled_id, slot)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_nvme_disk_firmware (
+    -- where this observation came from
+    -- (foreign key into `inv_collection` table)
+    inv_collection_id UUID NOT NULL,
+
+    -- unique id for this sled (should be foreign keys into `sled` table, though
+    -- it's conceivable a sled will report an id that we don't know about)
+    sled_id UUID NOT NULL,
+    -- The slot where this disk was last observed
+    slot INT8 CHECK (slot >= 0) NOT NULL,
+
+    -- total number of firmware slots the device has
+    number_of_slots INT2 CHECK (number_of_slots BETWEEN 1 AND 7) NOT NULL,
+    active_slot INT2 CHECK (active_slot BETWEEN 1 AND 7) NOT NULL,
+    -- staged firmware slot to be active on reset
+    next_active_slot INT2 CHECK (next_active_slot BETWEEN 1 AND 7),
+    -- slot1 is distinct in the NVMe spec in the sense that it can be read only
+    slot1_is_read_only BOOLEAN,
+    -- the firmware version string for each NVMe slot (0 indexed), a NULL means the
+    -- slot exists but is empty
+    slot_firmware_versions STRING(8)[] CHECK (array_length(slot_firmware_versions, 1) BETWEEN 1 AND 7),
+    
+    -- PK consisting of:
+    -- - Which collection this was
+    -- - The sled reporting the disk
+    -- - The slot in which the disk was found
     PRIMARY KEY (inv_collection_id, sled_id, slot)
 );
 
@@ -3374,7 +3411,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone (
     dns_gz_address INET,
     dns_gz_address_index INT8,
 
-    -- Properties common to both kinds of NTP zones
+    -- Properties for boundary NTP zones
+    -- these define upstream servers we need to contact
     ntp_ntp_servers TEXT[],
     ntp_dns_servers INET[],
     ntp_domain TEXT,
@@ -3612,7 +3650,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone (
     dns_gz_address INET,
     dns_gz_address_index INT8,
 
-    -- Properties common to both kinds of NTP zones
+    -- Properties for boundary NTP zones
+    -- these define upstream servers we need to contact
     ntp_ntp_servers TEXT[],
     ntp_dns_servers INET[],
     ntp_domain TEXT,
@@ -4382,7 +4421,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '104.0.0', NULL)
+    (TRUE, NOW(), NOW(), '107.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

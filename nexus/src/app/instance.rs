@@ -19,6 +19,7 @@ use crate::external_api::params;
 use cancel_safe_futures::prelude::*;
 use futures::future::Fuse;
 use futures::{FutureExt, SinkExt, StreamExt};
+use nexus_db_model::InstanceUpdate;
 use nexus_db_model::IpAttachState;
 use nexus_db_model::IpKind;
 use nexus_db_model::Vmm as DbVmm;
@@ -61,6 +62,8 @@ use propolis_client::support::WebSocketStream;
 use sagas::instance_common::ExternalIpAttach;
 use sagas::instance_start;
 use sagas::instance_update;
+use sled_agent_client::types::BootOrderEntry;
+use sled_agent_client::types::BootSettings;
 use sled_agent_client::types::InstanceMigrationTargetParams;
 use sled_agent_client::types::InstanceProperties;
 use sled_agent_client::types::VmmPutStateBody;
@@ -233,6 +236,10 @@ enum InstanceStateChangeRequestAction {
     /// Request the appropriate state change from the sled with the specified
     /// UUID.
     SendToSled { sled_id: SledUuid, propolis_id: PropolisUuid },
+
+    /// The instance is not currently incarnated on a sled, so just update its
+    /// runtime state in the database without communicating with a sled-agent.
+    UpdateRuntime(db::model::InstanceRuntimeState),
 }
 
 /// What is the higher level operation that is calling
@@ -295,6 +302,40 @@ impl super::Nexus {
         }
     }
 
+    pub(crate) async fn instance_reconfigure(
+        self: &Arc<Self>,
+        opctx: &OpContext,
+        instance_lookup: &lookup::Instance<'_>,
+        params: &params::InstanceUpdate,
+    ) -> UpdateResult<InstanceAndActiveVmm> {
+        let (.., authz_project, authz_instance) =
+            instance_lookup.lookup_for(authz::Action::Modify).await?;
+
+        let boot_disk_id = match params.boot_disk.clone() {
+            Some(disk) => {
+                let selector = params::DiskSelector {
+                    project: match &disk {
+                        NameOrId::Name(_) => Some(authz_project.id().into()),
+                        NameOrId::Id(_) => None,
+                    },
+                    disk,
+                };
+                let (.., authz_disk) = self
+                    .disk_lookup(opctx, selector)?
+                    .lookup_for(authz::Action::Modify)
+                    .await?;
+
+                Some(authz_disk.id())
+            }
+            None => None,
+        };
+
+        let update = InstanceUpdate { boot_disk_id };
+        self.datastore()
+            .instance_reconfigure(opctx, &authz_instance, update)
+            .await
+    }
+
     pub(crate) async fn project_create_instance(
         self: &Arc<Self>,
         opctx: &OpContext,
@@ -304,14 +345,17 @@ impl super::Nexus {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
 
+        let all_disks: Vec<&params::InstanceDiskAttachment> =
+            params.boot_disk.iter().chain(params.disks.iter()).collect();
+
         // Validate parameters
-        if params.disks.len() > MAX_DISKS_PER_INSTANCE as usize {
+        if all_disks.len() > MAX_DISKS_PER_INSTANCE as usize {
             return Err(Error::invalid_request(&format!(
                 "cannot attach more than {} disks to instance",
                 MAX_DISKS_PER_INSTANCE
             )));
         }
-        for disk in &params.disks {
+        for disk in all_disks.iter() {
             if let params::InstanceDiskAttachment::Create(create) = disk {
                 self.validate_disk_create_params(opctx, &authz_project, create)
                     .await?;
@@ -431,6 +475,14 @@ impl super::Nexus {
                 )));
             }
         }
+
+        // It is deceptively inconvenient to do an early check that the boot
+        // disk is valid here! We accept boot disk by name or ID, but disk
+        // creation and attachment requests as part of instance creation all
+        // require the disk name. So if the boot disk is an ID, we would need
+        // to look up all attachment requests to compare the named disk and
+        // to-be-attached disks. Instead, leave this for the other end of the
+        // saga when we'd go to set the boot disk.
 
         let saga_params = sagas::instance_create::Params {
             serialized_authn: authn::saga::Serialized::for_opctx(opctx),
@@ -811,13 +863,39 @@ impl super::Nexus {
                                 still being created"
                                 ))
                 }
+                // Failed instances may transition to Stopped by just changing
+                // the Nexus state in the database to NoVmm.
+                //
+                // An instance's effective state will never be Failed while it
+                // is linked with a VMM. If the instance has an active VMM which
+                // is Failed, the instance's effective state will be Stopping,
+                // rather than Failed, until an instance-update saga has
+                // unlinked the Failed VMM. We can guarantee this is the case,
+                // as a database CHECK constraint will not permit an instance
+                // with an active Propolis ID to be Failed. Therefore, we know
+                // that a Failed instance is definitely not incarnated on a
+                // sled, so all we need to do to "stop" it is to update its
+                // state in the database.
+                InstanceState::Failed if matches!(requested, InstanceStateChangeRequest::Stop) => {
+                    // As discussed above, this shouldn't happen, so return an
+                    // internal error and complain about it in the logs.
+                    if vmm_state.is_some() {
+                        return Err(Error::internal_error(
+                            "an instance should not be in the Failed \
+                             effective state if it has an active VMM"
+                        ));
+                    }
 
+                    let prev_runtime = instance_state.runtime();
+                    return Ok(InstanceStateChangeRequestAction::UpdateRuntime(db::model::InstanceRuntimeState {
+                        time_updated: chrono::Utc::now(),
+                        r#gen: prev_runtime.r#gen.0.next().into(),
+                        nexus_state: db::model::InstanceState::NoVmm,
+                        ..prev_runtime.clone()
+                    }));
+                }
                 // If the instance has no sled beacuse it's been destroyed or
                 // has fallen over, reject the state change.
-                //
-                // TODO(#2825): Failed instances should be allowed to stop, but
-                // this requires a special action because there is no sled to
-                // send the request to.
                 InstanceState::Failed | InstanceState::Destroyed => {
                     return Err(Error::invalid_request(&format!(
                         "instance state cannot be changed from {}",
@@ -898,6 +976,26 @@ impl super::Nexus {
             &requested,
         )? {
             InstanceStateChangeRequestAction::AlreadyDone => Ok(()),
+            InstanceStateChangeRequestAction::UpdateRuntime(new_runtime) => {
+                let instance_id =
+                    InstanceUuid::from_untyped_uuid(prev_instance_state.id());
+                let changed = self
+                    .datastore()
+                    .instance_update_runtime(&instance_id, &new_runtime)
+                    .await
+                    .map_err(InstanceStateChangeError::Other)?;
+                if !changed {
+                    // TODO(eliza): perhaps we should refetch the instance here
+                    // and return Ok if it was in the desired state...
+                    Err(InstanceStateChangeError::Other(Error::conflict(
+                        "The instance was previously in a state that allowed \
+                         the requested state change, but the instance's state \
+                          changed before the request could be completed",
+                    )))
+                } else {
+                    Ok(())
+                }
+            }
             InstanceStateChangeRequestAction::SendToSled {
                 sled_id,
                 propolis_id,
@@ -982,6 +1080,8 @@ impl super::Nexus {
             )
             .await?;
 
+        let mut boot_disk_name = None;
+
         let mut disk_reqs = vec![];
         for disk in &disks {
             // Disks that are attached to an instance should always have a slot
@@ -1016,6 +1116,12 @@ impl super::Nexus {
                 )
                 .await?;
 
+            // Propolis wants the name of the boot disk rather than ID, because we send names
+            // rather than IDs in the disk requsts as assembled below.
+            if db_instance.boot_disk_id == Some(disk.id()) {
+                boot_disk_name = Some(disk.name().to_string());
+            }
+
             disk_reqs.push(sled_agent_client::types::DiskRequest {
                 name: disk.name().to_string(),
                 slot: sled_agent_client::types::Slot(slot.0),
@@ -1027,6 +1133,41 @@ impl super::Nexus {
                 .map_err(Error::from)?,
             });
         }
+
+        let boot_settings = if let Some(boot_disk_name) = boot_disk_name {
+            Some(BootSettings {
+                order: vec![BootOrderEntry { name: boot_disk_name }],
+            })
+        } else {
+            if let Some(instance_boot_disk_id) =
+                db_instance.boot_disk_id.as_ref()
+            {
+                // This should never occur: when setting the boot disk we ensure it is
+                // attached, and when detaching a disk we ensure it is not the boot
+                // disk. If this error is seen, the instance somehow had a boot disk
+                // that was not attached anyway.
+                //
+                // When Propolis accepts an ID rather than name, and we don't need to
+                // look up a name when assembling the Propolis request, we might as well
+                // remove this check; we can just pass the ID and rely on Propolis' own
+                // check that the boot disk is attached.
+                if boot_disk_name.is_none() {
+                    error!(self.log, "instance boot disk is not attached";
+                       "boot_disk_id" => ?instance_boot_disk_id,
+                       "instance id" => %db_instance.id());
+
+                    return Err(InstanceStateChangeError::Other(
+                        Error::internal_error(&format!(
+                            "instance {} has boot disk {:?} but it is not attached",
+                            db_instance.id(),
+                            db_instance.boot_disk_id.as_ref(),
+                        )),
+                    ));
+                }
+            }
+
+            None
+        };
 
         let nics = self
             .db_datastore
@@ -1175,6 +1316,7 @@ impl super::Nexus {
                 search_domains: Vec::new(),
             },
             disks: disk_reqs,
+            boot_settings,
             cloud_init_bytes: Some(base64::Engine::encode(
                 &base64::engine::general_purpose::STANDARD,
                 db_instance.generate_cidata(&ssh_keys)?,
@@ -2260,6 +2402,7 @@ mod tests {
             network_interfaces: InstanceNetworkInterfaceAttachment::None,
             external_ips: vec![],
             disks: vec![],
+            boot_disk: None,
             ssh_public_keys: None,
             start: false,
             auto_restart_policy: Default::default(),
