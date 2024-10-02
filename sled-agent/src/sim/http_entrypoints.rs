@@ -181,6 +181,40 @@ impl SledAgentApi for SledAgentSimImpl {
         Ok(HttpResponseUpdatedNoContent())
     }
 
+    async fn artifact_copy_from_depot(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<ArtifactPathParam>,
+        body: TypedBody<ArtifactCopyFromDepotBody>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sha256 = path_params.into_inner().sha256;
+        let address = body.into_inner().address;
+        rqctx
+            .context()
+            .artifact_store()
+            .copy_from_depot(sha256, address)
+            .await?;
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn artifact_put(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<ArtifactPathParam>,
+        body: StreamingBody,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sha256 = path_params.into_inner().sha256;
+        rqctx.context().artifact_store().put_body(sha256, body).await?;
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn artifact_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<ArtifactPathParam>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let sha256 = path_params.into_inner().sha256;
+        rqctx.context().artifact_store().delete(sha256).await?;
+        Ok(HttpResponseDeleted())
+    }
+
     async fn vmm_issue_disk_snapshot_request(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<VmmIssueDiskSnapshotRequestPathParam>,

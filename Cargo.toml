@@ -15,6 +15,7 @@ members = [
     "clients/nexus-client",
     "clients/oxide-client",
     "clients/oximeter-client",
+    "clients/repo-depot-client",
     "clients/sled-agent-client",
     "clients/wicketd-client",
     "cockroach-admin",
@@ -97,6 +98,7 @@ members = [
     "sled-agent",
     "sled-agent/api",
     "sled-agent/bootstrap-agent-api",
+    "sled-agent/repo-depot-api",
     "sled-agent/types",
     "sled-hardware",
     "sled-hardware/types",
@@ -135,6 +137,7 @@ default-members = [
     "clients/nexus-client",
     "clients/oxide-client",
     "clients/oximeter-client",
+    "clients/repo-depot-client",
     "clients/sled-agent-client",
     "clients/wicketd-client",
     "cockroach-admin",
@@ -219,6 +222,7 @@ default-members = [
     "sled-agent",
     "sled-agent/api",
     "sled-agent/bootstrap-agent-api",
+    "sled-agent/repo-depot-api",
     "sled-agent/types",
     "sled-hardware",
     "sled-hardware/types",
@@ -529,6 +533,8 @@ reedline = "0.33.0"
 ref-cast = "1.0"
 regex = "1.10.6"
 regress = "0.9.1"
+repo-depot-api = { path = "sled-agent/repo-depot-api" }
+repo-depot-client = { path = "clients/repo-depot-client" }
 reqwest = { version = "0.12", default-features = false }
 ring = "0.17.8"
 rpassword = "7.3.1"

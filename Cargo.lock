@@ -6866,6 +6866,7 @@ dependencies = [
  "glob",
  "guppy",
  "hex",
+ "hex-literal",
  "http 1.1.0",
  "hyper 1.4.1",
  "hyper-staticfile",
@@ -6899,12 +6900,15 @@ dependencies = [
  "propolis_api_types",
  "rand",
  "rcgen",
+ "repo-depot-api",
+ "repo-depot-client",
  "reqwest 0.12.7",
  "schemars",
  "semver 1.0.23",
  "serde",
  "serde_human_bytes",
  "serde_json",
+ "sha2",
  "sha3",
  "sled-agent-api",
  "sled-agent-client",
@@ -7204,6 +7208,7 @@ dependencies = [
  "openapiv3",
  "owo-colors",
  "oximeter-api",
+ "repo-depot-api",
  "serde_json",
  "similar",
  "sled-agent-api",
@@ -9072,6 +9077,29 @@ name = "relative-path"
 version = "1.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba39f3699c378cd8970968dcbff9c43159ea4cfbd88d43c00b22f2ef10a435d2"
+
+[[package]]
+name = "repo-depot-api"
+version = "0.1.0"
+dependencies = [
+ "dropshot 0.12.0",
+ "omicron-common",
+ "omicron-workspace-hack",
+ "schemars",
+ "serde",
+]
+
+[[package]]
+name = "repo-depot-client"
+version = "0.1.0"
+dependencies = [
+ "omicron-workspace-hack",
+ "progenitor",
+ "reqwest 0.12.7",
+ "schemars",
+ "serde",
+ "slog",
+]
 
 [[package]]
 name = "reqwest"
