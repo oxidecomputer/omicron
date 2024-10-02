@@ -9,7 +9,6 @@ use crate::disk::DiskError;
 use camino::Utf8PathBuf;
 use omicron_common::api::external::ByteCountRangeError;
 use omicron_common::api::external::Generation;
-use omicron_common::disk::DatasetName;
 use uuid::Uuid;
 
 #[derive(thiserror::Error, Debug)]
@@ -58,8 +57,8 @@ pub enum Error {
         err: uuid::Error,
     },
 
-    #[error("Dataset {name:?} exists with a different uuid (has {old}, requested {new})")]
-    UuidMismatch { name: Box<DatasetName>, old: Uuid, new: Uuid },
+    #[error("Dataset {name} exists with a different uuid (has {old}, requested {new})")]
+    UuidMismatch { name: String, old: Uuid, new: Uuid },
 
     #[error("Error parsing pool {name}'s size: {err}")]
     BadPoolSize {

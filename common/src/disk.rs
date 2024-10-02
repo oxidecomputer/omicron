@@ -12,6 +12,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
+use std::str::FromStr;
 use uuid::Uuid;
 
 use crate::{
@@ -186,6 +187,18 @@ impl GzipLevel {
     }
 }
 
+impl FromStr for GzipLevel {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let level = s.parse::<u8>()?;
+        if level < GZIP_LEVEL_MIN || level > GZIP_LEVEL_MAX {
+            bail!("Invalid gzip compression level: {level}");
+        }
+        Ok(Self(level))
+    }
+}
+
 #[derive(
     Copy,
     Clone,
@@ -242,7 +255,130 @@ impl fmt::Display for CompressionAlgorithm {
     }
 }
 
-/// Configuration information necessary to request a single dataset
+impl FromStr for CompressionAlgorithm {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        use CompressionAlgorithm::*;
+        let c = match s {
+            "on" => On,
+            "" | "off" => Off,
+            "gzip" => Gzip,
+            "lz4" => Lz4,
+            "lzjb" => Lzjb,
+            "zle" => Zle,
+            _ => {
+                let Some(suffix) = s.strip_prefix("gzip-") else {
+                    bail!("Unknown compression algorithm {s}");
+                };
+                GzipN { level: suffix.parse()? }
+            }
+        };
+        Ok(c)
+    }
+}
+
+/// Shared configuration information to request a dataset.
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+)]
+pub struct SharedDatasetConfig {
+    /// The compression mode to be used by the dataset
+    pub compression: CompressionAlgorithm,
+
+    /// The upper bound on the amount of storage used by this dataset
+    pub quota: Option<ByteCount>,
+
+    /// The lower bound on the amount of storage usable by this dataset
+    pub reservation: Option<ByteCount>,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+)]
+pub struct NestedDatasetLocation {
+    /// A path, within the dataset root, which is being requested.
+    pub path: String,
+
+    /// The UUID within which the dataset being requested
+    pub id: DatasetUuid,
+
+    /// The root in which this dataset is being requested
+    pub root: DatasetName,
+}
+
+impl NestedDatasetLocation {
+    pub fn mountpoint(&self, root: &Utf8Path) -> Utf8PathBuf {
+        let mut path = Utf8Path::new(&self.path);
+
+        // This path must be nested, so we need it to be relative to
+        // "self.root". However, joining paths in Rust is quirky,
+        // as it chooses to replace the path entirely if the argument
+        // to `.join(...)` is absolute.
+        //
+        // Here, we "fix" the path to make non-absolute before joining
+        // the paths.
+        while path.is_absolute() {
+            path = path
+                .strip_prefix("/")
+                .expect("Path is absolute, but we cannot strip '/' character");
+        }
+
+        self.root.mountpoint(root).join(path)
+    }
+
+    pub fn full_name(&self) -> String {
+        format!("{}/{}", self.root.full_name(), self.path)
+    }
+}
+
+// TODO: Does this need to be here? Feels a little like an internal detail...
+/// Configuration information necessary to request a single nested dataset.
+///
+/// These datasets must be placed within one of the top-level datasets
+/// managed directly by Nexus.
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+)]
+pub struct NestedDatasetConfig {
+    /// Location of this nested dataset
+    pub name: NestedDatasetLocation,
+
+    /// Configuration of this dataset
+    #[serde(flatten)]
+    pub inner: SharedDatasetConfig,
+}
+
+/// Configuration information necessary to request a single dataset.
+///
+/// These datasets are tracked directly by Nexus.
 #[derive(
     Clone,
     Debug,
@@ -262,14 +398,8 @@ pub struct DatasetConfig {
     /// The dataset's name
     pub name: DatasetName,
 
-    /// The compression mode to be used by the dataset
-    pub compression: CompressionAlgorithm,
-
-    /// The upper bound on the amount of storage used by this dataset
-    pub quota: Option<ByteCount>,
-
-    /// The lower bound on the amount of storage usable by this dataset
-    pub reservation: Option<ByteCount>,
+    #[serde(flatten)]
+    pub inner: SharedDatasetConfig,
 }
 
 #[derive(

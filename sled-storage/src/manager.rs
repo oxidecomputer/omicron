@@ -20,7 +20,8 @@ use key_manager::StorageKeyRequester;
 use omicron_common::disk::{
     DatasetConfig, DatasetManagementStatus, DatasetName, DatasetsConfig,
     DatasetsManagementResult, DiskIdentity, DiskVariant, DisksManagementResult,
-    OmicronPhysicalDisksConfig,
+    NestedDatasetConfig, NestedDatasetLocation, OmicronPhysicalDisksConfig,
+    SharedDatasetConfig,
 };
 use omicron_common::ledger::Ledger;
 use omicron_uuid_kinds::DatasetUuid;
@@ -130,6 +131,17 @@ pub(crate) enum StorageRequest {
         tx: DebugIgnore<oneshot::Sender<Result<DatasetsConfig, Error>>>,
     },
 
+    NestedDatasetEnsure {
+        config: NestedDatasetConfig,
+        tx: DebugIgnore<oneshot::Sender<Result<(), Error>>>,
+    },
+    NestedDatasetList {
+        name: NestedDatasetLocation,
+        tx: DebugIgnore<
+            oneshot::Sender<Result<Vec<NestedDatasetConfig>, Error>>,
+        >,
+    },
+
     // Requests to explicitly manage or stop managing a set of devices
     OmicronPhysicalDisksEnsure {
         config: OmicronPhysicalDisksConfig,
@@ -152,6 +164,13 @@ pub(crate) enum StorageRequest {
     /// serializes through the `StorageManager` task after all prior requests.
     /// This serialization is particularly useful for tests.
     GetLatestResources(DebugIgnore<oneshot::Sender<AllDisks>>),
+}
+
+#[derive(Debug)]
+struct DatasetCreationDetails {
+    zoned: bool,
+    mountpoint: Mountpoint,
+    full_name: String,
 }
 
 /// A mechanism for interacting with the [`StorageManager`]
@@ -275,6 +294,32 @@ impl StorageHandle {
         let (tx, rx) = oneshot::channel();
         self.tx
             .send(StorageRequest::DatasetsList { tx: tx.into() })
+            .await
+            .unwrap();
+
+        rx.await.unwrap()
+    }
+
+    pub async fn nested_dataset_ensure(
+        &self,
+        config: NestedDatasetConfig,
+    ) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(StorageRequest::NestedDatasetEnsure { config, tx: tx.into() })
+            .await
+            .unwrap();
+
+        rx.await.unwrap()
+    }
+
+    pub async fn nested_dataset_list(
+        &self,
+        name: NestedDatasetLocation,
+    ) -> Result<Vec<NestedDatasetConfig>, Error> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(StorageRequest::NestedDatasetList { name, tx: tx.into() })
             .await
             .unwrap();
 
@@ -478,6 +523,12 @@ impl StorageManager {
             }
             StorageRequest::DatasetsList { tx } => {
                 let _ = tx.0.send(self.datasets_config_list().await);
+            }
+            StorageRequest::NestedDatasetEnsure { config, tx } => {
+                let _ = tx.0.send(self.nested_dataset_ensure(config).await);
+            }
+            StorageRequest::NestedDatasetList { name, tx } => {
+                let _ = tx.0.send(self.nested_dataset_list(name).await);
             }
             StorageRequest::OmicronPhysicalDisksEnsure { config, tx } => {
                 let _ =
@@ -787,7 +838,23 @@ impl StorageManager {
             err: None,
         };
 
-        if let Err(err) = self.ensure_dataset(config).await {
+        let mountpoint_path =
+            config.name.mountpoint(ZPOOL_MOUNTPOINT_ROOT.into());
+        let details = DatasetCreationDetails {
+            zoned: config.name.dataset().zoned(),
+            mountpoint: Mountpoint::Path(mountpoint_path),
+            full_name: config.name.full_name(),
+        };
+
+        if let Err(err) = self
+            .ensure_dataset_with_id(
+                config.name.pool(),
+                config.id,
+                &config.inner,
+                &details,
+            )
+            .await
+        {
             warn!(log, "Failed to ensure dataset"; "dataset" => ?status.dataset_name, "err" => ?err);
             status.err = Some(err.to_string());
         };
@@ -813,6 +880,74 @@ impl StorageManager {
                 return Err(Error::LedgerNotFound);
             }
         }
+    }
+
+    // Ensures that a dataset exists, nested somewhere arbitrary within
+    // a Nexus-controlled dataset.
+    async fn nested_dataset_ensure(
+        &mut self,
+        config: NestedDatasetConfig,
+    ) -> Result<(), Error> {
+        let log = self.log.new(o!("request" => "nested_dataset_ensure"));
+        info!(log, "Ensuring nested dataset");
+
+        let mountpoint_path =
+            config.name.mountpoint(ZPOOL_MOUNTPOINT_ROOT.into());
+
+        let details = DatasetCreationDetails {
+            zoned: false,
+            mountpoint: Mountpoint::Path(mountpoint_path),
+            full_name: config.name.full_name(),
+        };
+
+        self.ensure_dataset(config.name.root.pool(), &config.inner, &details)
+            .await?;
+
+        Ok(())
+    }
+
+    // Lists the properties of 'name' and all children within
+    async fn nested_dataset_list(
+        &mut self,
+        name: NestedDatasetLocation,
+    ) -> Result<Vec<NestedDatasetConfig>, Error> {
+        let log = self.log.new(o!("request" => "nested_dataset_list"));
+        info!(log, "Listing nested datasets");
+
+        let full_name = name.full_name();
+        let properties =
+            illumos_utils::zfs::Zfs::get_dataset_properties(&[full_name])
+                .map_err(|e| {
+                    warn!(
+                        log,
+                        "Failed to access nested dataset";
+                        "name" => ?name
+                    );
+                    crate::dataset::DatasetError::Other(e)
+                })?;
+
+        let root_path = name.root.full_name();
+        Ok(properties
+            .into_iter()
+            .filter_map(|prop| {
+                Some(NestedDatasetConfig {
+                    // The output of our "zfs list" command could be nested away
+                    // from the root - so we actually copy our input to our
+                    // output here, and update the path relative to the input
+                    // root.
+                    name: NestedDatasetLocation {
+                        path: prop.name.strip_prefix(&root_path)?.to_string(),
+                        id: name.id,
+                        root: name.root.clone(),
+                    },
+                    inner: SharedDatasetConfig {
+                        compression: prop.compression.parse().ok()?,
+                        quota: prop.quota,
+                        reservation: prop.reservation,
+                    },
+                })
+            })
+            .collect())
     }
 
     // Makes an U.2 disk managed by the control plane within [`StorageResources`].
@@ -986,12 +1121,49 @@ impl StorageManager {
         }
     }
 
-    // Ensures a dataset exists within a zpool, according to `config`.
+    // Invokes [Self::ensure_dataset] and also ensures the dataset has an
+    // expected UUID as a ZFS property.
+    async fn ensure_dataset_with_id(
+        &mut self,
+        zpool: &ZpoolName,
+        id: DatasetUuid,
+        config: &SharedDatasetConfig,
+        details: &DatasetCreationDetails,
+    ) -> Result<(), Error> {
+        self.ensure_dataset(zpool, config, details).await?;
+
+        // Ensure the dataset has a usable UUID.
+        if let Ok(id_str) = Zfs::get_oxide_value(&details.full_name, "uuid") {
+            if let Ok(found_id) = id_str.parse::<DatasetUuid>() {
+                if found_id != id {
+                    return Err(Error::UuidMismatch {
+                        name: details.full_name.clone(),
+                        old: found_id.into_untyped_uuid(),
+                        new: id.into_untyped_uuid(),
+                    });
+                }
+                return Ok(());
+            }
+        }
+        Zfs::set_oxide_value(&details.full_name, "uuid", &id.to_string())?;
+        Ok(())
+    }
+
+    // Ensures a dataset exists within a zpool.
+    //
+    // Confirms that the zpool exists and is managed by this sled.
     async fn ensure_dataset(
         &mut self,
-        config: &DatasetConfig,
+        zpool: &ZpoolName,
+        config: &SharedDatasetConfig,
+        details: &DatasetCreationDetails,
     ) -> Result<(), Error> {
-        info!(self.log, "ensure_dataset"; "config" => ?config);
+        info!(
+            self.log,
+            "ensure_dataset";
+            "config" => ?config,
+            "details" => ?details,
+        );
 
         // We can only place datasets within managed disks.
         // If a disk is attached to this sled, but not a part of the Control
@@ -1000,22 +1172,13 @@ impl StorageManager {
             .resources
             .disks()
             .iter_managed()
-            .any(|(_, disk)| disk.zpool_name() == config.name.pool())
+            .any(|(_, disk)| disk.zpool_name() == zpool)
         {
-            return Err(Error::ZpoolNotFound(format!(
-                "{}",
-                config.name.pool(),
-            )));
+            return Err(Error::ZpoolNotFound(format!("{}", zpool,)));
         }
 
-        let zoned = config.name.dataset().zoned();
-        let mountpoint_path =
-            config.name.mountpoint(ZPOOL_MOUNTPOINT_ROOT.into());
-        let mountpoint = Mountpoint::Path(mountpoint_path);
-
-        let fs_name = &config.name.full_name();
+        let DatasetCreationDetails { zoned, mountpoint, full_name } = details;
         let do_format = true;
-
         // The "crypt" dataset needs these details, but should already exist
         // by the time we're creating datasets inside.
         let encryption_details = None;
@@ -1025,28 +1188,14 @@ impl StorageManager {
             compression: config.compression,
         });
         Zfs::ensure_filesystem(
-            fs_name,
-            mountpoint,
-            zoned,
+            &full_name,
+            mountpoint.clone(),
+            *zoned,
             do_format,
             encryption_details,
             size_details,
             None,
         )?;
-        // Ensure the dataset has a usable UUID.
-        if let Ok(id_str) = Zfs::get_oxide_value(&fs_name, "uuid") {
-            if let Ok(id) = id_str.parse::<DatasetUuid>() {
-                if id != config.id {
-                    return Err(Error::UuidMismatch {
-                        name: Box::new(config.name.clone()),
-                        old: id.into_untyped_uuid(),
-                        new: config.id.into_untyped_uuid(),
-                    });
-                }
-                return Ok(());
-            }
-        }
-        Zfs::set_oxide_value(&fs_name, "uuid", &config.id.to_string())?;
 
         Ok(())
     }
@@ -1088,7 +1237,7 @@ impl StorageManager {
             if let Ok(id) = id_str.parse::<Uuid>() {
                 if id != request.dataset_id {
                     return Err(Error::UuidMismatch {
-                        name: Box::new(request.dataset_name.clone()),
+                        name: request.dataset_name.full_name(),
                         old: id,
                         new: request.dataset_id,
                     });
@@ -1628,9 +1777,11 @@ mod tests {
             DatasetConfig {
                 id,
                 name,
-                compression: CompressionAlgorithm::Off,
-                quota: None,
-                reservation: None,
+                inner: SharedDatasetConfig {
+                    compression: CompressionAlgorithm::Off,
+                    quota: None,
+                    reservation: None,
+                },
             },
         )]);
         // "Generation = 1" is reserved as "no requests seen yet", so we jump

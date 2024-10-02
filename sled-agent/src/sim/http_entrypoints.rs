@@ -449,7 +449,8 @@ impl SledAgentApi for SledAgentSimImpl {
     async fn support_bundle_get(
         _rqctx: RequestContext<Self::Context>,
         _path_params: Path<SupportBundlePathParam>,
-    ) -> Result<HttpResponseHeaders<HttpResponseOk<FreeformBody>>, HttpError> {
+    ) -> Result<HttpResponseHeaders<HttpResponseOk<FreeformBody>>, HttpError>
+    {
         method_unimplemented()
     }
 

@@ -26,7 +26,9 @@ use omicron_common::{
         DisksManagementResult, OmicronPhysicalDisksConfig,
     },
 };
-use omicron_uuid_kinds::{DatasetUuid, PropolisUuid, SupportBundleUuid, ZpoolUuid};
+use omicron_uuid_kinds::{
+    DatasetUuid, PropolisUuid, SupportBundleUuid, ZpoolUuid,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::{

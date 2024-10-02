@@ -234,13 +234,16 @@ impl SledAgentApi for SledAgentImpl {
         _path_params: Path<SupportBundlePathParam>,
         _body: StreamingBody,
     ) -> Result<HttpResponseCreated<()>, HttpError> {
+        // TODO: I think I need an API to request creation/listing from
+        // the storage manager within an existing dataset?
         todo!();
     }
 
     async fn support_bundle_get(
         _rqctx: RequestContext<Self::Context>,
         _path_params: Path<SupportBundlePathParam>,
-    ) -> Result<HttpResponseHeaders<HttpResponseOk<FreeformBody>>, HttpError> {
+    ) -> Result<HttpResponseHeaders<HttpResponseOk<FreeformBody>>, HttpError>
+    {
         todo!();
     }
 
