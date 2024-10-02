@@ -13,6 +13,7 @@ omicron-rpaths.workspace = true
 anyhow.workspace = true
 camino.workspace = true
 clickhouse-admin-api.workspace = true
+clickhouse-admin-client.workspace = true
 clickhouse-admin-types.workspace = true
 cockroach-admin-client.workspace = true
 dns-service-client.workspace = true

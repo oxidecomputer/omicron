@@ -10,6 +10,7 @@ use anyhow::Context;
 use camino::Utf8PathBuf;
 use clickhouse_admin_api::KeeperConfigurableSettings;
 use clickhouse_admin_api::ServerConfigurableSettings;
+use clickhouse_admin_client::Client;
 use clickhouse_admin_types::config::ClickhouseHost;
 use clickhouse_admin_types::config::RaftServerSettings;
 use clickhouse_admin_types::KeeperId;
@@ -37,14 +38,29 @@ pub(crate) async fn deploy_nodes(
     opctx: &OpContext,
     zones: &BTreeMap<SledUuid, BlueprintZonesConfig>,
     clickhouse_cluster_config: &ClickhouseClusterConfig,
-) -> Result<(), anyhow::Error> {
-    let keeper_configs = keeper_configs(zones, clickhouse_cluster_config)?;
+) -> Result<(), Vec<anyhow::Error>> {
+    let keeper_configs = match keeper_configs(zones, clickhouse_cluster_config)
+    {
+        Ok(keeper_configs) => keeper_configs,
+        Err(e) => return Err(vec![e]),
+    };
+
     let keeper_hosts: Vec<_> = keeper_configs
         .iter()
         .map(|s| ClickhouseHost::Ipv6(s.settings.listen_addr))
         .collect();
+
     let server_configs =
-        server_configs(zones, clickhouse_cluster_config, keeper_hosts)?;
+        match server_configs(zones, clickhouse_cluster_config, keeper_hosts) {
+            Ok(server_configs) => server_configs,
+            Err(e) => return Err(vec![e]),
+        };
+
+    // Inform each clickhouse keeper about its configuration
+    for keeper in keeper_configs {}
+
+    // Inform each clickhouse server about its configuration
+    for server in server_configs {}
 
     todo!()
 }
