@@ -1536,6 +1536,8 @@ impl<'a> BlueprintBuilder<'a> {
 
         Ok(EnsureMultiple::Changed {
             added: num_clickhouse_servers_to_add,
+            updated: 0,
+            expunged: 0,
             removed: 0,
         })
     }
@@ -1592,6 +1594,8 @@ impl<'a> BlueprintBuilder<'a> {
 
         Ok(EnsureMultiple::Changed {
             added: num_clickhouse_keepers_to_add,
+            updated: 0,
+            expunged: 0,
             removed: 0,
         })
     }
