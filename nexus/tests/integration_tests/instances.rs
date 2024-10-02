@@ -4339,7 +4339,7 @@ async fn test_auto_restart_policy_can_be_changed(
         external_ips: vec![],
         boot_disk: None,
         disks: Vec::new(),
-        start: false,
+        start: true,
         // Start out with None
         auto_restart_policy: None,
     };
