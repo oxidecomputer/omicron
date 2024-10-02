@@ -306,7 +306,11 @@ impl NexusSaga for SagaInstanceCreate {
             )?;
         }
 
-        builder.append(set_boot_disk_action());
+        // We only need to set the boot disk if there is one to set.
+        if params.create_params.boot_disk.is_some() {
+            builder.append(set_boot_disk_action());
+        }
+
         builder.append(move_to_stopped_action());
         Ok(builder.build()?)
     }
@@ -1077,8 +1081,9 @@ async fn sic_set_boot_disk(
         .await
         .map_err(ActionError::action_failed)?;
 
-    let initial_configuration =
-        nexus_db_model::InstanceUpdate { boot_disk_id: Some(authz_disk.id()) };
+    let initial_configuration = nexus_db_model::InstanceReconfigure {
+        boot_disk_id: Some(authz_disk.id()),
+    };
 
     datastore
         .instance_reconfigure(&opctx, &authz_instance, initial_configuration)
@@ -1109,8 +1114,12 @@ async fn sic_set_boot_disk_undo(
 
     // If there was a boot disk, clear it. If there was not a boot disk,
     // this is a no-op.
+    if params.create_params.boot_disk.is_none() {
+        return Ok(());
+    }
+
     let undo_configuration =
-        nexus_db_model::InstanceUpdate { boot_disk_id: None };
+        nexus_db_model::InstanceReconfigure { boot_disk_id: None };
 
     datastore
         .instance_reconfigure(&opctx, &authz_instance, undo_configuration)

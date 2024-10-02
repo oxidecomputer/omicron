@@ -532,9 +532,18 @@ mod optional_time_delta {
 }
 
 /// The parts of an Instance that can be directly updated after creation.
+///
+/// The model's name `InstanceReconfigure` is in contrast to the external
+/// [`params::InstanceUpdate`]: `reconfigure` is the internal name of changing
+/// an instance's configuration in places it might conflict with the phrase
+/// "instance update". If we rename `instance update` (see
+/// <https://github.com/oxidecomputer/omicron/issues/6631>), then this could
+/// reasonably be renamed `InstanceUpdate` like other update models, with its
+/// user `instance_reconfigure` also renamed to `instance_update` like other
+/// update queries.
 #[derive(Clone, Debug, AsChangeset, Serialize, Deserialize)]
 #[diesel(table_name = instance, treat_none_as_null = true)]
-pub struct InstanceUpdate {
+pub struct InstanceReconfigure {
     #[diesel(column_name = boot_disk_id)]
     pub boot_disk_id: Option<Uuid>,
 }
