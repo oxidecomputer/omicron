@@ -2015,10 +2015,18 @@ impl super::Nexus {
             )
             .await?;
 
-        saga_outputs
+        let out = saga_outputs
             .lookup_node_output::<views::ExternalIp>("output")
             .map_err(|e| Error::internal_error(&format!("{:#}", &e)))
-            .internal_context("looking up output from ip attach saga")
+            .internal_context("looking up output from ip attach saga");
+
+        // The VPC routing RPW currently has double-duty on ensuring that
+        // sled-agents have up-to-date mappings between the EIPs they should
+        // know about and its intended function.
+        // Trigger the RPW so that OPTE can accurately select the IP ASAP.
+        self.vpc_needed_notify_sleds();
+
+        out
     }
 
     /// Detach an external IP from an instance.
