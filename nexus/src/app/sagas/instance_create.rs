@@ -306,7 +306,11 @@ impl NexusSaga for SagaInstanceCreate {
             )?;
         }
 
-        builder.append(set_boot_disk_action());
+        // We only need to set the boot disk if there is one to set.
+        if params.create_params.boot_disk.is_some() {
+            builder.append(set_boot_disk_action());
+        }
+
         builder.append(move_to_stopped_action());
         Ok(builder.build()?)
     }
