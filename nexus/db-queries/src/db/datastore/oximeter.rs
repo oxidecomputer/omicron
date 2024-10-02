@@ -22,12 +22,11 @@ use chrono::Utc;
 use diesel::prelude::*;
 use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
-use diesel::sql_types;
-use nexus_db_model::ProducerKindEnum;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::ResourceType;
+use omicron_common::api::internal;
 use uuid::Uuid;
 
 /// Type returned when reassigning producers from an Oximeter collector.
@@ -168,89 +167,24 @@ impl DataStore {
         }
     }
 
-    /// Create or update a record for a new producer endpoint
+    /// Create or update a record for a producer endpoint
     ///
-    /// If this producer record is being updated, this method does _not_ update
-    /// the assigned Oximeter to match `producer.oximeter_id` if it differs from
-    /// the existing record in the database. We currently only expect a single
-    /// Oximeter instance to be running at a time:
-    /// <https://github.com/oxidecomputer/omicron/issues/323>
+    /// If the endpoint is being created, a randomly-chosen Oximeter instance
+    /// will be assigned. If the endpoint is being updated, it will keep its
+    /// existing Oximeter assignment.
     pub async fn producer_endpoint_create(
         &self,
         opctx: &OpContext,
-        producer: &ProducerEndpoint,
+        producer: &internal::nexus::ProducerEndpoint,
     ) -> Result<(), Error> {
-        // Our caller has already chosen an Oximeter instance for this producer,
-        // but we don't want to allow it to use a nonexistent or expunged
-        // Oximeter. This query turns into a `SELECT all_the_fields_of_producer
-        // WHERE producer.oximeter_id is legal` in a diesel-compatible way. I'm
-        // not aware of a helper method to generate "all the fields of
-        // `producer`", so instead we have a big tuple of its fields that must
-        // stay in sync with the `table!` definition and field ordering for the
-        // `metric_producer` table. The compiler will catch any mistakes
-        // _except_ incorrect orderings where the types still line up (e.g.,
-        // swapping two Uuid columns), which is not ideal but is hopefully good
-        // enough.
-        let producer_subquery = {
-            use db::schema::oximeter::dsl;
-
-            dsl::oximeter
-                .select((
-                    producer.id().into_sql::<sql_types::Uuid>(),
-                    producer
-                        .time_created()
-                        .into_sql::<sql_types::Timestamptz>(),
-                    producer
-                        .time_modified()
-                        .into_sql::<sql_types::Timestamptz>(),
-                    producer.kind.into_sql::<ProducerKindEnum>(),
-                    producer.ip.into_sql::<sql_types::Inet>(),
-                    producer.port.into_sql::<sql_types::Int4>(),
-                    producer.interval.into_sql::<sql_types::Float8>(),
-                    producer.oximeter_id.into_sql::<sql_types::Uuid>(),
-                ))
-                .filter(
-                    dsl::id
-                        .eq(producer.oximeter_id)
-                        .and(dsl::time_expunged.is_null()),
-                )
-        };
-
-        use db::schema::metric_producer::dsl;
-
-        // TODO: see https://github.com/oxidecomputer/omicron/issues/323
-        let n = diesel::insert_into(dsl::metric_producer)
-            .values(producer_subquery)
-            .on_conflict(dsl::id)
-            .do_update()
-            .set((
-                dsl::time_modified.eq(Utc::now()),
-                dsl::kind.eq(producer.kind),
-                dsl::ip.eq(producer.ip),
-                dsl::port.eq(producer.port),
-                dsl::interval.eq(producer.interval),
-            ))
+        let n = queries::oximeter::upsert_producer(producer)
             .execute_async(&*self.pool_connection_authorized(opctx).await?)
             .await
-            .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::Conflict(
-                        ResourceType::MetricProducer,
-                        "Producer Endpoint",
-                    ),
-                )
-            })?;
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        // We expect `n` to basically always be 1 (1 row was inserted or
-        // updated). It can be 0 if `producer.oximeter_id` doesn't exist or has
-        // been expunged. It can never be 2 or greater because
-        // `producer_subquery` filters on finding an exact row for its Oximeter
-        // instance's ID.
         match n {
-            0 => Err(Error::not_found_by_id(
-                ResourceType::Oximeter,
-                &producer.oximeter_id,
+            0 => Err(Error::unavail(
+                "no Oximeter instances available for assignment",
             )),
             1 => Ok(()),
             _ => Err(Error::internal_error(&format!(
@@ -361,7 +295,6 @@ mod tests {
     use db::datastore::pub_test_utils::datastore_test;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::internal_api::params;
-    use omicron_common::api::external::LookupType;
     use omicron_common::api::internal::nexus;
     use omicron_test_utils::dev;
     use std::time::Duration;
@@ -518,6 +451,37 @@ mod tests {
         logctx.cleanup_successful();
     }
 
+    // Helper function to insert a producer then read the ID of the collector to
+    // which it was assigned.
+    async fn create_producer_returning_collector(
+        datastore: &DataStore,
+        opctx: &OpContext,
+        producer: &nexus::ProducerEndpoint,
+    ) -> Uuid {
+        datastore
+            .producer_endpoint_create(&opctx, &producer)
+            .await
+            .expect("created producer");
+
+        let conn = datastore
+            .pool_connection_authorized(opctx)
+            .await
+            .expect("acquired db connection");
+
+        let inserted: ProducerEndpoint = {
+            use db::schema::metric_producer::dsl;
+
+            dsl::metric_producer
+                .find(producer.id)
+                .select(ProducerEndpoint::as_select())
+                .first_async(&*conn)
+                .await
+                .expect("found producer")
+        };
+
+        inserted.oximeter_id
+    }
+
     #[tokio::test]
     async fn test_producer_endpoint_create_rejects_expunged_oximeters() {
         // Setup
@@ -528,7 +492,7 @@ mod tests {
         let (opctx, datastore) =
             datastore_test(&logctx, &db, Uuid::new_v4()).await;
 
-        // Insert a few Oximeter collectors.
+        // Insert a couple Oximeter collectors.
         let collector_ids = (0..4).map(|_| Uuid::new_v4()).collect::<Vec<_>>();
         for &collector_id in &collector_ids {
             let info = OximeterInfo::new(&params::OximeterInfo {
@@ -541,77 +505,85 @@ mod tests {
                 .expect("inserted collector");
         }
 
-        // We can insert metric producers for each collector.
-        for &collector_id in &collector_ids {
-            let producer = ProducerEndpoint::new(
-                &nexus::ProducerEndpoint {
-                    id: Uuid::new_v4(),
-                    kind: nexus::ProducerKind::Service,
-                    address: "[::1]:0".parse().unwrap(), // unused
-                    interval: Duration::from_secs(0),    // unused
-                },
-                collector_id,
-            );
-            datastore
-                .producer_endpoint_create(&opctx, &producer)
-                .await
-                .expect("created producer");
+        // Creating a producer randomly chooses one of our collectors. Create
+        // 1000 and check that we saw each collector at least once.
+        let mut seen_collector_counts = vec![0; collector_ids.len()];
+        for _ in 0..1000 {
+            let producer = nexus::ProducerEndpoint {
+                id: Uuid::new_v4(),
+                kind: nexus::ProducerKind::Service,
+                address: "[::1]:0".parse().unwrap(), // unused
+                interval: Duration::from_secs(0),    // unused
+            };
+            let collector_id = create_producer_returning_collector(
+                &datastore, &opctx, &producer,
+            )
+            .await;
+            let i = collector_ids
+                .iter()
+                .position(|id| *id == collector_id)
+                .expect("found collector position");
+            seen_collector_counts[i] += 1;
+        }
+        eprintln!("saw collector counts: {seen_collector_counts:?}");
+        for count in seen_collector_counts {
+            assert_ne!(count, 0);
         }
 
-        // Delete the first collector.
+        // Expunge the first collector.
         datastore
             .oximeter_expunge(&opctx, collector_ids[0])
             .await
             .expect("expunged collector");
 
-        // Attempting to insert a producer assigned to the first collector
-        // should fail, now that it's expunged.
-        let err = {
-            let producer = ProducerEndpoint::new(
-                &nexus::ProducerEndpoint {
-                    id: Uuid::new_v4(),
-                    kind: nexus::ProducerKind::Service,
-                    address: "[::1]:0".parse().unwrap(), // unused
-                    interval: Duration::from_secs(0),    // unused
-                },
-                collector_ids[0],
-            );
-            datastore
-                .producer_endpoint_create(&opctx, &producer)
-                .await
-                .expect_err("producer creation fails")
-        };
-        assert_eq!(
-            err,
-            Error::ObjectNotFound {
-                type_name: ResourceType::Oximeter,
-                lookup_type: LookupType::ById(collector_ids[0])
-            }
-        );
-
-        // We can still insert metric producers for the other collectors...
-        for &collector_id in &collector_ids[1..] {
-            let mut producer = ProducerEndpoint::new(
-                &nexus::ProducerEndpoint {
-                    id: Uuid::new_v4(),
-                    kind: nexus::ProducerKind::Service,
-                    address: "[::1]:0".parse().unwrap(), // unused
-                    interval: Duration::from_secs(0),    // unused
-                },
-                collector_id,
-            );
-            datastore
-                .producer_endpoint_create(&opctx, &producer)
-                .await
-                .expect("created producer");
-
-            // ... and we can update them.
-            producer.port = 100.into();
-            datastore
-                .producer_endpoint_create(&opctx, &producer)
-                .await
-                .expect("created producer");
+        // Repeat the test above; we should never see collector 0 chosen.
+        let mut seen_collector_counts = vec![0; collector_ids.len()];
+        for _ in 0..1000 {
+            let producer = nexus::ProducerEndpoint {
+                id: Uuid::new_v4(),
+                kind: nexus::ProducerKind::Service,
+                address: "[::1]:0".parse().unwrap(), // unused
+                interval: Duration::from_secs(0),    // unused
+            };
+            let collector_id = create_producer_returning_collector(
+                &datastore, &opctx, &producer,
+            )
+            .await;
+            let i = collector_ids
+                .iter()
+                .position(|id| *id == collector_id)
+                .expect("found collector position");
+            seen_collector_counts[i] += 1;
         }
+        eprintln!("saw collector counts: {seen_collector_counts:?}");
+        assert_eq!(seen_collector_counts[0], 0);
+        for count in seen_collector_counts.into_iter().skip(1) {
+            assert_ne!(count, 0);
+        }
+
+        // Expunge the remaining collectors; trying to create a producer now
+        // should fail.
+        for &collector_id in &collector_ids[1..] {
+            datastore
+                .oximeter_expunge(&opctx, collector_id)
+                .await
+                .expect("expunged collector");
+        }
+        let producer = nexus::ProducerEndpoint {
+            id: Uuid::new_v4(),
+            kind: nexus::ProducerKind::Service,
+            address: "[::1]:0".parse().unwrap(), // unused
+            interval: Duration::from_secs(0),    // unused
+        };
+        let err = datastore
+            .producer_endpoint_create(&opctx, &producer)
+            .await
+            .expect_err("unexpected success - all oximeters expunged")
+            .to_string();
+        assert!(
+            err.contains("no Oximeter instances available for assignment"),
+            "unexpected error: {err}"
+        );
 
         // Cleanup
         db.cleanup().await.unwrap();
@@ -639,26 +611,34 @@ mod tests {
                 .expect("inserted collector");
         }
 
-        // Insert 250 metric producers assigned to each collector.
-        for &collector_id in &collector_ids {
-            for _ in 0..250 {
-                let producer = ProducerEndpoint::new(
-                    &nexus::ProducerEndpoint {
-                        id: Uuid::new_v4(),
-                        kind: nexus::ProducerKind::Service,
-                        address: "[::1]:0".parse().unwrap(), // unused
-                        interval: Duration::from_secs(0),    // unused
-                    },
-                    collector_id,
-                );
-                datastore
-                    .producer_endpoint_create(&opctx, &producer)
-                    .await
-                    .expect("created producer");
-            }
+        // Insert 1000 metric producers.
+        let mut seen_collector_counts = vec![0; collector_ids.len()];
+        for _ in 0..1000 {
+            let producer = nexus::ProducerEndpoint {
+                id: Uuid::new_v4(),
+                kind: nexus::ProducerKind::Service,
+                address: "[::1]:0".parse().unwrap(), // unused
+                interval: Duration::from_secs(0),    // unused
+            };
+            let collector_id = create_producer_returning_collector(
+                &datastore, &opctx, &producer,
+            )
+            .await;
+            let i = collector_ids
+                .iter()
+                .position(|id| *id == collector_id)
+                .expect("found collector position");
+            seen_collector_counts[i] += 1;
         }
+        eprintln!("saw collector counts: {seen_collector_counts:?}");
+        // Sanity check that we got at least one assignment to collector 0 (so
+        // our reassignment below actually does something).
+        assert!(
+            seen_collector_counts[0] > 0,
+            "expected more than 0 assignments to collector 0 (very unlucky?!)"
+        );
 
-        // Delete one collector.
+        // Expunge one collector.
         datastore
             .oximeter_expunge(&opctx, collector_ids[0])
             .await
@@ -669,7 +649,10 @@ mod tests {
             .oximeter_reassign_all_producers(&opctx, collector_ids[0])
             .await
             .expect("reassigned producers");
-        assert_eq!(num_reassigned, CollectorReassignment::Complete(250));
+        assert_eq!(
+            num_reassigned,
+            CollectorReassignment::Complete(seen_collector_counts[0])
+        );
 
         // Check the distribution of producers for each of the remaining
         // collectors. We don't know the exact count, so we'll check that:
@@ -679,10 +662,10 @@ mod tests {
         //   enough that most calculators give up and call it 0)
         // * All 1000 producers are assigned to one of the three collectors
         //
-        // to guard against "the reassignment query gave all 250 to exactly one
-        // of the remaining collectors", which is an easy failure mode for this
-        // kind of SQL query, where the query engine only evaluates the
-        // randomness once instead of once for each producer.
+        // to guard against "the reassignment query gave all of collector 0's
+        // producers to exactly one of the remaining collectors", which is an
+        // easy failure mode for this kind of SQL query, where the query engine
+        // only evaluates the randomness once instead of once for each producer.
         let mut producer_counts = [0; 4];
         for i in 0..4 {
             producer_counts[i] = datastore
@@ -696,9 +679,13 @@ mod tests {
                 .len();
         }
         assert_eq!(producer_counts[0], 0); // all reassigned
-        assert!(producer_counts[1] > 250); // gained at least one
-        assert!(producer_counts[2] > 250); // gained at least one
-        assert!(producer_counts[3] > 250); // gained at least one
+
+        // each gained at least one
+        assert!(producer_counts[1] > seen_collector_counts[1]);
+        assert!(producer_counts[2] > seen_collector_counts[2]);
+        assert!(producer_counts[3] > seen_collector_counts[3]);
+
+        // all producers are assigned
         assert_eq!(producer_counts[1..].iter().sum::<usize>(), 1000);
 
         // Cleanup
@@ -729,23 +716,24 @@ mod tests {
                 .expect("inserted collector");
         }
 
-        // Insert 10 metric producers assigned to each collector.
-        for &collector_id in &collector_ids {
-            for _ in 0..10 {
-                let producer = ProducerEndpoint::new(
-                    &nexus::ProducerEndpoint {
-                        id: Uuid::new_v4(),
-                        kind: nexus::ProducerKind::Service,
-                        address: "[::1]:0".parse().unwrap(), // unused
-                        interval: Duration::from_secs(0),    // unused
-                    },
-                    collector_id,
-                );
-                datastore
-                    .producer_endpoint_create(&opctx, &producer)
-                    .await
-                    .expect("created producer");
-            }
+        // Insert 100 metric producers.
+        let mut seen_collector_counts = vec![0; collector_ids.len()];
+        for _ in 0..100 {
+            let producer = nexus::ProducerEndpoint {
+                id: Uuid::new_v4(),
+                kind: nexus::ProducerKind::Service,
+                address: "[::1]:0".parse().unwrap(), // unused
+                interval: Duration::from_secs(0),    // unused
+            };
+            let collector_id = create_producer_returning_collector(
+                &datastore, &opctx, &producer,
+            )
+            .await;
+            let i = collector_ids
+                .iter()
+                .position(|id| *id == collector_id)
+                .expect("found collector position");
+            seen_collector_counts[i] += 1;
         }
 
         // Delete all four collectors.
@@ -783,15 +771,18 @@ mod tests {
             .expect("inserted collector");
 
         // Reassigning the original four collectors should now all succeed.
-        for &collector_id in &collector_ids {
+        for (i, &collector_id) in collector_ids.iter().enumerate() {
             let num_reassigned = datastore
                 .oximeter_reassign_all_producers(&opctx, collector_id)
                 .await
                 .expect("reassigned producers");
-            assert_eq!(num_reassigned, CollectorReassignment::Complete(10));
+            assert_eq!(
+                num_reassigned,
+                CollectorReassignment::Complete(seen_collector_counts[i])
+            );
         }
 
-        // All 40 producers should be assigned to our new collector.
+        // All 100 producers should be assigned to our new collector.
         let nproducers = datastore
             .producers_list_by_oximeter_id(
                 &opctx,
@@ -801,7 +792,7 @@ mod tests {
             .await
             .expect("listed producers")
             .len();
-        assert_eq!(nproducers, 40);
+        assert_eq!(nproducers, 100);
 
         // Cleanup
         db.cleanup().await.unwrap();
@@ -827,15 +818,12 @@ mod tests {
             .expect("failed to insert collector");
 
         // Insert a producer
-        let producer = ProducerEndpoint::new(
-            &nexus::ProducerEndpoint {
-                id: Uuid::new_v4(),
-                kind: nexus::ProducerKind::Service,
-                address: "[::1]:0".parse().unwrap(), // unused
-                interval: Duration::from_secs(0),    // unused
-            },
-            collector_info.id,
-        );
+        let producer = nexus::ProducerEndpoint {
+            id: Uuid::new_v4(),
+            kind: nexus::ProducerKind::Service,
+            address: "[::1]:0".parse().unwrap(), // unused
+            interval: Duration::from_secs(0),    // unused
+        };
         datastore
             .producer_endpoint_create(&opctx, &producer)
             .await
@@ -851,7 +839,7 @@ mod tests {
             .await
             .expect("failed to list all producers");
         assert_eq!(all_producers.len(), 1);
-        assert_eq!(all_producers[0].id(), producer.id());
+        assert_eq!(all_producers[0].id(), producer.id);
 
         // Steal this producer so we have a database-precision timestamp and can
         // use full equality checks moving forward.
