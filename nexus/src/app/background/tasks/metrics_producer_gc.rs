@@ -118,6 +118,7 @@ mod tests {
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::internal_api::params;
+    use omicron_common::api::external::DataPageParams;
     use omicron_common::api::internal::nexus;
     use omicron_common::api::internal::nexus::ProducerRegistrationResponse;
     use serde_json::json;
@@ -156,17 +157,24 @@ mod tests {
             datastore.clone(),
         );
 
-        let mut collector = httptest::Server::run();
-
-        // Insert an Oximeter collector
-        let collector_info = OximeterInfo::new(&params::OximeterInfo {
-            collector_id: Uuid::new_v4(),
-            address: collector.addr(),
-        });
-        datastore
-            .oximeter_create(&opctx, &collector_info)
+        // Producer <-> collector assignment is random. We're going to create a
+        // mock collector below then insert a producer, and we want to guarantee
+        // the producer is assigned to the mock collector. To do so, we need to
+        // expunge the "real" collector set up by `nexus_test`. We'll phrase
+        // this as a loop to match the datastore methods and in case nexus_test
+        // ever starts multiple collectors.
+        for oximeter_info in datastore
+            .oximeter_list(&opctx, &DataPageParams::max_page())
             .await
-            .expect("failed to insert collector");
+            .expect("listed oximeters")
+        {
+            datastore
+                .oximeter_expunge(&opctx, oximeter_info.id)
+                .await
+                .expect("expunged oximeter");
+        }
+
+        let mut collector = httptest::Server::run();
 
         // There are several producers which automatically register themselves
         // during tests, from Nexus and the simulated sled-agent for example. We
@@ -181,6 +189,16 @@ mod tests {
                 .times(0..)
                 .respond_with(status_code(201).body(body)),
         );
+
+        // Insert an Oximeter collector
+        let collector_info = OximeterInfo::new(&params::OximeterInfo {
+            collector_id: Uuid::new_v4(),
+            address: collector.addr(),
+        });
+        datastore
+            .oximeter_create(&opctx, &collector_info)
+            .await
+            .expect("failed to insert collector");
 
         // Insert a producer.
         let producer = nexus::ProducerEndpoint {
