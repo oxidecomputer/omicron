@@ -1928,9 +1928,7 @@ impl<'a> BlueprintDisksBuilder<'a> {
 pub mod test {
     use super::*;
     use crate::example::example;
-    use crate::example::example_with;
-    use crate::example::ExampleSystem;
-    use crate::example::ExampleSystemMods;
+    use crate::example::ExampleSystemBuilder;
     use crate::system::SledBuilder;
     use expectorate::assert_contents;
     use nexus_inventory::CollectionBuilder;
@@ -1943,8 +1941,6 @@ pub mod test {
     use slog_error_chain::InlineErrorChain;
     use std::collections::BTreeSet;
     use std::mem;
-
-    pub const DEFAULT_N_SLEDS: usize = 3;
 
     /// Checks various conditions that should be true for all blueprints
     #[track_caller]
@@ -2035,7 +2031,7 @@ pub mod test {
         static TEST_NAME: &str = "blueprint_builder_test_initial";
         let logctx = test_setup_log(TEST_NAME);
         let (collection, input, blueprint_initial) =
-            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+            example(&logctx.log, TEST_NAME);
         verify_blueprint(&blueprint_initial);
 
         let diff = blueprint_initial.diff_since_collection(&collection);
@@ -2070,14 +2066,13 @@ pub mod test {
     fn test_basic() {
         static TEST_NAME: &str = "blueprint_builder_test_basic";
         let logctx = test_setup_log(TEST_NAME);
-        let mut example =
-            ExampleSystem::new(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
-        let blueprint1 = &example.blueprint;
-        verify_blueprint(blueprint1);
+        let (mut example, blueprint1) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME).build();
+        verify_blueprint(&blueprint1);
 
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
-            blueprint1,
+            &blueprint1,
             &example.input,
             &example.collection,
             "test_basic",
@@ -2229,7 +2224,7 @@ pub mod test {
             "blueprint_builder_test_prune_decommissioned_sleds";
         let logctx = test_setup_log(TEST_NAME);
         let (collection, input, mut blueprint1) =
-            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+            example(&logctx.log, TEST_NAME);
         verify_blueprint(&blueprint1);
 
         // Mark one sled as having a desired state of decommissioned.
@@ -2317,12 +2312,13 @@ pub mod test {
 
         // Start with an empty system (sleds with no zones). However, we leave
         // the disks around so that `sled_ensure_disks` can add them.
-        let (collection, input, parent) = example_with(
-            &logctx.log,
-            TEST_NAME,
-            DEFAULT_N_SLEDS,
-            ExampleSystemMods::new().no_zones().no_disks_in_blueprint(),
-        );
+        let (example, parent) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
+                .no_zones()
+                .no_disks_in_blueprint()
+                .build();
+        let collection = example.collection;
+        let input = example.input;
 
         {
             // We start empty, and can add a disk
@@ -2381,8 +2377,7 @@ pub mod test {
         static TEST_NAME: &str =
             "blueprint_builder_test_zone_filesystem_zpool_colocated";
         let logctx = test_setup_log(TEST_NAME);
-        let (_, _, blueprint) =
-            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+        let (_, _, blueprint) = example(&logctx.log, TEST_NAME);
 
         for (_, zone_config) in &blueprint.blueprint_zones {
             for zone in &zone_config.zones {
@@ -2407,12 +2402,12 @@ pub mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Start with an empty system (sleds with no zones).
-        let (collection, input, parent) = example_with(
-            &logctx.log,
-            TEST_NAME,
-            DEFAULT_N_SLEDS,
-            ExampleSystemMods::new().no_zones(),
-        );
+        let (example, parent) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
+                .no_zones()
+                .build();
+        let collection = example.collection;
+        let input = example.input;
 
         // Adding a new Nexus zone currently requires copying settings from an
         // existing Nexus zone. `parent` has no zones, so we should fail if we
@@ -2451,7 +2446,7 @@ pub mod test {
         static TEST_NAME: &str = "blueprint_builder_test_add_nexus_error_cases";
         let logctx = test_setup_log(TEST_NAME);
         let (mut collection, mut input, mut parent) =
-            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+            example(&logctx.log, TEST_NAME);
 
         // Remove the Nexus zone from one of the sleds so that
         // `sled_ensure_zone_nexus` can attempt to add a Nexus zone to
@@ -2606,8 +2601,7 @@ pub mod test {
             "blueprint_builder_test_invalid_parent_blueprint_\
              two_zones_with_same_external_ip";
         let logctx = test_setup_log(TEST_NAME);
-        let (collection, input, mut parent) =
-            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+        let (collection, input, mut parent) = example(&logctx.log, TEST_NAME);
 
         // We should fail if the parent blueprint claims to contain two
         // zones with the same external IP. Skim through the zones, copy the
@@ -2665,8 +2659,7 @@ pub mod test {
             "blueprint_builder_test_invalid_parent_blueprint_\
              two_nexus_zones_with_same_nic_ip";
         let logctx = test_setup_log(TEST_NAME);
-        let (collection, input, mut parent) =
-            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+        let (collection, input, mut parent) = example(&logctx.log, TEST_NAME);
 
         // We should fail if the parent blueprint claims to contain two
         // Nexus zones with the same NIC IP. Skim through the zones, copy
@@ -2724,8 +2717,7 @@ pub mod test {
             "blueprint_builder_test_invalid_parent_blueprint_\
              two_zones_with_same_vnic_mac";
         let logctx = test_setup_log(TEST_NAME);
-        let (collection, input, mut parent) =
-            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+        let (collection, input, mut parent) = example(&logctx.log, TEST_NAME);
 
         // We should fail if the parent blueprint claims to contain two
         // zones with the same service vNIC MAC address. Skim through the
@@ -2783,12 +2775,12 @@ pub mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Start with an empty system (sleds with no zones).
-        let (collection, input, parent) = example_with(
-            &logctx.log,
-            TEST_NAME,
-            DEFAULT_N_SLEDS,
-            ExampleSystemMods::new().no_zones(),
-        );
+        let (example, parent) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
+                .no_zones()
+                .build();
+        let collection = example.collection;
+        let input = example.input;
 
         // Pick an arbitrary sled.
         let (target_sled_id, sled_resources) = input
