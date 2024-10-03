@@ -841,7 +841,7 @@ pub struct ResolvedVpcRouteSet {
 /// which can choose them as a source.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
 pub struct ExternalIpGatewayMap {
-    pub mappings: HashMap<Uuid, HashMap<IpAddr, Uuid>>,
+    pub mappings: HashMap<Uuid, HashMap<IpAddr, HashSet<Uuid>>>,
 }
 
 /// Describes the purpose of the dataset.

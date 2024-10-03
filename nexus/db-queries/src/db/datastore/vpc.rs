@@ -59,6 +59,7 @@ use nexus_db_model::InternetGateway;
 use nexus_db_model::InternetGatewayIpAddress;
 use nexus_db_model::InternetGatewayIpPool;
 use nexus_db_model::IpPoolRange;
+use nexus_db_model::NetworkInterfaceKind;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::SledFilter;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -2318,13 +2319,6 @@ impl DataStore {
     }
 
     // XXX: maybe wants to live in external IP?
-    // XXX: this assumes that only one IGW can be associated
-    //      with each IP per VPC. I would be... surprised if
-    //      we allow a pool to be referenced by several IGWs
-    //      in the same VPC? But maybe that's worth discussion.
-    //      There's nothing stopping us from changing OPTE to
-    //      insert several nat rules if there exists >1 IGW value
-    //      (or just implementing an OR predicate).
     /// Returns a (Ip, NicId) -> InetGwId map which identifies, for a given sled:
     /// * a) which external IPs belong to any of its services/instances/probe NICs.
     /// * b) whether each IP is linked to an Internet Gateway via its parent pool.
@@ -2332,12 +2326,14 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         sled_id: Uuid,
-    ) -> Result<HashMap<Uuid, HashMap<IpAddr, Uuid>>, Error> {
+    ) -> Result<HashMap<Uuid, HashMap<IpAddr, HashSet<Uuid>>>, Error> {
         // TODO: give GW-bound addresses preferential treatment.
         use db::schema::external_ip as eip;
         use db::schema::external_ip::dsl as eip_dsl;
         use db::schema::internet_gateway as igw;
         use db::schema::internet_gateway::dsl as igw_dsl;
+        use db::schema::internet_gateway_ip_address as igw_ip;
+        use db::schema::internet_gateway_ip_address::dsl as igw_ip_dsl;
         use db::schema::internet_gateway_ip_pool as igw_pool;
         use db::schema::internet_gateway_ip_pool::dsl as igw_pool_dsl;
         use db::schema::network_interface as ni;
@@ -2380,7 +2376,58 @@ impl DataStore {
             .load_async::<(IpNetwork, Uuid, Uuid)>(&*conn)
             .await;
 
-        // TODO: service & probe mappings.
+        match instance_mappings {
+            Ok(map) => {
+                for (ip, nic_id, inet_gw_id) in map {
+                    let per_nic: &mut HashMap<_, _> =
+                        out.entry(nic_id).or_default();
+                    let igw_list: &mut HashSet<_> =
+                        per_nic.entry(ip.ip()).or_default();
+
+                    igw_list.insert(inet_gw_id);
+                }
+            }
+            Err(e) => {
+                return Err(Error::non_resourcetype_not_found(&format!(
+                    "unable to find IGW mappings for sled {sled_id}: {e}"
+                )))
+            }
+        }
+
+        // Map all individual IPs bound to IGWs to NICs in their VPC.
+        let indiv_ip_mappings = ni::table
+            .inner_join(igw::table.on(igw_dsl::vpc_id.eq(ni::vpc_id)))
+            .inner_join(
+                igw_ip::table
+                    .on(igw_ip_dsl::internet_gateway_id.eq(igw_dsl::id)),
+            )
+            .filter(ni::time_deleted.is_null())
+            .filter(ni::kind.eq(NetworkInterfaceKind::Instance))
+            .filter(igw_dsl::time_deleted.is_null())
+            .filter(igw_ip_dsl::time_deleted.is_null())
+            .select((igw_ip_dsl::address, ni::id, igw_dsl::id))
+            .load_async::<(IpNetwork, Uuid, Uuid)>(&*conn)
+            .await;
+
+        match indiv_ip_mappings {
+            Ok(map) => {
+                for (ip, nic_id, inet_gw_id) in map {
+                    let per_nic: &mut HashMap<_, _> =
+                        out.entry(nic_id).or_default();
+                    let igw_list: &mut HashSet<_> =
+                        per_nic.entry(ip.ip()).or_default();
+
+                    igw_list.insert(inet_gw_id);
+                }
+            }
+            Err(e) => {
+                return Err(Error::non_resourcetype_not_found(&format!(
+                    "unable to find IGW mappings for sled {sled_id}: {e}"
+                )))
+            }
+        }
+
+        // TODO: service & probe EIP mappings.
         //       note that the current sled-agent design
         //       does not yet allow us to re-ensure the set of
         //       external IPs for non-instance entities.
@@ -2388,21 +2435,7 @@ impl DataStore {
         //       the mappings are ignored by sled-agent for new
         //       services/probes/etc.
 
-        match instance_mappings {
-            Ok(map) => {
-                for (ip, nic_id, inet_gw_id) in map {
-                    let per_nic: &mut HashMap<_, _> =
-                        out.entry(nic_id).or_default();
-
-                    per_nic.insert(ip.ip(), inet_gw_id);
-                }
-
-                Ok(out)
-            }
-            Err(e) => Err(Error::non_resourcetype_not_found(&format!(
-                "unable to find IGW mappings for sled {sled_id}: {e}"
-            ))),
-        }
+        Ok(out)
     }
 
     /// Resolve all targets in a router into concrete details.

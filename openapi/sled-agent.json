@@ -3046,8 +3046,12 @@
             "additionalProperties": {
               "type": "object",
               "additionalProperties": {
-                "type": "string",
-                "format": "uuid"
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "uniqueItems": true
               }
             }
           }

@@ -83,7 +83,7 @@ struct PortManagerInner {
     /// attached to each NIC.
     ///
     /// IGW IDs are specific to the VPC of each NIC.
-    eip_gateways: Mutex<HashMap<Uuid, HashMap<IpAddr, Uuid>>>,
+    eip_gateways: Mutex<HashMap<Uuid, HashMap<IpAddr, HashSet<Uuid>>>>,
 }
 
 impl PortManagerInner {
@@ -692,7 +692,11 @@ impl PortManager {
         }
 
         let inet_gw_map = if let Some(map) = inet_gw_map {
-            Some(map.into_iter().map(|(k, v)| (k.into(), v)).collect())
+            Some(
+                map.into_iter()
+                    .map(|(k, v)| (k.into(), v.into_iter().collect()))
+                    .collect(),
+            )
         } else {
             None
         };
