@@ -21,6 +21,7 @@ use omicron_common::address::CLICKHOUSE_ADMIN_PORT;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use slog::error;
+use slog::info;
 use slog::warn;
 use std::collections::BTreeMap;
 use std::net::Ipv6Addr;
@@ -136,6 +137,11 @@ pub(crate) async fn deploy_nodes(
     if !errors.is_empty() {
         return Err(errors);
     }
+
+    info!(
+        opctx.log,
+        "Successfully deployed all clickhouse server and keeper configs"
+    );
 
     Ok(())
 }
