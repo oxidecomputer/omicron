@@ -13,6 +13,12 @@ pub const BOUNDARY_NTP_REDUNDANCY: usize = 2;
 /// Reconfigurator (to know whether to add new Nexus zones)
 pub const NEXUS_REDUNDANCY: usize = 3;
 
+// The amount of redundancy for Oximeter services.
+///
+/// This is used by both RSS (to distribute the initial set of services) and the
+/// Reconfigurator (to know whether to add new Oximeter zones)
+pub const OXIMETER_REDUNDANCY: usize = 1;
+
 /// The amount of redundancy for CockroachDb services.
 ///
 /// This is used by both RSS (to distribute the initial set of services) and the

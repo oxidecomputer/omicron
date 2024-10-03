@@ -83,6 +83,7 @@ pub struct SystemDescription {
     target_boundary_ntp_zone_count: usize,
     target_nexus_zone_count: usize,
     target_internal_dns_zone_count: usize,
+    target_oximeter_zone_count: usize,
     target_cockroachdb_zone_count: usize,
     target_cockroachdb_cluster_version: CockroachDbClusterVersion,
     service_ip_pool_ranges: Vec<IpRange>,
@@ -136,11 +137,12 @@ impl SystemDescription {
         let target_internal_dns_zone_count = INTERNAL_DNS_REDUNDANCY;
 
         // TODO-cleanup These are wrong, but we don't currently set up any
-        // boundary NTP or CRDB nodes in our fake system, so this prevents
-        // downstream test issues with the planner thinking our system is out of
-        // date from the gate.
+        // of these zones in our fake system, so this prevents downstream test
+        // issues with the planner thinking our system is out of date from the
+        // gate.
         let target_boundary_ntp_zone_count = 0;
         let target_cockroachdb_zone_count = 0;
+        let target_oximeter_zone_count = 0;
 
         let target_cockroachdb_cluster_version =
             CockroachDbClusterVersion::POLICY;
@@ -161,6 +163,7 @@ impl SystemDescription {
             target_boundary_ntp_zone_count,
             target_nexus_zone_count,
             target_internal_dns_zone_count,
+            target_oximeter_zone_count,
             target_cockroachdb_zone_count,
             target_cockroachdb_cluster_version,
             service_ip_pool_ranges,
@@ -344,6 +347,7 @@ impl SystemDescription {
             target_boundary_ntp_zone_count: self.target_boundary_ntp_zone_count,
             target_nexus_zone_count: self.target_nexus_zone_count,
             target_internal_dns_zone_count: self.target_internal_dns_zone_count,
+            target_oximeter_zone_count: self.target_oximeter_zone_count,
             target_cockroachdb_zone_count: self.target_cockroachdb_zone_count,
             target_cockroachdb_cluster_version: self
                 .target_cockroachdb_cluster_version,

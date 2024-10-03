@@ -359,6 +359,7 @@ impl<'a> Planner<'a> {
             DiscretionaryOmicronZone::InternalDns,
             DiscretionaryOmicronZone::ExternalDns,
             DiscretionaryOmicronZone::Nexus,
+            DiscretionaryOmicronZone::Oximeter,
         ] {
             let num_zones_to_add = self.num_additional_zones_needed(zone_kind);
             if num_zones_to_add == 0 {
@@ -452,6 +453,9 @@ impl<'a> Planner<'a> {
             }
             DiscretionaryOmicronZone::Nexus => {
                 self.input.target_nexus_zone_count()
+            }
+            DiscretionaryOmicronZone::Oximeter => {
+                self.input.target_oximeter_zone_count()
             }
         };
 
@@ -558,6 +562,12 @@ impl<'a> Planner<'a> {
                 }
                 DiscretionaryOmicronZone::Nexus => {
                     self.blueprint.sled_ensure_zone_multiple_nexus(
+                        sled_id,
+                        new_total_zone_count,
+                    )?
+                }
+                DiscretionaryOmicronZone::Oximeter => {
+                    self.blueprint.sled_ensure_zone_multiple_oximeter(
                         sled_id,
                         new_total_zone_count,
                     )?
