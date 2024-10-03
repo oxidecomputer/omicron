@@ -11,6 +11,7 @@ use clickhouse_admin_types::{
 use dropshot::{
     HttpError, HttpResponseCreated, HttpResponseOk, RequestContext, TypedBody,
 };
+use illumos_utils::svcadm::Svcadm;
 use std::sync::Arc;
 
 type ClickhouseApiDescription = dropshot::ApiDescription<Arc<ServerContext>>;
@@ -31,10 +32,18 @@ impl ClickhouseAdminApi for ClickhouseAdminImpl {
     ) -> Result<HttpResponseCreated<ReplicaConfig>, HttpError> {
         let ctx = rqctx.context();
         let replica_server = body.into_inner();
-        // TODO(https://github.com/oxidecomputer/omicron/issues/5999): Do something
-        // with the generation number `replica_server.generation`
         let output =
             ctx.clickward().generate_server_config(replica_server.settings)?;
+
+        // Once we have generated the client we can safely enable the clickhouse_server service
+        let fmri = "svc:/oxide/clickhouse_server:default".to_string();
+        Svcadm::enable_service(fmri).map_err(|err| HttpError {
+            status_code: http::StatusCode::INTERNAL_SERVER_ERROR,
+            error_code: Some(String::from("Internal")),
+            external_message: format!("{err}"),
+            internal_message: format!("{err}"),
+        })?;
+
         Ok(HttpResponseCreated(output))
     }
 
@@ -44,9 +53,17 @@ impl ClickhouseAdminApi for ClickhouseAdminImpl {
     ) -> Result<HttpResponseCreated<KeeperConfig>, HttpError> {
         let ctx = rqctx.context();
         let keeper = body.into_inner();
-        // TODO(https://github.com/oxidecomputer/omicron/issues/5999): Do something
-        // with the generation number `keeper.generation`
         let output = ctx.clickward().generate_keeper_config(keeper.settings)?;
+
+        // Once we have generated the client we can safely enable the clickhouse_keeper service
+        let fmri = "svc:/oxide/clickhouse_keeper:default".to_string();
+        Svcadm::enable_service(fmri).map_err(|err| HttpError {
+            status_code: http::StatusCode::INTERNAL_SERVER_ERROR,
+            error_code: Some(String::from("Internal")),
+            external_message: format!("{err}"),
+            internal_message: format!("{err}"),
+        })?;
+
         Ok(HttpResponseCreated(output))
     }
 
