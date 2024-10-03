@@ -410,7 +410,7 @@ mod test {
                     panic!("bad host");
                 };
                 keeper_ips_last_octet_as_keeper_id
-                    .insert(KeeperId(*ip.octets().last().unwrap() as u64));
+                    .insert(KeeperId(u64::from(*ip.octets().last().unwrap())));
             }
         }
         assert_eq!(keeper_ids, expected_keeper_ids);
@@ -449,7 +449,7 @@ mod test {
                     panic!("bad host");
                 };
                 keeper_ips_last_octet_as_keeper_id
-                    .insert(KeeperId(*ip.octets().last().unwrap() as u64));
+                    .insert(KeeperId(u64::from(*ip.octets().last().unwrap())));
             }
             assert_eq!(keeper_ips_last_octet_as_keeper_id, expected_keeper_ids);
 
