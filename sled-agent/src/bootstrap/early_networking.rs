@@ -414,7 +414,7 @@ impl<'a> EarlyNetworkSetup<'a> {
         info!(
             self.log,
             "Initializing {} Uplinks on {switch_location:?} at \
-             {switch_zone_underlay_ip}",
+             {switch_zone_underlay_ip} via Dendrite",
             our_ports.len(),
         );
         let dpd = DpdClient::new(
@@ -436,7 +436,7 @@ impl<'a> EarlyNetworkSetup<'a> {
             info!(
                 self.log,
                 "Configuring default uplink on switch";
-                "config" => #?dpd_port_settings
+                "config" => ?dpd_port_settings
             );
 
             loop {
@@ -588,6 +588,10 @@ impl<'a> EarlyNetworkSetup<'a> {
 
         if !bgp_peer_configs.is_empty() {
             if let Some(config) = &config {
+                info!(
+                    self.log,
+                    "Applying BGP configuration via Maghemite daemon (MGD).";
+                    "configuration" => ?config);
                 mgd.bgp_apply(&ApplyRequest {
                     asn: config.asn,
                     peers: bgp_peer_configs,
@@ -636,6 +640,10 @@ impl<'a> EarlyNetworkSetup<'a> {
                 rq.routes.list.push(sr);
             }
         }
+        info!(
+            self.log,
+            "Adding static IPv4 routes via Maghemite daemon (MGD).";
+            "routes" => ?rq.routes.list);
         mgd.static_add_v4_route(&rq).await.map_err(|e| {
             EarlyNetworkSetupError::BgpConfigurationError(format!(
                 "static routing configuration failed: {e}",
@@ -661,6 +669,10 @@ impl<'a> EarlyNetworkSetup<'a> {
                 peer: spec.remote,
                 required_rx: spec.required_rx,
             };
+            info!(
+                self.log,
+                "Adding BFD peer config to Maghemite daemon (MGD).";
+                "static route request" => ?cfg);
             mgd.add_bfd_peer(&cfg).await.map_err(|e| {
                 EarlyNetworkSetupError::BfdConfigurationError(e.to_string())
             })?;
@@ -673,7 +685,7 @@ impl<'a> EarlyNetworkSetup<'a> {
         &self,
         port_config: &PortConfig,
     ) -> Result<(PortSettings, PortId), EarlyNetworkSetupError> {
-        info!(self.log, "Building Port Configuration");
+        info!(self.log, "Building Dendrite Port Configuration");
         let mut dpd_port_settings = PortSettings { links: HashMap::new() };
         let link_id = LinkId(0);
 
@@ -729,7 +741,10 @@ impl<'a> EarlyNetworkSetup<'a> {
                     );
                 }
             }
-            info!(self.log, "Waiting for dendrite to come online");
+            info!(
+                self.log,
+                "Waiting for dendrite to come online every 2 seconds"
+            );
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         }
     }

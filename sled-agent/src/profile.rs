@@ -32,7 +32,6 @@ impl ProfileBuilder {
         installed_zone: &InstalledZone,
     ) -> Result<(), std::io::Error> {
         info!(log, "Profile for {}:\n{}", installed_zone.name(), self);
-
         let profile_path = installed_zone.site_profile_xml_path();
 
         tokio::fs::write(&profile_path, format!("{self}").as_bytes()).await?;

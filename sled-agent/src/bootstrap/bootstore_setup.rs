@@ -98,6 +98,12 @@ pub async fn poll_ddmd_for_bootstore_peer_update(
                 let peers: BTreeSet<_> = addrs
                     .map(|ip| SocketAddrV6::new(ip, BOOTSTORE_PORT, 0, 0))
                     .collect();
+                info!(
+                    log,
+                    "Polling DDMD for peer state until current peers match desired peers";
+                    "desired peers" => ?peers,
+                    "current peers" => ?current_peers,
+                );
                 if peers != current_peers {
                     current_peers = peers;
                     if let Err(e) = bootstore_node_handle
