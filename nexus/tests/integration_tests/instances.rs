@@ -4158,21 +4158,12 @@ async fn test_cannot_detach_boot_disk(cptestctx: &ControlPlaneTestContext) {
 
     // Change the instance's boot disk.
     let url_instance_update = format!("/v1/instances/{}", instance.identity.id);
-
-    let builder =
-        RequestBuilder::new(client, http::Method::PUT, &url_instance_update)
-            .body(Some(&params::InstanceUpdate {
-                boot_disk: None,
-                auto_restart_policy: None,
-            }))
-            .expect_status(Some(http::StatusCode::OK));
-    let response = NexusRequest::new(builder)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .expect("can attempt to reconfigure the instance");
-
-    let instance = response.parsed_body::<Instance>().unwrap();
+    let instance = expect_instance_reconfigure_ok(
+        &client,
+        &instance.identity.id,
+        params::InstanceUpdate { boot_disk: None, auto_restart_policy: None },
+    )
+    .await;
     assert_eq!(instance.boot_disk_id, None);
 
     // Now try to detach `disks[0]` again. This should succeed.
