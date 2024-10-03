@@ -589,6 +589,7 @@ pub(crate) mod test {
         ExpressionMethods, OptionalExtension, QueryDsl, SelectableHelper,
     };
     use dropshot::test_util::ClientTestContext;
+    use nexus_db_queries::db::fixed_data::vpc::SERVICES_INTERNET_GATEWAY_ID;
     use nexus_db_queries::{
         authn::saga::Serialized, authz, context::OpContext,
         db::datastore::DataStore, db::fixed_data::vpc::SERVICES_VPC_ID,
@@ -755,6 +756,7 @@ pub(crate) mod test {
         assert!(no_routes_exist(datastore).await);
         assert!(no_subnets_exist(datastore).await);
         assert!(no_gateways_exist(datastore).await);
+        assert!(no_gateway_links_exist(datastore).await);
         assert!(no_firewall_rules_exist(datastore).await);
     }
 
@@ -815,8 +817,30 @@ pub(crate) mod test {
             .await
             .optional()
             .unwrap()
-            .map(|router| {
-                eprintln!("Internet gateway exists: {router:?}");
+            .map(|igw| {
+                eprintln!("Internet gateway exists: {igw:?}");
+            })
+            .is_none()
+    }
+
+    async fn no_gateway_links_exist(datastore: &DataStore) -> bool {
+        use nexus_db_queries::db::model::InternetGatewayIpPool;
+        use nexus_db_queries::db::schema::internet_gateway_ip_pool::dsl;
+
+        dsl::internet_gateway_ip_pool
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::internet_gateway_id.ne(*SERVICES_INTERNET_GATEWAY_ID))
+            .select(InternetGatewayIpPool::as_select())
+            .first_async::<InternetGatewayIpPool>(
+                &*datastore.pool_connection_for_tests().await.unwrap(),
+            )
+            .await
+            .optional()
+            .unwrap()
+            .map(|igw_ip_pool| {
+                eprintln!(
+                    "Internet gateway ip pool links exists: {igw_ip_pool:?}"
+                );
             })
             .is_none()
     }

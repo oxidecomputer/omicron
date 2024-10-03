@@ -510,13 +510,15 @@ impl DataStore {
                 )
             })?;
 
-        self.link_default_gateway(
-            opctx,
-            ip_pool_resource.resource_id,
-            ip_pool_resource.ip_pool_id,
-            &conn,
-        )
-        .await?;
+        if ip_pool_resource.is_default {
+            self.link_default_gateway(
+                opctx,
+                ip_pool_resource.resource_id,
+                ip_pool_resource.ip_pool_id,
+                &conn,
+            )
+            .await?;
+        }
 
         Ok(result)
     }
@@ -613,7 +615,8 @@ impl DataStore {
         }
         Ok(())
     }
-    async fn unlink_default_gateway(
+
+    async fn unlink_ip_pool_gateway(
         &self,
         opctx: &OpContext,
         silo_id: Uuid,
@@ -647,7 +650,6 @@ impl DataStore {
             for vpc in &vpcs {
                 let igws = igw_dsl::internet_gateway
                     .filter(igw_dsl::time_deleted.is_null())
-                    .filter(igw_dsl::name.eq("default"))
                     .filter(igw_dsl::vpc_id.eq(vpc.id()))
                     .select(InternetGateway::as_select())
                     .load_async(conn)
@@ -912,7 +914,7 @@ impl DataStore {
                 ))
             })?;
 
-        self.unlink_default_gateway(
+        self.unlink_ip_pool_gateway(
             opctx,
             authz_silo.id(),
             authz_pool.id(),

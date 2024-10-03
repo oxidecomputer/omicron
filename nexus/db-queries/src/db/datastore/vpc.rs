@@ -50,6 +50,8 @@ use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
 use futures::stream::{self, StreamExt};
 use ipnetwork::IpNetwork;
+use nexus_db_fixed_data::vpc::SERVICES_INTERNET_GATEWAY_DEFAULT_ROUTE_V4;
+use nexus_db_fixed_data::vpc::SERVICES_INTERNET_GATEWAY_DEFAULT_ROUTE_V6;
 use nexus_db_fixed_data::vpc::SERVICES_INTERNET_GATEWAY_ID;
 use nexus_db_fixed_data::vpc::SERVICES_VPC_ID;
 use nexus_db_model::ExternalIp;
@@ -172,7 +174,7 @@ impl DataStore {
         };
 
         let default_v4 = RouterRoute::new(
-            Uuid::new_v4(),
+            *SERVICES_INTERNET_GATEWAY_DEFAULT_ROUTE_V4,
             SERVICES_VPC.system_router_id,
             ExternalRouteKind::Default,
             nexus_types::external_api::params::RouterRouteCreate {
@@ -188,8 +190,9 @@ impl DataStore {
                 ),
             },
         );
+
         let default_v6 = RouterRoute::new(
-            Uuid::new_v4(),
+            *SERVICES_INTERNET_GATEWAY_DEFAULT_ROUTE_V6,
             SERVICES_VPC.system_router_id,
             ExternalRouteKind::Default,
             nexus_types::external_api::params::RouterRouteCreate {
@@ -1724,7 +1727,6 @@ impl DataStore {
                 let err = err.clone();
                 let igw_name = igw_name.clone();
                 async move {
-
                     // determine if there are routes that target this igw
                     let this_target = format!("inetgw:{}", igw_name);
                     use  db::schema::router_route::dsl as rr;

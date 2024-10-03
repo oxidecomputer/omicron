@@ -449,8 +449,8 @@ impl PortManager {
     ) -> Result<(), Error> {
         let mut routes = self.inner.routes.lock().unwrap();
         let mut deltas = HashMap::new();
-        slog::info!(self.inner.log, "new routes: {new_routes:#?}");
-        for new in &new_routes {
+        slog::debug!(self.inner.log, "new routes: {new_routes:#?}");
+        for new in new_routes {
             // Disregard any route information for a subnet we don't have.
             let Some(old) = routes.get(&new.id) else {
                 slog::warn!(self.inner.log, "ignoring route {new:#?}");
@@ -486,6 +486,16 @@ impl PortManager {
                     ),
                 };
             deltas.insert(new.id, (to_add, to_delete));
+
+            let active_ports = old.active_ports;
+            routes.insert(
+                new.id,
+                RouteSet {
+                    version: new.version,
+                    routes: new.routes,
+                    active_ports,
+                },
+            );
         }
 
         // Note: We're deliberately holding both locks here
@@ -563,22 +573,6 @@ impl PortManager {
                     );
                 }
             }
-        }
-
-        for new in new_routes {
-            let Some(old) = routes.get(&new.id) else {
-                slog::warn!(self.inner.log, "ignoring route {new:#?}");
-                continue;
-            };
-            let active_ports = old.active_ports;
-            routes.insert(
-                new.id,
-                RouteSet {
-                    version: new.version,
-                    routes: new.routes,
-                    active_ports,
-                },
-            );
         }
 
         Ok(())

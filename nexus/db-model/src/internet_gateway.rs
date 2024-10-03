@@ -57,7 +57,6 @@ impl InternetGatewayIpPool {
         identity: IdentityMetadataCreateParams,
     ) -> Self {
         let identity = InternetGatewayIpPoolIdentity::new(id, identity);
-        //InternetGatewayIpPoolIdentity::new(pool_id, params.identity);
         Self { identity, internet_gateway_id, ip_pool_id }
     }
 }
