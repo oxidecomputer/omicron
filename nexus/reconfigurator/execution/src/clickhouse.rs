@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Deployment of Clickhouse keeper and server nodes via clickhouse-admin running in
-//! deployed omicron zones.
+//! deployed clickhouse zones.
 
 use anyhow::anyhow;
 use camino::Utf8PathBuf;

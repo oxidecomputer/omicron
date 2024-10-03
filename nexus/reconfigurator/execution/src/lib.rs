@@ -207,6 +207,12 @@ pub async fn realize_blueprint_with_overrides(
         deploy_disks_done,
     );
 
+    register_deploy_clickhouse_cluster_nodes_step(
+        &engine.for_component(ExecutionComponent::Clickhouse),
+        &opctx,
+        blueprint,
+    );
+
     let reassign_saga_output = register_reassign_sagas_step(
         &engine.for_component(ExecutionComponent::OmicronZones),
         &opctx,
@@ -513,6 +519,34 @@ fn register_decommission_expunged_disks_step<'a>(
                 )
                 .await
                 .map_err(merge_anyhow_list)?;
+
+                StepSuccess::new(()).into()
+            },
+        )
+        .register();
+}
+
+fn register_deploy_clickhouse_cluster_nodes_step<'a>(
+    registrar: &ComponentRegistrar<'_, 'a>,
+    opctx: &'a OpContext,
+    blueprint: &'a Blueprint,
+) {
+    registrar
+        .new_step(
+            ExecutionStepId::Ensure,
+            "Deploy clickhouse cluster nodes",
+            move |_cx| async move {
+                if let Some(clickhouse_cluster_config) =
+                    &blueprint.clickhouse_cluster_config
+                {
+                    clickhouse::deploy_nodes(
+                        &opctx,
+                        &blueprint.blueprint_zones,
+                        &clickhouse_cluster_config,
+                    )
+                    .await
+                    .map_err(merge_anyhow_list)?;
+                }
 
                 StepSuccess::new(()).into()
             },
