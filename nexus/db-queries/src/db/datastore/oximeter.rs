@@ -452,6 +452,133 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_producer_endpoint_reassigns_if_oximeter_expunged() {
+        // Setup
+        let logctx = dev::test_setup_log(
+            "test_producer_endpoint_reassigns_if_oximeter_expunged",
+        );
+        let mut db = test_setup_database(&logctx.log).await;
+        let (opctx, datastore) =
+            datastore_test(&logctx, &db, Uuid::new_v4()).await;
+
+        // Insert an Oximeter collector.
+        let oximeter1_id = Uuid::new_v4();
+        datastore
+            .oximeter_create(
+                &opctx,
+                &OximeterInfo::new(&params::OximeterInfo {
+                    collector_id: oximeter1_id,
+                    address: "[::1]:0".parse().unwrap(), // unused
+                }),
+            )
+            .await
+            .expect("inserted collector");
+
+        // Insert a producer.
+        let producer = nexus::ProducerEndpoint {
+            id: Uuid::new_v4(),
+            kind: nexus::ProducerKind::Service,
+            address: "[::1]:0".parse().unwrap(),
+            interval: Duration::from_secs(0),
+        };
+        let chosen_oximeter = datastore
+            .producer_endpoint_create(&opctx, &producer)
+            .await
+            .expect("inserted producer");
+        assert_eq!(chosen_oximeter.id, oximeter1_id);
+
+        // Grab the inserted producer (so we have its time_modified for checks
+        // below).
+        let producer_info = datastore
+            .producers_list_by_oximeter_id(
+                &opctx,
+                oximeter1_id,
+                &DataPageParams::max_page(),
+            )
+            .await
+            .expect("listed producers")
+            .pop()
+            .expect("got producer");
+        assert_eq!(producer_info.id(), producer.id);
+
+        // Expunge the oximeter.
+        datastore
+            .oximeter_expunge(&opctx, oximeter1_id)
+            .await
+            .expect("expunged oximeter");
+
+        // Attempting to upsert our producer again should fail; our oximeter has
+        // been expunged, and our time modified should be unchanged.
+        let err = datastore
+            .producer_endpoint_create(&opctx, &producer)
+            .await
+            .expect_err("producer upsert failed")
+            .to_string();
+        assert!(
+            err.contains("no Oximeter instances available for assignment"),
+            "unexpected error: {err}"
+        );
+        {
+            let check_info = datastore
+                .producers_list_by_oximeter_id(
+                    &opctx,
+                    oximeter1_id,
+                    &DataPageParams::max_page(),
+                )
+                .await
+                .expect("listed producers")
+                .pop()
+                .expect("got producer");
+            assert_eq!(
+                producer_info, check_info,
+                "unexpected modification in failed upsert"
+            );
+        }
+
+        // Add a new, non-expunged Oximeter.
+        let oximeter2_id = Uuid::new_v4();
+        datastore
+            .oximeter_create(
+                &opctx,
+                &OximeterInfo::new(&params::OximeterInfo {
+                    collector_id: oximeter2_id,
+                    address: "[::1]:0".parse().unwrap(), // unused
+                }),
+            )
+            .await
+            .expect("inserted collector");
+
+        // Retry updating our existing producer; it should get reassigned to a
+        // the new Oximeter.
+        let chosen_oximeter = datastore
+            .producer_endpoint_create(&opctx, &producer)
+            .await
+            .expect("inserted producer");
+        assert_eq!(chosen_oximeter.id, oximeter2_id);
+        {
+            let check_info = datastore
+                .producers_list_by_oximeter_id(
+                    &opctx,
+                    oximeter2_id,
+                    &DataPageParams::max_page(),
+                )
+                .await
+                .expect("listed producers")
+                .pop()
+                .expect("got producer");
+            assert_eq!(check_info.id(), producer_info.id());
+            assert!(
+                check_info.time_modified() > producer_info.time_modified(),
+                "producer time modified was not advanced"
+            );
+        }
+
+        // Cleanup
+        db.cleanup().await.unwrap();
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
     async fn test_producer_endpoint_create_rejects_expunged_oximeters() {
         // Setup
         let logctx = dev::test_setup_log(

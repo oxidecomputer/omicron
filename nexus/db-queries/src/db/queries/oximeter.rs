@@ -24,35 +24,63 @@ type SelectableSql<T> = <
 /// If the producer is being inserted for the first time, a random Oximeter will
 /// be chosen from among all non-expunged entries in the `oximeter` table.
 ///
+/// If the producer is being updated, it will keep its existing Oximeter as long
+/// as that Oximeter has not been expunged. If its previously-chosen Oximeter
+/// has been expunged, its assignment will be changed to a random non-expunged
+/// Oximeter.
+///
 /// If this query succeeds but returns 0 rows inserted/updated, there are no
 /// non-expunged `Oximeter` instances to choose.
 ///
 /// Returns the oximeter ID assigned to this producer (either the
-/// randomly-chosen one, if newly inserted, or the previously-chosen, if
-/// updated).
+/// randomly-chosen one, if newly inserted or updated-from-an-expunged, or the
+/// previously-chosen, if updated and the existing assignment is still valid).
 pub fn upsert_producer(
     producer: &internal::nexus::ProducerEndpoint,
 ) -> TypedSqlQuery<SelectableSql<OximeterInfo>> {
     let builder = QueryBuilder::new();
 
-    // Choose a random non-expunged Oximeter instance.
+    // Select the existing oximeter ID for this producer, if it exists and is
+    // not expunged.
+    let builder = builder.sql(r#"
+      WITH existing_oximeter AS (
+        SELECT oximeter.id
+        FROM metric_producer INNER JOIN oximeter
+          ON (metric_producer.oximeter_id = oximeter.id)
+        WHERE
+          oximeter.time_expunged IS NULL
+          AND metric_producer.id = "#)
+      .param()
+      .bind::<sql_types::Uuid, _>(producer.id)
+      .sql("), ");
+
+    // Choose a random non-expunged Oximeter instance to use if the previous
+    // clause did not find an existing, non-expunged Oximeter.
     let builder = builder.sql(
         r#"
-        WITH chosen_oximeter AS (
-          SELECT
-            id AS oximeter_id
-          FROM oximeter
+        random_oximeter AS (
+          SELECT id FROM oximeter
           WHERE time_expunged IS NULL
           ORDER BY random()
           LIMIT 1
-        )
+        ),
     "#,
     );
+
+    // Combine the previous two queries. The `LEFT JOIN ... ON true` ensures we
+    // always get a row from this clause if there is _any_ non-expunged Oximeter
+    // available.
+    let builder = builder.sql(r#"
+      chosen_oximeter AS (
+        SELECT COALESCE(existing_oximeter.id, random_oximeter.id) AS oximeter_id
+        FROM random_oximeter LEFT JOIN existing_oximeter ON true
+      ),
+    "#);
 
     // Build the INSERT for new producers...
     let builder = builder.sql(
         r#"
-        , inserted_producer AS (
+        inserted_producer AS (
             INSERT INTO metric_producer (
               id,
               time_created,
@@ -87,8 +115,11 @@ pub fn upsert_producer(
         .bind::<sql_types::Float, _>(producer.interval.as_secs_f32())
         .sql(", oximeter_id FROM chosen_oximeter");
 
-    // If the producer already exists, update a subset of the fields,
-    // intentionally omitting `time_created` and `oximeter_id`.
+    // If the producer already exists, update everything except id/time_created.
+    // This will keep the existing `oximeter_id` if we got a non-NULL value from
+    // the first clause in our CTE (selecting the existing oximeter id if it's
+    // not expunged), or reassign to our randomly-chosen one (the second clause
+    // above) if our current assignment is expunged.
     let builder = builder.sql(
         r#"
         ON CONFLICT (id)
@@ -97,7 +128,8 @@ pub fn upsert_producer(
           kind = excluded.kind,
           ip = excluded.ip,
           port = excluded.port,
-          interval = excluded.interval
+          interval = excluded.interval,
+          oximeter_id = excluded.oximeter_id
     "#,
     );
 
@@ -119,6 +151,7 @@ pub fn upsert_producer(
               FROM oximeter
               INNER JOIN inserted_producer
               ON (oximeter.id = inserted_producer.oximeter_id)
+              WHERE oximeter.time_expunged IS NULL
             "#,
         );
 
