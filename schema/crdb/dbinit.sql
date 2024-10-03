@@ -4487,7 +4487,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '107.0.0', NULL)
+    (TRUE, NOW(), NOW(), '108.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
