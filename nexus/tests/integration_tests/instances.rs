@@ -4157,7 +4157,6 @@ async fn test_cannot_detach_boot_disk(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(err.message, "boot disk cannot be detached");
 
     // Change the instance's boot disk.
-    let url_instance_update = format!("/v1/instances/{}", instance.identity.id);
     let instance = expect_instance_reconfigure_ok(
         &client,
         &instance.identity.id,
