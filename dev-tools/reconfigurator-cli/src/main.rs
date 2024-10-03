@@ -618,9 +618,12 @@ fn cmd_sled_show(
     swriteln!(s, "sled {}", sled_id);
     swriteln!(s, "subnet {}", sled_resources.subnet.net());
     swriteln!(s, "zpools ({}):", sled_resources.zpools.len());
-    for (zpool, disk) in &sled_resources.zpools {
+    for (zpool, (disk, datasets)) in &sled_resources.zpools {
         swriteln!(s, "    {:?}", zpool);
-        swriteln!(s, "    ↳ {:?}", disk);
+        swriteln!(s, "    {:?}", disk);
+        for dataset in datasets {
+            swriteln!(s, "    ↳ {:?}", dataset);
+        }
     }
     Ok(Some(s))
 }
@@ -781,7 +784,12 @@ fn cmd_blueprint_edit(
                 .context("failed to add Nexus zone")?;
             assert_matches::assert_matches!(
                 added,
-                EnsureMultiple::Changed { added: 1, removed: 0 }
+                EnsureMultiple::Changed {
+                    added: 1,
+                    updated: 0,
+                    expunged: 0,
+                    removed: 0
+                }
             );
             format!("added Nexus zone to sled {}", sled_id)
         }
@@ -793,7 +801,12 @@ fn cmd_blueprint_edit(
                 .context("failed to add CockroachDB zone")?;
             assert_matches::assert_matches!(
                 added,
-                EnsureMultiple::Changed { added: 1, removed: 0 }
+                EnsureMultiple::Changed {
+                    added: 1,
+                    updated: 0,
+                    expunged: 0,
+                    removed: 0
+                }
             );
             format!("added CockroachDB zone to sled {}", sled_id)
         }

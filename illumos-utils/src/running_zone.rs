@@ -12,12 +12,13 @@ use crate::dladm::Etherstub;
 use crate::link::{Link, VnicAllocator};
 use crate::opte::{Port, PortTicket};
 use crate::svc::wait_for_service;
-use crate::zone::{AddressRequest, ZONE_PREFIX};
+use crate::zone::AddressRequest;
 use crate::zpool::{PathInPool, ZpoolName};
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::Utf8TempDir;
 use ipnetwork::IpNetwork;
 use omicron_common::backoff;
+use omicron_uuid_kinds::OmicronZoneUuid;
 pub use oxlog::is_oxide_smf_log_file;
 use slog::{error, info, o, warn, Logger};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -26,7 +27,6 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 #[cfg(target_os = "illumos")]
 use std::thread;
-use uuid::Uuid;
 
 #[cfg(any(test, feature = "testing"))]
 use crate::zone::MockZones as Zones;
@@ -947,12 +947,11 @@ impl InstalledZone {
     ///
     /// This results in a zone name which is distinct across different zpools,
     /// but stable and predictable across reboots.
-    pub fn get_zone_name(zone_type: &str, unique_name: Option<Uuid>) -> String {
-        let mut zone_name = format!("{}{}", ZONE_PREFIX, zone_type);
-        if let Some(suffix) = unique_name {
-            zone_name.push_str(&format!("_{}", suffix));
-        }
-        zone_name
+    pub fn get_zone_name(
+        zone_type: &str,
+        unique_name: Option<OmicronZoneUuid>,
+    ) -> String {
+        crate::zone::zone_name(zone_type, unique_name)
     }
 
     /// Get the name of the bootstrap VNIC in the zone, if any.
@@ -1055,7 +1054,7 @@ pub struct ZoneBuilder<'a> {
     // builder purposes - that is, skipping this field in the builder will
     // still result in an `Ok(InstalledZone)` from `.install()`, rather than
     // an `Err(InstallZoneError::IncompleteBuilder)`.
-    unique_name: Option<Uuid>,
+    unique_name: Option<OmicronZoneUuid>,
     /// ZFS datasets to be accessed from within the zone.
     datasets: Option<&'a [zone::Dataset]>,
     /// Filesystems to mount within the zone.
@@ -1119,7 +1118,7 @@ impl<'a> ZoneBuilder<'a> {
     }
 
     /// Unique ID of the instance of the zone being created. (optional)
-    pub fn with_unique_name(mut self, uuid: Uuid) -> Self {
+    pub fn with_unique_name(mut self, uuid: OmicronZoneUuid) -> Self {
         self.unique_name = Some(uuid);
         self
     }

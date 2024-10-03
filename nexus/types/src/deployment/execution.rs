@@ -33,6 +33,7 @@ pub enum ExecutionComponent {
     OmicronZones,
     FirewallRules,
     DatasetRecords,
+    Datasets,
     Dns,
     Cockroach,
 }

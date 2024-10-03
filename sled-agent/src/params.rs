@@ -4,7 +4,6 @@
 
 use nexus_sled_agent_shared::inventory::{OmicronZoneConfig, OmicronZoneType};
 use omicron_common::disk::{DatasetKind, DatasetName};
-use omicron_uuid_kinds::GenericUuid;
 pub use sled_hardware::DendriteAsic;
 use std::net::SocketAddrV6;
 
@@ -20,7 +19,7 @@ impl OmicronZoneConfigExt for OmicronZoneConfig {
     fn zone_name(&self) -> String {
         illumos_utils::running_zone::InstalledZone::get_zone_name(
             self.zone_type.kind().zone_prefix(),
-            Some(self.id.into_untyped_uuid()),
+            Some(self.id),
         )
     }
 }
