@@ -116,9 +116,7 @@ mod tests {
     use httptest::Expectation;
     use nexus_db_model::OximeterInfo;
     use nexus_db_queries::context::OpContext;
-    use nexus_db_queries::db::model::ProducerEndpoint;
     use nexus_test_utils_macros::nexus_test;
-    use nexus_types::identity::Asset;
     use nexus_types::internal_api::params;
     use omicron_common::api::internal::nexus;
     use omicron_common::api::internal::nexus::ProducerRegistrationResponse;
@@ -185,15 +183,12 @@ mod tests {
         );
 
         // Insert a producer.
-        let producer = ProducerEndpoint::new(
-            &nexus::ProducerEndpoint {
-                id: Uuid::new_v4(),
-                kind: nexus::ProducerKind::Service,
-                address: "[::1]:0".parse().unwrap(), // unused
-                interval: Duration::from_secs(0),    // unused
-            },
-            collector_info.id,
-        );
+        let producer = nexus::ProducerEndpoint {
+            id: Uuid::new_v4(),
+            kind: nexus::ProducerKind::Service,
+            address: "[::1]:0".parse().unwrap(), // unused
+            interval: Duration::from_secs(0),    // unused
+        };
         datastore
             .producer_endpoint_create(&opctx, &producer)
             .await
@@ -215,7 +210,7 @@ mod tests {
         // ago, which should result in it being pruned.
         set_time_modified(
             &datastore,
-            producer.id(),
+            producer.id,
             Utc::now() - chrono::TimeDelta::hours(2),
         )
         .await;
@@ -224,7 +219,7 @@ mod tests {
         collector.expect(
             Expectation::matching(request::method_path(
                 "DELETE",
-                format!("/producers/{}", producer.id()),
+                format!("/producers/{}", producer.id),
             ))
             .respond_with(status_code(204)),
         );
@@ -235,7 +230,7 @@ mod tests {
         assert!(value.contains_key("expiration"));
         assert_eq!(
             *value.get("pruned").expect("missing `pruned`"),
-            json!([producer.id()])
+            json!([producer.id])
         );
 
         collector.verify_and_clear();
