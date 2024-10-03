@@ -547,11 +547,12 @@ async fn svc_create_gateway_undo(
         &sagactx,
         &params.serialized_authn,
     );
+    let vpc_id = sagactx.lookup::<Uuid>("vpc_id")?;
     let authz_igw = sagactx.lookup::<authz::InternetGateway>("gateway")?;
 
     osagactx
         .datastore()
-        .vpc_delete_internet_gateway(&opctx, &authz_igw, true)
+        .vpc_delete_internet_gateway(&opctx, &authz_igw, vpc_id, true)
         .await?;
     Ok(())
 }
@@ -721,15 +722,21 @@ pub(crate) mod test {
             .expect("Failed to delete system router");
 
         // Default gateway
-        let (.., authz_igw, _igw) = LookupPath::new(&opctx, &datastore)
-            .project_id(project_id)
-            .vpc_name(&default_name.clone().into())
-            .internet_gateway_name(&default_name.clone().into())
-            .fetch()
-            .await
-            .expect("Failed to fetch default gateway");
+        let (.., authz_vpc, authz_igw, _igw) =
+            LookupPath::new(&opctx, &datastore)
+                .project_id(project_id)
+                .vpc_name(&default_name.clone().into())
+                .internet_gateway_name(&default_name.clone().into())
+                .fetch()
+                .await
+                .expect("Failed to fetch default gateway");
         datastore
-            .vpc_delete_internet_gateway(&opctx, &authz_igw, true)
+            .vpc_delete_internet_gateway(
+                &opctx,
+                &authz_igw,
+                authz_vpc.id(),
+                true,
+            )
             .await
             .expect("Failed to delete default gateway");
 

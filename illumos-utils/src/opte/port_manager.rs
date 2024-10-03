@@ -466,19 +466,14 @@ impl PortManager {
                     (Some(old_vers), Some(new_vers))
                         if !old_vers.is_replaced_by(&new_vers) =>
                     {
-                        slog::info!(self.inner.log, "skipping delta compute");
-                        //TODO(ry) continue;
-                        //XXX
-                        (
-                            new.routes
-                                .difference(&old.routes)
-                                .cloned()
-                                .collect(),
-                            old.routes
-                                .difference(&new.routes)
-                                .cloned()
-                                .collect(),
-                        )
+                        slog::info!(
+                            self.inner.log,
+                            "skipping delta compute for subnet";
+                            "subnet" => ?new.id,
+                            "old_vers" => ?old_vers,
+                            "new_vers" => ?new_vers,
+                        );
+                        continue;
                     }
                     _ => (
                         new.routes.difference(&old.routes).cloned().collect(),

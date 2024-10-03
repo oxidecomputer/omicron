@@ -78,6 +78,8 @@ impl super::Nexus {
             .vpc_create_internet_gateway(&opctx, &authz_vpc, router)
             .await?;
 
+        self.vpc_needed_notify_sleds();
+
         Ok(router)
     }
 
@@ -108,12 +110,17 @@ impl super::Nexus {
         lookup: &lookup::InternetGateway<'_>,
         cascade: bool,
     ) -> DeleteResult {
-        let (.., authz_igw, _db_igw) =
+        let (.., authz_vpc, authz_igw, _db_igw) =
             lookup.fetch_for(authz::Action::Delete).await?;
 
         let out = self
             .db_datastore
-            .vpc_delete_internet_gateway(opctx, &authz_igw, cascade)
+            .vpc_delete_internet_gateway(
+                opctx,
+                &authz_igw,
+                authz_vpc.id(),
+                cascade,
+            )
             .await?;
 
         self.vpc_needed_notify_sleds();
@@ -251,8 +258,6 @@ impl super::Nexus {
             )
             .await?;
 
-        //TODO trigger igw rpw
-        //self.vpc_router_increment_rpw_version(opctx, &authz_router).await?;
         self.vpc_needed_notify_sleds();
 
         Ok(out)
@@ -338,8 +343,6 @@ impl super::Nexus {
             .internet_gateway_attach_ip_address(&opctx, &authz_igw, route)
             .await?;
 
-        //TODO trigger igw rpw
-        //self.vpc_router_increment_rpw_version(opctx, &authz_router).await?;
         self.vpc_needed_notify_sleds();
 
         Ok(route)
@@ -376,8 +379,6 @@ impl super::Nexus {
             )
             .await?;
 
-        //TODO trigger igw rpw
-        //self.vpc_router_increment_rpw_version(opctx, &authz_router).await?;
         self.vpc_needed_notify_sleds();
 
         Ok(out)

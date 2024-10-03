@@ -1302,6 +1302,11 @@ impl DataStore {
                     ),
                 )
             })?;
+
+        // This is a named resource in router rules, so router resolution
+        // will change on add/delete.
+        self.vpc_increment_rpw_version(opctx, authz_vpc.id()).await?;
+
         Ok((
             authz::InternetGateway::new(
                 authz_vpc.clone(),
@@ -1366,13 +1371,22 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         authz_igw: &authz::InternetGateway,
+        vpc_id: Uuid,
         cascade: bool,
     ) -> DeleteResult {
-        if cascade {
+        let res = if cascade {
             self.vpc_delete_internet_gateway_cascade(opctx, authz_igw).await
         } else {
             self.vpc_delete_internet_gateway_no_cascade(opctx, authz_igw).await
+        };
+
+        if res.is_ok() {
+            // This is a named resource in router rules, so router resolution
+            // will change on add/delete.
+            self.vpc_increment_rpw_version(opctx, vpc_id).await?;
         }
+
+        res
     }
 
     pub async fn vpc_delete_internet_gateway_no_cascade(
