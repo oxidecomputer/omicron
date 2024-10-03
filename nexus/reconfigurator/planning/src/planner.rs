@@ -1010,8 +1010,14 @@ mod test {
         static TEST_NAME: &str = "planner_add_multiple_nexus_to_one_sled";
         let logctx = test_setup_log(TEST_NAME);
 
-        // Use our example system as a starting point, but strip it down to just
-        // one sled.
+        // Use our example system as a starting point, but strip it down to
+        // just one sled.
+        //
+        // An alternative here would be to pass in nsleds = 1 rather than
+        // DEFAULT_N_SLEDS, but that would cause multiple Nexuses to be added
+        // to the one sled within the example system. Instead, we want there to
+        // be _one_ Nexus on the one sled, and then add more Nexuses to that
+        // within this test.
         let (sled_id, blueprint1, collection, input) = {
             let (mut collection, input, mut blueprint) =
                 example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);

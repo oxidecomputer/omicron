@@ -1928,7 +1928,9 @@ impl<'a> BlueprintDisksBuilder<'a> {
 pub mod test {
     use super::*;
     use crate::example::example;
+    use crate::example::example_with;
     use crate::example::ExampleSystem;
+    use crate::example::ExampleSystemMods;
     use crate::system::SledBuilder;
     use expectorate::assert_contents;
     use nexus_inventory::CollectionBuilder;
@@ -2312,22 +2314,14 @@ pub mod test {
     fn test_add_physical_disks() {
         static TEST_NAME: &str = "blueprint_builder_test_add_physical_disks";
         let logctx = test_setup_log(TEST_NAME);
-        let (collection, input, _) =
-            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
-        let input = {
-            // Clear out the external networking records from `input`, since
-            // we're building an empty blueprint.
-            let mut builder = input.into_builder();
-            *builder.network_resources_mut() =
-                OmicronZoneNetworkResources::new();
-            builder.build()
-        };
 
-        // Start with an empty blueprint (sleds with no zones).
-        let parent = BlueprintBuilder::build_empty_with_sleds_seeded(
-            input.all_sled_ids(SledFilter::Commissioned),
-            "test",
+        // Start with an empty system (sleds with no zones). However, we leave
+        // the disks around so that `sled_ensure_disks` can add them.
+        let (collection, input, parent) = example_with(
+            &logctx.log,
             TEST_NAME,
+            DEFAULT_N_SLEDS,
+            ExampleSystemMods::new().no_zones().no_disks_in_blueprint(),
         );
 
         {
@@ -2342,7 +2336,15 @@ pub mod test {
             .expect("failed to create builder");
 
             assert!(builder.disks.changed_disks.is_empty());
-            assert!(builder.disks.parent_disks.is_empty());
+            // We expect sleds to be present but not have any disks in them.
+            for (sled_id, disks) in builder.disks.parent_disks {
+                assert_eq!(
+                    disks.disks,
+                    Vec::new(),
+                    "for sled {}, no disks present in parent",
+                    sled_id
+                );
+            }
 
             for (sled_id, sled_resources) in
                 input.all_sled_resources(SledFilter::InService)
@@ -2351,12 +2353,23 @@ pub mod test {
                     builder
                         .sled_ensure_disks(sled_id, &sled_resources)
                         .unwrap(),
-                    EnsureMultiple::Changed { added: 10, removed: 0 },
+                    EnsureMultiple::Changed {
+                        added: usize::from(SledBuilder::DEFAULT_NPOOLS),
+                        removed: 0
+                    },
                 );
             }
 
             assert!(!builder.disks.changed_disks.is_empty());
-            assert!(builder.disks.parent_disks.is_empty());
+            // We expect sleds to be present but not have any disks in them.
+            for (sled_id, disks) in builder.disks.parent_disks {
+                assert_eq!(
+                    disks.disks,
+                    Vec::new(),
+                    "for sled {}, no disks present in parent",
+                    sled_id
+                );
+            }
         }
 
         logctx.cleanup_successful();
@@ -2393,21 +2406,12 @@ pub mod test {
             "blueprint_builder_test_add_nexus_with_no_existing_nexus_zones";
         let logctx = test_setup_log(TEST_NAME);
 
-        // Discard the example blueprint and start with an empty one.
-        let (collection, input, _) =
-            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
-        let input = {
-            // Clear out the external networking records from `input`, since
-            // we're building an empty blueprint.
-            let mut builder = input.into_builder();
-            *builder.network_resources_mut() =
-                OmicronZoneNetworkResources::new();
-            builder.build()
-        };
-        let parent = BlueprintBuilder::build_empty_with_sleds_seeded(
-            input.all_sled_ids(SledFilter::Commissioned),
-            "test",
+        // Start with an empty system (sleds with no zones).
+        let (collection, input, parent) = example_with(
+            &logctx.log,
             TEST_NAME,
+            DEFAULT_N_SLEDS,
+            ExampleSystemMods::new().no_zones(),
         );
 
         // Adding a new Nexus zone currently requires copying settings from an
@@ -2778,21 +2782,12 @@ pub mod test {
         static TEST_NAME: &str = "blueprint_builder_test_ensure_cockroachdb";
         let logctx = test_setup_log(TEST_NAME);
 
-        // Discard the example blueprint and start with an empty one.
-        let (collection, input, _) =
-            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
-        let input = {
-            // Clear out the external networking records from `input`, since
-            // we're building an empty blueprint.
-            let mut builder = input.into_builder();
-            *builder.network_resources_mut() =
-                OmicronZoneNetworkResources::new();
-            builder.build()
-        };
-        let parent = BlueprintBuilder::build_empty_with_sleds_seeded(
-            input.all_sled_ids(SledFilter::Commissioned),
-            "test",
+        // Start with an empty system (sleds with no zones).
+        let (collection, input, parent) = example_with(
+            &logctx.log,
             TEST_NAME,
+            DEFAULT_N_SLEDS,
+            ExampleSystemMods::new().no_zones(),
         );
 
         // Pick an arbitrary sled.

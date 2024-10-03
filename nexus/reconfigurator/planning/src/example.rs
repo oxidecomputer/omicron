@@ -40,11 +40,28 @@ impl ExampleSystem {
         test_name: &str,
         nsleds: usize,
     ) -> ExampleSystem {
+        Self::new_impl(log, test_name, nsleds, ExampleSystemMods::new())
+    }
+
+    fn new_impl(
+        log: &slog::Logger,
+        test_name: &str,
+        nsleds: usize,
+        mods: ExampleSystemMods,
+    ) -> ExampleSystem {
+        let log = log.new(slog::o!("component" => "ExampleSystem", "test_name" => test_name.to_string()));
+        slog::info!(log, "Creating example system"; "nsleds" => nsleds, "mods" => ?mods);
+
         let mut system = SystemDescription::new();
         let mut sled_rng = TypedUuidRng::from_seed(test_name, "ExampleSystem");
         let sled_ids: Vec<_> = (0..nsleds).map(|_| sled_rng.next()).collect();
+        let npools =
+            if mods.no_disks { 0 } else { SledBuilder::DEFAULT_NPOOLS };
+
         for sled_id in &sled_ids {
-            let _ = system.sled(SledBuilder::new().id(*sled_id)).unwrap();
+            let _ = system
+                .sled(SledBuilder::new().id(*sled_id).npools(npools))
+                .unwrap();
         }
 
         let mut input_builder = system
@@ -67,7 +84,7 @@ impl ExampleSystem {
 
         // Now make a blueprint and collection with some zones on each sled.
         let mut builder = BlueprintBuilder::new_based_on(
-            log,
+            &log,
             &initial_blueprint,
             &base_input,
             &collection,
@@ -78,25 +95,32 @@ impl ExampleSystem {
         for (i, (sled_id, sled_resources)) in
             base_input.all_sled_resources(SledFilter::Commissioned).enumerate()
         {
-            let _ = builder.sled_ensure_zone_ntp(sled_id).unwrap();
-            let _ = builder
-                .sled_ensure_zone_multiple_nexus_with_config(
-                    sled_id,
-                    1,
-                    false,
-                    vec![],
-                )
-                .unwrap();
-            if i < INTERNAL_DNS_REDUNDANCY {
+            if !mods.no_zones {
+                let _ = builder.sled_ensure_zone_ntp(sled_id).unwrap();
                 let _ = builder
-                    .sled_ensure_zone_multiple_internal_dns(sled_id, 1)
+                    .sled_ensure_zone_multiple_nexus_with_config(
+                        sled_id,
+                        1,
+                        false,
+                        vec![],
+                    )
                     .unwrap();
+                if i < INTERNAL_DNS_REDUNDANCY {
+                    let _ = builder
+                        .sled_ensure_zone_multiple_internal_dns(sled_id, 1)
+                        .unwrap();
+                }
             }
-            let _ = builder.sled_ensure_disks(sled_id, sled_resources).unwrap();
-            for pool_name in sled_resources.zpools.keys() {
-                let _ = builder
-                    .sled_ensure_zone_crucible(sled_id, *pool_name)
-                    .unwrap();
+            if !mods.no_disks_in_blueprint {
+                let _ =
+                    builder.sled_ensure_disks(sled_id, sled_resources).unwrap();
+            }
+            if !mods.no_zones {
+                for pool_name in sled_resources.zpools.keys() {
+                    let _ = builder
+                        .sled_ensure_zone_crucible(sled_id, *pool_name)
+                        .unwrap();
+                }
             }
         }
 
@@ -171,4 +195,64 @@ pub fn example(
 ) -> (Collection, PlanningInput, Blueprint) {
     let example = ExampleSystem::new(log, test_name, nsleds);
     (example.collection, example.input, example.blueprint)
+}
+
+/// Returns a collection, planning input, and blueprint describing a simple
+/// system with no zones.
+///
+/// The test name is used as the RNG seed.
+///
+/// `n_sleds` is the number of sleds supported. Currently, this value can
+/// be anywhere between 0 and 5. (More can be added in the future if
+/// necessary.)
+pub fn example_with(
+    log: &slog::Logger,
+    test_name: &str,
+    nsleds: usize,
+    mods: ExampleSystemMods,
+) -> (Collection, PlanningInput, Blueprint) {
+    let example = ExampleSystem::new_impl(log, test_name, nsleds, mods);
+    (example.collection, example.input, example.blueprint)
+}
+
+/// Non-default modifications to make to the initial setup for the example
+/// system.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExampleSystemMods {
+    no_zones: bool,
+    no_disks: bool,
+    no_disks_in_blueprint: bool,
+}
+
+impl Default for ExampleSystemMods {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ExampleSystemMods {
+    pub fn new() -> Self {
+        Self { no_zones: false, no_disks: false, no_disks_in_blueprint: false }
+    }
+
+    /// Do not create any zones in the example system.
+    pub fn no_zones(mut self) -> Self {
+        self.no_zones = true;
+        self
+    }
+
+    /// Do not create any disks in the example system.
+    pub fn no_disks(mut self) -> Self {
+        self.no_disks = true;
+        self
+    }
+
+    /// Do not add any disks to the returned blueprint.
+    ///
+    /// [`Self::no_disks`] implies this: if no disks are created, then the
+    /// blueprint won't have any disks.
+    pub fn no_disks_in_blueprint(mut self) -> Self {
+        self.no_disks_in_blueprint = true;
+        self
+    }
 }
