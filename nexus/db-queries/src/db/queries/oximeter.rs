@@ -42,17 +42,20 @@ pub fn upsert_producer(
 
     // Select the existing oximeter ID for this producer, if it exists and is
     // not expunged.
-    let builder = builder.sql(r#"
-      WITH existing_oximeter AS (
-        SELECT oximeter.id
-        FROM metric_producer INNER JOIN oximeter
-          ON (metric_producer.oximeter_id = oximeter.id)
-        WHERE
-          oximeter.time_expunged IS NULL
-          AND metric_producer.id = "#)
-      .param()
-      .bind::<sql_types::Uuid, _>(producer.id)
-      .sql("), ");
+    let builder = builder
+        .sql(
+            r#"
+            WITH existing_oximeter AS (
+              SELECT oximeter.id
+              FROM metric_producer INNER JOIN oximeter
+                ON (metric_producer.oximeter_id = oximeter.id)
+              WHERE
+                oximeter.time_expunged IS NULL
+                AND metric_producer.id = "#,
+        )
+        .param()
+        .bind::<sql_types::Uuid, _>(producer.id)
+        .sql("), ");
 
     // Choose a random non-expunged Oximeter instance to use if the previous
     // clause did not find an existing, non-expunged Oximeter.
@@ -70,12 +73,14 @@ pub fn upsert_producer(
     // Combine the previous two queries. The `LEFT JOIN ... ON true` ensures we
     // always get a row from this clause if there is _any_ non-expunged Oximeter
     // available.
-    let builder = builder.sql(r#"
+    let builder = builder.sql(
+        r#"
       chosen_oximeter AS (
         SELECT COALESCE(existing_oximeter.id, random_oximeter.id) AS oximeter_id
         FROM random_oximeter LEFT JOIN existing_oximeter ON true
       ),
-    "#);
+    "#,
+    );
 
     // Build the INSERT for new producers...
     let builder = builder.sql(

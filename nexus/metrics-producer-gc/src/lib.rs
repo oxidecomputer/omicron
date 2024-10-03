@@ -240,11 +240,11 @@ mod tests {
 
         // Insert a producer.
         let producer = nexus::ProducerEndpoint {
-                id: Uuid::new_v4(),
-                kind: nexus::ProducerKind::Service,
-                address: "[::1]:0".parse().unwrap(), // unused
-                interval: Duration::from_secs(0),    // unused
-            };
+            id: Uuid::new_v4(),
+            kind: nexus::ProducerKind::Service,
+            address: "[::1]:0".parse().unwrap(), // unused
+            interval: Duration::from_secs(0),    // unused
+        };
         datastore
             .producer_endpoint_create(&opctx, &producer)
             .await
@@ -319,11 +319,11 @@ mod tests {
 
         // Insert a producer.
         let producer = nexus::ProducerEndpoint {
-                id: Uuid::new_v4(),
-                kind: nexus::ProducerKind::Service,
-                address: "[::1]:0".parse().unwrap(), // unused
-                interval: Duration::from_secs(0),    // unused
-            };
+            id: Uuid::new_v4(),
+            kind: nexus::ProducerKind::Service,
+            address: "[::1]:0".parse().unwrap(), // unused
+            interval: Duration::from_secs(0),    // unused
+        };
         datastore
             .producer_endpoint_create(&opctx, &producer)
             .await
