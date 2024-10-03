@@ -224,19 +224,41 @@ impl SledAgentApi for SledAgentImpl {
     }
 
     async fn support_bundle_list(
-        _rqctx: RequestContext<Self::Context>,
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundleListPathParam>,
     ) -> Result<HttpResponseOk<Vec<SupportBundleMetadata>>, HttpError> {
-        todo!();
+        let sa = rqctx.context();
+
+        let SupportBundleListPathParam { zpool_id, dataset_id } =
+            path_params.into_inner();
+
+        let bundles = sa.support_bundle_list(zpool_id, dataset_id).await?;
+
+        Ok(HttpResponseOk(bundles))
     }
 
     async fn support_bundle_create(
-        _rqctx: RequestContext<Self::Context>,
-        _path_params: Path<SupportBundlePathParam>,
-        _body: StreamingBody,
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+        query_params: Query<SupportBundleQueryParams>,
+        body: StreamingBody,
     ) -> Result<HttpResponseCreated<()>, HttpError> {
-        // TODO: I think I need an API to request creation/listing from
-        // the storage manager within an existing dataset?
-        todo!();
+        let sa = rqctx.context();
+
+        let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
+            path_params.into_inner();
+        let SupportBundleQueryParams { hash } = query_params.into_inner();
+
+        sa.support_bundle_create(
+            zpool_id,
+            dataset_id,
+            support_bundle_id,
+            hash,
+            body,
+        )
+        .await?;
+
+        Ok(HttpResponseCreated(()))
     }
 
     async fn support_bundle_get(

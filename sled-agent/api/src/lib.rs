@@ -25,6 +25,7 @@ use omicron_common::{
         DatasetsConfig, DatasetsManagementResult, DiskVariant,
         DisksManagementResult, OmicronPhysicalDisksConfig,
     },
+    update::ArtifactHash,
 };
 use omicron_uuid_kinds::{
     DatasetUuid, PropolisUuid, SupportBundleUuid, ZpoolUuid,
@@ -156,13 +157,14 @@ pub trait SledAgentApi {
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<String>>, HttpError>;
 
-    /// List all support bundles stored on this sled
+    /// List all support bundles within a particular dataset
     #[endpoint {
         method = GET,
-        path = "/support-bundles"
+        path = "/support-bundles/{zpool_id}/{dataset_id}"
     }]
     async fn support_bundle_list(
         rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundleListPathParam>,
     ) -> Result<HttpResponseOk<Vec<SupportBundleMetadata>>, HttpError>;
 
     /// Create a service bundle within a particular dataset
@@ -173,6 +175,7 @@ pub trait SledAgentApi {
     async fn support_bundle_create(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<SupportBundlePathParam>,
+        query_params: Query<SupportBundleQueryParams>,
         body: StreamingBody,
     ) -> Result<HttpResponseCreated<()>, HttpError>;
 
@@ -583,6 +586,16 @@ pub struct VmmPathParam {
 
 /// Path parameters for Support Bundle requests (sled agent API)
 #[derive(Deserialize, JsonSchema)]
+pub struct SupportBundleListPathParam {
+    /// The zpool on which this support bundle was provisioned
+    pub zpool_id: ZpoolUuid,
+
+    /// The dataset on which this support bundle was provisioned
+    pub dataset_id: DatasetUuid,
+}
+
+/// Path parameters for Support Bundle requests (sled agent API)
+#[derive(Deserialize, JsonSchema)]
 pub struct SupportBundlePathParam {
     /// The zpool on which this support bundle was provisioned
     pub zpool_id: ZpoolUuid,
@@ -596,15 +609,14 @@ pub struct SupportBundlePathParam {
 
 /// Metadata about a support bundle
 #[derive(Deserialize, Serialize, JsonSchema)]
+pub struct SupportBundleQueryParams {
+    pub hash: ArtifactHash,
+}
+
+/// Metadata about a support bundle
+#[derive(Deserialize, Serialize, JsonSchema)]
 pub struct SupportBundleMetadata {
     pub support_bundle_id: SupportBundleUuid,
-
-    /// The zpool on which this support bundle was provisioned
-    pub zpool_id: ZpoolUuid,
-    /// The dataset on which this support bundle was provisioned
-    pub dataset_id: DatasetUuid,
-
-    pub time_created: chrono::DateTime<chrono::Utc>,
 }
 
 /// Path parameters for Disk requests (sled agent API)

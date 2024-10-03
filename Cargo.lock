@@ -6904,6 +6904,7 @@ dependencies = [
  "serde",
  "serde_human_bytes",
  "serde_json",
+ "sha2",
  "sha3",
  "sled-agent-api",
  "sled-agent-client",
