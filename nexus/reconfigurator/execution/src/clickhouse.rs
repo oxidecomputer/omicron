@@ -93,10 +93,7 @@ pub(crate) async fn deploy_nodes(
         let log = log.new(slog::o!("admin_url" => admin_url.clone()));
         futs.push(Either::Left(async move {
             let client = Client::new(&admin_url, log.clone());
-            let res = client
-                .generate_keeper_config(&config.clone())
-                .await
-                .map(|_| ());
+            let res = client.generate_keeper_config(&config).await.map(|_| ());
             (res, config.settings.id.0, admin_url)
         }));
     }

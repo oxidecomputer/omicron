@@ -21,7 +21,7 @@ pub struct ServerConfigurableSettings {
     pub settings: ServerSettings,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct KeeperConfigurableSettings {
     /// A unique identifier for the configuration generation.
     pub generation: Generation,
