@@ -16713,9 +16713,6 @@
           "description": {
             "type": "string"
           },
-          "gateway": {
-            "$ref": "#/components/schemas/NameOrId"
-          },
           "ip_pool": {
             "$ref": "#/components/schemas/NameOrId"
           },
@@ -16725,7 +16722,6 @@
         },
         "required": [
           "description",
-          "gateway",
           "ip_pool",
           "name"
         ]

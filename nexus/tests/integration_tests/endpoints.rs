@@ -283,7 +283,6 @@ pub static DEMO_INTERNET_GATEWAY_IP_POOL_CREATE: Lazy<
         description: String::from(""),
     },
     ip_pool: NameOrId::Id(uuid::Uuid::new_v4()),
-    gateway: NameOrId::Id(uuid::Uuid::new_v4()),
 });
 pub static DEMO_INTERNET_GATEWAY_IP_ADDRESS_CREATE: Lazy<
     params::InternetGatewayIpAddressCreate,
