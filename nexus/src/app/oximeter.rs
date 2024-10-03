@@ -114,7 +114,7 @@ impl super::Nexus {
     ) -> Result<(), Error> {
         let collector_info = self
             .db_datastore
-            .producer_endpoint_create(opctx, &producer_info)
+            .producer_endpoint_upsert_and_assign(opctx, &producer_info)
             .await?;
 
         let address = SocketAddr::from((

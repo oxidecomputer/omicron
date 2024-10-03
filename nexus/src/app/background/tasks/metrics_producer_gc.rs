@@ -190,7 +190,7 @@ mod tests {
             interval: Duration::from_secs(0),    // unused
         };
         datastore
-            .producer_endpoint_create(&opctx, &producer)
+            .producer_endpoint_upsert_and_assign(&opctx, &producer)
             .await
             .expect("failed to insert producer");
 

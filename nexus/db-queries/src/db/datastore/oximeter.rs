@@ -176,7 +176,7 @@ impl DataStore {
     /// Returns the oximeter ID assigned to this producer (either the
     /// randomly-chosen one, if newly inserted, or the previously-chosen, if
     /// updated).
-    pub async fn producer_endpoint_create(
+    pub async fn producer_endpoint_upsert_and_assign(
         &self,
         opctx: &OpContext,
         producer: &internal::nexus::ProducerEndpoint,
@@ -482,7 +482,7 @@ mod tests {
             interval: Duration::from_secs(0),
         };
         let chosen_oximeter = datastore
-            .producer_endpoint_create(&opctx, &producer)
+            .producer_endpoint_upsert_and_assign(&opctx, &producer)
             .await
             .expect("inserted producer");
         assert_eq!(chosen_oximeter.id, oximeter1_id);
@@ -510,7 +510,7 @@ mod tests {
         // Attempting to upsert our producer again should fail; our oximeter has
         // been expunged, and our time modified should be unchanged.
         let err = datastore
-            .producer_endpoint_create(&opctx, &producer)
+            .producer_endpoint_upsert_and_assign(&opctx, &producer)
             .await
             .expect_err("producer upsert failed")
             .to_string();
@@ -551,7 +551,7 @@ mod tests {
         // Retry updating our existing producer; it should get reassigned to a
         // the new Oximeter.
         let chosen_oximeter = datastore
-            .producer_endpoint_create(&opctx, &producer)
+            .producer_endpoint_upsert_and_assign(&opctx, &producer)
             .await
             .expect("inserted producer");
         assert_eq!(chosen_oximeter.id, oximeter2_id);
@@ -579,10 +579,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_producer_endpoint_create_rejects_expunged_oximeters() {
+    async fn test_producer_endpoint_upsert_rejects_expunged_oximeters() {
         // Setup
         let logctx = dev::test_setup_log(
-            "test_producer_endpoint_create_rejects_expunged_oximeters",
+            "test_producer_endpoint_upsert_rejects_expunged_oximeters",
         );
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) =
@@ -612,7 +612,7 @@ mod tests {
                 interval: Duration::from_secs(0),    // unused
             };
             let collector_id = datastore
-                .producer_endpoint_create(&opctx, &producer)
+                .producer_endpoint_upsert_and_assign(&opctx, &producer)
                 .await
                 .expect("inserted producer")
                 .id;
@@ -643,7 +643,7 @@ mod tests {
                 interval: Duration::from_secs(0),    // unused
             };
             let collector_id = datastore
-                .producer_endpoint_create(&opctx, &producer)
+                .producer_endpoint_upsert_and_assign(&opctx, &producer)
                 .await
                 .expect("inserted producer")
                 .id;
@@ -674,7 +674,7 @@ mod tests {
             interval: Duration::from_secs(0),    // unused
         };
         let err = datastore
-            .producer_endpoint_create(&opctx, &producer)
+            .producer_endpoint_upsert_and_assign(&opctx, &producer)
             .await
             .expect_err("unexpected success - all oximeters expunged")
             .to_string();
@@ -719,7 +719,7 @@ mod tests {
                 interval: Duration::from_secs(0),    // unused
             };
             let collector_id = datastore
-                .producer_endpoint_create(&opctx, &producer)
+                .producer_endpoint_upsert_and_assign(&opctx, &producer)
                 .await
                 .expect("inserted producer")
                 .id;
@@ -825,7 +825,7 @@ mod tests {
                 interval: Duration::from_secs(0),    // unused
             };
             let collector_id = datastore
-                .producer_endpoint_create(&opctx, &producer)
+                .producer_endpoint_upsert_and_assign(&opctx, &producer)
                 .await
                 .expect("inserted producer")
                 .id;
@@ -925,7 +925,7 @@ mod tests {
             interval: Duration::from_secs(0),    // unused
         };
         datastore
-            .producer_endpoint_create(&opctx, &producer)
+            .producer_endpoint_upsert_and_assign(&opctx, &producer)
             .await
             .expect("failed to insert producer");
 
