@@ -2537,7 +2537,6 @@ mod tests {
                 zones: vec![BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
                     id: zone_id,
-                    underlay_address: Ipv6Addr::LOCALHOST,
                     filesystem_pool: None,
                     zone_type: BlueprintZoneType::Nexus(
                         blueprint_zone_type::Nexus {
