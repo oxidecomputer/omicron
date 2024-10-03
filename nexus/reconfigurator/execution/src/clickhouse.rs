@@ -105,7 +105,8 @@ pub(crate) async fn deploy_nodes(
         }
     }
 
-    // Inform each clickhouse server about its configuration
+    // Inform each clickhouse-admin server in a clickhouse server zone about the
+    // clickhouse server configuration
     for config in server_configs {
         let admin_addr = SocketAddr::V6(SocketAddrV6::new(
             config.settings.listen_addr,
@@ -267,4 +268,199 @@ fn keeper_configs(
     }
 
     Ok(keeper_configs)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use clickhouse_admin_types::config::ClickhouseHost;
+    use clickhouse_admin_types::KeeperId;
+    use clickhouse_admin_types::ServerId;
+    use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
+    use nexus_types::deployment::blueprint_zone_type;
+    use nexus_types::deployment::BlueprintZoneConfig;
+    use nexus_types::deployment::BlueprintZoneDisposition;
+    use nexus_types::deployment::BlueprintZoneType;
+    use nexus_types::inventory::ZpoolName;
+    use omicron_common::api::external::Generation;
+    use omicron_uuid_kinds::ZpoolUuid;
+    use std::collections::BTreeSet;
+
+    fn test_data(
+    ) -> (BTreeMap<SledUuid, BlueprintZonesConfig>, ClickhouseClusterConfig)
+    {
+        let num_keepers = 3u64;
+        let num_servers = 2u64;
+
+        let mut zones = BTreeMap::new();
+        let mut config = ClickhouseClusterConfig::new("test".to_string());
+
+        for keeper_id in 1..=num_keepers {
+            let sled_id = SledUuid::new_v4();
+            let zone_id = OmicronZoneUuid::new_v4();
+            let zone_config = BlueprintZonesConfig {
+                generation: Generation::new(),
+                zones: vec![BlueprintZoneConfig {
+                    disposition: BlueprintZoneDisposition::InService,
+                    id: zone_id,
+                    underlay_address: Ipv6Addr::new(
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        keeper_id as u16,
+                    ),
+                    filesystem_pool: None,
+                    zone_type: BlueprintZoneType::ClickhouseKeeper(
+                        blueprint_zone_type::ClickhouseKeeper {
+                            address: SocketAddrV6::new(
+                                Ipv6Addr::LOCALHOST,
+                                0,
+                                0,
+                                0,
+                            ),
+                            dataset: OmicronZoneDataset {
+                                pool_name: ZpoolName::new_external(
+                                    ZpoolUuid::new_v4(),
+                                ),
+                            },
+                        },
+                    ),
+                }],
+            };
+            zones.insert(sled_id, zone_config);
+            config.keepers.insert(zone_id, keeper_id.into());
+        }
+
+        for server_id in 1..=num_servers {
+            let sled_id = SledUuid::new_v4();
+            let zone_id = OmicronZoneUuid::new_v4();
+            let zone_config = BlueprintZonesConfig {
+                generation: Generation::new(),
+                zones: vec![BlueprintZoneConfig {
+                    disposition: BlueprintZoneDisposition::InService,
+                    id: zone_id,
+                    underlay_address: Ipv6Addr::new(
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        0,
+                        server_id as u16 + 10,
+                    ),
+                    filesystem_pool: None,
+                    zone_type: BlueprintZoneType::ClickhouseServer(
+                        blueprint_zone_type::ClickhouseServer {
+                            address: SocketAddrV6::new(
+                                Ipv6Addr::LOCALHOST,
+                                0,
+                                0,
+                                0,
+                            ),
+                            dataset: OmicronZoneDataset {
+                                pool_name: ZpoolName::new_external(
+                                    ZpoolUuid::new_v4(),
+                                ),
+                            },
+                        },
+                    ),
+                }],
+            };
+            zones.insert(sled_id, zone_config);
+            config.servers.insert(zone_id, server_id.into());
+        }
+
+        (zones, config)
+    }
+
+    #[test]
+    fn test_generate_config_settings() {
+        let (zones, clickhouse_cluster_config) = test_data();
+
+        // Generate our keeper settings to send to keepers
+        let keeper_settings =
+            keeper_configs(&zones, &clickhouse_cluster_config)
+                .expect("generated keeper settings");
+
+        // Are the keeper settings what we expect
+        assert_eq!(keeper_settings.len(), 3);
+        let expected_keeper_ids: BTreeSet<_> =
+            [1u64, 2, 3].into_iter().map(KeeperId::from).collect();
+        let mut keeper_ids = BTreeSet::new();
+        let mut keeper_ips_last_octet_as_keeper_id = BTreeSet::new();
+        for k in &keeper_settings {
+            assert_eq!(k.settings.raft_servers.len(), 3);
+            for rs in &k.settings.raft_servers {
+                keeper_ids.insert(rs.id);
+                let ClickhouseHost::Ipv6(ip) = rs.host else {
+                    panic!("bad host");
+                };
+                keeper_ips_last_octet_as_keeper_id
+                    .insert(KeeperId(*ip.octets().last().unwrap() as u64));
+            }
+        }
+        assert_eq!(keeper_ids, expected_keeper_ids);
+        assert_eq!(keeper_ids, keeper_ips_last_octet_as_keeper_id);
+
+        let keeper_hosts: Vec<_> = keeper_settings
+            .iter()
+            .map(|s| ClickhouseHost::Ipv6(s.settings.listen_addr))
+            .collect();
+
+        // Generate our server settings to send to clickhouse servers
+        let server_settings =
+            server_configs(&zones, &clickhouse_cluster_config, keeper_hosts)
+                .expect("generated server settings");
+
+        // Are our server settings what we expect
+        assert_eq!(server_settings.len(), 2);
+        let expected_server_ids: BTreeSet<_> =
+            [1u64, 2].into_iter().map(ServerId::from).collect();
+        let mut server_ids = BTreeSet::new();
+        let mut server_ips_last_octet = BTreeSet::new();
+        let expected_server_ips_last_octet: BTreeSet<u8> =
+            [11u8, 12].into_iter().collect();
+        for s in server_settings {
+            assert_eq!(s.settings.keepers.len(), 3);
+            assert_eq!(s.settings.remote_servers.len(), 2);
+            server_ids.insert(s.settings.id);
+
+            server_ips_last_octet
+                .insert(*s.settings.listen_addr.octets().last().unwrap());
+
+            // Are all our keeper ips correct?
+            let mut keeper_ips_last_octet_as_keeper_id = BTreeSet::new();
+            for host in &s.settings.keepers {
+                let ClickhouseHost::Ipv6(ip) = host else {
+                    panic!("bad host");
+                };
+                keeper_ips_last_octet_as_keeper_id
+                    .insert(KeeperId(*ip.octets().last().unwrap() as u64));
+            }
+            assert_eq!(keeper_ips_last_octet_as_keeper_id, expected_keeper_ids);
+
+            // Are all our remote server ips correct?
+            let mut remote_server_last_octets = BTreeSet::new();
+            for host in &s.settings.remote_servers {
+                let ClickhouseHost::Ipv6(ip) = host else {
+                    panic!("bad host");
+                };
+                remote_server_last_octets.insert(*ip.octets().last().unwrap());
+            }
+            assert_eq!(
+                remote_server_last_octets,
+                expected_server_ips_last_octet
+            );
+        }
+        // Are all our server ids correct
+        assert_eq!(server_ids, expected_server_ids);
+
+        // Are all our server listen ips correct?
+        assert_eq!(server_ips_last_octet, expected_server_ips_last_octet);
+    }
 }
