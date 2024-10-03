@@ -44,7 +44,6 @@ pub(crate) struct Params {
     pub create_params: params::InstanceCreate,
     pub boundary_switches: HashSet<SwitchLocation>,
 }
-
 // Several nodes in this saga are wrapped in their own subsaga so that they can
 // have a parameter that denotes which node they are (e.g., which NIC or which
 // external IP).  They also need the outer saga's parameters.
@@ -1077,11 +1076,8 @@ async fn sic_set_boot_disk(
         .await
         .map_err(ActionError::action_failed)?;
 
-    let initial_configuration =
-        nexus_db_model::InstanceUpdate { boot_disk_id: Some(authz_disk.id()) };
-
     datastore
-        .instance_reconfigure(&opctx, &authz_instance, initial_configuration)
+        .instance_set_boot_disk(&opctx, &authz_instance, Some(authz_disk.id()))
         .await
         .map_err(ActionError::action_failed)?;
 
@@ -1109,11 +1105,8 @@ async fn sic_set_boot_disk_undo(
 
     // If there was a boot disk, clear it. If there was not a boot disk,
     // this is a no-op.
-    let undo_configuration =
-        nexus_db_model::InstanceUpdate { boot_disk_id: None };
-
     datastore
-        .instance_reconfigure(&opctx, &authz_instance, undo_configuration)
+        .instance_set_boot_disk(&opctx, &authz_instance, None)
         .await
         .map_err(ActionError::action_failed)?;
 
