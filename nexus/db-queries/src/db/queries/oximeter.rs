@@ -4,12 +4,20 @@
 
 //! Implementation of queries for Oximeter collectors and producers.
 
+use crate::db::column_walker::AllColumnsOf;
 use crate::db::raw_query_builder::{QueryBuilder, TypedSqlQuery};
+use diesel::pg::Pg;
 use diesel::sql_types;
 use ipnetwork::IpNetwork;
-use nexus_db_model::{ProducerKind, ProducerKindEnum, SqlU16};
+use nexus_db_model::{OximeterInfo, ProducerKind, ProducerKindEnum, SqlU16};
 use omicron_common::api::internal;
 use uuid::Uuid;
+
+type AllColumnsOfOximeterInfo =
+    AllColumnsOf<crate::db::schema::oximeter::table>;
+type SelectableSql<T> = <
+    <T as diesel::Selectable<Pg>>::SelectExpression as diesel::Expression
+>::SqlType;
 
 /// Upsert a metric producer.
 ///
@@ -24,7 +32,7 @@ use uuid::Uuid;
 /// updated).
 pub fn upsert_producer(
     producer: &internal::nexus::ProducerEndpoint,
-) -> TypedSqlQuery<sql_types::Uuid> {
+) -> TypedSqlQuery<SelectableSql<OximeterInfo>> {
     let builder = QueryBuilder::new();
 
     // Choose a random non-expunged Oximeter instance.
@@ -44,16 +52,17 @@ pub fn upsert_producer(
     // Build the INSERT for new producers...
     let builder = builder.sql(
         r#"
-        INSERT INTO metric_producer (
-            id,
-            time_created,
-            time_modified,
-            kind,
-            ip,
-            port,
-            interval,
-            oximeter_id
-        )
+        , inserted_producer AS (
+            INSERT INTO metric_producer (
+              id,
+              time_created,
+              time_modified,
+              kind,
+              ip,
+              port,
+              interval,
+              oximeter_id
+          )
     "#,
     );
 
@@ -92,12 +101,26 @@ pub fn upsert_producer(
     "#,
     );
 
-    // Finally, return this producer's assigned collector ID.
+    // ... and return this producer's assigned collector ID.
     let builder = builder.sql(
         r#"
-        RETURNING oximeter_id
+          RETURNING oximeter_id
+        )
     "#,
     );
+
+    // Finally, join the oximeter ID from our inserted or updated producer with
+    // the `oximeter` table to get all of its information.
+    let builder = builder
+        .sql("SELECT ")
+        .sql(AllColumnsOfOximeterInfo::with_prefix("oximeter"))
+        .sql(
+            r#"
+              FROM oximeter
+              INNER JOIN inserted_producer
+              ON (oximeter.id = inserted_producer.oximeter_id)
+            "#,
+        );
 
     builder.query()
 }

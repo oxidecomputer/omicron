@@ -180,12 +180,12 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         producer: &internal::nexus::ProducerEndpoint,
-    ) -> Result<Uuid, Error> {
+    ) -> Result<OximeterInfo, Error> {
         match queries::oximeter::upsert_producer(producer)
             .get_result_async(&*self.pool_connection_authorized(opctx).await?)
             .await
         {
-            Ok(id) => Ok(id),
+            Ok(info) => Ok(info),
             Err(DieselError::NotFound) => Err(Error::unavail(
                 "no Oximeter instances available for assignment",
             )),
@@ -487,7 +487,8 @@ mod tests {
             let collector_id = datastore
                 .producer_endpoint_create(&opctx, &producer)
                 .await
-                .expect("inserted producer");
+                .expect("inserted producer")
+                .id;
             let i = collector_ids
                 .iter()
                 .position(|id| *id == collector_id)
@@ -517,7 +518,8 @@ mod tests {
             let collector_id = datastore
                 .producer_endpoint_create(&opctx, &producer)
                 .await
-                .expect("inserted producer");
+                .expect("inserted producer")
+                .id;
             let i = collector_ids
                 .iter()
                 .position(|id| *id == collector_id)
@@ -592,7 +594,8 @@ mod tests {
             let collector_id = datastore
                 .producer_endpoint_create(&opctx, &producer)
                 .await
-                .expect("inserted producer");
+                .expect("inserted producer")
+                .id;
             let i = collector_ids
                 .iter()
                 .position(|id| *id == collector_id)
@@ -697,7 +700,8 @@ mod tests {
             let collector_id = datastore
                 .producer_endpoint_create(&opctx, &producer)
                 .await
-                .expect("inserted producer");
+                .expect("inserted producer")
+                .id;
             let i = collector_ids
                 .iter()
                 .position(|id| *id == collector_id)

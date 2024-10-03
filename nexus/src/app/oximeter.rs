@@ -112,27 +112,17 @@ impl super::Nexus {
         opctx: &OpContext,
         producer_info: nexus::ProducerEndpoint,
     ) -> Result<(), Error> {
-        let collector_id = self
+        let collector_info = self
             .db_datastore
             .producer_endpoint_create(opctx, &producer_info)
             .await?;
-
-        // It's possible (albeit quite unlikely) that the collector we chose in
-        // the query above was expunged between then and when we execute this
-        // query to look up its information. In such a case, we've now assigned
-        // this producer to an expunged collector, so failing is fine - we'll
-        // rely on reconfigurator to come back in and reassign this producer
-        // once a new oximeter is available (just like it would have to do for
-        // for any producers that were assigned to this collector already).
-        let collector_info =
-            self.db_datastore.oximeter_lookup(opctx, &collector_id).await?;
 
         let address = SocketAddr::from((
             collector_info.ip.ip(),
             collector_info.port.try_into().unwrap(),
         ));
         let collector =
-            build_oximeter_client(&self.log, &collector_id, address);
+            build_oximeter_client(&self.log, &collector_info.id, address);
 
         collector
             .producers_post(&oximeter_client::types::ProducerEndpoint::from(
@@ -144,7 +134,7 @@ impl super::Nexus {
             self.log,
             "assigned collector to new producer";
             "producer_id" => %producer_info.id,
-            "collector_id" => %collector_id,
+            "collector_id" => %collector_info.id,
         );
 
         Ok(())
