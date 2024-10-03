@@ -188,7 +188,7 @@ table! {
         dst -> Inet,
         gw -> Inet,
         vid -> Nullable<Int4>,
-        rib_priority -> Nullable<Int2>,
+        local_pref -> Nullable<Int2>,
     }
 }
 
