@@ -14,6 +14,9 @@ use clickhouse_admin_types::config::ClickhouseHost;
 use clickhouse_admin_types::config::RaftServerSettings;
 use clickhouse_admin_types::KeeperSettings;
 use clickhouse_admin_types::ServerSettings;
+use futures::future::Either;
+use futures::stream::FuturesUnordered;
+use futures::stream::StreamExt;
 use nexus_db_queries::context::OpContext;
 use nexus_types::deployment::BlueprintZonesConfig;
 use nexus_types::deployment::ClickhouseClusterConfig;
@@ -74,9 +77,11 @@ pub(crate) async fn deploy_nodes(
         };
 
     let mut errors = vec![];
+    let log = opctx.log.clone();
 
-    // Inform each clickhouse-admin server in a keeper zone about its keeper's
-    // configuration
+    // Inform each clickhouse-admin server in a keeper zone or server zone about
+    // its node's configuration
+    let mut futs = FuturesUnordered::new();
     for config in keeper_configs {
         let admin_addr = SocketAddr::V6(SocketAddrV6::new(
             config.settings.listen_addr,
@@ -85,28 +90,16 @@ pub(crate) async fn deploy_nodes(
             0,
         ));
         let admin_url = format!("http://{admin_addr}");
-        let log = opctx.log.new(slog::o!("admin_url" => admin_url.clone()));
-        let client = Client::new(&admin_url, log.clone());
-        if let Err(e) = client.generate_keeper_config(&config).await {
-            warn!(
-                log,
-                "Failed to send config for keeper {} to clickhouse-admin: {e}",
-                config.settings.id
-            );
-            errors.push(anyhow!(
-                concat!(
-                    "failed to send keeper config for keeper {} ",
-                    "to clickhouse-admin; admin_url = {}, error = {}",
-                ),
-                config.settings.id,
-                admin_url,
-                e
-            ));
-        }
+        let log = log.new(slog::o!("admin_url" => admin_url.clone()));
+        futs.push(Either::Left(async move {
+            let client = Client::new(&admin_url, log.clone());
+            let res = client
+                .generate_keeper_config(&config.clone())
+                .await
+                .map(|_| ());
+            (res, config.settings.id.0, admin_url)
+        }));
     }
-
-    // Inform each clickhouse-admin server in a clickhouse server zone about the
-    // clickhouse server configuration
     for config in server_configs {
         let admin_addr = SocketAddr::V6(SocketAddrV6::new(
             config.settings.listen_addr,
@@ -116,19 +109,30 @@ pub(crate) async fn deploy_nodes(
         ));
         let admin_url = format!("http://{admin_addr}");
         let log = opctx.log.new(slog::o!("admin_url" => admin_url.clone()));
-        let client = Client::new(&admin_url, log.clone());
-        if let Err(e) = client.generate_server_config(&config).await {
+        futs.push(Either::Right(async move {
+            let client = Client::new(&admin_url, log.clone());
+            let res = client.generate_server_config(&config).await.map(|_| ());
+            (res, config.settings.id.0, admin_url)
+        }));
+    }
+
+    while let Some((res, id, admin_url)) = futs.next().await {
+        if let Err(e) = res {
             warn!(
                 log,
-                "Failed to send config for keeper {} to clickhouse-admin: {e}",
-                config.settings.id
+                concat!(
+                "Failed to send config for clickhouse keeper or server with ",
+                "id {} to clickhouse-admin: {}"),
+                id,
+                e
             );
             errors.push(anyhow!(
                 concat!(
-                    "failed to send clickhouse server config for server {} ",
-                    "to clickhouse-admin; admin_url = {}, error = {}",
+                    "failed to send config for clickhouse keeper or server ",
+                    "with id {} to clickhouse-admin; admin_url = {}",
+                    "error = {}"
                 ),
-                config.settings.id,
+                id,
                 admin_url,
                 e
             ));
