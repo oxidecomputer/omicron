@@ -98,8 +98,8 @@ _exit_trap() {
 		pfexec zlogin "$z" cat /etc/inet/chrony.conf
 		pfexec zlogin "$z" ping -sn oxide.computer 56 1
 		pfexec zlogin "$z" ping -sn 1.1.1.1 56 1
-		pfexec zlogin "$z" dig 0.pool.ntp.org @1.1.1.1
-		pfexec zlogin "$z" getent hosts time.cloudfare.come
+		pfexec zlogin "$z" /usr/sbin/dig 0.pool.ntp.org @1.1.1.1
+		pfexec zlogin "$z" getent hosts time.cloudfare.com
 
 		# Attempt to get chrony to do some time sync from the CLI with
 		# messages being written to the terminal and with debugging
@@ -107,7 +107,7 @@ _exit_trap() {
 		# Since chronyd on the CLI needs to use the ports that the
 		# service will be using, stop it first (with -s to wait for it
 		# to exit).
-		pfexec svcadm -z "$z" disable -s oxide/ntp
+		pfexec /usr/sbin/svcadm -z "$z" disable -s oxide/ntp
 		# Run in dry-run one-shot mode (-Q)
 		pfexec zlogin "$z" /usr/sbin/chronyd -t 10 -ddQ
 		# Run in one-shot mode (-q) -- attempt to set the clock
@@ -116,7 +116,7 @@ _exit_trap() {
 		# to talk to an explicit external service. This command line is
 		# similar to that used by the pre-flight NTP checks.
 		pfexec zlogin "$z" /usr/sbin/chronyd -t 10 -ddq \
-		    pool time.cloudflare.com iburst maxdelay 0.1
+		    'pool time.cloudflare.com iburst maxdelay 0.1'
 	done
 
 	pfexec zlogin sidecar_softnpu cat /var/log/softnpu.log
