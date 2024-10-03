@@ -93,8 +93,20 @@ pub(crate) async fn deploy_nodes(
         let log = log.new(slog::o!("admin_url" => admin_url.clone()));
         futs.push(Either::Left(async move {
             let client = Client::new(&admin_url, log.clone());
-            let res = client.generate_keeper_config(&config).await.map(|_| ());
-            (res, config.settings.id.0, admin_url)
+            client.generate_keeper_config(&config).await.map(|_| ()).map_err(
+                |e| {
+                    anyhow!(
+                        concat!(
+                            "failed to send config for clickhouse keeper ",
+                            "with id {} to clickhouse-admin; admin_url = {}",
+                            "error = {}"
+                        ),
+                        config.settings.id,
+                        admin_url,
+                        e
+                    )
+                },
+            )
         }));
     }
     for config in server_configs {
@@ -108,31 +120,27 @@ pub(crate) async fn deploy_nodes(
         let log = opctx.log.new(slog::o!("admin_url" => admin_url.clone()));
         futs.push(Either::Right(async move {
             let client = Client::new(&admin_url, log.clone());
-            let res = client.generate_server_config(&config).await.map(|_| ());
-            (res, config.settings.id.0, admin_url)
+            client.generate_server_config(&config).await.map(|_| ()).map_err(
+                |e| {
+                    anyhow!(
+                        concat!(
+                            "failed to send config for clickhouse server ",
+                            "with id {} to clickhouse-admin; admin_url = {}",
+                            "error = {}"
+                        ),
+                        config.settings.id,
+                        admin_url,
+                        e
+                    )
+                },
+            )
         }));
     }
 
-    while let Some((res, id, admin_url)) = futs.next().await {
+    while let Some(res) = futs.next().await {
         if let Err(e) = res {
-            warn!(
-                log,
-                concat!(
-                "Failed to send config for clickhouse keeper or server with ",
-                "id {} to clickhouse-admin: {}"),
-                id,
-                e
-            );
-            errors.push(anyhow!(
-                concat!(
-                    "failed to send config for clickhouse keeper or server ",
-                    "with id {} to clickhouse-admin; admin_url = {}",
-                    "error = {}"
-                ),
-                id,
-                admin_url,
-                e
-            ));
+            warn!(log, "{e}");
+            errors.push(e);
         }
     }
 
