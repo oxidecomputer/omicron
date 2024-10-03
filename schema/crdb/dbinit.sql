@@ -1767,6 +1767,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_router_by_vpc ON omicron.public.vpc_rou
 ) WHERE
     time_deleted IS NULL;
 
+/* Index used to accelerate vpc_increment_rpw_version and list. */
+CREATE INDEX IF NOT EXISTS lookup_routers_in_vpc ON omicron.public.vpc_router (
+    vpc_id
+) WHERE
+    time_deleted IS NULL;
+
 CREATE TYPE IF NOT EXISTS omicron.public.router_route_kind AS ENUM (
     'default',
     'vpc_subnet',
