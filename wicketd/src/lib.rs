@@ -184,8 +184,7 @@ impl Server {
         let wicketd_server = {
             let ds_log = log.new(o!("component" => "dropshot (wicketd)"));
             let mgs_client = make_mgs_client(log.clone(), args.mgs_address);
-            dropshot::HttpServerStarter::new(
-                &dropshot_config,
+            dropshot::ServerBuilder::new(
                 http_entrypoints::api(),
                 ServerContext {
                     bind_address: args.address,
@@ -200,10 +199,11 @@ impl Server {
                     preflight_checker: PreflightCheckerHandler::new(&log),
                     internal_dns_resolver,
                 },
-                &ds_log,
+                ds_log,
             )
-            .map_err(|err| anyhow!(err).context("initializing http server"))?
+            .config(dropshot_config)
             .start()
+            .map_err(|err| anyhow!(err).context("initializing http server"))?
         };
 
         let installinator_server = {
@@ -215,21 +215,21 @@ impl Server {
                     WicketdInstallinatorApiImpl,
                 >()?;
 
-            dropshot::HttpServerStarter::new(
-                &installinator_config,
+            dropshot::ServerBuilder::new(
                 api_description,
                 WicketdInstallinatorContext::new(
                     &log,
                     store.clone(),
                     ipr_artifact,
                 ),
-                &log,
+                log,
             )
+            .config(installinator_config)
+            .start()
             .map_err(|err| {
                 anyhow!(err)
                     .context("failed to create installinator artifact server")
             })?
-            .start()
         };
 
         Ok(Self {

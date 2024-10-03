@@ -7,7 +7,6 @@ use omicron_common::FileKv;
 use slog::{debug, error, Drain};
 use slog_dtrace::ProbeRegistration;
 use slog_error_chain::SlogInlineError;
-use std::error::Error;
 use std::io;
 use std::sync::Arc;
 
@@ -28,7 +27,7 @@ pub enum StartError {
     #[error("failed to register dtrace probes: {0}")]
     RegisterDtraceProbes(String),
     #[error("failed to initialize HTTP server")]
-    InitializeHttpServer(#[source] Box<dyn Error + Send + Sync>),
+    InitializeHttpServer(#[source] dropshot::BuildError),
 }
 
 pub type Server = dropshot::HttpServer<Arc<ServerContext>>;
@@ -63,13 +62,12 @@ pub async fn start_server(
             .with_log(log.new(slog::o!("component" => "ClickhouseCli"))),
         log.new(slog::o!("component" => "ServerContext")),
     );
-    let http_server_starter = dropshot::HttpServerStarter::new(
-        &server_config.dropshot,
+    dropshot::ServerBuilder::new(
         http_entrypoints::api(),
         Arc::new(context),
-        &log.new(slog::o!("component" => "dropshot")),
+        log.new(slog::o!("component" => "dropshot")),
     )
-    .map_err(StartError::InitializeHttpServer)?;
-
-    Ok(http_server_starter.start())
+    .config(server_config.dropshot)
+    .start()
+    .map_err(StartError::InitializeHttpServer)
 }

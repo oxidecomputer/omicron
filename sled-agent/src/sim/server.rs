@@ -98,14 +98,14 @@ impl Server {
         .await;
 
         let dropshot_log = log.new(o!("component" => "dropshot"));
-        let http_server = dropshot::HttpServerStarter::new(
-            &config.dropshot,
+        let http_server = dropshot::ServerBuilder::new(
             http_api(),
             sled_agent.clone(),
-            &dropshot_log,
+            dropshot_log,
         )
-        .map_err(|error| anyhow!("initializing server: {}", error))?
-        .start();
+        .config(config.dropshot.clone())
+        .start()
+        .map_err(|error| anyhow!("initializing server: {}", error))?;
 
         // Notify the control plane that we're up, and continue trying this
         // until it succeeds. We retry with an randomized, capped exponential

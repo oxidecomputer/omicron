@@ -83,14 +83,14 @@ impl InternalServer {
         .await?;
 
         // Launch the internal server.
-        let server_starter_internal = dropshot::HttpServerStarter::new(
-            &config.deployment.dropshot_internal,
+        let http_server_internal = dropshot::ServerBuilder::new(
             internal_api(),
             context.clone(),
-            &log.new(o!("component" => "dropshot_internal")),
+            log.new(o!("component" => "dropshot_internal")),
         )
+        .config(config.deployment.dropshot_internal.clone())
+        .start()
         .map_err(|error| format!("initializing internal server: {}", error))?;
-        let http_server_internal = server_starter_internal.start();
 
         Ok(Self {
             apictx: context,
@@ -150,32 +150,30 @@ impl Server {
         };
 
         let http_server_external = {
-            let server_starter_external =
-                dropshot::HttpServerStarter::new_with_tls(
-                    &config.deployment.dropshot_external.dropshot,
-                    external_api(),
-                    apictx.for_external(),
-                    &log.new(o!("component" => "dropshot_external")),
-                    tls_config.clone().map(dropshot::ConfigTls::Dynamic),
-                )
-                .map_err(|error| {
-                    format!("initializing external server: {}", error)
-                })?;
-            server_starter_external.start()
+            dropshot::ServerBuilder::new(
+                external_api(),
+                apictx.for_external(),
+                log.new(o!("component" => "dropshot_external")),
+            )
+            .config(config.deployment.dropshot_external.dropshot.clone())
+            .tls(tls_config.clone().map(dropshot::ConfigTls::Dynamic))
+            .start()
+            .map_err(|error| {
+                format!("initializing external server: {}", error)
+            })?
         };
         let http_server_techport_external = {
-            let server_starter_external_techport =
-                dropshot::HttpServerStarter::new_with_tls(
-                    &techport_server_config,
-                    external_api(),
-                    apictx.for_techport(),
-                    &log.new(o!("component" => "dropshot_external_techport")),
-                    tls_config.map(dropshot::ConfigTls::Dynamic),
-                )
-                .map_err(|error| {
-                    format!("initializing external techport server: {}", error)
-                })?;
-            server_starter_external_techport.start()
+            dropshot::ServerBuilder::new(
+                external_api(),
+                apictx.for_techport(),
+                log.new(o!("component" => "dropshot_external_techport")),
+            )
+            .config(techport_server_config)
+            .tls(tls_config.map(dropshot::ConfigTls::Dynamic))
+            .start()
+            .map_err(|error| {
+                format!("initializing external techport server: {}", error)
+            })?
         };
 
         // Start the metric producer server that oximeter uses to fetch our

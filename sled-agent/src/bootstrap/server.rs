@@ -459,16 +459,16 @@ fn start_dropshot_server(
     ));
     let dropshot_log =
         context.base_log.new(o!("component" => "dropshot (BootstrapAgent)"));
-    let http_server = dropshot::HttpServerStarter::new(
-        &dropshot_config,
+    let http_server = dropshot::ServerBuilder::new(
         http_entrypoints::api(),
         context,
-        &dropshot_log,
+        dropshot_log,
     )
+    .config(dropshot_config)
+    .start()
     .map_err(|error| {
         StartError::InitBootstrapDropshotServer(error.to_string())
-    })?
-    .start();
+    })?;
 
     Ok(http_server)
 }

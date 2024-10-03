@@ -15,8 +15,8 @@ use dropshot::HttpError;
 use dropshot::HttpResponseCreated;
 use dropshot::HttpResponseUpdatedNoContent;
 use dropshot::HttpServer;
-use dropshot::HttpServerStarter;
 use dropshot::RequestContext;
+use dropshot::ServerBuilder;
 use dropshot::TypedBody;
 use nexus_types::internal_api::params::OximeterInfo;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
@@ -251,14 +251,14 @@ impl Server {
         let nexus = Arc::new(StandaloneNexus::new(
             log.new(slog::o!("component" => "nexus-standalone")),
         ));
-        let server = HttpServerStarter::new(
-            &ConfigDropshot { bind_address: address, ..Default::default() },
+        let server = ServerBuilder::new(
             standalone_nexus_api(),
             Arc::clone(&nexus),
-            &log,
+            log.clone(),
         )
-        .map_err(|e| Error::Server(e.to_string()))?
-        .start();
+        .config(ConfigDropshot { bind_address: address, ..Default::default() })
+        .start()
+        .map_err(|e| Error::Server(e.to_string()))?;
         info!(
             log,
             "created standalone nexus server for metric collections";

@@ -87,25 +87,29 @@ fn start_dropshot_server(
     all_servers_shutdown: &FuturesUnordered<ShutdownWaitFuture>,
     log: &Logger,
 ) -> Result<(), String> {
-    let dropshot = ConfigDropshot {
-        bind_address: SocketAddr::V6(addr),
-        request_body_max_bytes,
-        default_handler_task_mode: HandlerTaskMode::Detached,
-        log_headers: vec![],
-    };
-    let http_server_starter = dropshot::HttpServerStarter::new(
-        &dropshot,
-        http_entrypoints::api(),
-        Arc::clone(apictx),
-        &log.new(o!("component" => "dropshot")),
-    )
-    .map_err(|error| {
-        format!("initializing http server listening at {addr}: {}", error)
-    })?;
-
     match http_servers.entry(addr) {
         Entry::Vacant(slot) => {
-            let http_server = http_server_starter.start();
+            let dropshot = ConfigDropshot {
+                bind_address: SocketAddr::V6(addr),
+                request_body_max_bytes,
+                default_handler_task_mode: HandlerTaskMode::Detached,
+                log_headers: vec![],
+            };
+
+            let http_server = dropshot::ServerBuilder::new(
+                http_entrypoints::api(),
+                Arc::clone(apictx),
+                log.new(o!("component" => "dropshot")),
+            )
+            .config(dropshot)
+            .start()
+            .map_err(|error| {
+                format!(
+                    "initializing http server listening at {addr}: {}",
+                    error
+                )
+            })?;
+
             all_servers_shutdown.push(http_server.wait_for_shutdown());
             slot.insert(http_server);
             Ok(())
