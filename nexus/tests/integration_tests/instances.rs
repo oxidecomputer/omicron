@@ -4191,13 +4191,31 @@ async fn test_cannot_detach_boot_disk(cptestctx: &ControlPlaneTestContext) {
 }
 
 #[nexus_test]
-async fn test_updating_running_instance_is_conflict(
+async fn test_updating_running_instance_boot_disk_is_conflict(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
     let instance_name = "immediately-running";
 
+    // Test pre-reqs
+    DiskTest::new(&cptestctx).await;
     create_project_and_pool(&client).await;
+
+    create_disk(&client, PROJECT_NAME, "probablydata").await;
+    create_disk(&client, PROJECT_NAME, "alsodata").await;
+
+    // Verify disk is there and currently detached
+    let disks: Vec<Disk> =
+        NexusRequest::iter_collection_authn(client, &get_disks_url(), "", None)
+            .await
+            .expect("failed to list disks")
+            .all_items;
+    assert_eq!(disks.len(), 2);
+    assert_eq!(disks[0].state, DiskState::Detached);
+    assert_eq!(disks[1].state, DiskState::Detached);
+
+    let probablydata = Name::try_from(String::from("probablydata")).unwrap();
+    let alsodata = Name::try_from(String::from("alsodata")).unwrap();
 
     let instance_params = params::InstanceCreate {
         identity: IdentityMetadataCreateParams {
@@ -4211,8 +4229,17 @@ async fn test_updating_running_instance_is_conflict(
         ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
-        disks: vec![],
-        boot_disk: None,
+        disks: vec![
+            params::InstanceDiskAttachment::Attach(
+                params::InstanceDiskAttach { name: probablydata.clone() },
+            ),
+            params::InstanceDiskAttachment::Attach(
+                params::InstanceDiskAttach { name: alsodata.clone() },
+            ),
+        ],
+        boot_disk: Some(params::InstanceDiskAttachment::Attach(
+            params::InstanceDiskAttach { name: probablydata.clone() },
+        )),
         start: true,
         auto_restart_policy: Default::default(),
     };
@@ -4242,7 +4269,7 @@ async fn test_updating_running_instance_is_conflict(
     let builder =
         RequestBuilder::new(client, http::Method::PUT, &url_instance_update)
             .body(Some(&params::InstanceUpdate {
-                boot_disk: None,
+                boot_disk: Some(alsodata.clone().into()),
                 auto_restart_policy: None,
             }))
             .expect_status(Some(http::StatusCode::CONFLICT));
@@ -4254,7 +4281,21 @@ async fn test_updating_running_instance_is_conflict(
         .expect("can attempt to reconfigure the instance");
 
     let error = response.parsed_body::<HttpErrorResponseBody>().unwrap();
-    assert_eq!(error.message, "instance must be stopped to update");
+    assert_eq!(error.message, "instance must be stopped to set boot disk");
+
+    // However, we can freely change the auto-restart policy of a running
+    // instance.
+    expect_instance_reconfigure_ok(
+        &client,
+        &instance_id.into_untyped_uuid(),
+        params::InstanceUpdate {
+            // Leave the boot disk the same as the one with which the instance
+            // was created.
+            boot_disk: Some(probablydata.clone().into()),
+            auto_restart_policy: Some(InstanceAutoRestartPolicy::BestEffort),
+        },
+    )
+    .await;
 }
 
 #[nexus_test]
@@ -4315,6 +4356,29 @@ async fn expect_instance_reconfigure_ok(
         .expect("response should be parsed as an instance")
 }
 
+async fn expect_instance_reconfigure_err(
+    external_client: &ClientTestContext,
+    instance_id: &Uuid,
+    update: params::InstanceUpdate,
+    status: http::StatusCode,
+) -> HttpErrorResponseBody {
+    let url_instance_update = format!("/v1/instances/{instance_id}");
+
+    let builder =
+        RequestBuilder::new(client, http::Method::PUT, &url_instance_update)
+            .body(Some(params))
+            .expect_status(Some(http::StatusCode::CONFLICT));
+
+    let response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("can attempt to reconfigure the instance");
+
+    response
+        .parsed_body::<HttpErrorResponseBody>()
+        .expect("error response should parse successfully")
+}
 // Test reconfiguring an instance's auto-restart policy.
 #[nexus_test]
 async fn test_auto_restart_policy_can_be_changed(
