@@ -85,7 +85,7 @@ impl<T: StorageBackend> ArtifactStore<T> {
         sha256: ArtifactHash,
     ) -> Result<File, Error> {
         let sha256 = sha256.to_string();
-        for dataset in self.datasets().await? {
+        for dataset in self.dataset_mountpoints().await? {
             let path = dataset.join(&sha256);
             match File::open(&path).await {
                 Ok(file) => {
@@ -112,7 +112,11 @@ impl<T: StorageBackend> ArtifactStore<T> {
         sha256: ArtifactHash,
         stream: impl Stream<Item = Result<impl AsRef<[u8]>, Error>>,
     ) -> Result<(), Error> {
-        let ds = self.datasets().await?.next().ok_or(Error::NoUpdateDataset)?;
+        let ds = self
+            .dataset_mountpoints()
+            .await?
+            .next()
+            .ok_or(Error::NoUpdateDataset)?;
         let final_path = ds.join(sha256.to_string());
 
         let (file, temp_path) = tokio::task::spawn_blocking(move || {
@@ -226,7 +230,7 @@ impl<T: StorageBackend> ArtifactStore<T> {
     ) -> Result<(), Error> {
         let sha256 = sha256.to_string();
         let mut any_datasets = false;
-        for dataset in self.datasets().await? {
+        for dataset in self.dataset_mountpoints().await? {
             any_datasets = true;
             let path = dataset.join(&sha256);
             match tokio::fs::remove_file(&path).await {
@@ -253,7 +257,7 @@ impl<T: StorageBackend> ArtifactStore<T> {
         }
     }
 
-    async fn datasets(
+    async fn dataset_mountpoints(
         &self,
     ) -> Result<impl Iterator<Item = Utf8PathBuf> + '_, Error> {
         let config = self.storage.datasets_config_list().await?;
