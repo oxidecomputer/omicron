@@ -4540,7 +4540,7 @@ async fn test_size_can_be_changed(cptestctx: &ControlPlaneTestContext) {
             ncpus: new_ncpus,
             memory: new_memory,
         },
-        StatusCode::NOT_FOUND
+        StatusCode::NOT_FOUND,
     )
     .await;
 }
