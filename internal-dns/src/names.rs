@@ -25,8 +25,10 @@ pub const DNS_ZONE_EXTERNAL_TESTING: &str = "oxide-dev.test";
 pub enum ServiceName {
     /// The HTTP interface to a single-node ClickHouse server.
     Clickhouse,
-    /// The HTTP interface for managing replicated clickhouse servers and keepers
-    ClickhouseAdmin,
+    /// The HTTP interface for managing clickhouse keepers
+    ClickhouseAdminKeeper,
+    /// The HTTP interface for managing replicated clickhouse servers
+    ClickhouseAdminServer,
     /// The native TCP interface to a ClickHouse server.
     ///
     /// NOTE: This is used for either single-node or a replicated cluster.
@@ -57,7 +59,8 @@ impl ServiceName {
     fn service_kind(&self) -> &'static str {
         match self {
             ServiceName::Clickhouse => "clickhouse",
-            ServiceName::ClickhouseAdmin => "clickhouse-admin",
+            ServiceName::ClickhouseAdminKeeper => "clickhouse-admin-keeper",
+            ServiceName::ClickhouseAdminServer => "clickhouse-admin-server",
             ServiceName::ClickhouseNative => "clickhouse-native",
             ServiceName::ClickhouseKeeper => "clickhouse-keeper",
             ServiceName::ClickhouseServer => "clickhouse-server",
@@ -85,7 +88,8 @@ impl ServiceName {
     pub fn dns_name(&self) -> String {
         match self {
             ServiceName::Clickhouse
-            | ServiceName::ClickhouseAdmin
+            | ServiceName::ClickhouseAdminKeeper
+            | ServiceName::ClickhouseAdminServer
             | ServiceName::ClickhouseNative
             | ServiceName::ClickhouseKeeper
             | ServiceName::ClickhouseServer

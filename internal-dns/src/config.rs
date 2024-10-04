@@ -411,8 +411,8 @@ impl DnsConfigBuilder {
     /// this zone, and `http_port` is the associated port for that service. The
     /// native service is added automatically, using its default port.
     ///
-    /// For `ClickhouseServer` zones we also need to add a `ClickhouseAdmin`
-    /// service.
+    /// For `ClickhouseServer` zones we also need to add a
+    /// `ClickhouseAdminServer` service.
     ///
     /// # Errors
     ///
@@ -442,7 +442,7 @@ impl DnsConfigBuilder {
 
         if http_service == ServiceName::ClickhouseServer {
             self.service_backend_zone(
-                ServiceName::ClickhouseAdmin,
+                ServiceName::ClickhouseAdminServer,
                 &zone,
                 CLICKHOUSE_ADMIN_PORT,
             )?;
@@ -474,7 +474,7 @@ impl DnsConfigBuilder {
         let zone = self.host_zone(zone_id, underlay_address)?;
         self.service_backend_zone(service, &zone, port)?;
         self.service_backend_zone(
-            ServiceName::ClickhouseAdmin,
+            ServiceName::ClickhouseAdminKeeper,
             &zone,
             CLICKHOUSE_ADMIN_PORT,
         )
@@ -589,8 +589,12 @@ mod test {
     fn display_srv_service() {
         assert_eq!(ServiceName::Clickhouse.dns_name(), "_clickhouse._tcp",);
         assert_eq!(
-            ServiceName::ClickhouseAdmin.dns_name(),
-            "_clickhouse-keeper._tcp",
+            ServiceName::ClickhouseAdminKeeper.dns_name(),
+            "_clickhouse-admin-keeper._tcp",
+        );
+        assert_eq!(
+            ServiceName::ClickhouseAdminServer.dns_name(),
+            "_clickhouse-admin-server._tcp",
         );
         assert_eq!(
             ServiceName::ClickhouseKeeper.dns_name(),
