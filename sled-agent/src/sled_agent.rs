@@ -169,8 +169,8 @@ pub enum Error {
     #[error("Expected revision to fit in a u32, but found {0}")]
     UnexpectedRevision(i64),
 
-    #[error("Error starting Repo Depot service: {0}")]
-    RepoDepotStart(#[source] Box<dyn std::error::Error + Send + Sync>),
+    #[error(transparent)]
+    RepoDepotStart(#[from] crate::artifact_store::StartError),
 }
 
 impl From<Error> for omicron_common::api::external::Error {
@@ -591,7 +591,7 @@ impl SledAgent {
 
         let repo_depot = ArtifactStore::new(&log, storage_manager.clone())
             .start(sled_address, &config.dropshot)
-            .map_err(Error::RepoDepotStart)?;
+            .await?;
 
         let sled_agent = SledAgent {
             inner: Arc::new(SledAgentInner {

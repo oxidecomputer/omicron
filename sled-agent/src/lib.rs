@@ -15,7 +15,7 @@ pub mod sim;
 pub mod common;
 
 // Modules for the non-simulated sled agent.
-mod artifact_store;
+pub mod artifact_store;
 mod backing_fs;
 mod boot_disk_os_writer;
 pub mod bootstrap;

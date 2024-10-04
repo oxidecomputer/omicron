@@ -36,6 +36,8 @@ use slog::{error, info, Logger};
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 
+const TEMP_SUBDIR: &str = "tmp";
+
 #[derive(Clone)]
 pub(crate) struct ArtifactStore<T: StorageBackend = StorageHandle> {
     log: Logger,
@@ -52,14 +54,54 @@ impl<T: StorageBackend> ArtifactStore<T> {
 }
 
 impl ArtifactStore {
-    pub(crate) fn start(
+    pub(crate) async fn start(
         self,
         sled_address: SocketAddrV6,
         dropshot_config: &ConfigDropshot,
-    ) -> Result<
-        dropshot::HttpServer<ArtifactStore<StorageHandle>>,
-        Box<dyn std::error::Error + Send + Sync>,
-    > {
+    ) -> Result<dropshot::HttpServer<ArtifactStore>, StartError> {
+        // This function is only called when the real Sled Agent starts up (it
+        // is only defined over `ArtifactStore<StorageHandle>`). In the real
+        // Sled Agent, these datasets are durable and may retain temporary
+        // files leaked during a crash. Upon startup, we attempt to remove the
+        // subdirectory we store temporary files in, logging an error if that
+        // fails.
+
+        // This `datasets_config_list` call is clear enough to the
+        // compiler, but perhaps not to the person reading this code,
+        // because there's two relevant methods in scope: the concrete
+        // `StorageHandle::datasets_config_list` (because T = StorageHandle) and
+        // the generic `<StorageHandle as StorageBackend>::datasets_config_list`.
+        // The reason the concrete function is selected is because these
+        // functions return two different error types, and the `.map_err`
+        // implies that we want a `sled_storage::error::Error`.
+        let config = self
+            .storage
+            .datasets_config_list()
+            .await
+            .map_err(StartError::DatasetConfig)?;
+        for mountpoint in
+            update_dataset_mountpoints(config, ZPOOL_MOUNTPOINT_ROOT.into())
+        {
+            let path = mountpoint.join(TEMP_SUBDIR);
+            if let Err(err) = tokio::fs::remove_dir_all(&path).await {
+                if err.kind() != ErrorKind::NotFound {
+                    // We log an error here because we expect that if we are
+                    // having disk I/O errors, something else (fmd?) will
+                    // identify those issues and bubble them up to the operator.
+                    // (As of writing this comment that is not true but we
+                    // expect this to exist in the limit, and refusing to start
+                    // Sled Agent because of a problem with a single FRU seems
+                    // inappropriate.)
+                    error!(
+                        &self.log,
+                        "Failed to remove stale temporary artifacts";
+                        "error" => &err,
+                        "path" => path.as_str(),
+                    );
+                }
+            }
+        }
+
         let mut depot_address = sled_address;
         depot_address.set_port(REPO_DEPOT_PORT);
 
@@ -73,9 +115,19 @@ impl ArtifactStore {
                 .expect("registered entrypoints"),
             self,
             &log,
-        )?
+        )
+        .map_err(StartError::Dropshot)?
         .start())
     }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum StartError {
+    #[error("Error retrieving dataset configuration: {0}")]
+    DatasetConfig(#[source] sled_storage::error::Error),
+
+    #[error("Dropshot error while starting Repo Depot service: {0}")]
+    Dropshot(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
 impl<T: StorageBackend> ArtifactStore<T> {
@@ -94,7 +146,7 @@ impl<T: StorageBackend> ArtifactStore<T> {
                         &self.log,
                         "Retrieved artifact";
                         "sha256" => &sha256,
-                        "path" => path.as_str()
+                        "path" => path.as_str(),
                     );
                     return Ok(file);
                 }
@@ -123,17 +175,27 @@ impl<T: StorageBackend> ArtifactStore<T> {
         sha256: ArtifactHash,
         stream: impl Stream<Item = Result<impl AsRef<[u8]>, Error>>,
     ) -> Result<(), Error> {
-        let ds = self
+        let mountpoint = self
             .dataset_mountpoints()
             .await?
             .next()
             .ok_or(Error::NoUpdateDataset)?;
-        let final_path = ds.join(sha256.to_string());
+        let final_path = mountpoint.join(sha256.to_string());
 
+        let temp_dir = mountpoint.join(TEMP_SUBDIR);
+        if let Err(err) = tokio::fs::create_dir(&temp_dir).await {
+            if err.kind() != ErrorKind::AlreadyExists {
+                return Err(Error::File {
+                    verb: "create directory",
+                    path: temp_dir,
+                    err,
+                });
+            }
+        }
         let (file, temp_path) = tokio::task::spawn_blocking(move || {
-            NamedUtf8TempFile::new_in(&ds).map_err(|err| Error::File {
+            NamedUtf8TempFile::new_in(&temp_dir).map_err(|err| Error::File {
                 verb: "create temporary file in",
-                path: ds,
+                path: temp_dir,
                 err,
             })
         })
@@ -185,7 +247,7 @@ impl<T: StorageBackend> ArtifactStore<T> {
             &self.log,
             "Wrote artifact";
             "sha256" => &sha256.to_string(),
-            "path" => final_path.as_str()
+            "path" => final_path.as_str(),
         );
         Ok(())
     }
@@ -251,7 +313,7 @@ impl<T: StorageBackend> ArtifactStore<T> {
                         &self.log,
                         "Removed artifact";
                         "sha256" => &sha256,
-                        "path" => path.as_str()
+                        "path" => path.as_str(),
                     );
                 }
                 Err(err) if err.kind() == ErrorKind::NotFound => {}
@@ -282,13 +344,19 @@ impl<T: StorageBackend> ArtifactStore<T> {
         &self,
     ) -> Result<impl Iterator<Item = Utf8PathBuf> + '_, Error> {
         let config = self.storage.datasets_config_list().await?;
-        let mountpoint_root = self.storage.mountpoint_root();
-        Ok(config
-            .datasets
-            .into_values()
-            .filter(|dataset| *dataset.name.dataset() == DatasetKind::Update)
-            .map(|dataset| dataset.name.mountpoint(mountpoint_root)))
+        Ok(update_dataset_mountpoints(config, self.storage.mountpoint_root()))
     }
+}
+
+fn update_dataset_mountpoints(
+    config: DatasetsConfig,
+    root: &Utf8Path,
+) -> impl Iterator<Item = Utf8PathBuf> + '_ {
+    config
+        .datasets
+        .into_values()
+        .filter(|dataset| *dataset.name.dataset() == DatasetKind::Update)
+        .map(|dataset| dataset.name.mountpoint(root))
 }
 
 enum RepoDepotImpl {}
@@ -463,19 +531,32 @@ mod test {
         // present
         assert!(matches!(store.delete(TEST_HASH).await, Ok(())));
 
-        // put succeeds
-        store
-            .put(TEST_HASH, stream::once(async { Ok(TEST_ARTIFACT) }))
-            .await
-            .unwrap();
+        // test several things here:
+        // 1. put succeeds
+        // 2. put is idempotent (we don't care if it clobbers a file as long as
+        //    the hash is okay)
+        // 3. we don't fail trying to create TEMP_SUBDIR twice
+        for _ in 0..2 {
+            store
+                .put(TEST_HASH, stream::once(async { Ok(TEST_ARTIFACT) }))
+                .await
+                .unwrap();
+            // get succeeds, file reads back OK
+            let mut file = store.get(TEST_HASH).await.unwrap();
+            let mut vec = Vec::new();
+            file.read_to_end(&mut vec).await.unwrap();
+            assert_eq!(vec, TEST_ARTIFACT);
+        }
 
-        // get now succeeds, file reads back OK
-        let mut file = store.get(TEST_HASH).await.unwrap();
-        let mut vec = Vec::new();
-        file.read_to_end(&mut vec).await.unwrap();
-        assert_eq!(vec, TEST_ARTIFACT);
-        // delete succeeds
-        store.delete(TEST_HASH).await.unwrap();
+        // delete succeeds and is idempotent
+        for _ in 0..2 {
+            store.delete(TEST_HASH).await.unwrap();
+            // get now fails because it no longer exists
+            assert!(matches!(
+                store.get(TEST_HASH).await,
+                Err(Error::NotFound { .. })
+            ));
+        }
     }
 
     #[tokio::test]
