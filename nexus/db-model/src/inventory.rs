@@ -1173,12 +1173,11 @@ impl From<InvDataset> for nexus_types::inventory::Dataset {
     }
 }
 
-/// Information about a sled's Omicron zones, part of [`nexus_types::inventory::SledAgent`].
+/// Information about a sled's Omicron zones, part of
+/// [`nexus_types::inventory::SledAgent`].
 ///
-///
-/// # Todo
-///
-/// TODO: this table is vestigial and can be combined with InvSledAgent. See <issue URL>.
+/// TODO: This table is vestigial and can be combined with `InvSledAgent`. See
+/// https://github.com/oxidecomputer/omicron/issues/6770.
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_sled_omicron_zones)]
 pub struct InvSledOmicronZones {

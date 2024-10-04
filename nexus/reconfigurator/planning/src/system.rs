@@ -516,6 +516,7 @@ struct Sled {
 
 impl Sled {
     /// Create a `Sled` using faked-up information based on a `SledBuilder`
+    #[allow(clippy::too_many_arguments)]
     fn new_simulated(
         sled_id: SledUuid,
         sled_subnet: Ipv6Subnet<SLED_PREFIX>,
