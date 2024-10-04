@@ -138,8 +138,8 @@ impl<T: StorageBackend> ArtifactStore<T> {
     ) -> Result<File, Error> {
         let sha256 = sha256.to_string();
         let mut last_error = None;
-        for dataset in self.dataset_mountpoints().await? {
-            let path = dataset.join(&sha256);
+        for mountpoint in self.dataset_mountpoints().await? {
+            let path = mountpoint.join(&sha256);
             match File::open(&path).await {
                 Ok(file) => {
                     info!(
@@ -304,9 +304,9 @@ impl<T: StorageBackend> ArtifactStore<T> {
         let sha256 = sha256.to_string();
         let mut any_datasets = false;
         let mut last_error = None;
-        for dataset in self.dataset_mountpoints().await? {
+        for mountpoint in self.dataset_mountpoints().await? {
             any_datasets = true;
-            let path = dataset.join(&sha256);
+            let path = mountpoint.join(&sha256);
             match tokio::fs::remove_file(&path).await {
                 Ok(()) => {
                     info!(
