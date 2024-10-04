@@ -663,7 +663,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=11371b0f3743f8df5b047dc0edc2699f4bdf3927"
+source = "git+https://github.com/oxidecomputer/propolis?rev=11371b0f3743f8df5b047dc0edc2699f4bdf3927#11371b0f3743f8df5b047dc0edc2699f4bdf3927"
 dependencies = [
  "bhyve_api_sys",
  "libc",
@@ -673,7 +673,7 @@ dependencies = [
 [[package]]
 name = "bhyve_api_sys"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=11371b0f3743f8df5b047dc0edc2699f4bdf3927"
+source = "git+https://github.com/oxidecomputer/propolis?rev=11371b0f3743f8df5b047dc0edc2699f4bdf3927#11371b0f3743f8df5b047dc0edc2699f4bdf3927"
 dependencies = [
  "libc",
  "strum",
@@ -1718,6 +1718,19 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "crucible-client-types"
+version = "0.1.0"
+source = "git+https://github.com/oxidecomputer/crucible?rev=2b88ab88461fb06aaf2aab11c5e381a3cad25eac#2b88ab88461fb06aaf2aab11c5e381a3cad25eac"
+dependencies = [
+ "base64 0.22.1",
+ "crucible-workspace-hack",
+ "schemars",
+ "serde",
+ "serde_json",
+ "uuid",
 ]
 
 [[package]]
@@ -3983,7 +3996,7 @@ dependencies = [
  "httpdate",
  "itoa",
  "pin-project-lite",
- "socket2 0.5.7",
+ "socket2 0.4.10",
  "tokio",
  "tower-service",
  "tracing",
@@ -5492,6 +5505,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "chrono",
+ "clickhouse-admin-types",
  "const_format",
  "db-macros",
  "diesel",
@@ -5612,6 +5626,7 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "chrono",
+ "clickhouse-admin-types",
  "expectorate",
  "futures",
  "gateway-client",
@@ -6881,6 +6896,7 @@ dependencies = [
  "pretty_assertions",
  "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=11371b0f3743f8df5b047dc0edc2699f4bdf3927)",
  "propolis-mock-server",
+ "propolis_api_types",
  "rand",
  "rcgen",
  "reqwest 0.12.7",
@@ -8590,6 +8606,19 @@ dependencies = [
  "serde_derive",
  "thiserror",
  "toml 0.7.8",
+]
+
+[[package]]
+name = "propolis_api_types"
+version = "0.0.0"
+source = "git+https://github.com/oxidecomputer/propolis?rev=11371b0f3743f8df5b047dc0edc2699f4bdf3927#11371b0f3743f8df5b047dc0edc2699f4bdf3927"
+dependencies = [
+ "crucible-client-types",
+ "propolis_types",
+ "schemars",
+ "serde",
+ "thiserror",
+ "uuid",
 ]
 
 [[package]]

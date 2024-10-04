@@ -13,8 +13,8 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use omicron_common::address::CLICKHOUSE_HTTP_PORT;
-use omicron_common::api::external::Error;
 use omicron_common::api::external::{DataPageParams, ListResultVec};
+use omicron_common::api::external::{Error, LookupType, ResourceType};
 use omicron_common::api::internal::nexus::{self, ProducerEndpoint};
 use oximeter_client::Client as OximeterClient;
 use oximeter_db::query::Timestamp;
@@ -113,22 +113,55 @@ impl super::Nexus {
         opctx: &OpContext,
         producer_info: nexus::ProducerEndpoint,
     ) -> Result<(), Error> {
-        let (collector, id) = self.next_collector(opctx).await?;
-        let db_info = db::model::ProducerEndpoint::new(&producer_info, id);
-        self.db_datastore.producer_endpoint_create(opctx, &db_info).await?;
-        collector
-            .producers_post(&oximeter_client::types::ProducerEndpoint::from(
-                &producer_info,
-            ))
-            .await
-            .map_err(Error::from)?;
-        info!(
-            self.log,
-            "assigned collector to new producer";
-            "producer_id" => ?producer_info.id,
-            "collector_id" => ?id,
-        );
-        Ok(())
+        for attempt in 0.. {
+            let (collector, id) = self.next_collector(opctx).await?;
+            let db_info = db::model::ProducerEndpoint::new(&producer_info, id);
+
+            // We chose the collector in `self.next_collector` above; if we get
+            // an "Oximeter not found" error when we try to create a producer
+            // assigned to that collector, we've lost an extremely rare race
+            // where the collector we chose was deleted in between when we chose
+            // it and when we tried to assign it. If we hit this, we should just
+            // pick another collector and try again.
+            //
+            // To safeguard against some other bug forcing us into an infinite
+            // loop here, we'll only retry once. Losing this particular race
+            // once is exceedingly unlikely; losing it twice probably means
+            // something else is wrong, so we'll just return the error.
+            match self
+                .db_datastore
+                .producer_endpoint_create(opctx, &db_info)
+                .await
+            {
+                Ok(()) => (), // fallthrough
+                Err(Error::ObjectNotFound {
+                    type_name: ResourceType::Oximeter,
+                    lookup_type: LookupType::ById(bad_id),
+                }) if id == bad_id && attempt == 0 => {
+                    // We lost the race on our first try; try again.
+                    continue;
+                }
+                // Any other error or we lost the race twice; fail.
+                Err(err) => return Err(err),
+            }
+
+            collector
+                .producers_post(
+                    &oximeter_client::types::ProducerEndpoint::from(
+                        &producer_info,
+                    ),
+                )
+                .await
+                .map_err(Error::from)?;
+            info!(
+                self.log,
+                "assigned collector to new producer";
+                "producer_id" => ?producer_info.id,
+                "collector_id" => ?id,
+            );
+            return Ok(());
+        }
+        unreachable!("for loop always returns after at most two iterations")
     }
 
     /// Returns a results from the timeseries DB based on the provided query

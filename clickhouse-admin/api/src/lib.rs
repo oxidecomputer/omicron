@@ -4,7 +4,8 @@
 
 use clickhouse_admin_types::config::{KeeperConfig, ReplicaConfig};
 use clickhouse_admin_types::{
-    KeeperConf, KeeperSettings, Lgif, RaftConfig, ServerSettings,
+    ClickhouseKeeperClusterMembership, KeeperConf, KeeperSettings, Lgif,
+    RaftConfig, ServerSettings,
 };
 use dropshot::{
     HttpError, HttpResponseCreated, HttpResponseOk, RequestContext, TypedBody,
@@ -84,4 +85,13 @@ pub trait ClickhouseAdminApi {
     async fn keeper_conf(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<KeeperConf>, HttpError>;
+
+    /// Retrieve cluster membership information from a keeper node.
+    #[endpoint {
+        method = GET,
+        path = "/keeper/cluster-membership",
+    }]
+    async fn keeper_cluster_membership(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<ClickhouseKeeperClusterMembership>, HttpError>;
 }

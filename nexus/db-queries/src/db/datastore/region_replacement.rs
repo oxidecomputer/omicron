@@ -657,7 +657,7 @@ impl DataStore {
 
     /// Transition a RegionReplacement record from Completing to Complete,
     /// clearing the operating saga id. Also removes the `volume_repair` record
-    /// that is taking a "lock" on the Volume.
+    /// that is taking a lock on the Volume.
     pub async fn set_region_replacement_complete(
         &self,
         opctx: &OpContext,
@@ -701,6 +701,75 @@ impl DataStore {
                             && record.replacement_state
                                 == RegionReplacementState::Complete
                         {
+                            Ok(())
+                        } else {
+                            Err(TxnError::CustomError(Error::conflict(format!(
+                                "region replacement {} set to {:?} (operating saga id {:?})",
+                                request.id,
+                                record.replacement_state,
+                                record.operating_saga_id,
+                            ))))
+                        }
+                    }
+                }
+            })
+            .await
+            .map_err(|e| match e {
+                TxnError::CustomError(error) => error,
+
+                TxnError::Database(error) => {
+                    public_error_from_diesel(error, ErrorHandler::Server)
+                }
+            })
+    }
+
+    /// Transition a RegionReplacement record from Requested to Complete, which
+    /// occurs when the associated volume is soft or hard deleted.  Also removes
+    /// the `volume_repair` record that is taking a lock on the Volume.
+    pub async fn set_region_replacement_complete_from_requested(
+        &self,
+        opctx: &OpContext,
+        request: RegionReplacement,
+    ) -> Result<(), Error> {
+        type TxnError = TransactionError<Error>;
+
+        assert_eq!(
+            request.replacement_state,
+            RegionReplacementState::Requested,
+        );
+
+        self.pool_connection_authorized(opctx)
+            .await?
+            .transaction_async(|conn| async move {
+                Self::volume_repair_delete_query(
+                    request.volume_id,
+                    request.id,
+                )
+                .execute_async(&conn)
+                .await?;
+
+                use db::schema::region_replacement::dsl;
+
+                let result = diesel::update(dsl::region_replacement)
+                    .filter(dsl::id.eq(request.id))
+                    .filter(
+                        dsl::replacement_state.eq(RegionReplacementState::Requested),
+                    )
+                    .filter(dsl::operating_saga_id.is_null())
+                    .set((
+                        dsl::replacement_state.eq(RegionReplacementState::Complete),
+                    ))
+                    .check_if_exists::<RegionReplacement>(request.id)
+                    .execute_and_check(&conn)
+                    .await?;
+
+                match result.status {
+                    UpdateStatus::Updated => Ok(()),
+
+                    UpdateStatus::NotUpdatedButExists => {
+                        let record = result.found;
+
+                        if record.replacement_state == RegionReplacementState::Complete {
                             Ok(())
                         } else {
                             Err(TxnError::CustomError(Error::conflict(format!(

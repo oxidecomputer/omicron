@@ -14,6 +14,7 @@ use nexus_sled_agent_shared::inventory::Baseboard;
 use nexus_sled_agent_shared::inventory::Inventory;
 use nexus_sled_agent_shared::inventory::InventoryDisk;
 use nexus_sled_agent_shared::inventory::SledRole;
+use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbSettings;
 use nexus_types::deployment::PlanningInputBuilder;
@@ -82,11 +83,13 @@ pub struct SystemDescription {
     target_boundary_ntp_zone_count: usize,
     target_nexus_zone_count: usize,
     target_internal_dns_zone_count: usize,
+    target_oximeter_zone_count: usize,
     target_cockroachdb_zone_count: usize,
     target_cockroachdb_cluster_version: CockroachDbClusterVersion,
     service_ip_pool_ranges: Vec<IpRange>,
     internal_dns_version: Generation,
     external_dns_version: Generation,
+    clickhouse_policy: Option<ClickhousePolicy>,
 }
 
 impl SystemDescription {
@@ -134,11 +137,12 @@ impl SystemDescription {
         let target_internal_dns_zone_count = INTERNAL_DNS_REDUNDANCY;
 
         // TODO-cleanup These are wrong, but we don't currently set up any
-        // boundary NTP or CRDB nodes in our fake system, so this prevents
-        // downstream test issues with the planner thinking our system is out of
-        // date from the gate.
+        // of these zones in our fake system, so this prevents downstream test
+        // issues with the planner thinking our system is out of date from the
+        // gate.
         let target_boundary_ntp_zone_count = 0;
         let target_cockroachdb_zone_count = 0;
+        let target_oximeter_zone_count = 0;
 
         let target_cockroachdb_cluster_version =
             CockroachDbClusterVersion::POLICY;
@@ -159,11 +163,13 @@ impl SystemDescription {
             target_boundary_ntp_zone_count,
             target_nexus_zone_count,
             target_internal_dns_zone_count,
+            target_oximeter_zone_count,
             target_cockroachdb_zone_count,
             target_cockroachdb_cluster_version,
             service_ip_pool_ranges,
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
+            clickhouse_policy: None,
         }
     }
 
@@ -206,6 +212,12 @@ impl SystemDescription {
         ranges: Vec<IpRange>,
     ) -> &mut Self {
         self.service_ip_pool_ranges = ranges;
+        self
+    }
+
+    /// Set the clickhouse policy
+    pub fn clickhouse_policy(&mut self, policy: ClickhousePolicy) -> &mut Self {
+        self.clickhouse_policy = Some(policy);
         self
     }
 
@@ -335,10 +347,11 @@ impl SystemDescription {
             target_boundary_ntp_zone_count: self.target_boundary_ntp_zone_count,
             target_nexus_zone_count: self.target_nexus_zone_count,
             target_internal_dns_zone_count: self.target_internal_dns_zone_count,
+            target_oximeter_zone_count: self.target_oximeter_zone_count,
             target_cockroachdb_zone_count: self.target_cockroachdb_zone_count,
             target_cockroachdb_cluster_version: self
                 .target_cockroachdb_cluster_version,
-            clickhouse_policy: None,
+            clickhouse_policy: self.clickhouse_policy.clone(),
         };
         let mut builder = PlanningInputBuilder::new(
             policy,
@@ -379,6 +392,9 @@ pub struct SledBuilder {
 }
 
 impl SledBuilder {
+    /// The default number of U.2 (external) pools for a sled.
+    pub const DEFAULT_NPOOLS: u8 = 10;
+
     /// Begin describing a sled to be added to a `SystemDescription`
     pub fn new() -> Self {
         SledBuilder {
@@ -387,7 +403,7 @@ impl SledBuilder {
             hardware: SledHardware::Gimlet,
             hardware_slot: None,
             sled_role: SledRole::Gimlet,
-            npools: 10,
+            npools: Self::DEFAULT_NPOOLS,
         }
     }
 

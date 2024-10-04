@@ -100,6 +100,21 @@ impl BlueprintZoneType {
         matches!(self, BlueprintZoneType::Crucible(_))
     }
 
+    /// Identifies whether this is a clickhouse keeper zone
+    pub fn is_clickhouse_keeper(&self) -> bool {
+        matches!(self, BlueprintZoneType::ClickhouseKeeper(_))
+    }
+
+    /// Identifies whether this is a clickhouse server zone
+    pub fn is_clickhouse_server(&self) -> bool {
+        matches!(self, BlueprintZoneType::ClickhouseServer(_))
+    }
+
+    /// Identifies whether this is a single-node clickhouse zone
+    pub fn is_clickhouse(&self) -> bool {
+        matches!(self, BlueprintZoneType::Clickhouse(_))
+    }
+
     /// Returns the durable dataset associated with this zone, if any exists.
     pub fn durable_dataset(&self) -> Option<DurableDataset<'_>> {
         let (dataset, kind, &address) = match self {

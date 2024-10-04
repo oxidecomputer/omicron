@@ -241,11 +241,8 @@ mod tests {
     use omicron_uuid_kinds::ZpoolUuid;
 
     use crate::{
-        blueprint_builder::{
-            test::{verify_blueprint, DEFAULT_N_SLEDS},
-            BlueprintBuilder, Ensure,
-        },
-        example::ExampleSystem,
+        blueprint_builder::{test::verify_blueprint, BlueprintBuilder, Ensure},
+        example::ExampleSystemBuilder,
     };
 
     use super::*;
@@ -255,9 +252,8 @@ mod tests {
     fn test_builder_zones() {
         static TEST_NAME: &str = "blueprint_test_builder_zones";
         let logctx = test_setup_log(TEST_NAME);
-        let mut example =
-            ExampleSystem::new(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
-        let blueprint_initial = example.blueprint;
+        let (mut example, blueprint_initial) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME).build();
 
         // Add a completely bare sled to the input.
         let (new_sled_id, input2) = {

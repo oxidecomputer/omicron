@@ -5,7 +5,9 @@
 use crate::context::ServerContext;
 use clickhouse_admin_api::*;
 use clickhouse_admin_types::config::{KeeperConfig, ReplicaConfig};
-use clickhouse_admin_types::{KeeperConf, Lgif, RaftConfig};
+use clickhouse_admin_types::{
+    ClickhouseKeeperClusterMembership, KeeperConf, Lgif, RaftConfig,
+};
 use dropshot::{
     HttpError, HttpResponseCreated, HttpResponseOk, RequestContext, TypedBody,
 };
@@ -69,6 +71,15 @@ impl ClickhouseAdminApi for ClickhouseAdminImpl {
     ) -> Result<HttpResponseOk<KeeperConf>, HttpError> {
         let ctx = rqctx.context();
         let output = ctx.clickhouse_cli().keeper_conf().await?;
+        Ok(HttpResponseOk(output))
+    }
+
+    async fn keeper_cluster_membership(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<ClickhouseKeeperClusterMembership>, HttpError>
+    {
+        let ctx = rqctx.context();
+        let output = ctx.clickhouse_cli().keeper_cluster_membership().await?;
         Ok(HttpResponseOk(output))
     }
 }

@@ -9,6 +9,8 @@
 //! through Nexus' external API.
 
 use crate::sim::http_entrypoints_pantry::ExpectedDigest;
+use crate::sim::http_entrypoints_pantry::PantryStatus;
+use crate::sim::http_entrypoints_pantry::VolumeStatus;
 use crate::sim::SledAgent;
 use anyhow::{self, bail, Result};
 use chrono::prelude::*;
@@ -1152,10 +1154,17 @@ impl Storage {
     }
 }
 
+pub struct PantryVolume {
+    vcr: VolumeConstructionRequest, // Please rewind!
+    status: VolumeStatus,
+    activate_job: Option<String>,
+}
+
 /// Simulated crucible pantry
 pub struct Pantry {
     pub id: OmicronZoneUuid,
-    vcrs: Mutex<HashMap<String, VolumeConstructionRequest>>, // Please rewind!
+    /// Map Volume UUID to PantryVolume struct
+    volumes: Mutex<HashMap<String, PantryVolume>>,
     sled_agent: Arc<SledAgent>,
     jobs: Mutex<HashSet<String>>,
 }
@@ -1164,19 +1173,26 @@ impl Pantry {
     pub fn new(sled_agent: Arc<SledAgent>) -> Self {
         Self {
             id: OmicronZoneUuid::new_v4(),
-            vcrs: Mutex::new(HashMap::default()),
+            volumes: Mutex::new(HashMap::default()),
             sled_agent,
             jobs: Mutex::new(HashSet::default()),
         }
+    }
+
+    pub async fn status(&self) -> Result<PantryStatus, HttpError> {
+        Ok(PantryStatus {
+            volumes: self.volumes.lock().await.keys().cloned().collect(),
+            num_job_handles: self.jobs.lock().await.len(),
+        })
     }
 
     pub async fn entry(
         &self,
         volume_id: String,
     ) -> Result<VolumeConstructionRequest, HttpError> {
-        let vcrs = self.vcrs.lock().await;
-        match vcrs.get(&volume_id) {
-            Some(entry) => Ok(entry.clone()),
+        let volumes = self.volumes.lock().await;
+        match volumes.get(&volume_id) {
+            Some(entry) => Ok(entry.vcr.clone()),
 
             None => Err(HttpError::for_not_found(None, volume_id)),
         }
@@ -1187,9 +1203,98 @@ impl Pantry {
         volume_id: String,
         volume_construction_request: VolumeConstructionRequest,
     ) -> Result<()> {
-        let mut vcrs = self.vcrs.lock().await;
-        vcrs.insert(volume_id, volume_construction_request);
+        let mut volumes = self.volumes.lock().await;
+
+        volumes.insert(
+            volume_id,
+            PantryVolume {
+                vcr: volume_construction_request,
+                status: VolumeStatus {
+                    active: true,
+                    seen_active: true,
+                    num_job_handles: 0,
+                },
+                activate_job: None,
+            },
+        );
+
         Ok(())
+    }
+
+    pub async fn attach_activate_background(
+        &self,
+        volume_id: String,
+        activate_job_id: String,
+        volume_construction_request: VolumeConstructionRequest,
+    ) -> Result<(), HttpError> {
+        let mut volumes = self.volumes.lock().await;
+        let mut jobs = self.jobs.lock().await;
+
+        volumes.insert(
+            volume_id,
+            PantryVolume {
+                vcr: volume_construction_request,
+                status: VolumeStatus {
+                    active: false,
+                    seen_active: false,
+                    num_job_handles: 1,
+                },
+                activate_job: Some(activate_job_id.clone()),
+            },
+        );
+
+        jobs.insert(activate_job_id);
+
+        Ok(())
+    }
+
+    pub async fn activate_background_attachment(
+        &self,
+        volume_id: String,
+    ) -> Result<String, HttpError> {
+        let activate_job = {
+            let volumes = self.volumes.lock().await;
+            volumes.get(&volume_id).unwrap().activate_job.clone().unwrap()
+        };
+
+        let mut status = self.volume_status(volume_id.clone()).await?;
+
+        status.active = true;
+        status.seen_active = true;
+
+        self.update_volume_status(volume_id, status).await?;
+
+        Ok(activate_job)
+    }
+
+    pub async fn volume_status(
+        &self,
+        volume_id: String,
+    ) -> Result<VolumeStatus, HttpError> {
+        let volumes = self.volumes.lock().await;
+
+        match volumes.get(&volume_id) {
+            Some(pantry_volume) => Ok(pantry_volume.status.clone()),
+
+            None => Err(HttpError::for_not_found(None, volume_id)),
+        }
+    }
+
+    pub async fn update_volume_status(
+        &self,
+        volume_id: String,
+        status: VolumeStatus,
+    ) -> Result<(), HttpError> {
+        let mut volumes = self.volumes.lock().await;
+
+        match volumes.get_mut(&volume_id) {
+            Some(pantry_volume) => {
+                pantry_volume.status = status;
+                Ok(())
+            }
+
+            None => Err(HttpError::for_not_found(None, volume_id)),
+        }
     }
 
     pub async fn is_job_finished(
@@ -1240,11 +1345,11 @@ impl Pantry {
         // the simulated instance ensure, then call
         // [`instance_issue_disk_snapshot_request`] as the snapshot logic is the
         // same.
-        let vcrs = self.vcrs.lock().await;
-        let volume_construction_request = vcrs.get(&volume_id).unwrap();
+        let volumes = self.volumes.lock().await;
+        let volume_construction_request = &volumes.get(&volume_id).unwrap().vcr;
 
         self.sled_agent
-            .map_disk_ids_to_region_ids(&volume_construction_request)
+            .map_disk_ids_to_region_ids(volume_construction_request)
             .await?;
 
         self.sled_agent
@@ -1329,8 +1434,8 @@ impl Pantry {
     }
 
     pub async fn detach(&self, volume_id: String) -> Result<()> {
-        let mut vcrs = self.vcrs.lock().await;
-        vcrs.remove(&volume_id);
+        let mut volumes = self.volumes.lock().await;
+        volumes.remove(&volume_id);
         Ok(())
     }
 }

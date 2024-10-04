@@ -1215,6 +1215,20 @@ pub struct InstanceAutoRestartStatus {
     #[serde(rename = "auto_restart_enabled")]
     pub enabled: bool,
 
+    /// The auto-restart policy configured for this instance, or `None` if no
+    /// explicit policy is configured.
+    ///
+    /// If this is not present, then this instance uses the default auto-restart
+    /// policy, which may or may not allow it to be restarted. The
+    /// `auto_restart_enabled` field indicates whether the instance will be
+    /// automatically restarted.
+    //
+    // Rename this field, as the struct is `#[serde(flatten)]`ed into the
+    // `Instance` type, and we would like the field to be prefixed with
+    // `auto_restart`.
+    #[serde(rename = "auto_restart_policy")]
+    pub policy: Option<InstanceAutoRestartPolicy>,
+
     /// The time at which the auto-restart cooldown period for this instance
     /// completes, permitting it to be automatically restarted again. If the
     /// instance enters the `Failed` state, it will not be restarted until after
@@ -1233,7 +1247,9 @@ pub struct InstanceAutoRestartStatus {
 
 /// A policy determining when an instance should be automatically restarted by
 /// the control plane.
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum InstanceAutoRestartPolicy {
     /// The instance should not be automatically restarted by the control plane

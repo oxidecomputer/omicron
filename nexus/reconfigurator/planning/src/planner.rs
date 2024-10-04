@@ -353,10 +353,13 @@ impl<'a> Planner<'a> {
 
         for zone_kind in [
             DiscretionaryOmicronZone::BoundaryNtp,
+            DiscretionaryOmicronZone::ClickhouseKeeper,
+            DiscretionaryOmicronZone::ClickhouseServer,
             DiscretionaryOmicronZone::CockroachDb,
             DiscretionaryOmicronZone::InternalDns,
             DiscretionaryOmicronZone::ExternalDns,
             DiscretionaryOmicronZone::Nexus,
+            DiscretionaryOmicronZone::Oximeter,
         ] {
             let num_zones_to_add = self.num_additional_zones_needed(zone_kind);
             if num_zones_to_add == 0 {
@@ -431,6 +434,12 @@ impl<'a> Planner<'a> {
             DiscretionaryOmicronZone::BoundaryNtp => {
                 self.input.target_boundary_ntp_zone_count()
             }
+            DiscretionaryOmicronZone::ClickhouseKeeper => {
+                self.input.target_clickhouse_keeper_zone_count()
+            }
+            DiscretionaryOmicronZone::ClickhouseServer => {
+                self.input.target_clickhouse_server_zone_count()
+            }
             DiscretionaryOmicronZone::CockroachDb => {
                 self.input.target_cockroachdb_zone_count()
             }
@@ -444,6 +453,9 @@ impl<'a> Planner<'a> {
             }
             DiscretionaryOmicronZone::Nexus => {
                 self.input.target_nexus_zone_count()
+            }
+            DiscretionaryOmicronZone::Oximeter => {
+                self.input.target_oximeter_zone_count()
             }
         };
 
@@ -518,6 +530,18 @@ impl<'a> Planner<'a> {
                 DiscretionaryOmicronZone::BoundaryNtp => self
                     .blueprint
                     .sled_promote_internal_ntp_to_boundary_ntp(sled_id)?,
+                DiscretionaryOmicronZone::ClickhouseKeeper => {
+                    self.blueprint.sled_ensure_zone_multiple_clickhouse_keeper(
+                        sled_id,
+                        new_total_zone_count,
+                    )?
+                }
+                DiscretionaryOmicronZone::ClickhouseServer => {
+                    self.blueprint.sled_ensure_zone_multiple_clickhouse_server(
+                        sled_id,
+                        new_total_zone_count,
+                    )?
+                }
                 DiscretionaryOmicronZone::CockroachDb => {
                     self.blueprint.sled_ensure_zone_multiple_cockroachdb(
                         sled_id,
@@ -538,6 +562,12 @@ impl<'a> Planner<'a> {
                 }
                 DiscretionaryOmicronZone::Nexus => {
                     self.blueprint.sled_ensure_zone_multiple_nexus(
+                        sled_id,
+                        new_total_zone_count,
+                    )?
+                }
+                DiscretionaryOmicronZone::Oximeter => {
+                    self.blueprint.sled_ensure_zone_multiple_oximeter(
                         sled_id,
                         new_total_zone_count,
                     )?
@@ -695,6 +725,7 @@ fn sled_needs_all_zones_expunged(
 pub(crate) fn zone_needs_expungement(
     sled_details: &SledDetails,
     zone_config: &BlueprintZoneConfig,
+    clickhouse_cluster_enabled: bool,
 ) -> Option<ZoneExpungeReason> {
     // Should we expunge the zone because the sled is gone?
     if let Some(reason) =
@@ -719,6 +750,16 @@ pub(crate) fn zone_needs_expungement(
         }
     };
 
+    // Should we expunge the zone because clickhouse clusters are no longer
+    // enabled via policy?
+    if !clickhouse_cluster_enabled {
+        if zone_config.zone_type.is_clickhouse_keeper()
+            || zone_config.zone_type.is_clickhouse_server()
+        {
+            return Some(ZoneExpungeReason::ClickhouseClusterDisabled);
+        }
+    }
+
     None
 }
 
@@ -731,6 +772,7 @@ pub(crate) enum ZoneExpungeReason {
     DiskExpunged,
     SledDecommissioned,
     SledExpunged,
+    ClickhouseClusterDisabled,
 }
 
 #[cfg(test)]
@@ -738,15 +780,16 @@ mod test {
     use super::Planner;
     use crate::blueprint_builder::test::assert_planning_makes_no_changes;
     use crate::blueprint_builder::test::verify_blueprint;
-    use crate::blueprint_builder::test::DEFAULT_N_SLEDS;
     use crate::blueprint_builder::BlueprintBuilder;
     use crate::blueprint_builder::EnsureMultiple;
     use crate::example::example;
-    use crate::example::ExampleSystem;
+    use crate::example::ExampleSystemBuilder;
     use crate::system::SledBuilder;
     use chrono::NaiveDateTime;
     use chrono::TimeZone;
     use chrono::Utc;
+    use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
+    use clickhouse_admin_types::KeeperId;
     use expectorate::assert_contents;
     use nexus_inventory::now_db_precision;
     use nexus_sled_agent_shared::inventory::ZoneKind;
@@ -755,6 +798,7 @@ mod test {
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneFilter;
     use nexus_types::deployment::BlueprintZoneType;
+    use nexus_types::deployment::ClickhousePolicy;
     use nexus_types::deployment::CockroachDbClusterVersion;
     use nexus_types::deployment::CockroachDbPreserveDowngrade;
     use nexus_types::deployment::CockroachDbSettings;
@@ -769,10 +813,13 @@ mod test {
     use omicron_common::api::external::Generation;
     use omicron_common::disk::DiskIdentity;
     use omicron_test_utils::dev::test_setup_log;
+    use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
+    use std::collections::BTreeSet;
     use std::collections::HashMap;
+    use std::mem;
     use std::net::IpAddr;
     use typed_rng::TypedUuidRng;
 
@@ -783,10 +830,9 @@ mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Use our example system.
-        let mut example =
-            ExampleSystem::new(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
-        let blueprint1 = &example.blueprint;
-        verify_blueprint(blueprint1);
+        let (mut example, blueprint1) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME).build();
+        verify_blueprint(&blueprint1);
 
         println!("{}", blueprint1.display());
 
@@ -795,7 +841,7 @@ mod test {
         // fix.
         let blueprint2 = Planner::new_based_on(
             logctx.log.clone(),
-            blueprint1,
+            &blueprint1,
             &example.input,
             "no-op?",
             &example.collection,
@@ -805,7 +851,7 @@ mod test {
         .plan()
         .expect("failed to plan");
 
-        let diff = blueprint2.diff_since_blueprint(blueprint1);
+        let diff = blueprint2.diff_since_blueprint(&blueprint1);
         println!("1 -> 2 (expected no changes):\n{}", diff.display());
         assert_eq!(diff.sleds_added.len(), 0);
         assert_eq!(diff.sleds_removed.len(), 0);
@@ -962,11 +1008,17 @@ mod test {
         static TEST_NAME: &str = "planner_add_multiple_nexus_to_one_sled";
         let logctx = test_setup_log(TEST_NAME);
 
-        // Use our example system as a starting point, but strip it down to just
-        // one sled.
+        // Use our example system as a starting point, but strip it down to
+        // just one sled.
+        //
+        // An alternative here would be to pass in nsleds = 1 rather than
+        // DEFAULT_N_SLEDS, but that would cause multiple Nexuses to be added
+        // to the one sled within the example system. Instead, we want there to
+        // be _one_ Nexus on the one sled, and then add more Nexuses to that
+        // within this test.
         let (sled_id, blueprint1, collection, input) = {
             let (mut collection, input, mut blueprint) =
-                example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+                example(&logctx.log, TEST_NAME);
 
             // Pick one sled ID to keep and remove the rest.
             let mut builder = input.into_builder();
@@ -981,22 +1033,41 @@ mod test {
             blueprint.blueprint_zones.retain(|k, _v| keep_sled_id == *k);
             blueprint.blueprint_disks.retain(|k, _v| keep_sled_id == *k);
 
-            // Previously, we would clear out any network resources from the
-            // planning input that were assigned to sleds other than
-            // `keep_sled_id`. However, currently, while constructing the
-            // example system, network resources do not make their way into the
-            // planning input! So that operation was a no-op.
-            //
-            // For now, we just check that the network resources are empty.
-            //
-            // TODO: This is arguably a bug in how ExampleSystem is generated,
-            // and will hopefully be addressed in the future.
-            assert_eq!(
-                builder.network_resources_mut(),
-                &OmicronZoneNetworkResources::new(),
-                "input network resources should be empty -- \
-                 has the ExampleSystem logic been updated to populate them?"
-            );
+            // Also remove all the networking resources for the zones we just
+            // stripped out; i.e., only keep those for `keep_sled_id`.
+            let mut new_network_resources = OmicronZoneNetworkResources::new();
+            let old_network_resources = builder.network_resources_mut();
+            for old_ip in old_network_resources.omicron_zone_external_ips() {
+                if blueprint.all_omicron_zones(BlueprintZoneFilter::All).any(
+                    |(_, zone)| {
+                        zone.zone_type
+                            .external_networking()
+                            .map(|(ip, _nic)| ip.id() == old_ip.ip.id())
+                            .unwrap_or(false)
+                    },
+                ) {
+                    new_network_resources
+                        .add_external_ip(old_ip.zone_id, old_ip.ip)
+                        .expect("copied IP to new input");
+                }
+            }
+            for old_nic in old_network_resources.omicron_zone_nics() {
+                if blueprint.all_omicron_zones(BlueprintZoneFilter::All).any(
+                    |(_, zone)| {
+                        zone.zone_type
+                            .external_networking()
+                            .map(|(_ip, nic)| {
+                                nic.id == old_nic.nic.id.into_untyped_uuid()
+                            })
+                            .unwrap_or(false)
+                    },
+                ) {
+                    new_network_resources
+                        .add_nic(old_nic.zone_id, old_nic.nic)
+                        .expect("copied NIC to new input");
+                }
+            }
+            mem::swap(old_network_resources, &mut &mut new_network_resources);
 
             (keep_sled_id, blueprint, collection, builder.build())
         };
@@ -1079,8 +1150,7 @@ mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Use our example system as a starting point.
-        let (collection, input, blueprint1) =
-            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+        let (collection, input, blueprint1) = example(&logctx.log, TEST_NAME);
 
         // This blueprint should only have 3 Nexus zones: one on each sled.
         assert_eq!(blueprint1.blueprint_zones.len(), 3);
@@ -1162,7 +1232,7 @@ mod test {
 
         // Use our example system as a starting point.
         let (collection, input, mut blueprint1) =
-            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+            example(&logctx.log, TEST_NAME);
 
         // This blueprint should have exactly 3 internal DNS zones: one on each
         // sled.
@@ -1276,8 +1346,7 @@ mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Use our example system as a starting point.
-        let (collection, input, blueprint1) =
-            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+        let (collection, input, blueprint1) = example(&logctx.log, TEST_NAME);
 
         // Expunge the first sled we see, which will result in a Nexus external
         // IP no longer being associated with a running zone, and a new Nexus
@@ -1376,8 +1445,7 @@ mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Use our example system as a starting point.
-        let (collection, input, blueprint1) =
-            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+        let (collection, input, blueprint1) = example(&logctx.log, TEST_NAME);
 
         // We should not be able to add any external DNS zones yet,
         // because we haven't give it any addresses (which currently
@@ -1551,8 +1619,10 @@ mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Create an example system with a single sled
-        let (collection, input, blueprint1) =
-            example(&logctx.log, TEST_NAME, 1);
+        let (example, blueprint1) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME).nsleds(1).build();
+        let collection = example.collection;
+        let input = example.input;
 
         let mut builder = input.into_builder();
 
@@ -1643,8 +1713,10 @@ mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Create an example system with a single sled
-        let (collection, input, blueprint1) =
-            example(&logctx.log, TEST_NAME, 1);
+        let (example, blueprint1) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME).nsleds(1).build();
+        let collection = example.collection;
+        let input = example.input;
 
         let mut builder = input.into_builder();
 
@@ -1741,8 +1813,10 @@ mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Create an example system with a single sled
-        let (collection, input, blueprint1) =
-            example(&logctx.log, TEST_NAME, 1);
+        let (example, blueprint1) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME).nsleds(1).build();
+        let collection = example.collection;
+        let input = example.input;
 
         let mut builder = input.into_builder();
 
@@ -1870,8 +1944,10 @@ mod test {
         // and decommissioned sleds. (When we add more kinds of
         // non-provisionable states in the future, we'll have to add more
         // sleds.)
-        let (collection, input, mut blueprint1) =
-            example(&logctx.log, TEST_NAME, 5);
+        let (example, mut blueprint1) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME).nsleds(5).build();
+        let collection = example.collection;
+        let input = example.input;
 
         // This blueprint should only have 5 Nexus zones: one on each sled.
         assert_eq!(blueprint1.blueprint_zones.len(), 5);
@@ -2151,8 +2227,7 @@ mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Use our example system as a starting point.
-        let (collection, input, blueprint1) =
-            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+        let (collection, input, blueprint1) = example(&logctx.log, TEST_NAME);
 
         // Expunge one of the sleds.
         let mut builder = input.into_builder();
@@ -2234,7 +2309,10 @@ mod test {
         assert_eq!(diff.sleds_added.len(), 0);
         assert_eq!(diff.sleds_removed.len(), 0);
         assert_eq!(diff.sleds_modified.len(), 0);
-        assert_eq!(diff.sleds_unchanged.len(), DEFAULT_N_SLEDS);
+        assert_eq!(
+            diff.sleds_unchanged.len(),
+            ExampleSystemBuilder::DEFAULT_N_SLEDS
+        );
 
         // Test a no-op planning iteration.
         assert_planning_makes_no_changes(
@@ -2277,7 +2355,10 @@ mod test {
         assert_eq!(diff.sleds_added.len(), 0);
         assert_eq!(diff.sleds_removed.len(), 0);
         assert_eq!(diff.sleds_modified.len(), 0);
-        assert_eq!(diff.sleds_unchanged.len(), DEFAULT_N_SLEDS);
+        assert_eq!(
+            diff.sleds_unchanged.len(),
+            ExampleSystemBuilder::DEFAULT_N_SLEDS
+        );
 
         // Test a no-op planning iteration.
         assert_planning_makes_no_changes(
@@ -2295,7 +2376,10 @@ mod test {
         static TEST_NAME: &str = "planner_ensure_preserve_downgrade_option";
         let logctx = test_setup_log(TEST_NAME);
 
-        let (collection, input, bp1) = example(&logctx.log, TEST_NAME, 0);
+        let (example, bp1) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME).nsleds(0).build();
+        let collection = example.collection;
+        let input = example.input;
         let mut builder = input.into_builder();
         assert!(bp1.cockroachdb_fingerprint.is_empty());
         assert_eq!(
@@ -2408,6 +2492,630 @@ mod test {
                 CockroachDbPreserveDowngrade::DoNotModify
             );
         }
+
+        logctx.cleanup_successful();
+    }
+
+    /// Deploy all keeper nodes server nodes at once for a new cluster.
+    /// Then add keeper nodes 1 at a time.
+    #[test]
+    fn test_plan_deploy_all_clickhouse_cluster_nodes() {
+        static TEST_NAME: &str = "planner_deploy_all_keeper_nodes";
+        let logctx = test_setup_log(TEST_NAME);
+        let log = logctx.log.clone();
+
+        // Use our example system.
+        let (mut collection, input, blueprint1) = example(&log, TEST_NAME);
+        verify_blueprint(&blueprint1);
+
+        // We shouldn't have a clickhouse cluster config, as we don't have a
+        // clickhouse policy set yet
+        assert!(blueprint1.clickhouse_cluster_config.is_none());
+        let target_keepers = 3;
+        let target_servers = 2;
+
+        // Enable clickhouse clusters via policy
+        let mut input_builder = input.into_builder();
+        input_builder.policy_mut().clickhouse_policy = Some(ClickhousePolicy {
+            deploy_with_standalone: true,
+            target_servers,
+            target_keepers,
+        });
+
+        // Creating a new blueprint should deploy all the new clickhouse zones
+        let input = input_builder.build();
+        let blueprint2 = Planner::new_based_on(
+            log.clone(),
+            &blueprint1,
+            &input,
+            "test_blueprint2",
+            &collection,
+        )
+        .expect("created planner")
+        .with_rng_seed((TEST_NAME, "bp2"))
+        .plan()
+        .expect("plan");
+
+        // We should see zones for 3 clickhouse keepers, and 2 servers created
+        let active_zones: Vec<_> = blueprint2
+            .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+            .map(|(_, z)| z.clone())
+            .collect();
+
+        let keeper_zone_ids: BTreeSet<_> = active_zones
+            .iter()
+            .filter(|z| z.zone_type.is_clickhouse_keeper())
+            .map(|z| z.id)
+            .collect();
+        let server_zone_ids: BTreeSet<_> = active_zones
+            .iter()
+            .filter(|z| z.zone_type.is_clickhouse_server())
+            .map(|z| z.id)
+            .collect();
+
+        assert_eq!(keeper_zone_ids.len(), target_keepers);
+        assert_eq!(server_zone_ids.len(), target_servers);
+
+        // We should be attempting to allocate all servers and keepers since
+        // this the initial configuration
+        {
+            let clickhouse_cluster_config =
+                blueprint2.clickhouse_cluster_config.as_ref().unwrap();
+            assert_eq!(clickhouse_cluster_config.generation, 2.into());
+            assert_eq!(
+                clickhouse_cluster_config.max_used_keeper_id,
+                (target_keepers as u64).into()
+            );
+            assert_eq!(
+                clickhouse_cluster_config.max_used_server_id,
+                (target_servers as u64).into()
+            );
+            assert_eq!(clickhouse_cluster_config.keepers.len(), target_keepers);
+            assert_eq!(clickhouse_cluster_config.servers.len(), target_servers);
+
+            // Ensure that the added keepers are in server zones
+            for zone_id in clickhouse_cluster_config.keepers.keys() {
+                assert!(keeper_zone_ids.contains(zone_id));
+            }
+
+            // Ensure that the added servers are in server zones
+            for zone_id in clickhouse_cluster_config.servers.keys() {
+                assert!(server_zone_ids.contains(zone_id));
+            }
+        }
+
+        // Planning again without changing inventory should result in the same
+        // state
+        let blueprint3 = Planner::new_based_on(
+            log.clone(),
+            &blueprint2,
+            &input,
+            "test_blueprint3",
+            &collection,
+        )
+        .expect("created planner")
+        .with_rng_seed((TEST_NAME, "bp3"))
+        .plan()
+        .expect("plan");
+
+        assert_eq!(
+            blueprint2.clickhouse_cluster_config,
+            blueprint3.clickhouse_cluster_config
+        );
+
+        // Updating the inventory to reflect the keepers
+        // should result in the same state, except for the
+        // `highest_seen_keeper_leader_committed_log_index`
+        let (zone_id, keeper_id) = blueprint3
+            .clickhouse_cluster_config
+            .as_ref()
+            .unwrap()
+            .keepers
+            .first_key_value()
+            .unwrap();
+        let membership = ClickhouseKeeperClusterMembership {
+            queried_keeper: *keeper_id,
+            leader_committed_log_index: 1,
+            raft_config: blueprint3
+                .clickhouse_cluster_config
+                .as_ref()
+                .unwrap()
+                .keepers
+                .values()
+                .cloned()
+                .collect(),
+        };
+        collection
+            .clickhouse_keeper_cluster_membership
+            .insert(*zone_id, membership);
+
+        let blueprint4 = Planner::new_based_on(
+            log.clone(),
+            &blueprint3,
+            &input,
+            "test_blueprint4",
+            &collection,
+        )
+        .expect("created planner")
+        .with_rng_seed((TEST_NAME, "bp4"))
+        .plan()
+        .expect("plan");
+
+        let bp3_config = blueprint3.clickhouse_cluster_config.as_ref().unwrap();
+        let bp4_config = blueprint4.clickhouse_cluster_config.as_ref().unwrap();
+        assert_eq!(bp4_config.generation, bp3_config.generation);
+        assert_eq!(
+            bp4_config.max_used_keeper_id,
+            bp3_config.max_used_keeper_id
+        );
+        assert_eq!(
+            bp4_config.max_used_server_id,
+            bp3_config.max_used_server_id
+        );
+        assert_eq!(bp4_config.keepers, bp3_config.keepers);
+        assert_eq!(bp4_config.servers, bp3_config.servers);
+        assert_eq!(
+            bp4_config.highest_seen_keeper_leader_committed_log_index,
+            1
+        );
+
+        // Let's bump the clickhouse target to 5 via policy so that we can add
+        // more nodes one at a time. Initial configuration deploys all nodes,
+        // but reconfigurations may only add or remove one node at a time.
+        // Enable clickhouse clusters via policy
+        let target_keepers = 5;
+        let mut input_builder = input.into_builder();
+        input_builder.policy_mut().clickhouse_policy = Some(ClickhousePolicy {
+            deploy_with_standalone: true,
+            target_servers,
+            target_keepers,
+        });
+        let input = input_builder.build();
+        let blueprint5 = Planner::new_based_on(
+            log.clone(),
+            &blueprint4,
+            &input,
+            "test_blueprint5",
+            &collection,
+        )
+        .expect("created planner")
+        .with_rng_seed((TEST_NAME, "bp5"))
+        .plan()
+        .expect("plan");
+
+        let active_zones: Vec<_> = blueprint5
+            .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+            .map(|(_, z)| z.clone())
+            .collect();
+
+        let new_keeper_zone_ids: BTreeSet<_> = active_zones
+            .iter()
+            .filter(|z| z.zone_type.is_clickhouse_keeper())
+            .map(|z| z.id)
+            .collect();
+
+        // We should have allocated 2 new keeper zones
+        assert_eq!(new_keeper_zone_ids.len(), target_keepers);
+        assert!(keeper_zone_ids.is_subset(&new_keeper_zone_ids));
+
+        // We should be trying to provision one new keeper for a keeper zone
+        let bp4_config = blueprint4.clickhouse_cluster_config.as_ref().unwrap();
+        let bp5_config = blueprint5.clickhouse_cluster_config.as_ref().unwrap();
+        assert_eq!(bp5_config.generation, bp4_config.generation.next());
+        assert_eq!(
+            bp5_config.max_used_keeper_id,
+            bp4_config.max_used_keeper_id + 1.into()
+        );
+        assert_eq!(
+            bp5_config.keepers.len(),
+            bp5_config.max_used_keeper_id.0 as usize
+        );
+
+        // Planning again without updating inventory results in the same `ClickhouseClusterConfig`
+        let blueprint6 = Planner::new_based_on(
+            log.clone(),
+            &blueprint5,
+            &input,
+            "test_blueprint6",
+            &collection,
+        )
+        .expect("created planner")
+        .with_rng_seed((TEST_NAME, "bp6"))
+        .plan()
+        .expect("plan");
+
+        let bp6_config = blueprint6.clickhouse_cluster_config.as_ref().unwrap();
+        assert_eq!(bp5_config, bp6_config);
+
+        // Updating the inventory to include the 4th node should add another
+        // keeper node
+        let membership = ClickhouseKeeperClusterMembership {
+            queried_keeper: *keeper_id,
+            leader_committed_log_index: 2,
+            raft_config: blueprint6
+                .clickhouse_cluster_config
+                .as_ref()
+                .unwrap()
+                .keepers
+                .values()
+                .cloned()
+                .collect(),
+        };
+        collection
+            .clickhouse_keeper_cluster_membership
+            .insert(*zone_id, membership);
+
+        let blueprint7 = Planner::new_based_on(
+            log.clone(),
+            &blueprint6,
+            &input,
+            "test_blueprint7",
+            &collection,
+        )
+        .expect("created planner")
+        .with_rng_seed((TEST_NAME, "bp7"))
+        .plan()
+        .expect("plan");
+
+        let bp7_config = blueprint7.clickhouse_cluster_config.as_ref().unwrap();
+        assert_eq!(bp7_config.generation, bp6_config.generation.next());
+        assert_eq!(
+            bp7_config.max_used_keeper_id,
+            bp6_config.max_used_keeper_id + 1.into()
+        );
+        assert_eq!(
+            bp7_config.keepers.len(),
+            bp7_config.max_used_keeper_id.0 as usize
+        );
+        assert_eq!(bp7_config.keepers.len(), target_keepers);
+        assert_eq!(
+            bp7_config.highest_seen_keeper_leader_committed_log_index,
+            2
+        );
+
+        // Updating the inventory to reflect the newest keeper node should not
+        // increase the cluster size since we have reached the target.
+        let membership = ClickhouseKeeperClusterMembership {
+            queried_keeper: *keeper_id,
+            leader_committed_log_index: 3,
+            raft_config: blueprint7
+                .clickhouse_cluster_config
+                .as_ref()
+                .unwrap()
+                .keepers
+                .values()
+                .cloned()
+                .collect(),
+        };
+        collection
+            .clickhouse_keeper_cluster_membership
+            .insert(*zone_id, membership);
+        let blueprint8 = Planner::new_based_on(
+            log.clone(),
+            &blueprint7,
+            &input,
+            "test_blueprint8",
+            &collection,
+        )
+        .expect("created planner")
+        .with_rng_seed((TEST_NAME, "bp8"))
+        .plan()
+        .expect("plan");
+
+        let bp8_config = blueprint8.clickhouse_cluster_config.as_ref().unwrap();
+        assert_eq!(bp8_config.generation, bp7_config.generation);
+        assert_eq!(
+            bp8_config.max_used_keeper_id,
+            bp7_config.max_used_keeper_id
+        );
+        assert_eq!(bp8_config.keepers, bp7_config.keepers);
+        assert_eq!(bp7_config.keepers.len(), target_keepers);
+        assert_eq!(
+            bp8_config.highest_seen_keeper_leader_committed_log_index,
+            3
+        );
+
+        logctx.cleanup_successful();
+    }
+
+    // Start with an existing clickhouse cluster and expunge a keeper. This
+    // models what will happen after an RSS deployment with clickhouse policy
+    // enabled or an existing system already running a clickhouse cluster.
+    #[test]
+    fn test_expunge_clickhouse_clusters() {
+        static TEST_NAME: &str = "planner_expunge_clickhouse_clusters";
+        let logctx = test_setup_log(TEST_NAME);
+        let log = logctx.log.clone();
+
+        // Use our example system.
+        let (mut collection, input, blueprint1) = example(&log, TEST_NAME);
+
+        let target_keepers = 3;
+        let target_servers = 2;
+
+        // Enable clickhouse clusters via policy
+        let mut input_builder = input.into_builder();
+        input_builder.policy_mut().clickhouse_policy = Some(ClickhousePolicy {
+            deploy_with_standalone: true,
+            target_servers,
+            target_keepers,
+        });
+        let input = input_builder.build();
+
+        // Create a new blueprint to deploy all our clickhouse zones
+        let mut blueprint2 = Planner::new_based_on(
+            log.clone(),
+            &blueprint1,
+            &input,
+            "test_blueprint2",
+            &collection,
+        )
+        .expect("created planner")
+        .with_rng_seed((TEST_NAME, "bp2"))
+        .plan()
+        .expect("plan");
+
+        // We should see zones for 3 clickhouse keepers, and 2 servers created
+        let active_zones: Vec<_> = blueprint2
+            .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+            .map(|(_, z)| z.clone())
+            .collect();
+
+        let keeper_zone_ids: BTreeSet<_> = active_zones
+            .iter()
+            .filter(|z| z.zone_type.is_clickhouse_keeper())
+            .map(|z| z.id)
+            .collect();
+        let server_zone_ids: BTreeSet<_> = active_zones
+            .iter()
+            .filter(|z| z.zone_type.is_clickhouse_server())
+            .map(|z| z.id)
+            .collect();
+
+        assert_eq!(keeper_zone_ids.len(), target_keepers);
+        assert_eq!(server_zone_ids.len(), target_servers);
+
+        // Directly manipulate the blueprint and inventory so that the
+        // clickhouse clusters are stable
+        let config = blueprint2.clickhouse_cluster_config.as_mut().unwrap();
+        config.max_used_keeper_id = (target_keepers as u64).into();
+        config.keepers = keeper_zone_ids
+            .iter()
+            .enumerate()
+            .map(|(i, zone_id)| (*zone_id, KeeperId(i as u64)))
+            .collect();
+        config.highest_seen_keeper_leader_committed_log_index = 1;
+
+        let raft_config: BTreeSet<_> =
+            config.keepers.values().cloned().collect();
+
+        collection.clickhouse_keeper_cluster_membership = config
+            .keepers
+            .iter()
+            .map(|(zone_id, keeper_id)| {
+                (
+                    *zone_id,
+                    ClickhouseKeeperClusterMembership {
+                        queried_keeper: *keeper_id,
+                        leader_committed_log_index: 1,
+                        raft_config: raft_config.clone(),
+                    },
+                )
+            })
+            .collect();
+
+        // Let's run the planner. The blueprint shouldn't change with regards to
+        // clickhouse as our inventory reflects our desired state.
+        let blueprint3 = Planner::new_based_on(
+            log.clone(),
+            &blueprint2,
+            &input,
+            "test_blueprint3",
+            &collection,
+        )
+        .expect("created planner")
+        .with_rng_seed((TEST_NAME, "bp3"))
+        .plan()
+        .expect("plan");
+
+        assert_eq!(
+            blueprint2.clickhouse_cluster_config,
+            blueprint3.clickhouse_cluster_config
+        );
+
+        // Find the sled containing one of the keeper zones and expunge it
+        let (sled_id, bp_zone_config) = blueprint3
+            .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+            .find(|(_, z)| z.zone_type.is_clickhouse_keeper())
+            .unwrap();
+
+        // Expunge a keeper zone
+        let mut builder = input.into_builder();
+        builder.sleds_mut().get_mut(&sled_id).unwrap().policy =
+            SledPolicy::Expunged;
+        let input = builder.build();
+
+        let blueprint4 = Planner::new_based_on(
+            log.clone(),
+            &blueprint3,
+            &input,
+            "test_blueprint4",
+            &collection,
+        )
+        .expect("created planner")
+        .with_rng_seed((TEST_NAME, "bp4"))
+        .plan()
+        .expect("plan");
+
+        // The planner should expunge a zone based on the sled being expunged. Since this
+        // is a clickhouse keeper zone, the clickhouse keeper configuration should change
+        // to reflect this.
+        let old_config = blueprint3.clickhouse_cluster_config.as_ref().unwrap();
+        let config = blueprint4.clickhouse_cluster_config.as_ref().unwrap();
+        assert_eq!(config.generation, old_config.generation.next());
+        assert!(!config.keepers.contains_key(&bp_zone_config.id));
+        // We've only removed one keeper from our desired state
+        assert_eq!(config.keepers.len() + 1, old_config.keepers.len());
+        // We haven't allocated any new keepers
+        assert_eq!(config.max_used_keeper_id, old_config.max_used_keeper_id);
+
+        // Planning again will not change the keeper state because we haven't updated the inventory
+        let blueprint5 = Planner::new_based_on(
+            log.clone(),
+            &blueprint4,
+            &input,
+            "test_blueprint5",
+            &collection,
+        )
+        .expect("created planner")
+        .with_rng_seed((TEST_NAME, "bp5"))
+        .plan()
+        .expect("plan");
+
+        assert_eq!(
+            blueprint4.clickhouse_cluster_config,
+            blueprint5.clickhouse_cluster_config
+        );
+
+        // Updating the inventory to reflect the removed keeper results in a new one being added
+
+        // Remove the keeper for the expunged zone
+        collection
+            .clickhouse_keeper_cluster_membership
+            .remove(&bp_zone_config.id);
+
+        // Update the inventory on at least one of the remaining nodes.
+        let existing = collection
+            .clickhouse_keeper_cluster_membership
+            .first_entry()
+            .unwrap()
+            .into_mut();
+        existing.leader_committed_log_index = 3;
+        existing.raft_config = config.keepers.values().cloned().collect();
+
+        let blueprint6 = Planner::new_based_on(
+            log.clone(),
+            &blueprint5,
+            &input,
+            "test_blueprint6",
+            &collection,
+        )
+        .expect("created planner")
+        .with_rng_seed((TEST_NAME, "bp6"))
+        .plan()
+        .expect("plan");
+
+        let old_config = blueprint5.clickhouse_cluster_config.as_ref().unwrap();
+        let config = blueprint6.clickhouse_cluster_config.as_ref().unwrap();
+
+        // Our generation has changed to reflect the added keeper
+        assert_eq!(config.generation, old_config.generation.next());
+        assert!(!config.keepers.contains_key(&bp_zone_config.id));
+        // We've only added one keeper from our desired state
+        // This brings us back up to our target count
+        assert_eq!(config.keepers.len(), old_config.keepers.len() + 1);
+        assert_eq!(config.keepers.len(), target_keepers);
+        // We've allocated one new keeper
+        assert_eq!(
+            config.max_used_keeper_id,
+            old_config.max_used_keeper_id + 1.into()
+        );
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_expunge_all_clickhouse_cluster_zones_after_policy_is_disabled() {
+        static TEST_NAME: &str = "planner_expunge_all_clickhouse_cluster_zones_after_policy_is_disabled";
+        let logctx = test_setup_log(TEST_NAME);
+        let log = logctx.log.clone();
+
+        // Use our example system.
+        let (collection, input, blueprint1) = example(&log, TEST_NAME);
+
+        let target_keepers = 3;
+        let target_servers = 2;
+
+        // Enable clickhouse clusters via policy
+        let mut input_builder = input.into_builder();
+        input_builder.policy_mut().clickhouse_policy = Some(ClickhousePolicy {
+            deploy_with_standalone: true,
+            target_servers,
+            target_keepers,
+        });
+        let input = input_builder.build();
+
+        // Create a new blueprint to deploy all our clickhouse zones
+        let blueprint2 = Planner::new_based_on(
+            log.clone(),
+            &blueprint1,
+            &input,
+            "test_blueprint2",
+            &collection,
+        )
+        .expect("created planner")
+        .with_rng_seed((TEST_NAME, "bp2"))
+        .plan()
+        .expect("plan");
+
+        // We should see zones for 3 clickhouse keepers, and 2 servers created
+        let active_zones: Vec<_> = blueprint2
+            .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+            .map(|(_, z)| z.clone())
+            .collect();
+
+        let keeper_zone_ids: BTreeSet<_> = active_zones
+            .iter()
+            .filter(|z| z.zone_type.is_clickhouse_keeper())
+            .map(|z| z.id)
+            .collect();
+        let server_zone_ids: BTreeSet<_> = active_zones
+            .iter()
+            .filter(|z| z.zone_type.is_clickhouse_server())
+            .map(|z| z.id)
+            .collect();
+
+        assert_eq!(keeper_zone_ids.len(), target_keepers);
+        assert_eq!(server_zone_ids.len(), target_servers);
+
+        // Disable clickhouse clusters via policy
+        let mut input_builder = input.into_builder();
+        input_builder.policy_mut().clickhouse_policy = None;
+        let input = input_builder.build();
+
+        // Create a new blueprint with the disabled policy
+        let blueprint3 = Planner::new_based_on(
+            log.clone(),
+            &blueprint2,
+            &input,
+            "test_blueprint3",
+            &collection,
+        )
+        .expect("created planner")
+        .with_rng_seed((TEST_NAME, "bp3"))
+        .plan()
+        .expect("plan");
+
+        // All our clickhouse keeper and server zones that we created when we
+        // enabled our clickhouse policy should be expunged when we disable it.
+        let expunged_zones: Vec<_> = blueprint3
+            .all_omicron_zones(BlueprintZoneFilter::Expunged)
+            .map(|(_, z)| z.clone())
+            .collect();
+
+        let expunged_keeper_zone_ids: BTreeSet<_> = expunged_zones
+            .iter()
+            .filter(|z| z.zone_type.is_clickhouse_keeper())
+            .map(|z| z.id)
+            .collect();
+        let expunged_server_zone_ids: BTreeSet<_> = expunged_zones
+            .iter()
+            .filter(|z| z.zone_type.is_clickhouse_server())
+            .map(|z| z.id)
+            .collect();
+
+        assert_eq!(keeper_zone_ids, expunged_keeper_zone_ids);
+        assert_eq!(server_zone_ids, expunged_server_zone_ids);
 
         logctx.cleanup_successful();
     }

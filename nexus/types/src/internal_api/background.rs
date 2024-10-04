@@ -12,6 +12,7 @@ use uuid::Uuid;
 pub struct RegionReplacementStatus {
     pub requests_created_ok: Vec<String>,
     pub start_invoked_ok: Vec<String>,
+    pub requests_completed_ok: Vec<String>,
     pub errors: Vec<String>,
 }
 

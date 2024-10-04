@@ -813,18 +813,20 @@ impl BpClickhouseClusterConfig {
                 .max_used_server_id
                 .0
                 .try_into()
-                .context("more than 2^63 IDs in use")?,
+                .context("more than 2^63 clickhouse server IDs in use")?,
             max_used_keeper_id: config
                 .max_used_keeper_id
                 .0
                 .try_into()
-                .context("more than 2^63 IDs in use")?,
+                .context("more than 2^63 clickhouse keeper IDs in use")?,
             cluster_name: config.cluster_name.clone(),
             cluster_secret: config.cluster_secret.clone(),
             highest_seen_keeper_leader_committed_log_index: config
                 .highest_seen_keeper_leader_committed_log_index
                 .try_into()
-                .context("more than 2^63 IDs in use")?,
+                .context(
+                    "more than 2^63 clickhouse keeper log indexes in use",
+                )?,
         })
     }
 }

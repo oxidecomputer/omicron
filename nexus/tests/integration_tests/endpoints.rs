@@ -434,7 +434,10 @@ pub static DEMO_INSTANCE_CREATE: Lazy<params::InstanceCreate> =
         auto_restart_policy: Default::default(),
     });
 pub static DEMO_INSTANCE_UPDATE: Lazy<params::InstanceUpdate> =
-    Lazy::new(|| params::InstanceUpdate { boot_disk: None });
+    Lazy::new(|| params::InstanceUpdate {
+        boot_disk: None,
+        auto_restart_policy: None,
+    });
 
 // The instance needs a network interface, too.
 pub static DEMO_INSTANCE_NIC_NAME: Lazy<Name> =
