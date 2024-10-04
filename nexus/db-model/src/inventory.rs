@@ -1177,7 +1177,7 @@ impl From<InvDataset> for nexus_types::inventory::Dataset {
 /// [`nexus_types::inventory::SledAgent`].
 ///
 /// TODO: This table is vestigial and can be combined with `InvSledAgent`. See
-/// https://github.com/oxidecomputer/omicron/issues/6770.
+/// [issue #6670](https://github.com/oxidecomputer/omicron/issues/6770).
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_sled_omicron_zones)]
 pub struct InvSledOmicronZones {
