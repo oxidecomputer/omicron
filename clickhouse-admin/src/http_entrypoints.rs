@@ -26,7 +26,7 @@ enum ClickhouseAdminImpl {}
 impl ClickhouseAdminApi for ClickhouseAdminImpl {
     type Context = Arc<ServerContext>;
 
-    async fn generate_server_config(
+    async fn generate_server_config_and_enable(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<ServerConfigurableSettings>,
     ) -> Result<HttpResponseCreated<ReplicaConfig>, HttpError> {
@@ -37,17 +37,12 @@ impl ClickhouseAdminApi for ClickhouseAdminImpl {
 
         // Once we have generated the client we can safely enable the clickhouse_server service
         let fmri = "svc:/oxide/clickhouse_server:default".to_string();
-        Svcadm::enable_service(fmri).map_err(|err| HttpError {
-            status_code: http::StatusCode::INTERNAL_SERVER_ERROR,
-            error_code: Some(String::from("Internal")),
-            external_message: format!("{err}"),
-            internal_message: format!("{err}"),
-        })?;
+        Svcadm::enable_service(fmri)?;
 
         Ok(HttpResponseCreated(output))
     }
 
-    async fn generate_keeper_config(
+    async fn generate_keeper_config_and_enable(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<KeeperConfigurableSettings>,
     ) -> Result<HttpResponseCreated<KeeperConfig>, HttpError> {
@@ -57,12 +52,7 @@ impl ClickhouseAdminApi for ClickhouseAdminImpl {
 
         // Once we have generated the client we can safely enable the clickhouse_keeper service
         let fmri = "svc:/oxide/clickhouse_keeper:default".to_string();
-        Svcadm::enable_service(fmri).map_err(|err| HttpError {
-            status_code: http::StatusCode::INTERNAL_SERVER_ERROR,
-            error_code: Some(String::from("Internal")),
-            external_message: format!("{err}"),
-            internal_message: format!("{err}"),
-        })?;
+        Svcadm::enable_service(fmri)?;
 
         Ok(HttpResponseCreated(output))
     }
