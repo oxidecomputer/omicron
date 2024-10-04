@@ -32,7 +32,7 @@ use omicron_common::update::ArtifactHash;
 use repo_depot_api::*;
 use sha2::{Digest, Sha256};
 use sled_storage::manager::StorageHandle;
-use slog::{info, Logger};
+use slog::{error, info, Logger};
 use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 
@@ -85,6 +85,7 @@ impl<T: StorageBackend> ArtifactStore<T> {
         sha256: ArtifactHash,
     ) -> Result<File, Error> {
         let sha256 = sha256.to_string();
+        let mut last_error = None;
         for dataset in self.dataset_mountpoints().await? {
             let path = dataset.join(&sha256);
             match File::open(&path).await {
@@ -99,11 +100,21 @@ impl<T: StorageBackend> ArtifactStore<T> {
                 }
                 Err(err) if err.kind() == ErrorKind::NotFound => {}
                 Err(err) => {
-                    return Err(Error::File { verb: "open", path, err });
+                    error!(
+                        &self.log,
+                        "Failed to open file";
+                        "error" => &err,
+                        "path" => path.as_str(),
+                    );
+                    last_error = Some(Error::File { verb: "open", path, err });
                 }
             }
         }
-        Err(Error::NotFound { sha256 })
+        if let Some(last_error) = last_error {
+            Err(last_error)
+        } else {
+            Err(Error::NotFound { sha256 })
+        }
     }
 
     /// PUT operation (served by Sled Agent API)
@@ -230,6 +241,7 @@ impl<T: StorageBackend> ArtifactStore<T> {
     ) -> Result<(), Error> {
         let sha256 = sha256.to_string();
         let mut any_datasets = false;
+        let mut last_error = None;
         for dataset in self.dataset_mountpoints().await? {
             any_datasets = true;
             let path = dataset.join(&sha256);
@@ -244,11 +256,20 @@ impl<T: StorageBackend> ArtifactStore<T> {
                 }
                 Err(err) if err.kind() == ErrorKind::NotFound => {}
                 Err(err) => {
-                    return Err(Error::File { verb: "remove", path, err });
+                    error!(
+                        &self.log,
+                        "Failed to remove file";
+                        "error" => &err,
+                        "path" => path.as_str(),
+                    );
+                    last_error =
+                        Some(Error::File { verb: "remove", path, err });
                 }
             }
         }
-        if any_datasets {
+        if let Some(last_error) = last_error {
+            Err(last_error)
+        } else if any_datasets {
             Ok(())
         } else {
             // If we're here because there aren't any update datasets, we should
