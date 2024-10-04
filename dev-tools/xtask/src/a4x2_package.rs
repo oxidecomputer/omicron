@@ -106,6 +106,13 @@ pub fn run_cmd(args: A4x2PackageArgs) -> Result<()> {
             .arg("checkout")
             .arg(&treeish);
         run_subcmd(cmd)?;
+
+        // For it to be useful we need to do this
+        let mut cmd = Command::new("./tools/install_builder_prerequisites.sh");
+        cmd
+            .current_dir(&omicron_dir)
+            .arg("-yp");
+        run_subcmd(cmd)?;
     }
 
     // Testbed stuff
