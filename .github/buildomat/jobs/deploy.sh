@@ -116,7 +116,7 @@ _exit_trap() {
 		# to talk to an explicit external service. This command line is
 		# similar to that used by the pre-flight NTP checks.
 		pfexec zlogin "$z" /usr/sbin/chronyd -t 10 -ddq \
-		    'pool time.cloudflare.com iburst maxdelay 0.1'
+		    "'pool time.cloudflare.com iburst maxdelay 0.1'"
 	done
 
 	pfexec zlogin sidecar_softnpu cat /var/log/softnpu.log
