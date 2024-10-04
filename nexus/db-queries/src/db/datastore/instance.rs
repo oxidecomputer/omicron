@@ -1157,13 +1157,13 @@ impl DataStore {
             InstanceState::Creating,
         ];
 
-        let maybe_instance = instance_dsl::instance
+        let maybe_old_boot_disk_id = instance_dsl::instance
             .filter(instance_dsl::id.eq(authz_instance.id()))
             .filter(instance_dsl::time_deleted.is_null())
-            .select(Instance::as_select())
-            .first_async::<Instance>(conn)
+            .select(instance_dsl::boot_disk_id)
+            .first_async::<Option<Uuid>>(conn)
             .await;
-        let instance = match maybe_instance {
+        let old_boot_disk_id = match maybe_old_boot_disk_id {
             Ok(i) => i,
             Err(diesel::NotFound) => {
                 // If the instance simply doesn't exist, we
@@ -1179,7 +1179,7 @@ impl DataStore {
         // If the desired boot disk is already set, we're good here, and can
         // elide the check that the instance is in an acceptable state to change
         // the boot disk.
-        if instance.boot_disk_id == boot_disk_id {
+        if old_boot_disk_id == boot_disk_id {
             return Ok(());
         }
 
@@ -1251,6 +1251,35 @@ impl DataStore {
             InstanceState::Failed,
             InstanceState::Creating,
         ];
+
+        let maybe_old_sizes = instance_dsl::instance
+            .filter(instance_dsl::id.eq(authz_instance.id()))
+            .filter(instance_dsl::time_deleted.is_null())
+            .select((instance_dsl::ncpus, instance_dsl::memory))
+            .first_async::<(InstanceCpuCount, ByteCount)>(conn)
+            .await;
+
+        // Might be nice to extract `old_sizes` into an `InstanceDimensions` or
+        // something? Not processing the tuple `(InstanceCpuCount, ByteCount)`
+        // elsewhere yet, so maybe that would be premature...
+        let old_sizes = match maybe_old_sizes {
+            Ok(i) => i,
+            Err(diesel::NotFound) => {
+                // If the instance simply doesn't exist, we
+                // shouldn't retry. Bail with a useful error.
+                return Err(err.bail(Error::not_found_by_id(
+                    ResourceType::Instance,
+                    &authz_instance.id(),
+                )));
+            }
+            Err(e) => return Err(e),
+        };
+
+        // Bail out early if the extant vCPU and memory settings match the
+        // "new values".
+        if old_sizes == (ncpus, memory) {
+            return Ok(());
+        }
 
         let r = diesel::update(instance_dsl::instance)
             .filter(instance_dsl::id.eq(authz_instance.id()))
