@@ -774,12 +774,84 @@ impl super::Nexus {
             .map_err(Into::into)
     }
 
+    /// Forcefully stop a running instance, causing its sled-agent to rudely
+    /// terminate its VMM process and unregister the instance.
     pub(crate) async fn instance_force_terminate(
         &self,
         opctx: &OpContext,
         instance_lookup: &lookup::Instance<'_>,
     ) -> Result<InstanceAndActiveVmm, InstanceStateChangeError> {
-        todo!("eliza: actually implement this")
+        let (.., authz_instance) =
+            instance_lookup.lookup_for(authz::Action::Modify).await?;
+
+        let state = self
+            .db_datastore
+            .instance_fetch_with_vmm(opctx, &authz_instance)
+            .await?;
+
+        // Is the instance currently incarnated in a VMM process?
+        let Some(vmm) = state.vmm() else {
+            // If the instance is already un-incarnated, we're all good.
+            debug!(
+                opctx.log,
+                "asked to force terminate an instance that has no VMM, \
+                 doing nothing";
+                "instance_id" => %authz_instance.id(),
+                "instance_state" => ?state.instance.runtime(),
+            );
+            debug_assert_eq!(
+                state.instance.runtime().nexus_state,
+                db::model::InstanceState::NoVmm,
+                "if an instance has no active VMM, it must be in the NoVmm \
+                 state (this is enforced by a DB check constraint)",
+            );
+            return Ok(state);
+        };
+
+        // Ladies and gentlemen, we got him!
+        let propolis_id = PropolisUuid::from_untyped_uuid(vmm.id);
+        let sled_id = SledUuid::from_untyped_uuid(vmm.sled_id);
+        let unregister_result =
+            self.instance_ensure_unregistered(&propolis_id, &sled_id).await;
+        match unregister_result {
+            // VMM unregistered, now process the state transition.
+            Ok(Some(state)) => {
+                info!(
+                    opctx.log,
+                    "instance terminated with extreme prejudice";
+                    "instance_id" => %authz_instance.id(),
+                    "vmm_id" => %propolis_id,
+                    "sled_id" => %sled_id,
+                );
+
+                self.notify_vmm_updated(opctx, propolis_id, &state).await?;
+            }
+            // If the returned state from sled-agent is `None`, then the instance
+            // was already unregistered --- so this should succeed.
+            Ok(None) => {
+                info!(
+                    opctx.log,
+                    "asked to force terminate an instance that was already \
+                     unregistered";
+                    "instance_id" => %authz_instance.id(),
+                    "vmm_id" => %propolis_id,
+                    "sled_id" => %sled_id,
+                );
+            }
+            // If the error indicates that the VMM wasn't there to terminate,
+            // mark it as Failed instead.
+            Err(InstanceStateChangeError::SledAgent(e)) if e.vmm_gone() => {
+                let _ = self
+                    .mark_vmm_failed(&opctx, authz_instance.clone(), &vmm, &e)
+                    .await;
+            }
+            Err(e) => return Err(e),
+        }
+
+        self.db_datastore
+            .instance_fetch_with_vmm(opctx, &authz_instance)
+            .await
+            .map_err(Into::into)
     }
 
     /// Idempotently ensures that the sled specified in `db_instance` does not
