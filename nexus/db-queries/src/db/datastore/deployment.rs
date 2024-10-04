@@ -1869,7 +1869,7 @@ mod tests {
     ) -> (Collection, PlanningInput, Blueprint) {
         // We'll start with an example system.
         let (mut base_collection, planning_input, mut blueprint) =
-            example(log, test_name, 3);
+            example(log, test_name);
 
         // Take a more thorough collection representative (includes SPs,
         // etc.)...

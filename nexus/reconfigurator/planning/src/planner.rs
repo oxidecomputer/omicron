@@ -780,11 +780,10 @@ mod test {
     use super::Planner;
     use crate::blueprint_builder::test::assert_planning_makes_no_changes;
     use crate::blueprint_builder::test::verify_blueprint;
-    use crate::blueprint_builder::test::DEFAULT_N_SLEDS;
     use crate::blueprint_builder::BlueprintBuilder;
     use crate::blueprint_builder::EnsureMultiple;
     use crate::example::example;
-    use crate::example::ExampleSystem;
+    use crate::example::ExampleSystemBuilder;
     use crate::system::SledBuilder;
     use chrono::NaiveDateTime;
     use chrono::TimeZone;
@@ -831,10 +830,9 @@ mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Use our example system.
-        let mut example =
-            ExampleSystem::new(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
-        let blueprint1 = &example.blueprint;
-        verify_blueprint(blueprint1);
+        let (mut example, blueprint1) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME).build();
+        verify_blueprint(&blueprint1);
 
         println!("{}", blueprint1.display());
 
@@ -843,7 +841,7 @@ mod test {
         // fix.
         let blueprint2 = Planner::new_based_on(
             logctx.log.clone(),
-            blueprint1,
+            &blueprint1,
             &example.input,
             "no-op?",
             &example.collection,
@@ -853,7 +851,7 @@ mod test {
         .plan()
         .expect("failed to plan");
 
-        let diff = blueprint2.diff_since_blueprint(blueprint1);
+        let diff = blueprint2.diff_since_blueprint(&blueprint1);
         println!("1 -> 2 (expected no changes):\n{}", diff.display());
         assert_eq!(diff.sleds_added.len(), 0);
         assert_eq!(diff.sleds_removed.len(), 0);
@@ -1010,11 +1008,17 @@ mod test {
         static TEST_NAME: &str = "planner_add_multiple_nexus_to_one_sled";
         let logctx = test_setup_log(TEST_NAME);
 
-        // Use our example system as a starting point, but strip it down to just
-        // one sled.
+        // Use our example system as a starting point, but strip it down to
+        // just one sled.
+        //
+        // An alternative here would be to pass in nsleds = 1 rather than
+        // DEFAULT_N_SLEDS, but that would cause multiple Nexuses to be added
+        // to the one sled within the example system. Instead, we want there to
+        // be _one_ Nexus on the one sled, and then add more Nexuses to that
+        // within this test.
         let (sled_id, blueprint1, collection, input) = {
             let (mut collection, input, mut blueprint) =
-                example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+                example(&logctx.log, TEST_NAME);
 
             // Pick one sled ID to keep and remove the rest.
             let mut builder = input.into_builder();
@@ -1146,8 +1150,7 @@ mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Use our example system as a starting point.
-        let (collection, input, blueprint1) =
-            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+        let (collection, input, blueprint1) = example(&logctx.log, TEST_NAME);
 
         // This blueprint should only have 3 Nexus zones: one on each sled.
         assert_eq!(blueprint1.blueprint_zones.len(), 3);
@@ -1229,7 +1232,7 @@ mod test {
 
         // Use our example system as a starting point.
         let (collection, input, mut blueprint1) =
-            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+            example(&logctx.log, TEST_NAME);
 
         // This blueprint should have exactly 3 internal DNS zones: one on each
         // sled.
@@ -1343,8 +1346,7 @@ mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Use our example system as a starting point.
-        let (collection, input, blueprint1) =
-            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+        let (collection, input, blueprint1) = example(&logctx.log, TEST_NAME);
 
         // Expunge the first sled we see, which will result in a Nexus external
         // IP no longer being associated with a running zone, and a new Nexus
@@ -1443,8 +1445,7 @@ mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Use our example system as a starting point.
-        let (collection, input, blueprint1) =
-            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+        let (collection, input, blueprint1) = example(&logctx.log, TEST_NAME);
 
         // We should not be able to add any external DNS zones yet,
         // because we haven't give it any addresses (which currently
@@ -1618,8 +1619,10 @@ mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Create an example system with a single sled
-        let (collection, input, blueprint1) =
-            example(&logctx.log, TEST_NAME, 1);
+        let (example, blueprint1) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME).nsleds(1).build();
+        let collection = example.collection;
+        let input = example.input;
 
         let mut builder = input.into_builder();
 
@@ -1710,8 +1713,10 @@ mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Create an example system with a single sled
-        let (collection, input, blueprint1) =
-            example(&logctx.log, TEST_NAME, 1);
+        let (example, blueprint1) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME).nsleds(1).build();
+        let collection = example.collection;
+        let input = example.input;
 
         let mut builder = input.into_builder();
 
@@ -1808,8 +1813,10 @@ mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Create an example system with a single sled
-        let (collection, input, blueprint1) =
-            example(&logctx.log, TEST_NAME, 1);
+        let (example, blueprint1) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME).nsleds(1).build();
+        let collection = example.collection;
+        let input = example.input;
 
         let mut builder = input.into_builder();
 
@@ -1937,8 +1944,10 @@ mod test {
         // and decommissioned sleds. (When we add more kinds of
         // non-provisionable states in the future, we'll have to add more
         // sleds.)
-        let (collection, input, mut blueprint1) =
-            example(&logctx.log, TEST_NAME, 5);
+        let (example, mut blueprint1) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME).nsleds(5).build();
+        let collection = example.collection;
+        let input = example.input;
 
         // This blueprint should only have 5 Nexus zones: one on each sled.
         assert_eq!(blueprint1.blueprint_zones.len(), 5);
@@ -2218,8 +2227,7 @@ mod test {
         let logctx = test_setup_log(TEST_NAME);
 
         // Use our example system as a starting point.
-        let (collection, input, blueprint1) =
-            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+        let (collection, input, blueprint1) = example(&logctx.log, TEST_NAME);
 
         // Expunge one of the sleds.
         let mut builder = input.into_builder();
@@ -2301,7 +2309,10 @@ mod test {
         assert_eq!(diff.sleds_added.len(), 0);
         assert_eq!(diff.sleds_removed.len(), 0);
         assert_eq!(diff.sleds_modified.len(), 0);
-        assert_eq!(diff.sleds_unchanged.len(), DEFAULT_N_SLEDS);
+        assert_eq!(
+            diff.sleds_unchanged.len(),
+            ExampleSystemBuilder::DEFAULT_N_SLEDS
+        );
 
         // Test a no-op planning iteration.
         assert_planning_makes_no_changes(
@@ -2344,7 +2355,10 @@ mod test {
         assert_eq!(diff.sleds_added.len(), 0);
         assert_eq!(diff.sleds_removed.len(), 0);
         assert_eq!(diff.sleds_modified.len(), 0);
-        assert_eq!(diff.sleds_unchanged.len(), DEFAULT_N_SLEDS);
+        assert_eq!(
+            diff.sleds_unchanged.len(),
+            ExampleSystemBuilder::DEFAULT_N_SLEDS
+        );
 
         // Test a no-op planning iteration.
         assert_planning_makes_no_changes(
@@ -2362,7 +2376,10 @@ mod test {
         static TEST_NAME: &str = "planner_ensure_preserve_downgrade_option";
         let logctx = test_setup_log(TEST_NAME);
 
-        let (collection, input, bp1) = example(&logctx.log, TEST_NAME, 0);
+        let (example, bp1) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME).nsleds(0).build();
+        let collection = example.collection;
+        let input = example.input;
         let mut builder = input.into_builder();
         assert!(bp1.cockroachdb_fingerprint.is_empty());
         assert_eq!(
@@ -2488,8 +2505,7 @@ mod test {
         let log = logctx.log.clone();
 
         // Use our example system.
-        let (mut collection, input, blueprint1) =
-            example(&log, TEST_NAME, DEFAULT_N_SLEDS);
+        let (mut collection, input, blueprint1) = example(&log, TEST_NAME);
         verify_blueprint(&blueprint1);
 
         // We shouldn't have a clickhouse cluster config, as we don't have a
@@ -2812,8 +2828,7 @@ mod test {
         let log = logctx.log.clone();
 
         // Use our example system.
-        let (mut collection, input, blueprint1) =
-            example(&log, TEST_NAME, DEFAULT_N_SLEDS);
+        let (mut collection, input, blueprint1) = example(&log, TEST_NAME);
 
         let target_keepers = 3;
         let target_servers = 2;
@@ -3016,8 +3031,7 @@ mod test {
         let log = logctx.log.clone();
 
         // Use our example system.
-        let (collection, input, blueprint1) =
-            example(&log, TEST_NAME, DEFAULT_N_SLEDS);
+        let (collection, input, blueprint1) = example(&log, TEST_NAME);
 
         let target_keepers = 3;
         let target_servers = 2;

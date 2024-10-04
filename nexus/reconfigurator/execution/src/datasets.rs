@@ -118,7 +118,7 @@ pub(crate) async fn ensure_dataset_records_exist(
 mod tests {
     use super::*;
     use nexus_db_model::Zpool;
-    use nexus_reconfigurator_planning::example::example;
+    use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::blueprint_zone_type;
@@ -149,7 +149,9 @@ mod tests {
         let opctx = &opctx;
 
         // Use the standard example system.
-        let (collection, _, blueprint) = example(&opctx.log, TEST_NAME, 5);
+        let (example, blueprint) =
+            ExampleSystemBuilder::new(&opctx.log, TEST_NAME).nsleds(5).build();
+        let collection = example.collection;
 
         // Record the sleds and zpools.
         crate::tests::insert_sled_records(datastore, &blueprint).await;
