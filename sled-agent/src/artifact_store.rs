@@ -557,6 +557,8 @@ mod test {
                 Err(Error::NotFound { .. })
             ));
         }
+
+        log.cleanup_successful();
     }
 
     #[tokio::test]
@@ -583,5 +585,7 @@ mod test {
             store.delete(TEST_HASH).await,
             Err(Error::NoUpdateDataset)
         ));
+
+        log.cleanup_successful();
     }
 }
