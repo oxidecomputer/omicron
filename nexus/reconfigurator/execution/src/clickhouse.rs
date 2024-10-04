@@ -34,8 +34,7 @@ use std::str::FromStr;
 
 const CLICKHOUSE_SERVER_CONFIG_DIR: &str =
     "/opt/oxide/clickhouse_server/config.d";
-const CLICKHOUSE_KEEPER_CONFIG_DIR: &str =
-    "/opt/oxide/clickhouse_keeper/config.d";
+const CLICKHOUSE_KEEPER_CONFIG_DIR: &str = "/opt/oxide/clickhouse_keeper";
 const CLICKHOUSE_DATA_DIR: &str = "/data";
 
 pub(crate) async fn deploy_nodes(
