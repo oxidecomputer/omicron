@@ -301,7 +301,22 @@ pub fn blueprint_internal_dns_config(
             }
             BlueprintZoneType::ClickhouseKeeper(
                 blueprint_zone_type::ClickhouseKeeper { address, .. },
-            ) => (ServiceName::ClickhouseKeeper, address.port()),
+            ) => {
+                // Add the Clickhouse keeper service and `clickhouse-admin`
+                // service used for managing the keeper. We continue below so we
+                // don't fall through and call `host_zone_with_one_backend`.
+                dns_builder
+                    .host_zone_clickhouse_keeper(
+                        zone.id,
+                        zone.underlay_address,
+                        ServiceName::ClickhouseKeeper,
+                        address.port(),
+                    )
+                    .map_err(|e| Error::InternalError {
+                        internal_message: e.to_string(),
+                    })?;
+                continue 'all_zones;
+            }
             BlueprintZoneType::CockroachDb(
                 blueprint_zone_type::CockroachDb { address, .. },
             ) => (ServiceName::Cockroach, address.port()),
