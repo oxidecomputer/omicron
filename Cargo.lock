@@ -13600,6 +13600,7 @@ dependencies = [
  "fs-err",
  "macaddr",
  "serde",
+ "shell-words",
  "swrite",
  "tabled",
  "textwrap",
