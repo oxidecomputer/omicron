@@ -19,17 +19,11 @@ use std::sync::Arc;
 
 pub struct RegionSnapshotReplacementFinishDetector {
     datastore: Arc<DataStore>,
-    disabled: bool,
 }
 
 impl RegionSnapshotReplacementFinishDetector {
-    #[allow(dead_code)]
     pub fn new(datastore: Arc<DataStore>) -> Self {
-        RegionSnapshotReplacementFinishDetector { datastore, disabled: false }
-    }
-
-    pub fn disabled(datastore: Arc<DataStore>) -> Self {
-        RegionSnapshotReplacementFinishDetector { datastore, disabled: true }
+        RegionSnapshotReplacementFinishDetector { datastore }
     }
 
     async fn transition_requests_to_done(
@@ -158,10 +152,6 @@ impl BackgroundTask for RegionSnapshotReplacementFinishDetector {
     ) -> BoxFuture<'a, serde_json::Value> {
         async move {
             let mut status = RegionSnapshotReplacementFinishStatus::default();
-
-            if self.disabled {
-                return json!(status);
-            }
 
             self.transition_requests_to_done(opctx, &mut status).await;
 

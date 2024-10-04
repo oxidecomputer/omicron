@@ -7,6 +7,7 @@
 use super::DataStore;
 use crate::db;
 use crate::db::datastore::OpContext;
+use crate::db::datastore::RunnableQuery;
 use crate::db::datastore::SQL_BATCH_SIZE;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
@@ -22,9 +23,11 @@ use crate::db::model::UpstairsRepairNotification;
 use crate::db::model::UpstairsRepairNotificationType;
 use crate::db::model::UpstairsRepairProgress;
 use crate::db::model::Volume;
+use crate::db::model::VolumeResourceUsage;
+use crate::db::model::VolumeResourceUsageRecord;
+use crate::db::model::VolumeResourceUsageType;
 use crate::db::pagination::paginated;
 use crate::db::pagination::Paginator;
-use crate::db::queries::volume::*;
 use crate::db::DbConnection;
 use crate::transaction_retry::OptionalError;
 use anyhow::bail;
@@ -53,6 +56,7 @@ use serde::Deserializer;
 use serde::Serialize;
 use sled_agent_client::types::VolumeConstructionRequest;
 use std::collections::VecDeque;
+use std::net::AddrParseError;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use uuid::Uuid;
@@ -91,19 +95,187 @@ enum VolumeGetError {
     InvalidVolume(String),
 }
 
+#[derive(Debug, thiserror::Error)]
+enum VolumeCreationError {
+    #[error("Error from Volume creation: {0}")]
+    Public(Error),
+
+    #[error("Serde error during Volume creation: {0}")]
+    SerdeError(#[from] serde_json::Error),
+
+    #[error("Address parsing error during Volume creation: {0}")]
+    AddressParseError(#[from] AddrParseError),
+
+    #[error("Could not match read-only resource to {0}")]
+    CouldNotFindResource(String),
+}
+
 impl DataStore {
-    pub async fn volume_create(&self, volume: Volume) -> CreateResult<Volume> {
+    async fn volume_create_txn(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        err: OptionalError<VolumeCreationError>,
+        volume: Volume,
+        crucible_targets: CrucibleTargets,
+    ) -> Result<Volume, diesel::result::Error> {
         use db::schema::volume::dsl;
 
-        #[derive(Debug, thiserror::Error)]
-        enum VolumeCreationError {
-            #[error("Error from Volume creation: {0}")]
-            Public(Error),
+        let maybe_volume: Option<Volume> = dsl::volume
+            .filter(dsl::id.eq(volume.id()))
+            .select(Volume::as_select())
+            .first_async(conn)
+            .await
+            .optional()?;
 
-            #[error("Serde error during Volume creation: {0}")]
-            SerdeError(#[from] serde_json::Error),
+        // If the volume existed already, return it and do not increase usage
+        // counts.
+        if let Some(volume) = maybe_volume {
+            return Ok(volume);
         }
 
+        let volume: Volume = diesel::insert_into(dsl::volume)
+            .values(volume.clone())
+            .returning(Volume::as_returning())
+            .get_result_async(conn)
+            .await
+            .map_err(|e| {
+                err.bail_retryable_or_else(e, |e| {
+                    VolumeCreationError::Public(public_error_from_diesel(
+                        e,
+                        ErrorHandler::Conflict(
+                            ResourceType::Volume,
+                            volume.id().to_string().as_str(),
+                        ),
+                    ))
+                })
+            })?;
+
+        // Increase the usage count for the read-only Crucible resources
+        use db::schema::volume_resource_usage::dsl as ru_dsl;
+
+        for read_only_target in crucible_targets.read_only_targets {
+            let sub_err = OptionalError::new();
+
+            let maybe_usage = Self::read_only_target_to_volume_resource_usage(
+                conn,
+                &sub_err,
+                &read_only_target,
+            )
+            .await
+            .map_err(|e| {
+                if let Some(sub_err) = sub_err.take() {
+                    err.bail(VolumeCreationError::AddressParseError(sub_err))
+                } else {
+                    e
+                }
+            })?;
+
+            match maybe_usage {
+                Some(usage) => {
+                    diesel::insert_into(ru_dsl::volume_resource_usage)
+                        .values(VolumeResourceUsageRecord::new(
+                            volume.id(),
+                            usage,
+                        ))
+                        .execute_async(conn)
+                        .await?;
+                }
+
+                None => {
+                    // Something went wrong, bail out - we can't create this
+                    // Volume if we can't record its resource usage correctly
+                    return Err(err.bail(
+                        VolumeCreationError::CouldNotFindResource(
+                            read_only_target,
+                        ),
+                    ));
+                }
+            }
+        }
+
+        Ok(volume)
+    }
+
+    async fn target_to_region(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        err: &OptionalError<AddrParseError>,
+        target: &str,
+        read_only: bool,
+    ) -> Result<Option<Region>, diesel::result::Error> {
+        let address: SocketAddrV6 = target.parse().map_err(|e| err.bail(e))?;
+        let ip: db::model::Ipv6Addr = address.ip().into();
+
+        // Match region by dataset id and target port
+
+        use db::schema::dataset::dsl as dataset_dsl;
+        use db::schema::region::dsl as region_dsl;
+
+        dataset_dsl::dataset
+            .inner_join(
+                region_dsl::region
+                    .on(region_dsl::dataset_id.eq(dataset_dsl::id)),
+            )
+            .filter(dataset_dsl::ip.eq(ip))
+            .filter(
+                region_dsl::port
+                    .eq(Some::<db::model::SqlU16>(address.port().into())),
+            )
+            .filter(region_dsl::read_only.eq(read_only))
+            .select(Region::as_select())
+            .get_result_async::<Region>(conn)
+            .await
+            .optional()
+    }
+
+    async fn read_only_target_to_volume_resource_usage(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        err: &OptionalError<AddrParseError>,
+        read_only_target: &str,
+    ) -> Result<Option<VolumeResourceUsage>, diesel::result::Error> {
+        // Easy case: it's a region snapshot, and we can match by the snapshot
+        // address directly
+
+        let maybe_region_snapshot = {
+            use db::schema::region_snapshot::dsl;
+            dsl::region_snapshot
+                .filter(dsl::snapshot_addr.eq(read_only_target.to_string()))
+                .filter(dsl::deleting.eq(false))
+                .select(RegionSnapshot::as_select())
+                .get_result_async::<RegionSnapshot>(conn)
+                .await
+                .optional()?
+        };
+
+        if let Some(region_snapshot) = maybe_region_snapshot {
+            return Ok(Some(VolumeResourceUsage::RegionSnapshot {
+                dataset_id: region_snapshot.dataset_id,
+                region_id: region_snapshot.region_id,
+                snapshot_id: region_snapshot.snapshot_id,
+            }));
+        }
+
+        // Less easy case: it's a read-only region, and we have to match by
+        // dataset ip and region port
+
+        let maybe_region = Self::target_to_region(
+            conn,
+            err,
+            read_only_target,
+            true, // read-only
+        )
+        .await?;
+
+        if let Some(region) = maybe_region {
+            return Ok(Some(VolumeResourceUsage::ReadOnlyRegion {
+                region_id: region.id(),
+            }));
+        }
+
+        // If the resource was hard-deleted, or in the off chance that the
+        // region didn't have an assigned port, return None here.
+        Ok(None)
+    }
+
+    pub async fn volume_create(&self, volume: Volume) -> CreateResult<Volume> {
         // Grab all the targets that the volume construction request references.
         // Do this outside the transaction, as the data inside volume doesn't
         // change and this would simply add to the transaction time.
@@ -132,67 +304,13 @@ impl DataStore {
                 let crucible_targets = crucible_targets.clone();
                 let volume = volume.clone();
                 async move {
-                    let maybe_volume: Option<Volume> = dsl::volume
-                        .filter(dsl::id.eq(volume.id()))
-                        .select(Volume::as_select())
-                        .first_async(&conn)
-                        .await
-                        .optional()?;
-
-                    // If the volume existed already, return it and do not increase
-                    // usage counts.
-                    if let Some(volume) = maybe_volume {
-                        return Ok(volume);
-                    }
-
-                    // TODO do we need on_conflict do_nothing here? if the transaction
-                    // model is read-committed, the SELECT above could return nothing,
-                    // and the INSERT here could still result in a conflict.
-                    //
-                    // See also https://github.com/oxidecomputer/omicron/issues/1168
-                    let volume: Volume = diesel::insert_into(dsl::volume)
-                        .values(volume.clone())
-                        .on_conflict(dsl::id)
-                        .do_nothing()
-                        .returning(Volume::as_returning())
-                        .get_result_async(&conn)
-                        .await
-                        .map_err(|e| {
-                            err.bail_retryable_or_else(e, |e| {
-                                VolumeCreationError::Public(
-                                    public_error_from_diesel(
-                                        e,
-                                        ErrorHandler::Conflict(
-                                            ResourceType::Volume,
-                                            volume.id().to_string().as_str(),
-                                        ),
-                                    ),
-                                )
-                            })
-                        })?;
-
-                    // Increase the usage count for Crucible resources according to the
-                    // contents of the volume.
-
-                    // Increase the number of uses for each referenced region snapshot.
-                    use db::schema::region_snapshot::dsl as rs_dsl;
-                    for read_only_target in &crucible_targets.read_only_targets
-                    {
-                        diesel::update(rs_dsl::region_snapshot)
-                            .filter(
-                                rs_dsl::snapshot_addr
-                                    .eq(read_only_target.clone()),
-                            )
-                            .filter(rs_dsl::deleting.eq(false))
-                            .set(
-                                rs_dsl::volume_references
-                                    .eq(rs_dsl::volume_references + 1),
-                            )
-                            .execute_async(&conn)
-                            .await?;
-                    }
-
-                    Ok(volume)
+                    Self::volume_create_txn(
+                        &conn,
+                        err,
+                        volume,
+                        crucible_targets,
+                    )
+                    .await
                 }
             })
             .await
@@ -200,10 +318,22 @@ impl DataStore {
                 if let Some(err) = err.take() {
                     match err {
                         VolumeCreationError::Public(err) => err,
+
                         VolumeCreationError::SerdeError(err) => {
                             Error::internal_error(&format!(
-                                "Transaction error: {}",
-                                err
+                                "SerdeError error: {err}"
+                            ))
+                        }
+
+                        VolumeCreationError::CouldNotFindResource(s) => {
+                            Error::internal_error(&format!(
+                                "CouldNotFindResource error: {s}"
+                            ))
+                        }
+
+                        VolumeCreationError::AddressParseError(err) => {
+                            Error::internal_error(&format!(
+                                "AddressParseError error: {err}"
                             ))
                         }
                     }
@@ -213,18 +343,27 @@ impl DataStore {
             })
     }
 
+    async fn volume_get_impl(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        volume_id: Uuid,
+    ) -> Result<Option<Volume>, diesel::result::Error> {
+        use db::schema::volume::dsl;
+        dsl::volume
+            .filter(dsl::id.eq(volume_id))
+            .select(Volume::as_select())
+            .first_async::<Volume>(conn)
+            .await
+            .optional()
+    }
+
     /// Return a `Option<Volume>` based on id, even if it's soft deleted.
     pub async fn volume_get(
         &self,
         volume_id: Uuid,
     ) -> LookupResult<Option<Volume>> {
-        use db::schema::volume::dsl;
-        dsl::volume
-            .filter(dsl::id.eq(volume_id))
-            .select(Volume::as_select())
-            .first_async::<Volume>(&*self.pool_connection_unauthorized().await?)
+        let conn = self.pool_connection_unauthorized().await?;
+        Self::volume_get_impl(&conn, volume_id)
             .await
-            .optional()
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
@@ -239,6 +378,105 @@ impl DataStore {
             .await
             .map(|_| ())
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    fn volume_usage_records_for_resource_query(
+        resource: VolumeResourceUsage,
+    ) -> impl RunnableQuery<VolumeResourceUsageRecord> {
+        use db::schema::volume_resource_usage::dsl;
+
+        match resource {
+            VolumeResourceUsage::ReadOnlyRegion { region_id } => {
+                dsl::volume_resource_usage
+                    .filter(
+                        dsl::usage_type
+                            .eq(VolumeResourceUsageType::ReadOnlyRegion),
+                    )
+                    .filter(dsl::region_id.eq(region_id))
+                    .into_boxed()
+            }
+
+            VolumeResourceUsage::RegionSnapshot {
+                dataset_id,
+                region_id,
+                snapshot_id,
+            } => dsl::volume_resource_usage
+                .filter(
+                    dsl::usage_type.eq(VolumeResourceUsageType::RegionSnapshot),
+                )
+                .filter(dsl::region_snapshot_dataset_id.eq(dataset_id))
+                .filter(dsl::region_snapshot_region_id.eq(region_id))
+                .filter(dsl::region_snapshot_snapshot_id.eq(snapshot_id))
+                .into_boxed(),
+        }
+    }
+
+    /// For a given VolumeResourceUsage, return all found usage records for it.
+    pub async fn volume_usage_records_for_resource(
+        &self,
+        resource: VolumeResourceUsage,
+    ) -> ListResultVec<VolumeResourceUsageRecord> {
+        let conn = self.pool_connection_unauthorized().await?;
+
+        Self::volume_usage_records_for_resource_query(resource)
+            .load_async(&*conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    /// When moving a resource from one volume to another, call this to update
+    /// the corresponding volume resource usage record
+    pub async fn swap_volume_usage_records_for_resources(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        resource: VolumeResourceUsage,
+        from_volume_id: Uuid,
+        to_volume_id: Uuid,
+    ) -> Result<(), diesel::result::Error> {
+        use db::schema::volume_resource_usage::dsl;
+
+        match resource {
+            VolumeResourceUsage::ReadOnlyRegion { region_id } => {
+                let updated_rows = diesel::update(dsl::volume_resource_usage)
+                    .filter(
+                        dsl::usage_type
+                            .eq(VolumeResourceUsageType::ReadOnlyRegion),
+                    )
+                    .filter(dsl::region_id.eq(region_id))
+                    .filter(dsl::volume_id.eq(from_volume_id))
+                    .set(dsl::volume_id.eq(to_volume_id))
+                    .execute_async(conn)
+                    .await?;
+
+                if updated_rows == 0 {
+                    return Err(diesel::result::Error::NotFound);
+                }
+            }
+
+            VolumeResourceUsage::RegionSnapshot {
+                dataset_id,
+                region_id,
+                snapshot_id,
+            } => {
+                let updated_rows = diesel::update(dsl::volume_resource_usage)
+                    .filter(
+                        dsl::usage_type
+                            .eq(VolumeResourceUsageType::RegionSnapshot),
+                    )
+                    .filter(dsl::region_snapshot_dataset_id.eq(dataset_id))
+                    .filter(dsl::region_snapshot_region_id.eq(region_id))
+                    .filter(dsl::region_snapshot_snapshot_id.eq(snapshot_id))
+                    .filter(dsl::volume_id.eq(from_volume_id))
+                    .set(dsl::volume_id.eq(to_volume_id))
+                    .execute_async(conn)
+                    .await?;
+
+                if updated_rows == 0 {
+                    return Err(diesel::result::Error::NotFound);
+                }
+            }
+        }
+
+        Ok(())
     }
 
     async fn volume_checkout_allowed(
@@ -781,17 +1019,33 @@ impl DataStore {
     }
 
     /// Find regions for deleted volumes that do not have associated region
-    /// snapshots.
+    /// snapshots and are not being used by any other non-deleted volumes
     pub async fn find_deleted_volume_regions(
         &self,
     ) -> ListResultVec<(Dataset, Region, Option<RegionSnapshot>, Volume)> {
+        let conn = self.pool_connection_unauthorized().await?;
+        self.transaction_retry_wrapper("find_deleted_volume_regions")
+            .transaction(&conn, |conn| async move {
+                Self::find_deleted_volume_regions_txn(&conn).await
+            })
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    async fn find_deleted_volume_regions_txn(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> Result<
+        Vec<(Dataset, Region, Option<RegionSnapshot>, Volume)>,
+        diesel::result::Error,
+    > {
         use db::schema::dataset::dsl as dataset_dsl;
         use db::schema::region::dsl as region_dsl;
         use db::schema::region_snapshot::dsl;
         use db::schema::volume::dsl as volume_dsl;
+        use db::schema::volume_resource_usage::dsl as ru_dsl;
 
         // Find all regions and datasets
-        region_dsl::region
+        let tuples_superset = region_dsl::region
             .inner_join(
                 volume_dsl::volume.on(region_dsl::volume_id.eq(volume_dsl::id)),
             )
@@ -824,9 +1078,29 @@ impl DataStore {
                 Option::<RegionSnapshot>::as_select(),
                 Volume::as_select(),
             ))
-            .load_async(&*self.pool_connection_unauthorized().await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+            .load_async(conn)
+            .await?;
+
+        // Filter out read-only regions that are still being used by volumes
+        let mut tuples = Vec::with_capacity(tuples_superset.len());
+
+        for (dataset, region, region_snapshot, volume) in tuples_superset {
+            let region_usage_left = ru_dsl::volume_resource_usage
+                .filter(
+                    ru_dsl::usage_type
+                        .eq(VolumeResourceUsageType::ReadOnlyRegion),
+                )
+                .filter(ru_dsl::region_id.eq(region.id()))
+                .count()
+                .get_result_async::<i64>(conn)
+                .await?;
+
+            if region_usage_left == 0 {
+                tuples.push((dataset, region, region_snapshot, volume));
+            }
+        }
+
+        Ok(tuples)
     }
 
     pub async fn read_only_resources_associated_with_volume(
@@ -857,8 +1131,15 @@ enum SoftDeleteTransactionError {
     #[error("Serde error decreasing Crucible resources: {0}")]
     SerdeError(#[from] serde_json::Error),
 
-    #[error("Updated {0} database rows, expected 1")]
-    UnexpectedDatabaseUpdate(usize),
+    #[error("Updated {0} database rows in {1}, expected 1")]
+    UnexpectedDatabaseUpdate(usize, String),
+
+    // XXX is this an error? delete volume anyway, else we're stuck?
+    #[error("Could not match resource to {0}")]
+    CouldNotFindResource(String),
+
+    #[error("Address parsing error during Volume soft-delete: {0}")]
+    AddressParseError(#[from] AddrParseError),
 }
 
 impl DataStore {
@@ -923,8 +1204,8 @@ impl DataStore {
                 .map_err(|e| err.bail(e.into()))?;
 
         // Grab all the targets that the volume construction request references.
-        // Do this _inside_ the transaction, as the read-only parent data inside
-        // volume can change as a result of region snapshot replacement.
+        // Do this _inside_ the transaction, as the data inside volumes can
+        // change as a result of region / region snapshot replacement.
         let crucible_targets = {
             let mut crucible_targets = CrucibleTargets::default();
             read_only_resources_associated_with_volume(
@@ -934,52 +1215,237 @@ impl DataStore {
             crucible_targets
         };
 
-        // Decrease the number of references for each region snapshot that a
-        // volume references, returning the updated rows.
-        let updated_region_snapshots = ConditionallyDecreaseReferences::new(
-            crucible_targets.read_only_targets,
-        )
-        .get_results_async::<RegionSnapshot>(conn)
-        .await?;
+        // Decrease the number of references for each resource that a volume
+        // references, collecting the regions and region snapshots that were
+        // freed up for deletion.
 
-        // Return all regions for the volume to be cleaned up.
-        let regions: Vec<Uuid> = {
-            use db::schema::region::dsl as region_dsl;
-            use db::schema::region_snapshot::dsl as region_snapshot_dsl;
+        let num_read_write_subvolumes = count_read_write_sub_volumes(&vcr);
 
-            region_dsl::region
-                .left_join(
-                    region_snapshot_dsl::region_snapshot
-                        .on(region_snapshot_dsl::region_id.eq(region_dsl::id)),
+        let mut regions: Vec<Uuid> =
+            Vec::with_capacity(3 * num_read_write_subvolumes);
+
+        let mut region_snapshots: Vec<RegionSnapshotV3> =
+            Vec::with_capacity(crucible_targets.read_only_targets.len());
+
+        // First, grab read-write regions - they're not shared, but they are
+        // not candidates for deletion if there are region snapshots
+        {
+            let mut read_write_targets =
+                Vec::with_capacity(3 * num_read_write_subvolumes);
+            read_write_resources_associated_with_volume(
+                &vcr,
+                &mut read_write_targets,
+            );
+
+            for target in read_write_targets {
+                let sub_err = OptionalError::new();
+
+                let maybe_region = Self::target_to_region(
+                    conn, &sub_err, &target, false, // read-write
                 )
-                .filter(
-                    region_snapshot_dsl::volume_references
-                        .eq(0)
-                        .or(region_snapshot_dsl::volume_references.is_null()),
-                )
-                .filter(region_dsl::volume_id.eq(volume_id))
-                .select(Region::as_select())
-                .get_results_async(conn)
-                .await?
-                .into_iter()
-                .map(|region| region.id())
-                .collect()
-        };
+                .await
+                .map_err(|e| {
+                    if let Some(sub_err) = sub_err.take() {
+                        err.bail(SoftDeleteTransactionError::AddressParseError(
+                            sub_err,
+                        ))
+                    } else {
+                        e
+                    }
+                })?;
 
-        // Return the region snapshots that had their volume_references updated
-        // to 0 (and had the deleting flag set) to be cleaned up.
-        let region_snapshots = updated_region_snapshots
-            .into_iter()
-            .filter(|region_snapshot| {
-                region_snapshot.volume_references == 0
-                    && region_snapshot.deleting
-            })
-            .map(|region_snapshot| RegionSnapshotV3 {
-                dataset: region_snapshot.dataset_id,
-                region: region_snapshot.region_id,
-                snapshot: region_snapshot.snapshot_id,
-            })
-            .collect();
+                let Some(region) = maybe_region else {
+                    return Err(err.bail(
+                        SoftDeleteTransactionError::CouldNotFindResource(
+                            format!("could not find resource for {target}"),
+                        ),
+                    ));
+                };
+
+                // Filter out regions that have any region-snapshots
+                let region_snapshot_count: i64 = {
+                    use db::schema::region_snapshot::dsl;
+                    dsl::region_snapshot
+                        .filter(dsl::region_id.eq(region.id()))
+                        .count()
+                        .get_result_async::<i64>(conn)
+                        .await?
+                };
+
+                if region_snapshot_count == 0 {
+                    regions.push(region.id());
+                }
+            }
+        }
+
+        for read_only_target in &crucible_targets.read_only_targets {
+            use db::schema::volume_resource_usage::dsl as ru_dsl;
+
+            let sub_err = OptionalError::new();
+
+            let maybe_usage = Self::read_only_target_to_volume_resource_usage(
+                conn,
+                &sub_err,
+                read_only_target,
+            )
+            .await
+            .map_err(|e| {
+                if let Some(sub_err) = sub_err.take() {
+                    err.bail(SoftDeleteTransactionError::AddressParseError(
+                        sub_err,
+                    ))
+                } else {
+                    e
+                }
+            })?;
+
+            let Some(usage) = maybe_usage else {
+                return Err(err.bail(
+                    SoftDeleteTransactionError::CouldNotFindResource(format!(
+                        "could not find resource for {read_only_target}"
+                    )),
+                ));
+            };
+
+            // For each read-only resource, remove the associated volume
+            // resource usage record for this volume. Only return a resource for
+            // deletion if no more associated volume usage records are found.
+            match usage {
+                VolumeResourceUsage::ReadOnlyRegion { region_id } => {
+                    let updated_rows =
+                        diesel::delete(ru_dsl::volume_resource_usage)
+                            .filter(ru_dsl::volume_id.eq(volume_id))
+                            .filter(
+                                ru_dsl::usage_type.eq(
+                                    VolumeResourceUsageType::ReadOnlyRegion,
+                                ),
+                            )
+                            .filter(ru_dsl::region_id.eq(Some(region_id)))
+                            .execute_async(conn)
+                            .await?;
+
+                    if updated_rows != 1 {
+                        return Err(err.bail(
+                            SoftDeleteTransactionError::UnexpectedDatabaseUpdate(
+                                updated_rows,
+                                "volume_resource_usage (region)".into(),
+                            )
+                        ));
+                    }
+
+                    let region_usage_left = ru_dsl::volume_resource_usage
+                        .filter(
+                            ru_dsl::usage_type
+                                .eq(VolumeResourceUsageType::ReadOnlyRegion),
+                        )
+                        .filter(ru_dsl::region_id.eq(region_id))
+                        .count()
+                        .get_result_async::<i64>(conn)
+                        .await?;
+
+                    if region_usage_left == 0 {
+                        regions.push(region_id);
+                    }
+                }
+
+                VolumeResourceUsage::RegionSnapshot {
+                    dataset_id,
+                    region_id,
+                    snapshot_id,
+                } => {
+                    let updated_rows =
+                        diesel::delete(ru_dsl::volume_resource_usage)
+                            .filter(ru_dsl::volume_id.eq(volume_id))
+                            .filter(
+                                ru_dsl::usage_type.eq(
+                                    VolumeResourceUsageType::RegionSnapshot,
+                                ),
+                            )
+                            .filter(
+                                ru_dsl::region_snapshot_dataset_id
+                                    .eq(Some(dataset_id)),
+                            )
+                            .filter(
+                                ru_dsl::region_snapshot_region_id
+                                    .eq(Some(region_id)),
+                            )
+                            .filter(
+                                ru_dsl::region_snapshot_snapshot_id
+                                    .eq(Some(snapshot_id)),
+                            )
+                            .execute_async(conn)
+                            .await?;
+
+                    if updated_rows != 1 {
+                        return Err(err.bail(
+                            SoftDeleteTransactionError::UnexpectedDatabaseUpdate(
+                                updated_rows,
+                                "volume_resource_usage \
+                                (region_snapshot)".into(),
+                            )
+                        ));
+                    }
+
+                    let region_snapshot_usage_left =
+                        ru_dsl::volume_resource_usage
+                            .filter(
+                                ru_dsl::usage_type.eq(
+                                    VolumeResourceUsageType::RegionSnapshot,
+                                ),
+                            )
+                            .filter(
+                                ru_dsl::region_snapshot_dataset_id
+                                    .eq(Some(dataset_id)),
+                            )
+                            .filter(
+                                ru_dsl::region_snapshot_region_id
+                                    .eq(Some(region_id)),
+                            )
+                            .filter(
+                                ru_dsl::region_snapshot_snapshot_id
+                                    .eq(Some(snapshot_id)),
+                            )
+                            .count()
+                            .get_result_async::<i64>(conn)
+                            .await?;
+
+                    if region_snapshot_usage_left == 0 {
+                        // Don't forget to set `deleting`! see: omicron#4095
+                        {
+                            use db::schema::region_snapshot::dsl;
+                            let updated_rows =
+                                diesel::update(dsl::region_snapshot)
+                                    .filter(dsl::dataset_id.eq(dataset_id))
+                                    .filter(dsl::region_id.eq(region_id))
+                                    .filter(dsl::snapshot_id.eq(snapshot_id))
+                                    .filter(
+                                        dsl::snapshot_addr
+                                            .eq(read_only_target.clone()),
+                                    )
+                                    .filter(dsl::deleting.eq(false))
+                                    .set(dsl::deleting.eq(true))
+                                    .execute_async(conn)
+                                    .await?;
+
+                            if updated_rows != 1 {
+                                return Err(err.bail(
+                                    SoftDeleteTransactionError::UnexpectedDatabaseUpdate(
+                                        updated_rows,
+                                        "setting deleting".into(),
+                                    )
+                                ));
+                            }
+                        }
+
+                        region_snapshots.push(RegionSnapshotV3 {
+                            dataset: dataset_id,
+                            region: region_id,
+                            snapshot: snapshot_id,
+                        });
+                    }
+                }
+            }
+        }
 
         let resources_to_delete = CrucibleResources::V3(CrucibleResourcesV3 {
             regions,
@@ -1005,6 +1471,7 @@ impl DataStore {
                 return Err(err.bail(
                     SoftDeleteTransactionError::UnexpectedDatabaseUpdate(
                         updated_rows,
+                        "volume".into(),
                     ),
                 ));
             }
@@ -1053,11 +1520,20 @@ impl DataStore {
     ) -> Result<bool, Error> {
         #[derive(Debug, thiserror::Error)]
         enum RemoveReadOnlyParentError {
-            #[error("Serde error removing read only parent: {0}")]
+            #[error("Error removing read-only parent: {0}")]
+            Public(Error),
+
+            #[error("Serde error removing read-only parent: {0}")]
             SerdeError(#[from] serde_json::Error),
 
             #[error("Updated {0} database rows, expected {1}")]
             UnexpectedDatabaseUpdate(usize, usize),
+
+            #[error("Address parsing error during ROP removal: {0}")]
+            AddressParseError(#[from] AddrParseError),
+
+            #[error("Could not match read-only resource to {0}")]
+            CouldNotFindResource(String),
         }
 
         // In this single transaction:
@@ -1080,8 +1556,8 @@ impl DataStore {
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 async move {
-                    // Grab the volume in question. If the volume record was already
-                    // deleted then we can just return.
+                    // Grab the volume in question. If the volume record was
+                    // already deleted then we can just return.
                     let volume = {
                         use db::schema::volume::dsl;
 
@@ -1100,8 +1576,8 @@ impl DataStore {
                         };
 
                         if volume.time_deleted.is_some() {
-                            // this volume is deleted, so let whatever is deleting
-                            // it clean it up.
+                            // this volume is deleted, so let whatever is
+                            // deleting it clean it up.
                             return Ok(false);
                         } else {
                             // A volume record exists, and was not deleted, we
@@ -1110,8 +1586,8 @@ impl DataStore {
                         }
                     };
 
-                    // If a read_only_parent exists, remove it from volume_id, and
-                    // attach it to temp_volume_id.
+                    // If a read_only_parent exists, remove it from volume_id,
+                    // and attach it to temp_volume_id.
                     let vcr: VolumeConstructionRequest =
                         serde_json::from_str(
                             volume.data()
@@ -1179,6 +1655,7 @@ impl DataStore {
                                     sub_volumes: vec![],
                                     read_only_parent,
                                 };
+
                                 let rop_volume_data =
                                     serde_json::to_string(
                                         &rop_vcr
@@ -1188,6 +1665,7 @@ impl DataStore {
                                             e,
                                         ))
                                     })?;
+
                                 // Update the temp_volume_id with the volume
                                 // data that contains the read_only_parent.
                                 let num_updated =
@@ -1197,20 +1675,73 @@ impl DataStore {
                                         .set(volume_dsl::data.eq(rop_volume_data))
                                         .execute_async(&conn)
                                         .await?;
+
                                 if num_updated != 1 {
                                     return Err(err.bail(RemoveReadOnlyParentError::UnexpectedDatabaseUpdate(num_updated, 1)));
                                 }
+
+                                // Update the volume resource usage record for
+                                // every read-only resource in the ROP
+                                let crucible_targets = {
+                                    let mut crucible_targets = CrucibleTargets::default();
+                                    read_only_resources_associated_with_volume(
+                                        &rop_vcr,
+                                        &mut crucible_targets,
+                                    );
+                                    crucible_targets
+                                };
+
+                                for read_only_target in crucible_targets.read_only_targets {
+                                    let sub_err = OptionalError::new();
+
+                                    let maybe_usage = Self::read_only_target_to_volume_resource_usage(
+                                        &conn,
+                                        &sub_err,
+                                        &read_only_target,
+                                    )
+                                    .await
+                                    .map_err(|e| {
+                                        if let Some(sub_err) = sub_err.take() {
+                                            err.bail(RemoveReadOnlyParentError::AddressParseError(sub_err))
+                                        } else {
+                                            e
+                                        }
+                                    })?;
+
+                                    let Some(usage) = maybe_usage else {
+                                        return Err(err.bail(
+                                            RemoveReadOnlyParentError::CouldNotFindResource(format!(
+                                                "could not find resource for {read_only_target}"
+                                            )),
+                                        ));
+                                    };
+
+                                    Self::swap_volume_usage_records_for_resources(
+                                        &conn,
+                                        usage,
+                                        volume_id,
+                                        temp_volume_id,
+                                    )
+                                    .await
+                                    .map_err(|e| {
+                                        err.bail_retryable_or_else(e, |e| {
+                                            RemoveReadOnlyParentError::Public(
+                                                public_error_from_diesel(
+                                                    e,
+                                                    ErrorHandler::Server,
+                                                )
+                                            )
+                                        })
+                                    })?;
+                                }
+
                                 Ok(true)
                             }
                         }
-                        VolumeConstructionRequest::File { id: _, block_size: _, path: _ }
-                        | VolumeConstructionRequest::Region {
-                            block_size: _,
-                            blocks_per_extent: _,
-                            extent_count: _,
-                            opts: _,
-                            gen: _ }
-                        | VolumeConstructionRequest::Url { id: _, block_size: _, url: _ } => {
+
+                        VolumeConstructionRequest::File { .. }
+                        | VolumeConstructionRequest::Region { .. }
+                        | VolumeConstructionRequest::Url { .. } => {
                             // Volume has a format that does not contain ROPs
                             Ok(false)
                         }
@@ -1608,7 +2139,7 @@ pub struct CrucibleResourcesV2 {
     pub snapshots_to_delete: Vec<RegionSnapshot>,
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct RegionSnapshotV3 {
     dataset: Uuid,
     region: Uuid,
@@ -1895,6 +2426,8 @@ pub struct VolumeReplacementParams {
 #[derive(Debug, Clone, Copy)]
 pub struct VolumeWithTarget(pub Uuid);
 
+// Note: it would be easier to pass around strings, but comparison could fail
+// due to formatting issues, so pass around SocketAddrV6 here
 #[derive(Debug, Clone, Copy)]
 pub struct ExistingTarget(pub SocketAddrV6);
 
@@ -2242,6 +2775,18 @@ impl DataStore {
 
             #[error("Updated {0} database rows, expected {1}")]
             UnexpectedDatabaseUpdate(usize, usize),
+
+            #[error(
+                "Address parsing error during Volume snapshot \
+            replacement: {0}"
+            )]
+            AddressParseError(#[from] AddrParseError),
+
+            #[error("Could not match read-only resource to {0}")]
+            CouldNotFindResource(String),
+
+            #[error("Multiple volume resource usage records for {0}")]
+            MultipleResourceUsageRecords(String),
         }
         let err = OptionalError::new();
 
@@ -2249,8 +2794,10 @@ impl DataStore {
         self.transaction_retry_wrapper("volume_replace_snapshot")
             .transaction(&conn, |conn| {
                 let err = err.clone();
+
                 async move {
                     use db::schema::volume::dsl as volume_dsl;
+                    use db::schema::volume_resource_usage::dsl as ru_dsl;
 
                     // Grab the old volume first
                     let maybe_old_volume = {
@@ -2431,6 +2978,170 @@ impl DataStore {
                         ));
                     }
 
+                    // Update the appropriate volume resource usage records - it
+                    // could either be a read-only region or a region snapshot,
+                    // so determine what it is first
+
+                    let sub_err = OptionalError::new();
+                    let maybe_existing_usage = Self::read_only_target_to_volume_resource_usage(
+                        &conn,
+                        &sub_err,
+                        &existing.0.to_string(),
+                    )
+                    .await
+                    .map_err(|e| if let Some(sub_err) = sub_err.take() {
+                            err.bail(VolumeReplaceSnapshotError::AddressParseError(
+                                sub_err
+                            ))
+                        } else {
+                            e
+                        }
+                    )?;
+
+                    let Some(existing_usage) = maybe_existing_usage else {
+                        return Err(err.bail(
+                            VolumeReplaceSnapshotError::CouldNotFindResource(
+                                format!(
+                                    "could not find resource for {}",
+                                    existing.0,
+                                )
+                            ))
+                        );
+                    };
+
+                    // The "existing" target moved into the volume to delete
+
+                    Self::swap_volume_usage_records_for_resources(
+                        &conn,
+                        existing_usage,
+                        volume_id.0,
+                        volume_to_delete_id.0,
+                    )
+                    .await
+                    .map_err(|e| {
+                        err.bail_retryable_or_else(e, |e| {
+                            VolumeReplaceSnapshotError::Public(
+                                public_error_from_diesel(
+                                    e,
+                                    ErrorHandler::Server,
+                                )
+                            )
+                        })
+                    })?;
+
+                    let sub_err = OptionalError::new();
+                    let maybe_replacement_usage =
+                        Self::read_only_target_to_volume_resource_usage(
+                            &conn,
+                            &sub_err,
+                            &replacement.0.to_string(),
+                        )
+                        .await
+                        .map_err(|e| if let Some(sub_err) = sub_err.take() {
+                                err.bail(VolumeReplaceSnapshotError::AddressParseError(
+                                    sub_err
+                                ))
+                            } else {
+                                e
+                            }
+                        )?;
+
+                    let Some(replacement_usage) = maybe_replacement_usage else {
+                        return Err(err.bail(
+                            VolumeReplaceSnapshotError::CouldNotFindResource(
+                                format!(
+                                    "could not find resource for {}",
+                                    existing.0,
+                                )
+                            ))
+                        );
+                    };
+
+                    // This function may be called with a replacement volume
+                    // that is completely blank, to be filled in later by this
+                    // function. `volume_create` will have been called but will
+                    // not have added any volume resource usage records, because
+                    // it was blank!
+                    //
+                    // The indention leaving this transaction is that the
+                    // correct volume resource usage records exist, so if this
+                    // is the case, create a new record.
+                    //
+                    // If the replacement volume usage records exist, then
+                    // perform a swap instead.
+
+                    let existing_replacement_volume_usage_records =
+                        Self::volume_usage_records_for_resource_query(
+                            replacement_usage.clone(),
+                        )
+                        .load_async(&conn)
+                        .await
+                        .map_err(|e| {
+                            err.bail_retryable_or_else(e, |e| {
+                                VolumeReplaceSnapshotError::Public(
+                                    public_error_from_diesel(
+                                        e,
+                                        ErrorHandler::Server,
+                                    )
+                                )
+                            })
+                        })?
+                        // XXX be smart enough to .filter the above query
+                        .into_iter()
+                        .filter(|record| record.volume_id == volume_to_delete_id.0)
+                        .count();
+
+                    // The "replacement" target moved into the volume
+
+                    if existing_replacement_volume_usage_records == 0 {
+                        // No matching record
+                        let new_record = VolumeResourceUsageRecord::new(
+                            volume_id.0,
+                            replacement_usage,
+                        );
+
+                        diesel::insert_into(ru_dsl::volume_resource_usage)
+                            .values(new_record)
+                            .execute_async(&conn)
+                            .await
+                            .map_err(|e| {
+                                err.bail_retryable_or_else(e, |e| {
+                                    VolumeReplaceSnapshotError::Public(
+                                        public_error_from_diesel(
+                                            e,
+                                            ErrorHandler::Server,
+                                        )
+                                    )
+                                })
+                            })?;
+                    } else if existing_replacement_volume_usage_records == 1 {
+                        // One matching record: perform swap
+                        Self::swap_volume_usage_records_for_resources(
+                            &conn,
+                            replacement_usage,
+                            volume_to_delete_id.0,
+                            volume_id.0,
+                        )
+                        .await
+                        .map_err(|e| {
+                            err.bail_retryable_or_else(e, |e| {
+                                VolumeReplaceSnapshotError::Public(
+                                    public_error_from_diesel(
+                                        e,
+                                        ErrorHandler::Server,
+                                    )
+                                )
+                            })
+                        })?;
+                    } else {
+                        // More than one matching record!
+                        return Err(err.bail(
+                            VolumeReplaceSnapshotError::MultipleResourceUsageRecords(
+                                format!("{replacement_usage:?}")
+                            )
+                        ));
+                    }
+
                     Ok(VolumeReplaceResult::Done)
                 }
             })
@@ -2440,19 +3151,13 @@ impl DataStore {
                     match err {
                         VolumeReplaceSnapshotError::Public(e) => e,
 
-                        VolumeReplaceSnapshotError::SerdeError(_) => {
-                            Error::internal_error(&err.to_string())
-                        }
-
-                        VolumeReplaceSnapshotError::SnapshotReplacementError(_) => {
-                            Error::internal_error(&err.to_string())
-                        }
-
-                        VolumeReplaceSnapshotError::UnexpectedReplacedTargets(_, _) => {
-                            Error::internal_error(&err.to_string())
-                        }
-
-                        VolumeReplaceSnapshotError::UnexpectedDatabaseUpdate(_, _) => {
+                        VolumeReplaceSnapshotError::SerdeError(_) |
+                        VolumeReplaceSnapshotError::SnapshotReplacementError(_) |
+                        VolumeReplaceSnapshotError::UnexpectedReplacedTargets(_, _) |
+                        VolumeReplaceSnapshotError::UnexpectedDatabaseUpdate(_, _) |
+                        VolumeReplaceSnapshotError::AddressParseError(_) |
+                        VolumeReplaceSnapshotError::CouldNotFindResource(_) |
+                        VolumeReplaceSnapshotError::MultipleResourceUsageRecords(_) => {
                             Error::internal_error(&err.to_string())
                         }
                     }
@@ -2463,7 +3168,7 @@ impl DataStore {
     }
 }
 
-/// Return the targets from a VolumeConstructionRequest.
+/// Return the read-only targets from a VolumeConstructionRequest.
 ///
 /// The targets of a volume construction request map to resources.
 pub fn read_only_resources_associated_with_volume(
@@ -2505,6 +3210,65 @@ pub fn read_only_resources_associated_with_volume(
                 // no action required
             }
         }
+    }
+}
+
+/// Return the read-write targets from a VolumeConstructionRequest.
+///
+/// The targets of a volume construction request map to resources.
+pub fn read_write_resources_associated_with_volume(
+    vcr: &VolumeConstructionRequest,
+    targets: &mut Vec<String>,
+) {
+    let mut parts: VecDeque<&VolumeConstructionRequest> = VecDeque::new();
+    parts.push_back(&vcr);
+
+    while let Some(vcr_part) = parts.pop_front() {
+        match vcr_part {
+            VolumeConstructionRequest::Volume { sub_volumes, .. } => {
+                for sub_volume in sub_volumes {
+                    parts.push_back(sub_volume);
+                }
+
+                // No need to look under read-only parent
+            }
+
+            VolumeConstructionRequest::Url { .. } => {
+                // no action required
+            }
+
+            VolumeConstructionRequest::Region { opts, .. } => {
+                if !opts.read_only {
+                    for target in &opts.target {
+                        targets.push(target.clone());
+                    }
+                }
+            }
+
+            VolumeConstructionRequest::File { .. } => {
+                // no action required
+            }
+        }
+    }
+}
+
+/// Return the number of read-write subvolumes in a VolumeConstructionRequest.
+pub fn count_read_write_sub_volumes(vcr: &VolumeConstructionRequest) -> usize {
+    match vcr {
+        VolumeConstructionRequest::Volume { sub_volumes, .. } => {
+            sub_volumes.len()
+        }
+
+        VolumeConstructionRequest::Url { .. } => 0,
+
+        VolumeConstructionRequest::Region { .. } => {
+            // We don't support a pure Region VCR at the volume
+            // level in the database, so this choice should
+            // never be encountered.
+            panic!("Region not supported as a top level volume");
+        }
+
+        VolumeConstructionRequest::File { .. } => 0,
     }
 }
 
@@ -2780,8 +3544,14 @@ impl DataStore {
 mod tests {
     use super::*;
 
+    use crate::db::datastore::test::TestDatasets;
     use crate::db::datastore::test_utils::datastore_test;
+    use crate::db::datastore::REGION_REDUNDANCY_THRESHOLD;
+    use nexus_config::RegionAllocationStrategy;
+    use nexus_db_model::SqlU16;
     use nexus_test_utils::db::test_setup_database;
+    use nexus_types::external_api::params::DiskSource;
+    use omicron_common::api::external::ByteCount;
     use omicron_test_utils::dev;
     use sled_agent_client::types::CrucibleOpts;
 
@@ -2896,46 +3666,80 @@ mod tests {
         let logctx = dev::test_setup_log("test_volume_replace_region");
         let log = logctx.log.new(o!());
         let mut db = test_setup_database(&log).await;
-        let (_opctx, db_datastore) = datastore_test(&logctx, &db).await;
+        let (opctx, db_datastore) = datastore_test(&logctx, &db).await;
+        let conn = db_datastore.pool_connection_unauthorized().await.unwrap();
 
-        // Insert four Region records (three, plus one additionally allocated)
+        let _test_datasets = TestDatasets::create(
+            &opctx,
+            db_datastore.clone(),
+            REGION_REDUNDANCY_THRESHOLD,
+        )
+        .await;
 
         let volume_id = Uuid::new_v4();
-        let new_volume_id = Uuid::new_v4();
+        let volume_to_delete_id = Uuid::new_v4();
 
-        let mut region_and_volume_ids = [
-            (Uuid::new_v4(), volume_id),
-            (Uuid::new_v4(), volume_id),
-            (Uuid::new_v4(), volume_id),
-            (Uuid::new_v4(), new_volume_id),
-        ];
+        let datasets_and_regions = db_datastore
+            .disk_region_allocate(
+                &opctx,
+                volume_id,
+                &DiskSource::Blank { block_size: 512.try_into().unwrap() },
+                ByteCount::from_gibibytes_u32(1),
+                &&RegionAllocationStrategy::RandomWithDistinctSleds {
+                    seed: None,
+                },
+            )
+            .await
+            .unwrap();
 
-        {
-            let conn = db_datastore.pool_connection_for_tests().await.unwrap();
+        let mut region_addresses: Vec<String> =
+            Vec::with_capacity(datasets_and_regions.len());
 
-            for i in 0..4 {
-                let (_, volume_id) = region_and_volume_ids[i];
+        for (i, (_, region)) in datasets_and_regions.iter().enumerate() {
+            // `disk_region_allocate` won't put any ports in, so add fake ones
+            // here
+            use nexus_db_model::schema::region::dsl;
+            diesel::update(dsl::region)
+                .filter(dsl::id.eq(region.id()))
+                .set(dsl::port.eq(Some::<SqlU16>((100 + i as u16).into())))
+                .execute_async(&*conn)
+                .await
+                .unwrap();
 
-                let region = Region::new(
-                    Uuid::new_v4(), // dataset id
-                    volume_id,
-                    512_i64.try_into().unwrap(),
-                    10,
-                    10,
-                    10001,
-                    false,
-                );
+            let address: SocketAddrV6 =
+                db_datastore.region_addr(region.id()).await.unwrap().unwrap();
 
-                region_and_volume_ids[i].0 = region.id();
-
-                use nexus_db_model::schema::region::dsl;
-                diesel::insert_into(dsl::region)
-                    .values(region.clone())
-                    .execute_async(&*conn)
-                    .await
-                    .unwrap();
-            }
+            region_addresses.push(address.to_string());
         }
+
+        // Manually create a replacement region at the first dataset
+        let replacement_region = {
+            let (dataset, region) = &datasets_and_regions[0];
+            let region = Region::new(
+                dataset.id(),
+                volume_to_delete_id,
+                region.block_size().try_into().unwrap(),
+                region.blocks_per_extent(),
+                region.extent_count(),
+                111,
+                false, // read-write
+            );
+
+            use nexus_db_model::schema::region::dsl;
+            diesel::insert_into(dsl::region)
+                .values(region.clone())
+                .execute_async(&*conn)
+                .await
+                .unwrap();
+
+            region
+        };
+
+        let replacement_region_addr: SocketAddrV6 = db_datastore
+            .region_addr(replacement_region.id())
+            .await
+            .unwrap()
+            .unwrap();
 
         let _volume = db_datastore
             .volume_create(nexus_db_model::Volume::new(
@@ -2951,9 +3755,9 @@ mod tests {
                         opts: CrucibleOpts {
                             id: volume_id,
                             target: vec![
-                                String::from("[fd00:1122:3344:101::1]:11111"), // target to replace
-                                String::from("[fd00:1122:3344:102::1]:22222"),
-                                String::from("[fd00:1122:3344:103::1]:33333"),
+                                region_addresses[0].clone(), // target to replace
+                                region_addresses[1].clone(),
+                                region_addresses[2].clone(),
                             ],
                             lossy: false,
                             flush_timeout: None,
@@ -2974,26 +3778,19 @@ mod tests {
 
         // Replace one
 
-        let target = region_and_volume_ids[0];
-        let replacement = region_and_volume_ids[3];
-
         let volume_replace_region_result = db_datastore
             .volume_replace_region(
                 /* target */
                 db::datastore::VolumeReplacementParams {
-                    volume_id: target.1,
-                    region_id: target.0,
-                    region_addr: "[fd00:1122:3344:101::1]:11111"
-                        .parse()
-                        .unwrap(),
+                    volume_id,
+                    region_id: datasets_and_regions[0].1.id(),
+                    region_addr: region_addresses[0].parse().unwrap(),
                 },
                 /* replacement */
                 db::datastore::VolumeReplacementParams {
-                    volume_id: replacement.1,
-                    region_id: replacement.0,
-                    region_addr: "[fd55:1122:3344:101::1]:11111"
-                        .parse()
-                        .unwrap(),
+                    volume_id: volume_to_delete_id,
+                    region_id: replacement_region.id(),
+                    region_addr: replacement_region_addr,
                 },
             )
             .await
@@ -3020,9 +3817,9 @@ mod tests {
                     opts: CrucibleOpts {
                         id: volume_id,
                         target: vec![
-                            String::from("[fd55:1122:3344:101::1]:11111"), // replaced
-                            String::from("[fd00:1122:3344:102::1]:22222"),
-                            String::from("[fd00:1122:3344:103::1]:33333"),
+                            replacement_region_addr.to_string(), // replaced
+                            region_addresses[1].clone(),
+                            region_addresses[2].clone(),
                         ],
                         lossy: false,
                         flush_timeout: None,
@@ -3043,19 +3840,15 @@ mod tests {
             .volume_replace_region(
                 /* target */
                 db::datastore::VolumeReplacementParams {
-                    volume_id: target.1,
-                    region_id: replacement.0,
-                    region_addr: "[fd55:1122:3344:101::1]:11111"
-                        .parse()
-                        .unwrap(),
+                    volume_id,
+                    region_id: replacement_region.id(),
+                    region_addr: replacement_region_addr,
                 },
                 /* replacement */
                 db::datastore::VolumeReplacementParams {
-                    volume_id: replacement.1,
-                    region_id: target.0,
-                    region_addr: "[fd00:1122:3344:101::1]:11111"
-                        .parse()
-                        .unwrap(),
+                    volume_id: volume_to_delete_id,
+                    region_id: datasets_and_regions[0].1.id(),
+                    region_addr: region_addresses[0].parse().unwrap(),
                 },
             )
             .await
@@ -3082,9 +3875,9 @@ mod tests {
                     opts: CrucibleOpts {
                         id: volume_id,
                         target: vec![
-                            String::from("[fd00:1122:3344:101::1]:11111"), // back to what it was
-                            String::from("[fd00:1122:3344:102::1]:22222"),
-                            String::from("[fd00:1122:3344:103::1]:33333"),
+                            region_addresses[0].clone(), // back to what it was
+                            region_addresses[1].clone(),
+                            region_addresses[2].clone(),
                         ],
                         lossy: false,
                         flush_timeout: None,
@@ -3109,13 +3902,126 @@ mod tests {
         let logctx = dev::test_setup_log("test_volume_replace_snapshot");
         let log = logctx.log.new(o!());
         let mut db = test_setup_database(&log).await;
-        let (_opctx, db_datastore) = datastore_test(&logctx, &db).await;
+        let (opctx, db_datastore) = datastore_test(&logctx, &db).await;
+        let conn = db_datastore.pool_connection_for_tests().await.unwrap();
 
-        // Insert two volumes: one with the target to replace, and one temporary
-        // "volume to delete" that's blank.
+        let _test_datasets = TestDatasets::create(
+            &opctx,
+            db_datastore.clone(),
+            REGION_REDUNDANCY_THRESHOLD,
+        )
+        .await;
 
         let volume_id = Uuid::new_v4();
         let volume_to_delete_id = Uuid::new_v4();
+
+        let datasets_and_regions = db_datastore
+            .disk_region_allocate(
+                &opctx,
+                volume_id,
+                &DiskSource::Blank { block_size: 512.try_into().unwrap() },
+                ByteCount::from_gibibytes_u32(1),
+                &&RegionAllocationStrategy::RandomWithDistinctSleds {
+                    seed: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        let mut region_addresses: Vec<String> =
+            Vec::with_capacity(datasets_and_regions.len());
+
+        for (i, (_, region)) in datasets_and_regions.iter().enumerate() {
+            // `disk_region_allocate` won't put any ports in, so add fake ones
+            // here
+            use nexus_db_model::schema::region::dsl;
+            diesel::update(dsl::region)
+                .filter(dsl::id.eq(region.id()))
+                .set(dsl::port.eq(Some::<SqlU16>((100 + i as u16).into())))
+                .execute_async(&*conn)
+                .await
+                .unwrap();
+
+            let address: SocketAddrV6 =
+                db_datastore.region_addr(region.id()).await.unwrap().unwrap();
+
+            region_addresses.push(address.to_string());
+        }
+
+        // Manually create a replacement region at the first dataset
+        let replacement_region = {
+            let (dataset, region) = &datasets_and_regions[0];
+            let region = Region::new(
+                dataset.id(),
+                volume_to_delete_id,
+                region.block_size().try_into().unwrap(),
+                region.blocks_per_extent(),
+                region.extent_count(),
+                111,
+                true, // read-only
+            );
+
+            use nexus_db_model::schema::region::dsl;
+            diesel::insert_into(dsl::region)
+                .values(region.clone())
+                .execute_async(&*conn)
+                .await
+                .unwrap();
+
+            region
+        };
+
+        let replacement_region_addr: SocketAddrV6 = db_datastore
+            .region_addr(replacement_region.id())
+            .await
+            .unwrap()
+            .unwrap();
+
+        // need to add region snapshot objects to satisfy volume create
+        // transaction's search for resources
+
+        let address_1 = String::from("[fd00:1122:3344:104::1]:400");
+        let address_2 = String::from("[fd00:1122:3344:105::1]:401");
+        let address_3 = String::from("[fd00:1122:3344:106::1]:402");
+
+        let region_snapshots = [
+            RegionSnapshot::new(
+                Uuid::new_v4(),
+                Uuid::new_v4(),
+                Uuid::new_v4(),
+                address_1.clone(),
+            ),
+            RegionSnapshot::new(
+                Uuid::new_v4(),
+                Uuid::new_v4(),
+                Uuid::new_v4(),
+                address_2.clone(),
+            ),
+            RegionSnapshot::new(
+                Uuid::new_v4(),
+                Uuid::new_v4(),
+                Uuid::new_v4(),
+                address_3.clone(),
+            ),
+        ];
+
+        db_datastore
+            .region_snapshot_create(region_snapshots[0].clone())
+            .await
+            .unwrap();
+        db_datastore
+            .region_snapshot_create(region_snapshots[1].clone())
+            .await
+            .unwrap();
+        db_datastore
+            .region_snapshot_create(region_snapshots[2].clone())
+            .await
+            .unwrap();
+
+        // Insert two volumes: one with the target to replace, and one temporary
+        // "volume to delete" that's blank. Validate the pre-replacement volume
+        // resource usage records.
+
         let rop_id = Uuid::new_v4();
 
         db_datastore
@@ -3132,9 +4038,9 @@ mod tests {
                         opts: CrucibleOpts {
                             id: volume_id,
                             target: vec![
-                                String::from("[fd00:1122:3344:101::1]:11111"),
-                                String::from("[fd00:1122:3344:102::1]:22222"),
-                                String::from("[fd00:1122:3344:103::1]:33333"),
+                                region_addresses[0].clone(),
+                                region_addresses[1].clone(),
+                                region_addresses[2].clone(),
                             ],
                             lossy: false,
                             flush_timeout: None,
@@ -3156,9 +4062,9 @@ mod tests {
                                 id: rop_id,
                                 target: vec![
                                     // target to replace
-                                    String::from("[fd00:1122:3344:104::1]:400"),
-                                    String::from("[fd00:1122:3344:105::1]:401"),
-                                    String::from("[fd00:1122:3344:106::1]:402"),
+                                    address_1.clone(),
+                                    address_2.clone(),
+                                    address_3.clone(),
                                 ],
                                 lossy: false,
                                 flush_timeout: None,
@@ -3177,6 +4083,22 @@ mod tests {
             .await
             .unwrap();
 
+        for region_snapshot in &region_snapshots {
+            let usage = db_datastore
+                .volume_usage_records_for_resource(
+                    VolumeResourceUsage::RegionSnapshot {
+                        dataset_id: region_snapshot.dataset_id,
+                        region_id: region_snapshot.region_id,
+                        snapshot_id: region_snapshot.snapshot_id,
+                    },
+                )
+                .await
+                .unwrap();
+
+            assert_eq!(usage.len(), 1);
+            assert_eq!(usage[0].volume_id, volume_id);
+        }
+
         db_datastore
             .volume_create(nexus_db_model::Volume::new(
                 volume_to_delete_id,
@@ -3191,21 +4113,33 @@ mod tests {
             .await
             .unwrap();
 
+        // `volume_create` above was called with a blank volume, so no usage
+        // record will have been created for the read-only region
+
+        let usage = db_datastore
+            .volume_usage_records_for_resource(
+                VolumeResourceUsage::ReadOnlyRegion {
+                    region_id: replacement_region.id(),
+                },
+            )
+            .await
+            .unwrap();
+
+        assert!(usage.is_empty());
+
         // Do the replacement
 
         let volume_replace_snapshot_result = db_datastore
             .volume_replace_snapshot(
                 VolumeWithTarget(volume_id),
-                ExistingTarget("[fd00:1122:3344:104::1]:400".parse().unwrap()),
-                ReplacementTarget(
-                    "[fd55:1122:3344:101::1]:111".parse().unwrap(),
-                ),
+                ExistingTarget(address_1.parse().unwrap()),
+                ReplacementTarget(replacement_region_addr),
                 VolumeToDelete(volume_to_delete_id),
             )
             .await
             .unwrap();
 
-        assert_eq!(volume_replace_snapshot_result, VolumeReplaceResult::Done,);
+        assert_eq!(volume_replace_snapshot_result, VolumeReplaceResult::Done);
 
         // Ensure the shape of the resulting VCRs
 
@@ -3227,9 +4161,9 @@ mod tests {
                     opts: CrucibleOpts {
                         id: volume_id,
                         target: vec![
-                            String::from("[fd00:1122:3344:101::1]:11111"),
-                            String::from("[fd00:1122:3344:102::1]:22222"),
-                            String::from("[fd00:1122:3344:103::1]:33333"),
+                            region_addresses[0].clone(),
+                            region_addresses[1].clone(),
+                            region_addresses[2].clone(),
                         ],
                         lossy: false,
                         flush_timeout: None,
@@ -3251,9 +4185,9 @@ mod tests {
                             id: rop_id,
                             target: vec![
                                 // target replaced
-                                String::from("[fd55:1122:3344:101::1]:111"),
-                                String::from("[fd00:1122:3344:105::1]:401"),
-                                String::from("[fd00:1122:3344:106::1]:402"),
+                                replacement_region_addr.to_string(),
+                                address_2.clone(),
+                                address_3.clone(),
                             ],
                             lossy: false,
                             flush_timeout: None,
@@ -3293,7 +4227,7 @@ mod tests {
                         id: volume_to_delete_id,
                         target: vec![
                             // replaced target stashed here
-                            String::from("[fd00:1122:3344:104::1]:400"),
+                            address_1.clone(),
                         ],
                         lossy: false,
                         flush_timeout: None,
@@ -3309,15 +4243,54 @@ mod tests {
             },
         );
 
+        // Validate the post-replacement volume resource usage records
+
+        for (i, region_snapshot) in region_snapshots.iter().enumerate() {
+            let usage = db_datastore
+                .volume_usage_records_for_resource(
+                    VolumeResourceUsage::RegionSnapshot {
+                        dataset_id: region_snapshot.dataset_id,
+                        region_id: region_snapshot.region_id,
+                        snapshot_id: region_snapshot.snapshot_id,
+                    },
+                )
+                .await
+                .unwrap();
+
+            assert_eq!(usage.len(), 1);
+
+            match i {
+                0 => {
+                    assert_eq!(usage[0].volume_id, volume_to_delete_id);
+                }
+
+                1 | 2 => {
+                    assert_eq!(usage[0].volume_id, volume_id);
+                }
+
+                _ => panic!("out of range"),
+            }
+        }
+
+        let usage = db_datastore
+            .volume_usage_records_for_resource(
+                VolumeResourceUsage::ReadOnlyRegion {
+                    region_id: replacement_region.id(),
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(usage.len(), 1);
+        assert_eq!(usage[0].volume_id, volume_id);
+
         // Now undo the replacement. Note volume ID is not swapped.
 
         let volume_replace_snapshot_result = db_datastore
             .volume_replace_snapshot(
                 VolumeWithTarget(volume_id),
-                ExistingTarget("[fd55:1122:3344:101::1]:111".parse().unwrap()),
-                ReplacementTarget(
-                    "[fd00:1122:3344:104::1]:400".parse().unwrap(),
-                ),
+                ExistingTarget(replacement_region_addr),
+                ReplacementTarget(address_1.parse().unwrap()),
                 VolumeToDelete(volume_to_delete_id),
             )
             .await
@@ -3344,9 +4317,9 @@ mod tests {
                     opts: CrucibleOpts {
                         id: volume_id,
                         target: vec![
-                            String::from("[fd00:1122:3344:101::1]:11111"),
-                            String::from("[fd00:1122:3344:102::1]:22222"),
-                            String::from("[fd00:1122:3344:103::1]:33333"),
+                            region_addresses[0].clone(),
+                            region_addresses[1].clone(),
+                            region_addresses[2].clone(),
                         ],
                         lossy: false,
                         flush_timeout: None,
@@ -3368,9 +4341,7 @@ mod tests {
                             id: rop_id,
                             target: vec![
                                 // back to what it was
-                                String::from("[fd00:1122:3344:104::1]:400"),
-                                String::from("[fd00:1122:3344:105::1]:401"),
-                                String::from("[fd00:1122:3344:106::1]:402"),
+                                address_1, address_2, address_3,
                             ],
                             lossy: false,
                             flush_timeout: None,
@@ -3410,7 +4381,7 @@ mod tests {
                         id: volume_to_delete_id,
                         target: vec![
                             // replacement stashed here
-                            String::from("[fd55:1122:3344:101::1]:111"),
+                            replacement_region_addr.to_string(),
                         ],
                         lossy: false,
                         flush_timeout: None,
@@ -3426,6 +4397,36 @@ mod tests {
             },
         );
 
+        // Validate the post-post-replacement volume resource usage records
+
+        for region_snapshot in &region_snapshots {
+            let usage = db_datastore
+                .volume_usage_records_for_resource(
+                    VolumeResourceUsage::RegionSnapshot {
+                        dataset_id: region_snapshot.dataset_id,
+                        region_id: region_snapshot.region_id,
+                        snapshot_id: region_snapshot.snapshot_id,
+                    },
+                )
+                .await
+                .unwrap();
+
+            assert_eq!(usage.len(), 1);
+            assert_eq!(usage[0].volume_id, volume_id);
+        }
+
+        let usage = db_datastore
+            .volume_usage_records_for_resource(
+                VolumeResourceUsage::ReadOnlyRegion {
+                    region_id: replacement_region.id(),
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(usage.len(), 1);
+        assert_eq!(usage[0].volume_id, volume_to_delete_id);
+
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -3439,6 +4440,41 @@ mod tests {
         let (opctx, db_datastore) = datastore_test(&logctx, &db).await;
 
         let volume_id = Uuid::new_v4();
+
+        // need to add region snapshot objects to satisfy volume create
+        // transaction's search for resources
+
+        let address_1 = String::from("[fd00:1122:3344:104::1]:400");
+        let address_2 = String::from("[fd00:1122:3344:105::1]:401");
+        let address_3 = String::from("[fd00:1122:3344:106::1]:402");
+
+        db_datastore
+            .region_snapshot_create(RegionSnapshot::new(
+                Uuid::new_v4(),
+                Uuid::new_v4(),
+                Uuid::new_v4(),
+                address_1.clone(),
+            ))
+            .await
+            .unwrap();
+        db_datastore
+            .region_snapshot_create(RegionSnapshot::new(
+                Uuid::new_v4(),
+                Uuid::new_v4(),
+                Uuid::new_v4(),
+                address_2.clone(),
+            ))
+            .await
+            .unwrap();
+        db_datastore
+            .region_snapshot_create(RegionSnapshot::new(
+                Uuid::new_v4(),
+                Uuid::new_v4(),
+                Uuid::new_v4(),
+                address_3.clone(),
+            ))
+            .await
+            .unwrap();
 
         // case where the needle is found
 
@@ -3458,9 +4494,9 @@ mod tests {
                             opts: CrucibleOpts {
                                 id: Uuid::new_v4(),
                                 target: vec![
-                                    String::from("[fd00:1122:3344:104::1]:400"),
-                                    String::from("[fd00:1122:3344:105::1]:401"),
-                                    String::from("[fd00:1122:3344:106::1]:402"),
+                                    address_1.clone(),
+                                    address_2,
+                                    address_3,
                                 ],
                                 lossy: false,
                                 flush_timeout: None,
@@ -3482,7 +4518,7 @@ mod tests {
         let volumes = db_datastore
             .find_volumes_referencing_socket_addr(
                 &opctx,
-                "[fd00:1122:3344:104::1]:400".parse().unwrap(),
+                address_1.parse().unwrap(),
             )
             .await
             .unwrap();

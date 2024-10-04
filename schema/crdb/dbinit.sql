@@ -575,6 +575,8 @@ CREATE INDEX IF NOT EXISTS lookup_dataset_by_zpool on omicron.public.dataset (
     id
 ) WHERE pool_id IS NOT NULL AND time_deleted IS NULL;
 
+CREATE INDEX IF NOT EXISTS lookup_dataset_by_ip on omicron.public.dataset (ip);
+
 /*
  * A region of space allocated to Crucible Downstairs, within a dataset.
  */
@@ -652,6 +654,10 @@ CREATE INDEX IF NOT EXISTS lookup_region_by_dataset on omicron.public.region_sna
 
 CREATE INDEX IF NOT EXISTS lookup_region_snapshot_by_region_id on omicron.public.region_snapshot (
     region_id
+);
+
+CREATE INDEX IF NOT EXISTS lookup_region_snapshot_by_deleting on omicron.public.region_snapshot (
+    deleting
 );
 
 /*
@@ -4409,6 +4415,43 @@ CREATE INDEX IF NOT EXISTS lookup_bgp_config_by_bgp_announce_set_id ON omicron.p
 ) WHERE
     time_deleted IS NULL;
 
+CREATE TYPE IF NOT EXISTS omicron.public.volume_resource_usage_type AS ENUM (
+  'read_only_region',
+  'region_snapshot'
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.volume_resource_usage (
+    usage_id UUID NOT NULL,
+
+    volume_id UUID NOT NULL,
+
+    usage_type omicron.public.volume_resource_usage_type NOT NULL,
+
+    region_id UUID,
+
+    region_snapshot_dataset_id UUID,
+    region_snapshot_region_id UUID,
+    region_snapshot_snapshot_id UUID,
+
+    PRIMARY KEY (usage_id)
+);
+
+CREATE INDEX IF NOT EXISTS lookup_volume_resource_usage_by_region on omicron.public.volume_resource_usage (
+    region_id
+);
+
+CREATE INDEX IF NOT EXISTS lookup_volume_resource_usage_by_snapshot on omicron.public.volume_resource_usage (
+    region_snapshot_dataset_id, region_snapshot_region_id, region_snapshot_snapshot_id
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS one_record_per_volume_resource_usage on omicron.public.volume_resource_usage (
+    volume_id,
+    usage_type,
+    region_id,
+    region_snapshot_dataset_id,
+    region_snapshot_region_id,
+    region_snapshot_snapshot_id
+);
 
 /*
  * Keep this at the end of file so that the database does not contain a version
@@ -4421,7 +4464,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '107.0.0', NULL)
+    (TRUE, NOW(), NOW(), '108.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

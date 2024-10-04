@@ -22,28 +22,11 @@ use std::sync::Arc;
 pub struct RegionSnapshotReplacementGarbageCollect {
     datastore: Arc<DataStore>,
     sagas: Arc<dyn StartSaga>,
-    disabled: bool,
 }
 
 impl RegionSnapshotReplacementGarbageCollect {
-    #[allow(dead_code)]
     pub fn new(datastore: Arc<DataStore>, sagas: Arc<dyn StartSaga>) -> Self {
-        RegionSnapshotReplacementGarbageCollect {
-            datastore,
-            sagas,
-            disabled: false,
-        }
-    }
-
-    pub fn disabled(
-        datastore: Arc<DataStore>,
-        sagas: Arc<dyn StartSaga>,
-    ) -> Self {
-        RegionSnapshotReplacementGarbageCollect {
-            datastore,
-            sagas,
-            disabled: true,
-        }
+        RegionSnapshotReplacementGarbageCollect { datastore, sagas }
     }
 
     async fn send_garbage_collect_request(
@@ -151,10 +134,6 @@ impl BackgroundTask for RegionSnapshotReplacementGarbageCollect {
         async move {
             let mut status =
                 RegionSnapshotReplacementGarbageCollectStatus::default();
-
-            if self.disabled {
-                return json!(status);
-            }
 
             self.clean_up_region_snapshot_replacement_volumes(
                 opctx,

@@ -5,24 +5,46 @@
 //! Tests that Nexus properly manages and cleans up Crucible resources
 //! associated with Volumes
 
+use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
+use diesel::ExpressionMethods;
 use dropshot::test_util::ClientTestContext;
 use http::method::Method;
 use http::StatusCode;
+use nexus_config::RegionAllocationStrategy;
+use nexus_db_model::RegionSnapshotReplacement;
+use nexus_db_model::VolumeResourceUsage;
+use nexus_db_model::VolumeResourceUsageRecord;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
+use nexus_db_queries::db::datastore::CrucibleResources;
+use nexus_db_queries::db::datastore::ExistingTarget;
+use nexus_db_queries::db::datastore::RegionAllocationFor;
+use nexus_db_queries::db::datastore::RegionAllocationParameters;
+use nexus_db_queries::db::datastore::ReplacementTarget;
+use nexus_db_queries::db::datastore::VolumeReplaceResult;
+use nexus_db_queries::db::datastore::VolumeToDelete;
+use nexus_db_queries::db::datastore::VolumeWithTarget;
+use nexus_db_queries::db::datastore::SQL_BATCH_SIZE;
 use nexus_db_queries::db::lookup::LookupPath;
+use nexus_db_queries::db::pagination::paginated;
+use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
+use nexus_test_utils::background::run_replacement_tasks_to_completion;
 use nexus_test_utils::http_testing::AuthnMode;
 use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::resource_helpers::create_default_ip_pool;
+use nexus_test_utils::resource_helpers::create_disk;
+use nexus_test_utils::resource_helpers::create_disk_from_snapshot;
 use nexus_test_utils::resource_helpers::create_project;
+use nexus_test_utils::resource_helpers::create_snapshot;
 use nexus_test_utils::resource_helpers::object_create;
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::params;
 use nexus_types::external_api::views;
 use nexus_types::identity::Asset;
+use nexus_types::identity::Resource;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -30,6 +52,7 @@ use omicron_common::api::external::Name;
 use omicron_common::api::internal;
 use omicron_uuid_kinds::DownstairsKind;
 use omicron_uuid_kinds::DownstairsRegionKind;
+use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::TypedUuid;
 use omicron_uuid_kinds::UpstairsKind;
 use omicron_uuid_kinds::UpstairsRepairKind;
@@ -37,6 +60,8 @@ use omicron_uuid_kinds::UpstairsSessionKind;
 use rand::prelude::SliceRandom;
 use rand::{rngs::StdRng, SeedableRng};
 use sled_agent_client::types::{CrucibleOpts, VolumeConstructionRequest};
+use std::collections::HashSet;
+use std::net::SocketAddrV6;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -2286,36 +2311,47 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
         .unwrap();
     assert_eq!(crucible_targets.read_only_targets.len(), 3);
 
-    // Also validate the volume's region_snapshots got incremented by
-    // volume_create
+    // Also validate the volume's region_snapshots had volume resource usage
+    // records created by volume_create
 
     for i in 0..3 {
         let (dataset_id, region_id, snapshot_id, _) = region_snapshots[i];
-        let region_snapshot = datastore
-            .region_snapshot_get(dataset_id, region_id, snapshot_id)
+
+        let usage = datastore
+            .volume_usage_records_for_resource(
+                VolumeResourceUsage::RegionSnapshot {
+                    dataset_id,
+                    region_id,
+                    snapshot_id,
+                },
+            )
             .await
-            .unwrap()
             .unwrap();
 
-        assert_eq!(region_snapshot.volume_references, 1);
-        assert_eq!(region_snapshot.deleting, false);
+        assert_eq!(usage.len(), 1);
+        assert_eq!(usage[0].volume_id, volume_id);
     }
 
-    // Soft delete the volume, and validate that only three region_snapshot
-    // records are returned.
+    // Soft delete the volume, and validate that the volume's region_snapshots
+    // had their volume resource usage records deleted
 
     let cr = datastore.soft_delete_volume(volume_id).await.unwrap();
 
     for i in 0..3 {
         let (dataset_id, region_id, snapshot_id, _) = region_snapshots[i];
-        let region_snapshot = datastore
-            .region_snapshot_get(dataset_id, region_id, snapshot_id)
+
+        let usage = datastore
+            .volume_usage_records_for_resource(
+                VolumeResourceUsage::RegionSnapshot {
+                    dataset_id,
+                    region_id,
+                    snapshot_id,
+                },
+            )
             .await
-            .unwrap()
             .unwrap();
 
-        assert_eq!(region_snapshot.volume_references, 0);
-        assert_eq!(region_snapshot.deleting, true);
+        assert!(usage.is_empty());
     }
 
     let datasets_and_regions = datastore.regions_to_delete(&cr).await.unwrap();
@@ -2396,30 +2432,42 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
         .unwrap();
     assert_eq!(crucible_targets.read_only_targets.len(), 3);
 
-    // Also validate only the volume's region_snapshots got incremented by
-    // volume_create.
+    // Also validate only the new volume's region_snapshots had usage records
+    // created.
 
     for i in 0..3 {
         let (dataset_id, region_id, snapshot_id, _) = region_snapshots[i];
-        let region_snapshot = datastore
-            .region_snapshot_get(dataset_id, region_id, snapshot_id)
+
+        let usage = datastore
+            .volume_usage_records_for_resource(
+                VolumeResourceUsage::RegionSnapshot {
+                    dataset_id,
+                    region_id,
+                    snapshot_id,
+                },
+            )
             .await
-            .unwrap()
             .unwrap();
 
-        assert_eq!(region_snapshot.volume_references, 0);
-        assert_eq!(region_snapshot.deleting, true);
+        assert!(usage.is_empty());
     }
+
     for i in 3..6 {
         let (dataset_id, region_id, snapshot_id, _) = region_snapshots[i];
-        let region_snapshot = datastore
-            .region_snapshot_get(dataset_id, region_id, snapshot_id)
+
+        let usage = datastore
+            .volume_usage_records_for_resource(
+                VolumeResourceUsage::RegionSnapshot {
+                    dataset_id,
+                    region_id,
+                    snapshot_id,
+                },
+            )
             .await
-            .unwrap()
             .unwrap();
 
-        assert_eq!(region_snapshot.volume_references, 1);
-        assert_eq!(region_snapshot.deleting, false);
+        assert_eq!(usage.len(), 1);
+        assert_eq!(usage[0].volume_id, volume_id);
     }
 
     // Soft delete the volume, and validate that only three region_snapshot
@@ -2427,18 +2475,23 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
 
     let cr = datastore.soft_delete_volume(volume_id).await.unwrap();
 
-    // Make sure every region_snapshot is now 0, and deleting
+    // Make sure every region_snapshot has no usage records now
 
     for i in 0..6 {
         let (dataset_id, region_id, snapshot_id, _) = region_snapshots[i];
-        let region_snapshot = datastore
-            .region_snapshot_get(dataset_id, region_id, snapshot_id)
+
+        let usage = datastore
+            .volume_usage_records_for_resource(
+                VolumeResourceUsage::RegionSnapshot {
+                    dataset_id,
+                    region_id,
+                    snapshot_id,
+                },
+            )
             .await
-            .unwrap()
             .unwrap();
 
-        assert_eq!(region_snapshot.volume_references, 0);
-        assert_eq!(region_snapshot.deleting, true);
+        assert!(usage.is_empty());
     }
 
     let datasets_and_regions = datastore.regions_to_delete(&cr).await.unwrap();
@@ -3502,4 +3555,1978 @@ async fn test_cte_returns_regions(cptestctx: &ControlPlaneTestContext) {
             .map(|(_, region)| region.id())
             .collect::<Vec<Uuid>>(),
     );
+}
+
+struct TestReadOnlyRegionReferenceUsage {
+    datastore: Arc<DataStore>,
+
+    region: db::model::Region,
+    region_address: SocketAddrV6,
+
+    first_volume_id: Uuid,
+    second_volume_id: Uuid,
+
+    last_resources_to_delete: Option<CrucibleResources>,
+}
+
+impl TestReadOnlyRegionReferenceUsage {
+    pub async fn new(cptestctx: &ControlPlaneTestContext) -> Self {
+        let client = &cptestctx.external_client;
+        let apictx = &cptestctx.server.server_context();
+        let nexus = &apictx.nexus;
+        let datastore = nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.new(o!()),
+            datastore.clone(),
+        );
+
+        DiskTestBuilder::new(&cptestctx)
+            .on_specific_sled(cptestctx.first_sled())
+            .with_zpool_count(4)
+            .build()
+            .await;
+
+        create_project_and_pool(client).await;
+
+        let first_volume_id = Uuid::new_v4();
+        let second_volume_id = Uuid::new_v4();
+        let snapshot_id = Uuid::new_v4();
+
+        let datasets_and_regions = datastore
+            .arbitrary_region_allocate(
+                &opctx,
+                RegionAllocationFor::SnapshotVolume {
+                    volume_id: first_volume_id,
+                    snapshot_id,
+                },
+                RegionAllocationParameters::FromDiskSource {
+                    disk_source: &params::DiskSource::Blank {
+                        block_size: params::BlockSize::try_from(512).unwrap(),
+                    },
+                    size: ByteCount::from_gibibytes_u32(1),
+                },
+                &RegionAllocationStrategy::Random { seed: None },
+                1,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(datasets_and_regions.len(), 1);
+
+        let (_, region) = &datasets_and_regions[0];
+
+        assert_eq!(region.volume_id(), first_volume_id);
+        assert!(region.read_only());
+
+        // We're not sending the allocation request to any simulated crucible agent,
+        // so fill in a random port here.
+        datastore.region_set_port(region.id(), 12345).await.unwrap();
+
+        let region_address =
+            datastore.region_addr(region.id()).await.unwrap().unwrap();
+
+        let region = datastore.get_region(region.id()).await.unwrap();
+
+        TestReadOnlyRegionReferenceUsage {
+            datastore: datastore.clone(),
+
+            region,
+            region_address,
+
+            first_volume_id,
+            second_volume_id,
+
+            last_resources_to_delete: None,
+        }
+    }
+
+    pub async fn create_first_volume(&self) {
+        self.datastore
+            .volume_create(nexus_db_model::Volume::new(
+                self.first_volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: self.first_volume_id,
+                    block_size: 512,
+                    sub_volumes: vec![VolumeConstructionRequest::Region {
+                        block_size: 512,
+                        blocks_per_extent: self.region.blocks_per_extent(),
+                        extent_count: self.region.extent_count() as u32,
+                        gen: 1,
+                        opts: CrucibleOpts {
+                            id: Uuid::new_v4(),
+                            target: vec![self.region_address.to_string()],
+                            lossy: false,
+                            flush_timeout: None,
+                            key: None,
+                            cert_pem: None,
+                            key_pem: None,
+                            root_cert_pem: None,
+                            control: None,
+                            read_only: true,
+                        },
+                    }],
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+    }
+
+    pub async fn validate_only_first_volume_referenced(&self) {
+        let usage = self
+            .datastore
+            .volume_usage_records_for_resource(
+                VolumeResourceUsage::ReadOnlyRegion {
+                    region_id: self.region.id(),
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(usage.len(), 1);
+        assert_eq!(usage[0].volume_id, self.first_volume_id);
+    }
+
+    pub async fn validate_only_second_volume_referenced(&self) {
+        let usage = self
+            .datastore
+            .volume_usage_records_for_resource(
+                VolumeResourceUsage::ReadOnlyRegion {
+                    region_id: self.region.id(),
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(usage.len(), 1);
+        assert_eq!(usage[0].volume_id, self.second_volume_id);
+    }
+
+    pub async fn delete_first_volume(&mut self) {
+        let resources_to_delete = self
+            .datastore
+            .soft_delete_volume(self.first_volume_id)
+            .await
+            .unwrap();
+
+        self.last_resources_to_delete = Some(resources_to_delete);
+    }
+
+    pub async fn delete_second_volume(&mut self) {
+        let resources_to_delete = self
+            .datastore
+            .soft_delete_volume(self.second_volume_id)
+            .await
+            .unwrap();
+
+        self.last_resources_to_delete = Some(resources_to_delete);
+    }
+
+    pub async fn validate_no_usage_records(&self) {
+        let usage = self
+            .datastore
+            .volume_usage_records_for_resource(
+                VolumeResourceUsage::ReadOnlyRegion {
+                    region_id: self.region.id(),
+                },
+            )
+            .await
+            .unwrap();
+
+        assert!(usage.is_empty());
+    }
+
+    pub async fn validate_region_returned_for_cleanup(&self) {
+        assert!(self
+            .datastore
+            .regions_to_delete(&self.last_resources_to_delete.as_ref().unwrap())
+            .await
+            .unwrap()
+            .into_iter()
+            .any(|(_, r)| r.id() == self.region.id()));
+    }
+
+    pub async fn validate_region_not_returned_for_cleanup(&self) {
+        assert!(!self
+            .datastore
+            .regions_to_delete(&self.last_resources_to_delete.as_ref().unwrap())
+            .await
+            .unwrap()
+            .into_iter()
+            .any(|(_, r)| r.id() == self.region.id()));
+    }
+
+    pub async fn region_returned_by_find_deleted_volume_regions(&self) {
+        let deleted_volume_regions =
+            self.datastore.find_deleted_volume_regions().await.unwrap();
+
+        assert!(deleted_volume_regions
+            .into_iter()
+            .any(|(_, r, _, _)| r.id() == self.region.id()));
+    }
+
+    pub async fn region_not_returned_by_find_deleted_volume_regions(&self) {
+        let deleted_volume_regions =
+            self.datastore.find_deleted_volume_regions().await.unwrap();
+
+        assert!(!deleted_volume_regions
+            .into_iter()
+            .any(|(_, r, _, _)| r.id() == self.region.id()));
+    }
+
+    pub async fn create_first_volume_region_in_rop(&self) {
+        self.datastore
+            .volume_create(nexus_db_model::Volume::new(
+                self.first_volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: self.first_volume_id,
+                    block_size: 512,
+                    sub_volumes: vec![],
+                    read_only_parent: Some(Box::new(
+                        VolumeConstructionRequest::Region {
+                            block_size: 512,
+                            blocks_per_extent: self.region.blocks_per_extent(),
+                            extent_count: self.region.extent_count() as u32,
+                            gen: 1,
+                            opts: CrucibleOpts {
+                                id: Uuid::new_v4(),
+                                target: vec![self.region_address.to_string()],
+                                lossy: false,
+                                flush_timeout: None,
+                                key: None,
+                                cert_pem: None,
+                                key_pem: None,
+                                root_cert_pem: None,
+                                control: None,
+                                read_only: true,
+                            },
+                        },
+                    )),
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+    }
+
+    pub async fn create_second_volume(&self) {
+        self.datastore
+            .volume_create(nexus_db_model::Volume::new(
+                self.second_volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: self.second_volume_id,
+                    block_size: 512,
+                    sub_volumes: vec![VolumeConstructionRequest::Region {
+                        block_size: 512,
+                        blocks_per_extent: self.region.blocks_per_extent(),
+                        extent_count: self.region.extent_count() as u32,
+                        gen: 1,
+                        opts: CrucibleOpts {
+                            id: Uuid::new_v4(),
+                            target: vec![self.region_address.to_string()],
+                            lossy: false,
+                            flush_timeout: None,
+                            key: None,
+                            cert_pem: None,
+                            key_pem: None,
+                            root_cert_pem: None,
+                            control: None,
+                            read_only: true,
+                        },
+                    }],
+                    read_only_parent: None,
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+    }
+
+    pub async fn create_second_volume_region_in_rop(&self) {
+        self.datastore
+            .volume_create(nexus_db_model::Volume::new(
+                self.second_volume_id,
+                serde_json::to_string(&VolumeConstructionRequest::Volume {
+                    id: self.second_volume_id,
+                    block_size: 512,
+                    sub_volumes: vec![],
+                    read_only_parent: Some(Box::new(
+                        VolumeConstructionRequest::Region {
+                            block_size: 512,
+                            blocks_per_extent: self.region.blocks_per_extent(),
+                            extent_count: self.region.extent_count() as u32,
+                            gen: 1,
+                            opts: CrucibleOpts {
+                                id: Uuid::new_v4(),
+                                target: vec![self.region_address.to_string()],
+                                lossy: false,
+                                flush_timeout: None,
+                                key: None,
+                                cert_pem: None,
+                                key_pem: None,
+                                root_cert_pem: None,
+                                control: None,
+                                read_only: true,
+                            },
+                        },
+                    )),
+                })
+                .unwrap(),
+            ))
+            .await
+            .unwrap();
+    }
+
+    pub async fn validate_both_volumes_referenced(&self) {
+        let usage = self
+            .datastore
+            .volume_usage_records_for_resource(
+                VolumeResourceUsage::ReadOnlyRegion {
+                    region_id: self.region.id(),
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(usage.len(), 2);
+        assert!(usage.iter().any(|r| r.volume_id == self.first_volume_id));
+        assert!(usage.iter().any(|r| r.volume_id == self.second_volume_id));
+    }
+}
+
+/// Assert that creating a volume with a read-only region in a subvolume creates
+/// an appropriate usage record, and that deleting that volume removes it
+#[nexus_test]
+async fn test_read_only_region_reference_usage_sanity(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let mut harness = TestReadOnlyRegionReferenceUsage::new(cptestctx).await;
+
+    // Create one volume referencing the harness' read-only region
+
+    harness.create_first_volume().await;
+
+    // Validate only one volume resource usage record was created
+
+    harness.validate_only_first_volume_referenced().await;
+
+    // Now, soft-delete the volume, and make sure that the associated volume
+    // resource usage record is gone too.
+
+    harness.delete_first_volume().await;
+
+    harness.validate_no_usage_records().await;
+
+    // If the read-only volume references for a read-only region are gone, then
+    // it should be returned for cleanup.
+
+    harness.validate_region_returned_for_cleanup().await;
+
+    // It should be returned by find_deleted_volume_regions.
+
+    harness.region_returned_by_find_deleted_volume_regions().await;
+}
+
+/// Assert that creating a volume with a read-only region in the ROP creates an
+/// appropriate reference, and that deleting that volume removes it
+#[nexus_test]
+async fn test_read_only_region_reference_sanity_rop(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let mut harness = TestReadOnlyRegionReferenceUsage::new(cptestctx).await;
+
+    // Create one volume referencing the harness' read-only region
+
+    harness.create_first_volume_region_in_rop().await;
+
+    // Validate that the appropriate volume resource usage record was created
+
+    harness.validate_only_first_volume_referenced().await;
+
+    // It should be _not_ returned by find_deleted_volume_regions.
+
+    harness.region_not_returned_by_find_deleted_volume_regions().await;
+
+    // Now, soft-delete the volume, and make sure that read-only volume
+    // reference is gone too.
+
+    harness.delete_first_volume().await;
+
+    harness.validate_no_usage_records().await;
+
+    // If the read-only volume references for a read-only region are gone, then
+    // it should be returned for cleanup.
+
+    harness.validate_region_returned_for_cleanup().await;
+
+    // It should be returned by find_deleted_volume_regions.
+
+    harness.region_returned_by_find_deleted_volume_regions().await;
+}
+
+/// Assert that creating multiple volumes with a read-only region creates the
+/// appropriate references, and that deleting only one of those volumes does not
+/// mean the read-only region gets cleaned up
+#[nexus_test]
+async fn test_read_only_region_reference_sanity_multi(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let mut harness = TestReadOnlyRegionReferenceUsage::new(cptestctx).await;
+
+    // Create two volumes this time
+
+    harness.create_first_volume().await;
+    harness.create_second_volume().await;
+
+    // Validate that the appropriate volume resource usage records were created
+
+    harness.validate_both_volumes_referenced().await;
+
+    // Now, soft-delete the first volume, and make sure that only one read-only
+    // volume reference is gone.
+
+    harness.delete_first_volume().await;
+
+    harness.validate_only_second_volume_referenced().await;
+
+    // If any read-only volume reference remains, then the region should not be
+    // returned for deletion, and it still should not be returned by
+    // `find_deleted_volume_regions`.
+
+    harness.validate_region_not_returned_for_cleanup().await;
+
+    harness.region_not_returned_by_find_deleted_volume_regions().await;
+
+    // Deleting the second volume should free up the read-only region for
+    // deletion
+
+    harness.delete_second_volume().await;
+
+    harness.validate_no_usage_records().await;
+
+    harness.validate_region_returned_for_cleanup().await;
+
+    harness.region_returned_by_find_deleted_volume_regions().await;
+}
+
+/// Assert that creating multiple volumes with a read-only region in the ROP
+/// creates the appropriate references, and that deleting only one of those
+/// volumes does not mean the read-only region gets cleaned up
+#[nexus_test]
+async fn test_read_only_region_reference_sanity_rop_multi(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let mut harness = TestReadOnlyRegionReferenceUsage::new(cptestctx).await;
+
+    // Create two volumes this time
+
+    harness.create_first_volume_region_in_rop().await;
+    harness.create_second_volume_region_in_rop().await;
+
+    // Validate that the appropriate volume resource usage records were created
+
+    harness.validate_both_volumes_referenced().await;
+
+    // Now, soft-delete the volume, and make sure that only one read-only volume
+    // reference is gone.
+
+    harness.delete_first_volume().await;
+
+    harness.validate_only_second_volume_referenced().await;
+
+    // If any read-only volume reference remains, then the region should not be
+    // returned for deletion, and it still should not be returned by
+    // `find_deleted_volume_regions`.
+
+    harness.validate_region_not_returned_for_cleanup().await;
+
+    harness.region_not_returned_by_find_deleted_volume_regions().await;
+
+    // Deleting the second volume should free up the read-only region for
+    // deletion
+
+    harness.delete_second_volume().await;
+
+    harness.validate_no_usage_records().await;
+
+    harness.validate_region_returned_for_cleanup().await;
+
+    harness.region_returned_by_find_deleted_volume_regions().await;
+}
+
+/// Assert that a read-only region is properly reference counted and not
+/// prematurely deleted:
+///
+/// 1) create a disk, then a snapshot of that disk, then a disk from that
+///    snapshot
+///
+/// 2) issue a region snapshot replacement request for one of the region
+///    snapshots in that snapshot, then run that process to completion
+///
+/// 3) delete the snapshot
+///
+/// 4) expect that the reference to the read-only region in the disk created
+///    from the snapshot means that read-only region will not be cleaned up by
+///    Nexus
+///
+/// 5) clean up all the objects, and expect the crucible resources are properly
+///    cleaned up
+#[nexus_test]
+async fn test_read_only_region_reference_counting(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let internal_client = &cptestctx.internal_client;
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    // Four zpools are required for region replacement or region snapshot
+    // replacement
+    let disk_test = DiskTestBuilder::new(&cptestctx)
+        .on_specific_sled(cptestctx.first_sled())
+        .with_zpool_count(4)
+        .build()
+        .await;
+
+    create_project_and_pool(client).await;
+
+    let disk = create_disk(&client, PROJECT_NAME, "disk").await;
+
+    let snapshot =
+        create_snapshot(&client, PROJECT_NAME, "disk", "snapshot").await;
+
+    let disk_from_snapshot = create_disk_from_snapshot(
+        &client,
+        PROJECT_NAME,
+        "disk-from-snapshot",
+        snapshot.identity.id,
+    )
+    .await;
+
+    // Perform region snapshot replacement for one of the snapshot's regions,
+    // causing a read-only region to be created.
+
+    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+        .disk_id(disk.identity.id)
+        .fetch()
+        .await
+        .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id));
+
+    let allocated_regions =
+        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+
+    assert_eq!(allocated_regions.len(), 3);
+
+    let (dataset, region) = &allocated_regions[0];
+
+    let request = RegionSnapshotReplacement::new(
+        dataset.id(),
+        region.id(),
+        snapshot.identity.id,
+    );
+
+    datastore
+        .insert_region_snapshot_replacement_request(&opctx, request)
+        .await
+        .unwrap();
+
+    run_replacement_tasks_to_completion(&internal_client).await;
+
+    // The snapshot's allocated regions should have the one read-only region
+
+    let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
+        .snapshot_id(snapshot.identity.id)
+        .fetch()
+        .await
+        .unwrap_or_else(|_| {
+            panic!("snapshot {:?} should exist", snapshot.identity.id)
+        });
+
+    let allocated_regions =
+        datastore.get_allocated_regions(db_snapshot.volume_id).await.unwrap();
+
+    assert_eq!(allocated_regions.len(), 1);
+    let (_, read_only_region) = &allocated_regions[0];
+    assert!(read_only_region.read_only());
+
+    let db_read_only_dataset =
+        datastore.dataset_get(read_only_region.dataset_id()).await.unwrap();
+
+    // The disk-from-snap VCR should also reference that read-only region
+
+    let (.., db_disk_from_snapshot) = LookupPath::new(&opctx, &datastore)
+        .disk_id(disk_from_snapshot.identity.id)
+        .fetch()
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "disk_from_snapshot {:?} should exist",
+                disk_from_snapshot.identity.id
+            )
+        });
+
+    let read_only_region_address: SocketAddrV6 =
+        nexus.region_addr(&opctx.log, read_only_region.id()).await.unwrap();
+
+    assert!(datastore
+        .find_volumes_referencing_socket_addr(
+            &opctx,
+            read_only_region_address.into()
+        )
+        .await
+        .unwrap()
+        .iter()
+        .any(|volume| volume.id() == db_disk_from_snapshot.volume_id));
+
+    // Expect that there are two read-only region references now: one in the
+    // snapshot volume, and one in the disk-from-snap volume.
+
+    let usage = datastore
+        .volume_usage_records_for_resource(
+            VolumeResourceUsage::ReadOnlyRegion {
+                region_id: read_only_region.id(),
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(usage.len(), 2);
+    assert!(usage.iter().any(|r| r.volume_id == db_snapshot.volume_id));
+    assert!(usage
+        .iter()
+        .any(|r| r.volume_id == db_disk_from_snapshot.volume_id));
+
+    // Deleting the snapshot should _not_ cause the region to get deleted from
+    // CRDB
+
+    NexusRequest::object_delete(client, &get_snapshot_url("snapshot"))
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to delete snapshot");
+
+    let post_delete_region =
+        datastore.get_region(read_only_region.id()).await.unwrap();
+    assert_eq!(post_delete_region, *read_only_region);
+
+    // or cause Nexus to send delete commands to the appropriate Crucible
+    // agent.
+
+    assert_eq!(
+        cptestctx
+            .sled_agent
+            .sled_agent
+            .get_crucible_dataset(
+                TypedUuid::from_untyped_uuid(db_read_only_dataset.pool_id),
+                db_read_only_dataset.id(),
+            )
+            .await
+            .get(crucible_agent_client::types::RegionId(
+                read_only_region.id().to_string()
+            ))
+            .await
+            .unwrap()
+            .state,
+        crucible_agent_client::types::State::Created
+    );
+
+    // Expect that there is one read-only region reference now, and that's from
+    // disk-from-snap
+
+    let usage = datastore
+        .volume_usage_records_for_resource(
+            VolumeResourceUsage::ReadOnlyRegion {
+                region_id: read_only_region.id(),
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(usage.len(), 1);
+    assert_eq!(usage[0].volume_id, db_disk_from_snapshot.volume_id);
+
+    // Delete the disk, and expect that does not alter the volume usage records
+
+    NexusRequest::object_delete(client, &get_disk_url("disk"))
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to delete disk");
+
+    let usage = datastore
+        .volume_usage_records_for_resource(
+            VolumeResourceUsage::ReadOnlyRegion {
+                region_id: read_only_region.id(),
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(usage.len(), 1);
+    assert_eq!(usage[0].volume_id, db_disk_from_snapshot.volume_id);
+
+    // Delete the disk from snapshot, verify everything is cleaned up
+
+    NexusRequest::object_delete(client, &get_disk_url("disk-from-snapshot"))
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to delete disk");
+
+    let usage = datastore
+        .volume_usage_records_for_resource(
+            VolumeResourceUsage::ReadOnlyRegion {
+                region_id: read_only_region.id(),
+            },
+        )
+        .await
+        .unwrap();
+
+    assert!(usage.is_empty());
+
+    assert_eq!(
+        cptestctx
+            .sled_agent
+            .sled_agent
+            .get_crucible_dataset(
+                TypedUuid::from_untyped_uuid(db_read_only_dataset.pool_id),
+                db_read_only_dataset.id(),
+            )
+            .await
+            .get(crucible_agent_client::types::RegionId(
+                read_only_region.id().to_string()
+            ))
+            .await
+            .unwrap()
+            .state,
+        crucible_agent_client::types::State::Destroyed
+    );
+
+    // Assert everything was cleaned up
+    assert!(disk_test.crucible_resources_deleted().await);
+}
+
+/// Assert that a snapshot of a volume with a read-only region is properly
+/// reference counted.
+#[nexus_test]
+async fn test_read_only_region_reference_counting_layers(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let internal_client = &cptestctx.internal_client;
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    // Four zpools are required for region replacement or region snapshot
+    // replacement
+    let disk_test = DiskTestBuilder::new(&cptestctx)
+        .on_specific_sled(cptestctx.first_sled())
+        .with_zpool_count(4)
+        .build()
+        .await;
+
+    create_project_and_pool(client).await;
+
+    let disk = create_disk(&client, PROJECT_NAME, "disk").await;
+
+    let snapshot =
+        create_snapshot(&client, PROJECT_NAME, "disk", "snapshot").await;
+
+    let disk_from_snapshot = create_disk_from_snapshot(
+        &client,
+        PROJECT_NAME,
+        "disk-from-snapshot",
+        snapshot.identity.id,
+    )
+    .await;
+
+    // Perform region snapshot replacement for one of the snapshot's regions,
+    // causing a read-only region to be created.
+
+    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+        .disk_id(disk.identity.id)
+        .fetch()
+        .await
+        .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id));
+
+    let allocated_regions =
+        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+
+    assert_eq!(allocated_regions.len(), 3);
+
+    let (dataset, region) = &allocated_regions[0];
+
+    let request = RegionSnapshotReplacement::new(
+        dataset.id(),
+        region.id(),
+        snapshot.identity.id,
+    );
+
+    datastore
+        .insert_region_snapshot_replacement_request(&opctx, request)
+        .await
+        .unwrap();
+
+    run_replacement_tasks_to_completion(&internal_client).await;
+
+    // Grab the read-only region in the snapshot volume
+
+    let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
+        .snapshot_id(snapshot.identity.id)
+        .fetch()
+        .await
+        .unwrap_or_else(|_| {
+            panic!("snapshot {:?} should exist", snapshot.identity.id)
+        });
+
+    let allocated_regions =
+        datastore.get_allocated_regions(db_snapshot.volume_id).await.unwrap();
+
+    assert_eq!(allocated_regions.len(), 1);
+    let (_, read_only_region) = &allocated_regions[0];
+    assert!(read_only_region.read_only());
+
+    // The disk-from-snap VCR should also reference that read-only region
+
+    let (.., db_disk_from_snapshot) = LookupPath::new(&opctx, &datastore)
+        .disk_id(disk_from_snapshot.identity.id)
+        .fetch()
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "disk_from_snapshot {:?} should exist",
+                disk_from_snapshot.identity.id
+            )
+        });
+
+    let read_only_region_address: SocketAddrV6 =
+        nexus.region_addr(&opctx.log, read_only_region.id()).await.unwrap();
+
+    assert!(datastore
+        .find_volumes_referencing_socket_addr(
+            &opctx,
+            read_only_region_address.into()
+        )
+        .await
+        .unwrap()
+        .iter()
+        .any(|volume| volume.id() == db_disk_from_snapshot.volume_id));
+
+    // Expect that there are two read-only region references now: one in the
+    // snapshot volume, and one in the disk-from-snap volume.
+
+    let usage = datastore
+        .volume_usage_records_for_resource(
+            VolumeResourceUsage::ReadOnlyRegion {
+                region_id: read_only_region.id(),
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(usage.len(), 2);
+    assert!(usage.iter().any(|r| r.volume_id == db_snapshot.volume_id));
+    assert!(usage
+        .iter()
+        .any(|r| r.volume_id == db_disk_from_snapshot.volume_id));
+
+    // Take a snapshot of the disk-from-snapshot disk
+
+    let double_snapshot = create_snapshot(
+        &client,
+        PROJECT_NAME,
+        "disk-from-snapshot",
+        "double-snapshot",
+    )
+    .await;
+
+    // Assert correct volume usage records
+
+    let (.., db_double_snapshot) = LookupPath::new(&opctx, &datastore)
+        .snapshot_id(double_snapshot.identity.id)
+        .fetch()
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "double_snapshot {:?} should exist",
+                double_snapshot.identity.id
+            )
+        });
+
+    let usage = datastore
+        .volume_usage_records_for_resource(
+            VolumeResourceUsage::ReadOnlyRegion {
+                region_id: read_only_region.id(),
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(usage.len(), 3);
+    assert!(usage.iter().any(|r| r.volume_id == db_snapshot.volume_id));
+    assert!(usage
+        .iter()
+        .any(|r| r.volume_id == db_disk_from_snapshot.volume_id));
+    assert!(usage.iter().any(|r| r.volume_id == db_double_snapshot.volume_id));
+
+    // Delete resources, assert volume resource usage records along the way
+
+    NexusRequest::object_delete(client, &get_disk_url("disk-from-snapshot"))
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to delete disk");
+
+    assert!(!disk_test.crucible_resources_deleted().await);
+
+    let usage = datastore
+        .volume_usage_records_for_resource(
+            VolumeResourceUsage::ReadOnlyRegion {
+                region_id: read_only_region.id(),
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(usage.len(), 2);
+    assert!(usage.iter().any(|r| r.volume_id == db_snapshot.volume_id));
+    assert!(usage.iter().any(|r| r.volume_id == db_double_snapshot.volume_id));
+
+    NexusRequest::object_delete(client, &get_snapshot_url("snapshot"))
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to delete snapshot");
+
+    assert!(!disk_test.crucible_resources_deleted().await);
+
+    let usage = datastore
+        .volume_usage_records_for_resource(
+            VolumeResourceUsage::ReadOnlyRegion {
+                region_id: read_only_region.id(),
+            },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(usage.len(), 1);
+    assert!(usage.iter().any(|r| r.volume_id == db_double_snapshot.volume_id));
+
+    NexusRequest::object_delete(client, &get_snapshot_url("double-snapshot"))
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to delete snapshot");
+
+    assert!(!disk_test.crucible_resources_deleted().await);
+
+    let usage = datastore
+        .volume_usage_records_for_resource(
+            VolumeResourceUsage::ReadOnlyRegion {
+                region_id: read_only_region.id(),
+            },
+        )
+        .await
+        .unwrap();
+
+    assert!(usage.is_empty());
+
+    NexusRequest::object_delete(client, &get_disk_url("disk"))
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to delete disk");
+
+    // Assert everything was cleaned up
+    assert!(disk_test.crucible_resources_deleted().await);
+}
+
+#[nexus_test]
+async fn test_volume_replace_snapshot_respects_accounting(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    DiskTestBuilder::new(&cptestctx)
+        .on_specific_sled(cptestctx.first_sled())
+        .with_zpool_count(4)
+        .build()
+        .await;
+
+    create_project_and_pool(client).await;
+
+    // Create a disk, then a snapshot of that disk
+
+    let disk = create_disk(&client, PROJECT_NAME, "disk").await;
+
+    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+        .disk_id(disk.identity.id)
+        .fetch()
+        .await
+        .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id));
+
+    let disk_allocated_regions =
+        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+
+    assert_eq!(disk_allocated_regions.len(), 3);
+
+    let snapshot =
+        create_snapshot(&client, PROJECT_NAME, "disk", "snapshot").await;
+
+    let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
+        .snapshot_id(snapshot.identity.id)
+        .fetch()
+        .await
+        .unwrap_or_else(|_| {
+            panic!("snapshot {:?} should exist", snapshot.identity.id)
+        });
+
+    let allocated_regions =
+        datastore.get_allocated_regions(db_snapshot.volume_id).await.unwrap();
+
+    // There won't be any regions for the snapshot volume, only region snapshots
+
+    assert!(allocated_regions.is_empty());
+
+    // Get another region to use with volume_replace_snapshot
+
+    datastore
+        .arbitrary_region_allocate(
+            &opctx,
+            RegionAllocationFor::SnapshotVolume {
+                volume_id: db_snapshot.volume_id,
+                snapshot_id: db_snapshot.id(),
+            },
+            RegionAllocationParameters::FromDiskSource {
+                disk_source: &params::DiskSource::Blank {
+                    block_size: params::BlockSize::try_from(512).unwrap(),
+                },
+                size: ByteCount::from_gibibytes_u32(1),
+            },
+            &RegionAllocationStrategy::Random { seed: None },
+            allocated_regions.len() + 1,
+        )
+        .await
+        .unwrap();
+
+    // Get the newly allocated region
+
+    let mut new_allocated_regions =
+        datastore.get_allocated_regions(db_snapshot.volume_id).await.unwrap();
+
+    assert_eq!(new_allocated_regions.len(), 1);
+
+    let (_, new_region) =
+        new_allocated_regions.pop().expect("we just checked the length!");
+
+    // We're not sending the allocation request to any simulated crucible agent,
+    // so fill in a random port here.
+    datastore.region_set_port(new_region.id(), 12345).await.unwrap();
+
+    // Create a blank region to use as the "volume to delete"
+
+    let volume_to_delete_id = Uuid::new_v4();
+
+    datastore
+        .volume_create(nexus_db_model::Volume::new(
+            volume_to_delete_id,
+            serde_json::to_string(&VolumeConstructionRequest::Volume {
+                id: volume_to_delete_id,
+                block_size: 512,
+                sub_volumes: vec![],
+                read_only_parent: None,
+            })
+            .unwrap(),
+        ))
+        .await
+        .unwrap();
+
+    // Assert the correct volume resource usage record before the replacement:
+    // nothing should reference the newly allocated region yet
+
+    let usage = datastore
+        .volume_usage_records_for_resource(
+            VolumeResourceUsage::ReadOnlyRegion { region_id: new_region.id() },
+        )
+        .await
+        .unwrap();
+
+    assert!(usage.is_empty());
+
+    // Perform replacement of the first region in the snapshot
+
+    let existing = datastore
+        .region_snapshot_get(
+            disk_allocated_regions[0].1.dataset_id(),
+            disk_allocated_regions[0].1.id(),
+            db_snapshot.id(),
+        )
+        .await
+        .expect("region snapshot exists!")
+        .unwrap();
+
+    let replacement = datastore
+        .region_addr(new_region.id())
+        .await
+        .expect("new region has address!")
+        .unwrap();
+
+    let replacement_result = datastore
+        .volume_replace_snapshot(
+            VolumeWithTarget(db_snapshot.volume_id),
+            ExistingTarget(existing.snapshot_addr.parse().unwrap()),
+            ReplacementTarget(replacement),
+            VolumeToDelete(volume_to_delete_id),
+        )
+        .await
+        .unwrap();
+
+    match replacement_result {
+        VolumeReplaceResult::Done => {
+            // ok!
+        }
+
+        _ => {
+            panic!("replacement result was {replacement_result:?}");
+        }
+    }
+
+    // Assert the volume resource usage record after volume_replace_snapshot:
+    // the new region should have a usage for the snapshot's volume
+
+    let usage = datastore
+        .volume_usage_records_for_resource(
+            VolumeResourceUsage::ReadOnlyRegion { region_id: new_region.id() },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(usage.len(), 1);
+    assert_eq!(usage[0].volume_id, db_snapshot.volume_id);
+
+    // Now, reverse the replacement
+
+    let replacement_result = datastore
+        .volume_replace_snapshot(
+            VolumeWithTarget(db_snapshot.volume_id),
+            ExistingTarget(replacement), // swapped!
+            ReplacementTarget(existing.snapshot_addr.parse().unwrap()), // swapped!
+            VolumeToDelete(volume_to_delete_id),
+        )
+        .await
+        .unwrap();
+
+    match replacement_result {
+        VolumeReplaceResult::Done => {
+            // ok!
+        }
+
+        _ => {
+            panic!("replacement result was {replacement_result:?}");
+        }
+    }
+
+    // Assert the new region's volume resource usage record now references the
+    // volume to delete
+
+    let usage = datastore
+        .volume_usage_records_for_resource(
+            VolumeResourceUsage::ReadOnlyRegion { region_id: new_region.id() },
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(usage.len(), 1);
+    assert_eq!(usage[0].volume_id, volume_to_delete_id);
+}
+
+/// Test that the `volume_remove_rop` function correctly updates volume resource
+/// usage records
+#[nexus_test]
+async fn test_volume_remove_rop_respects_accounting(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    DiskTestBuilder::new(&cptestctx)
+        .on_specific_sled(cptestctx.first_sled())
+        .with_zpool_count(4)
+        .build()
+        .await;
+
+    create_project_and_pool(client).await;
+
+    // Create a disk, then a snapshot of that disk, then a disk from that
+    // snapshot.
+
+    let disk = create_disk(&client, PROJECT_NAME, "disk").await;
+
+    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+        .disk_id(disk.identity.id)
+        .fetch()
+        .await
+        .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id));
+
+    let disk_allocated_regions =
+        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+
+    assert_eq!(disk_allocated_regions.len(), 3);
+
+    let snapshot =
+        create_snapshot(&client, PROJECT_NAME, "disk", "snapshot").await;
+
+    let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
+        .snapshot_id(snapshot.identity.id)
+        .fetch()
+        .await
+        .unwrap_or_else(|_| {
+            panic!("snapshot {:?} should exist", snapshot.identity.id)
+        });
+
+    let disk_from_snapshot = create_disk_from_snapshot(
+        &client,
+        PROJECT_NAME,
+        "disk-from-snapshot",
+        snapshot.identity.id,
+    )
+    .await;
+
+    let (.., db_disk_from_snapshot) = LookupPath::new(&opctx, &datastore)
+        .disk_id(disk_from_snapshot.identity.id)
+        .fetch()
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "disk_from_snapshot {:?} should exist",
+                disk_from_snapshot.identity.id
+            )
+        });
+
+    // Assert the correct volume resource usage records before the removal:
+    // both the snapshot volume and disk_from_snapshot volume should have usage
+    // records for the three region snapshots.
+
+    for (_, disk_allocated_region) in &disk_allocated_regions {
+        let region_snapshot = datastore
+            .region_snapshot_get(
+                disk_allocated_region.dataset_id(),
+                disk_allocated_region.id(),
+                db_snapshot.id(),
+            )
+            .await
+            .expect("region snapshot exists!")
+            .unwrap();
+
+        let usage = datastore
+            .volume_usage_records_for_resource(
+                VolumeResourceUsage::RegionSnapshot {
+                    dataset_id: region_snapshot.dataset_id,
+                    region_id: region_snapshot.region_id,
+                    snapshot_id: region_snapshot.snapshot_id,
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(usage.len(), 2);
+        assert!(usage.iter().any(|r| r.volume_id == db_snapshot.volume_id));
+        assert!(usage
+            .iter()
+            .any(|r| r.volume_id == db_disk_from_snapshot.volume_id));
+    }
+
+    // Remove the ROP from disk-from-snapshot
+
+    let volume_to_delete_id = Uuid::new_v4();
+
+    datastore
+        .volume_create(nexus_db_model::Volume::new(
+            volume_to_delete_id,
+            serde_json::to_string(&VolumeConstructionRequest::Volume {
+                id: volume_to_delete_id,
+                block_size: 512,
+                sub_volumes: vec![],
+                read_only_parent: None,
+            })
+            .unwrap(),
+        ))
+        .await
+        .unwrap();
+
+    let result = datastore
+        .volume_remove_rop(db_disk_from_snapshot.volume_id, volume_to_delete_id)
+        .await
+        .unwrap();
+
+    // Assert that there was a removal
+
+    assert!(result);
+
+    // Assert the correct volume resource usage records after the removal:
+    // the snapshot volume should still have usage records for the three region
+    // snapshots, and now so should the volume to delete
+
+    for (_, disk_allocated_region) in &disk_allocated_regions {
+        let region_snapshot = datastore
+            .region_snapshot_get(
+                disk_allocated_region.dataset_id(),
+                disk_allocated_region.id(),
+                db_snapshot.id(),
+            )
+            .await
+            .expect("region snapshot exists!")
+            .unwrap();
+
+        let usage = datastore
+            .volume_usage_records_for_resource(
+                VolumeResourceUsage::RegionSnapshot {
+                    dataset_id: region_snapshot.dataset_id,
+                    region_id: region_snapshot.region_id,
+                    snapshot_id: region_snapshot.snapshot_id,
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(usage.len(), 2);
+        assert!(usage.iter().any(|r| r.volume_id == db_snapshot.volume_id));
+        assert!(usage.iter().any(|r| r.volume_id == volume_to_delete_id));
+    }
+}
+
+/// Test that the `volume_remove_rop` function only updates volume resource
+/// usage records for the volume being operated on
+#[nexus_test]
+async fn test_volume_remove_rop_respects_accounting_no_modify_others(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    DiskTestBuilder::new(&cptestctx)
+        .on_specific_sled(cptestctx.first_sled())
+        .with_zpool_count(4)
+        .build()
+        .await;
+
+    create_project_and_pool(client).await;
+
+    // Create a disk, then a snapshot of that disk, then a disk from that
+    // snapshot.
+
+    let disk = create_disk(&client, PROJECT_NAME, "disk").await;
+
+    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+        .disk_id(disk.identity.id)
+        .fetch()
+        .await
+        .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id));
+
+    let disk_allocated_regions =
+        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+
+    assert_eq!(disk_allocated_regions.len(), 3);
+
+    let snapshot =
+        create_snapshot(&client, PROJECT_NAME, "disk", "snapshot").await;
+
+    let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
+        .snapshot_id(snapshot.identity.id)
+        .fetch()
+        .await
+        .unwrap_or_else(|_| {
+            panic!("snapshot {:?} should exist", snapshot.identity.id)
+        });
+
+    let disk_from_snapshot = create_disk_from_snapshot(
+        &client,
+        PROJECT_NAME,
+        "disk-from-snapshot",
+        snapshot.identity.id,
+    )
+    .await;
+
+    let (.., db_disk_from_snapshot) = LookupPath::new(&opctx, &datastore)
+        .disk_id(disk_from_snapshot.identity.id)
+        .fetch()
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "disk_from_snapshot {:?} should exist",
+                disk_from_snapshot.identity.id
+            )
+        });
+
+    let another_disk_from_snapshot = create_disk_from_snapshot(
+        &client,
+        PROJECT_NAME,
+        "another-disk-from-snapshot",
+        snapshot.identity.id,
+    )
+    .await;
+
+    let (.., db_another_disk_from_snapshot) =
+        LookupPath::new(&opctx, &datastore)
+            .disk_id(another_disk_from_snapshot.identity.id)
+            .fetch()
+            .await
+            .unwrap_or_else(|_| {
+                panic!(
+                    "another_disk_from_snapshot {:?} should exist",
+                    another_disk_from_snapshot.identity.id
+                )
+            });
+
+    // Assert the correct volume resource usage records before the removal: the
+    // snapshot volume, disk_from_snapshot volume, and
+    // another_disk_from_snapshot volume should have usage records for the three
+    // region snapshots.
+
+    for (_, disk_allocated_region) in &disk_allocated_regions {
+        let region_snapshot = datastore
+            .region_snapshot_get(
+                disk_allocated_region.dataset_id(),
+                disk_allocated_region.id(),
+                db_snapshot.id(),
+            )
+            .await
+            .expect("region snapshot exists!")
+            .unwrap();
+
+        let usage = datastore
+            .volume_usage_records_for_resource(
+                VolumeResourceUsage::RegionSnapshot {
+                    dataset_id: region_snapshot.dataset_id,
+                    region_id: region_snapshot.region_id,
+                    snapshot_id: region_snapshot.snapshot_id,
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(usage.len(), 3);
+        assert!(usage.iter().any(|r| r.volume_id == db_snapshot.volume_id));
+        assert!(usage
+            .iter()
+            .any(|r| r.volume_id == db_disk_from_snapshot.volume_id));
+        assert!(usage
+            .iter()
+            .any(|r| r.volume_id == db_another_disk_from_snapshot.volume_id));
+    }
+
+    // Remove the ROP from disk-from-snapshot
+
+    let volume_to_delete_id = Uuid::new_v4();
+
+    datastore
+        .volume_create(nexus_db_model::Volume::new(
+            volume_to_delete_id,
+            serde_json::to_string(&VolumeConstructionRequest::Volume {
+                id: volume_to_delete_id,
+                block_size: 512,
+                sub_volumes: vec![],
+                read_only_parent: None,
+            })
+            .unwrap(),
+        ))
+        .await
+        .unwrap();
+
+    let result = datastore
+        .volume_remove_rop(db_disk_from_snapshot.volume_id, volume_to_delete_id)
+        .await
+        .unwrap();
+
+    // Assert that there was a removal
+
+    assert!(result);
+
+    // Assert the correct volume resource usage records after the removal: the
+    // snapshot volume and another_disk_from_snapshot volume should still have
+    // usage records for the three region snapshots, and now so should the
+    // volume to delete.
+
+    for (_, disk_allocated_region) in &disk_allocated_regions {
+        let region_snapshot = datastore
+            .region_snapshot_get(
+                disk_allocated_region.dataset_id(),
+                disk_allocated_region.id(),
+                db_snapshot.id(),
+            )
+            .await
+            .expect("region snapshot exists!")
+            .unwrap();
+
+        let usage = datastore
+            .volume_usage_records_for_resource(
+                VolumeResourceUsage::RegionSnapshot {
+                    dataset_id: region_snapshot.dataset_id,
+                    region_id: region_snapshot.region_id,
+                    snapshot_id: region_snapshot.snapshot_id,
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(usage.len(), 3);
+        assert!(usage.iter().any(|r| r.volume_id == db_snapshot.volume_id));
+        assert!(usage.iter().any(|r| r.volume_id == volume_to_delete_id));
+        assert!(usage
+            .iter()
+            .any(|r| r.volume_id == db_another_disk_from_snapshot.volume_id));
+    }
+}
+
+async fn delete_all_volume_resource_usage_records(datastore: &DataStore) {
+    use db::schema::volume_resource_usage::dsl;
+
+    let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+    diesel::delete(dsl::volume_resource_usage)
+        .filter(dsl::usage_id.ne(Uuid::new_v4()))
+        .execute_async(&*conn)
+        .await
+        .unwrap();
+}
+
+async fn perform_migration(datastore: &DataStore) {
+    const MIGRATION_TO_REF_COUNT_WITH_RECORDS_SQL: &str = include_str!(
+        "../../../schema/crdb/crucible-ref-count-records/up08.sql"
+    );
+
+    assert!(MIGRATION_TO_REF_COUNT_WITH_RECORDS_SQL
+        .contains("INSERT INTO volume_resource_usage"));
+
+    let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+    // To make sure that the migration is idempotent, perform it twice
+    diesel::sql_query(MIGRATION_TO_REF_COUNT_WITH_RECORDS_SQL)
+        .execute_async(&*conn)
+        .await
+        .unwrap();
+
+    diesel::sql_query(MIGRATION_TO_REF_COUNT_WITH_RECORDS_SQL)
+        .execute_async(&*conn)
+        .await
+        .unwrap();
+}
+
+async fn get_volume_resource_usage_records(
+    datastore: &DataStore,
+) -> HashSet<VolumeResourceUsageRecord> {
+    use db::schema::volume_resource_usage::dsl;
+
+    let mut records: Vec<VolumeResourceUsageRecord> = Vec::new();
+    let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+    let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+    while let Some(p) = paginator.next() {
+        let page = paginated(
+            dsl::volume_resource_usage,
+            dsl::usage_id,
+            &p.current_pagparams(),
+        )
+        .get_results_async::<VolumeResourceUsageRecord>(&*conn)
+        .await
+        .unwrap();
+
+        paginator = p.found_batch(&page, &|r| r.usage_id);
+
+        for record in page {
+            records.push(record);
+        }
+    }
+
+    records
+        .into_iter()
+        .map(|mut record: VolumeResourceUsageRecord| {
+            // Zero out usage_id for comparison
+            record.usage_id = Uuid::nil();
+            record
+        })
+        .collect()
+}
+
+#[nexus_test]
+async fn test_migrate_to_ref_count_with_records(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+    let datastore = nexus.datastore();
+
+    DiskTestBuilder::new(&cptestctx)
+        .on_specific_sled(cptestctx.first_sled())
+        .with_zpool_count(4)
+        .build()
+        .await;
+
+    create_project_and_pool(client).await;
+
+    // Create a disk
+
+    create_disk(&client, PROJECT_NAME, "disk").await;
+
+    // Test migration
+
+    let records_before = get_volume_resource_usage_records(&datastore).await;
+
+    delete_all_volume_resource_usage_records(&datastore).await;
+    perform_migration(&datastore).await;
+
+    let records_after = get_volume_resource_usage_records(&datastore).await;
+
+    assert_eq!(records_before, records_after);
+
+    // Create a snapshot
+
+    let snapshot =
+        create_snapshot(&client, PROJECT_NAME, "disk", "snapshot").await;
+
+    // Test migration
+
+    let records_before = get_volume_resource_usage_records(&datastore).await;
+
+    delete_all_volume_resource_usage_records(&datastore).await;
+    perform_migration(&datastore).await;
+
+    let records_after = get_volume_resource_usage_records(&datastore).await;
+
+    assert_eq!(records_before, records_after);
+
+    // Create a disk from that snapshot
+
+    create_disk_from_snapshot(
+        &client,
+        PROJECT_NAME,
+        "disk-from-snapshot",
+        snapshot.identity.id,
+    )
+    .await;
+
+    // Test migration
+
+    let records_before = get_volume_resource_usage_records(&datastore).await;
+
+    delete_all_volume_resource_usage_records(&datastore).await;
+    perform_migration(&datastore).await;
+
+    let records_after = get_volume_resource_usage_records(&datastore).await;
+
+    assert_eq!(records_before, records_after);
+
+    // Delete the snapshot
+
+    NexusRequest::object_delete(client, &get_snapshot_url("snapshot"))
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to delete snapshot");
+
+    // Test the migration
+
+    let records_before = get_volume_resource_usage_records(&datastore).await;
+
+    delete_all_volume_resource_usage_records(&datastore).await;
+    perform_migration(&datastore).await;
+
+    let records_after = get_volume_resource_usage_records(&datastore).await;
+
+    assert_eq!(records_before, records_after);
+
+    // Delete the disk from snapshot
+
+    NexusRequest::object_delete(client, &get_disk_url("disk-from-snapshot"))
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to delete disk-from-snapshot");
+
+    // Test the migration
+
+    let records_before = get_volume_resource_usage_records(&datastore).await;
+
+    delete_all_volume_resource_usage_records(&datastore).await;
+    perform_migration(&datastore).await;
+
+    let records_after = get_volume_resource_usage_records(&datastore).await;
+
+    assert_eq!(records_before, records_after);
+}
+
+#[nexus_test]
+async fn test_migrate_to_ref_count_with_records_soft_delete_volume(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    DiskTestBuilder::new(&cptestctx)
+        .on_specific_sled(cptestctx.first_sled())
+        .with_zpool_count(4)
+        .build()
+        .await;
+
+    create_project_and_pool(client).await;
+
+    // Create a disk, then a snapshot from that disk, then an image based on
+    // that snapshot
+
+    create_disk(&client, PROJECT_NAME, "disk").await;
+
+    let snapshot =
+        create_snapshot(&client, PROJECT_NAME, "disk", "snapshot").await;
+
+    let params = params::ImageCreate {
+        identity: IdentityMetadataCreateParams {
+            name: "windows99".parse().unwrap(),
+            description: String::from("as soon as we get CSM support!"),
+        },
+        source: params::ImageSource::Snapshot { id: snapshot.identity.id },
+        os: "windows98".to_string(),
+        version: "se".to_string(),
+    };
+
+    let images_url = format!("/v1/images?project={}", PROJECT_NAME);
+    NexusRequest::objects_post(client, &images_url, &params)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .unwrap();
+
+    // Soft-delete the snapshot's volume
+
+    let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
+        .snapshot_id(snapshot.identity.id)
+        .fetch()
+        .await
+        .unwrap_or_else(|_| {
+            panic!("snapshot {:?} should exist", snapshot.identity.id)
+        });
+
+    let resources =
+        datastore.soft_delete_volume(db_snapshot.volume_id).await.unwrap();
+
+    // Assert that the region snapshots did not have deleted set to true
+
+    assert!(datastore
+        .snapshots_to_delete(&resources)
+        .await
+        .unwrap()
+        .is_empty());
+
+    // This means that the snapshot volume is soft-deleted, make sure the
+    // migration does not make usage records for it!
+
+    let records_before = get_volume_resource_usage_records(&datastore).await;
+
+    delete_all_volume_resource_usage_records(&datastore).await;
+    perform_migration(&datastore).await;
+
+    let records_after = get_volume_resource_usage_records(&datastore).await;
+
+    assert_eq!(records_before, records_after);
+}
+
+#[nexus_test]
+async fn test_migrate_to_ref_count_with_records_region_snapshot_deleting(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+    let datastore = nexus.datastore();
+
+    let disk_test = DiskTestBuilder::new(&cptestctx)
+        .on_specific_sled(cptestctx.first_sled())
+        .with_zpool_count(4)
+        .build()
+        .await;
+
+    let mut iter = disk_test.zpools();
+    let zpool0 = iter.next().expect("Expected four zpools");
+    let zpool1 = iter.next().expect("Expected four zpools");
+    let zpool2 = iter.next().expect("Expected four zpools");
+    let zpool3 = iter.next().expect("Expected four zpools");
+
+    // (dataset_id, region_id, snapshot_id, snapshot_addr)
+    let region_snapshots = vec![
+        (
+            zpool0.datasets[0].id,
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            String::from("[fd00:1122:3344:101:7]:19016"),
+        ),
+        (
+            zpool1.datasets[0].id,
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            String::from("[fd00:1122:3344:102:7]:19016"),
+        ),
+        (
+            zpool2.datasets[0].id,
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            String::from("[fd00:1122:3344:103:7]:19016"),
+        ),
+        (
+            zpool3.datasets[0].id,
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            String::from("[fd00:1122:3344:104:7]:19016"),
+        ),
+    ];
+
+    for i in 0..4 {
+        let (dataset_id, region_id, snapshot_id, snapshot_addr) =
+            &region_snapshots[i];
+
+        datastore
+            .region_snapshot_create(nexus_db_model::RegionSnapshot {
+                dataset_id: *dataset_id,
+                region_id: *region_id,
+                snapshot_id: *snapshot_id,
+                snapshot_addr: snapshot_addr.clone(),
+                volume_references: 0,
+                deleting: false,
+            })
+            .await
+            .unwrap();
+    }
+
+    // Create two volumes, one with the first three region snapshots, one with
+    // the last three region snapshots
+
+    let first_volume_id = Uuid::new_v4();
+    datastore
+        .volume_create(nexus_db_model::Volume::new(
+            first_volume_id,
+            serde_json::to_string(&VolumeConstructionRequest::Volume {
+                id: first_volume_id,
+                block_size: 512,
+                sub_volumes: vec![],
+                read_only_parent: Some(Box::new(
+                    VolumeConstructionRequest::Region {
+                        block_size: 512,
+                        blocks_per_extent: 1,
+                        extent_count: 1,
+                        gen: 1,
+                        opts: CrucibleOpts {
+                            id: Uuid::new_v4(),
+                            target: vec![
+                                region_snapshots[0].3.clone(),
+                                region_snapshots[1].3.clone(),
+                                region_snapshots[2].3.clone(),
+                            ],
+                            lossy: false,
+                            flush_timeout: None,
+                            key: None,
+                            cert_pem: None,
+                            key_pem: None,
+                            root_cert_pem: None,
+                            control: None,
+                            read_only: true,
+                        },
+                    },
+                )),
+            })
+            .unwrap(),
+        ))
+        .await
+        .unwrap();
+
+    let second_volume_id = Uuid::new_v4();
+    datastore
+        .volume_create(nexus_db_model::Volume::new(
+            second_volume_id,
+            serde_json::to_string(&VolumeConstructionRequest::Volume {
+                id: second_volume_id,
+                block_size: 512,
+                sub_volumes: vec![],
+                read_only_parent: Some(Box::new(
+                    VolumeConstructionRequest::Region {
+                        block_size: 512,
+                        blocks_per_extent: 1,
+                        extent_count: 1,
+                        gen: 1,
+                        opts: CrucibleOpts {
+                            id: Uuid::new_v4(),
+                            target: vec![
+                                region_snapshots[1].3.clone(),
+                                region_snapshots[2].3.clone(),
+                                region_snapshots[3].3.clone(),
+                            ],
+                            lossy: false,
+                            flush_timeout: None,
+                            key: None,
+                            cert_pem: None,
+                            key_pem: None,
+                            root_cert_pem: None,
+                            control: None,
+                            read_only: true,
+                        },
+                    },
+                )),
+            })
+            .unwrap(),
+        ))
+        .await
+        .unwrap();
+
+    // Deleting the first volume should only return region_snapshot[0] for
+    // deletion.
+
+    let resources =
+        datastore.soft_delete_volume(first_volume_id).await.unwrap();
+
+    let snapshots_to_delete =
+        datastore.snapshots_to_delete(&resources).await.unwrap();
+
+    assert_eq!(snapshots_to_delete.len(), 1);
+
+    let region_snapshot_to_delete = &snapshots_to_delete[0].1;
+
+    assert_eq!(region_snapshot_to_delete.dataset_id, region_snapshots[0].0);
+    assert_eq!(region_snapshot_to_delete.region_id, region_snapshots[0].1);
+    assert_eq!(region_snapshot_to_delete.snapshot_id, region_snapshots[0].2);
+    assert_eq!(region_snapshot_to_delete.snapshot_addr, region_snapshots[0].3);
+    assert_eq!(region_snapshot_to_delete.volume_references, 0);
+    assert_eq!(region_snapshot_to_delete.deleting, true);
+
+    // Test the migration does not incorrectly think a region snapshot with
+    // deleting = true is used by any volume
+
+    let records_before = get_volume_resource_usage_records(&datastore).await;
+
+    delete_all_volume_resource_usage_records(&datastore).await;
+    perform_migration(&datastore).await;
+
+    let records_after = get_volume_resource_usage_records(&datastore).await;
+
+    assert_eq!(records_before, records_after);
 }
