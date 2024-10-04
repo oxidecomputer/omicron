@@ -459,7 +459,7 @@ impl SledAgentApi for SledAgentSimImpl {
     async fn support_bundle_delete(
         _rqctx: RequestContext<Self::Context>,
         _path_params: Path<SupportBundlePathParam>,
-    ) -> Result<HttpResponseCreated<()>, HttpError> {
+    ) -> Result<HttpResponseDeleted, HttpError> {
         method_unimplemented()
     }
 

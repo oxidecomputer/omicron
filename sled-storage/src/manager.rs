@@ -4,13 +4,12 @@
 
 //! The storage manager task
 
-use std::collections::HashSet;
-
 use crate::config::MountConfig;
 use crate::dataset::CONFIG_DATASET;
 use crate::disk::RawDisk;
 use crate::error::Error;
 use crate::resources::{AllDisks, StorageResources};
+use anyhow::anyhow;
 use camino::Utf8PathBuf;
 use debug_ignore::DebugIgnore;
 use futures::future::FutureExt;
@@ -27,6 +26,7 @@ use omicron_common::ledger::Ledger;
 use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use slog::{error, info, o, warn, Logger};
+use std::collections::HashSet;
 use std::future::Future;
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::{interval, Duration, MissedTickBehavior};
@@ -133,6 +133,10 @@ pub(crate) enum StorageRequest {
 
     NestedDatasetEnsure {
         config: NestedDatasetConfig,
+        tx: DebugIgnore<oneshot::Sender<Result<(), Error>>>,
+    },
+    NestedDatasetDestroy {
+        name: NestedDatasetLocation,
         tx: DebugIgnore<oneshot::Sender<Result<(), Error>>>,
     },
     NestedDatasetList {
@@ -307,6 +311,19 @@ impl StorageHandle {
         let (tx, rx) = oneshot::channel();
         self.tx
             .send(StorageRequest::NestedDatasetEnsure { config, tx: tx.into() })
+            .await
+            .unwrap();
+
+        rx.await.unwrap()
+    }
+
+    pub async fn nested_dataset_destroy(
+        &self,
+        name: NestedDatasetLocation,
+    ) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(StorageRequest::NestedDatasetDestroy { name, tx: tx.into() })
             .await
             .unwrap();
 
@@ -526,6 +543,9 @@ impl StorageManager {
             }
             StorageRequest::NestedDatasetEnsure { config, tx } => {
                 let _ = tx.0.send(self.nested_dataset_ensure(config).await);
+            }
+            StorageRequest::NestedDatasetDestroy { name, tx } => {
+                let _ = tx.0.send(self.nested_dataset_destroy(name).await);
             }
             StorageRequest::NestedDatasetList { name, tx } => {
                 let _ = tx.0.send(self.nested_dataset_list(name).await);
@@ -903,6 +923,24 @@ impl StorageManager {
         self.ensure_dataset(config.name.root.pool(), &config.inner, &details)
             .await?;
 
+        Ok(())
+    }
+
+    async fn nested_dataset_destroy(
+        &mut self,
+        name: NestedDatasetLocation,
+    ) -> Result<(), Error> {
+        let log = self.log.new(o!("request" => "nested_dataset_destroy"));
+        let full_name = name.full_name();
+        info!(log, "Destroying nested dataset"; "name" => full_name.clone());
+
+        if name.path.is_empty() {
+            let msg = "Cannot destroy nested dataset with empty name";
+            warn!(log, "{msg}");
+            return Err(anyhow!(msg).into());
+        }
+
+        Zfs::destroy_dataset(&full_name).map_err(|e| anyhow!(e))?;
         Ok(())
     }
 

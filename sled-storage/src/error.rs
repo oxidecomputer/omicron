@@ -100,6 +100,9 @@ pub enum Error {
 
     #[error("Zpool Not Found: {0}")]
     ZpoolNotFound(String),
+
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
 }
 
 impl From<Error> for omicron_common::api::external::Error {

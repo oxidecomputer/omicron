@@ -67,6 +67,7 @@ use omicron_uuid_kinds::{
 };
 use sha2::{Digest, Sha256};
 use sled_agent_api::SupportBundleMetadata;
+use sled_agent_api::SupportBundleState;
 use sled_agent_api::Zpool;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::EarlyNetworkConfig;
@@ -867,8 +868,6 @@ impl SledAgent {
             ZpoolName::new_external(zpool_id),
             DatasetKind::Debug,
         );
-        let root_bundle_name = format!("{}/", root.full_name());
-
         let dataset_location = omicron_common::disk::NestedDatasetLocation {
             path: String::from(""),
             id: dataset_id,
@@ -877,34 +876,38 @@ impl SledAgent {
         let datasets =
             self.storage().nested_dataset_list(dataset_location).await?;
 
-        // TODO: We SHOULD check the mountpaths, to see that the datasets were
-        // actually created successfully?
-        //
-        // Could list them either way, maybe returning a state?
+        let mut bundles = Vec::with_capacity(datasets.len());
+        for dataset in datasets {
+            // We should be able to parse each dataset name as a support bundle UUID
+            let Ok(support_bundle_id) =
+                dataset.name.path.parse::<SupportBundleUuid>()
+            else {
+                warn!(self.log, "Dataset path not a UUID"; "path" => dataset.name.path);
+                continue;
+            };
 
-        let bundles = datasets
-            .into_iter()
-            .map(|dataset| {
-                Ok::<SupportBundleMetadata, Error>(SupportBundleMetadata {
-                    support_bundle_id: dataset
-                        .name
-                        .path
-                        .strip_prefix(&root_bundle_name)
-                        .ok_or_else(|| {
-                            Error::SupportBundle(format!(
-                                "Unexpected dataset name: {}",
-                                dataset.name.path
-                            ))
-                        })?
-                        .parse::<SupportBundleUuid>()
-                        .map_err(|err| {
-                            Error::SupportBundle(format!(
-                                "Cannot parse uuid from dataset: {err}"
-                            ))
-                        })?,
-                })
-            })
-            .collect::<Result<Vec<SupportBundleMetadata>, Error>>()?;
+            // The dataset for a support bundle exists.
+            let support_bundle_path = dataset
+                .name
+                .mountpoint(illumos_utils::zpool::ZPOOL_MOUNTPOINT_ROOT.into())
+                .join("bundle");
+
+            // Identify whether or not the final "bundle" file exists.
+            //
+            // This is a signal that the support bundle has been fully written.
+            let state = if tokio::fs::try_exists(
+                &support_bundle_path
+            ).await.map_err(|e| {
+                Error::SupportBundle(format!("Cannot check filesystem for {support_bundle_path}: {e}"))
+            })? {
+                SupportBundleState::Complete
+            } else {
+                SupportBundleState::Incomplete
+            };
+
+            let bundle = SupportBundleMetadata { support_bundle_id, state };
+            bundles.push(bundle);
+        }
 
         Ok(bundles)
     }
@@ -969,7 +972,8 @@ impl SledAgent {
             return Ok(());
         }
 
-        // Stream the file into the dataset (as a temporary name)
+        // Stream the file into the dataset, first as a temporary file,
+        // and then renaming to the final location.
         info!(log, "Streaming bundle to storage");
         let tmp_file = tokio::fs::File::create(&support_bundle_path_tmp)
             .await
@@ -996,6 +1000,58 @@ impl SledAgent {
 
         info!(log, "Bundle written successfully");
         Ok(())
+    }
+
+    pub async fn support_bundle_delete(
+        &self,
+        zpool_id: ZpoolUuid,
+        dataset_id: DatasetUuid,
+        support_bundle_id: SupportBundleUuid,
+    ) -> Result<(), Error> {
+        let log = self.log.new(o!(
+            "operation" => "support_bundle_delete",
+            "zpool_id" => zpool_id.to_string(),
+            "dataset_id" => dataset_id.to_string(),
+            "bundle_id" => support_bundle_id.to_string(),
+        ));
+        info!(log, "Destroying support bundle");
+        self.storage()
+            .nested_dataset_destroy(NestedDatasetLocation {
+                path: support_bundle_id.to_string(),
+                id: dataset_id,
+                root: DatasetName::new(
+                    ZpoolName::new_external(zpool_id),
+                    DatasetKind::Debug,
+                ),
+            })
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn support_bundle_get(
+        &self,
+        zpool_id: ZpoolUuid,
+        dataset_id: DatasetUuid,
+        support_bundle_id: SupportBundleUuid,
+    ) -> Result<tokio::fs::File, Error> {
+        let dataset = NestedDatasetLocation {
+            path: support_bundle_id.to_string(),
+            id: dataset_id,
+            root: DatasetName::new(
+                ZpoolName::new_external(zpool_id),
+                DatasetKind::Debug,
+            ),
+        };
+        // The mounted root of the support bundle dataset
+        let support_bundle_dir = dataset
+            .mountpoint(illumos_utils::zpool::ZPOOL_MOUNTPOINT_ROOT.into());
+        let path = support_bundle_dir.join("bundle");
+
+        let f = tokio::fs::File::open(&path).await.map_err(|e| {
+            Error::SupportBundle(format!("Failed to open {path}: {e}"))
+        })?;
+        Ok(f)
     }
 
     /// Returns the hex, lowercase sha2 checksum of a file at `path`.

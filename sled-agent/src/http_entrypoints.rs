@@ -262,18 +262,44 @@ impl SledAgentApi for SledAgentImpl {
     }
 
     async fn support_bundle_get(
-        _rqctx: RequestContext<Self::Context>,
-        _path_params: Path<SupportBundlePathParam>,
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
     ) -> Result<HttpResponseHeaders<HttpResponseOk<FreeformBody>>, HttpError>
     {
-        todo!();
+        let sa = rqctx.context();
+        let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
+            path_params.into_inner();
+
+        let file = sa
+            .support_bundle_get(zpool_id, dataset_id, support_bundle_id)
+            .await?;
+
+        let file_access = hyper_staticfile::vfs::TokioFileAccess::new(file);
+        let file_stream =
+            hyper_staticfile::util::FileBytesStream::new(file_access);
+        let body = Body::wrap(hyper_staticfile::Body::Full(file_stream));
+        let body = FreeformBody(body);
+        let mut response =
+            HttpResponseHeaders::new_unnamed(HttpResponseOk(body));
+        response.headers_mut().append(
+            http::header::CONTENT_TYPE,
+            "application/gzip".try_into().unwrap(),
+        );
+        Ok(response)
     }
 
     async fn support_bundle_delete(
-        _rqctx: RequestContext<Self::Context>,
-        _path_params: Path<SupportBundlePathParam>,
-    ) -> Result<HttpResponseCreated<()>, HttpError> {
-        todo!();
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let sa = rqctx.context();
+
+        let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
+            path_params.into_inner();
+
+        sa.support_bundle_delete(zpool_id, dataset_id, support_bundle_id)
+            .await?;
+        Ok(HttpResponseDeleted())
     }
 
     async fn datasets_put(

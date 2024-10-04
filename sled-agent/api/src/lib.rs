@@ -197,7 +197,7 @@ pub trait SledAgentApi {
     async fn support_bundle_delete(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<SupportBundlePathParam>,
-    ) -> Result<HttpResponseCreated<()>, HttpError>;
+    ) -> Result<HttpResponseDeleted, HttpError>;
 
     #[endpoint {
         method = GET,
@@ -613,10 +613,17 @@ pub struct SupportBundleQueryParams {
     pub hash: ArtifactHash,
 }
 
+#[derive(Deserialize, Serialize, JsonSchema, PartialEq)]
+pub enum SupportBundleState {
+    Complete,
+    Incomplete,
+}
+
 /// Metadata about a support bundle
 #[derive(Deserialize, Serialize, JsonSchema)]
 pub struct SupportBundleMetadata {
     pub support_bundle_id: SupportBundleUuid,
+    pub state: SupportBundleState,
 }
 
 /// Path parameters for Disk requests (sled agent API)
