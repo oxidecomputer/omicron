@@ -1166,6 +1166,18 @@ pub trait NexusExternalApi {
         path_params: Path<params::InstancePath>,
     ) -> Result<HttpResponseAccepted<Instance>, HttpError>;
 
+    /// Stop instance, violently.
+    #[endpoint {
+        method = POST,
+        path = "/v1/instances/{instance}/force-terminate",
+        tags = ["instances"],
+    }]
+    async fn instance_force_terminate(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::OptionalProjectSelector>,
+        path_params: Path<params::InstancePath>,
+    ) -> Result<HttpResponseAccepted<Instance>, HttpError>;
+
     /// Fetch instance serial console
     #[endpoint {
         method = GET,

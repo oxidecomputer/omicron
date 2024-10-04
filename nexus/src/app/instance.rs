@@ -774,6 +774,14 @@ impl super::Nexus {
             .map_err(Into::into)
     }
 
+    pub(crate) async fn instance_force_terminate(
+        &self,
+        opctx: &OpContext,
+        instance_lookup: &lookup::Instance<'_>,
+    ) -> Result<InstanceAndActiveVmm, InstanceStateChangeError> {
+        todo!("eliza: actually implement this")
+    }
+
     /// Idempotently ensures that the sled specified in `db_instance` does not
     /// have a record of the instance. If the instance is currently running on
     /// this sled, this operation rudely terminates it.
