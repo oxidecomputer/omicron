@@ -437,6 +437,8 @@ pub static DEMO_INSTANCE_UPDATE: Lazy<params::InstanceUpdate> =
     Lazy::new(|| params::InstanceUpdate {
         boot_disk: None,
         auto_restart_policy: None,
+        ncpus: InstanceCpuCount(1),
+        memory: ByteCount::from_gibibytes_u32(16),
     });
 
 // The instance needs a network interface, too.

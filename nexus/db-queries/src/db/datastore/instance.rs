@@ -18,10 +18,12 @@ use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::identity::Resource;
 use crate::db::lookup::LookupPath;
+use crate::db::model::ByteCount;
 use crate::db::model::Generation;
 use crate::db::model::Instance;
 use crate::db::model::InstanceAutoRestart;
 use crate::db::model::InstanceAutoRestartPolicy;
+use crate::db::model::InstanceCpuCount;
 use crate::db::model::InstanceRuntimeState;
 use crate::db::model::InstanceState;
 use crate::db::model::InstanceUpdate;
@@ -1038,8 +1040,12 @@ impl DataStore {
             .transaction_retry_wrapper("reconfigure_instance")
             .transaction(&conn, |conn| {
                 let err = err.clone();
-                let InstanceUpdate { boot_disk_id, auto_restart_policy } =
-                    update.clone();
+                let InstanceUpdate {
+                    boot_disk_id,
+                    auto_restart_policy,
+                    ncpus,
+                    memory,
+                } = update.clone();
                 async move {
                     // Set the auto-restart policy.
                     diesel::update(instance_dsl::instance)
@@ -1050,6 +1056,16 @@ impl DataStore {
                         )
                         .execute_async(&conn)
                         .await?;
+
+                    // Set vCPUs and memory size.
+                    self.instance_set_size_on_conn(
+                        &conn,
+                        &err,
+                        authz_instance,
+                        ncpus,
+                        memory,
+                    )
+                    .await?;
 
                     // Next, set the boot disk if needed.
                     self.instance_set_boot_disk_on_conn(
@@ -1209,6 +1225,50 @@ impl DataStore {
                     .contains(&r.found.runtime().nexus_state));
                 Err(err.bail(Error::conflict(
                     "instance must be stopped to set boot disk",
+                )))
+            }
+            UpdateStatus::Updated => Ok(()),
+        }
+    }
+
+    /// Set an instance's CPU count and memory size to the provided values,
+    /// within an existing transaction.
+    async fn instance_set_size_on_conn(
+        &self,
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        err: &OptionalError<Error>,
+        authz_instance: &authz::Instance,
+        ncpus: InstanceCpuCount,
+        memory: ByteCount,
+    ) -> Result<(), diesel::result::Error> {
+        use db::schema::instance::dsl as instance_dsl;
+
+        // Do not allow setting sizes of running instances to ensure that if an
+        // instance is running, its resource usage matches what we record in the
+        // database.
+        const OK_TO_SET_SIZE_STATES: &'static [InstanceState] = &[
+            InstanceState::NoVmm,
+            InstanceState::Failed,
+            InstanceState::Creating,
+        ];
+
+        let r = diesel::update(instance_dsl::instance)
+            .filter(instance_dsl::id.eq(authz_instance.id()))
+            .filter(instance_dsl::state.eq_any(OK_TO_SET_SIZE_STATES))
+            .set((
+                instance_dsl::ncpus.eq(ncpus),
+                instance_dsl::memory.eq(memory),
+            ))
+            .check_if_exists::<Instance>(authz_instance.id())
+            .execute_and_check(&conn)
+            .await?;
+        match r.status {
+            UpdateStatus::NotUpdatedButExists => {
+                // This should be the only reason the query would fail...
+                debug_assert!(!OK_TO_SET_SIZE_STATES
+                    .contains(&r.found.runtime().nexus_state));
+                Err(err.bail(Error::conflict(
+                    "instance must be stopped to be resized",
                 )))
             }
             UpdateStatus::Updated => Ok(()),

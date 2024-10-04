@@ -41,6 +41,7 @@ use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::InstanceCpuCount;
 use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
@@ -311,6 +312,8 @@ impl super::Nexus {
         let (.., authz_project, authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
 
+        check_instance_cpu_memory_sizes(params.ncpus, params.memory)?;
+
         let boot_disk_id = match params.boot_disk.clone() {
             Some(disk) => {
                 let selector = params::DiskSelector {
@@ -331,8 +334,11 @@ impl super::Nexus {
         };
 
         let auto_restart_policy = params.auto_restart_policy.map(Into::into);
+        let ncpus = params.ncpus.into();
+        let memory = params.memory.into();
 
-        let update = InstanceUpdate { boot_disk_id, auto_restart_policy };
+        let update =
+            InstanceUpdate { boot_disk_id, auto_restart_policy, ncpus, memory };
         self.datastore()
             .instance_reconfigure(opctx, &authz_instance, update)
             .await
@@ -346,6 +352,8 @@ impl super::Nexus {
     ) -> CreateResult<InstanceAndActiveVmm> {
         let (.., authz_project) =
             project_lookup.lookup_for(authz::Action::CreateChild).await?;
+
+        check_instance_cpu_memory_sizes(params.ncpus, params.memory)?;
 
         let all_disks: Vec<&params::InstanceDiskAttachment> =
             params.boot_disk.iter().chain(params.disks.iter()).collect();
@@ -362,12 +370,6 @@ impl super::Nexus {
                 self.validate_disk_create_params(opctx, &authz_project, create)
                     .await?;
             }
-        }
-        if params.ncpus.0 > MAX_VCPU_PER_INSTANCE {
-            return Err(Error::invalid_request(&format!(
-                "cannot have more than {} vCPUs per instance",
-                MAX_VCPU_PER_INSTANCE
-            )));
         }
         if params.external_ips.len() > MAX_EXTERNAL_IPS_PER_INSTANCE {
             return Err(Error::invalid_request(&format!(
@@ -411,43 +413,6 @@ impl super::Nexus {
                     "All interfaces must be in the same VPC",
                 ));
             }
-        }
-
-        // Reject instances where the memory is not at least
-        // MIN_MEMORY_BYTES_PER_INSTANCE
-        if params.memory.to_bytes() < u64::from(MIN_MEMORY_BYTES_PER_INSTANCE) {
-            return Err(Error::invalid_value(
-                "size",
-                format!(
-                    "memory must be at least {}",
-                    ByteCount::from(MIN_MEMORY_BYTES_PER_INSTANCE)
-                ),
-            ));
-        }
-
-        // Reject instances where the memory is not divisible by
-        // MIN_MEMORY_BYTES_PER_INSTANCE
-        if (params.memory.to_bytes() % u64::from(MIN_MEMORY_BYTES_PER_INSTANCE))
-            != 0
-        {
-            return Err(Error::invalid_value(
-                "size",
-                format!(
-                    "memory must be divisible by {}",
-                    ByteCount::from(MIN_MEMORY_BYTES_PER_INSTANCE)
-                ),
-            ));
-        }
-
-        // Reject instances where the memory is greater than the limit
-        if params.memory.to_bytes() > MAX_MEMORY_BYTES_PER_INSTANCE {
-            return Err(Error::invalid_value(
-                "size",
-                format!(
-                    "memory must be less than or equal to {}",
-                    ByteCount::try_from(MAX_MEMORY_BYTES_PER_INSTANCE).unwrap()
-                ),
-            ));
         }
 
         let actor = opctx.authn.actor_required().internal_context(
@@ -2185,6 +2150,57 @@ pub(crate) async fn process_vmm_update(
     } else {
         Ok(None)
     }
+}
+
+/// Determines whether the supplied instance sizes (CPU count and memory size)
+/// are acceptable.
+fn check_instance_cpu_memory_sizes(
+    ncpus: InstanceCpuCount,
+    memory: ByteCount,
+) -> Result<(), Error> {
+    if ncpus.0 > MAX_VCPU_PER_INSTANCE {
+        return Err(Error::invalid_request(&format!(
+            "cannot have more than {} vCPUs per instance",
+            MAX_VCPU_PER_INSTANCE
+        )));
+    }
+
+    // Reject instances where the memory is not at least
+    // MIN_MEMORY_BYTES_PER_INSTANCE
+    if memory.to_bytes() < u64::from(MIN_MEMORY_BYTES_PER_INSTANCE) {
+        return Err(Error::invalid_value(
+            "size",
+            format!(
+                "memory must be at least {}",
+                ByteCount::from(MIN_MEMORY_BYTES_PER_INSTANCE)
+            ),
+        ));
+    }
+
+    // Reject instances where the memory is not divisible by
+    // MIN_MEMORY_BYTES_PER_INSTANCE
+    if (memory.to_bytes() % u64::from(MIN_MEMORY_BYTES_PER_INSTANCE)) != 0 {
+        return Err(Error::invalid_value(
+            "size",
+            format!(
+                "memory must be divisible by {}",
+                ByteCount::from(MIN_MEMORY_BYTES_PER_INSTANCE)
+            ),
+        ));
+    }
+
+    // Reject instances where the memory is greater than the limit
+    if memory.to_bytes() > MAX_MEMORY_BYTES_PER_INSTANCE {
+        return Err(Error::invalid_value(
+            "size",
+            format!(
+                "memory must be less than or equal to {}",
+                ByteCount::try_from(MAX_MEMORY_BYTES_PER_INSTANCE).unwrap()
+            ),
+        ));
+    }
+
+    Ok(())
 }
 
 /// Determines the disposition of a request to start an instance given its state
