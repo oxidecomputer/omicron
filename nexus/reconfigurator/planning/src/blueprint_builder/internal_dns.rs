@@ -100,7 +100,7 @@ impl DnsSubnetAllocator {
 pub mod test {
     use super::*;
     use crate::blueprint_builder::test::verify_blueprint;
-    use crate::example::example;
+    use crate::example::ExampleSystemBuilder;
     use nexus_types::deployment::BlueprintZoneFilter;
     use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
     use omicron_test_utils::dev::test_setup_log;
@@ -116,12 +116,12 @@ pub mod test {
 
         // Use our example system to create a blueprint and input.
         let (example, mut blueprint1) =
-            example(&logctx.log, TEST_NAME, INTERNAL_DNS_REDUNDANCY);
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
+                .nsleds(INTERNAL_DNS_REDUNDANCY)
+                .build();
 
         // `ExampleSystem` adds an internal DNS server to every sled. Manually
         // prune out all but the first of them to give us space to add more.
-        // TODO: should this also prune entries out of the system
-        // description/collection?
         for (_, zone_config) in blueprint1.blueprint_zones.iter_mut().skip(1) {
             zone_config.zones.retain(|z| !z.zone_type.is_internal_dns());
         }
@@ -135,7 +135,7 @@ pub mod test {
             blueprint1
                 .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
                 .map(|(_sled_id, zone_config)| zone_config),
-            example.planning_input(),
+            &example.input,
         )
         .expect("can't create allocator");
 

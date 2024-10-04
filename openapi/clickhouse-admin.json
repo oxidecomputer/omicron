@@ -10,6 +10,30 @@
     "version": "0.0.1"
   },
   "paths": {
+    "/keeper/cluster-membership": {
+      "get": {
+        "summary": "Retrieve cluster membership information from a keeper node.",
+        "operationId": "keeper_cluster_membership",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClickhouseKeeperClusterMembership"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/keeper/conf": {
       "get": {
         "summary": "Retrieve configuration information from a keeper node.",
@@ -197,6 +221,39 @@
             ],
             "additionalProperties": false
           }
+        ]
+      },
+      "ClickhouseKeeperClusterMembership": {
+        "description": "The configuration of the clickhouse keeper raft cluster returned from a single keeper node\n\nEach keeper is asked for its known raft configuration via `clickhouse-admin` dropshot servers running in `ClickhouseKeeper` zones. state. We include the leader committed log index known to the current keeper node (whether or not it is the leader) to determine which configuration is newest.",
+        "type": "object",
+        "properties": {
+          "leader_committed_log_index": {
+            "description": "Index of the last committed log entry from the leader's perspective",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "queried_keeper": {
+            "description": "Keeper ID of the keeper being queried",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/KeeperId"
+              }
+            ]
+          },
+          "raft_config": {
+            "description": "Keeper IDs of all keepers in the cluster",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/KeeperId"
+            },
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "leader_committed_log_index",
+          "queried_keeper",
+          "raft_config"
         ]
       },
       "Error": {

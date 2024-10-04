@@ -103,6 +103,10 @@ impl PlanningInput {
         self.policy.target_internal_dns_zone_count
     }
 
+    pub fn target_oximeter_zone_count(&self) -> usize {
+        self.policy.target_oximeter_zone_count
+    }
+
     pub fn target_cockroachdb_zone_count(&self) -> usize {
         self.policy.target_cockroachdb_zone_count
     }
@@ -113,8 +117,28 @@ impl PlanningInput {
         self.policy.target_cockroachdb_cluster_version
     }
 
+    pub fn target_clickhouse_server_zone_count(&self) -> usize {
+        self.policy
+            .clickhouse_policy
+            .as_ref()
+            .map(|policy| policy.target_servers)
+            .unwrap_or(0)
+    }
+
+    pub fn target_clickhouse_keeper_zone_count(&self) -> usize {
+        self.policy
+            .clickhouse_policy
+            .as_ref()
+            .map(|policy| policy.target_keepers)
+            .unwrap_or(0)
+    }
+
     pub fn service_ip_pool_ranges(&self) -> &[IpRange] {
         &self.policy.service_ip_pool_ranges
+    }
+
+    pub fn clickhouse_cluster_enabled(&self) -> bool {
+        self.policy.clickhouse_policy.is_some()
     }
 
     pub fn all_sleds(
@@ -813,6 +837,9 @@ pub struct Policy {
     /// internal DNS server on each of the expected reserved addresses).
     pub target_internal_dns_zone_count: usize,
 
+    /// desired total number of deployed Oximeter zones
+    pub target_oximeter_zone_count: usize,
+
     /// desired total number of deployed CockroachDB zones
     pub target_cockroachdb_zone_count: usize,
 
@@ -893,6 +920,7 @@ impl PlanningInputBuilder {
                 target_boundary_ntp_zone_count: 0,
                 target_nexus_zone_count: 0,
                 target_internal_dns_zone_count: 0,
+                target_oximeter_zone_count: 0,
                 target_cockroachdb_zone_count: 0,
                 target_cockroachdb_cluster_version:
                     CockroachDbClusterVersion::POLICY,

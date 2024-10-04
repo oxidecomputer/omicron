@@ -42,7 +42,7 @@ use thiserror::Error;
 ///
 /// So we use two separate maps for now. But a single map is always a
 /// possibility in the future, if required.
-#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OmicronZoneNetworkResources {
     /// external IPs allocated to Omicron zones
     omicron_zone_external_ips: TriMap<OmicronZoneExternalIpEntry>,

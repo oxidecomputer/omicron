@@ -15,6 +15,7 @@ use nexus_sled_agent_shared::inventory::Inventory;
 use nexus_sled_agent_shared::inventory::InventoryDisk;
 use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_sled_agent_shared::inventory::SledRole;
+use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbSettings;
 use nexus_types::deployment::PlanningInputBuilder;
@@ -83,12 +84,13 @@ pub struct SystemDescription {
     target_boundary_ntp_zone_count: usize,
     target_nexus_zone_count: usize,
     target_internal_dns_zone_count: usize,
+    target_oximeter_zone_count: usize,
     target_cockroachdb_zone_count: usize,
     target_cockroachdb_cluster_version: CockroachDbClusterVersion,
-    cockroachdb_settings: CockroachDbSettings,
     service_ip_pool_ranges: Vec<IpRange>,
     internal_dns_version: Generation,
     external_dns_version: Generation,
+    clickhouse_policy: Option<ClickhousePolicy>,
 }
 
 impl SystemDescription {
@@ -136,11 +138,12 @@ impl SystemDescription {
         let target_internal_dns_zone_count = INTERNAL_DNS_REDUNDANCY;
 
         // TODO-cleanup These are wrong, but we don't currently set up any
-        // boundary NTP or CRDB nodes in our fake system, so this prevents
-        // downstream test issues with the planner thinking our system is out of
-        // date from the gate.
+        // of these zones in our fake system, so this prevents downstream test
+        // issues with the planner thinking our system is out of date from the
+        // gate.
         let target_boundary_ntp_zone_count = 0;
         let target_cockroachdb_zone_count = 0;
+        let target_oximeter_zone_count = 0;
 
         let target_cockroachdb_cluster_version =
             CockroachDbClusterVersion::POLICY;
@@ -161,12 +164,13 @@ impl SystemDescription {
             target_boundary_ntp_zone_count,
             target_nexus_zone_count,
             target_internal_dns_zone_count,
+            target_oximeter_zone_count,
             target_cockroachdb_zone_count,
             target_cockroachdb_cluster_version,
-            cockroachdb_settings: CockroachDbSettings::empty(),
             service_ip_pool_ranges,
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
+            clickhouse_policy: None,
         }
     }
 
@@ -204,18 +208,6 @@ impl SystemDescription {
         self
     }
 
-    pub fn get_target_nexus_zone_count(&self) -> usize {
-        self.target_nexus_zone_count
-    }
-
-    pub fn target_internal_dns_zone_count(
-        &mut self,
-        count: usize,
-    ) -> &mut Self {
-        self.target_internal_dns_zone_count = count;
-        self
-    }
-
     pub fn service_ip_pool_ranges(
         &mut self,
         ranges: Vec<IpRange>,
@@ -224,15 +216,9 @@ impl SystemDescription {
         self
     }
 
-    pub fn get_service_ip_pool_ranges(&self) -> &[IpRange] {
-        &self.service_ip_pool_ranges
-    }
-
-    pub fn cockroachdb_settings(
-        &mut self,
-        settings: CockroachDbSettings,
-    ) -> &mut Self {
-        self.cockroachdb_settings = settings;
+    /// Set the clickhouse policy
+    pub fn clickhouse_policy(&mut self, policy: ClickhousePolicy) -> &mut Self {
+        self.clickhouse_policy = Some(policy);
         self
     }
 
@@ -320,63 +306,6 @@ impl SystemDescription {
         Ok(self)
     }
 
-    /// Returns sled IDs known to the system.
-    pub fn sled_ids(&self) -> impl ExactSizeIterator<Item = SledUuid> + '_ {
-        self.sleds.keys().copied()
-    }
-
-    /// Set operator policy for an existing sled.
-    ///
-    /// This does not currently check for consistency with the sled state.
-    ///
-    /// Returns an error if the sled is not found.
-    pub fn sled_set_policy(
-        &mut self,
-        sled_id: SledUuid,
-        policy: SledPolicy,
-    ) -> anyhow::Result<&mut Self> {
-        let sled = self.sleds.get_mut(&sled_id).with_context(|| {
-            format!("attempted to access sled {} not found in system", sled_id)
-        })?;
-        sled.policy = policy;
-        Ok(self)
-    }
-
-    /// Set the internal state of an existing sled.
-    ///
-    /// This does not currently check for consistency with the sled policy.
-    ///
-    /// Returns an error if the sled is not found.
-    pub fn sled_set_state(
-        &mut self,
-        sled_id: SledUuid,
-        state: SledState,
-    ) -> anyhow::Result<&mut Self> {
-        let sled = self.sleds.get_mut(&sled_id).with_context(|| {
-            format!("attempted to access sled {} not found in system", sled_id)
-        })?;
-        sled.state = state;
-        Ok(self)
-    }
-
-    /// Get a mutable reference to a sled's resources.
-    ///
-    /// Returns an error if the sled is not found.
-    pub fn sled_get_resources_mut(
-        &mut self,
-        sled_id: SledUuid,
-    ) -> anyhow::Result<&mut SledResources> {
-        self.sleds
-            .get_mut(&sled_id)
-            .map(|sled| &mut sled.resources)
-            .with_context(|| {
-                format!(
-                    "attempted to access sled {} not found in system",
-                    sled_id
-                )
-            })
-    }
-
     /// Set Omicron zones for a sled.
     ///
     /// Returns an error if the sled is not found.
@@ -400,26 +329,6 @@ impl SystemDescription {
         })?;
         sled.inventory_sled_agent.omicron_zones = omicron_zones;
         Ok(self)
-    }
-
-    /// Remove a sled from the system.
-    ///
-    /// Returns an error if the sled is not found.
-    pub fn sled_remove(&mut self, sled_id: SledUuid) -> anyhow::Result<()> {
-        self.sleds.shift_remove(&sled_id).with_context(|| {
-            format!("attempted to remove sled {sled_id} not found in system")
-        })?;
-        Ok(())
-    }
-
-    /// Retain sleds matching a predicate.
-    ///
-    /// Useful for clearing out a system to be "all but a few" sleds.
-    pub fn retain_sled_ids<F>(&mut self, mut f: F)
-    where
-        F: FnMut(SledUuid) -> bool,
-    {
-        self.sleds.retain(|id, _| f(*id));
     }
 
     pub fn to_collection_builder(&self) -> anyhow::Result<CollectionBuilder> {
@@ -465,16 +374,17 @@ impl SystemDescription {
             target_boundary_ntp_zone_count: self.target_boundary_ntp_zone_count,
             target_nexus_zone_count: self.target_nexus_zone_count,
             target_internal_dns_zone_count: self.target_internal_dns_zone_count,
+            target_oximeter_zone_count: self.target_oximeter_zone_count,
             target_cockroachdb_zone_count: self.target_cockroachdb_zone_count,
             target_cockroachdb_cluster_version: self
                 .target_cockroachdb_cluster_version,
-            clickhouse_policy: None,
+            clickhouse_policy: self.clickhouse_policy.clone(),
         };
         let mut builder = PlanningInputBuilder::new(
             policy,
             self.internal_dns_version,
             self.external_dns_version,
-            self.cockroachdb_settings.clone(),
+            CockroachDbSettings::empty(),
         );
 
         for sled in self.sleds.values() {
@@ -510,6 +420,9 @@ pub struct SledBuilder {
 }
 
 impl SledBuilder {
+    /// The default number of U.2 (external) pools for a sled.
+    pub const DEFAULT_NPOOLS: u8 = 10;
+
     /// Begin describing a sled to be added to a `SystemDescription`
     pub fn new() -> Self {
         SledBuilder {
@@ -521,9 +434,9 @@ impl SledBuilder {
             omicron_zones: OmicronZonesConfig {
                 // The initial generation is the one with no zones.
                 generation: OmicronZonesConfig::INITIAL_GENERATION,
-                zones: vec![],
+                zones: Vec::new(),
             },
-            npools: 10,
+            npools: Self::DEFAULT_NPOOLS,
         }
     }
 
@@ -544,12 +457,6 @@ impl SledBuilder {
         String: From<S>,
     {
         self.unique = Some(String::from(unique));
-        self
-    }
-
-    /// Set the Omicron zone configuration for this sled
-    pub fn omicron_zones(mut self, omicron_zones: OmicronZonesConfig) -> Self {
-        self.omicron_zones = omicron_zones;
         self
     }
 
@@ -856,8 +763,6 @@ impl Sled {
             usable_hardware_threads: inv_sled_agent.usable_hardware_threads,
             usable_physical_ram: inv_sled_agent.usable_physical_ram,
             omicron_zones: inv_sled_agent.omicron_zones.clone(),
-            // TODO: should we copy over disks, zpools and datasets from the
-            // existing sled agent?
             disks: vec![],
             zpools: vec![],
             datasets: vec![],

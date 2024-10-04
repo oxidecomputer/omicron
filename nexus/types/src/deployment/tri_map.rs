@@ -581,7 +581,7 @@ mod tests {
         }
     }
 
-    #[proptest(cases = 16)]
+    #[proptest(cases = 64)]
     fn proptest_permutation_eq(
         #[strategy(test_entry_permutation_strategy(0..256))] entries: (
             Vec<TestEntry>,

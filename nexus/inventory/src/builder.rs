@@ -11,6 +11,7 @@
 use anyhow::anyhow;
 use chrono::DateTime;
 use chrono::Utc;
+use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;
 use gateway_client::types::SpType;
@@ -29,6 +30,7 @@ use nexus_types::inventory::ServiceProcessor;
 use nexus_types::inventory::SledAgent;
 use nexus_types::inventory::Zpool;
 use omicron_uuid_kinds::CollectionKind;
+use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -89,6 +91,8 @@ pub struct CollectionBuilder {
     rot_pages_found:
         BTreeMap<RotPageWhich, BTreeMap<Arc<BaseboardId>, RotPageFound>>,
     sleds: BTreeMap<SledUuid, SledAgent>,
+    clickhouse_keeper_cluster_membership:
+        BTreeMap<OmicronZoneUuid, ClickhouseKeeperClusterMembership>,
     // We just generate one UUID for each collection.
     id_rng: TypedUuidRng<CollectionKind>,
 }
@@ -115,6 +119,7 @@ impl CollectionBuilder {
             cabooses_found: BTreeMap::new(),
             rot_pages_found: BTreeMap::new(),
             sleds: BTreeMap::new(),
+            clickhouse_keeper_cluster_membership: BTreeMap::new(),
             id_rng: TypedUuidRng::from_entropy(),
         }
     }
@@ -141,9 +146,8 @@ impl CollectionBuilder {
             cabooses_found: self.cabooses_found,
             rot_pages_found: self.rot_pages_found,
             sled_agents: self.sleds,
-            // Currently unused
-            // See: https://github.com/oxidecomputer/omicron/issues/6578
-            clickhouse_keeper_cluster_membership: BTreeMap::new(),
+            clickhouse_keeper_cluster_membership: self
+                .clickhouse_keeper_cluster_membership,
         }
     }
 
@@ -531,6 +535,16 @@ impl CollectionBuilder {
             Ok(())
         }
     }
+
+    /// Record information about Keeper cluster membership learned from the
+    /// clickhouse-admin service running in the keeper zones.
+    pub fn found_clickhouse_keeper_cluster_membership(
+        &mut self,
+        zone_id: OmicronZoneUuid,
+        membership: ClickhouseKeeperClusterMembership,
+    ) {
+        self.clickhouse_keeper_cluster_membership.insert(zone_id, membership);
+    }
 }
 
 /// Returns the current time, truncated to the previous microsecond.
@@ -589,6 +603,7 @@ mod test {
         assert!(collection.rots.is_empty());
         assert!(collection.cabooses_found.is_empty());
         assert!(collection.rot_pages_found.is_empty());
+        assert!(collection.clickhouse_keeper_cluster_membership.is_empty());
     }
 
     // Simple test of a single, fairly typical collection that contains just

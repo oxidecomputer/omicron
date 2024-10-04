@@ -13,7 +13,8 @@
 #:  "%/pool/ext/*/crypt/debug/global/oxide-sled-agent:default.log.*",
 #:  "%/pool/ext/*/crypt/debug/oxz_*/oxide-*.log.*",
 #:  "%/pool/ext/*/crypt/debug/oxz_*/system-illumos-*.log.*",
-#:  "!/pool/ext/*/crypt/debug/oxz_propolis-server_*/*.log.*"
+#:  "!/pool/ext/*/crypt/debug/oxz_propolis-server_*/*.log.*",
+#:  "/tmp/kstat/*.kstat"
 #: ]
 #: skip_clone = true
 #:
@@ -65,11 +66,15 @@ _exit_trap() {
 
 	PORTS=$(pfexec /opt/oxide/opte/bin/opteadm list-ports | tail +2 | awk '{ print $1; }')
 	for p in $PORTS; do
+		pfexec /opt/oxide/opte/bin/opteadm dump-uft -p $p
 		LAYERS=$(pfexec /opt/oxide/opte/bin/opteadm list-layers -p $p | tail +2 | awk '{ print $1; }')
 		for l in $LAYERS; do
 			pfexec /opt/oxide/opte/bin/opteadm dump-layer -p $p $l
 		done
 	done
+
+	mkdir -p /tmp/kstat
+	pfexec kstat -p xde: > /tmp/kstat/xde.kstat
 
 	pfexec zfs list
 	pfexec zpool list
@@ -88,9 +93,30 @@ _exit_trap() {
 
 	for z in $(zoneadm list -n | grep oxz_ntp); do
 		banner "${z/oxz_/}"
-		pfexec zlogin "$z" chronyc tracking
-		pfexec zlogin "$z" chronyc sources
+		pfexec zlogin "$z" chronyc -n tracking
+		pfexec zlogin "$z" chronyc -n sources -a
 		pfexec zlogin "$z" cat /etc/inet/chrony.conf
+		pfexec zlogin "$z" ping -sn oxide.computer 56 1
+		pfexec zlogin "$z" ping -sn 1.1.1.1 56 1
+		pfexec zlogin "$z" /usr/sbin/dig 0.pool.ntp.org @1.1.1.1
+		pfexec zlogin "$z" getent hosts time.cloudfare.com
+
+		# Attempt to get chrony to do some time sync from the CLI with
+		# messages being written to the terminal and with debugging
+		# enabled if the chrony package was built with that option.
+		# Since chronyd on the CLI needs to use the ports that the
+		# service will be using, stop it first (with -s to wait for it
+		# to exit).
+		pfexec /usr/sbin/svcadm -z "$z" disable -s oxide/ntp
+		# Run in dry-run one-shot mode (-Q)
+		pfexec zlogin "$z" /usr/sbin/chronyd -t 10 -ddQ
+		# Run in one-shot mode (-q) -- attempt to set the clock
+		pfexec zlogin "$z" /usr/sbin/chronyd -t 10 -ddq
+		# Run in one-shot mode (-q) but override the configuration
+		# to talk to an explicit external service. This command line is
+		# similar to that used by the pre-flight NTP checks.
+		pfexec zlogin "$z" /usr/sbin/chronyd -t 10 -ddq \
+		    'pool time.cloudflare.com iburst maxdelay 0.1'
 	done
 
 	pfexec zlogin sidecar_softnpu cat /var/log/softnpu.log

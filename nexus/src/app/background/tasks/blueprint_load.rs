@@ -225,6 +225,7 @@ mod test {
                 internal_dns_version: Generation::new(),
                 external_dns_version: Generation::new(),
                 cockroachdb_fingerprint: String::new(),
+                clickhouse_cluster_config: None,
                 time_created: now_db_precision(),
                 creator: "test".to_string(),
                 comment: "test blueprint".to_string(),

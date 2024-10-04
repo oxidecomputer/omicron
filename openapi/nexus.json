@@ -12718,7 +12718,7 @@
             "type": "string"
           },
           "disk_source": {
-            "description": "initial source for this disk",
+            "description": "The initial source for this disk",
             "allOf": [
               {
                 "$ref": "#/components/schemas/DiskSource"
@@ -12729,7 +12729,7 @@
             "$ref": "#/components/schemas/Name"
           },
           "size": {
-            "description": "total size of the Disk in bytes",
+            "description": "The total size of the Disk (in bytes)",
             "allOf": [
               {
                 "$ref": "#/components/schemas/ByteCount"
@@ -15156,6 +15156,15 @@
             "description": "`true` if this instance's auto-restart policy will permit the control plane to automatically restart it if it enters the `Failed` state.",
             "type": "boolean"
           },
+          "auto_restart_policy": {
+            "nullable": true,
+            "description": "The auto-restart policy configured for this instance, or `None` if no explicit policy is configured.\n\nIf this is not present, then this instance uses the default auto-restart policy, which may or may not allow it to be restarted. The `auto_restart_enabled` field indicates whether the instance will be automatically restarted.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceAutoRestartPolicy"
+              }
+            ]
+          },
           "boot_disk_id": {
             "nullable": true,
             "description": "the ID of the disk used to boot this Instance, if a specific one is assigned.",
@@ -15312,16 +15321,31 @@
             }
           },
           "hostname": {
-            "$ref": "#/components/schemas/Hostname"
+            "description": "The hostname to be assigned to the instance",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Hostname"
+              }
+            ]
           },
           "memory": {
-            "$ref": "#/components/schemas/ByteCount"
+            "description": "The amount of RAM (in bytes) to be allocated to the instance",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
           },
           "name": {
             "$ref": "#/components/schemas/Name"
           },
           "ncpus": {
-            "$ref": "#/components/schemas/InstanceCpuCount"
+            "description": "The number of vCPUs to be allocated to the instance",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceCpuCount"
+              }
+            ]
           },
           "network_interfaces": {
             "description": "The network interfaces to be created for this instance.",
@@ -15373,7 +15397,7 @@
                 "type": "string"
               },
               "disk_source": {
-                "description": "initial source for this disk",
+                "description": "The initial source for this disk",
                 "allOf": [
                   {
                     "$ref": "#/components/schemas/DiskSource"
@@ -15384,7 +15408,7 @@
                 "$ref": "#/components/schemas/Name"
               },
               "size": {
-                "description": "total size of the Disk in bytes",
+                "description": "The total size of the Disk (in bytes)",
                 "allOf": [
                   {
                     "$ref": "#/components/schemas/ByteCount"
@@ -15792,6 +15816,15 @@
         "description": "Parameters of an `Instance` that can be reconfigured after creation.",
         "type": "object",
         "properties": {
+          "auto_restart_policy": {
+            "nullable": true,
+            "description": "The auto-restart policy for this instance.\n\nIf not provided, unset the instance's auto-restart policy.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceAutoRestartPolicy"
+              }
+            ]
+          },
           "boot_disk": {
             "nullable": true,
             "description": "Name or ID of the disk the instance should be instructed to boot from.\n\nIf not provided, unset the instance's boot disk.",

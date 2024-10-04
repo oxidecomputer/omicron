@@ -697,7 +697,7 @@ mod test {
                     usable_hardware_threads: 10,
                     usable_physical_ram: ByteCount::from(1024 * 1024),
                     omicron_zones: OmicronZonesConfig {
-                        generation: Generation::new(),
+                        generation: OmicronZonesConfig::INITIAL_GENERATION,
                         zones: vec![],
                     },
                     disks,

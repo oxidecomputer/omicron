@@ -217,22 +217,32 @@ pub(super) enum BuilderZonesConfigError {
 
 #[cfg(test)]
 mod tests {
-    use std::net::{Ipv6Addr, SocketAddrV6};
+    use std::{
+        collections::BTreeMap,
+        net::{Ipv6Addr, SocketAddrV6},
+    };
 
     use maplit::btreeset;
-    use nexus_types::deployment::{
-        blueprint_zone_type, BlueprintZoneType, SledFilter,
+    use nexus_types::deployment::SledDisk;
+    use nexus_types::external_api::views::PhysicalDiskPolicy;
+    use nexus_types::external_api::views::PhysicalDiskState;
+    use nexus_types::{
+        deployment::{
+            blueprint_zone_type, BlueprintZoneType, SledDetails, SledFilter,
+            SledResources,
+        },
+        external_api::views::{SledPolicy, SledState},
     };
+    use omicron_common::address::Ipv6Subnet;
+    use omicron_common::disk::DiskIdentity;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev::test_setup_log;
+    use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::ZpoolUuid;
 
     use crate::{
-        blueprint_builder::{
-            test::{verify_blueprint, DEFAULT_N_SLEDS},
-            BlueprintBuilder, Ensure,
-        },
-        example::example,
+        blueprint_builder::{test::verify_blueprint, BlueprintBuilder, Ensure},
+        example::ExampleSystemBuilder,
     };
 
     use super::*;
@@ -243,23 +253,54 @@ mod tests {
         static TEST_NAME: &str = "blueprint_test_builder_zones";
         let logctx = test_setup_log(TEST_NAME);
         let (mut example, blueprint_initial) =
-            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME).build();
+
+        // Add a completely bare sled to the input.
+        let (new_sled_id, input2) = {
+            let mut input = example.input.clone().into_builder();
+            let new_sled_id = example.sled_rng.next();
+            input
+                .add_sled(
+                    new_sled_id,
+                    SledDetails {
+                        policy: SledPolicy::provisionable(),
+                        state: SledState::Active,
+                        resources: SledResources {
+                            subnet: Ipv6Subnet::new(
+                                "fd00:1::".parse().unwrap(),
+                            ),
+                            zpools: BTreeMap::from([(
+                                ZpoolUuid::new_v4(),
+                                SledDisk {
+                                    disk_identity: DiskIdentity {
+                                        vendor: String::from("fake-vendor"),
+                                        serial: String::from("fake-serial"),
+                                        model: String::from("fake-model"),
+                                    },
+                                    disk_id: PhysicalDiskUuid::new_v4(),
+                                    policy: PhysicalDiskPolicy::InService,
+                                    state: PhysicalDiskState::Active,
+                                },
+                            )]),
+                        },
+                    },
+                )
+                .expect("adding new sled");
+
+            (new_sled_id, input.build())
+        };
 
         let existing_sled_id = example
-            .planning_input()
+            .input
             .all_sled_ids(SledFilter::Commissioned)
             .next()
             .expect("at least one sled present");
 
-        // Add a completely bare sled to the input.
-        let new_sled_id =
-            example.add_sled_with_builder(|builder| builder.npools(1));
-
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
             &blueprint_initial,
-            example.planning_input(),
-            example.collection(),
+            &input2,
+            &example.collection,
             "the_test",
         )
         .expect("creating blueprint builder");
@@ -430,8 +471,8 @@ mod tests {
             let mut builder = BlueprintBuilder::new_based_on(
                 &logctx.log,
                 &blueprint,
-                example.planning_input(),
-                example.collection(),
+                &input2,
+                &example.collection,
                 "the_test",
             )
             .expect("creating blueprint builder");
