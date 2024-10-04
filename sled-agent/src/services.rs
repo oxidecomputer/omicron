@@ -2024,6 +2024,7 @@ impl ServiceManager {
                             OmicronZoneType::ExternalDns {
                                 http_address,
                                 dns_address,
+                                nic,
                                 ..
                             },
                         ..
@@ -2046,17 +2047,19 @@ impl ServiceManager {
                 let opte_interface_setup =
                     Self::opte_interface_set_up_install(&installed_zone)?;
 
+                // We need to tell external_dns to listen on its OPTE port IP
+                // address, which comes from `nic`. Attach the port from its
+                // true external DNS address (`dns_address`).
+                let dns_address =
+                    SocketAddr::new(nic.ip, dns_address.port()).to_string();
+
                 let external_dns_config = PropertyGroupBuilder::new("config")
                     .add_property(
                         "http_address",
                         "astring",
                         http_address.to_string(),
                     )
-                    .add_property(
-                        "dns_address",
-                        "astring",
-                        dns_address.to_string(),
-                    );
+                    .add_property("dns_address", "astring", dns_address);
                 let external_dns_service =
                     ServiceBuilder::new("oxide/external_dns").add_instance(
                         ServiceInstanceBuilder::new("default")
