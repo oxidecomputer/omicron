@@ -11,6 +11,7 @@ workspace = true
 anyhow.workspace = true
 base64.workspace = true
 chrono.workspace = true
+clickhouse-admin-types.workspace = true
 futures.workspace = true
 gateway-client.workspace = true
 gateway-messages.workspace = true

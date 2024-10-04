@@ -13,8 +13,7 @@ use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
 use omicron_common::address::CLICKHOUSE_HTTP_PORT;
-use omicron_common::api::external::Error;
-use omicron_common::api::external::{DataPageParams, ListResultVec};
+use omicron_common::api::external::{DataPageParams, Error, ListResultVec};
 use omicron_common::api::internal::nexus::{self, ProducerEndpoint};
 use oximeter_client::Client as OximeterClient;
 use oximeter_db::query::Timestamp;
@@ -113,9 +112,18 @@ impl super::Nexus {
         opctx: &OpContext,
         producer_info: nexus::ProducerEndpoint,
     ) -> Result<(), Error> {
-        let (collector, id) = self.next_collector(opctx).await?;
-        let db_info = db::model::ProducerEndpoint::new(&producer_info, id);
-        self.db_datastore.producer_endpoint_create(opctx, &db_info).await?;
+        let collector_info = self
+            .db_datastore
+            .producer_endpoint_upsert_and_assign(opctx, &producer_info)
+            .await?;
+
+        let address = SocketAddr::from((
+            collector_info.ip.ip(),
+            collector_info.port.try_into().unwrap(),
+        ));
+        let collector =
+            build_oximeter_client(&self.log, &collector_info.id, address);
+
         collector
             .producers_post(&oximeter_client::types::ProducerEndpoint::from(
                 &producer_info,
@@ -125,9 +133,10 @@ impl super::Nexus {
         info!(
             self.log,
             "assigned collector to new producer";
-            "producer_id" => ?producer_info.id,
-            "collector_id" => ?id,
+            "producer_id" => %producer_info.id,
+            "collector_id" => %collector_info.id,
         );
+
         Ok(())
     }
 
@@ -238,27 +247,6 @@ impl super::Nexus {
             },
         )
         .unwrap())
-    }
-
-    // Return an oximeter collector to assign a newly-registered producer
-    async fn next_collector(
-        &self,
-        opctx: &OpContext,
-    ) -> Result<(OximeterClient, Uuid), Error> {
-        // TODO-robustness Replace with a real load-balancing strategy.
-        let page_params = DataPageParams {
-            marker: None,
-            direction: dropshot::PaginationOrder::Ascending,
-            limit: std::num::NonZeroU32::new(1).unwrap(),
-        };
-        let oxs = self.db_datastore.oximeter_list(opctx, &page_params).await?;
-        let info = oxs.first().ok_or_else(|| Error::ServiceUnavailable {
-            internal_message: String::from("no oximeter collectors available"),
-        })?;
-        let address =
-            SocketAddr::from((info.ip.ip(), info.port.try_into().unwrap()));
-        let id = info.id;
-        Ok((build_oximeter_client(&self.log, &id, address), id))
     }
 }
 

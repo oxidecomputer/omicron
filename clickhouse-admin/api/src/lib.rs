@@ -4,16 +4,17 @@
 
 use clickhouse_admin_types::config::{KeeperConfig, ReplicaConfig};
 use clickhouse_admin_types::{
-    KeeperConf, KeeperSettings, Lgif, RaftConfig, ServerSettings,
+    ClickhouseKeeperClusterMembership, KeeperConf, KeeperSettings, Lgif,
+    RaftConfig, ServerSettings,
 };
 use dropshot::{
     HttpError, HttpResponseCreated, HttpResponseOk, RequestContext, TypedBody,
 };
 use omicron_common::api::external::Generation;
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct ServerConfigurableSettings {
     /// A unique identifier for the configuration generation.
     pub generation: Generation,
@@ -21,7 +22,7 @@ pub struct ServerConfigurableSettings {
     pub settings: ServerSettings,
 }
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct KeeperConfigurableSettings {
     /// A unique identifier for the configuration generation.
     pub generation: Generation,
@@ -84,4 +85,13 @@ pub trait ClickhouseAdminApi {
     async fn keeper_conf(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<KeeperConf>, HttpError>;
+
+    /// Retrieve cluster membership information from a keeper node.
+    #[endpoint {
+        method = GET,
+        path = "/keeper/cluster-membership",
+    }]
+    async fn keeper_cluster_membership(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<ClickhouseKeeperClusterMembership>, HttpError>;
 }

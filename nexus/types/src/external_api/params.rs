@@ -1079,6 +1079,11 @@ pub struct InstanceUpdate {
     ///
     /// If not provided, unset the instance's boot disk.
     pub boot_disk: Option<NameOrId>,
+
+    /// The auto-restart policy for this instance.
+    ///
+    /// If not provided, unset the instance's auto-restart policy.
+    pub auto_restart_policy: Option<InstanceAutoRestartPolicy>,
 }
 
 #[inline]

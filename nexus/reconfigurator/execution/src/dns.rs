@@ -501,7 +501,7 @@ mod test {
     use nexus_inventory::CollectionBuilder;
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_reconfigurator_planning::blueprint_builder::EnsureMultiple;
-    use nexus_reconfigurator_planning::example::example;
+    use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
     use nexus_reconfigurator_preparation::PlanningInputFromDb;
     use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
     use nexus_sled_agent_shared::inventory::OmicronZoneType;
@@ -541,6 +541,7 @@ mod test {
     use omicron_common::policy::COCKROACHDB_REDUNDANCY;
     use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
     use omicron_common::policy::NEXUS_REDUNDANCY;
+    use omicron_common::policy::OXIMETER_REDUNDANCY;
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::ExternalIpUuid;
@@ -1137,7 +1138,8 @@ mod test {
     async fn test_blueprint_external_dns_basic() {
         static TEST_NAME: &str = "test_blueprint_external_dns_basic";
         let logctx = test_setup_log(TEST_NAME);
-        let (_, _, mut blueprint) = example(&logctx.log, TEST_NAME, 5);
+        let (_, mut blueprint) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME).nsleds(5).build();
         blueprint.internal_dns_version = Generation::new();
         blueprint.external_dns_version = Generation::new();
 
@@ -1548,6 +1550,7 @@ mod test {
                 target_boundary_ntp_zone_count: BOUNDARY_NTP_REDUNDANCY,
                 target_nexus_zone_count: NEXUS_REDUNDANCY,
                 target_internal_dns_zone_count: INTERNAL_DNS_REDUNDANCY,
+                target_oximeter_zone_count: OXIMETER_REDUNDANCY,
                 target_cockroachdb_zone_count: COCKROACHDB_REDUNDANCY,
                 target_cockroachdb_cluster_version:
                     CockroachDbClusterVersion::POLICY,

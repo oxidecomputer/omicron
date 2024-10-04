@@ -38,7 +38,7 @@ use omicron_common::disk::{
 use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_common::policy::{
     BOUNDARY_NTP_REDUNDANCY, COCKROACHDB_REDUNDANCY, INTERNAL_DNS_REDUNDANCY,
-    NEXUS_REDUNDANCY, RESERVED_INTERNAL_DNS_REDUNDANCY,
+    NEXUS_REDUNDANCY, OXIMETER_REDUNDANCY, RESERVED_INTERNAL_DNS_REDUNDANCY,
 };
 use omicron_uuid_kinds::{
     ExternalIpUuid, GenericUuid, OmicronZoneUuid, SledUuid, ZpoolUuid,
@@ -61,31 +61,8 @@ use thiserror::Error;
 use uuid::Uuid;
 
 // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
-// when Nexus provisions Oximeter.
-const OXIMETER_COUNT: usize = 1;
-// TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
 // when Nexus provisions Clickhouse.
-// TODO(https://github.com/oxidecomputer/omicron/issues/4000): Use
-// omicron_common::policy::CLICKHOUSE_SERVER_REDUNDANCY once we enable
-// replicated ClickHouse.
-// Set to 0 when testing replicated ClickHouse.
 const CLICKHOUSE_COUNT: usize = 1;
-// TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
-// when Nexus provisions Clickhouse keeper.
-// TODO(https://github.com/oxidecomputer/omicron/issues/4000): Use
-// omicron_common::policy::CLICKHOUSE_KEEPER_REDUNDANCY once we enable
-// replicated ClickHouse
-// Set to 3 when testing replicated ClickHouse.
-const CLICKHOUSE_KEEPER_COUNT: usize = 0;
-// TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
-// when Nexus provisions Clickhouse server.
-// TODO(https://github.com/oxidecomputer/omicron/issues/4000): Use
-// omicron_common::policy::CLICKHOUSE_SERVER_REDUNDANCY once we enable
-// replicated ClickHouse.
-// Set to 2 when testing replicated ClickHouse
-const CLICKHOUSE_SERVER_COUNT: usize = 0;
-// TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove.
-// when Nexus provisions Crucible.
 const MINIMUM_U2_COUNT: usize = 3;
 // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove.
 // when Nexus provisions the Pantry.
@@ -658,7 +635,7 @@ impl Plan {
 
         // Provision Oximeter zones, continuing to stripe across sleds.
         // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
-        for _ in 0..OXIMETER_COUNT {
+        for _ in 0..OXIMETER_REDUNDANCY {
             let sled = {
                 let which_sled =
                     sled_allocator.next().ok_or(PlanError::NotEnoughSleds)?;
@@ -723,90 +700,6 @@ impl Plan {
                 zone_type: BlueprintZoneType::Clickhouse(
                     blueprint_zone_type::Clickhouse {
                         address: http_address,
-                        dataset: OmicronZoneDataset {
-                            pool_name: dataset_name.pool().clone(),
-                        },
-                    },
-                ),
-                filesystem_pool,
-            });
-        }
-
-        // Provision Clickhouse server zones, continuing to stripe across sleds.
-        // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
-        // Temporary linter rule until replicated Clickhouse is enabled
-        #[allow(clippy::reversed_empty_ranges)]
-        for _ in 0..CLICKHOUSE_SERVER_COUNT {
-            let sled = {
-                let which_sled =
-                    sled_allocator.next().ok_or(PlanError::NotEnoughSleds)?;
-                &mut sled_info[which_sled]
-            };
-            let id = OmicronZoneUuid::new_v4();
-            let ip = sled.addr_alloc.next().expect("Not enough addrs");
-            // TODO: This may need to be a different port if/when to have single node
-            // and replicated running side by side as per stage 1 of RFD 468.
-            let http_port = omicron_common::address::CLICKHOUSE_HTTP_PORT;
-            let http_address = SocketAddrV6::new(ip, http_port, 0, 0);
-            dns_builder
-                .host_zone_clickhouse(
-                    id,
-                    ip,
-                    ServiceName::ClickhouseServer,
-                    http_port,
-                )
-                .unwrap();
-            let dataset_name =
-                sled.alloc_dataset_from_u2s(DatasetKind::ClickhouseServer)?;
-            let filesystem_pool = Some(dataset_name.pool().clone());
-            sled.request.zones.push(BlueprintZoneConfig {
-                disposition: BlueprintZoneDisposition::InService,
-                id,
-                underlay_address: ip,
-                zone_type: BlueprintZoneType::ClickhouseServer(
-                    blueprint_zone_type::ClickhouseServer {
-                        address: http_address,
-                        dataset: OmicronZoneDataset {
-                            pool_name: dataset_name.pool().clone(),
-                        },
-                    },
-                ),
-                filesystem_pool,
-            });
-        }
-
-        // Provision Clickhouse Keeper zones, continuing to stripe across sleds.
-        // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
-        // Temporary linter rule until replicated Clickhouse is enabled
-        #[allow(clippy::reversed_empty_ranges)]
-        for _ in 0..CLICKHOUSE_KEEPER_COUNT {
-            let sled = {
-                let which_sled =
-                    sled_allocator.next().ok_or(PlanError::NotEnoughSleds)?;
-                &mut sled_info[which_sled]
-            };
-            let id = OmicronZoneUuid::new_v4();
-            let ip = sled.addr_alloc.next().expect("Not enough addrs");
-            let port = omicron_common::address::CLICKHOUSE_KEEPER_TCP_PORT;
-            let address = SocketAddrV6::new(ip, port, 0, 0);
-            dns_builder
-                .host_zone_with_one_backend(
-                    id,
-                    ip,
-                    ServiceName::ClickhouseKeeper,
-                    port,
-                )
-                .unwrap();
-            let dataset_name =
-                sled.alloc_dataset_from_u2s(DatasetKind::ClickhouseKeeper)?;
-            let filesystem_pool = Some(dataset_name.pool().clone());
-            sled.request.zones.push(BlueprintZoneConfig {
-                disposition: BlueprintZoneDisposition::InService,
-                id,
-                underlay_address: ip,
-                zone_type: BlueprintZoneType::ClickhouseKeeper(
-                    blueprint_zone_type::ClickhouseKeeper {
-                        address,
                         dataset: OmicronZoneDataset {
                             pool_name: dataset_name.pool().clone(),
                         },

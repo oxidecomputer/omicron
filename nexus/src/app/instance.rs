@@ -330,7 +330,9 @@ impl super::Nexus {
             None => None,
         };
 
-        let update = InstanceUpdate { boot_disk_id };
+        let auto_restart_policy = params.auto_restart_policy.map(Into::into);
+
+        let update = InstanceUpdate { boot_disk_id, auto_restart_policy };
         self.datastore()
             .instance_reconfigure(opctx, &authz_instance, update)
             .await
