@@ -15833,8 +15833,28 @@
                 "$ref": "#/components/schemas/NameOrId"
               }
             ]
+          },
+          "memory": {
+            "description": "The amount of memory to assign to this instance.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
+          },
+          "ncpus": {
+            "description": "The number of CPUs to assign to this instance.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceCpuCount"
+              }
+            ]
           }
-        }
+        },
+        "required": [
+          "memory",
+          "ncpus"
+        ]
       },
       "IpNet": {
         "x-rust-type": {
