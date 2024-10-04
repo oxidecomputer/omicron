@@ -244,10 +244,10 @@ dof = { version = "0.3.0", default-features = false, features = ["des"] }
 hyper-582f2526e08bb6a0 = { package = "hyper", version = "0.14.30", features = ["full"] }
 hyper-rustls = { version = "0.27.3", default-features = false, features = ["http1", "http2", "ring", "tls12", "webpki-tokio"] }
 hyper-util = { version = "0.1.9", features = ["full"] }
-linux-raw-sys = { version = "0.4.13", default-features = false, features = ["elf", "errno", "general", "if_ether", "ioctl", "net", "netlink", "no_std", "prctl", "std", "system", "xdp"] }
+linux-raw-sys = { version = "0.4.14", default-features = false, features = ["elf", "errno", "general", "if_ether", "ioctl", "net", "netlink", "no_std", "prctl", "std", "system", "xdp"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
-rustix = { version = "0.38.34", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
+rustix = { version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
 rustls = { version = "0.23.10", default-features = false, features = ["logging", "ring", "std", "tls12"] }
 signal-hook-mio = { version = "0.2.4", default-features = false, features = ["support-v0_8", "support-v1_0"] }
 tokio-rustls = { version = "0.26.0", default-features = false, features = ["logging", "ring", "tls12"] }
@@ -258,10 +258,10 @@ dof = { version = "0.3.0", default-features = false, features = ["des"] }
 hyper-582f2526e08bb6a0 = { package = "hyper", version = "0.14.30", features = ["full"] }
 hyper-rustls = { version = "0.27.3", default-features = false, features = ["http1", "http2", "ring", "tls12", "webpki-tokio"] }
 hyper-util = { version = "0.1.9", features = ["full"] }
-linux-raw-sys = { version = "0.4.13", default-features = false, features = ["elf", "errno", "general", "if_ether", "ioctl", "net", "netlink", "no_std", "prctl", "std", "system", "xdp"] }
+linux-raw-sys = { version = "0.4.14", default-features = false, features = ["elf", "errno", "general", "if_ether", "ioctl", "net", "netlink", "no_std", "prctl", "std", "system", "xdp"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
-rustix = { version = "0.38.34", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
+rustix = { version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
 rustls = { version = "0.23.10", default-features = false, features = ["logging", "ring", "std", "tls12"] }
 signal-hook-mio = { version = "0.2.4", default-features = false, features = ["support-v0_8", "support-v1_0"] }
 tokio-rustls = { version = "0.26.0", default-features = false, features = ["logging", "ring", "tls12"] }
@@ -273,7 +273,7 @@ hyper-rustls = { version = "0.27.3", default-features = false, features = ["http
 hyper-util = { version = "0.1.9", features = ["full"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
-rustix = { version = "0.38.34", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
+rustix = { version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
 rustls = { version = "0.23.10", default-features = false, features = ["logging", "ring", "std", "tls12"] }
 signal-hook-mio = { version = "0.2.4", default-features = false, features = ["support-v0_8", "support-v1_0"] }
 tokio-rustls = { version = "0.26.0", default-features = false, features = ["logging", "ring", "tls12"] }
@@ -285,7 +285,7 @@ hyper-rustls = { version = "0.27.3", default-features = false, features = ["http
 hyper-util = { version = "0.1.9", features = ["full"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
-rustix = { version = "0.38.34", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
+rustix = { version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
 rustls = { version = "0.23.10", default-features = false, features = ["logging", "ring", "std", "tls12"] }
 signal-hook-mio = { version = "0.2.4", default-features = false, features = ["support-v0_8", "support-v1_0"] }
 tokio-rustls = { version = "0.26.0", default-features = false, features = ["logging", "ring", "tls12"] }
@@ -297,7 +297,7 @@ hyper-rustls = { version = "0.27.3", default-features = false, features = ["http
 hyper-util = { version = "0.1.9", features = ["full"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
-rustix = { version = "0.38.34", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
+rustix = { version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
 rustls = { version = "0.23.10", default-features = false, features = ["logging", "ring", "std", "tls12"] }
 signal-hook-mio = { version = "0.2.4", default-features = false, features = ["support-v0_8", "support-v1_0"] }
 tokio-rustls = { version = "0.26.0", default-features = false, features = ["logging", "ring", "tls12"] }
@@ -309,7 +309,7 @@ hyper-rustls = { version = "0.27.3", default-features = false, features = ["http
 hyper-util = { version = "0.1.9", features = ["full"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
-rustix = { version = "0.38.34", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
+rustix = { version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
 rustls = { version = "0.23.10", default-features = false, features = ["logging", "ring", "std", "tls12"] }
 signal-hook-mio = { version = "0.2.4", default-features = false, features = ["support-v0_8", "support-v1_0"] }
 tokio-rustls = { version = "0.26.0", default-features = false, features = ["logging", "ring", "tls12"] }
@@ -323,7 +323,7 @@ hyper-util = { version = "0.1.9", features = ["full"] }
 indicatif = { version = "0.17.8", features = ["rayon"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
-rustix = { version = "0.38.34", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
+rustix = { version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
 rustls = { version = "0.23.10", default-features = false, features = ["logging", "ring", "std", "tls12"] }
 signal-hook-mio = { version = "0.2.4", default-features = false, features = ["support-v0_8", "support-v1_0"] }
 tokio-rustls = { version = "0.26.0", default-features = false, features = ["logging", "ring", "tls12"] }
@@ -338,7 +338,7 @@ hyper-util = { version = "0.1.9", features = ["full"] }
 indicatif = { version = "0.17.8", features = ["rayon"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 once_cell = { version = "1.19.0" }
-rustix = { version = "0.38.34", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
+rustix = { version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
 rustls = { version = "0.23.10", default-features = false, features = ["logging", "ring", "std", "tls12"] }
 signal-hook-mio = { version = "0.2.4", default-features = false, features = ["support-v0_8", "support-v1_0"] }
 tokio-rustls = { version = "0.26.0", default-features = false, features = ["logging", "ring", "tls12"] }
