@@ -71,6 +71,10 @@ const PHY0: &str = "phy0";
 // before breaking to check for shutdown conditions.
 const BGP_SESSION_RESOLUTION: u64 = 100;
 
+// This is the default RIB Priority used for static routes.  This mirrors
+// the const defined in maghemite in rdb/src/lib.rs.
+const DEFAULT_RIB_PRIORITY_STATIC: u8 = 1;
+
 pub struct SwitchPortSettingsManager {
     datastore: Arc<DataStore>,
     resolver: Resolver,
@@ -1517,7 +1521,8 @@ fn static_routes_to_del(
                     nexthop: *nexthop,
                     prefix: *prefix,
                     vlan_id: *vlan_id,
-                    rib_priority: rib_priority.unwrap_or(1),
+                    rib_priority: rib_priority
+                        .unwrap_or(DEFAULT_RIB_PRIORITY_STATIC),
                 })
                 .collect::<Vec<StaticRoute4>>();
 
@@ -1535,7 +1540,8 @@ fn static_routes_to_del(
                     nexthop: *nexthop,
                     prefix: *prefix,
                     vlan_id: *vlan_id,
-                    rib_priority: rib_priority.unwrap_or(1),
+                    rib_priority: rib_priority
+                        .unwrap_or(DEFAULT_RIB_PRIORITY_STATIC),
                 })
                 .collect::<Vec<StaticRoute4>>();
 
@@ -1586,7 +1592,8 @@ fn static_routes_to_add(
                 nexthop: *nexthop,
                 prefix: *prefix,
                 vlan_id: *vlan_id,
-                rib_priority: rib_priority.unwrap_or(1),
+                rib_priority: rib_priority
+                    .unwrap_or(DEFAULT_RIB_PRIORITY_STATIC),
             })
             .collect::<Vec<StaticRoute4>>();
 
