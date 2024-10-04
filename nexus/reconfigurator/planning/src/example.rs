@@ -52,9 +52,9 @@ pub struct ExampleSystemBuilder {
     log: slog::Logger,
     test_name: String,
     nsleds: usize,
-    no_zones: bool,
-    no_disks: bool,
-    no_disks_in_blueprint: bool,
+    ndisks_per_sled: u8,
+    create_zones: bool,
+    create_disks_in_blueprint: bool,
 }
 
 impl ExampleSystemBuilder {
@@ -66,9 +66,9 @@ impl ExampleSystemBuilder {
             log: log.new(slog::o!("component" => "ExampleSystem", "test_name" => test_name.to_string())),
             test_name: test_name.to_string(),
             nsleds: Self::DEFAULT_N_SLEDS,
-            no_zones: false,
-            no_disks: false,
-            no_disks_in_blueprint: false,
+            ndisks_per_sled: SledBuilder::DEFAULT_NPOOLS,
+            create_zones: true,
+            create_disks_in_blueprint: true,
         }
     }
 
@@ -81,24 +81,31 @@ impl ExampleSystemBuilder {
         self
     }
 
-    /// Do not create any zones in the example system.
-    pub fn no_zones(mut self) -> Self {
-        self.no_zones = true;
-        self
-    }
-
-    /// Do not create any disks in the example system.
-    pub fn no_disks(mut self) -> Self {
-        self.no_disks = true;
-        self
-    }
-
-    /// Do not add any disks to the returned blueprint.
+    /// Set the number of disks per sled in the example system.
     ///
-    /// [`Self::no_disks`] implies this: if no disks are created, then the
-    /// blueprint won't have any disks.
-    pub fn no_disks_in_blueprint(mut self) -> Self {
-        self.no_disks_in_blueprint = true;
+    /// The default value is [`SledBuilder::DEFAULT_NPOOLS`]. A value of 0 is
+    /// permitted.
+    pub fn ndisks_per_sled(mut self, ndisks_per_sled: u8) -> Self {
+        self.ndisks_per_sled = ndisks_per_sled;
+        self
+    }
+
+    /// Create zones in the example system.
+    ///
+    /// The default is `true`.
+    pub fn create_zones(mut self, create_zones: bool) -> Self {
+        self.create_zones = create_zones;
+        self
+    }
+
+    /// Create disks in the blueprint.
+    ///
+    /// The default is `true`.
+    ///
+    /// If [`Self::ndisks_per_sled`] is set to 0, then this is implied: if no
+    /// disks are created, then the blueprint won't have any disks.
+    pub fn create_disks_in_blueprint(mut self, create: bool) -> Self {
+        self.create_disks_in_blueprint = create;
         self
     }
 
@@ -110,9 +117,9 @@ impl ExampleSystemBuilder {
             &self.log,
             "Creating example system";
             "nsleds" => self.nsleds,
-            "no_zones" => self.no_zones,
-            "no_disks" => self.no_disks,
-            "no_disks_in_blueprint" => self.no_disks_in_blueprint,
+            "ndisks_per_sled" => self.ndisks_per_sled,
+            "create_zones" => self.create_zones,
+            "create_disks_in_blueprint" => self.create_disks_in_blueprint,
         );
 
         let mut system = SystemDescription::new();
@@ -120,12 +127,14 @@ impl ExampleSystemBuilder {
             TypedUuidRng::from_seed(&self.test_name, "ExampleSystem");
         let sled_ids: Vec<_> =
             (0..self.nsleds).map(|_| sled_rng.next()).collect();
-        let npools =
-            if self.no_disks { 0 } else { SledBuilder::DEFAULT_NPOOLS };
 
         for sled_id in &sled_ids {
             let _ = system
-                .sled(SledBuilder::new().id(*sled_id).npools(npools))
+                .sled(
+                    SledBuilder::new()
+                        .id(*sled_id)
+                        .npools(self.ndisks_per_sled),
+                )
                 .unwrap();
         }
 
@@ -160,7 +169,7 @@ impl ExampleSystemBuilder {
         for (i, (sled_id, sled_resources)) in
             base_input.all_sled_resources(SledFilter::Commissioned).enumerate()
         {
-            if !self.no_zones {
+            if self.create_zones {
                 let _ = builder.sled_ensure_zone_ntp(sled_id).unwrap();
                 let _ = builder
                     .sled_ensure_zone_multiple_nexus_with_config(
@@ -176,11 +185,11 @@ impl ExampleSystemBuilder {
                         .unwrap();
                 }
             }
-            if !self.no_disks_in_blueprint {
+            if self.create_disks_in_blueprint {
                 let _ =
                     builder.sled_ensure_disks(sled_id, sled_resources).unwrap();
             }
-            if !self.no_zones {
+            if self.create_zones {
                 for pool_name in sled_resources.zpools.keys() {
                     let _ = builder
                         .sled_ensure_zone_crucible(sled_id, *pool_name)
@@ -235,9 +244,8 @@ impl ExampleSystemBuilder {
                 .unwrap();
         }
 
-        // Previously ExampleSystem itself used to carry around the blueprint,
-        // but logically the blueprint evolves separately from the system -- so
-        // it's returned as a separate value.
+        // The blueprint evolves separately from the system -- so it's returned
+        // as a separate value.
         let example = ExampleSystem {
             system,
             input: input_builder.build(),

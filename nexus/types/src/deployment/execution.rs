@@ -35,6 +35,7 @@ pub enum ExecutionComponent {
     DatasetRecords,
     Dns,
     Cockroach,
+    Clickhouse,
 }
 
 /// Steps for reconfigurator execution.

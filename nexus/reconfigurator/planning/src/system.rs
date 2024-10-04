@@ -393,6 +393,8 @@ pub struct SledBuilder {
 
 impl SledBuilder {
     /// The default number of U.2 (external) pools for a sled.
+    ///
+    /// The default is `10` based on the typical value for a Gimlet.
     pub const DEFAULT_NPOOLS: u8 = 10;
 
     /// Begin describing a sled to be added to a `SystemDescription`
@@ -429,7 +431,7 @@ impl SledBuilder {
 
     /// Set the number of U.2 (external) pools this sled should have
     ///
-    /// Default is currently `10` based on the typical value for a Gimlet
+    /// The default is [`Self::DEFAULT_NPOOLS`].
     pub fn npools(mut self, npools: u8) -> Self {
         self.npools = npools;
         self

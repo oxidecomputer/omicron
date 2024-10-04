@@ -2314,8 +2314,8 @@ pub mod test {
         // the disks around so that `sled_ensure_disks` can add them.
         let (example, parent) =
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
-                .no_zones()
-                .no_disks_in_blueprint()
+                .create_zones(false)
+                .create_disks_in_blueprint(false)
                 .build();
         let collection = example.collection;
         let input = example.input;
@@ -2332,12 +2332,14 @@ pub mod test {
             .expect("failed to create builder");
 
             assert!(builder.disks.changed_disks.is_empty());
-            // We expect sleds to be present but not have any disks in them.
+            // In the parent_disks map, we expect entries to be present for
+            // each sled, but not have any disks in them.
             for (sled_id, disks) in builder.disks.parent_disks {
                 assert_eq!(
                     disks.disks,
                     Vec::new(),
-                    "for sled {}, no disks present in parent",
+                    "for sled {}, expected no disks present in parent, \
+                     but found some",
                     sled_id
                 );
             }
@@ -2357,12 +2359,14 @@ pub mod test {
             }
 
             assert!(!builder.disks.changed_disks.is_empty());
-            // We expect sleds to be present but not have any disks in them.
+            // In the parent_disks map, we expect entries to be present for
+            // each sled, but not have any disks in them.
             for (sled_id, disks) in builder.disks.parent_disks {
                 assert_eq!(
                     disks.disks,
                     Vec::new(),
-                    "for sled {}, no disks present in parent",
+                    "for sled {}, expected no disks present in parent, \
+                     but found some",
                     sled_id
                 );
             }
@@ -2404,7 +2408,7 @@ pub mod test {
         // Start with an empty system (sleds with no zones).
         let (example, parent) =
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
-                .no_zones()
+                .create_zones(false)
                 .build();
         let collection = example.collection;
         let input = example.input;
@@ -2777,7 +2781,7 @@ pub mod test {
         // Start with an empty system (sleds with no zones).
         let (example, parent) =
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
-                .no_zones()
+                .create_zones(false)
                 .build();
         let collection = example.collection;
         let input = example.input;
