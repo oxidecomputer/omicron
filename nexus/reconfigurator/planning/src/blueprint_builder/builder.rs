@@ -1646,9 +1646,8 @@ impl<'a> BlueprintBuilder<'a> {
     /// ordinarily only come from RSS.
     ///
     /// TODO-cleanup: Remove when external DNS addresses are in the policy.
-    #[cfg(test)]
     #[track_caller]
-    pub fn add_external_dns_ip(&mut self, addr: IpAddr) {
+    pub(crate) fn add_external_dns_ip(&mut self, addr: IpAddr) {
         self.external_networking()
             .expect("failed to initialize external networking allocator")
             .add_external_dns_ip(addr);
