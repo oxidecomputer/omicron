@@ -466,7 +466,7 @@ mod tests {
         assert_eq!(block.n_rows, 1);
         let (name, col) = block.columns.first().unwrap();
         assert_eq!(name, "timestamp");
-        assert_eq!(col.data_type, DataType::DateTime);
+        assert!(matches!(col.data_type, DataType::DateTime(_)));
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

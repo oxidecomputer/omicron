@@ -7,7 +7,8 @@
 //! Types for working with actual blocks and columns of data.
 
 use super::Error;
-use chrono::{DateTime, Utc};
+use chrono::DateTime;
+use chrono_tz::Tz;
 use indexmap::IndexMap;
 use std::{
     fmt,
@@ -195,8 +196,8 @@ pub enum ValueArray {
     Uuid(Vec<Uuid>),
     Ipv4(Vec<Ipv4Addr>),
     Ipv6(Vec<Ipv6Addr>),
-    DateTime(Vec<DateTime<Utc>>),
-    DateTime64 { precision: Precision, values: Vec<DateTime<Utc>> },
+    DateTime { tz: Tz, values: Vec<DateTime<Tz>> },
+    DateTime64 { precision: Precision, tz: Tz, values: Vec<DateTime<Tz>> },
     Nullable { is_null: Vec<bool>, values: Box<ValueArray> },
     Enum8 { variants: IndexMap<i8, String>, values: Vec<i8> },
     Array { inner_type: DataType, values: Vec<ValueArray> },
@@ -221,7 +222,7 @@ impl ValueArray {
             ValueArray::Uuid(inner) => inner.len(),
             ValueArray::Ipv4(inner) => inner.len(),
             ValueArray::Ipv6(inner) => inner.len(),
-            ValueArray::DateTime(inner) => inner.len(),
+            ValueArray::DateTime { values, .. } => values.len(),
             ValueArray::DateTime64 { values, .. } => values.len(),
             ValueArray::Nullable { values, .. } => values.len(),
             ValueArray::Enum8 { values, .. } => values.len(),
@@ -248,10 +249,14 @@ impl ValueArray {
             DataType::Uuid => ValueArray::Uuid(vec![]),
             DataType::Ipv4 => ValueArray::Ipv4(vec![]),
             DataType::Ipv6 => ValueArray::Ipv6(vec![]),
-            DataType::DateTime => ValueArray::DateTime(vec![]),
-            DataType::DateTime64(precision) => {
-                ValueArray::DateTime64 { precision: *precision, values: vec![] }
+            DataType::DateTime(tz) => {
+                ValueArray::DateTime { tz: *tz, values: vec![] }
             }
+            DataType::DateTime64(precision, tz) => ValueArray::DateTime64 {
+                precision: *precision,
+                tz: *tz,
+                values: vec![],
+            },
             DataType::Enum8(variants) => {
                 ValueArray::Enum8 { variants: variants.clone(), values: vec![] }
             }
@@ -321,9 +326,10 @@ impl ValueArray {
             (ValueArray::Ipv6(us), ValueArray::Ipv6(mut them)) => {
                 us.append(&mut them)
             }
-            (ValueArray::DateTime(us), ValueArray::DateTime(mut them)) => {
-                us.append(&mut them)
-            }
+            (
+                ValueArray::DateTime { values: us, .. },
+                ValueArray::DateTime { values: mut them, .. },
+            ) => us.append(&mut them),
             (
                 ValueArray::DateTime64 { values: us, .. },
                 ValueArray::DateTime64 { values: mut them, .. },
@@ -401,13 +407,13 @@ impl TryFrom<u8> for Precision {
 /// order to convert it to a number of seconds and nanoseconds. Those are then
 /// used to call `DateTime::from_timestamp()`.
 macro_rules! precision_conversion_func {
-    ($precision:literal) => {{
-        |x| {
+    ($tz:expr, $precision:literal) => {{
+        |tz, x| {
             const SCALE: i64 = 10i64.pow($precision);
             const FACTOR: i64 = 10i64.pow(Precision::MAX as u32 - $precision);
             let seconds = x.div_euclid(SCALE);
             let nanos = (FACTOR * x.rem_euclid(SCALE)).try_into().unwrap();
-            DateTime::from_timestamp(seconds, nanos).unwrap()
+            tz.timestamp_opt(seconds, nanos).unwrap()
         }
     }};
 }
@@ -425,7 +431,10 @@ impl Precision {
 
     /// Return a conversion function that takes an i64 count and converts it to
     /// a DateTime.
-    pub(crate) fn as_conv(&self) -> fn(i64) -> DateTime<Utc> {
+    pub(crate) fn as_conv<T: chrono::TimeZone>(
+        &self,
+        _: &T,
+    ) -> fn(&T, i64) -> DateTime<T> {
         // For the easy values, we'll convert to seconds or microseconds, and
         // then use a constructor.
         //
@@ -433,22 +442,22 @@ impl Precision {
         // next-smallest sane unit, in this case milliseconds, and use the
         // appropriate constructor.
         match self.0 {
-            0 => |x| DateTime::from_timestamp(x, 0).unwrap(),
-            1 => precision_conversion_func!(1),
-            2 => precision_conversion_func!(2),
-            3 => |x| DateTime::from_timestamp_millis(x).unwrap(),
-            4 => precision_conversion_func!(4),
-            5 => precision_conversion_func!(5),
-            6 => |x| DateTime::from_timestamp_micros(x).unwrap(),
-            7 => precision_conversion_func!(7),
-            8 => precision_conversion_func!(8),
-            9 => |x| DateTime::from_timestamp_nanos(x),
+            0 => |tz, x| tz.timestamp_opt(x, 0).unwrap(),
+            1 => precision_conversion_func!(tz, 1),
+            2 => precision_conversion_func!(tz, 2),
+            3 => |tz, x| tz.timestamp_millis_opt(x).unwrap(),
+            4 => precision_conversion_func!(tz, 4),
+            5 => precision_conversion_func!(tz, 5),
+            6 => |tz, x| tz.timestamp_nanos(x * 1000),
+            7 => precision_conversion_func!(tz, 7),
+            8 => precision_conversion_func!(tz, 8),
+            9 => |tz, x| tz.timestamp_nanos(x),
             10..=u8::MAX => unreachable!(),
         }
     }
 
     /// Convert the provided datetime into a timestamp in the right precision.
-    pub(crate) fn scale(&self, value: DateTime<Utc>) -> i64 {
+    pub(crate) fn scale(&self, value: DateTime<impl chrono::TimeZone>) -> i64 {
         match self.0 {
             0 => value.timestamp(),
             1 => value.timestamp_millis() / 100,
@@ -490,8 +499,8 @@ pub enum DataType {
     Uuid,
     Ipv4,
     Ipv6,
-    DateTime,
-    DateTime64(Precision),
+    DateTime(Tz),
+    DateTime64(Precision, Tz),
     Enum8(IndexMap<i8, String>),
     Nullable(Box<DataType>),
     Array(Box<DataType>),
@@ -536,8 +545,10 @@ impl fmt::Display for DataType {
             DataType::Uuid => write!(f, "UUID"),
             DataType::Ipv4 => write!(f, "IPv4"),
             DataType::Ipv6 => write!(f, "IPv6"),
-            DataType::DateTime => write!(f, "DateTime"),
-            DataType::DateTime64(prec) => write!(f, "DateTime64({prec})"),
+            DataType::DateTime(tz) => write!(f, "DateTime('{tz}')"),
+            DataType::DateTime64(prec, tz) => {
+                write!(f, "DateTime64({prec}, '{tz}')")
+            }
             DataType::Enum8(map) => {
                 write!(f, "Enum8(")?;
                 for (i, (val, name)) in map.iter().enumerate() {
@@ -592,18 +603,82 @@ impl std::str::FromStr for DataType {
         } else if s == "IPv6" {
             return Ok(DataType::Ipv6);
         } else if s == "DateTime" {
-            return Ok(DataType::DateTime);
+            let timezone = match iana_time_zone::get_timezone() {
+                Ok(tz) => tz.parse().unwrap_or_else(|_| Tz::UTC),
+                Err(_) => Tz::UTC,
+            };
+            return Ok(DataType::DateTime(timezone));
         }
 
-        // Check for DateTime with precision.
+        // Check for DateTime with timezone
+        if let Some(suffix) = s.strip_prefix("DateTime(") {
+            let Some(inner) = suffix.strip_suffix(")") else {
+                return Err(Error::UnsupportedDataType(s.to_string()));
+            };
+            let Some(rest) = inner.strip_prefix("'") else {
+                // Since we don't have a timezone, we use "local". That's
+                // annoyingly fallible to get, so we'll fallback to UTC.
+                let timezone = match iana_time_zone::get_timezone() {
+                    Ok(tz) => tz.parse().unwrap_or_else(|_| Tz::UTC),
+                    Err(_) => Tz::UTC,
+                };
+                return Ok(DataType::DateTime(timezone));
+            };
+            let Some(timezone) = rest.strip_suffix("'") else {
+                return Err(Error::UnsupportedDataType(s.to_string()));
+            };
+            let timezone = timezone
+                .parse()
+                .map_err(|_| Error::UnsupportedDataType(s.to_string()))?;
+            return Ok(DataType::DateTime(timezone));
+        }
+
+        // Check for DateTime64 with precision.
         if let Some(suffix) = s.strip_prefix("DateTime64(") {
             let Some(inner) = suffix.strip_suffix(")") else {
                 return Err(Error::UnsupportedDataType(s.to_string()));
             };
-            return inner
+            // DateTime's may have a timezone in them, if it is different from
+            // the current one.
+            let Some((precision, rest)) = inner.split_once(',') else {
+                // Parse precision only...
+                let precision = inner
+                    .parse()
+                    .map_err(|_| Error::UnsupportedDataType(s.to_string()))
+                    .map(Precision)?;
+
+                // Since we don't have a timezone, we use "local". That's
+                // annoyingly fallible to get, so we'll fallback to UTC.
+                let timezone = match iana_time_zone::get_timezone() {
+                    Ok(tz) => tz.parse().unwrap_or_else(|_| Tz::UTC),
+                    Err(_) => Tz::UTC,
+                };
+                return Ok(DataType::DateTime64(precision, timezone));
+            };
+
+            // Parse the precision...
+            let precision = precision
                 .parse()
                 .map_err(|_| Error::UnsupportedDataType(s.to_string()))
-                .map(|p| DataType::DateTime64(Precision(p)));
+                .map(Precision)?;
+
+            // And the timezone.
+            let Some(rest) = rest.trim().strip_prefix("'") else {
+                // Since we don't have a timezone, we use "local". That's
+                // annoyingly fallible to get, so we'll fallback to UTC.
+                let timezone = match iana_time_zone::get_timezone() {
+                    Ok(tz) => tz.parse().unwrap_or_else(|_| Tz::UTC),
+                    Err(_) => Tz::UTC,
+                };
+                return Ok(DataType::DateTime(timezone));
+            };
+            let Some(timezone) = rest.strip_suffix("'") else {
+                return Err(Error::UnsupportedDataType(s.to_string()));
+            };
+            let timezone = timezone
+                .parse()
+                .map_err(|_| Error::UnsupportedDataType(s.to_string()))?;
+            return Ok(DataType::DateTime64(precision, timezone));
         }
 
         // Check for Enum8s.
@@ -655,6 +730,7 @@ impl std::str::FromStr for DataType {
 mod tests {
     use super::{DataType, Precision};
     use chrono::{SubsecRound as _, Utc};
+    use chrono_tz::Tz;
 
     #[test]
     fn test_data_type_to_string() {
@@ -677,8 +753,11 @@ mod tests {
             (DataType::Uuid, "UUID"),
             (DataType::Ipv4, "IPv4"),
             (DataType::Ipv6, "IPv6"),
-            (DataType::DateTime, "DateTime"),
-            (DataType::DateTime64(6.try_into().unwrap()), "DateTime64(6)"),
+            (DataType::DateTime(Tz::UTC), "DateTime('UTC')"),
+            (
+                DataType::DateTime64(6.try_into().unwrap(), Tz::UTC),
+                "DateTime64(6, 'UTC')",
+            ),
             (DataType::Enum8(enum8), "Enum8('foo' = 0, 'bar' = 1)"),
             (DataType::Nullable(Box::new(DataType::UInt8)), "Nullable(UInt8)"),
             (DataType::Array(Box::new(DataType::UInt8)), "Array(UInt8)"),
@@ -710,8 +789,8 @@ mod tests {
         for precision in 0..=Precision::MAX {
             let prec = Precision(precision);
             let timestamp = prec.scale(now);
-            let conv = prec.as_conv();
-            let recovered = conv(timestamp);
+            let conv = prec.as_conv(&Utc);
+            let recovered = conv(&Utc, timestamp);
             let now_with_precision = now.trunc_subsecs(u16::from(prec.0));
             assert_eq!(
                 now_with_precision, recovered,
