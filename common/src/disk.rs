@@ -347,7 +347,7 @@ impl NestedDatasetLocation {
 
     pub fn full_name(&self) -> String {
         if self.path.is_empty() {
-            format!("{}", self.root.full_name())
+            self.root.full_name().to_string()
         } else {
             format!("{}/{}", self.root.full_name(), self.path)
         }

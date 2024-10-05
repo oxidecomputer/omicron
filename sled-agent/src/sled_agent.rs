@@ -1113,7 +1113,7 @@ impl SledAgent {
         }
         let digest = hasher.finalize();
         if digest.as_slice() != expected_hash.as_ref() {
-            return Err(Error::SupportBundle(format!("Hash mismatch")));
+            return Err(Error::SupportBundle("Hash mismatch".to_string()));
         }
 
         // Rename the file to indicate it's ready
