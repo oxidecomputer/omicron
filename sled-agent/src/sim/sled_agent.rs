@@ -958,7 +958,7 @@ impl SledAgent {
                     continue;
                 }
                 _ => {
-                    println!("successfully installed routes {new:?}");
+                    println!("sled {} successfully installed routes {new:?}", self.id);
                 }
             };
 

@@ -6357,14 +6357,15 @@ pub async fn assert_sled_vpc_routes(
 
             println!("unexpected route setup");
             println!("vni: {vni:?}");
+            println!("sled: {}", sled_agent.id);
             println!("subnet: {}", db_subnet.ipv4_block.0);
-            println!("expected system: {system_routes:#?}");
-            println!("expected custom {custom_routes:#?}");
-            println!("found: {vpc_routes:#?}");
-            println!("\n-----\nsystem diff (+): {:?}", system_routes.difference(&found_system.routes));
-            println!("system diff (-): {:?}", found_system.routes.difference(&system_routes));
-            println!("custom diff (+): {:?}", custom_routes.difference(&found_custom.routes));
-            println!("custom diff (-): {:?}\n-----", found_custom.routes.difference(&custom_routes));
+            println!("expected system: {system_routes:?}");
+            println!("expected custom {custom_routes:?}");
+            println!("found: {vpc_routes:?}");
+            println!("\n-----\nsystem diff (-): {:?}", system_routes.difference(&found_system.routes));
+            println!("system diff (+): {:?}", found_system.routes.difference(&system_routes));
+            println!("custom diff (-): {:?}", custom_routes.difference(&found_custom.routes));
+            println!("custom diff (+): {:?}\n-----", found_custom.routes.difference(&custom_routes));
             Err(CondCheckError::NotYet::<()>)
         }
     };
@@ -6375,6 +6376,8 @@ pub async fn assert_sled_vpc_routes(
     )
     .await
     .expect("matching vpc routes should be present");
+
+    println!("success! VPC routes as expected for sled {}", sled_agent.id);
 
     (system_routes, custom_routes)
 }
