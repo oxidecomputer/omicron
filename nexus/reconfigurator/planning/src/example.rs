@@ -72,7 +72,7 @@ impl ExampleSystemBuilder {
     ///
     /// The default value is picked for backwards compatibility -- we may wish
     /// to revisit it in the future.
-    pub const DEFAULT_EXTERNAL_DNS_COUNT: u8 = 0;
+    pub const DEFAULT_EXTERNAL_DNS_COUNT: usize = 0;
 
     pub fn new(log: &slog::Logger, test_name: &str) -> Self {
         Self {
@@ -82,7 +82,7 @@ impl ExampleSystemBuilder {
             ndisks_per_sled: SledBuilder::DEFAULT_NPOOLS,
             nexus_count: None,
             internal_dns_count: ZoneCount(INTERNAL_DNS_REDUNDANCY),
-            external_dns_count: ZoneCount(Self::DEFAULT_EXTERNAL_DNS_COUNT.into()),
+            external_dns_count: ZoneCount(Self::DEFAULT_EXTERNAL_DNS_COUNT),
             create_zones: true,
             create_disks_in_blueprint: true,
         }
@@ -157,7 +157,7 @@ impl ExampleSystemBuilder {
                 external_dns_count,
             );
         }
-        self.external_dns_count = ZoneCount(external_dns_count.into());
+        self.external_dns_count = ZoneCount(external_dns_count);
         Ok(self)
     }
 
@@ -407,7 +407,7 @@ mod tests {
 
     #[test]
     fn builder_zone_counts() {
-        static TEST_NAME: &str = "builder_zone_counts";
+        static TEST_NAME: &str = "example_builder_zone_counts";
         let logctx = test_setup_log(TEST_NAME);
 
         let (example, mut blueprint) =
@@ -494,6 +494,8 @@ mod tests {
             external_dns_zones.len(),
             external_dns_zones,
         );
+
+        logctx.cleanup_successful();
     }
 
     fn blueprint_zones_of_kind(

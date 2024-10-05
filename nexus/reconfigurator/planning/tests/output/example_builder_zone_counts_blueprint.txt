@@ -1,201 +1,201 @@
-blueprint  290a6821-1182-4e20-8993-032191c1f0cd
-parent:    2f724b59-27a0-4beb-ae16-b13ff6ea0f7c
+blueprint  4a0b8410-b14f-41e7-85e7-3c0fe7050ccc
+parent:    e35b2fdd-354d-48d9-acb5-703b2c269a54
 
-  sled: 036d1836-53d0-4c78-bb44-8081552f44ca (active)
+  sled: 0dbf1e39-e265-4071-a8df-6d1225b46694 (active)
 
     physical disks at generation 1:
     ----------------------------------------------------------------------
     vendor        model        serial                                     
     ----------------------------------------------------------------------
-    fake-vendor   fake-model   serial-1b33fd42-9f78-4959-8660-bcd8005e2ccc
-    fake-vendor   fake-model   serial-2df1871f-4425-4b50-b2ba-25bb20869f60
-    fake-vendor   fake-model   serial-3df3093b-bf2c-4d88-a7f4-6d9588e11cb6
-    fake-vendor   fake-model   serial-53ac71fb-c775-460a-a2a0-59d6d85efeb2
-    fake-vendor   fake-model   serial-725499e3-ff42-439f-bcbc-9eefc343a572
-    fake-vendor   fake-model   serial-72f91c04-e5e7-406b-8904-0841c03eb56b
-    fake-vendor   fake-model   serial-8adee812-5ede-4825-81e5-62e5411ec181
-    fake-vendor   fake-model   serial-9b603350-6d38-4310-a246-3571d9305520
-    fake-vendor   fake-model   serial-a885c07a-41ca-42fc-b0c2-b7234c42c0a7
-    fake-vendor   fake-model   serial-b5b6b8f3-f115-43a5-9ce0-6896e32f2eaf
+    fake-vendor   fake-model   serial-2b9c7004-fa39-4cf0-ae41-c299d3191f26
+    fake-vendor   fake-model   serial-3ad934d9-90ee-4805-881c-20108827773f
+    fake-vendor   fake-model   serial-69db5dd6-795e-4e04-bfb3-f51962c49853
+    fake-vendor   fake-model   serial-8557a3fb-cc12-497f-86d2-9f1a463b3685
+    fake-vendor   fake-model   serial-9bd3cc34-4891-4c28-a4de-c4fcf01b6215
+    fake-vendor   fake-model   serial-9dafffa2-31b7-43c0-b673-0c946be799f0
+    fake-vendor   fake-model   serial-9e626a52-b5f1-4776-9cb8-271848b9c651
+    fake-vendor   fake-model   serial-a645a1ac-4c49-4c7e-ba53-3dc60b737f06
+    fake-vendor   fake-model   serial-b5ae209c-9226-44a0-8a6b-03b44f93d456
+    fake-vendor   fake-model   serial-cd783b74-e400-41e0-9bb7-1d1d2f8958ce
 
 
     omicron zones at generation 2:
     ------------------------------------------------------------------------------------------
     zone type      zone id                                disposition   underlay IP           
     ------------------------------------------------------------------------------------------
-    crucible       0372bc9f-d823-44b8-bd44-ee3ec15c92a7   in service    fd00:1122:3344:104::2e
-    crucible       2b736697-1ad7-4413-a88b-dbcc80dc6456   in service    fd00:1122:3344:104::29
-    crucible       380286ed-06ad-460b-9557-2766033fad7e   in service    fd00:1122:3344:104::2b
-    crucible       45ca18b4-3624-4b58-981a-7725fa7203dd   in service    fd00:1122:3344:104::28
-    crucible       4628825c-36af-411b-8f3b-b213ba9e89b8   in service    fd00:1122:3344:104::2a
-    crucible       5a78b5c6-58d1-4c5c-ac8e-bbefbf96205f   in service    fd00:1122:3344:104::26
-    crucible       75c172fd-96ab-41f7-86c8-c29943e75550   in service    fd00:1122:3344:104::2c
-    crucible       76ce1e14-82a2-4ba5-b137-853f7a567e74   in service    fd00:1122:3344:104::2d
-    crucible       a3f182a7-220d-432f-81f6-28492d8d9662   in service    fd00:1122:3344:104::2f
-    crucible       bd4f8a2a-d1c7-419e-bd6d-b87e7489f496   in service    fd00:1122:3344:104::27
-    external_dns   957cd6e9-d679-4f18-9619-e57dbe6e3d2b   in service    fd00:1122:3344:104::25
-    external_dns   b9de04a6-584d-4d36-b559-a0174a7b5b87   in service    fd00:1122:3344:104::24
-    internal_dns   4f7b886f-ed52-4623-8af5-73694da09b36   in service    fd00:1122:3344:1::1   
-    internal_ntp   d843d65f-ea61-44d6-8e17-fa154797a662   in service    fd00:1122:3344:104::21
-    nexus          041327ff-a277-4b8c-a2f9-03c3d534884f   in service    fd00:1122:3344:104::22
-    nexus          66e9a5b5-aabe-42fa-9ff6-26630bed600f   in service    fd00:1122:3344:104::23
+    crucible       4f673614-7a9d-4860-859c-9627de33e03b   in service    fd00:1122:3344:105::2b
+    crucible       5002e44e-eef1-4f3c-81fc-78b62134400e   in service    fd00:1122:3344:105::26
+    crucible       6422c22d-00bf-4826-9aeb-cf4e4dcae1c7   in service    fd00:1122:3344:105::2d
+    crucible       85631c30-4b81-4a22-a0e5-e110034cc980   in service    fd00:1122:3344:105::29
+    crucible       9334f86c-6555-499a-9ad7-5acc987e2b87   in service    fd00:1122:3344:105::2f
+    crucible       a0624221-da2b-4f45-862e-effec567dcd1   in service    fd00:1122:3344:105::2a
+    crucible       a9980763-1f8c-452d-a542-551d1001131e   in service    fd00:1122:3344:105::27
+    crucible       c863bdbb-f270-47e1-bf7b-2220cf129266   in service    fd00:1122:3344:105::28
+    crucible       d42c15ed-d303-43d4-b9e9-c5772505c2d7   in service    fd00:1122:3344:105::2c
+    crucible       d660e9f0-2f8f-4540-bd59-a32845d002ce   in service    fd00:1122:3344:105::2e
+    external_dns   82db7bcc-9e4c-418f-a46a-eb8ff561de7b   in service    fd00:1122:3344:105::25
+    external_dns   faac06c4-9aea-44a3-a94f-3da1adddb7b9   in service    fd00:1122:3344:105::24
+    internal_dns   fadaa1c6-81a2-46ed-a10f-c42c29b85de9   in service    fd00:1122:3344:1::1   
+    internal_ntp   a3a3fccb-1127-4e61-9bdf-13eb58365a8a   in service    fd00:1122:3344:105::21
+    nexus          1a741601-83b2-40b7-b59b-1a9b2c853411   in service    fd00:1122:3344:105::23
+    nexus          a7743bca-5056-479f-9151-6f2288c0ae28   in service    fd00:1122:3344:105::22
 
 
 
-  sled: 0b820e52-a99b-4a55-911e-08fa602365be (active)
+  sled: 15cf73a6-445b-4d36-9232-5ed364019bc6 (active)
 
     physical disks at generation 1:
     ----------------------------------------------------------------------
     vendor        model        serial                                     
     ----------------------------------------------------------------------
-    fake-vendor   fake-model   serial-0ec716f9-6dc3-4923-a870-bae51b171102
-    fake-vendor   fake-model   serial-158356d1-6c52-49a1-ac8d-4f57bf7bce76
-    fake-vendor   fake-model   serial-173428af-b2e0-440f-afeb-ab6df61c4bfc
-    fake-vendor   fake-model   serial-216df8dc-95d5-48b7-aea5-dd752554d671
-    fake-vendor   fake-model   serial-3baa7d0a-b732-4d70-9c08-13258ad4fc14
-    fake-vendor   fake-model   serial-8852d692-a31b-4b45-a742-e1daf5a000c3
-    fake-vendor   fake-model   serial-9d1e30c7-3749-4751-8b62-3f5bdc55be2c
-    fake-vendor   fake-model   serial-da66bd50-4d94-4867-82a5-5d9da90c2560
-    fake-vendor   fake-model   serial-e5b861dd-8ff8-44b9-958b-e097f1db6287
-    fake-vendor   fake-model   serial-f9b1db6e-b597-4b02-b9c6-887d2c6abc2d
+    fake-vendor   fake-model   serial-3cba16f1-1a3d-44e5-ba1d-e68cd2188615
+    fake-vendor   fake-model   serial-3fc3ec87-1c39-4df8-99bf-30ca97ec5fac
+    fake-vendor   fake-model   serial-4c18c1af-dc1c-4de5-92a1-1b2923ea6a87
+    fake-vendor   fake-model   serial-6f3a85db-de97-40d9-bf66-e6643ac1c114
+    fake-vendor   fake-model   serial-96f39cf4-b2ac-413d-8f94-ba66b127cddd
+    fake-vendor   fake-model   serial-99c392f3-77b8-4f60-9efa-4efae0c92721
+    fake-vendor   fake-model   serial-bc3195df-61ca-4111-863b-08b5cc243eab
+    fake-vendor   fake-model   serial-c787b52c-2cb8-4da2-a17a-128feb5eea0c
+    fake-vendor   fake-model   serial-d59d419e-c4d3-41ef-ab6d-0df3620dc84b
+    fake-vendor   fake-model   serial-dfaae221-11a9-4db0-b861-41fe5648f185
 
 
     omicron zones at generation 2:
     ------------------------------------------------------------------------------------------
     zone type      zone id                                disposition   underlay IP           
     ------------------------------------------------------------------------------------------
-    crucible       22d308ca-d149-433a-b51d-750f414de531   in service    fd00:1122:3344:102::2d
-    crucible       7038ff5c-72ed-4d32-9e03-53e66714ed12   in service    fd00:1122:3344:102::28
-    crucible       9b0500d9-de6d-420d-a4f9-10ac3ce7ef72   in service    fd00:1122:3344:102::25
-    crucible       bb7011a2-e51a-4593-9ff8-9dddb0929951   in service    fd00:1122:3344:102::26
-    crucible       bef6e9df-3433-479d-b1af-d66cd32ecaa6   in service    fd00:1122:3344:102::29
-    crucible       bfaabb97-c996-4928-af06-d2f51a0f1dc3   in service    fd00:1122:3344:102::2b
-    crucible       c754d4b0-fbf9-42d1-b965-f0338674d325   in service    fd00:1122:3344:102::27
-    crucible       d2a356b0-fca7-4d2e-959d-c4aeee4b9b11   in service    fd00:1122:3344:102::2a
-    crucible       daf2a522-19d5-4d7e-9452-90be365ee2da   in service    fd00:1122:3344:102::2c
-    crucible       de69b884-6e84-423f-93e7-8ef0d2e5f912   in service    fd00:1122:3344:102::2e
-    external_dns   ab730a91-baa8-4be0-a5f9-85f1ff3f0b98   in service    fd00:1122:3344:102::24
-    external_dns   bca34ce2-86ed-406c-9090-fc21160495d1   in service    fd00:1122:3344:102::23
-    internal_dns   9df25195-2353-4ba6-a4a7-448e55faa100   in service    fd00:1122:3344:2::1   
-    internal_ntp   a8d934e2-cab6-4c8a-b1fc-7d0337ff8818   in service    fd00:1122:3344:102::21
-    nexus          f3817648-7078-4d6e-a02e-ee6b45656444   in service    fd00:1122:3344:102::22
+    crucible       0dba037d-0b14-4e10-b430-c271f87d8e9a   in service    fd00:1122:3344:104::29
+    crucible       10f24d62-dec3-4f6f-9f42-722763e1fcbd   in service    fd00:1122:3344:104::2d
+    crucible       313bb913-2e8b-4c27-89e6-79c92db8c03c   in service    fd00:1122:3344:104::28
+    crucible       362b181b-452e-4f54-a42f-04bef00fa272   in service    fd00:1122:3344:104::27
+    crucible       60a0051f-d530-49e6-ab11-e2098856afba   in service    fd00:1122:3344:104::25
+    crucible       69b59e77-9da3-49d3-bf83-a464570aea97   in service    fd00:1122:3344:104::2a
+    crucible       7943dee3-d4ad-4ffb-93c7-2c1079e708a1   in service    fd00:1122:3344:104::2e
+    crucible       8343556a-7827-4fdd-90df-a4b603b177cc   in service    fd00:1122:3344:104::26
+    crucible       b2f90d4d-34ff-4aae-8cfd-4773a30c372f   in service    fd00:1122:3344:104::2b
+    crucible       f3c76e5a-779a-4c3c-87ce-dad309f612c4   in service    fd00:1122:3344:104::2c
+    external_dns   1c0614f1-b653-43c2-b278-5372036a87c8   in service    fd00:1122:3344:104::24
+    external_dns   58d88005-e182-4463-96ed-9220e59facb7   in service    fd00:1122:3344:104::23
+    internal_dns   35a629e9-5140-48bf-975d-ce66d9c3be59   in service    fd00:1122:3344:2::1   
+    internal_ntp   c33f069b-e412-4309-a62b-e1cbef3ec234   in service    fd00:1122:3344:104::21
+    nexus          76edbb5e-7038-4160-833b-131abc2b2a12   in service    fd00:1122:3344:104::22
 
 
 
-  sled: 23068535-34f7-48b1-8774-0c3076aa5a17 (active)
+  sled: 50e6c1c0-43b2-4abc-9041-41165597f639 (active)
 
     physical disks at generation 1:
     ----------------------------------------------------------------------
     vendor        model        serial                                     
     ----------------------------------------------------------------------
-    fake-vendor   fake-model   serial-3c2c149b-4921-4bfe-a181-205977fc8aae
-    fake-vendor   fake-model   serial-55a9af70-b8a1-446f-bd27-0d0c96c80e7b
-    fake-vendor   fake-model   serial-654892bc-0f99-45eb-9120-bf0a8b6bbf87
-    fake-vendor   fake-model   serial-656f7a53-53d4-47f5-8768-4540e649ca3d
-    fake-vendor   fake-model   serial-6b143c41-0b0e-402e-ab57-034e16972dd8
-    fake-vendor   fake-model   serial-7c989cb3-54d8-4155-a730-612450a308ba
-    fake-vendor   fake-model   serial-852d41d5-e2ee-4df3-818c-074f8ed7e6c6
-    fake-vendor   fake-model   serial-8bdece86-672d-4f06-87c0-0eee8a6ca15c
-    fake-vendor   fake-model   serial-b1033134-2a1a-437d-8e12-6808f6860009
-    fake-vendor   fake-model   serial-b4710119-2eec-4845-8956-f099d2927365
+    fake-vendor   fake-model   serial-00fb9aa9-0bbf-49ab-a712-6e8feaf719e2
+    fake-vendor   fake-model   serial-37f466d7-510b-40e4-b9a4-c5c092a6a5f6
+    fake-vendor   fake-model   serial-734b7b3a-86af-48a7-bd00-8d79fa2690c3
+    fake-vendor   fake-model   serial-747d2504-36a4-4acc-ad73-22291b5bbedb
+    fake-vendor   fake-model   serial-7dd422ab-4839-4a7a-8109-ba1941357c70
+    fake-vendor   fake-model   serial-8b020037-bc77-48b2-9280-a622f571908b
+    fake-vendor   fake-model   serial-96753d7f-de6b-4ce6-a9dc-004f6a0ba0cf
+    fake-vendor   fake-model   serial-a0bd8e79-1113-4c40-8705-ed00e66f0c35
+    fake-vendor   fake-model   serial-b30e150e-c83e-4c1e-b3bf-91a330d42135
+    fake-vendor   fake-model   serial-ff911b9b-57a8-4318-a253-e2363b70083d
 
 
     omicron zones at generation 2:
     ------------------------------------------------------------------------------------------
     zone type      zone id                                disposition   underlay IP           
     ------------------------------------------------------------------------------------------
-    crucible       21cb8cdd-30d2-49a8-96e4-41cb66e81371   in service    fd00:1122:3344:103::26
-    crucible       2dcbb3a7-9f18-47d8-9acc-ab7a2528e09b   in service    fd00:1122:3344:103::28
-    crucible       786a1822-4a57-4fd7-beb5-669ac9a715ad   in service    fd00:1122:3344:103::25
-    crucible       79391355-052c-4fe2-a6ed-f0fddba819b5   in service    fd00:1122:3344:103::2e
-    crucible       8b833298-aaa8-4d8f-8689-f4d564992ab5   in service    fd00:1122:3344:103::2c
-    crucible       91507eb8-6fe0-4b1b-829c-c0fe3eb955a1   in service    fd00:1122:3344:103::2a
-    crucible       b043e6cb-9747-4133-8066-865df6a91413   in service    fd00:1122:3344:103::29
-    crucible       bd60ec67-fba0-485b-8e3d-0cb2c19a9710   in service    fd00:1122:3344:103::2d
-    crucible       cdf7f8b8-fb53-4b11-a90f-6b150c1c29bc   in service    fd00:1122:3344:103::27
-    crucible       f909de21-a70e-4ace-9c21-bf1b17189773   in service    fd00:1122:3344:103::2b
-    external_dns   7b02512e-794a-41bc-acea-8a64122c294b   in service    fd00:1122:3344:103::23
-    external_dns   91c44cc8-6d6c-4227-bb67-c06fdc452c30   in service    fd00:1122:3344:103::24
-    internal_ntp   e95a530a-d147-459d-a549-05bb32cafe6a   in service    fd00:1122:3344:103::21
-    nexus          c5f63e70-d43e-4891-b07b-76d128830a1d   in service    fd00:1122:3344:103::22
+    crucible       234514a8-7a70-4dc5-905b-a29d1cfdee99   in service    fd00:1122:3344:102::2c
+    crucible       29400193-6c20-4c41-8c9a-5259803c7bfd   in service    fd00:1122:3344:102::2b
+    crucible       31fdc4e5-25f2-42c5-8c2c-7f8bf3a0b89e   in service    fd00:1122:3344:102::26
+    crucible       5895eb4f-7132-4530-8fc1-f9b719981856   in service    fd00:1122:3344:102::25
+    crucible       a1a32afe-10db-4dbf-ac2d-6745f6f55417   in service    fd00:1122:3344:102::2e
+    crucible       a3333bac-4989-4d9a-8257-8c7a0614cef0   in service    fd00:1122:3344:102::28
+    crucible       bec70cc9-82f9-42d3-935b-4f141c3c3503   in service    fd00:1122:3344:102::2d
+    crucible       de2023c8-6976-40fa-80d7-a8b0ea9546a1   in service    fd00:1122:3344:102::2a
+    crucible       e4aeecc2-f9ae-4b4f-963c-9c017e9df189   in service    fd00:1122:3344:102::27
+    crucible       ed528efc-4d32-43cc-a0a2-b412693a7eca   in service    fd00:1122:3344:102::29
+    external_dns   3c900bee-7455-4a41-8175-fe952484753c   in service    fd00:1122:3344:102::23
+    external_dns   cb4a2547-7798-48d2-839d-29f7d33d1486   in service    fd00:1122:3344:102::24
+    internal_ntp   caf0bd1b-1da6-46b0-bb64-d6b780ad7a4c   in service    fd00:1122:3344:102::21
+    nexus          68ff33cc-852b-4f2c-bc5c-9f7bdc32110e   in service    fd00:1122:3344:102::22
 
 
 
-  sled: 26537e17-cf75-4b5a-af32-08140c9f91c6 (active)
+  sled: 969ff976-df34-402c-a362-53db03a6b97f (active)
 
     physical disks at generation 1:
     ----------------------------------------------------------------------
     vendor        model        serial                                     
     ----------------------------------------------------------------------
-    fake-vendor   fake-model   serial-158d207b-23c3-4d5c-9798-2d8b301b4e7c
-    fake-vendor   fake-model   serial-2a85aa51-501a-4316-b3bd-6af5aeb019ee
-    fake-vendor   fake-model   serial-4408fb39-d6a1-4f9c-af2a-9e35015f7c36
-    fake-vendor   fake-model   serial-49041bf1-225c-49b5-9a83-4b4b884b5707
-    fake-vendor   fake-model   serial-53e69420-239e-42da-9018-1ebbef2d0392
-    fake-vendor   fake-model   serial-65d58d3d-c431-4eed-9d6a-e69afad6ed75
-    fake-vendor   fake-model   serial-9cb14c5e-e99d-4466-8f63-dc03fc31368c
-    fake-vendor   fake-model   serial-a559ea57-39a2-4793-aeea-8b6708212b44
-    fake-vendor   fake-model   serial-b82623c9-1593-4c3f-936c-268aec63547a
-    fake-vendor   fake-model   serial-fe0adefc-7c78-4b86-a214-882030c44481
+    fake-vendor   fake-model   serial-07444848-952b-4333-aa72-401c7bf5d724
+    fake-vendor   fake-model   serial-242f8f98-fdc2-4ea9-ab69-e57b993df0df
+    fake-vendor   fake-model   serial-26cc7ce1-dc59-4398-8083-a4e1db957a46
+    fake-vendor   fake-model   serial-3b757772-8c62-4543-a276-7c0051280687
+    fake-vendor   fake-model   serial-981430ec-a43e-4418-bd2c-28db344c8b06
+    fake-vendor   fake-model   serial-9dbfe441-887c-45d0-a3ed-7d8e1a63327f
+    fake-vendor   fake-model   serial-b37f5663-bedb-42a3-9b1a-5e417ee6c3d2
+    fake-vendor   fake-model   serial-b48a178d-f7fd-4b50-811d-f7d195752710
+    fake-vendor   fake-model   serial-be1784b0-017a-436f-8a6a-1884cddc5fa1
+    fake-vendor   fake-model   serial-f9415bcf-5757-442a-a400-5a9ccfb5d80a
 
 
     omicron zones at generation 2:
     ------------------------------------------------------------------------------------------
     zone type      zone id                                disposition   underlay IP           
     ------------------------------------------------------------------------------------------
-    crucible       00e75f53-5495-49f0-b386-2498c0c96cfa   in service    fd00:1122:3344:101::2d
-    crucible       2fcfcba1-865a-4b30-b37f-458f954b9c5c   in service    fd00:1122:3344:101::2e
-    crucible       5deccec9-ccba-4d53-8c76-a2deff592980   in service    fd00:1122:3344:101::26
-    crucible       6088dce6-f903-47b1-ba26-93c3e46e15bb   in service    fd00:1122:3344:101::28
-    crucible       7dea491f-e85b-4cef-81b5-db677139a63a   in service    fd00:1122:3344:101::29
-    crucible       87d07f58-49b0-43fe-a511-0490233b473c   in service    fd00:1122:3344:101::25
-    crucible       8972542a-e507-418b-b77c-8b07fefddff5   in service    fd00:1122:3344:101::2b
-    crucible       e6e29a88-f77d-4d04-89dc-44a41f583ee9   in service    fd00:1122:3344:101::27
-    crucible       e85a318b-6874-4003-8551-2c0aa6a5c67c   in service    fd00:1122:3344:101::2c
-    crucible       eb668288-40c3-4ffc-bca9-e3212e409c82   in service    fd00:1122:3344:101::2a
-    external_dns   227bac48-e082-4909-b987-daa7174edca6   in service    fd00:1122:3344:101::23
-    external_dns   d210f2b6-8d3b-443b-8b77-955d23b65ef1   in service    fd00:1122:3344:101::24
-    internal_ntp   a6d66e6f-5297-4b37-b16a-dd24eb1b9b86   in service    fd00:1122:3344:101::21
-    nexus          a4c40eb2-59c8-4adf-9806-3793c48541c8   in service    fd00:1122:3344:101::22
+    crucible       0a6c78bb-f778-4b6d-9d20-370ae7c89135   in service    fd00:1122:3344:103::2d
+    crucible       590907c2-e61e-4c2f-8a36-e705a24600c8   in service    fd00:1122:3344:103::2b
+    crucible       983ed36f-baed-4dd1-bec7-4780f070eeee   in service    fd00:1122:3344:103::28
+    crucible       9ff080b2-7bf9-4fe3-8d5f-367adb3525c8   in service    fd00:1122:3344:103::29
+    crucible       c3b6651b-6a62-4292-972c-481390f4a044   in service    fd00:1122:3344:103::2a
+    crucible       e8bb3c35-b1ee-4171-b8ff-924e6a560fbf   in service    fd00:1122:3344:103::27
+    crucible       e8d99319-3796-4605-bd96-e17011d77016   in service    fd00:1122:3344:103::25
+    crucible       ea723ef1-b23e-433d-bef5-90142476225d   in service    fd00:1122:3344:103::2c
+    crucible       efa54182-a3e6-4600-9e88-044a6a8ae350   in service    fd00:1122:3344:103::26
+    crucible       fbc67c83-773a-48ff-857c-61ddbf1ebf52   in service    fd00:1122:3344:103::2e
+    external_dns   7cbc95ce-ab55-4b70-851d-33a0164ca362   in service    fd00:1122:3344:103::23
+    external_dns   7e6fa426-5200-47b4-b791-393dd17b09d9   in service    fd00:1122:3344:103::24
+    internal_ntp   0d5f20e4-fdca-4611-ac07-053bc28c5088   in service    fd00:1122:3344:103::21
+    nexus          a16b5904-5ba8-42db-940c-8b852b052995   in service    fd00:1122:3344:103::22
 
 
 
-  sled: c8ecd2e7-749a-43fc-a4af-9ea4d2bf0bbf (active)
+  sled: ec5c0b37-b651-4c45-ac1c-24541ef9c44b (active)
 
     physical disks at generation 1:
     ----------------------------------------------------------------------
     vendor        model        serial                                     
     ----------------------------------------------------------------------
-    fake-vendor   fake-model   serial-05fb662a-acfd-4cb1-8295-17268cd98422
-    fake-vendor   fake-model   serial-0bfb38b5-9958-480c-9c5d-3146f2664842
-    fake-vendor   fake-model   serial-2b50e33b-dca6-40c4-a5bc-f6059566c4a9
-    fake-vendor   fake-model   serial-3415cd5c-884f-449d-b477-90f090e9d849
-    fake-vendor   fake-model   serial-3d970b38-3f6b-46bb-a4de-6ce37e8c8edb
-    fake-vendor   fake-model   serial-5c77871d-abe8-435f-ac03-f4621a05a3ca
-    fake-vendor   fake-model   serial-5ee687cb-a1c1-4160-a7f2-2d4c90ffeea8
-    fake-vendor   fake-model   serial-929956e9-e689-4e87-b0e8-3441e8af38f4
-    fake-vendor   fake-model   serial-e163c127-430b-4d15-baba-cc4e07dbd834
-    fake-vendor   fake-model   serial-e26721e3-47e9-4d1d-89d5-1e756336d758
+    fake-vendor   fake-model   serial-148436fe-d3e9-4371-8d2e-ec950cc8a84c
+    fake-vendor   fake-model   serial-7dd076f1-9d62-49a8-bc0c-5ff5d045c917
+    fake-vendor   fake-model   serial-a50f4bb9-d19a-4be8-ad49-b9a552a21062
+    fake-vendor   fake-model   serial-b4ee33bb-03f1-4085-9830-9da92002a969
+    fake-vendor   fake-model   serial-b50bec8b-a8d3-4ba6-ba3d-12c2a0da911c
+    fake-vendor   fake-model   serial-b64f79f6-188f-4e98-9eac-d8111673a130
+    fake-vendor   fake-model   serial-c144a26e-f859-42a0-adca-00d9091d98e4
+    fake-vendor   fake-model   serial-c45c08e4-aade-4333-9dad-935ccf4e8352
+    fake-vendor   fake-model   serial-df62d5da-7da0-468b-b328-0fefbf57568b
+    fake-vendor   fake-model   serial-e6433ded-7c90-46a9-8bda-648bcc9fbf07
 
 
     omicron zones at generation 2:
     ------------------------------------------------------------------------------------------
     zone type      zone id                                disposition   underlay IP           
     ------------------------------------------------------------------------------------------
-    crucible       16665ad6-4f5c-4949-b202-3c51550e861c   in service    fd00:1122:3344:105::25
-    crucible       388cea9a-b2b2-45c3-9d26-f4d4af5a92cf   in service    fd00:1122:3344:105::2e
-    crucible       4c732565-dbcf-4367-bb05-1775c4adcf61   in service    fd00:1122:3344:105::2b
-    crucible       5b607b9b-8b4c-4700-a3b9-add557a89054   in service    fd00:1122:3344:105::2d
-    crucible       634e454e-283a-4d7b-a6d5-5b58c3b64dc2   in service    fd00:1122:3344:105::2c
-    crucible       965e72d1-1b88-4302-bb92-0fcd41b3f82a   in service    fd00:1122:3344:105::29
-    crucible       99f0c057-eef6-4492-b045-f96c1b3c5dc8   in service    fd00:1122:3344:105::26
-    crucible       a299011c-c9d8-4bd8-9dba-c572a3e14eb9   in service    fd00:1122:3344:105::2a
-    crucible       bbd470e2-bf95-40a9-8efa-f272c0181116   in service    fd00:1122:3344:105::28
-    crucible       cc3b36ad-f07d-4d63-8581-ef6bfc68f468   in service    fd00:1122:3344:105::27
-    external_dns   8f914027-459a-47f4-93dc-fef9be3cce27   in service    fd00:1122:3344:105::24
-    external_dns   f9133104-424a-4a3e-93e6-d321d990b469   in service    fd00:1122:3344:105::23
-    internal_ntp   998618b2-29a5-4866-91aa-dc48ff515cf3   in service    fd00:1122:3344:105::21
-    nexus          d012b33e-c0a4-4e5b-9ec5-d3e6965af3a7   in service    fd00:1122:3344:105::22
+    crucible       19faa2c3-b077-470a-a424-6821dd49bd11   in service    fd00:1122:3344:101::25
+    crucible       1b122e0d-8b22-464f-b1af-589246d636dc   in service    fd00:1122:3344:101::29
+    crucible       25fb011b-ea9d-462c-a89e-5f7782858a4f   in service    fd00:1122:3344:101::2a
+    crucible       808e6761-6ddc-42f0-a82f-fd2049c751dc   in service    fd00:1122:3344:101::28
+    crucible       a1e77a19-9302-416a-afe9-cfdded5054d5   in service    fd00:1122:3344:101::26
+    crucible       be3b1ad8-3de2-4ad7-89b8-d279558121ae   in service    fd00:1122:3344:101::2d
+    crucible       c6192cad-a9c5-4b4d-bc8f-ce0fb066a0ed   in service    fd00:1122:3344:101::2c
+    crucible       d39f526b-9799-42a6-a610-f0f5605dac44   in service    fd00:1122:3344:101::27
+    crucible       e8dea18b-1697-4349-ae54-47f95cb3d907   in service    fd00:1122:3344:101::2b
+    crucible       f4053fb9-ce8c-4dcf-8dd3-bf6d305c29fc   in service    fd00:1122:3344:101::2e
+    external_dns   dd9050e5-77ae-4dd0-98aa-d34fc2be78d4   in service    fd00:1122:3344:101::23
+    external_dns   e8ac4104-9789-4ba1-90c5-aded124cc079   in service    fd00:1122:3344:101::24
+    internal_ntp   77511292-f3aa-4a07-970a-1159e2c38ec9   in service    fd00:1122:3344:101::21
+    nexus          236e5a84-cebe-40b8-8832-56a8e06b08b0   in service    fd00:1122:3344:101::22
 
 
  COCKROACHDB SETTINGS:
