@@ -957,7 +957,9 @@ impl SledAgent {
                 {
                     continue;
                 }
-                _ => {}
+                _ => {
+                    println!("successfully installed routes {new:?}");
+                }
             };
 
             routes.insert(
