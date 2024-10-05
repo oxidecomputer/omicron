@@ -62,7 +62,7 @@ pub(crate) async fn deploy_zones(
 
             let client = nexus_networking::sled_client_from_address(
                 sled_id.into_untyped_uuid(),
-                db_sled.sled_agent_address,
+                db_sled.sled_agent_address(),
                 &opctx.log,
             );
             let omicron_zones = config
@@ -420,11 +420,7 @@ mod test {
                     let SocketAddr::V6(addr) = server.addr() else {
                         panic!("Expected Ipv6 address. Got {}", server.addr());
                     };
-                    let sled = Sled {
-                        id: sled_id,
-                        sled_agent_address: addr,
-                        is_scrimlet: false,
-                    };
+                    let sled = Sled::new(sled_id, addr, false);
                     (sled_id, sled)
                 })
                 .collect();
