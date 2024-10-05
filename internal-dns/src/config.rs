@@ -64,7 +64,7 @@ use crate::names::{ServiceName, BOUNDARY_NTP_DNS_NAME, DNS_ZONE};
 use anyhow::{anyhow, ensure};
 use core::fmt;
 use dns_service_client::types::{DnsConfigParams, DnsConfigZone, DnsRecord};
-use omicron_common::address::CLICKHOUSE_TCP_PORT;
+use omicron_common::address::{CLICKHOUSE_ADMIN_PORT, CLICKHOUSE_TCP_PORT};
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::{OmicronZoneUuid, SledUuid};
 use std::collections::BTreeMap;
@@ -411,6 +411,9 @@ impl DnsConfigBuilder {
     /// this zone, and `http_port` is the associated port for that service. The
     /// native service is added automatically, using its default port.
     ///
+    /// For `ClickhouseServer` zones we also need to add a
+    /// `ClickhouseAdminServer` service.
+    ///
     /// # Errors
     ///
     /// This fails if the provided `http_service` is not for a ClickHouse
@@ -435,6 +438,45 @@ impl DnsConfigBuilder {
             ServiceName::ClickhouseNative,
             &zone,
             CLICKHOUSE_TCP_PORT,
+        )?;
+
+        if http_service == ServiceName::ClickhouseServer {
+            self.service_backend_zone(
+                ServiceName::ClickhouseAdminServer,
+                &zone,
+                CLICKHOUSE_ADMIN_PORT,
+            )?;
+        }
+
+        Ok(())
+    }
+
+    /// Higher-level shorthand for adding a ClickhouseKeeper zone with several
+    /// services.
+    ///
+    /// # Errors
+    ///
+    /// This fails if the provided `http_service` is not for a ClickhouseKeeper
+    /// replica server. It also fails if the given zone has already been added
+    /// to the configuration.
+    pub fn host_zone_clickhouse_keeper(
+        &mut self,
+        zone_id: OmicronZoneUuid,
+        underlay_address: Ipv6Addr,
+        service: ServiceName,
+        port: u16,
+    ) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            service == ServiceName::ClickhouseKeeper,
+            "This method is only valid for ClickHouse keeper servers, \
+            but we were provided the service '{service:?}'",
+        );
+        let zone = self.host_zone(zone_id, underlay_address)?;
+        self.service_backend_zone(service, &zone, port)?;
+        self.service_backend_zone(
+            ServiceName::ClickhouseAdminKeeper,
+            &zone,
+            CLICKHOUSE_ADMIN_PORT,
         )
     }
 
@@ -546,6 +588,14 @@ mod test {
     #[test]
     fn display_srv_service() {
         assert_eq!(ServiceName::Clickhouse.dns_name(), "_clickhouse._tcp",);
+        assert_eq!(
+            ServiceName::ClickhouseAdminKeeper.dns_name(),
+            "_clickhouse-admin-keeper._tcp",
+        );
+        assert_eq!(
+            ServiceName::ClickhouseAdminServer.dns_name(),
+            "_clickhouse-admin-server._tcp",
+        );
         assert_eq!(
             ServiceName::ClickhouseKeeper.dns_name(),
             "_clickhouse-keeper._tcp",
