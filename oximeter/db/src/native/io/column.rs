@@ -11,9 +11,17 @@ use crate::native::{
     io, Error,
 };
 use bytes::{Buf as _, BufMut as _, BytesMut};
-use chrono::DateTime;
+use chrono::{NaiveDate, TimeDelta, TimeZone};
 use std::net::{Ipv4Addr, Ipv6Addr};
 use uuid::Uuid;
+
+// ClickHouse `Date`s are represented as an unsigned 16-bit number of days from
+// the UNIX epoch.
+//
+// This is deprecated, but we allow it so we can create a const. The fallible
+// constructor requires unwrapping.
+#[allow(deprecated)]
+const EPOCH: NaiveDate = NaiveDate::from_ymd(1970, 01, 01);
 
 /// Helper macro to quickly and unsafely copy POD data from a message from the
 /// ClickHouse server into our own column data types.
@@ -150,7 +158,17 @@ fn decode_value_array(
             // encoding of IPv4 addresses.
             copyin_pod_as_values!(Ipv6Addr, src, n_rows)
         }
-        DataType::DateTime => {
+        DataType::Date => {
+            // Dates are stored as 16-bit unsigned values, giving the number of
+            // days since the UNIX epoch.
+            let days = copyin_pod_values_raw!(u16, src, n_rows);
+            let mut out = Vec::with_capacity(days.len());
+            for day in days.into_iter() {
+                out.push(EPOCH + TimeDelta::days(i64::from(day)));
+            }
+            ValueArray::Date(out)
+        }
+        DataType::DateTime(tz) => {
             // DateTimes are encoded as little-endian u32s, giving a traditional
             // UNIX timestamp with 1 second resolution. Similar to IPv4
             // addresses, we'll iterate in chunks and then convert.
@@ -166,14 +184,12 @@ fn decode_value_array(
 
                 // Safey: This only panics if the timestamp is out of range,
                 // which is not possible as this is actually a u32.
-                values.push(
-                    DateTime::from_timestamp(i64::from(timestamp), 0).unwrap(),
-                );
+                values.push(tz.timestamp_opt(i64::from(timestamp), 0).unwrap());
             }
             *src = rest;
-            ValueArray::DateTime(values)
+            ValueArray::DateTime { tz: *tz, values }
         }
-        DataType::DateTime64(precision) => {
+        DataType::DateTime64(precision, timezone) => {
             // DateTime64s are encoded as little-endian i64s, but their
             // precision is encoded in the argument, not the column itself.
             // We'll iterate over chunks of the provided data again, and convert
@@ -186,7 +202,7 @@ fn decode_value_array(
             // The precision determines how to convert these values. Most things
             // should be 3, 6, or 9, for milliseconds, microseconds, or
             // nanoseconds. But technically any precision in [0, 9] is possible.
-            let conv = precision.as_conv();
+            let conv = precision.as_conv(timezone);
             for chunk in data.chunks_exact(std::mem::size_of::<i64>()) {
                 // Safety: Because we split this above on `n_bytes`, we know
                 // this has exactly `n_rows` chunks of 8 bytes each.
@@ -194,10 +210,14 @@ fn decode_value_array(
 
                 // Safey: This only panics if the timestamp is out of range,
                 // which is not possible as this is actually a u32.
-                values.push(conv(timestamp));
+                values.push(conv(timezone, timestamp));
             }
             *src = rest;
-            ValueArray::DateTime64 { precision: *precision, values }
+            ValueArray::DateTime64 {
+                precision: *precision,
+                tz: *timezone,
+                values,
+            }
         }
         DataType::Enum8(variants) => {
             // Copy the encoded variant indices themselves, and include the
@@ -339,7 +359,16 @@ fn encode_value_array(values: ValueArray, mut dst: &mut BytesMut) {
             }
         }
         ValueArray::Ipv6(values) => copyout_pod_values!(Ipv6Addr, values, dst),
-        ValueArray::DateTime(values) => {
+        ValueArray::Date(values) => {
+            // Dates are represented in ClickHouse as a 16-bit unsigned number
+            // of days since the UNIX epoch.
+            dst.reserve(values.len() * std::mem::size_of::<u16>());
+            for value in values {
+                let days = value.signed_duration_since(EPOCH).num_days();
+                dst.put_u16_le(u16::try_from(days).unwrap());
+            }
+        }
+        ValueArray::DateTime { values, .. } => {
             // DateTimes are always little-endian u32s giving the UNIX
             // timestamp.
             for value in values {
@@ -348,7 +377,7 @@ fn encode_value_array(values: ValueArray, mut dst: &mut BytesMut) {
                 dst.put_u32_le(u32::try_from(value.timestamp()).unwrap());
             }
         }
-        ValueArray::DateTime64 { precision, values } => {
+        ValueArray::DateTime64 { precision, values, .. } => {
             // DateTime64s are always encoded as i64s, in whatever
             // resolution is defined by the column type itself.
             dst.reserve(values.len() * std::mem::size_of::<i64>());
@@ -398,7 +427,9 @@ fn encode_array_offsets(arrays: &[ValueArray], dst: &mut BytesMut) {
 mod tests {
     use super::*;
     use crate::native::block::Precision;
-    use chrono::{SubsecRound as _, Utc};
+    use chrono::SubsecRound as _;
+    use chrono::TimeZone;
+    use chrono_tz::Tz;
 
     #[test]
     fn test_decode_uint8_column() {
@@ -517,7 +548,7 @@ mod tests {
 
     #[test]
     fn test_encode_decode_column() {
-        let now64 = Utc::now();
+        let now64 = Tz::UTC.timestamp_opt(0, 0).unwrap();
         let now = now64.trunc_subsecs(0);
         let precision = Precision::new(9).unwrap();
         for (typ, values) in [
@@ -546,10 +577,17 @@ mod tests {
             ),
             (DataType::Ipv4, ValueArray::Ipv4(vec![Ipv4Addr::LOCALHOST])),
             (DataType::Ipv6, ValueArray::Ipv6(vec![Ipv6Addr::LOCALHOST])),
-            (DataType::DateTime, ValueArray::DateTime(vec![now])),
             (
-                DataType::DateTime64(precision),
-                ValueArray::DateTime64 { precision, values: vec![now64] },
+                DataType::DateTime(Tz::UTC),
+                ValueArray::DateTime { tz: Tz::UTC, values: vec![now] },
+            ),
+            (
+                DataType::DateTime64(precision, Tz::UTC),
+                ValueArray::DateTime64 {
+                    precision,
+                    tz: Tz::UTC,
+                    values: vec![now64],
+                },
             ),
             (
                 DataType::Nullable(Box::new(DataType::UInt8)),

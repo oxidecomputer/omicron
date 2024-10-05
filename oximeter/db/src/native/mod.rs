@@ -136,6 +136,15 @@ mod probes {
     /// Emitted when we receive a packet from the server, with its kind.
     fn packet__received(kind: &str) {}
 
+    /// Emitted when we receive a data packet, with details about the size and
+    /// data types for each column.
+    fn data__packet__received(
+        n_cols: u64,
+        n_rows: u64,
+        columns: Vec<(String, String)>,
+    ) {
+    }
+
     /// Emitted when we receive an unrecognized packet, with the kind and the
     /// length of the discarded buffer.
     fn unrecognized__server__packet(kind: u64, len: usize) {}
