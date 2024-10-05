@@ -6349,6 +6349,12 @@ pub async fn assert_sled_vpc_routes(
         if sys_routes_found && custom_routes_found {
             Ok(())
         } else {
+            println!("unexpected route setup");
+            println!("vni: {vni:?}");
+            println!("subnet: {}", db_subnet.ipv4_block.0);
+            println!("expected system: {system_routes:#?}");
+            println!("expected custom {custom_routes:#?}");
+            println!("found: {vpc_routes:#?}");
             Err(CondCheckError::NotYet::<()>)
         }
     };

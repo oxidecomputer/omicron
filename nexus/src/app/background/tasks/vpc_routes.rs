@@ -7,7 +7,7 @@
 use crate::app::background::BackgroundTask;
 use futures::future::BoxFuture;
 use futures::FutureExt;
-use nexus_db_model::{Sled, SledState, Vni};
+use nexus_db_model::{Sled, SledState, Vni, VpcRouterKind};
 use nexus_db_queries::{context::OpContext, db::DataStore};
 use nexus_networking::sled_client_from_address;
 use nexus_types::{
@@ -16,7 +16,7 @@ use nexus_types::{
 };
 use omicron_common::api::internal::shared::{
     ExternalIpGatewayMap, ResolvedVpcRoute, ResolvedVpcRouteSet, RouterId,
-    RouterKind, RouterVersion,
+    RouterKind, RouterTarget, RouterVersion,
 };
 use serde_json::json;
 use std::collections::hash_map::Entry;
@@ -240,12 +240,68 @@ impl BackgroundTask for VpcRouteManager {
 
                 // resolve into known_rules on an as-needed basis.
                 for set in &route_sets {
-                    let Some(db_router) = db_routers.get(&set.id) else {
-                        // The sled wants to know about rules for a VPC
-                        // subnet with no custom router set. Send them
-                        // the empty list, and unset its table version.
-                        set_rules(set.id, None, HashSet::new());
-                        continue;
+                    let (db_router, igw_only) = match db_routers.get(&set.id) {
+                        Some(r) => (r.clone(), false),
+                        None => {
+                            info!(
+                                log,
+                                "VPC route manager no upstream router\nkey: {:#?}\nkeys: {:#?}",
+                                set.id,
+                                db_routers.keys();
+                                "sled" =>  sled.id().to_string(),
+                            );
+
+                            // TODO the following is working around the fact that
+                            // routers are currently tied to subnets in this RPW sync code.
+                            // The code that follows tries to look up a VPC router when
+                            // looking up VPC routers with subnet matching fails. Routes
+                            // that are associated with internet gateways have no subnet
+                            // association, so this is needed to support internet
+                            // gateways. However, I don't want to unwind a bunch of
+                            // working VPC subnet routing logic in this initial commit
+                            // in suport of internet gateways.
+                            let vpc = match vni_to_vpc.get(&set.id.vni) {
+                                Some(vpc) => vpc,
+                                None => {
+                                    warn!(log, "VPC route manager no VPC for VNI {:?}", set.id.vni);
+                                    set_rules(set.id, None, HashSet::new());
+                                    continue;
+                                }
+                            };
+                            let Ok(routers) = self.datastore
+                                .vpc_get_custom_routers(opctx, vpc.identity().id)
+                                .await
+                            else {
+                                error!(
+                                    log,
+                                    "VPC route manager failed to fetch router for VPC";
+                                    "vpc" => vpc.identity().id.to_string()
+                                );
+                                set_rules(set.id, None, HashSet::new());
+                                continue;
+                            };
+
+                            let mut rtr = None;
+                            for r in routers.iter() {
+                                if matches!(set.id.kind, RouterKind::Custom(_)) && r.kind == VpcRouterKind::Custom {
+                                    if let Some(v) = set.version {
+                                        if v.router_id == r.id() {
+                                            rtr = Some(r.clone());
+                                        }
+                                    }
+                                }
+                            }
+
+                            if let Some(rtr) = rtr {
+                                (rtr, true)
+                            } else {
+                                // The sled wants to know about rules for a VPC
+                                // subnet with no custom router set. Send them
+                                // the empty list, and unset its table version.
+                                set_rules(set.id, None, HashSet::new());
+                                continue;
+                            }
+                        }
                     };
 
                     let router_id = db_router.id();
@@ -293,13 +349,22 @@ impl BackgroundTask for VpcRouteManager {
                     // We may have already resolved the rules for this
                     // router in a previous iteration.
                     if let Some(rules) = known_rules.get(&router_id) {
+                        let rules = if !igw_only {
+                            rules.clone()
+                        } else {
+                            rules.clone()
+                                .into_iter()
+                                .filter(|x| matches!(x.target, RouterTarget::InternetGateway(_)))
+                                .collect()
+                        };
+                        set_rules(set.id, Some(version), rules);
                         info!(
                             log,
                             "VPC route manager sled {} rules already resolved",
                             sled.id()
                         );
-                        set_rules(set.id, Some(version), rules.clone());
-                        continue;
+                        //XXX?
+                        //continue;
                     }
 
                     match self
