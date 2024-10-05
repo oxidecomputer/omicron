@@ -38,14 +38,6 @@ mod sled_state;
 #[cfg(test)]
 mod test_utils;
 
-fn db_sled_to_sled(db_sled: nexus_db_model::Sled) -> Sled {
-    Sled::new(
-        SledUuid::from_untyped_uuid(db_sled.id()),
-        db_sled.address(),
-        db_sled.is_scrimlet(),
-    )
-}
-
 /// The result of calling [`realize_blueprint`] or
 /// [`realize_blueprint_with_overrides`].
 #[derive(Debug)]
@@ -254,7 +246,7 @@ fn register_sled_list_step<'a>(
                     .map(|db_sled| {
                         (
                             SledUuid::from_untyped_uuid(db_sled.id()),
-                            db_sled_to_sled(db_sled),
+                            db_sled.into(),
                         )
                     })
                     .collect();

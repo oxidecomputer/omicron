@@ -20,7 +20,6 @@ use nexus_reconfigurator_planning::system::{
     SledBuilder, SledHwInventory, SystemDescription,
 };
 use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
-use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::execution;
 use nexus_types::deployment::execution::blueprint_external_dns_config;
@@ -898,7 +897,7 @@ fn make_sleds_by_id(
             let sled = execution::Sled::new(
                 *sled_id,
                 sled_agent_info.sled_agent_address,
-                sled_agent_info.sled_role == SledRole::Scrimlet,
+                sled_agent_info.sled_role,
             );
             (*sled_id, sled)
         })

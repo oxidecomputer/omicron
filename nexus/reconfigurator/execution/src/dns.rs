@@ -325,6 +325,7 @@ mod test {
     use nexus_reconfigurator_preparation::PlanningInputFromDb;
     use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
     use nexus_sled_agent_shared::inventory::OmicronZoneType;
+    use nexus_sled_agent_shared::inventory::SledRole;
     use nexus_sled_agent_shared::inventory::ZoneKind;
     use nexus_test_utils::resource_helpers::create_silo;
     use nexus_test_utils::resource_helpers::DiskTestBuilder;
@@ -718,7 +719,7 @@ mod test {
                     get_sled_address(Ipv6Subnet::new(subnet.network())),
                     // The first two of these (arbitrarily) will be marked
                     // Scrimlets.
-                    i < 2,
+                    if i < 2 { SledRole::Scrimlet } else { SledRole::Gimlet },
                 );
                 (*sled_id, sled_info)
             })

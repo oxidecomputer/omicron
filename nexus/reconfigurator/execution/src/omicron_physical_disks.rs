@@ -143,6 +143,7 @@ mod test {
     use nexus_db_model::Zpool;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db;
+    use nexus_sled_agent_shared::inventory::SledRole;
     use nexus_test_utils::SLED_AGENT_UUID;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::{
@@ -217,7 +218,7 @@ mod test {
                     let SocketAddr::V6(addr) = server.addr() else {
                         panic!("Expected Ipv6 address. Got {}", server.addr());
                     };
-                    let sled = Sled::new(sled_id, addr, false);
+                    let sled = Sled::new(sled_id, addr, SledRole::Gimlet);
                     (sled_id, sled)
                 })
                 .collect();

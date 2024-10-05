@@ -8,6 +8,7 @@ use std::{
 };
 
 use internal_dns::{DnsConfigBuilder, ServiceName};
+use nexus_sled_agent_shared::inventory::SledRole;
 use omicron_common::{
     address::{Ipv6Subnet, SLED_PREFIX},
     api::external::Name,
@@ -26,19 +27,20 @@ use super::Overridables;
 
 /// The minimal information needed to represent a sled in the context of
 /// blueprint execution.
+#[derive(Debug, Clone)]
 pub struct Sled {
     id: SledUuid,
     sled_agent_address: SocketAddrV6,
-    is_scrimlet: bool,
+    role: SledRole,
 }
 
 impl Sled {
     pub fn new(
         id: SledUuid,
         sled_agent_address: SocketAddrV6,
-        is_scrimlet: bool,
+        role: SledRole,
     ) -> Sled {
-        Sled { id, sled_agent_address, is_scrimlet }
+        Sled { id, sled_agent_address, role }
     }
 
     pub fn id(&self) -> SledUuid {
@@ -53,8 +55,12 @@ impl Sled {
         Ipv6Subnet::<SLED_PREFIX>::new(*self.sled_agent_address.ip())
     }
 
+    pub fn role(&self) -> SledRole {
+        self.role
+    }
+
     pub fn is_scrimlet(&self) -> bool {
-        self.is_scrimlet
+        self.role == SledRole::Scrimlet
     }
 }
 
@@ -143,7 +149,7 @@ pub fn blueprint_internal_dns_config(
         )?;
     }
 
-    let scrimlets = sleds_by_id.values().filter(|sled| sled.is_scrimlet);
+    let scrimlets = sleds_by_id.values().filter(|sled| sled.is_scrimlet());
     for scrimlet in scrimlets {
         let sled_subnet = scrimlet.subnet();
         let switch_zone_ip = overrides.switch_zone_ip(scrimlet.id, sled_subnet);
