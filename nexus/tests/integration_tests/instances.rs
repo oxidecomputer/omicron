@@ -6341,19 +6341,20 @@ pub async fn assert_sled_vpc_routes(
         };
 
         let vpc_routes = sled_agent.vpc_routes.lock().await;
-        let sys_routes_found = vpc_routes.iter().any(|(id, set)| {
-            *id == sys_key
-                && set.routes == system_routes
-        });
-        let custom_routes_found = vpc_routes.iter().any(|(id, set)| {
-            *id == custom_key && set.routes == custom_routes
-        });
+        let sys_routes_found = vpc_routes
+            .iter()
+            .any(|(id, set)| *id == sys_key && set.routes == system_routes);
+        let custom_routes_found = vpc_routes
+            .iter()
+            .any(|(id, set)| *id == custom_key && set.routes == custom_routes);
 
         if sys_routes_found && custom_routes_found {
             Ok(())
         } else {
-            let found_system = vpc_routes.get(&sys_key).cloned().unwrap_or_default();
-            let found_custom = vpc_routes.get(&custom_key).cloned().unwrap_or_default();
+            let found_system =
+                vpc_routes.get(&sys_key).cloned().unwrap_or_default();
+            let found_custom =
+                vpc_routes.get(&custom_key).cloned().unwrap_or_default();
 
             println!("unexpected route setup");
             println!("vni: {vni:?}");
@@ -6362,10 +6363,22 @@ pub async fn assert_sled_vpc_routes(
             println!("expected system: {system_routes:?}");
             println!("expected custom {custom_routes:?}");
             println!("found: {vpc_routes:?}");
-            println!("\n-----\nsystem diff (-): {:?}", system_routes.difference(&found_system.routes));
-            println!("system diff (+): {:?}", found_system.routes.difference(&system_routes));
-            println!("custom diff (-): {:?}", custom_routes.difference(&found_custom.routes));
-            println!("custom diff (+): {:?}\n-----", found_custom.routes.difference(&custom_routes));
+            println!(
+                "\n-----\nsystem diff (-): {:?}",
+                system_routes.difference(&found_system.routes)
+            );
+            println!(
+                "system diff (+): {:?}",
+                found_system.routes.difference(&system_routes)
+            );
+            println!(
+                "custom diff (-): {:?}",
+                custom_routes.difference(&found_custom.routes)
+            );
+            println!(
+                "custom diff (+): {:?}\n-----",
+                found_custom.routes.difference(&custom_routes)
+            );
             Err(CondCheckError::NotYet::<()>)
         }
     };
