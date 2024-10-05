@@ -1469,6 +1469,14 @@ impl DataStore {
         self.transaction_retry_wrapper("vpc_delete_internet_gateway_cascade")
             .transaction(&conn, |conn| {
                 async move {
+                    use db::schema::internet_gateway::dsl as igw;
+                    let igw_info = igw::internet_gateway
+                        .filter(igw::time_deleted.is_null())
+                        .filter(igw::id.eq(authz_igw.id()))
+                        .select(InternetGateway::as_select())
+                        .first_async(&conn)
+                        .await?;
+
                     use db::schema::internet_gateway::dsl;
                     let now = Utc::now();
                     diesel::update(dsl::internet_gateway)
@@ -1495,6 +1503,31 @@ impl DataStore {
                         .filter(addr::time_deleted.is_null())
                         .filter(addr::internet_gateway_id.eq(authz_igw.id()))
                         .set(addr::time_deleted.eq(now))
+                        .execute_async(&conn)
+                        .await?;
+
+                    // Delete routes targeting this igw
+                    use db::schema::vpc_router::dsl as vr;
+                    let vpc_routers = vr::vpc_router
+                        .filter(vr::time_deleted.is_null())
+                        .filter(vr::vpc_id.eq(igw_info.vpc_id))
+                        .select(VpcRouter::as_select())
+                        .load_async(&conn)
+                        .await?
+                        .into_iter()
+                        .map(|x| x.id())
+                        .collect::<Vec<_>>();
+
+                    use db::schema::router_route::dsl as rr;
+                    let now = Utc::now();
+                    diesel::update(rr::router_route)
+                        .filter(rr::time_deleted.is_null())
+                        .filter(rr::vpc_router_id.eq_any(vpc_routers))
+                        .filter(
+                            rr::target
+                                .eq(format!("inetgw:{}", igw_info.name())),
+                        )
+                        .set(rr::time_deleted.eq(now))
                         .execute_async(&conn)
                         .await?;
 
