@@ -101,6 +101,14 @@ pub(crate) struct NewFilesystemRequest {
 }
 
 #[derive(Debug)]
+pub enum NestedDatasetListOptions {
+    /// Returns children of the requested dataset, but not the dataset itself.
+    ChildrenOnly,
+    /// Returns both the requested dataset as well as all children.
+    SelfAndChildren,
+}
+
+#[derive(Debug)]
 pub(crate) enum StorageRequest {
     // Requests to manage which devices the sled considers active.
     // These are manipulated by hardware management.
@@ -141,6 +149,7 @@ pub(crate) enum StorageRequest {
     },
     NestedDatasetList {
         name: NestedDatasetLocation,
+        options: NestedDatasetListOptions,
         tx: DebugIgnore<
             oneshot::Sender<Result<Vec<NestedDatasetConfig>, Error>>,
         >,
@@ -333,10 +342,15 @@ impl StorageHandle {
     pub async fn nested_dataset_list(
         &self,
         name: NestedDatasetLocation,
+        options: NestedDatasetListOptions,
     ) -> Result<Vec<NestedDatasetConfig>, Error> {
         let (tx, rx) = oneshot::channel();
         self.tx
-            .send(StorageRequest::NestedDatasetList { name, tx: tx.into() })
+            .send(StorageRequest::NestedDatasetList {
+                name,
+                options,
+                tx: tx.into(),
+            })
             .await
             .unwrap();
 
@@ -547,8 +561,9 @@ impl StorageManager {
             StorageRequest::NestedDatasetDestroy { name, tx } => {
                 let _ = tx.0.send(self.nested_dataset_destroy(name).await);
             }
-            StorageRequest::NestedDatasetList { name, tx } => {
-                let _ = tx.0.send(self.nested_dataset_list(name).await);
+            StorageRequest::NestedDatasetList { name, options, tx } => {
+                let _ =
+                    tx.0.send(self.nested_dataset_list(name, options).await);
             }
             StorageRequest::OmicronPhysicalDisksEnsure { config, tx } => {
                 let _ =
@@ -948,6 +963,7 @@ impl StorageManager {
     async fn nested_dataset_list(
         &mut self,
         name: NestedDatasetLocation,
+        options: NestedDatasetListOptions,
     ) -> Result<Vec<NestedDatasetConfig>, Error> {
         let log = self.log.new(o!("request" => "nested_dataset_list"));
         info!(log, "Listing nested datasets");
@@ -968,13 +984,27 @@ impl StorageManager {
         Ok(properties
             .into_iter()
             .filter_map(|prop| {
+                let path = if prop.name == root_path {
+                    match options {
+                        NestedDatasetListOptions::ChildrenOnly => return None,
+                        NestedDatasetListOptions::SelfAndChildren => {
+                            String::new()
+                        }
+                    }
+                } else {
+                    prop.name
+                        .strip_prefix(&root_path)?
+                        .strip_prefix("/")?
+                        .to_string()
+                };
+
                 Some(NestedDatasetConfig {
                     // The output of our "zfs list" command could be nested away
                     // from the root - so we actually copy our input to our
                     // output here, and update the path relative to the input
                     // root.
                     name: NestedDatasetLocation {
-                        path: prop.name.strip_prefix(&root_path)?.to_string(),
+                        path,
                         id: name.id,
                         root: name.root.clone(),
                     },
@@ -1853,7 +1883,7 @@ mod tests {
         // However, calling it with a different input and the same generation
         // number should fail.
         config.generation = current_config_generation;
-        config.datasets.values_mut().next().unwrap().reservation =
+        config.datasets.values_mut().next().unwrap().inner.reservation =
             Some(1024.into());
         let err =
             harness.handle().datasets_ensure(config.clone()).await.unwrap_err();
@@ -1865,6 +1895,185 @@ mod tests {
         let status =
             harness.handle().datasets_ensure(config.clone()).await.unwrap();
         assert!(!status.has_error());
+
+        harness.cleanup().await;
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test]
+    async fn nested_dataset() {
+        illumos_utils::USE_MOCKS.store(false, Ordering::SeqCst);
+        let logctx = test_setup_log("nested_dataset");
+        let mut harness = StorageManagerTestHarness::new(&logctx.log).await;
+
+        // Test setup: Add a U.2 and M.2, adopt them into the "control plane"
+        // for usage.
+        harness.handle().key_manager_ready().await;
+        let raw_disks =
+            harness.add_vdevs(&["u2_under_test.vdev", "m2_helping.vdev"]).await;
+        let config = harness.make_config(1, &raw_disks);
+        let result = harness
+            .handle()
+            .omicron_physical_disks_ensure(config.clone())
+            .await
+            .expect("Ensuring disks should work after key manager is ready");
+        assert!(!result.has_error(), "{:?}", result);
+
+        // Create a dataset on the newly formatted U.2
+        //
+        // NOTE: The choice of "Update" dataset here is kinda arbitrary,
+        // with a couple caveats:
+        //
+        // - This dataset must not be "zoned", as if it is, the nested datasets
+        // (which are opinionated about being mountable) do not work.
+        // - Calling "omicron_physical_disks_ensure" automatically creates
+        // some datasets (see: U2_EXPECTED_DATASETS). We want to avoid
+        // colliding with those, though in practice it would be fine to re-use
+        // them.
+        let id = DatasetUuid::new_v4();
+        let zpool_name = ZpoolName::new_external(config.disks[0].pool_id);
+        let name = DatasetName::new(zpool_name.clone(), DatasetKind::Update);
+        let root_config = SharedDatasetConfig {
+            compression: CompressionAlgorithm::Off,
+            quota: None,
+            reservation: None,
+        };
+
+        let datasets = BTreeMap::from([(
+            id,
+            DatasetConfig {
+                id,
+                name: name.clone(),
+                inner: root_config.clone(),
+            },
+        )]);
+        let generation = Generation::new().next();
+        let config = DatasetsConfig { generation, datasets };
+        let status =
+            harness.handle().datasets_ensure(config.clone()).await.unwrap();
+        assert!(!status.has_error(), "{:?}", status);
+
+        // Start querying the state of nested datasets.
+        //
+        // When we ask about the root of a dataset, we only get information
+        // about the dataset we're asking for.
+        let root_location = NestedDatasetLocation {
+            path: String::new(),
+            id,
+            root: name.clone(),
+        };
+        let nested_datasets = harness
+            .handle()
+            .nested_dataset_list(
+                root_location.clone(),
+                NestedDatasetListOptions::SelfAndChildren,
+            )
+            .await
+            .unwrap();
+        assert_eq!(nested_datasets.len(), 1);
+        assert_eq!(nested_datasets[0].name, root_location);
+
+        // If we ask about children of this dataset, we see nothing.
+        let nested_datasets = harness
+            .handle()
+            .nested_dataset_list(
+                root_location.clone(),
+                NestedDatasetListOptions::ChildrenOnly,
+            )
+            .await
+            .unwrap();
+        assert_eq!(nested_datasets.len(), 0);
+
+        // We can't destroy non-nested datasets through this API
+        let err = harness
+            .handle()
+            .nested_dataset_destroy(root_location.clone())
+            .await
+            .expect_err("Should not be able to delete dataset root");
+        assert!(
+            err.to_string()
+                .contains("Cannot destroy nested dataset with empty name"),
+            "{err:?}"
+        );
+
+        // Create a nested dataset within the root one
+        let nested_location = NestedDatasetLocation {
+            path: "nested".to_string(),
+            ..root_location.clone()
+        };
+        let nested_config = SharedDatasetConfig {
+            compression: CompressionAlgorithm::On,
+            quota: None,
+            reservation: None,
+        };
+        harness
+            .handle()
+            .nested_dataset_ensure(NestedDatasetConfig {
+                name: nested_location.clone(),
+                inner: nested_config.clone(),
+            })
+            .await
+            .unwrap();
+
+        // We can re-send the ensure request
+        harness
+            .handle()
+            .nested_dataset_ensure(NestedDatasetConfig {
+                name: nested_location.clone(),
+                inner: nested_config.clone(),
+            })
+            .await
+            .expect("Ensuring nested datasets should be idempotent");
+
+        // We can observe the nested dataset
+        let nested_datasets = harness
+            .handle()
+            .nested_dataset_list(
+                root_location.clone(),
+                NestedDatasetListOptions::SelfAndChildren,
+            )
+            .await
+            .unwrap();
+        assert_eq!(nested_datasets.len(), 2);
+        assert_eq!(nested_datasets[0].name, root_location);
+        assert_eq!(nested_datasets[1].name, nested_location);
+        let nested_datasets = harness
+            .handle()
+            .nested_dataset_list(
+                root_location.clone(),
+                NestedDatasetListOptions::ChildrenOnly,
+            )
+            .await
+            .unwrap();
+        assert_eq!(nested_datasets.len(), 1);
+        assert_eq!(nested_datasets[0].name, nested_location);
+
+        // We can also destroy the nested dataset
+        harness
+            .handle()
+            .nested_dataset_destroy(nested_location.clone())
+            .await
+            .expect("Should have been able to destroy nested dataset");
+
+        let err = harness
+            .handle()
+            .nested_dataset_destroy(nested_location.clone())
+            .await
+            .expect_err(
+                "Should not be able to destroy nested dataset a second time",
+            );
+        assert!(err.to_string().contains("Dataset not found"), "{err:?}");
+
+        // The nested dataset should now be gone
+        let nested_datasets = harness
+            .handle()
+            .nested_dataset_list(
+                root_location.clone(),
+                NestedDatasetListOptions::ChildrenOnly,
+            )
+            .await
+            .unwrap();
+        assert_eq!(nested_datasets.len(), 0);
 
         harness.cleanup().await;
         logctx.cleanup_successful();

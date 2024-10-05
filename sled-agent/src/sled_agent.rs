@@ -85,6 +85,7 @@ use sled_hardware::{underlay, HardwareManager};
 use sled_hardware_types::underlay::BootstrapInterface;
 use sled_hardware_types::Baseboard;
 use sled_storage::dataset::{CRYPT_DATASET, ZONE_DATASET};
+use sled_storage::manager::NestedDatasetListOptions;
 use sled_storage::manager::StorageHandle;
 use slog::Logger;
 use sprockets_tls::keys::SprocketsConfig;
@@ -873,8 +874,13 @@ impl SledAgent {
             id: dataset_id,
             root,
         };
-        let datasets =
-            self.storage().nested_dataset_list(dataset_location).await?;
+        let datasets = self
+            .storage()
+            .nested_dataset_list(
+                dataset_location,
+                NestedDatasetListOptions::ChildrenOnly,
+            )
+            .await?;
 
         let mut bundles = Vec::with_capacity(datasets.len());
         for dataset in datasets {
