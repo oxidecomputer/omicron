@@ -10,9 +10,17 @@ use super::Error;
 use chrono::DateTime;
 use chrono_tz::Tz;
 use indexmap::IndexMap;
+use nom::{
+    bytes::complete::{tag, take_while1},
+    character::complete::u8 as nom_u8,
+    combinator::{eof, map, map_opt, opt},
+    sequence::{delimited, preceded, tuple},
+    IResult,
+};
 use std::{
     fmt,
     net::{Ipv4Addr, Ipv6Addr},
+    sync::LazyLock,
 };
 use uuid::Uuid;
 
@@ -565,6 +573,62 @@ impl fmt::Display for DataType {
     }
 }
 
+// Parse a quoted timezone, like `'UTC'` or `'America/Los_Angeles'`
+fn quoted_timezone(s: &str) -> IResult<&str, Tz> {
+    map(
+        delimited(tag("'"), take_while1(|c| c != '\''), tag("'")),
+        parse_timezone,
+    )(s)
+}
+
+// Parse a quoted timezone, delimited by parentheses ().
+fn parenthesized_timezone(s: &str) -> IResult<&str, Tz> {
+    delimited(tag("("), quoted_timezone, tag(")"))(s)
+}
+
+/// Parse a `DateTime` data type from a string, optionally with a timezone in
+/// it.
+fn datetime(s: &str) -> IResult<&str, DataType> {
+    map(
+        tuple((tag("DateTime"), opt(parenthesized_timezone), eof)),
+        |(_, maybe_tz, _)| {
+            DataType::DateTime(maybe_tz.unwrap_or_else(|| *DEFAULT_TIMEZONE))
+        },
+    )(s)
+}
+
+/// Parse a `DateTime64` data type from a string, with a precision and optional
+/// timezone in it.
+///
+/// Matches things like `DateTime64(1)` and `DateTime64(1, 'UTC')`.
+fn datetime64(s: &str) -> IResult<&str, DataType> {
+    map(
+        tuple((
+            tag("DateTime64("),
+            map_opt(nom_u8, Precision::new),
+            opt(preceded(tag(", "), quoted_timezone)),
+            tag(")"),
+            eof,
+        )),
+        |(_, precision, maybe_tz, _, _)| {
+            DataType::DateTime64(
+                precision,
+                maybe_tz.unwrap_or_else(|| *DEFAULT_TIMEZONE),
+            )
+        },
+    )(s)
+}
+
+static DEFAULT_TIMEZONE: LazyLock<Tz> =
+    LazyLock::new(|| match iana_time_zone::get_timezone() {
+        Ok(s) => s.parse().unwrap_or_else(|_| Tz::UTC),
+        Err(_) => Tz::UTC,
+    });
+
+fn parse_timezone(s: &str) -> Tz {
+    s.parse().unwrap_or_else(|_| *DEFAULT_TIMEZONE)
+}
+
 impl std::str::FromStr for DataType {
     type Err = Error;
 
@@ -602,84 +666,17 @@ impl std::str::FromStr for DataType {
             return Ok(DataType::Ipv4);
         } else if s == "IPv6" {
             return Ok(DataType::Ipv6);
-        } else if s == "DateTime" {
-            let timezone = match iana_time_zone::get_timezone() {
-                Ok(tz) => tz.parse().unwrap_or_else(|_| Tz::UTC),
-                Err(_) => Tz::UTC,
-            };
-            return Ok(DataType::DateTime(timezone));
         }
 
-        // Check for DateTime with timezone
-        if let Some(suffix) = s.strip_prefix("DateTime(") {
-            let Some(inner) = suffix.strip_suffix(")") else {
-                return Err(Error::UnsupportedDataType(s.to_string()));
-            };
-            let Some(rest) = inner.strip_prefix("'") else {
-                // Since we don't have a timezone, we use "local". That's
-                // annoyingly fallible to get, so we'll fallback to UTC.
-                let timezone = match iana_time_zone::get_timezone() {
-                    Ok(tz) => tz.parse().unwrap_or_else(|_| Tz::UTC),
-                    Err(_) => Tz::UTC,
-                };
-                return Ok(DataType::DateTime(timezone));
-            };
-            let Some(timezone) = rest.strip_suffix("'") else {
-                return Err(Error::UnsupportedDataType(s.to_string()));
-            };
-            let timezone = timezone
-                .parse()
-                .map_err(|_| Error::UnsupportedDataType(s.to_string()))?;
-            return Ok(DataType::DateTime(timezone));
-        }
+        // Check for datetime, possibly with a timezone.
+        if let Ok((_, dt)) = datetime(s) {
+            return Ok(dt);
+        };
 
-        // Check for DateTime64 with precision.
-        if let Some(suffix) = s.strip_prefix("DateTime64(") {
-            let Some(inner) = suffix.strip_suffix(")") else {
-                return Err(Error::UnsupportedDataType(s.to_string()));
-            };
-            // DateTime's may have a timezone in them, if it is different from
-            // the current one.
-            let Some((precision, rest)) = inner.split_once(',') else {
-                // Parse precision only...
-                let precision = inner
-                    .parse()
-                    .map_err(|_| Error::UnsupportedDataType(s.to_string()))
-                    .map(Precision)?;
-
-                // Since we don't have a timezone, we use "local". That's
-                // annoyingly fallible to get, so we'll fallback to UTC.
-                let timezone = match iana_time_zone::get_timezone() {
-                    Ok(tz) => tz.parse().unwrap_or_else(|_| Tz::UTC),
-                    Err(_) => Tz::UTC,
-                };
-                return Ok(DataType::DateTime64(precision, timezone));
-            };
-
-            // Parse the precision...
-            let precision = precision
-                .parse()
-                .map_err(|_| Error::UnsupportedDataType(s.to_string()))
-                .map(Precision)?;
-
-            // And the timezone.
-            let Some(rest) = rest.trim().strip_prefix("'") else {
-                // Since we don't have a timezone, we use "local". That's
-                // annoyingly fallible to get, so we'll fallback to UTC.
-                let timezone = match iana_time_zone::get_timezone() {
-                    Ok(tz) => tz.parse().unwrap_or_else(|_| Tz::UTC),
-                    Err(_) => Tz::UTC,
-                };
-                return Ok(DataType::DateTime(timezone));
-            };
-            let Some(timezone) = rest.strip_suffix("'") else {
-                return Err(Error::UnsupportedDataType(s.to_string()));
-            };
-            let timezone = timezone
-                .parse()
-                .map_err(|_| Error::UnsupportedDataType(s.to_string()))?;
-            return Ok(DataType::DateTime64(precision, timezone));
-        }
+        // Check for DateTime64 with precision, and possibly a timezone.
+        if let Ok((_, dt)) = datetime64(s) {
+            return Ok(dt);
+        };
 
         // Check for Enum8s.
         //
@@ -728,7 +725,8 @@ impl std::str::FromStr for DataType {
 
 #[cfg(test)]
 mod tests {
-    use super::{DataType, Precision};
+    use super::{DataType, Precision, DEFAULT_TIMEZONE};
+    use crate::native::block::{datetime, datetime64};
     use chrono::{SubsecRound as _, Utc};
     use chrono_tz::Tz;
 
@@ -802,5 +800,55 @@ mod tests {
             "
             );
         }
+    }
+
+    #[test]
+    fn parse_date_time() {
+        for (type_, s) in [
+            (DataType::DateTime(*DEFAULT_TIMEZONE), "DateTime"),
+            (DataType::DateTime(Tz::UTC), "DateTime('UTC')"),
+            (
+                DataType::DateTime(Tz::America__Los_Angeles),
+                "DateTime('America/Los_Angeles')",
+            ),
+        ] {
+            let dt = datetime(s).unwrap().1;
+            assert_eq!(type_, dt, "Failed to parse '{}' into DateTime", s,);
+        }
+
+        assert!(datetime("DateTim").is_err());
+        assert!(datetime("DateTime()").is_err());
+        assert!(datetime("DateTime()").is_err());
+        assert!(datetime("DateTime('U)").is_err());
+        assert!(datetime("DateTime(0)").is_err());
+    }
+
+    #[test]
+    fn parse_date_time64() {
+        for (type_, s) in [
+            (
+                DataType::DateTime64(Precision(3), *DEFAULT_TIMEZONE),
+                "DateTime64(3)",
+            ),
+            (
+                DataType::DateTime64(Precision(3), Tz::UTC),
+                "DateTime64(3, 'UTC')",
+            ),
+            (
+                DataType::DateTime64(Precision(6), Tz::America__Los_Angeles),
+                "DateTime64(6, 'America/Los_Angeles')",
+            ),
+        ] {
+            let dt = datetime64(s).unwrap().1;
+            assert_eq!(type_, dt, "Failed to parse '{}' into DateTime64", s,);
+        }
+
+        assert!(datetime64("DateTime6").is_err());
+        assert!(datetime64("DateTime64(").is_err());
+        assert!(datetime64("DateTime64()").is_err());
+        assert!(datetime64("DateTime64('U)").is_err());
+        assert!(datetime64("DateTime64(0, )").is_err());
+        assert!(datetime64("DateTime64('a', 'UTC')").is_err());
+        assert!(datetime64("DateTime64(1,'UTC')").is_err());
     }
 }

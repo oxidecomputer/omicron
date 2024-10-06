@@ -7482,6 +7482,7 @@ dependencies = [
  "indexmap 2.5.0",
  "itertools 0.13.0",
  "libc",
+ "nom",
  "num",
  "omicron-common",
  "omicron-test-utils",

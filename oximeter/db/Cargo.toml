@@ -24,6 +24,7 @@ gethostname.workspace = true
 highway.workspace = true
 iana-time-zone.workspace = true
 libc.workspace = true
+nom.workspace = true
 num.workspace = true
 omicron-common.workspace = true
 omicron-workspace-hack.workspace = true
