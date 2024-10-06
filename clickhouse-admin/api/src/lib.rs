@@ -12,9 +12,9 @@ use dropshot::{
 };
 use omicron_common::api::external::Generation;
 use schemars::JsonSchema;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct ServerConfigurableSettings {
     /// A unique identifier for the configuration generation.
     pub generation: Generation,
@@ -22,7 +22,7 @@ pub struct ServerConfigurableSettings {
     pub settings: ServerSettings,
 }
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct KeeperConfigurableSettings {
     /// A unique identifier for the configuration generation.
     pub generation: Generation,

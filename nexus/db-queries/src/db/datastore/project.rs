@@ -26,7 +26,7 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Utc;
 use diesel::prelude::*;
 use nexus_db_fixed_data::project::SERVICES_PROJECT;
-use nexus_db_fixed_data::silo::INTERNAL_SILO_ID;
+use nexus_types::silo::INTERNAL_SILO_ID;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
@@ -103,7 +103,7 @@ impl DataStore {
         debug!(opctx.log, "attempting to create built-in projects");
 
         let (authz_silo,) = db::lookup::LookupPath::new(&opctx, self)
-            .silo_id(*INTERNAL_SILO_ID)
+            .silo_id(INTERNAL_SILO_ID)
             .lookup_for(authz::Action::CreateChild)
             .await?;
 

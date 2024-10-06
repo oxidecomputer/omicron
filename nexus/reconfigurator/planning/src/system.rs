@@ -42,7 +42,6 @@ use omicron_common::disk::DiskIdentity;
 use omicron_common::disk::DiskVariant;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_common::policy::NEXUS_REDUNDANCY;
-use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use std::collections::BTreeMap;
@@ -207,6 +206,22 @@ impl SystemDescription {
         self
     }
 
+    pub fn get_target_nexus_zone_count(&self) -> usize {
+        self.target_nexus_zone_count
+    }
+
+    pub fn target_internal_dns_zone_count(
+        &mut self,
+        count: usize,
+    ) -> &mut Self {
+        self.target_internal_dns_zone_count = count;
+        self
+    }
+
+    pub fn get_target_internal_dns_zone_count(&self) -> usize {
+        self.target_internal_dns_zone_count
+    }
+
     pub fn service_ip_pool_ranges(
         &mut self,
         ranges: Vec<IpRange>,
@@ -304,6 +319,11 @@ impl SystemDescription {
         Ok(self)
     }
 
+    /// Return true if the system has any sleds in it.
+    pub fn has_sleds(&self) -> bool {
+        !self.sleds.is_empty()
+    }
+
     pub fn to_collection_builder(&self) -> anyhow::Result<CollectionBuilder> {
         let collector_label = self
             .collector
@@ -393,6 +413,8 @@ pub struct SledBuilder {
 
 impl SledBuilder {
     /// The default number of U.2 (external) pools for a sled.
+    ///
+    /// The default is `10` based on the typical value for a Gimlet.
     pub const DEFAULT_NPOOLS: u8 = 10;
 
     /// Begin describing a sled to be added to a `SystemDescription`
@@ -429,7 +451,7 @@ impl SledBuilder {
 
     /// Set the number of U.2 (external) pools this sled should have
     ///
-    /// Default is currently `10` based on the typical value for a Gimlet
+    /// The default is [`Self::DEFAULT_NPOOLS`].
     pub fn npools(mut self, npools: u8) -> Self {
         self.npools = npools;
         self
@@ -501,6 +523,10 @@ impl Sled {
             "SystemSimultatedSled",
             (sled_id, "ZpoolUuid"),
         );
+        let mut physical_disk_rng = TypedUuidRng::from_seed(
+            "SystemSimulatedSled",
+            (sled_id, "PhysicalDiskUuid"),
+        );
         let zpools: BTreeMap<_, _> = (0..nzpools)
             .map(|_| {
                 let zpool = ZpoolUuid::from(zpool_rng.next());
@@ -510,7 +536,7 @@ impl Sled {
                         serial: format!("serial-{zpool}"),
                         model: String::from("fake-model"),
                     },
-                    disk_id: PhysicalDiskUuid::new_v4(),
+                    disk_id: physical_disk_rng.next(),
                     policy: PhysicalDiskPolicy::InService,
                     state: PhysicalDiskState::Active,
                 };
