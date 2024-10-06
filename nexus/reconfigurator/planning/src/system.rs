@@ -207,6 +207,22 @@ impl SystemDescription {
         self
     }
 
+    pub fn get_target_nexus_zone_count(&self) -> usize {
+        self.target_nexus_zone_count
+    }
+
+    pub fn target_internal_dns_zone_count(
+        &mut self,
+        count: usize,
+    ) -> &mut Self {
+        self.target_internal_dns_zone_count = count;
+        self
+    }
+
+    pub fn get_target_internal_dns_zone_count(&self) -> usize {
+        self.target_internal_dns_zone_count
+    }
+
     pub fn service_ip_pool_ranges(
         &mut self,
         ranges: Vec<IpRange>,

@@ -33,7 +33,6 @@ use diesel::prelude::*;
 use diesel::result::Error as DieselError;
 use diesel::upsert::excluded;
 use ipnetwork::IpNetwork;
-use nexus_db_fixed_data::silo::INTERNAL_SILO_ID;
 use nexus_db_fixed_data::vpc_subnet::DNS_VPC_SUBNET;
 use nexus_db_fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
 use nexus_db_fixed_data::vpc_subnet::NTP_VPC_SUBNET;
@@ -57,6 +56,7 @@ use nexus_types::external_api::shared::IdentityType;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::shared::SiloRole;
 use nexus_types::identity::Resource;
+use nexus_types::silo::INTERNAL_SILO_ID;
 use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -983,7 +983,7 @@ impl DataStore {
                 db::model::IpPoolResource {
                     ip_pool_id: internal_pool_id,
                     resource_type: db::model::IpPoolResourceType::Silo,
-                    resource_id: *INTERNAL_SILO_ID,
+                    resource_id: INTERNAL_SILO_ID,
                     is_default: true,
                 },
             )
