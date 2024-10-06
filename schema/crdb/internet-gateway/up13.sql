@@ -57,11 +57,11 @@ SELECT
     gen_random_uuid(), 'default',
     'Default VPC gateway',
     now(), now(), NULL,
-    omicron.public.vpc_router.id,
+    omicron.public.vpc.id,
     0,
     0
 FROM
-    omicron.public.vpc_router
+    omicron.public.vpc
 ON CONFLICT DO NOTHING;
 
 -- link default gateways to default ip pools
@@ -92,6 +92,5 @@ JOIN
     omicron.public.ip_pool_resource as ipp
     ON project.silo_id = ipp.resource_id
 WHERE
-    ipp.is_default = true;
-
-
+    ipp.is_default = true
+ON CONFLICT DO NOTHING;
