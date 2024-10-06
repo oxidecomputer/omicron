@@ -19,8 +19,8 @@ use omicron_test_utils::dev::poll::wait_for_condition;
 use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_test_utils::dev::test_cmds::assert_exit_code;
 use omicron_test_utils::dev::test_cmds::path_to_executable;
-use omicron_test_utils::dev::test_cmds::redact_variable;
 use omicron_test_utils::dev::test_cmds::run_command;
+use omicron_test_utils::dev::test_cmds::Redactor;
 use omicron_test_utils::dev::test_cmds::EXIT_SUCCESS;
 use omicron_uuid_kinds::SledUuid;
 use slog::debug;
@@ -43,9 +43,25 @@ fn test_basic() {
     let exec = Exec::cmd(path_to_cli()).arg("tests/input/cmds.txt");
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
     assert_exit_code(exit_status, EXIT_SUCCESS, &stderr_text);
-    let stdout_text = redact_variable(&stdout_text);
+    let stdout_text = Redactor::new().do_redact(&stdout_text);
     assert_contents("tests/output/cmd-stdout", &stdout_text);
     assert_contents("tests/output/cmd-stderr", &stderr_text);
+}
+
+// Run tests against a loaded example system.
+#[test]
+fn test_example() {
+    let exec = Exec::cmd(path_to_cli()).arg("tests/input/cmds-example.txt");
+    let (exit_status, stdout_text, stderr_text) = run_command(exec);
+    assert_exit_code(exit_status, EXIT_SUCCESS, &stderr_text);
+
+    // The example system uses a fixed seed, which means that UUIDs are
+    // deterministic. Some of the test commands also use those UUIDs, and it's
+    // convenient for everyone if they aren't redacted.
+    let stdout_text =
+        Redactor::new().redact_uuids(false).do_redact(&stdout_text);
+    assert_contents("tests/output/cmd-example-stdout", &stdout_text);
+    assert_contents("tests/output/cmd-example-stderr", &stderr_text);
 }
 
 type ControlPlaneTestContext =

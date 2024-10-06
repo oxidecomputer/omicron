@@ -125,7 +125,51 @@ pub fn error_for_enoent() -> String {
 /// invocation to invocation (e.g., assigned TCP port numbers, timestamps)
 ///
 /// This allows use to use expectorate to verify the shape of the CLI output.
-pub fn redact_variable(input: &str) -> String {
+#[derive(Clone, Debug)]
+pub struct Redactor<'a> {
+    redact_uuids: bool,
+    extra: ExtraRedactions<'a>,
+}
+
+impl<'a> Redactor<'a> {
+    pub fn new() -> Self {
+        Self { redact_uuids: true, extra: ExtraRedactions::new() }
+    }
+
+    pub fn redact_uuids(&mut self, redact_uuids: bool) -> &mut Self {
+        self.redact_uuids = redact_uuids;
+        self
+    }
+
+    pub fn extra(
+        &mut self,
+        extra_redactions: ExtraRedactions<'a>,
+    ) -> &mut Self {
+        self.extra = extra_redactions;
+        self
+    }
+
+    pub fn do_redact(&self, input: &str) -> String {
+        // Perform extra redactions at the beginning, not the end. This is because
+        // some of the built-in redactions in redact_variable might match a
+        // substring of something that should be handled by extra_redactions (e.g.
+        // a temporary path).
+        let mut s = input.to_owned();
+        for (name, replacement) in &self.extra.redactions {
+            s = s.replace(name, replacement);
+        }
+
+        s = redact_basic(&s);
+
+        if self.redact_uuids {
+            s = redact_uuids(&s);
+        }
+
+        s
+    }
+}
+
+fn redact_basic(input: &str) -> String {
     // Replace TCP port numbers. We include the localhost
     // characters to avoid catching any random sequence of numbers.
     let s = regex::Regex::new(r"\[::1\]:\d{4,5}")
@@ -140,19 +184,6 @@ pub fn redact_variable(input: &str) -> String {
         .unwrap()
         .replace_all(&s, "127.0.0.1:REDACTED_PORT")
         .to_string();
-
-    // Replace uuids.
-    //
-    // The length of a UUID is 32 nibbles for the hex encoding of a u128 + 4
-    // dashes = 36.
-    const UUID_LEN: usize = 36;
-    let s = regex::Regex::new(
-        "[a-zA-Z0-9]{8}-[a-zA-Z0-9]{4}-[a-zA-Z0-9]{4}-\
-        [a-zA-Z0-9]{4}-[a-zA-Z0-9]{12}",
-    )
-    .unwrap()
-    .replace_all(&s, fill_redaction_text("uuid", UUID_LEN))
-    .to_string();
 
     // Replace timestamps.
     //
@@ -213,23 +244,17 @@ pub fn redact_variable(input: &str) -> String {
     s
 }
 
-/// Redact text from a string, allowing for extra redactions to be specified.
-pub fn redact_extra(
-    input: &str,
-    extra_redactions: &ExtraRedactions<'_>,
-) -> String {
-    // Perform extra redactions at the beginning, not the end. This is because
-    // some of the built-in redactions in redact_variable might match a
-    // substring of something that should be handled by extra_redactions (e.g.
-    // a temporary path).
-    let mut s = input.to_owned();
-    for (name, replacement) in &extra_redactions.redactions {
-        s = s.replace(name, replacement);
-    }
-    redact_variable(&s)
+fn redact_uuids(input: &str) -> String {
+    // The length of a UUID is 32 nibbles for the hex encoding of a u128 + 4
+    // dashes = 36.
+    const UUID_LEN: usize = 36;
+    regex::Regex::new(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+        .unwrap()
+        .replace_all(&input, fill_redaction_text("uuid", UUID_LEN))
+        .to_string()
 }
 
-/// Represents a list of extra redactions for [`redact_variable`].
+/// Represents a list of extra redactions for [`Redactor`].
 ///
 /// Extra redactions are applied in-order, before any builtin redactions.
 #[derive(Clone, Debug, Default)]
@@ -309,13 +334,12 @@ mod tests {
         let input = "time: 123ms, path: /var/tmp/tmp.456ms123s, \
             path2: /short, \
             path3: /variable-length/path";
-        let actual = redact_extra(
-            input,
-            ExtraRedactions::new()
-                .fixed_length("tp", "/var/tmp/tmp.456ms123s")
-                .fixed_length("short_redact", "/short")
-                .variable_length("variable", "/variable-length/path"),
-        );
+        let mut extra = ExtraRedactions::new();
+        extra
+            .fixed_length("tp", "/var/tmp/tmp.456ms123s")
+            .fixed_length("short_redact", "/short")
+            .variable_length("variable", "/variable-length/path");
+        let actual = Redactor::new().extra(extra).do_redact(input);
         assert_eq!(
             actual,
             "time: <REDACTED DURATION>ms, path: ....<REDACTED_TP>....., \
@@ -347,7 +371,7 @@ mod tests {
         for time in times {
             let input = format!("{:?}", time);
             assert_eq!(
-                redact_variable(&input),
+                Redactor::new().do_redact(&input),
                 "<REDACTED_TIMESTAMP>",
                 "Failed to redact {:?}",
                 time

@@ -4,35 +4,27 @@
 
 //! Propagates DNS changes in a given blueprint
 
-use crate::overridables::Overridables;
 use crate::Sled;
 use dns_service_client::DnsDiff;
-use internal_dns::DnsConfigBuilder;
-use internal_dns::ServiceName;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::Discoverability;
 use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
-use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_db_queries::db::DataStore;
-use nexus_types::deployment::blueprint_zone_type;
+use nexus_types::deployment::execution::blueprint_external_dns_config;
+use nexus_types::deployment::execution::blueprint_internal_dns_config;
+use nexus_types::deployment::execution::Overridables;
 use nexus_types::deployment::Blueprint;
-use nexus_types::deployment::BlueprintZoneFilter;
-use nexus_types::deployment::BlueprintZoneType;
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::DnsConfigParams;
 use nexus_types::internal_api::params::DnsConfigZone;
-use nexus_types::internal_api::params::DnsRecord;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::InternalContext;
-use omicron_common::api::external::Name;
 use omicron_common::bail_unless;
 use omicron_uuid_kinds::SledUuid;
 use slog::{debug, info, o};
 use std::collections::BTreeMap;
-use std::collections::HashMap;
-use std::net::IpAddr;
 
 pub(crate) async fn deploy_dns(
     opctx: &OpContext,
@@ -60,7 +52,10 @@ pub(crate) async fn deploy_dns(
 
     // Next, construct the DNS config represented by the blueprint.
     let internal_dns_zone_blueprint =
-        blueprint_internal_dns_config(blueprint, sleds_by_id, overrides)?;
+        blueprint_internal_dns_config(blueprint, sleds_by_id, overrides)
+            .map_err(|e| Error::InternalError {
+                internal_message: e.to_string(),
+            })?;
     let silos = datastore
         .silo_list_all_batched(opctx, Discoverability::All)
         .await
@@ -245,156 +240,6 @@ pub(crate) async fn deploy_dns_one(
     datastore.dns_update_from_version(opctx, update, generation).await
 }
 
-/// Returns the expected contents of internal DNS based on the given blueprint
-pub fn blueprint_internal_dns_config(
-    blueprint: &Blueprint,
-    sleds_by_id: &BTreeMap<SledUuid, Sled>,
-    overrides: &Overridables,
-) -> Result<DnsConfigZone, Error> {
-    // The DNS names configured here should match what RSS configures for the
-    // same zones.  It's tricky to have RSS share the same code because it uses
-    // Sled Agent's _internal_ `OmicronZoneConfig` (and friends), whereas we're
-    // using `sled-agent-client`'s version of that type.  However, the
-    // DnsConfigBuilder's interface is high-level enough that it handles most of
-    // the details.
-    let mut dns_builder = DnsConfigBuilder::new();
-
-    'all_zones: for (_, zone) in
-        blueprint.all_omicron_zones(BlueprintZoneFilter::ShouldBeInInternalDns)
-    {
-        let (service_name, port) = match &zone.zone_type {
-            BlueprintZoneType::BoundaryNtp(
-                blueprint_zone_type::BoundaryNtp { address, .. },
-            ) => (ServiceName::BoundaryNtp, address.port()),
-            BlueprintZoneType::InternalNtp(
-                blueprint_zone_type::InternalNtp { address, .. },
-            ) => (ServiceName::InternalNtp, address.port()),
-            BlueprintZoneType::Clickhouse(
-                blueprint_zone_type::Clickhouse { address, .. },
-            )
-            | BlueprintZoneType::ClickhouseServer(
-                blueprint_zone_type::ClickhouseServer { address, .. },
-            ) => {
-                // Add the HTTP and native TCP interfaces for ClickHouse data
-                // replicas. This adds the zone itself, so we need to continue
-                // back up to the loop over all the Omicron zones, rather than
-                // falling through to call `host_zone_with_one_backend()`.
-                let http_service = if matches!(
-                    &zone.zone_type,
-                    BlueprintZoneType::Clickhouse(_)
-                ) {
-                    ServiceName::Clickhouse
-                } else {
-                    ServiceName::ClickhouseServer
-                };
-                dns_builder
-                    .host_zone_clickhouse(
-                        zone.id,
-                        zone.underlay_address,
-                        http_service,
-                        address.port(),
-                    )
-                    .map_err(|e| Error::InternalError {
-                        internal_message: e.to_string(),
-                    })?;
-                continue 'all_zones;
-            }
-            BlueprintZoneType::ClickhouseKeeper(
-                blueprint_zone_type::ClickhouseKeeper { address, .. },
-            ) => (ServiceName::ClickhouseKeeper, address.port()),
-            BlueprintZoneType::CockroachDb(
-                blueprint_zone_type::CockroachDb { address, .. },
-            ) => (ServiceName::Cockroach, address.port()),
-            BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
-                internal_address,
-                ..
-            }) => (ServiceName::Nexus, internal_address.port()),
-            BlueprintZoneType::Crucible(blueprint_zone_type::Crucible {
-                address,
-                ..
-            }) => (ServiceName::Crucible(zone.id), address.port()),
-            BlueprintZoneType::CruciblePantry(
-                blueprint_zone_type::CruciblePantry { address },
-            ) => (ServiceName::CruciblePantry, address.port()),
-            BlueprintZoneType::Oximeter(blueprint_zone_type::Oximeter {
-                address,
-            }) => (ServiceName::Oximeter, address.port()),
-            BlueprintZoneType::ExternalDns(
-                blueprint_zone_type::ExternalDns { http_address, .. },
-            ) => (ServiceName::ExternalDns, http_address.port()),
-            BlueprintZoneType::InternalDns(
-                blueprint_zone_type::InternalDns { http_address, .. },
-            ) => (ServiceName::InternalDns, http_address.port()),
-        };
-        dns_builder
-            .host_zone_with_one_backend(
-                zone.id,
-                zone.underlay_address,
-                service_name,
-                port,
-            )
-            .map_err(|e| Error::InternalError {
-                internal_message: e.to_string(),
-            })?;
-    }
-
-    let scrimlets = sleds_by_id.values().filter(|sled| sled.is_scrimlet);
-    for scrimlet in scrimlets {
-        let sled_subnet = scrimlet.subnet();
-        let switch_zone_ip = overrides.switch_zone_ip(scrimlet.id, sled_subnet);
-        dns_builder
-            .host_zone_switch(
-                scrimlet.id,
-                switch_zone_ip,
-                overrides.dendrite_port(scrimlet.id),
-                overrides.mgs_port(scrimlet.id),
-                overrides.mgd_port(scrimlet.id),
-            )
-            .map_err(|e| Error::InternalError {
-                internal_message: e.to_string(),
-            })?;
-    }
-
-    Ok(dns_builder.build_zone())
-}
-
-pub fn blueprint_external_dns_config(
-    blueprint: &Blueprint,
-    silos: &[Name],
-    external_dns_zone_name: String,
-) -> DnsConfigZone {
-    let nexus_external_ips = blueprint_nexus_external_ips(blueprint);
-
-    let dns_records: Vec<DnsRecord> = nexus_external_ips
-        .into_iter()
-        .map(|addr| match addr {
-            IpAddr::V4(addr) => DnsRecord::A(addr),
-            IpAddr::V6(addr) => DnsRecord::Aaaa(addr),
-        })
-        .collect();
-
-    let records = silos
-        .into_iter()
-        // We do not generate a DNS name for the "default" Silo.
-        //
-        // We use the name here rather than the id.  It shouldn't really matter
-        // since every system will have this silo and so no other Silo could
-        // have this name.  But callers (particularly the test suite and
-        // reconfigurator-cli) specify silos by name, not id, so if we used the
-        // id here then they'd have to apply this filter themselves (and this
-        // abstraction, such as it is, would be leakier).
-        .filter_map(|silo_name| {
-            (silo_name != DEFAULT_SILO.name())
-                .then(|| (silo_dns_name(&silo_name), dns_records.clone()))
-        })
-        .collect::<HashMap<String, Vec<DnsRecord>>>();
-
-    DnsConfigZone {
-        zone_name: external_dns_zone_name,
-        records: records.clone(),
-    }
-}
-
 fn dns_compute_update(
     log: &slog::Logger,
     dns_group: DnsGroup,
@@ -453,35 +298,10 @@ fn dns_compute_update(
     Ok(Some(update))
 }
 
-/// Returns the (relative) DNS name for this Silo's API and console endpoints
-/// _within_ the external DNS zone (i.e., without that zone's suffix)
-///
-/// This specific naming scheme is determined under RFD 357.
-pub fn silo_dns_name(name: &omicron_common::api::external::Name) -> String {
-    // RFD 4 constrains resource names (including Silo names) to DNS-safe
-    // strings, which is why it's safe to directly put the name of the
-    // resource into the DNS name rather than doing any kind of escaping.
-    format!("{}.sys", name)
-}
-
-/// Return the Nexus external addresses according to the given blueprint
-pub fn blueprint_nexus_external_ips(blueprint: &Blueprint) -> Vec<IpAddr> {
-    blueprint
-        .all_omicron_zones(BlueprintZoneFilter::ShouldBeExternallyReachable)
-        .filter_map(|(_, z)| match z.zone_type {
-            BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
-                external_ip,
-                ..
-            }) => Some(external_ip.ip),
-            _ => None,
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::overridables::Overridables;
+    use crate::test_utils::overridables_for_test;
     use crate::test_utils::realize_blueprint_and_expect;
     use crate::Sled;
     use dns_service_client::DnsDiff;
@@ -505,14 +325,18 @@ mod test {
     use nexus_reconfigurator_preparation::PlanningInputFromDb;
     use nexus_sled_agent_shared::inventory::OmicronZoneConfig;
     use nexus_sled_agent_shared::inventory::OmicronZoneType;
+    use nexus_sled_agent_shared::inventory::SledRole;
     use nexus_sled_agent_shared::inventory::ZoneKind;
     use nexus_test_utils::resource_helpers::create_silo;
     use nexus_test_utils::resource_helpers::DiskTestBuilder;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::BlueprintTarget;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
+    use nexus_types::deployment::BlueprintZoneFilter;
+    use nexus_types::deployment::BlueprintZoneType;
     use nexus_types::deployment::BlueprintZonesConfig;
     use nexus_types::deployment::CockroachDbClusterVersion;
     use nexus_types::deployment::CockroachDbPreserveDowngrade;
@@ -529,6 +353,7 @@ mod test {
     use nexus_types::internal_api::params::DnsConfigZone;
     use nexus_types::internal_api::params::DnsRecord;
     use nexus_types::internal_api::params::Srv;
+    use nexus_types::silo::silo_dns_name;
     use omicron_common::address::get_sled_address;
     use omicron_common::address::get_switch_zone_address;
     use omicron_common::address::IpRange;
@@ -888,15 +713,13 @@ mod test {
             .zip(possible_sled_subnets)
             .enumerate()
             .map(|(i, (sled_id, subnet))| {
-                let sled_info = Sled {
-                    id: *sled_id,
-                    sled_agent_address: get_sled_address(Ipv6Subnet::new(
-                        subnet.network(),
-                    )),
+                let sled_info = Sled::new(
+                    *sled_id,
+                    get_sled_address(Ipv6Subnet::new(subnet.network())),
                     // The first two of these (arbitrarily) will be marked
                     // Scrimlets.
-                    is_scrimlet: i < 2,
-                };
+                    if i < 2 { SledRole::Scrimlet } else { SledRole::Gimlet },
+                );
                 (*sled_id, sled_info)
             })
             .collect();
@@ -953,7 +776,7 @@ mod test {
         let mut switch_sleds_by_ip: BTreeMap<_, _> = sleds_by_id
             .iter()
             .filter_map(|(sled_id, sled)| {
-                if sled.is_scrimlet {
+                if sled.is_scrimlet() {
                     let sled_subnet =
                         sleds_by_id.get(sled_id).unwrap().subnet();
                     let switch_zone_ip = get_switch_zone_address(sled_subnet);
@@ -1479,7 +1302,7 @@ mod test {
         .await;
 
         // Now, execute the initial blueprint.
-        let overrides = Overridables::for_test(cptestctx);
+        let overrides = overridables_for_test(cptestctx);
         _ = realize_blueprint_and_expect(
             &opctx, datastore, resolver, &blueprint, &overrides,
         )

@@ -165,7 +165,8 @@ impl DataStore {
         //
         // TODO: InvSledOmicronZones is a vestigial table kept for backwards
         // compatibility -- the only unique data within it (the generation
-        // number) can be moved into `InvSledAgent` in the future.
+        // number) can be moved into `InvSledAgent` in the future. See
+        // oxidecomputer/omicron#6770.
         let sled_omicron_zones = collection
             .sled_agents
             .values()
@@ -2249,18 +2250,22 @@ impl DataStore {
 
             // Look up the Omicron zones.
             //
-            // Previously, during collection, fetched the Omicron zones in a
-            // separate request from the other sled agent data. It's possible
-            // that for a given (collection, sled) pair, one of those queries
-            // succeeded while the other failed. But this has since been
-            // changed to fetch all the data in a single query, which means
-            // that newer collections will either have both sets of data or
-            // neither of them.
+            // Older versions of Nexus fetched the Omicron zones in a separate
+            // request from the other sled agent data. The database model stil
+            // accounts for the possibility that for a given (collection, sled)
+            // pair, one of those queries succeeded while the other failed. But
+            // this has since been changed to fetch all the data in a single
+            // query, which means that newer collections will either have both
+            // sets of data or neither of them.
             //
             // If it _is_ the case that one of the pieces of data is missing,
             // log that as a warning and drop the sled from the collection.
-            // This should only happen for old collections.
-
+            // This should only happen for old collections, and only in the
+            // unlikely case that exactly one of the two related requests
+            // failed.
+            //
+            // TODO: Update the database model to reflect the new reality
+            // (oxidecomputer/omicron#6770).
             let Some(omicron_zones) = omicron_zones.remove(&sled_id) else {
                 warn!(
                     self.log,
@@ -2288,11 +2293,10 @@ impl DataStore {
                 usable_physical_ram: s.usable_physical_ram.into(),
                 reservoir_size: s.reservoir_size.into(),
                 omicron_zones,
-                // TODO: the unwrap_or_defaults here look incorrect -- all the
-                // data should be present because for as long as we've been
-                // doing inventory collections, sled-agent has returned all of
-                // these atomically. In other words, we must produce an error
-                // here.
+                // For disks, zpools, and datasets, the map for a sled ID is
+                // only populated if there is at least one disk/zpool/dataset
+                // for that sled. The `unwrap_or_default` calls cover the case
+                // where there are no disks/zpools/datasets for a sled.
                 disks: physical_disks
                     .get(&sled_id)
                     .map(|disks| disks.to_vec())
