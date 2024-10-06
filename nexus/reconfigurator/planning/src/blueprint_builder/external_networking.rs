@@ -371,8 +371,7 @@ impl<'a> BuilderExternalNetworking<'a> {
     /// which could otherwise only be added via RSS.
     ///
     /// TODO-cleanup: Remove when external DNS addresses are in the policy.
-    #[cfg(test)]
-    pub fn add_external_dns_ip(&mut self, addr: IpAddr) {
+    pub(crate) fn add_external_dns_ip(&mut self, addr: IpAddr) {
         assert!(
             self.available_external_dns_ips.insert(addr),
             "duplicate external DNS IP address"
