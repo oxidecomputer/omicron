@@ -107,7 +107,7 @@ impl BackgroundTask for ServiceZoneNatTracker {
             let mut nexus_count = 0;
             let mut dns_count = 0;
 
-            for (sled_id, zones_found) in collection.omicron_zones {
+            for (sled_id, sa) in collection.sled_agents {
                 let (_, sled) = match LookupPath::new(opctx, &self.datastore)
                     .sled_id(sled_id.into_untyped_uuid())
                     .fetch()
@@ -128,7 +128,7 @@ impl BackgroundTask for ServiceZoneNatTracker {
 
                 let sled_address = oxnet::Ipv6Net::host_net(*sled.ip);
 
-                let zones_config: OmicronZonesConfig = zones_found.zones;
+                let zones_config: OmicronZonesConfig = sa.omicron_zones;
                 let zones: Vec<OmicronZoneConfig> = zones_config.zones;
 
                 for zone in zones {

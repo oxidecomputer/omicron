@@ -404,27 +404,6 @@
       }
     },
     "/omicron-zones": {
-      "get": {
-        "operationId": "omicron_zones_get",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OmicronZonesConfig"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
       "put": {
         "operationId": "omicron_zones_put",
         "requestBody": {
@@ -3391,6 +3370,9 @@
               "$ref": "#/components/schemas/InventoryDisk"
             }
           },
+          "omicron_zones": {
+            "$ref": "#/components/schemas/OmicronZonesConfig"
+          },
           "reservoir_size": {
             "$ref": "#/components/schemas/ByteCount"
           },
@@ -3422,6 +3404,7 @@
           "baseboard",
           "datasets",
           "disks",
+          "omicron_zones",
           "reservoir_size",
           "sled_agent_address",
           "sled_id",

@@ -5182,31 +5182,23 @@ fn inv_collection_print_sleds(collection: &Collection) {
             println!("        reservation: {reservation:?}, quota: {quota:?}");
         }
 
-        if let Some(zones) = collection.omicron_zones.get(&sled.sled_id) {
-            println!(
-                "    zones collected from {} at {}",
-                zones.source, zones.time_collected,
-            );
-            println!(
-                "    zones generation: {} (count: {})",
-                zones.zones.generation,
-                zones.zones.zones.len()
-            );
+        println!(
+            "    zones generation: {} (count: {})",
+            sled.omicron_zones.generation,
+            sled.omicron_zones.zones.len(),
+        );
 
-            if zones.zones.zones.is_empty() {
-                continue;
-            }
+        if sled.omicron_zones.zones.is_empty() {
+            continue;
+        }
 
-            println!("    ZONES FOUND");
-            for z in &zones.zones.zones {
-                println!(
-                    "      zone {} (type {})",
-                    z.id,
-                    z.zone_type.kind().report_str()
-                );
-            }
-        } else {
-            println!("  warning: no zone information found");
+        println!("    ZONES FOUND");
+        for z in &sled.omicron_zones.zones {
+            println!(
+                "      zone {} (type {})",
+                z.id,
+                z.zone_type.kind().report_str()
+            );
         }
     }
 }
