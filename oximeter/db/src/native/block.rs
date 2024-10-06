@@ -87,11 +87,13 @@ impl Block {
         if !self.matches_structure(&block) {
             return Err(Error::MismatchedBlockStructure);
         }
+        let n_new_rows = block.n_rows;
         for (our_col, their_col) in
             self.columns.values_mut().zip(block.columns.into_values())
         {
             our_col.concat(their_col).expect("Checked above");
         }
+        self.n_rows += n_new_rows;
         Ok(())
     }
 
