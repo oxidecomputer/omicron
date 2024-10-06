@@ -254,7 +254,7 @@ fn redact_uuids(input: &str) -> String {
         .to_string()
 }
 
-/// Represents a list of extra redactions for [`redact_variable`].
+/// Represents a list of extra redactions for [`Redactor`].
 ///
 /// Extra redactions are applied in-order, before any builtin redactions.
 #[derive(Clone, Debug, Default)]
