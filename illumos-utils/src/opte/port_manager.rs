@@ -517,12 +517,15 @@ impl PortManager {
                 (RouterClass::Custom, custom_delta),
             ] {
                 let Some((to_add, to_delete)) = delta else {
-                    info!(self.inner.log, "nothing to do!!!?");
+                    debug!(self.inner.log, "vpc route ensure: no delta");
                     continue;
                 };
 
-                info!(self.inner.log, "TO ADD {to_add:#?}");
-                info!(self.inner.log, "TO DELETE {to_delete:#?}");
+                debug!(self.inner.log, "vpc route ensure to_add: {to_add:#?}");
+                debug!(
+                    self.inner.log,
+                    "vpc router ensure to_delete: {to_delete:#?}"
+                );
 
                 for route in to_delete {
                     let route = DelRouterEntryReq {
