@@ -333,6 +333,7 @@ mod test {
     use nexus_db_model::SiloQuotasUpdate;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::params;
+    use nexus_types::silo::DEFAULT_SILO_ID;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev;
     use uuid::Uuid;
@@ -380,7 +381,7 @@ mod test {
         opctx: &OpContext,
     ) -> TestData {
         let fleet_id = *nexus_db_fixed_data::FLEET_ID;
-        let silo_id = *nexus_db_fixed_data::silo::DEFAULT_SILO_ID;
+        let silo_id = DEFAULT_SILO_ID;
         let project_id = Uuid::new_v4();
 
         let (authz_project, _project) = datastore
