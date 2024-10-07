@@ -1587,7 +1587,8 @@ impl ServiceManager {
                             .add_property_group(config),
                     );
 
-                // TODO-john link to new omicron issue
+                // We shouldn't need to hardcode a port here:
+                // https://github.com/oxidecomputer/omicron/issues/6796
                 let admin_address = {
                     let mut addr = *address;
                     addr.set_port(CLICKHOUSE_ADMIN_PORT);
@@ -1669,7 +1670,8 @@ impl ServiceManager {
                                 .add_property_group(config),
                         );
 
-                // TODO-john link to new omicron issue
+                // We shouldn't need to hardcode a port here:
+                // https://github.com/oxidecomputer/omicron/issues/6796
                 let admin_address = {
                     let mut addr = *address;
                     addr.set_port(CLICKHOUSE_ADMIN_PORT);
@@ -1754,7 +1756,8 @@ impl ServiceManager {
                                 .add_property_group(config),
                         );
 
-                // TODO-john link to new omicron issue
+                // We shouldn't need to hardcode a port here:
+                // https://github.com/oxidecomputer/omicron/issues/6796
                 let admin_address = {
                     let mut addr = *address;
                     addr.set_port(CLICKHOUSE_ADMIN_PORT);
@@ -1812,7 +1815,8 @@ impl ServiceManager {
                     return Err(Error::SledAgentNotReady);
                 };
 
-                // TODO-john link to new omicron issue
+                // We shouldn't need to hardcode a port here:
+                // https://github.com/oxidecomputer/omicron/issues/6796
                 let admin_address = {
                     let mut addr = *address;
                     addr.set_port(COCKROACH_ADMIN_PORT);
