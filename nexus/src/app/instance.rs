@@ -827,7 +827,21 @@ impl super::Nexus {
                 self.notify_vmm_updated(opctx, propolis_id, &state).await?;
             }
             // If the returned state from sled-agent is `None`, then the instance
-            // was already unregistered --- so this should succeed.
+            // was already unregistered. This may have been from a prior
+            // instance-ensure-unregistered call, but, since we observed an
+            // active VMM above, the current observed VMM generation doesn't
+            // know that the VMM is gone, so it is possible that the sled-agent
+            // has misplaced this instance. Therefore, we will attempt to mark
+            // the VMM as `Failed` at the generation after which we observed the
+            // VMM. This is safe to do here, because if the instance has been
+            // unregistered due to a race with another
+            // instance-ensure-unregistered request (rather than a sled-agent
+            // failure), that other call will have advanced the state
+            // generation, and our attempt to write the failed state will not
+            // succeed, which is fine.
+            //
+            // Either way, the caller should not observe a returned instance
+            // state that believes itself to be running.
             Ok(None) => {
                 info!(
                     opctx.log,
@@ -837,6 +851,14 @@ impl super::Nexus {
                     "vmm_id" => %propolis_id,
                     "sled_id" => %sled_id,
                 );
+                let _ = self
+                    .mark_vmm_failed(
+                        &opctx,
+                        authz_instance.clone(),
+                        &vmm,
+                        &"instance already unregistered",
+                    )
+                    .await;
             }
             // If the error indicates that the VMM wasn't there to terminate,
             // mark it as Failed instead.
@@ -1487,19 +1509,22 @@ impl super::Nexus {
     /// execute, as this may just mean that another saga is already updating the
     /// instance. The update will be performed eventually even if this method
     /// could not update the instance.
-    pub(crate) async fn mark_vmm_failed(
+    pub(crate) async fn mark_vmm_failed<R>(
         &self,
         opctx: &OpContext,
         authz_instance: authz::Instance,
         vmm: &db::model::Vmm,
-        reason: &SledAgentInstanceError,
-    ) -> Result<(), Error> {
+        reason: &R,
+    ) -> Result<(), Error>
+    where
+        R: std::fmt::Display,
+    {
         let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
         let vmm_id = PropolisUuid::from_untyped_uuid(vmm.id);
         error!(self.log, "marking VMM failed due to sled agent API error";
                "instance_id" => %instance_id,
                "vmm_id" => %vmm_id,
-               "error" => ?reason);
+               "error" => %reason);
 
         let new_runtime = VmmRuntimeState {
             state: db::model::VmmState::Failed,
@@ -1513,7 +1538,7 @@ impl super::Nexus {
                 info!(self.log, "marked VMM as Failed, preparing update saga";
                     "instance_id" => %instance_id,
                     "vmm_id" => %vmm_id,
-                    "reason" => ?reason,
+                    "reason" => %reason,
                 );
                 let saga = instance_update::SagaInstanceUpdate::prepare(
                     &instance_update::Params {

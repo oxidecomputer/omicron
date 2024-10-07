@@ -6069,15 +6069,9 @@ async fn test_instance_force_terminate(cptestctx: &ControlPlaneTestContext) {
         instance_post(&client, &already_gone_name, InstanceOp::ForceTerminate)
             .await
     );
-    assert_eq!(instance.runtime.run_state, InstanceState::Stopping);
     // This time, the instance will go to `Failed` rather than `Stopped` since
     // sled-agent is no longer aware of it.
-    instance_wait_for_state(
-        client,
-        InstanceUuid::from_untyped_uuid(instance.identity.id),
-        InstanceState::Failed,
-    )
-    .await;
+    assert_eq!(instance.runtime.run_state, InstanceState::Failed);
 }
 
 async fn instance_get(
