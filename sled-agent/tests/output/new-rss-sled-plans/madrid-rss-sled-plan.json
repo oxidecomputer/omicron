@@ -129,7 +129,7 @@
               "destination": "0.0.0.0/0",
               "nexthop": "172.20.15.33",
               "vlan_id": null,
-              "local_pref": null
+              "rib_priority": null
             }
           ],
           "addresses": [
@@ -152,7 +152,7 @@
               "destination": "0.0.0.0/0",
               "nexthop": "172.20.15.33",
               "vlan_id": null,
-              "local_pref": null
+              "rib_priority": null
             }
           ],
           "addresses": [

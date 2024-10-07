@@ -2607,8 +2607,8 @@ pub struct SwitchPortRouteConfig {
     /// over an 802.1Q tagged L2 segment.
     pub vlan_id: Option<u16>,
 
-    /// Local preference indicating priority within and across protocols.
-    pub local_pref: Option<u32>,
+    /// RIB Priority indicating priority within and across protocols.
+    pub rib_priority: Option<u8>,
 }
 
 /*

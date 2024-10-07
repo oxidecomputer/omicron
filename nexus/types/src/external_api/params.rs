@@ -1791,7 +1791,7 @@ pub struct Route {
 
     /// Local preference for route. Higher preference indictes precedence
     /// within and across protocols.
-    pub local_pref: Option<u32>,
+    pub rib_priority: Option<u8>,
 }
 
 /// Select a BGP config by a name or id.
