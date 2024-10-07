@@ -727,10 +727,14 @@ impl std::str::FromStr for DataType {
 
 #[cfg(test)]
 mod tests {
-    use super::{DataType, Precision, DEFAULT_TIMEZONE};
+    use super::{
+        Block, BlockInfo, Column, DataType, Precision, ValueArray,
+        DEFAULT_TIMEZONE,
+    };
     use crate::native::block::{datetime, datetime64};
     use chrono::{SubsecRound as _, Utc};
     use chrono_tz::Tz;
+    use indexmap::IndexMap;
 
     #[test]
     fn test_data_type_to_string() {
@@ -852,5 +856,28 @@ mod tests {
         assert!(datetime64("DateTime64(0, )").is_err());
         assert!(datetime64("DateTime64('a', 'UTC')").is_err());
         assert!(datetime64("DateTime64(1,'UTC')").is_err());
+    }
+
+    #[test]
+    fn concat_blocks() {
+        let data = vec![0, 1];
+        let values = ValueArray::UInt64(data.clone());
+        let mut block = Block {
+            name: String::new(),
+            info: BlockInfo::default(),
+            n_columns: 1,
+            n_rows: values.len() as u64,
+            columns: IndexMap::from([(
+                String::from("a"),
+                Column { values: values.clone(), data_type: DataType::UInt64 },
+            )]),
+        };
+        block.concat(block.clone()).unwrap();
+        assert_eq!(block.n_columns, 1);
+        assert_eq!(block.n_rows, values.len() as u64 * 2);
+        assert_eq!(
+            block.columns["a"].values,
+            ValueArray::UInt64(vec![data.as_slice(), data.as_slice()].concat())
+        );
     }
 }
