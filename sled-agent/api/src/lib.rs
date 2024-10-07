@@ -175,7 +175,7 @@ pub trait SledAgentApi {
     async fn support_bundle_create(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<SupportBundlePathParam>,
-        query_params: Query<SupportBundleQueryParams>,
+        query_params: Query<SupportBundleCreateQueryParams>,
         body: StreamingBody,
     ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError>;
 
@@ -609,7 +609,7 @@ pub struct SupportBundlePathParam {
 
 /// Metadata about a support bundle
 #[derive(Deserialize, Serialize, JsonSchema)]
-pub struct SupportBundleQueryParams {
+pub struct SupportBundleCreateQueryParams {
     pub hash: ArtifactHash,
 }
 

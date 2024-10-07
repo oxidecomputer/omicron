@@ -442,7 +442,7 @@ impl SledAgentApi for SledAgentSimImpl {
     async fn support_bundle_create(
         _rqctx: RequestContext<Self::Context>,
         _path_params: Path<SupportBundlePathParam>,
-        _query_params: Query<SupportBundleQueryParams>,
+        _query_params: Query<SupportBundleCreateQueryParams>,
         _body: StreamingBody,
     ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError> {
         method_unimplemented()
