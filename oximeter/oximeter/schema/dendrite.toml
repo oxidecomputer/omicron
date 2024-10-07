@@ -18,7 +18,7 @@ versions = [
     # switch for its statistics, which is why these fields are included.
     # Dendrite may eventually report statistics about itself, or other aspects
     # not related to the switch, so they belong here, not the target.
-    { added_in = 1, fields = [ "switch_model", "switch_revision", "switch_id", "switch_serial" ] }
+    { added_in = 1, fields = [ "switch_model", "switch_revision", "switch_id", "switch_serial", "switch_slot" ] }
 ]
 
 [fields.rack_id]
@@ -56,3 +56,7 @@ description = "ID of the switch being managed"
 [fields.switch_serial]
 type = "string"
 description = "Serial number of the switch being managed"
+
+[fields.switch_slot]
+type = "u32"
+description = "Slot number of the switch the link is on"
