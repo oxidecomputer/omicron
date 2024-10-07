@@ -6866,6 +6866,7 @@ dependencies = [
  "serde",
  "serde_human_bytes",
  "serde_json",
+ "sha2",
  "sha3",
  "sled-agent-api",
  "sled-agent-client",
@@ -10184,6 +10185,7 @@ name = "sled-agent-api"
 version = "0.1.0"
 dependencies = [
  "camino",
+ "chrono",
  "dropshot",
  "nexus-sled-agent-shared",
  "omicron-common",

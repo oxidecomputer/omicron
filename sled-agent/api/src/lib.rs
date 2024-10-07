@@ -25,8 +25,11 @@ use omicron_common::{
         DatasetsConfig, DatasetsManagementResult, DiskVariant,
         DisksManagementResult, OmicronPhysicalDisksConfig,
     },
+    update::ArtifactHash,
 };
-use omicron_uuid_kinds::{PropolisUuid, ZpoolUuid};
+use omicron_uuid_kinds::{
+    DatasetUuid, PropolisUuid, SupportBundleUuid, ZpoolUuid,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sled_agent_types::{
@@ -153,6 +156,48 @@ pub trait SledAgentApi {
     async fn zones_list(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<Vec<String>>, HttpError>;
+
+    /// List all support bundles within a particular dataset
+    #[endpoint {
+        method = GET,
+        path = "/support-bundles/{zpool_id}/{dataset_id}"
+    }]
+    async fn support_bundle_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundleListPathParam>,
+    ) -> Result<HttpResponseOk<Vec<SupportBundleMetadata>>, HttpError>;
+
+    /// Create a service bundle within a particular dataset
+    #[endpoint {
+        method = POST,
+        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}"
+    }]
+    async fn support_bundle_create(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+        query_params: Query<SupportBundleQueryParams>,
+        body: StreamingBody,
+    ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError>;
+
+    /// Fetch a service bundle from a particular dataset
+    #[endpoint {
+        method = GET,
+        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}"
+    }]
+    async fn support_bundle_get(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+    ) -> Result<HttpResponseHeaders<HttpResponseOk<FreeformBody>>, HttpError>;
+
+    /// Delete a service bundle from a particular dataset
+    #[endpoint {
+        method = DELETE,
+        path = "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}"
+    }]
+    async fn support_bundle_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
 
     #[endpoint {
         method = GET,
@@ -547,6 +592,49 @@ impl From<DiskVariant> for DiskType {
 #[derive(Deserialize, JsonSchema)]
 pub struct VmmPathParam {
     pub propolis_id: PropolisUuid,
+}
+
+/// Path parameters for Support Bundle requests (sled agent API)
+#[derive(Deserialize, JsonSchema)]
+pub struct SupportBundleListPathParam {
+    /// The zpool on which this support bundle was provisioned
+    pub zpool_id: ZpoolUuid,
+
+    /// The dataset on which this support bundle was provisioned
+    pub dataset_id: DatasetUuid,
+}
+
+/// Path parameters for Support Bundle requests (sled agent API)
+#[derive(Deserialize, JsonSchema)]
+pub struct SupportBundlePathParam {
+    /// The zpool on which this support bundle was provisioned
+    pub zpool_id: ZpoolUuid,
+
+    /// The dataset on which this support bundle was provisioned
+    pub dataset_id: DatasetUuid,
+
+    /// The ID of the support bundle itself
+    pub support_bundle_id: SupportBundleUuid,
+}
+
+/// Metadata about a support bundle
+#[derive(Deserialize, Serialize, JsonSchema)]
+pub struct SupportBundleQueryParams {
+    pub hash: ArtifactHash,
+}
+
+#[derive(Deserialize, Serialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum SupportBundleState {
+    Complete,
+    Incomplete,
+}
+
+/// Metadata about a support bundle
+#[derive(Deserialize, Serialize, JsonSchema)]
+pub struct SupportBundleMetadata {
+    pub support_bundle_id: SupportBundleUuid,
+    pub state: SupportBundleState,
 }
 
 /// Path parameters for Disk requests (sled agent API)

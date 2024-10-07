@@ -223,6 +223,86 @@ impl SledAgentApi for SledAgentImpl {
         .map_err(HttpError::from)
     }
 
+    async fn support_bundle_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundleListPathParam>,
+    ) -> Result<HttpResponseOk<Vec<SupportBundleMetadata>>, HttpError> {
+        let sa = rqctx.context();
+
+        let SupportBundleListPathParam { zpool_id, dataset_id } =
+            path_params.into_inner();
+
+        let bundles = sa.support_bundle_list(zpool_id, dataset_id).await?;
+
+        Ok(HttpResponseOk(bundles))
+    }
+
+    async fn support_bundle_create(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+        query_params: Query<SupportBundleQueryParams>,
+        body: StreamingBody,
+    ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError> {
+        let sa = rqctx.context();
+
+        let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
+            path_params.into_inner();
+        let SupportBundleQueryParams { hash } = query_params.into_inner();
+
+        let metadata = sa
+            .support_bundle_create(
+                zpool_id,
+                dataset_id,
+                support_bundle_id,
+                hash,
+                body,
+            )
+            .await?;
+
+        Ok(HttpResponseCreated(metadata))
+    }
+
+    async fn support_bundle_get(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+    ) -> Result<HttpResponseHeaders<HttpResponseOk<FreeformBody>>, HttpError>
+    {
+        let sa = rqctx.context();
+        let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
+            path_params.into_inner();
+
+        let file = sa
+            .support_bundle_get(zpool_id, dataset_id, support_bundle_id)
+            .await?;
+
+        let file_access = hyper_staticfile::vfs::TokioFileAccess::new(file);
+        let file_stream =
+            hyper_staticfile::util::FileBytesStream::new(file_access);
+        let body = Body::wrap(hyper_staticfile::Body::Full(file_stream));
+        let body = FreeformBody(body);
+        let mut response =
+            HttpResponseHeaders::new_unnamed(HttpResponseOk(body));
+        response.headers_mut().append(
+            http::header::CONTENT_TYPE,
+            "application/gzip".try_into().unwrap(),
+        );
+        Ok(response)
+    }
+
+    async fn support_bundle_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let sa = rqctx.context();
+
+        let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
+            path_params.into_inner();
+
+        sa.support_bundle_delete(zpool_id, dataset_id, support_bundle_id)
+            .await?;
+        Ok(HttpResponseDeleted())
+    }
+
     async fn datasets_put(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<DatasetsConfig>,
