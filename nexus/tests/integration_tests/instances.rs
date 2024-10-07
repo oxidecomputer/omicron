@@ -6028,6 +6028,58 @@ async fn test_instance_v2p_mappings(cptestctx: &ControlPlaneTestContext) {
     }
 }
 
+#[nexus_test]
+async fn test_instance_force_terminate(cptestctx: &ControlPlaneTestContext) {
+    let client = &cptestctx.external_client;
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+    let instance_name = "test-instance-please-ignore";
+    let already_gone_name = "what-instance";
+    make_forgotten_instance(
+        &cptestctx,
+        already_gone_name,
+        InstanceAutoRestartPolicy::Never,
+    )
+    .await;
+
+    // Create an instance.
+    let instance = create_instance(client, PROJECT_NAME, instance_name).await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+    instance_simulate(nexus, &instance_id).await;
+
+    let instance = dbg!(
+        instance_post(&client, &instance_name, InstanceOp::ForceTerminate)
+            .await
+    );
+    // The instance will go to Stopping first while an instance update saga
+    // removes the VMM.
+    assert_eq!(instance.runtime.run_state, InstanceState::Stopping);
+    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
+
+    // A subsequent force-terminate should be okay because we're already
+    // terminated.
+    let instance = dbg!(
+        instance_post(&client, &instance_name, InstanceOp::ForceTerminate)
+            .await
+    );
+    assert_eq!(instance.runtime.run_state, InstanceState::Stopped);
+
+    // Okay, what if the instance is already gone?
+    let instance = dbg!(
+        instance_post(&client, &already_gone_name, InstanceOp::ForceTerminate)
+            .await
+    );
+    assert_eq!(instance.runtime.run_state, InstanceState::Stopping);
+    // This time, the instance will go to `Failed` rather than `Stopped` since
+    // sled-agent is no longer aware of it.
+    instance_wait_for_state(
+        client,
+        InstanceUuid::from_untyped_uuid(instance.identity.id),
+        InstanceState::Failed,
+    )
+    .await;
+}
+
 async fn instance_get(
     client: &ClientTestContext,
     instance_url: &str,
@@ -6064,6 +6116,7 @@ pub enum InstanceOp {
     Start,
     Stop,
     Reboot,
+    ForceTerminate,
 }
 
 pub async fn instance_wait_for_state(
@@ -6225,6 +6278,7 @@ pub async fn instance_post(
                 InstanceOp::Start => "start",
                 InstanceOp::Stop => "stop",
                 InstanceOp::Reboot => "reboot",
+                InstanceOp::ForceTerminate => "force-terminate",
             }
         )
         .as_str(),
