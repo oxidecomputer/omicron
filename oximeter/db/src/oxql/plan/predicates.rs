@@ -229,14 +229,64 @@ impl Predicates {
         &self,
         delta: &Delta,
     ) -> anyhow::Result<SplitPredicates> {
-        // TODO(ben): this seems like something we should be able to do.
-        let Self::Single(filter) = self else {
-            anyhow::bail!(
-                "Cannot split a filter with disjunctions around a \
-                delta table operation"
-            );
-        };
+        match self {
+            Predicates::Single(single) => {
+                Self::split_single_predicates_around_delta(single, delta)
+            }
+            Predicates::Disjunctions(disjunctions) => {
+                // Even though we're pushing disjunctions, we only get this by
+                // splitting around another op. That means each element cannot
+                // _contain_ disjunctions -- they are joined by OR, though. So
+                // that means each element itself is single filter expr. So
+                // calling `flatten_disjunctions()` should return self. That
+                // means we know we'll always get a single predicate (or none).
+                // Either way, we push it onto our list, and then compress if
+                // needed.
+                let mut pushed = Vec::with_capacity(disjunctions.len());
+                let mut not_pushed = Vec::with_capacity(disjunctions.len());
+                for maybe_filter in disjunctions.iter() {
+                    let Some(filter) = maybe_filter else {
+                        continue;
+                    };
+                    let this = Self::split_single_predicates_around_delta(
+                        filter, delta,
+                    )?;
+                    match this.pushed {
+                        Some(Predicates::Single(filter)) => {
+                            pushed.push(Some(filter))
+                        }
+                        Some(_) => unreachable!(),
+                        None => pushed.push(None),
+                    }
+                    match this.not_pushed {
+                        Some(Predicates::Single(filter)) => {
+                            not_pushed.push(Some(filter))
+                        }
+                        Some(_) => unreachable!(),
+                        None => not_pushed.push(None),
+                    }
+                }
 
+                // Compress again.
+                let pushed = if pushed.iter().all(Option::is_none) {
+                    None
+                } else {
+                    Some(Predicates::from(OptionalDisjunctions(pushed)))
+                };
+                let not_pushed = if not_pushed.iter().all(Option::is_none) {
+                    None
+                } else {
+                    Some(Predicates::from(OptionalDisjunctions(not_pushed)))
+                };
+                Ok(SplitPredicates { pushed, not_pushed })
+            }
+        }
+    }
+
+    fn split_single_predicates_around_delta(
+        filter: &filter::Filter,
+        delta: &Delta,
+    ) -> anyhow::Result<SplitPredicates> {
         let schema = &delta.output;
         let disjunctions = filter.simplify_to_dnf()?.flatten_disjunctions();
 
@@ -272,16 +322,6 @@ impl Predicates {
             Some(Predicates::from(OptionalDisjunctions(not_pushed)))
         };
         Ok(SplitPredicates { pushed, not_pushed })
-    }
-
-    /// Return true any the predicates are options / missing.
-    pub fn any_unspecified(&self) -> bool {
-        match self {
-            Predicates::Single(_) => false,
-            Predicates::Disjunctions(disjuncts) => {
-                disjuncts.0.iter().any(Option::is_none)
-            }
-        }
     }
 
     pub(crate) fn to_required(&self) -> anyhow::Result<Vec<filter::Filter>> {

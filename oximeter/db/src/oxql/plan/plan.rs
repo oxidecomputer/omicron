@@ -319,6 +319,7 @@ impl Plan {
                 let node = Node::Get(Get {
                     table_schema: table_schema.clone(),
                     filters: vec![],
+                    limit: None,
                 });
                 nodes.push(node);
 
@@ -428,7 +429,136 @@ impl Plan {
     // filters like `filter x > 1 / 2` or `filter x > log(5)`, we can evaluate
     // those expressions at query-plan time.
     fn optimize_plan(nodes: &[Node]) -> anyhow::Result<OptimizedPlan> {
-        Self::pushdown_predicates(nodes)
+        let optimized = Self::pushdown_predicates(nodes)?;
+        Self::pushdown_limit(optimized.nodes())
+    }
+
+    // Push down limit operations in the list of plan nodes.
+    fn pushdown_limit(nodes: &[Node]) -> anyhow::Result<OptimizedPlan> {
+        anyhow::ensure!(
+            !nodes.is_empty(),
+            "Planning error: plan nodes cannot be empty"
+        );
+        let mut modified = false;
+
+        // Collect nodes in the plan.
+        let mut remaining_nodes =
+            nodes.iter().cloned().collect::<VecDeque<_>>();
+        let mut processed_nodes = VecDeque::with_capacity(nodes.len());
+
+        while let Some(current_node) = remaining_nodes.pop_back() {
+            // What we do with the limit node depends on what's in front of it.
+            let Some(next_node) = remaining_nodes.pop_back() else {
+                // If there _isn't_ one, then the current node must be the start
+                // of the plan, and so push it and break out.
+                processed_nodes.push_front(current_node);
+                break;
+            };
+
+            // If this isn't a limit node, just push it and continue
+            let Node::Limit(limit) = current_node else {
+                processed_nodes.push_front(current_node);
+                processed_nodes.push_front(next_node);
+                continue;
+            };
+
+            match next_node {
+                Node::Subquery(subplans) => {
+                    // Push the limit onto the subquery plans and recurse.
+                    let new_subplans = subplans
+                        .into_iter()
+                        .map(|mut plan| {
+                            let start = Instant::now();
+                            let nodes = [
+                                plan.optimized.nodes(),
+                                &[Node::Limit(limit.clone())],
+                            ]
+                            .concat();
+                            plan.optimized = Self::pushdown_limit(&nodes)?;
+                            plan.duration += start.elapsed();
+                            Ok(plan)
+                        })
+                        .collect::<anyhow::Result<Vec<_>>>()?;
+                    processed_nodes.push_front(Node::Subquery(new_subplans));
+                    modified = true;
+                }
+                Node::Get(mut get) => {
+                    // If we've gotten here, we _may_ be able to push this into
+                    // the databse, but only if there isn't one already in the
+                    // get node.
+                    match get.limit.as_mut() {
+                        Some(existing) => {
+                            // There's already a limiting operation here. We may
+                            // be able to coalesce them, but only if they're the
+                            // same kind. If not, it's not correct to reorder
+                            // them, so we have to push the current node and
+                            // then the next (get) node onto the processed list.
+                            if existing.kind == limit.limit.kind {
+                                // Take the smaller of the two!
+                                existing.count =
+                                    existing.count.min(limit.limit.count);
+                                modified = true;
+                            } else {
+                                // These are different kinds, push them in
+                                // order, starting with the limit.
+                                processed_nodes.push_front(Node::Limit(limit));
+                            }
+                        }
+                        None => {
+                            let old = get.limit.replace(limit.limit);
+                            assert!(old.is_none());
+                            modified = true;
+                        }
+                    }
+
+                    // We always push the get node last.
+                    processed_nodes.push_front(Node::Get(get));
+                }
+                Node::Delta(_)
+                | Node::Align(_)
+                | Node::GroupBy(_)
+                | Node::Join(_) => {
+                    remaining_nodes.push_back(Node::Limit(limit));
+                    processed_nodes.push_front(next_node);
+                    modified = true;
+                }
+                Node::Filter(filter) => {
+                    // We might be able to reorder the limit through the filter,
+                    // but it depends on whether and how the filter references
+                    // timestamps. They need to point in the same "direction" --
+                    // see `can_reorder_around()` for details.
+                    if filter.can_reorder_around(&limit.limit) {
+                        processed_nodes.push_front(Node::Filter(filter));
+                        remaining_nodes.push_back(Node::Limit(limit));
+                        modified = true;
+                    } else {
+                        processed_nodes.push_front(Node::Limit(limit));
+                        processed_nodes.push_front(Node::Filter(filter));
+                    }
+                }
+                Node::Limit(mut other_limit) => {
+                    // We might be able to coalesce these, if they're of the
+                    // same kind. If they are not, push the current one, and
+                    // then start carrying through the next one.
+                    if limit.limit.kind == other_limit.limit.kind {
+                        other_limit.limit.count =
+                            other_limit.limit.count.min(limit.limit.count);
+                        remaining_nodes.push_back(Node::Limit(other_limit));
+                        modified = true;
+                    } else {
+                        processed_nodes.push_front(Node::Limit(limit));
+                        remaining_nodes.push_back(Node::Limit(other_limit));
+                    }
+                }
+            }
+        }
+
+        let out = processed_nodes.make_contiguous().to_vec();
+        if modified {
+            Ok(OptimizedPlan::Optimized(out))
+        } else {
+            Ok(OptimizedPlan::Unchanged(out))
+        }
     }
 
     // Push down predicates in the list of plan nodes.
@@ -522,14 +652,6 @@ impl Plan {
                     // the filters won't be pushed any farther. It's required
                     // that every filter we push through be _non-empty_. See
                     // `Filter` for details.
-                    anyhow::ensure!(
-                        !current_filter.predicates.any_unspecified(),
-                        "The filter predicates do not restrict \
-                        either the fields or timestamps. This implies \
-                        a full table scan in the database, which is not \
-                        supported, please rewrite the predicates to restrict \
-                        the data by fields or timestamps.",
-                    );
                     get.filters = current_filter.predicates.to_required()?;
                     processed_nodes.push_front(Node::Get(get));
                     modified = true;

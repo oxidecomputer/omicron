@@ -12,6 +12,7 @@ use crate::oxql::ast::literal::Literal;
 use crate::oxql::ast::table_ops::filter::{
     self, implicit_field_names_for_table_schema,
 };
+use crate::oxql::ast::table_ops::limit;
 use crate::oxql::plan::plan::TableOpInput;
 use crate::oxql::plan::predicates::Predicates;
 use crate::oxql::schema::TableSchema;
@@ -196,5 +197,20 @@ impl Filter {
             );
         }
         Ok(())
+    }
+
+    // Return true if we can reorder a limit around the provided filter.
+    pub fn can_reorder_around(&self, limit: &limit::Limit) -> bool {
+        match &self.predicates {
+            Predicates::Single(f) => f.can_reorder_around(limit),
+            Predicates::Disjunctions(disjunctions) => {
+                disjunctions.iter().all(|maybe_disjunction| {
+                    maybe_disjunction
+                        .as_ref()
+                        .map(|filter| filter.can_reorder_around(limit))
+                        .unwrap_or(true)
+                })
+            }
+        }
     }
 }
