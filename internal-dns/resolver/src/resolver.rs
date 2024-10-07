@@ -26,6 +26,46 @@ pub enum ResolveError {
     NotFoundByString(String),
 }
 
+/// A wrapper around a set of bootstrap DNS addresses, providing a convenient
+/// way to construct a [`qorb::resolvers::dns::DnsResolver`] for specific
+/// services.
+#[derive(Debug, Clone)]
+pub struct QorbResolver {
+    bootstrap_dns_ips: Vec<SocketAddr>,
+}
+
+impl QorbResolver {
+    pub fn new(bootstrap_dns_ips: Vec<SocketAddr>) -> Self {
+        Self { bootstrap_dns_ips }
+    }
+
+    pub fn bootstrap_dns_ips(&self) -> &[SocketAddr] {
+        &self.bootstrap_dns_ips
+    }
+
+    pub fn for_service(
+        &self,
+        service: ServiceName,
+    ) -> qorb::resolver::BoxedResolver {
+        let config = qorb::resolvers::dns::DnsResolverConfig {
+            // Ignore the TTL returned by our servers, primarily to avoid
+            // thrashing if they return a TTL of 0 (which they currently do:
+            // https://github.com/oxidecomputer/omicron/issues/6790).
+            hardcoded_ttl: Some(std::time::Duration::MAX),
+            // We don't currently run additional internal DNS servers that
+            // themselves need to be found via a set of bootstrap DNS IPs, but
+            // if we did, we'd populate `resolver_service` here to tell qorb how
+            // to find them.
+            ..Default::default()
+        };
+        Box::new(qorb::resolvers::dns::DnsResolver::new(
+            qorb::service::Name(service.srv_name()),
+            self.bootstrap_dns_ips.clone(),
+            config,
+        ))
+    }
+}
+
 /// A wrapper around a DNS resolver, providing a way to conveniently
 /// look up IP addresses of services based on their SRV keys.
 #[derive(Clone)]

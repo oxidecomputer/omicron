@@ -9,14 +9,12 @@ use super::Config as DbConfig;
 use crate::db::pool_connection::{DieselPgConnector, DieselPgConnectorArgs};
 
 use internal_dns_types::names::ServiceName;
+use internal_dns_resolver::QorbResolver;
 use qorb::backend;
 use qorb::policy::Policy;
 use qorb::resolver::{AllBackends, Resolver};
-use qorb::resolvers::dns::{DnsResolver, DnsResolverConfig};
-use qorb::service;
 use slog::Logger;
 use std::collections::BTreeMap;
-use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::watch;
 
@@ -55,19 +53,6 @@ impl Resolver for SingleHostResolver {
     }
 }
 
-fn make_dns_resolver(
-    bootstrap_dns: Vec<SocketAddr>,
-) -> qorb::resolver::BoxedResolver {
-    Box::new(DnsResolver::new(
-        service::Name(ServiceName::Cockroach.srv_name()),
-        bootstrap_dns,
-        DnsResolverConfig {
-            hardcoded_ttl: Some(tokio::time::Duration::MAX),
-            ..Default::default()
-        },
-    ))
-}
-
 fn make_single_host_resolver(
     config: &DbConfig,
 ) -> qorb::resolver::BoxedResolver {
@@ -96,11 +81,11 @@ impl Pool {
     ///
     /// Creating this pool does not necessarily wait for connections to become
     /// available, as backends may shift over time.
-    pub fn new(log: &Logger, bootstrap_dns: Vec<SocketAddr>) -> Self {
+    pub fn new(log: &Logger, resolver: &QorbResolver) -> Self {
         // Make sure diesel-dtrace's USDT probes are enabled.
         usdt::register_probes().expect("Failed to register USDT DTrace probes");
 
-        let resolver = make_dns_resolver(bootstrap_dns);
+        let resolver = resolver.for_service(ServiceName::Cockroach);
         let connector = make_postgres_connector(log);
 
         let policy = Policy::default();
