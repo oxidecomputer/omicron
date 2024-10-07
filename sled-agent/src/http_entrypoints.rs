@@ -242,14 +242,14 @@ impl SledAgentApi for SledAgentImpl {
         path_params: Path<SupportBundlePathParam>,
         query_params: Query<SupportBundleQueryParams>,
         body: StreamingBody,
-    ) -> Result<HttpResponseCreated<()>, HttpError> {
+    ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError> {
         let sa = rqctx.context();
 
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
             path_params.into_inner();
         let SupportBundleQueryParams { hash } = query_params.into_inner();
 
-        sa.support_bundle_create(
+        let metadata = sa.support_bundle_create(
             zpool_id,
             dataset_id,
             support_bundle_id,
@@ -258,7 +258,7 @@ impl SledAgentApi for SledAgentImpl {
         )
         .await?;
 
-        Ok(HttpResponseCreated(()))
+        Ok(HttpResponseCreated(metadata))
     }
 
     async fn support_bundle_get(

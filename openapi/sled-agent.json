@@ -524,6 +524,220 @@
         }
       }
     },
+    "/support-bundles/{zpool_id}/{dataset_id}": {
+      "get": {
+        "summary": "List all support bundles within a particular dataset",
+        "operationId": "support_bundle_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "description": "The dataset on which this support bundle was provisioned",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+            }
+          },
+          {
+            "in": "path",
+            "name": "zpool_id",
+            "description": "The zpool on which this support bundle was provisioned",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Array_of_SupportBundleMetadata",
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SupportBundleMetadata"
+                  }
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}": {
+      "get": {
+        "summary": "Fetch a service bundle from a particular dataset",
+        "operationId": "support_bundle_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "description": "The dataset on which this support bundle was provisioned",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+            }
+          },
+          {
+            "in": "path",
+            "name": "support_bundle_id",
+            "description": "The ID of the support bundle itself",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
+            }
+          },
+          {
+            "in": "path",
+            "name": "zpool_id",
+            "description": "The zpool on which this support bundle was provisioned",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "*/*": {
+                "schema": {}
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create a service bundle within a particular dataset",
+        "operationId": "support_bundle_create",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "description": "The dataset on which this support bundle was provisioned",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+            }
+          },
+          {
+            "in": "path",
+            "name": "support_bundle_id",
+            "description": "The ID of the support bundle itself",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
+            }
+          },
+          {
+            "in": "path",
+            "name": "zpool_id",
+            "description": "The zpool on which this support bundle was provisioned",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "hash",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "hex string (32 bytes)"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SupportBundleMetadata"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a service bundle from a particular dataset",
+        "operationId": "support_bundle_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset_id",
+            "description": "The dataset on which this support bundle was provisioned",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForDatasetKind"
+            }
+          },
+          {
+            "in": "path",
+            "name": "support_bundle_id",
+            "description": "The ID of the support bundle itself",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
+            }
+          },
+          {
+            "in": "path",
+            "name": "zpool_id",
+            "description": "The zpool on which this support bundle was provisioned",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TypedUuidForZpoolKind"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/switch-ports": {
       "post": {
         "operationId": "uplink_ensure",
@@ -2249,7 +2463,7 @@
         ]
       },
       "DatasetConfig": {
-        "description": "Configuration information necessary to request a single dataset",
+        "description": "Configuration information necessary to request a single dataset.\n\nThese datasets are tracked directly by Nexus.",
         "type": "object",
         "properties": {
           "compression": {
@@ -5045,6 +5259,29 @@
         "format": "uint8",
         "minimum": 0
       },
+      "SupportBundleMetadata": {
+        "description": "Metadata about a support bundle",
+        "type": "object",
+        "properties": {
+          "state": {
+            "$ref": "#/components/schemas/SupportBundleState"
+          },
+          "support_bundle_id": {
+            "$ref": "#/components/schemas/TypedUuidForSupportBundleKind"
+          }
+        },
+        "required": [
+          "state",
+          "support_bundle_id"
+        ]
+      },
+      "SupportBundleState": {
+        "type": "string",
+        "enum": [
+          "complete",
+          "incomplete"
+        ]
+      },
       "SwitchLocation": {
         "description": "Identifies switch physical location",
         "oneOf": [
@@ -5136,6 +5373,10 @@
         "format": "uuid"
       },
       "TypedUuidForSledKind": {
+        "type": "string",
+        "format": "uuid"
+      },
+      "TypedUuidForSupportBundleKind": {
         "type": "string",
         "format": "uuid"
       },

@@ -444,7 +444,7 @@ impl SledAgentApi for SledAgentSimImpl {
         _path_params: Path<SupportBundlePathParam>,
         _query_params: Query<SupportBundleQueryParams>,
         _body: StreamingBody,
-    ) -> Result<HttpResponseCreated<()>, HttpError> {
+    ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError> {
         method_unimplemented()
     }
 

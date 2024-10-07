@@ -925,7 +925,7 @@ impl SledAgent {
         support_bundle_id: SupportBundleUuid,
         expected_hash: ArtifactHash,
         body: StreamingBody,
-    ) -> Result<(), Error> {
+    ) -> Result<SupportBundleMetadata, Error> {
         let log = self.log.new(o!(
             "operation" => "support_bundle_create",
             "zpool_id" => zpool_id.to_string(),
@@ -975,7 +975,11 @@ impl SledAgent {
             }
 
             info!(log, "Support bundle already exists");
-            return Ok(());
+            let metadata = SupportBundleMetadata {
+                support_bundle_id,
+                state: SupportBundleState::Complete,
+            };
+            return Ok(metadata);
         }
 
         // Stream the file into the dataset, first as a temporary file,
@@ -1005,7 +1009,11 @@ impl SledAgent {
         }
 
         info!(log, "Bundle written successfully");
-        Ok(())
+        let metadata = SupportBundleMetadata {
+            support_bundle_id,
+            state: SupportBundleState::Complete,
+        };
+        Ok(metadata)
     }
 
     pub async fn support_bundle_delete(

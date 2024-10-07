@@ -177,7 +177,7 @@ pub trait SledAgentApi {
         path_params: Path<SupportBundlePathParam>,
         query_params: Query<SupportBundleQueryParams>,
         body: StreamingBody,
-    ) -> Result<HttpResponseCreated<()>, HttpError>;
+    ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError>;
 
     /// Fetch a service bundle from a particular dataset
     #[endpoint {
@@ -614,6 +614,7 @@ pub struct SupportBundleQueryParams {
 }
 
 #[derive(Deserialize, Serialize, JsonSchema, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub enum SupportBundleState {
     Complete,
     Incomplete,
