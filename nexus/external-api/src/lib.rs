@@ -1166,7 +1166,13 @@ pub trait NexusExternalApi {
         path_params: Path<params::InstancePath>,
     ) -> Result<HttpResponseAccepted<Instance>, HttpError>;
 
-    /// Stop instance, violently.
+    /// Terminate instance
+    ///
+    /// Immediately halts a running instance by rudely terminating its
+    /// virtual machine process. This immediately moves the instance to the
+    /// "stopped" state without transitioning through the "stopping" state.
+    /// This operation can be used to recover an instance that is not
+    /// responding to requests to stop issued through the instance stop API.
     #[endpoint {
         method = POST,
         path = "/v1/instances/{instance}/force-terminate",
