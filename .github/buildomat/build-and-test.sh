@@ -4,8 +4,7 @@ set -o errexit
 set -o pipefail
 set -o xtrace
 
-# Color the output for easier readability.
-export CARGO_TERM_COLOR=always
+source .github/buildomat/ci-env.sh
 
 target_os=$1
 

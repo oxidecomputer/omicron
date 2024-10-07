@@ -26,6 +26,8 @@ set -o errexit
 set -o pipefail
 set -o xtrace
 
+source .github/buildomat/ci-env.sh
+
 #
 # If we fail, try to collect some debugging information
 #
