@@ -22,7 +22,9 @@
 #: ]
 #: enable = false
 
+# shellcheck source=/dev/null
 source ./env.sh
+# shellcheck source=/dev/null
 source .github/buildomat/ci-env.sh
 
 set -o errexit

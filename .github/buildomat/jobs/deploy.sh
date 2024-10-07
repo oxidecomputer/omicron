@@ -26,8 +26,6 @@ set -o errexit
 set -o pipefail
 set -o xtrace
 
-source .github/buildomat/ci-env.sh
-
 #
 # If we fail, try to collect some debugging information
 #
@@ -195,6 +193,9 @@ pfexec chown build:build /opt/oxide/work
 cd /opt/oxide/work
 
 ptime -m tar xvzf /input/package/work/package.tar.gz
+
+# shellcheck source=/dev/null
+source .github/buildomat/ci-env.sh
 
 # Ask buildomat for the range of extra addresses that we're allowed to use, and
 # break them up into the ranges we need.

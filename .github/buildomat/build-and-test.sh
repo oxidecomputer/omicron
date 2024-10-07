@@ -4,6 +4,13 @@ set -o errexit
 set -o pipefail
 set -o xtrace
 
+#
+# Set up our PATH for the test suite.
+#
+
+# shellcheck source=/dev/null
+source ./env.sh
+# shellcheck source=/dev/null
 source .github/buildomat/ci-env.sh
 
 target_os=$1
@@ -29,10 +36,7 @@ OUTPUT_DIR='/work'
 echo "tests will store non-ephemeral output in $OUTPUT_DIR" >&2
 mkdir -p "$OUTPUT_DIR"
 
-#
-# Set up our PATH for the test suite.
-#
-source ./env.sh
+
 
 banner prerequisites
 ptime -m bash ./tools/install_builder_prerequisites.sh -y
