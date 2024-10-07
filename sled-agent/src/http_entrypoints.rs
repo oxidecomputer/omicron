@@ -249,14 +249,15 @@ impl SledAgentApi for SledAgentImpl {
             path_params.into_inner();
         let SupportBundleQueryParams { hash } = query_params.into_inner();
 
-        let metadata = sa.support_bundle_create(
-            zpool_id,
-            dataset_id,
-            support_bundle_id,
-            hash,
-            body,
-        )
-        .await?;
+        let metadata = sa
+            .support_bundle_create(
+                zpool_id,
+                dataset_id,
+                support_bundle_id,
+                hash,
+                body,
+            )
+            .await?;
 
         Ok(HttpResponseCreated(metadata))
     }
