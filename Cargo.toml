@@ -273,11 +273,6 @@ redundant_field_names = "warn"
 # idiomatically declaring a static array of atomics uses `const Atomic`). We
 # warn on this to catch the former, and expect any uses of the latter to allow
 # this locally.
-#
-# Note: any const value with a type containing a `bytes::Bytes` hits this lint,
-# and you should `#![allow]` it for now. This is most likely to be seen with
-# `http::header::{HeaderName, HeaderValue}`. This is a Clippy bug which will be
-# fixed in the Rust 1.80 toolchain (rust-lang/rust-clippy#12691).
 declare_interior_mutable_const = "warn"
 # Also warn on casts, preferring explicit conversions instead.
 #
