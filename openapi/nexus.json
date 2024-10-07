@@ -2681,7 +2681,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "List addresses attached to an internet gateway.",
+        "summary": "List IP addresses attached to internet gateway",
         "operationId": "internet_gateway_ip_address_list",
         "parameters": [
           {
@@ -2764,7 +2764,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "Attach ip pool to internet gateway",
+        "summary": "Attach IP pool to internet gateway",
         "operationId": "internet_gateway_ip_address_create",
         "parameters": [
           {
@@ -2828,7 +2828,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "Detach ip pool from internet gateway",
+        "summary": "Detach IP pool from internet gateway",
         "operationId": "internet_gateway_ip_address_delete",
         "parameters": [
           {
@@ -2891,7 +2891,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "List IP pools attached to an internet gateway.",
+        "summary": "List IP pools attached to internet gateway",
         "operationId": "internet_gateway_ip_pool_list",
         "parameters": [
           {
@@ -2974,7 +2974,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "Attach ip pool to internet gateway",
+        "summary": "Attach IP pool to internet gateway",
         "operationId": "internet_gateway_ip_pool_create",
         "parameters": [
           {
@@ -3038,7 +3038,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "Detach ip pool from internet gateway",
+        "summary": "Detach IP pool from internet gateway",
         "operationId": "internet_gateway_ip_pool_delete",
         "parameters": [
           {
@@ -18674,7 +18674,7 @@
             "type": "string"
           },
           "destination": {
-            "description": "Selects which traffic this routing rule will apply to.",
+            "description": "Selects which traffic this routing rule will apply to",
             "allOf": [
               {
                 "$ref": "#/components/schemas/RouteDestination"
@@ -18703,7 +18703,7 @@
             ]
           },
           "target": {
-            "description": "The location that matched packets should be forwarded to.",
+            "description": "The location that matched packets should be forwarded to",
             "allOf": [
               {
                 "$ref": "#/components/schemas/RouteTarget"

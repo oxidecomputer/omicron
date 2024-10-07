@@ -2257,7 +2257,7 @@ pub trait NexusExternalApi {
         query_params: Query<params::InternetGatewayDeleteSelector>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
-    /// List IP pools attached to an internet gateway.
+    /// List IP pools attached to internet gateway
     #[endpoint {
         method = GET,
         path = "/v1/internet-gateway-ip-pools",
@@ -2273,7 +2273,7 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
-    /// Attach ip pool to internet gateway
+    /// Attach IP pool to internet gateway
     #[endpoint {
         method = POST,
         path = "/v1/internet-gateway-ip-pools",
@@ -2285,7 +2285,7 @@ pub trait NexusExternalApi {
         create_params: TypedBody<params::InternetGatewayIpPoolCreate>,
     ) -> Result<HttpResponseCreated<views::InternetGatewayIpPool>, HttpError>;
 
-    /// Detach ip pool from internet gateway
+    /// Detach IP pool from internet gateway
     #[endpoint {
         method = DELETE,
         path = "/v1/internet-gateway-ip-pools/{pool}",
@@ -2297,7 +2297,7 @@ pub trait NexusExternalApi {
         query_params: Query<params::DeleteInternetGatewayElementSelector>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
-    /// List addresses attached to an internet gateway.
+    /// List IP addresses attached to internet gateway
     #[endpoint {
         method = GET,
         path = "/v1/internet-gateway-ip-addresses",
@@ -2313,7 +2313,7 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
-    /// Attach ip pool to internet gateway
+    /// Attach IP pool to internet gateway
     #[endpoint {
         method = POST,
         path = "/v1/internet-gateway-ip-addresses",
@@ -2325,7 +2325,7 @@ pub trait NexusExternalApi {
         create_params: TypedBody<params::InternetGatewayIpAddressCreate>,
     ) -> Result<HttpResponseCreated<views::InternetGatewayIpAddress>, HttpError>;
 
-    /// Detach ip pool from internet gateway
+    /// Detach IP pool from internet gateway
     #[endpoint {
         method = DELETE,
         path = "/v1/internet-gateway-ip-addresses/{address}",
@@ -3173,6 +3173,6 @@ pub fn validate_api(spec: &OpenAPI, mut cx: ValidationContext<'_>) {
 pub type IpPoolRangePaginationParams =
     PaginationParams<EmptyScanParams, IpNetwork>;
 
-/// Type used to paginate request to list timeseries schema.
+/// Type used to paginate request to list timeseries schema
 pub type TimeseriesSchemaPaginationParams =
     PaginationParams<EmptyScanParams, oximeter_types::TimeseriesName>;
