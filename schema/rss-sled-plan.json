@@ -978,20 +978,20 @@
             }
           ]
         },
-        "local_pref": {
-          "description": "The local preference associated with this route.",
+        "nexthop": {
+          "description": "The nexthop/gateway address.",
+          "type": "string",
+          "format": "ip"
+        },
+        "rib_priority": {
+          "description": "The RIB priority (i.e. Admin Distance) associated with this route.",
           "default": null,
           "type": [
             "integer",
             "null"
           ],
-          "format": "uint32",
+          "format": "uint8",
           "minimum": 0.0
-        },
-        "nexthop": {
-          "description": "The nexthop/gateway address.",
-          "type": "string",
-          "format": "ip"
         },
         "vlan_id": {
           "description": "The VLAN id associated with this route.",

@@ -276,6 +276,33 @@
         }
       }
     },
+    "/eip-gateways": {
+      "put": {
+        "summary": "Update per-NIC IP address <-> internet gateway mappings.",
+        "operationId": "set_eip_gateways",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExternalIpGatewayMap"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/inventory": {
       "get": {
         "summary": "Fetch basic information about this sled",
@@ -3010,6 +3037,29 @@
           "baseboard"
         ]
       },
+      "ExternalIpGatewayMap": {
+        "description": "Per-NIC mappings from external IP addresses to the Internet Gateways which can choose them as a source.",
+        "type": "object",
+        "properties": {
+          "mappings": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "uniqueItems": true
+              }
+            }
+          }
+        },
+        "required": [
+          "mappings"
+        ]
+      },
       "Generation": {
         "description": "Generation numbers stored in the database, used for optimistic concurrency control",
         "type": "integer",
@@ -4674,18 +4724,18 @@
               }
             ]
           },
-          "local_pref": {
-            "nullable": true,
-            "description": "The local preference associated with this route.",
-            "default": null,
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          },
           "nexthop": {
             "description": "The nexthop/gateway address.",
             "type": "string",
             "format": "ip"
+          },
+          "rib_priority": {
+            "nullable": true,
+            "description": "The RIB priority (i.e. Admin Distance) associated with this route.",
+            "default": null,
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
           },
           "vlan_id": {
             "nullable": true,
@@ -4779,10 +4829,16 @@
                 "enum": [
                   "internet_gateway"
                 ]
+              },
+              "value": {
+                "nullable": true,
+                "type": "string",
+                "format": "uuid"
               }
             },
             "required": [
-              "type"
+              "type",
+              "value"
             ]
           },
           {

@@ -778,7 +778,7 @@ impl ServiceInner {
                                 destination: r.destination,
                                 nexthop: r.nexthop,
                                 vlan_id: r.vlan_id,
-                                local_pref: r.local_pref,
+                                rib_priority: r.rib_priority,
                             })
                             .collect(),
                         addresses: config
