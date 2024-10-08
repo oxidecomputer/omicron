@@ -76,6 +76,7 @@ path_param!(VpcPath, vpc, "VPC");
 path_param!(SubnetPath, subnet, "subnet");
 path_param!(RouterPath, router, "router");
 path_param!(RoutePath, route, "route");
+path_param!(InternetGatewayPath, gateway, "gateway");
 path_param!(FloatingIpPath, floating_ip, "floating IP");
 path_param!(DiskPath, disk, "disk");
 path_param!(SnapshotPath, snapshot, "snapshot");
@@ -83,6 +84,7 @@ path_param!(ImagePath, image, "image");
 path_param!(SiloPath, silo, "silo");
 path_param!(ProviderPath, provider, "SAML identity provider");
 path_param!(IpPoolPath, pool, "IP pool");
+path_param!(IpAddressPath, address, "IP address");
 path_param!(SshKeyPath, ssh_key, "SSH key");
 path_param!(AddressLotPath, address_lot, "address lot");
 path_param!(ProbePath, probe, "probe");
@@ -258,6 +260,17 @@ pub struct OptionalVpcSelector {
     pub vpc: Option<NameOrId>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct InternetGatewayDeleteSelector {
+    /// Name or ID of the project, only required if `vpc` is provided as a `Name`
+    pub project: Option<NameOrId>,
+    /// Name or ID of the VPC
+    pub vpc: Option<NameOrId>,
+    /// Also delete routes targeting this gateway.
+    #[serde(default)]
+    pub cascade: bool,
+}
+
 #[derive(Deserialize, JsonSchema)]
 pub struct SubnetSelector {
     /// Name or ID of the project, only required if `vpc` is provided as a `Name`
@@ -298,6 +311,65 @@ pub struct RouteSelector {
     pub router: Option<NameOrId>,
     /// Name or ID of the route
     pub route: NameOrId,
+}
+
+// Internet gateways
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct InternetGatewaySelector {
+    /// Name or ID of the project, only required if `vpc` is provided as a `Name`
+    pub project: Option<NameOrId>,
+    /// Name or ID of the VPC, only required if `gateway` is provided as a `Name`
+    pub vpc: Option<NameOrId>,
+    /// Name or ID of the internet gateway
+    pub gateway: NameOrId,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct OptionalInternetGatewaySelector {
+    /// Name or ID of the project, only required if `vpc` is provided as a `Name`
+    pub project: Option<NameOrId>,
+    /// Name or ID of the VPC, only required if `gateway` is provided as a `Name`
+    pub vpc: Option<NameOrId>,
+    /// Name or ID of the internet gateway
+    pub gateway: Option<NameOrId>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct DeleteInternetGatewayElementSelector {
+    /// Name or ID of the project, only required if `vpc` is provided as a `Name`
+    pub project: Option<NameOrId>,
+    /// Name or ID of the VPC, only required if `gateway` is provided as a `Name`
+    pub vpc: Option<NameOrId>,
+    /// Name or ID of the internet gateway
+    pub gateway: Option<NameOrId>,
+    /// Also delete routes targeting this gateway element.
+    #[serde(default)]
+    pub cascade: bool,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct InternetGatewayIpPoolSelector {
+    /// Name or ID of the project, only required if `vpc` is provided as a `Name`
+    pub project: Option<NameOrId>,
+    /// Name or ID of the VPC, only required if `gateway` is provided as a `Name`
+    pub vpc: Option<NameOrId>,
+    /// Name or ID of the gateway, only required if `pool` is provided as a `Name`
+    pub gateway: Option<NameOrId>,
+    /// Name or ID of the pool
+    pub pool: NameOrId,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct InternetGatewayIpAddressSelector {
+    /// Name or ID of the project, only required if `vpc` is provided as a `Name`
+    pub project: Option<NameOrId>,
+    /// Name or ID of the VPC, only required if `gateway` is provided as a `Name`
+    pub vpc: Option<NameOrId>,
+    /// Name or ID of the gateway, only required if `address` is provided as a `Name`
+    pub gateway: Option<NameOrId>,
+    /// Name or ID of the address
+    pub address: NameOrId,
 }
 
 // Silos
@@ -1302,6 +1374,30 @@ pub struct RouterRouteUpdate {
     pub destination: RouteDestination,
 }
 
+// INTERNET GATEWAYS
+
+/// Create-time parameters for an `InternetGateway`
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InternetGatewayCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InternetGatewayIpPoolCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+    pub ip_pool: NameOrId,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InternetGatewayIpAddressCreate {
+    #[serde(flatten)]
+    pub identity: IdentityMetadataCreateParams,
+    pub gateway: NameOrId,
+    pub address: IpAddr,
+}
+
 // DISKS
 
 #[derive(Display, Serialize, Deserialize, JsonSchema)]
@@ -1695,7 +1791,7 @@ pub struct Route {
 
     /// Local preference for route. Higher preference indictes precedence
     /// within and across protocols.
-    pub local_pref: Option<u32>,
+    pub rib_priority: Option<u8>,
 }
 
 /// Select a BGP config by a name or id.

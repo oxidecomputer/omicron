@@ -45,6 +45,10 @@ use tokio::time::sleep;
 
 const BGP_SESSION_RESOLUTION: u64 = 100;
 
+// This is the default RIB Priority used for static routes.  This mirrors
+// the const defined in maghemite in rdb/src/lib.rs.
+const DEFAULT_RIB_PRIORITY_STATIC: u8 = 1;
+
 /// Errors that can occur during early network setup
 #[derive(Error, Debug)]
 pub enum EarlyNetworkSetupError {
@@ -631,8 +635,14 @@ impl<'a> EarlyNetworkSetup<'a> {
                     IpAddr::V6(_) => continue,
                 };
                 let vlan_id = r.vlan_id;
-                let local_pref = r.local_pref;
-                let sr = StaticRoute4 { nexthop, prefix, vlan_id, local_pref };
+                let rib_priority = r.rib_priority;
+                let sr = StaticRoute4 {
+                    nexthop,
+                    prefix,
+                    vlan_id,
+                    rib_priority: rib_priority
+                        .unwrap_or(DEFAULT_RIB_PRIORITY_STATIC),
+                };
                 rq.routes.list.push(sr);
             }
         }

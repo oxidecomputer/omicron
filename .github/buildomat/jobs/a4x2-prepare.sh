@@ -22,7 +22,10 @@
 #: ]
 #: enable = false
 
+# shellcheck source=/dev/null
 source ./env.sh
+# shellcheck source=/dev/null
+source .github/buildomat/ci-env.sh
 
 set -o errexit
 set -o pipefail
@@ -91,4 +94,3 @@ for x in ce cr1 cr2 g0 g1 g2 g3 tools omicron-common; do
     tar -czf cargo-bay-$x.tgz cargo-bay/$x
     mv cargo-bay-$x.tgz /out/
 done
-
