@@ -340,7 +340,6 @@ mod tests {
             .add_zone(BlueprintZoneConfig {
                 disposition: BlueprintZoneDisposition::InService,
                 id: new_zone_id,
-                underlay_address: Ipv6Addr::UNSPECIFIED,
                 filesystem_pool: Some(filesystem_pool),
                 zone_type: BlueprintZoneType::Oximeter(
                     blueprint_zone_type::Oximeter {

@@ -17,6 +17,7 @@ use omicron_common::api::internal::shared::NetworkInterface;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use std::net::Ipv6Addr;
 use std::net::SocketAddrV6;
 
 #[derive(Debug, Clone, Eq, PartialEq, JsonSchema, Deserialize, Serialize)]
@@ -37,6 +38,65 @@ pub enum BlueprintZoneType {
 }
 
 impl BlueprintZoneType {
+    /// Returns the underlay IP address associated with this zone.
+    ///
+    /// Assumes all zone have exactly one underlay IP address (which is
+    /// currently true).
+    pub fn underlay_ip(&self) -> Ipv6Addr {
+        match self {
+            BlueprintZoneType::BoundaryNtp(
+                blueprint_zone_type::BoundaryNtp { address, .. },
+            )
+            | BlueprintZoneType::Clickhouse(
+                blueprint_zone_type::Clickhouse { address, .. },
+            )
+            | BlueprintZoneType::ClickhouseKeeper(
+                blueprint_zone_type::ClickhouseKeeper { address, .. },
+            )
+            | BlueprintZoneType::ClickhouseServer(
+                blueprint_zone_type::ClickhouseServer { address, .. },
+            )
+            | BlueprintZoneType::CockroachDb(
+                blueprint_zone_type::CockroachDb { address, .. },
+            )
+            | BlueprintZoneType::Crucible(blueprint_zone_type::Crucible {
+                address,
+                ..
+            })
+            | BlueprintZoneType::CruciblePantry(
+                blueprint_zone_type::CruciblePantry { address },
+            )
+            | BlueprintZoneType::ExternalDns(
+                blueprint_zone_type::ExternalDns {
+                    http_address: address, ..
+                },
+            )
+            | BlueprintZoneType::InternalNtp(
+                blueprint_zone_type::InternalNtp { address },
+            )
+            | BlueprintZoneType::Nexus(blueprint_zone_type::Nexus {
+                internal_address: address,
+                ..
+            })
+            | BlueprintZoneType::Oximeter(blueprint_zone_type::Oximeter {
+                address,
+            }) => *address.ip(),
+            BlueprintZoneType::InternalDns(
+                blueprint_zone_type::InternalDns {
+                    http_address: address,
+                    dns_address,
+                    ..
+                },
+            ) => {
+                // InternalDns is the only variant that carries two
+                // `SocketAddrV6`s that are both on the underlay network. We
+                // expect these to have the same IP address.
+                debug_assert_eq!(address.ip(), dns_address.ip());
+                *address.ip()
+            }
+        }
+    }
+
     /// Returns the zpool being used by this zone, if any.
     pub fn durable_zpool(
         &self,

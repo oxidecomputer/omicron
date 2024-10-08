@@ -2144,13 +2144,14 @@ mod test {
                     }
                     NextCrucibleMutate::Done => true,
                 }
-            } else if let BlueprintZoneType::InternalNtp(_) =
-                &mut zone.zone_type
+            } else if let BlueprintZoneType::InternalNtp(
+                blueprint_zone_type::InternalNtp { address },
+            ) = &mut zone.zone_type
             {
                 // Change the underlay IP.
-                let mut segments = zone.underlay_address.segments();
+                let mut segments = address.ip().segments();
                 segments[0] += 1;
-                zone.underlay_address = segments.into();
+                address.set_ip(segments.into());
                 true
             } else {
                 true

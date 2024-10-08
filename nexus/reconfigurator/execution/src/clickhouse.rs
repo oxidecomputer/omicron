@@ -159,7 +159,7 @@ fn server_configs(
     zones: &BTreeMap<SledUuid, BlueprintZonesConfig>,
     clickhouse_cluster_config: &ClickhouseClusterConfig,
     keepers: Vec<ClickhouseHost>,
-) -> Result<Vec<ServerConfigurableSettings>, anyhow::Error> {
+) -> anyhow::Result<Vec<ServerConfigurableSettings>> {
     let server_ips: BTreeMap<OmicronZoneUuid, Ipv6Addr> = zones
         .values()
         .flat_map(|zones_config| {
@@ -171,9 +171,7 @@ fn server_configs(
                         .servers
                         .contains_key(&zone_config.id)
                 })
-                .map(|zone_config| {
-                    (zone_config.id, zone_config.underlay_address)
-                })
+                .map(|zone_config| (zone_config.id, zone_config.underlay_ip()))
         })
         .collect();
 
@@ -231,9 +229,7 @@ fn keeper_configs(
                         .keepers
                         .contains_key(&zone_config.id)
                 })
-                .map(|zone_config| {
-                    (zone_config.id, zone_config.underlay_address)
-                })
+                .map(|zone_config| (zone_config.id, zone_config.underlay_ip()))
         })
         .collect();
 
@@ -311,21 +307,20 @@ mod test {
                 zones: vec![BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
                     id: zone_id,
-                    underlay_address: Ipv6Addr::new(
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        keeper_id as u16,
-                    ),
                     filesystem_pool: None,
                     zone_type: BlueprintZoneType::ClickhouseKeeper(
                         blueprint_zone_type::ClickhouseKeeper {
                             address: SocketAddrV6::new(
-                                Ipv6Addr::LOCALHOST,
+                                Ipv6Addr::new(
+                                    0,
+                                    0,
+                                    0,
+                                    0,
+                                    0,
+                                    0,
+                                    0,
+                                    keeper_id as u16,
+                                ),
                                 0,
                                 0,
                                 0,
@@ -351,21 +346,20 @@ mod test {
                 zones: vec![BlueprintZoneConfig {
                     disposition: BlueprintZoneDisposition::InService,
                     id: zone_id,
-                    underlay_address: Ipv6Addr::new(
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        0,
-                        server_id as u16 + 10,
-                    ),
                     filesystem_pool: None,
                     zone_type: BlueprintZoneType::ClickhouseServer(
                         blueprint_zone_type::ClickhouseServer {
                             address: SocketAddrV6::new(
-                                Ipv6Addr::LOCALHOST,
+                                Ipv6Addr::new(
+                                    0,
+                                    0,
+                                    0,
+                                    0,
+                                    0,
+                                    0,
+                                    0,
+                                    server_id as u16 + 10,
+                                ),
                                 0,
                                 0,
                                 0,

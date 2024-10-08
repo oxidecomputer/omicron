@@ -55,7 +55,7 @@ impl BpSledSubtableData for BpDiffZoneDetails {
                     zone.kind().report_str().to_string(),
                     zone.id().to_string(),
                     zone.disposition().to_string(),
-                    zone.underlay_address().to_string(),
+                    zone.underlay_ip().to_string(),
                 ],
             )
         })
@@ -99,11 +99,11 @@ impl ModifiedZone {
             );
             reason.push_str(&msg);
         }
-        if before.underlay_address() != after.underlay_address {
+        if before.underlay_ip() != after.underlay_ip() {
             let msg = format!(
-                "mismatched underlay address: before: {}, after: {}\n",
-                before.underlay_address(),
-                after.underlay_address
+                "mismatched underlay IP: before: {}, after: {}\n",
+                before.underlay_ip(),
+                after.underlay_ip()
             );
             reason.push_str(&msg);
         }
@@ -162,7 +162,7 @@ impl BpSledSubtableData for BpDiffZonesModified {
                         zone.zone.disposition().to_string(),
                     ),
                     BpSledSubtableColumn::value(
-                        zone.zone.underlay_address().to_string(),
+                        zone.zone.underlay_ip().to_string(),
                     ),
                 ],
             )

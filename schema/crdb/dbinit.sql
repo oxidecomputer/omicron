@@ -3437,7 +3437,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone (
 
     -- unique id for this zone
     id UUID NOT NULL,
-    underlay_address INET NOT NULL,
     zone_type omicron.public.zone_type NOT NULL,
 
     -- SocketAddr of the "primary" service for this zone
@@ -3679,7 +3678,6 @@ CREATE TABLE IF NOT EXISTS omicron.public.bp_omicron_zone (
 
     -- unique id for this zone
     id UUID NOT NULL,
-    underlay_address INET NOT NULL,
     zone_type omicron.public.zone_type NOT NULL,
 
     -- SocketAddr of the "primary" service for this zone
@@ -4487,7 +4485,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '108.0.0', NULL)
+    (TRUE, NOW(), NOW(), '109.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

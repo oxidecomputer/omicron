@@ -402,7 +402,6 @@ mod test {
                 zones: vec![BlueprintZoneConfig {
                     disposition,
                     id: OmicronZoneUuid::new_v4(),
-                    underlay_address: "::1".parse().unwrap(),
                     filesystem_pool: Some(ZpoolName::new_external(pool_id)),
                     zone_type: BlueprintZoneType::InternalDns(
                         blueprint_zone_type::InternalDns {

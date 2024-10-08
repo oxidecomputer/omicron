@@ -170,7 +170,8 @@ ERRORS:
     zone diff errors: before gen 2, after gen 2
 
       zone id: 6dff7633-66bb-4924-a6ff-2c896e66964b
-      reason: mismatched zone type: after: Nexus(
+      reason: mismatched underlay IP: before: fd00:1122:3344:105::22, after: fd01:1122:3344:105::22
+mismatched zone type: after: Nexus(
     Nexus {
         internal_address: [fd01:1122:3344:105::22]:12221,
         external_ip: OmicronZoneExternalFloatingIp {
@@ -217,7 +218,12 @@ ERRORS:
 )
 
       zone id: 7f4e9f9f-08f8-4d14-885d-e977c05525ad
-      reason: mismatched underlay address: before: fd00:1122:3344:105::21, after: fd01:1122:3344:105::21
+      reason: mismatched underlay IP: before: fd00:1122:3344:105::21, after: fd01:1122:3344:105::21
+mismatched zone type: after: InternalNtp(
+    InternalNtp {
+        address: [fd01:1122:3344:105::21]:123,
+    },
+)
 
  COCKROACHDB SETTINGS:
     state fingerprint:::::::::::::::::   (none) (unchanged)
