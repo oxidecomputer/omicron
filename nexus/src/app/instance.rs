@@ -17,6 +17,7 @@ use crate::app::sagas::NexusSaga;
 use crate::cidata::InstanceCiData;
 use crate::external_api::params;
 use cancel_safe_futures::prelude::*;
+use futures::future;
 use futures::future::Fuse;
 use futures::{FutureExt, SinkExt, StreamExt};
 use nexus_db_model::InstanceUpdate;
@@ -784,31 +785,90 @@ impl super::Nexus {
         let (.., authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
 
-        let state = self
+        let db::datastore::InstanceGestalt {
+            instance,
+            active_vmm,
+            target_vmm,
+            migration: _,
+        } = self
             .db_datastore
-            .instance_fetch_with_vmm(opctx, &authz_instance)
+            .instance_fetch_all(opctx, &authz_instance)
             .await?;
 
-        // Is the instance currently incarnated in a VMM process?
-        let Some(vmm) = state.vmm() else {
-            // If the instance is already un-incarnated, we're all good.
-            debug!(
-                opctx.log,
-                "asked to force terminate an instance that has no VMM, \
-                 doing nothing";
-                "instance_id" => %authz_instance.id(),
-                "instance_state" => ?state.instance.runtime(),
-            );
-            debug_assert_eq!(
-                state.instance.runtime().nexus_state,
-                db::model::InstanceState::NoVmm,
-                "if an instance has no active VMM, it must be in the NoVmm \
-                 state (this is enforced by a DB check constraint)",
-            );
-            return Ok(state);
+        // If the instance is currently incarnated by VMM process(es), hunt down
+        // and destroy them.
+        let terminate_active = match active_vmm {
+            Some(vmm) => {
+                future::Either::Left(self.instance_force_terminate_vmm(
+                    opctx,
+                    &authz_instance,
+                    vmm,
+                    "active",
+                ))
+            }
+            None => {
+                debug!(
+                    opctx.log,
+                    "asked to force terminate an instance that has no active VMM";
+                    "instance_id" => %authz_instance.id(),
+                    "instance_state" => ?instance.runtime(),
+                );
+                future::Either::Right(future::ready(Ok::<
+                    _,
+                    InstanceStateChangeError,
+                >(())))
+            }
+        };
+        let terminate_target = match target_vmm {
+            Some(vmm) => {
+                future::Either::Left(self.instance_force_terminate_vmm(
+                    opctx,
+                    &authz_instance,
+                    vmm,
+                    "target",
+                ))
+            }
+            None => future::Either::Right(future::ready(Ok::<
+                _,
+                InstanceStateChangeError,
+            >(()))),
         };
 
+        // If our attempt to terminate either VMM failed, bail --- but only
+        // after both futures complete (which is why we use `join!` rather than
+        // `try_join!`).
+        let (active_terminated, target_terminated) = tokio::join! {
+            terminate_active, terminate_target
+        };
+        active_terminated?;
+        target_terminated?;
+
         // Ladies and gentlemen, we got him!
+        self.db_datastore
+            .instance_fetch_with_vmm(opctx, &authz_instance)
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Forcefully terminate a VMM associated with an instance (by calling
+    /// [`Self::instance_ensure_unregistered`]), and then update the instance's
+    /// state to reflect that the VMM has been unregistered.
+    ///
+    /// # Arguments
+    ///
+    /// - `opctx`: the [`OpContext`] for this action
+    /// - `authz_instance`: the instance associated with the VMM, so that the
+    ///   instance can be updated to reflect the new VMM state.
+    /// - `vmm`: the VMM to forcefully terminate
+    /// - `vmm_role`: a string ("active" or "target") for logging which VMM is
+    ///   being terminated.
+    async fn instance_force_terminate_vmm(
+        &self,
+        opctx: &OpContext,
+        authz_instance: &authz::Instance,
+        vmm: db::model::Vmm,
+        vmm_role: &str,
+    ) -> Result<(), InstanceStateChangeError> {
         let propolis_id = PropolisUuid::from_untyped_uuid(vmm.id);
         let sled_id = SledUuid::from_untyped_uuid(vmm.sled_id);
         let unregister_result =
@@ -818,7 +878,8 @@ impl super::Nexus {
             Ok(Some(state)) => {
                 info!(
                     opctx.log,
-                    "instance terminated with extreme prejudice";
+                    "instance's {vmm_role} VMM terminated with extreme \
+                     prejudice";
                     "instance_id" => %authz_instance.id(),
                     "vmm_id" => %propolis_id,
                     "sled_id" => %sled_id,
@@ -826,27 +887,27 @@ impl super::Nexus {
 
                 self.notify_vmm_updated(opctx, propolis_id, &state).await?;
             }
-            // If the returned state from sled-agent is `None`, then the instance
-            // was already unregistered. This may have been from a prior
-            // instance-ensure-unregistered call, but, since we observed an
-            // active VMM above, the current observed VMM generation doesn't
-            // know that the VMM is gone, so it is possible that the sled-agent
-            // has misplaced this instance. Therefore, we will attempt to mark
-            // the VMM as `Failed` at the generation after which we observed the
-            // VMM. This is safe to do here, because if the instance has been
-            // unregistered due to a race with another
-            // instance-ensure-unregistered request (rather than a sled-agent
-            // failure), that other call will have advanced the state
-            // generation, and our attempt to write the failed state will not
-            // succeed, which is fine.
+            // If the returned state from sled-agent is `None`, then the
+            // instance was already unregistered. This may have been from a
+            // prior attempt to stop the instance (either normally or
+            // forcefully). But, since we observed an active VMM above, the
+            // current observed VMM generation doesn't know that the VMM is
+            // gone, so it is possible that the sled-agent has misplaced this
+            // instance. Therefore, we will attempt to mark the VMM as `Failed`
+            // at the generation after which we observed the VMM. This is safe
+            // to do here, because if the instance has been unregistered due to
+            // a race with another instance-ensure-unregistered request (rather
+            // than a sled-agent failure), that other call will have advanced
+            // the state generation, and our attempt to write the failed state
+            // will not succeed, which is fine.
             //
             // Either way, the caller should not observe a returned instance
             // state that believes itself to be running.
             Ok(None) => {
                 info!(
                     opctx.log,
-                    "asked to force terminate an instance that was already \
-                     unregistered";
+                    "asked to force terminate an instance's {vmm_role} VMM ;
+                     thatwas already unregistered";
                     "instance_id" => %authz_instance.id(),
                     "vmm_id" => %propolis_id,
                     "sled_id" => %sled_id,
@@ -869,11 +930,7 @@ impl super::Nexus {
             }
             Err(e) => return Err(e),
         }
-
-        self.db_datastore
-            .instance_fetch_with_vmm(opctx, &authz_instance)
-            .await
-            .map_err(Into::into)
+        Ok(())
     }
 
     /// Idempotently ensures that the sled specified in `db_instance` does not
