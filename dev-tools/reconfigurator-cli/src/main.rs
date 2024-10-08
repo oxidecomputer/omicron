@@ -13,8 +13,6 @@ use clap::{Args, Parser, Subcommand};
 use dns_service_client::DnsDiff;
 use indexmap::IndexMap;
 use nexus_inventory::CollectionBuilder;
-use nexus_reconfigurator_execution::blueprint_external_dns_config;
-use nexus_reconfigurator_execution::blueprint_internal_dns_config;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_planning::blueprint_builder::EnsureMultiple;
 use nexus_reconfigurator_planning::planner::Planner;
@@ -22,8 +20,10 @@ use nexus_reconfigurator_planning::system::{
     SledBuilder, SledHwInventory, SystemDescription,
 };
 use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
-use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_sled_agent_shared::inventory::ZoneKind;
+use nexus_types::deployment::execution;
+use nexus_types::deployment::execution::blueprint_external_dns_config;
+use nexus_types::deployment::execution::blueprint_internal_dns_config;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
@@ -882,10 +882,7 @@ fn cmd_blueprint_diff(
 
 fn make_sleds_by_id(
     sim: &ReconfiguratorSim,
-) -> Result<
-    BTreeMap<SledUuid, nexus_reconfigurator_execution::Sled>,
-    anyhow::Error,
-> {
+) -> Result<BTreeMap<SledUuid, execution::Sled>, anyhow::Error> {
     let collection = sim
         .system
         .to_collection_builder()
@@ -897,10 +894,10 @@ fn make_sleds_by_id(
         .sled_agents
         .iter()
         .map(|(sled_id, sled_agent_info)| {
-            let sled = nexus_reconfigurator_execution::Sled::new(
+            let sled = execution::Sled::new(
                 *sled_id,
                 sled_agent_info.sled_agent_address,
-                sled_agent_info.sled_role == SledRole::Scrimlet,
+                sled_agent_info.sled_role,
             );
             (*sled_id, sled)
         })
