@@ -1106,14 +1106,6 @@ mod test {
         // which it would by default (because we have only one sled).
         builder.policy_mut().target_internal_dns_zone_count = 1;
 
-        // And we don't want it to add any ClickHouse zones,
-        // which it also would by default.
-        builder.policy_mut().clickhouse_policy = Some(ClickhousePolicy {
-            deploy_with_standalone: false,
-            target_servers: 0,
-            target_keepers: 0,
-        });
-
         let input = builder.build();
         let blueprint2 = Planner::new_based_on(
             logctx.log.clone(),
@@ -2525,77 +2517,47 @@ mod test {
         // Use our example system as a starting point.
         let (collection, input, blueprint1) = example(&logctx.log, TEST_NAME);
 
-        // We should not have any ClickHouse zones yet.
+        // We should start with one ClickHouse zone. Find out which sled it's on.
+        let clickhouse_sleds = blueprint1
+            .all_omicron_zones(BlueprintZoneFilter::All)
+            .filter_map(|(sled, zone)| {
+                zone.zone_type.is_clickhouse().then(|| Some(sled))
+            })
+            .collect::<Vec<_>>();
         assert_eq!(
-            blueprint1
-                .all_omicron_zones(BlueprintZoneFilter::All)
-                .filter(|(_, zone)| zone.zone_type.is_clickhouse())
-                .count(),
-            0
-        );
-
-        // Construct a new blueprint that includes a single-node ClickHouse
-        // cluster on the first sled.
-        let mut blueprint_builder = BlueprintBuilder::new_based_on(
-            &logctx.log,
-            &blueprint1,
-            &input,
-            &collection,
-            TEST_NAME,
-        )
-        .expect("failed to build blueprint builder");
-        let sled_1 = blueprint_builder
-            .sled_ids_with_zones()
-            .next()
-            .expect("no first sled");
-        assert!(matches!(
-            blueprint_builder
-                .sled_ensure_zone_multiple_clickhouse(sled_1, 1)
-                .expect("can't add single-node ClickHouse zone to blueprint"),
-            EnsureMultiple::Changed { added: 1, removed: 0 }
-        ));
-
-        // Check that it's there.
-        let blueprint2 = blueprint_builder.build();
-        let diff = blueprint2.diff_since_blueprint(&blueprint1);
-        println!("1 -> 2 (added ClickHouse zone):\n{}", diff.display());
-        assert_eq!(
-            blueprint2
-                .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
-                .filter(|(_, zone)| zone.zone_type.is_clickhouse())
-                .count(),
+            clickhouse_sleds.len(),
             1,
-            "can't find ClickHouse zone in new blueprint"
+            "can't find ClickHouse zone in initial blueprint"
         );
+        let clickhouse_sled = clickhouse_sleds[0].expect("missing sled id");
 
-        // Expunge the first sled and re-plan. This gets us an expunged
-        // ClickHouse zone, which the planner should immediately replace
-        // with one on another (non-expunged) sled.
+        // Expunge the sled hosting ClickHouse and re-plan. The planner should
+        // immediately replace the zone with one on another (non-expunged) sled.
         let mut input_builder = input.into_builder();
         input_builder
             .sleds_mut()
-            .get_mut(&sled_1)
-            .expect("found sled 1 again")
+            .get_mut(&clickhouse_sled)
+            .expect("can't find sled")
             .policy = SledPolicy::Expunged;
         let input = input_builder.build();
-        let blueprint3 = Planner::new_based_on(
+        let blueprint2 = Planner::new_based_on(
             logctx.log.clone(),
-            &blueprint2,
+            &blueprint1,
             &input,
-            "test_blueprint3",
+            "test_blueprint2",
             &collection,
         )
         .expect("failed to create planner")
-        .with_rng_seed((TEST_NAME, "bp3"))
+        .with_rng_seed((TEST_NAME, "bp2"))
         .plan()
         .expect("failed to re-plan");
 
-        let diff = blueprint3.diff_since_blueprint(&blueprint2);
-        println!("2 -> 3 (expunged sled):\n{}", diff.display());
+        let diff = blueprint2.diff_since_blueprint(&blueprint1);
+        println!("1 -> 2 (expunged sled):\n{}", diff.display());
         assert_eq!(
-            blueprint3
+            blueprint2
                 .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
-                .filter(|(sled, zone)| *sled != sled_1
+                .filter(|(sled, zone)| *sled != clickhouse_sled
                     && zone.zone_type.is_clickhouse())
                 .count(),
             1,
@@ -2605,7 +2567,7 @@ mod test {
         // Test a no-op planning iteration.
         assert_planning_makes_no_changes(
             &logctx.log,
-            &blueprint3,
+            &blueprint2,
             &input,
             TEST_NAME,
         );

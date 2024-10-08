@@ -179,6 +179,10 @@ impl ExampleSystemBuilder {
                         vec![],
                     )
                     .unwrap();
+                if i == 0 {
+                    let _ = builder
+                        .sled_ensure_zone_multiple_clickhouse(sled_id, 1);
+                }
                 if i < INTERNAL_DNS_REDUNDANCY {
                     let _ = builder
                         .sled_ensure_zone_multiple_internal_dns(sled_id, 1)
