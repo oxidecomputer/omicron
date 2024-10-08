@@ -14,6 +14,7 @@ use camino::Utf8Path;
 use http::method::Method;
 use http::StatusCode;
 use itertools::Itertools;
+use nexus_db_model::Migration;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO_ID;
@@ -63,6 +64,7 @@ use omicron_common::api::external::InstanceState;
 use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::Vni;
+use omicron_common::api::internal::nexus::MigrationState;
 use omicron_common::api::internal::shared::ResolvedVpcRoute;
 use omicron_common::api::internal::shared::RouterId;
 use omicron_common::api::internal::shared::RouterKind;
@@ -712,36 +714,6 @@ async fn test_instance_start_creates_networking_state(
 
 #[nexus_test]
 async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
-    use nexus_db_model::Migration;
-    use omicron_common::api::internal::nexus::MigrationState;
-    async fn migration_fetch(
-        cptestctx: &ControlPlaneTestContext,
-        migration_id: Uuid,
-    ) -> Migration {
-        use async_bb8_diesel::AsyncRunQueryDsl;
-        use diesel::prelude::*;
-        use nexus_db_queries::db::schema::migration::dsl;
-
-        let datastore =
-            cptestctx.server.server_context().nexus.datastore().clone();
-        let db_state = dsl::migration
-            // N.B. that for the purposes of this test, we explicitly should
-            // *not* filter out migrations that are marked as deleted, as the
-            // migration record is marked as deleted once the migration completes.
-            .filter(dsl::id.eq(migration_id))
-            .select(Migration::as_select())
-            .get_results_async::<Migration>(
-                &*datastore.pool_connection_for_tests().await.unwrap(),
-            )
-            .await
-            .unwrap();
-
-        info!(&cptestctx.logctx.log, "refetched migration info from db";
-                "migration" => ?db_state);
-
-        db_state.into_iter().next().unwrap()
-    }
-
     let client = &cptestctx.external_client;
     let internal_client = &cptestctx.internal_client;
     let apictx = &cptestctx.server.server_context();
@@ -920,6 +892,33 @@ async fn test_instance_migrate(cptestctx: &ControlPlaneTestContext) {
     let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
     assert_eq!(migration.target_state, MigrationState::Completed.into());
     assert_eq!(migration.source_state, MigrationState::Completed.into());
+}
+
+async fn migration_fetch(
+    cptestctx: &ControlPlaneTestContext,
+    migration_id: Uuid,
+) -> Migration {
+    use async_bb8_diesel::AsyncRunQueryDsl;
+    use diesel::prelude::*;
+    use nexus_db_queries::db::schema::migration::dsl;
+
+    let datastore = cptestctx.server.server_context().nexus.datastore().clone();
+    let db_state = dsl::migration
+        // N.B. that for the purposes of this test, we explicitly should
+        // *not* filter out migrations that are marked as deleted, as the
+        // migration record is marked as deleted once the migration completes.
+        .filter(dsl::id.eq(migration_id))
+        .select(Migration::as_select())
+        .get_results_async::<Migration>(
+            &*datastore.pool_connection_for_tests().await.unwrap(),
+        )
+        .await
+        .unwrap();
+
+    info!(&cptestctx.logctx.log, "refetched migration info from db";
+                "migration" => ?db_state);
+
+    db_state.into_iter().next().unwrap()
 }
 
 #[nexus_test]
@@ -6051,10 +6050,10 @@ async fn test_instance_force_terminate(cptestctx: &ControlPlaneTestContext) {
         instance_post(&client, &instance_name, InstanceOp::ForceTerminate)
             .await
     );
-    // The instance will go to Stopping first while an instance update saga
-    // removes the VMM.
-    assert_eq!(instance.runtime.run_state, InstanceState::Stopping);
-    instance_wait_for_state(client, instance_id, InstanceState::Stopped).await;
+    // The instance force terminate endpoint will attempt to run the
+    // instance-update saga to completion, so the instance should go to Stopped
+    // immediately from the caller's perspective.
+    assert_eq!(instance.runtime.run_state, InstanceState::Stopped);
 
     // A subsequent force-terminate should be okay because we're already
     // terminated.
@@ -6072,6 +6071,176 @@ async fn test_instance_force_terminate(cptestctx: &ControlPlaneTestContext) {
     // This time, the instance will go to `Failed` rather than `Stopped` since
     // sled-agent is no longer aware of it.
     assert_eq!(instance.runtime.run_state, InstanceState::Failed);
+}
+
+#[nexus_test]
+async fn test_instance_force_terminate_migrating(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let internal_client = &cptestctx.internal_client;
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+    let instance_name = "test-instance-please-ignore";
+
+    // Create a second sled to migrate to/from.
+    let default_sled_id: SledUuid =
+        nexus_test_utils::SLED_AGENT_UUID.parse().unwrap();
+    let update_dir = Utf8Path::new("/should/be/unused");
+    let other_sled_id = SledUuid::new_v4();
+    let _other_sa = nexus_test_utils::start_sled_agent(
+        cptestctx.logctx.log.new(o!("sled_id" => other_sled_id.to_string())),
+        cptestctx.server.get_http_server_internal_address().await,
+        other_sled_id,
+        &update_dir,
+        sim::SimMode::Explicit,
+    )
+    .await
+    .unwrap();
+
+    create_project_and_pool(&client).await;
+    let instance_url = get_instance_url(instance_name);
+
+    // Explicitly create an instance with no disks. Simulated sled agent assumes
+    // that disks are co-located with their instances.
+    let instance = nexus_test_utils::resource_helpers::create_instance_with(
+        client,
+        PROJECT_NAME,
+        instance_name,
+        &params::InstanceNetworkInterfaceAttachment::Default,
+        Vec::<params::InstanceDiskAttachment>::new(),
+        Vec::<params::ExternalIpCreate>::new(),
+        true,
+        Default::default(),
+    )
+    .await;
+    let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
+
+    // Poke the instance into an active state.
+    instance_simulate(nexus, &instance_id).await;
+    let instance_next = instance_get(&client, &instance_url).await;
+    assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
+
+    let sled_info = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("running instance should have a sled");
+
+    let original_sled = sled_info.sled_id;
+    let dst_sled_id = if original_sled == default_sled_id {
+        other_sled_id
+    } else {
+        default_sled_id
+    };
+
+    let migrate_url =
+        format!("/instances/{}/migrate", &instance_id.to_string());
+    let instance = NexusRequest::new(
+        RequestBuilder::new(internal_client, Method::POST, &migrate_url)
+            .body(Some(&InstanceMigrateRequest {
+                dst_sled_id: dst_sled_id.into_untyped_uuid(),
+            }))
+            .expect_status(Some(StatusCode::OK)),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .unwrap()
+    .parsed_body::<Instance>()
+    .unwrap();
+
+    let new_sled_info = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("running instance should have a sled");
+
+    let current_sled = new_sled_info.sled_id;
+    assert_eq!(current_sled, original_sled);
+
+    // Ensure that both sled agents report that the migration is in progress.
+    let migration_id = {
+        let datastore = apictx.nexus.datastore();
+        let opctx = OpContext::for_tests(
+            cptestctx.logctx.log.new(o!()),
+            datastore.clone(),
+        );
+        let (.., authz_instance) = LookupPath::new(&opctx, &datastore)
+            .instance_id(instance.identity.id)
+            .lookup_for(nexus_db_queries::authz::Action::Read)
+            .await
+            .unwrap();
+        datastore
+            .instance_refetch(&opctx, &authz_instance)
+            .await
+            .unwrap()
+            .runtime_state
+            .migration_id
+            .expect("since we've started a migration, the instance record must have a migration id!")
+    };
+    let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
+    assert_eq!(migration.target_state, MigrationState::Pending.into());
+    assert_eq!(migration.source_state, MigrationState::Pending.into());
+
+    let info = nexus
+        .active_instance_info(&instance_id, None)
+        .await
+        .unwrap()
+        .expect("instance should be on a sled");
+    let src_propolis_id = info.propolis_id;
+    let dst_propolis_id =
+        info.dst_propolis_id.expect("instance should have a migration target");
+
+    // Simulate the migration. We will use `instance_single_step_on_sled` to
+    // single-step both sled-agents through the migration state machine and
+    // ensure that the migration state looks nice at each step.
+    instance_simulate_migration_source(
+        cptestctx,
+        nexus,
+        original_sled,
+        src_propolis_id,
+        migration_id,
+    )
+    .await;
+
+    // Move source to "migrating".
+    vmm_single_step_on_sled(cptestctx, nexus, original_sled, src_propolis_id)
+        .await;
+    vmm_single_step_on_sled(cptestctx, nexus, original_sled, src_propolis_id)
+        .await;
+
+    let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
+    assert_eq!(migration.source_state, MigrationState::InProgress.into());
+    assert_eq!(migration.target_state, MigrationState::Pending.into());
+    let instance = instance_get(&client, &instance_url).await;
+    assert_eq!(instance.runtime.run_state, InstanceState::Migrating);
+
+    // Move target to "migrating".
+    vmm_single_step_on_sled(cptestctx, nexus, dst_sled_id, dst_propolis_id)
+        .await;
+    vmm_single_step_on_sled(cptestctx, nexus, dst_sled_id, dst_propolis_id)
+        .await;
+
+    let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
+    assert_eq!(migration.source_state, MigrationState::InProgress.into());
+    assert_eq!(migration.target_state, MigrationState::InProgress.into());
+    let instance = instance_get(&client, &instance_url).await;
+    assert_eq!(instance.runtime.run_state, InstanceState::Migrating);
+
+    // OKAY NOW DESTROY EVERYTHING
+    let instance = dbg!(
+        instance_post(&client, instance_name, InstanceOp::ForceTerminate).await
+    );
+
+    // The instance should have moved to Stopped.
+    assert_eq!(instance.runtime.run_state, InstanceState::Stopped);
+
+    // Now, check up on the migration. Both sides should have been marked as
+    // `Failed`, since we tore it down mid-migration.
+    let migration = dbg!(migration_fetch(cptestctx, migration_id).await);
+    assert_eq!(migration.target_state, MigrationState::Failed.into());
+    assert_eq!(migration.source_state, MigrationState::Failed.into());
 }
 
 async fn instance_get(

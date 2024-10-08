@@ -17,7 +17,6 @@ use crate::app::sagas::NexusSaga;
 use crate::cidata::InstanceCiData;
 use crate::external_api::params;
 use cancel_safe_futures::prelude::*;
-use futures::future;
 use futures::future::Fuse;
 use futures::{FutureExt, SinkExt, StreamExt};
 use nexus_db_model::InstanceUpdate;
@@ -797,14 +796,15 @@ impl super::Nexus {
 
         // If the instance is currently incarnated by VMM process(es), hunt down
         // and destroy them.
-        let terminate_active = match active_vmm {
+        let terminated_active = match active_vmm {
             Some(vmm) => {
-                future::Either::Left(self.instance_force_terminate_vmm(
+                self.instance_force_terminate_vmm(
                     opctx,
                     &authz_instance,
                     vmm,
                     "active",
-                ))
+                )
+                .await
             }
             None => {
                 debug!(
@@ -813,35 +813,26 @@ impl super::Nexus {
                     "instance_id" => %authz_instance.id(),
                     "instance_state" => ?instance.runtime(),
                 );
-                future::Either::Right(future::ready(Ok::<
-                    _,
-                    InstanceStateChangeError,
-                >(())))
+                Ok(())
             }
         };
-        let terminate_target = match target_vmm {
+        let terminated_target = match target_vmm {
             Some(vmm) => {
-                future::Either::Left(self.instance_force_terminate_vmm(
+                self.instance_force_terminate_vmm(
                     opctx,
                     &authz_instance,
                     vmm,
                     "target",
-                ))
+                )
+                .await
             }
-            None => future::Either::Right(future::ready(Ok::<
-                _,
-                InstanceStateChangeError,
-            >(()))),
+            None => Ok(()),
         };
 
         // If our attempt to terminate either VMM failed, bail --- but only
-        // after both futures complete (which is why we use `join!` rather than
-        // `try_join!`).
-        let (active_terminated, target_terminated) = tokio::join! {
-            terminate_active, terminate_target
-        };
-        active_terminated?;
-        target_terminated?;
+        // after both futures completed.
+        terminated_active?;
+        terminated_target?;
 
         // Ladies and gentlemen, we got him!
         self.db_datastore
@@ -885,7 +876,31 @@ impl super::Nexus {
                     "sled_id" => %sled_id,
                 );
 
-                self.notify_vmm_updated(opctx, propolis_id, &state).await?;
+                // We would like the caller to see the instance they are
+                // attempting to terminate go to "Stopped", so run the
+                // instance-update saga synchronously if possible. This is
+                // particularly important in the case where a migrating instance
+                // is force-terminated, as an instance with a migration ID will
+                // remain "Migrating" (not "Stopping") until its migration ID is
+                // unset, and it seems a bit sad to return a "Migrating"
+                // instance to a caller who tries to force-kill it.
+                if let Some((_, saga)) = process_vmm_update(
+                    &self.db_datastore,
+                    opctx,
+                    propolis_id,
+                    &state,
+                )
+                .await?
+                {
+                    self.sagas
+                        .saga_prepare(saga)
+                        .await?
+                        .start()
+                        .await?
+                        .wait_until_stopped()
+                        .await
+                        .into_omicron_result()?;
+                }
             }
             // If the returned state from sled-agent is `None`, then the
             // instance was already unregistered. This may have been from a
