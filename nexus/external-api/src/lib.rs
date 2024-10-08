@@ -2313,7 +2313,7 @@ pub trait NexusExternalApi {
         HttpError,
     >;
 
-    /// Attach IP pool to internet gateway
+    /// Attach IP address to internet gateway
     #[endpoint {
         method = POST,
         path = "/v1/internet-gateway-ip-addresses",
@@ -2325,7 +2325,7 @@ pub trait NexusExternalApi {
         create_params: TypedBody<params::InternetGatewayIpAddressCreate>,
     ) -> Result<HttpResponseCreated<views::InternetGatewayIpAddress>, HttpError>;
 
-    /// Detach IP pool from internet gateway
+    /// Detach IP address from internet gateway
     #[endpoint {
         method = DELETE,
         path = "/v1/internet-gateway-ip-addresses/{address}",

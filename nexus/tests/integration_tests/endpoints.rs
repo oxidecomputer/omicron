@@ -291,7 +291,6 @@ pub static DEMO_INTERNET_GATEWAY_IP_ADDRESS_CREATE: Lazy<
         name: DEMO_INTERNET_GATEWAY_NAME.clone(),
         description: String::from(""),
     },
-    gateway: NameOrId::Id(uuid::Uuid::new_v4()),
     address: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
 });
 pub static DEMO_INTERNET_GATEWAY_IP_POOLS_URL: Lazy<String> = Lazy::new(|| {

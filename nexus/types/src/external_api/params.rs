@@ -1394,7 +1394,6 @@ pub struct InternetGatewayIpPoolCreate {
 pub struct InternetGatewayIpAddressCreate {
     #[serde(flatten)]
     pub identity: IdentityMetadataCreateParams,
-    pub gateway: NameOrId,
     pub address: IpAddr,
 }
 
