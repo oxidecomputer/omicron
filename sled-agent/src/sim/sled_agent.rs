@@ -36,12 +36,18 @@ use omicron_common::disk::{
     DatasetsConfig, DatasetsManagementResult, DiskIdentity, DiskVariant,
     DisksManagementResult, OmicronPhysicalDisksConfig,
 };
-use omicron_uuid_kinds::{GenericUuid, PropolisUuid, SledUuid, ZpoolUuid};
+use omicron_common::update::ArtifactHash;
+use omicron_uuid_kinds::{
+    DatasetUuid, GenericUuid, PhysicalDiskUuid, PropolisUuid, SledUuid,
+    SupportBundleUuid, ZpoolUuid,
+};
 use oxnet::Ipv6Net;
 use propolis_client::{
     types::VolumeConstructionRequest, Client as PropolisClient,
 };
 use propolis_mock_server::Context as PropolisContext;
+use sled_agent_api::SupportBundleMetadata;
+use sled_agent_api::SupportBundleState;
 use sled_agent_types::disk::DiskStateRequested;
 use sled_agent_types::early_networking::{
     EarlyNetworkConfig, EarlyNetworkConfigBody,
@@ -579,7 +585,7 @@ impl SledAgent {
     /// Adds a Physical Disk to the simulated sled agent.
     pub async fn create_external_physical_disk(
         &self,
-        id: Uuid,
+        id: PhysicalDiskUuid,
         identity: DiskIdentity,
     ) {
         let variant = DiskVariant::U2;
@@ -602,18 +608,18 @@ impl SledAgent {
         self.storage.lock().await.get_all_zpools()
     }
 
-    pub async fn get_datasets(
+    pub async fn get_crucible_datasets(
         &self,
         zpool_id: ZpoolUuid,
-    ) -> Vec<(Uuid, SocketAddr)> {
-        self.storage.lock().await.get_all_datasets(zpool_id)
+    ) -> Vec<(DatasetUuid, SocketAddr)> {
+        self.storage.lock().await.get_all_crucible_datasets(zpool_id)
     }
 
     /// Adds a Zpool to the simulated sled agent.
     pub async fn create_zpool(
         &self,
         id: ZpoolUuid,
-        physical_disk_id: Uuid,
+        physical_disk_id: PhysicalDiskUuid,
         size: u64,
     ) {
         self.storage
@@ -623,22 +629,43 @@ impl SledAgent {
             .await;
     }
 
+    /// Adds a debug dataset within a zpool
+    pub async fn create_debug_dataset(
+        &self,
+        zpool_id: ZpoolUuid,
+        dataset_id: DatasetUuid,
+    ) {
+        self.storage
+            .lock()
+            .await
+            .insert_debug_dataset(zpool_id, dataset_id)
+            .await
+    }
+
     /// Adds a Crucible Dataset within a zpool.
     pub async fn create_crucible_dataset(
         &self,
         zpool_id: ZpoolUuid,
-        dataset_id: Uuid,
+        dataset_id: DatasetUuid,
     ) -> SocketAddr {
-        self.storage.lock().await.insert_dataset(zpool_id, dataset_id).await
+        self.storage
+            .lock()
+            .await
+            .insert_crucible_dataset(zpool_id, dataset_id)
+            .await
     }
 
     /// Returns a crucible dataset within a particular zpool.
     pub async fn get_crucible_dataset(
         &self,
         zpool_id: ZpoolUuid,
-        dataset_id: Uuid,
+        dataset_id: DatasetUuid,
     ) -> Arc<CrucibleData> {
-        self.storage.lock().await.get_dataset(zpool_id, dataset_id).await
+        self.storage
+            .lock()
+            .await
+            .get_crucible_dataset(zpool_id, dataset_id)
+            .await
     }
 
     /// Issue a snapshot request for a Crucible disk attached to an instance.
@@ -890,6 +917,68 @@ impl SledAgent {
         })
     }
 
+    pub async fn support_bundle_list(
+        &self,
+        zpool_id: ZpoolUuid,
+        dataset_id: DatasetUuid,
+    ) -> Result<Vec<SupportBundleMetadata>, HttpError> {
+        self.storage
+            .lock()
+            .await
+            .support_bundle_list(zpool_id, dataset_id)
+            .await
+    }
+
+    pub async fn support_bundle_create(
+        &self,
+        zpool_id: ZpoolUuid,
+        dataset_id: DatasetUuid,
+        support_bundle_id: SupportBundleUuid,
+        expected_hash: ArtifactHash,
+    ) -> Result<SupportBundleMetadata, HttpError> {
+        self.storage
+            .lock()
+            .await
+            .support_bundle_create(
+                zpool_id,
+                dataset_id,
+                support_bundle_id,
+                expected_hash,
+            )
+            .await?;
+
+        Ok(SupportBundleMetadata {
+            support_bundle_id,
+            state: SupportBundleState::Complete,
+        })
+    }
+
+    pub async fn support_bundle_get(
+        &self,
+        zpool_id: ZpoolUuid,
+        dataset_id: DatasetUuid,
+        support_bundle_id: SupportBundleUuid,
+    ) -> Result<(), HttpError> {
+        self.storage
+            .lock()
+            .await
+            .support_bundle_exists(zpool_id, dataset_id, support_bundle_id)
+            .await
+    }
+
+    pub async fn support_bundle_delete(
+        &self,
+        zpool_id: ZpoolUuid,
+        dataset_id: DatasetUuid,
+        support_bundle_id: SupportBundleUuid,
+    ) -> Result<(), HttpError> {
+        self.storage
+            .lock()
+            .await
+            .support_bundle_delete(zpool_id, dataset_id, support_bundle_id)
+            .await
+    }
+
     pub async fn datasets_ensure(
         &self,
         config: DatasetsConfig,
@@ -927,7 +1016,11 @@ impl SledAgent {
         *self.fake_zones.lock().await = requested_zones;
     }
 
-    pub async fn drop_dataset(&self, zpool_id: ZpoolUuid, dataset_id: Uuid) {
+    pub async fn drop_dataset(
+        &self,
+        zpool_id: ZpoolUuid,
+        dataset_id: DatasetUuid,
+    ) {
         self.storage.lock().await.drop_dataset(zpool_id, dataset_id)
     }
 

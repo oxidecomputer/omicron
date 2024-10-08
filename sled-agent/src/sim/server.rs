@@ -41,8 +41,10 @@ use omicron_common::backoff::{
 };
 use omicron_common::disk::DiskIdentity;
 use omicron_common::FileKv;
+use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use oxnet::Ipv6Net;
 use sled_agent_types::rack_init::RecoverySiloConfig;
@@ -177,7 +179,7 @@ impl Server {
         // Crucible dataset for each. This emulates the setup we expect to have
         // on the physical rack.
         for zpool in &config.storage.zpools {
-            let physical_disk_id = Uuid::new_v4();
+            let physical_disk_id = PhysicalDiskUuid::new_v4();
             let zpool_id = ZpoolUuid::new_v4();
             let vendor = "synthetic-vendor".to_string();
             let serial = format!("synthetic-serial-{zpool_id}");
@@ -196,13 +198,13 @@ impl Server {
             sled_agent
                 .create_zpool(zpool_id, physical_disk_id, zpool.size)
                 .await;
-            let dataset_id = Uuid::new_v4();
+            let dataset_id = DatasetUuid::new_v4();
             let address =
                 sled_agent.create_crucible_dataset(zpool_id, dataset_id).await;
 
             datasets.push(NexusTypes::DatasetCreateRequest {
                 zpool_id: zpool_id.into_untyped_uuid(),
-                dataset_id,
+                dataset_id: dataset_id.into_untyped_uuid(),
                 request: NexusTypes::DatasetPutRequest {
                     address: address.to_string(),
                     kind: DatasetKind::Crucible,
@@ -522,11 +524,11 @@ pub async fn run_standalone_server(
     for zpool in &zpools {
         let zpool_id = ZpoolUuid::from_untyped_uuid(zpool.id);
         for (dataset_id, address) in
-            server.sled_agent.get_datasets(zpool_id).await
+            server.sled_agent.get_crucible_datasets(zpool_id).await
         {
             datasets.push(NexusTypes::DatasetCreateRequest {
                 zpool_id: zpool.id,
-                dataset_id,
+                dataset_id: *dataset_id.as_untyped_uuid(),
                 request: NexusTypes::DatasetPutRequest {
                     address: address.to_string(),
                     kind: DatasetKind::Crucible,

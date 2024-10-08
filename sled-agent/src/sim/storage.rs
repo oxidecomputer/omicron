@@ -28,12 +28,18 @@ use omicron_common::disk::DiskManagementStatus;
 use omicron_common::disk::DiskVariant;
 use omicron_common::disk::DisksManagementResult;
 use omicron_common::disk::OmicronPhysicalDisksConfig;
+use omicron_common::update::ArtifactHash;
+use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::PropolisUuid;
+use omicron_uuid_kinds::SupportBundleUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use propolis_client::types::VolumeConstructionRequest;
 use serde::Serialize;
+use sled_agent_api::SupportBundleMetadata;
+use sled_agent_api::SupportBundleState;
 use slog::Logger;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -808,39 +814,68 @@ impl CrucibleServer {
     }
 }
 
+#[derive(Default)]
+pub(crate) struct DebugData {
+    bundles: HashMap<SupportBundleUuid, ArtifactHash>,
+}
+
 pub(crate) struct PhysicalDisk {
     pub(crate) identity: DiskIdentity,
     pub(crate) variant: DiskVariant,
     pub(crate) slot: i64,
 }
 
+/// Describes data being simulated within a dataset.
+pub(crate) enum DatasetContents {
+    Crucible(CrucibleServer),
+    Debug(DebugData),
+}
+
 pub(crate) struct Zpool {
     id: ZpoolUuid,
-    physical_disk_id: Uuid,
+    physical_disk_id: PhysicalDiskUuid,
     total_size: u64,
-    datasets: HashMap<Uuid, CrucibleServer>,
+    datasets: HashMap<DatasetUuid, DatasetContents>,
 }
 
 impl Zpool {
-    fn new(id: ZpoolUuid, physical_disk_id: Uuid, total_size: u64) -> Self {
+    fn new(
+        id: ZpoolUuid,
+        physical_disk_id: PhysicalDiskUuid,
+        total_size: u64,
+    ) -> Self {
         Zpool { id, physical_disk_id, total_size, datasets: HashMap::new() }
     }
 
-    fn insert_dataset(
+    fn insert_debug_dataset(&mut self, id: DatasetUuid) {
+        self.datasets.insert(id, DatasetContents::Debug(DebugData::default()));
+    }
+
+    fn insert_crucible_dataset(
         &mut self,
         log: &Logger,
-        id: Uuid,
+        id: DatasetUuid,
         crucible_ip: IpAddr,
         start_port: u16,
         end_port: u16,
     ) -> &CrucibleServer {
         self.datasets.insert(
             id,
-            CrucibleServer::new(log, crucible_ip, start_port, end_port),
+            DatasetContents::Crucible(CrucibleServer::new(
+                log,
+                crucible_ip,
+                start_port,
+                end_port,
+            )),
         );
-        self.datasets
+        let DatasetContents::Crucible(crucible) = self
+            .datasets
             .get(&id)
             .expect("Failed to get the dataset we just inserted")
+        else {
+            panic!("Should have just inserted Crucible dataset");
+        };
+        crucible
     }
 
     pub fn total_size(&self) -> u64 {
@@ -852,10 +887,12 @@ impl Zpool {
         region_id: Uuid,
     ) -> Option<Arc<CrucibleData>> {
         for dataset in self.datasets.values() {
-            for region in &dataset.data().list().await {
-                let id = Uuid::from_str(&region.id.0).unwrap();
-                if id == region_id {
-                    return Some(dataset.data());
+            if let DatasetContents::Crucible(dataset) = dataset {
+                for region in &dataset.data().list().await {
+                    let id = Uuid::from_str(&region.id.0).unwrap();
+                    if id == region_id {
+                        return Some(dataset.data());
+                    }
                 }
             }
         }
@@ -867,13 +904,15 @@ impl Zpool {
         let mut regions = vec![];
 
         for dataset in self.datasets.values() {
-            for region in &dataset.data().list().await {
-                if region.state == State::Destroyed {
-                    continue;
-                }
+            if let DatasetContents::Crucible(dataset) = dataset {
+                for region in &dataset.data().list().await {
+                    if region.state == State::Destroyed {
+                        continue;
+                    }
 
-                if port == region.port_number {
-                    regions.push(region.clone());
+                    if port == region.port_number {
+                        regions.push(region.clone());
+                    }
                 }
             }
         }
@@ -884,7 +923,7 @@ impl Zpool {
         regions.pop()
     }
 
-    pub fn drop_dataset(&mut self, id: Uuid) {
+    pub fn drop_dataset(&mut self, id: DatasetUuid) {
         let _ = self.datasets.remove(&id).expect("Failed to get the dataset");
     }
 }
@@ -895,7 +934,7 @@ pub struct Storage {
     log: Logger,
     config: Option<OmicronPhysicalDisksConfig>,
     dataset_config: Option<DatasetsConfig>,
-    physical_disks: HashMap<Uuid, PhysicalDisk>,
+    physical_disks: HashMap<PhysicalDiskUuid, PhysicalDisk>,
     next_disk_slot: i64,
     zpools: HashMap<ZpoolUuid, Zpool>,
     crucible_ip: IpAddr,
@@ -918,7 +957,7 @@ impl Storage {
     }
 
     /// Returns an immutable reference to all (currently known) physical disks
-    pub fn physical_disks(&self) -> &HashMap<Uuid, PhysicalDisk> {
+    pub fn physical_disks(&self) -> &HashMap<PhysicalDiskUuid, PhysicalDisk> {
         &self.physical_disks
     }
 
@@ -1002,7 +1041,7 @@ impl Storage {
 
     pub async fn insert_physical_disk(
         &mut self,
-        id: Uuid,
+        id: PhysicalDiskUuid,
         identity: DiskIdentity,
         variant: DiskVariant,
     ) {
@@ -1016,7 +1055,7 @@ impl Storage {
     pub async fn insert_zpool(
         &mut self,
         zpool_id: ZpoolUuid,
-        disk_id: Uuid,
+        disk_id: PhysicalDiskUuid,
         size: u64,
     ) {
         // Update our local data
@@ -1028,18 +1067,153 @@ impl Storage {
         &self.zpools
     }
 
-    /// Adds a Dataset to the sled's simulated storage.
-    pub async fn insert_dataset(
+    fn get_debug_dataset(
+        &self,
+        zpool_id: ZpoolUuid,
+        dataset_id: DatasetUuid,
+    ) -> Result<&DebugData, HttpError> {
+        let Some(zpool) = self.zpools.get(&zpool_id) else {
+            return Err(HttpError::for_not_found(
+                None,
+                format!("zpool does not exist {zpool_id}"),
+            ));
+        };
+        let Some(dataset) = zpool.datasets.get(&dataset_id) else {
+            return Err(HttpError::for_not_found(
+                None,
+                format!("dataset does not exist {dataset_id}"),
+            ));
+        };
+
+        let DatasetContents::Debug(debug) = dataset else {
+            return Err(HttpError::for_bad_request(
+                None,
+                format!("Not a debug dataset"),
+            ));
+        };
+
+        Ok(debug)
+    }
+
+    fn get_debug_dataset_mut(
         &mut self,
         zpool_id: ZpoolUuid,
-        dataset_id: Uuid,
+        dataset_id: DatasetUuid,
+    ) -> Result<&mut DebugData, HttpError> {
+        let Some(zpool) = self.zpools.get_mut(&zpool_id) else {
+            return Err(HttpError::for_not_found(
+                None,
+                format!("zpool does not exist {zpool_id}"),
+            ));
+        };
+        let Some(dataset) = zpool.datasets.get_mut(&dataset_id) else {
+            return Err(HttpError::for_not_found(
+                None,
+                format!("dataset does not exist {dataset_id}"),
+            ));
+        };
+
+        let DatasetContents::Debug(debug) = dataset else {
+            return Err(HttpError::for_bad_request(
+                None,
+                format!("Not a debug dataset"),
+            ));
+        };
+
+        Ok(debug)
+    }
+
+    pub async fn support_bundle_list(
+        &self,
+        zpool_id: ZpoolUuid,
+        dataset_id: DatasetUuid,
+    ) -> Result<Vec<SupportBundleMetadata>, HttpError> {
+        let debug = self.get_debug_dataset(zpool_id, dataset_id)?;
+
+        Ok(debug
+            .bundles
+            .keys()
+            .map(|id| SupportBundleMetadata {
+                support_bundle_id: *id,
+                state: SupportBundleState::Complete,
+            })
+            .collect())
+    }
+
+    pub async fn support_bundle_create(
+        &mut self,
+        zpool_id: ZpoolUuid,
+        dataset_id: DatasetUuid,
+        support_bundle_id: SupportBundleUuid,
+        hash: ArtifactHash,
+    ) -> Result<(), HttpError> {
+        let debug = self.get_debug_dataset_mut(zpool_id, dataset_id)?;
+
+        // This is for the simulated server, so we totally ignore the "contents"
+        // of the bundle and just accept that it should exist.
+        debug.bundles.insert(support_bundle_id, hash);
+
+        Ok(())
+    }
+
+    pub async fn support_bundle_exists(
+        &self,
+        zpool_id: ZpoolUuid,
+        dataset_id: DatasetUuid,
+        support_bundle_id: SupportBundleUuid,
+    ) -> Result<(), HttpError> {
+        let debug = self.get_debug_dataset(zpool_id, dataset_id)?;
+
+        if !debug.bundles.contains_key(&support_bundle_id) {
+            return Err(HttpError::for_not_found(
+                None,
+                format!("Support bundle not found {support_bundle_id}"),
+            ));
+        }
+        Ok(())
+    }
+
+    pub async fn support_bundle_delete(
+        &mut self,
+        zpool_id: ZpoolUuid,
+        dataset_id: DatasetUuid,
+        support_bundle_id: SupportBundleUuid,
+    ) -> Result<(), HttpError> {
+        let debug = self.get_debug_dataset_mut(zpool_id, dataset_id)?;
+
+        if debug.bundles.remove(&support_bundle_id).is_none() {
+            return Err(HttpError::for_not_found(
+                None,
+                format!("Support bundle not found {support_bundle_id}"),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Adds a debug dataset to the sled's simulated storage
+    pub async fn insert_debug_dataset(
+        &mut self,
+        zpool_id: ZpoolUuid,
+        dataset_id: DatasetUuid,
+    ) {
+        self.zpools
+            .get_mut(&zpool_id)
+            .expect("Zpool does not exist")
+            .insert_debug_dataset(dataset_id);
+    }
+
+    /// Adds a Crucible dataset to the sled's simulated storage.
+    pub async fn insert_crucible_dataset(
+        &mut self,
+        zpool_id: ZpoolUuid,
+        dataset_id: DatasetUuid,
     ) -> SocketAddr {
         // Update our local data
         let dataset = self
             .zpools
             .get_mut(&zpool_id)
             .expect("Zpool does not exist")
-            .insert_dataset(
+            .insert_crucible_dataset(
                 &self.log,
                 dataset_id,
                 self.crucible_ip,
@@ -1068,7 +1242,7 @@ impl Storage {
                 };
 
                 nexus_client::types::PhysicalDiskPutRequest {
-                    id: *id,
+                    id: *id.as_untyped_uuid(),
                     vendor: disk.identity.vendor.clone(),
                     serial: disk.identity.serial.clone(),
                     model: disk.identity.model.clone(),
@@ -1085,37 +1259,51 @@ impl Storage {
             .map(|pool| nexus_client::types::ZpoolPutRequest {
                 id: pool.id.into_untyped_uuid(),
                 sled_id: self.sled_id,
-                physical_disk_id: pool.physical_disk_id,
+                physical_disk_id: *pool.physical_disk_id.as_untyped_uuid(),
             })
             .collect()
     }
 
-    pub fn get_all_datasets(
+    pub fn get_all_crucible_datasets(
         &self,
         zpool_id: ZpoolUuid,
-    ) -> Vec<(Uuid, SocketAddr)> {
+    ) -> Vec<(DatasetUuid, SocketAddr)> {
         let zpool = self.zpools.get(&zpool_id).expect("Zpool does not exist");
 
         zpool
             .datasets
             .iter()
-            .map(|(id, server)| (*id, server.address()))
+            .filter_map(|(id, dataset)| match dataset {
+                DatasetContents::Crucible(server) => {
+                    Some((*id, server.address()))
+                }
+                _ => None,
+            })
             .collect()
     }
 
     pub async fn get_dataset(
         &self,
         zpool_id: ZpoolUuid,
-        dataset_id: Uuid,
-    ) -> Arc<CrucibleData> {
+        dataset_id: DatasetUuid,
+    ) -> &DatasetContents {
         self.zpools
             .get(&zpool_id)
             .expect("Zpool does not exist")
             .datasets
             .get(&dataset_id)
             .expect("Dataset does not exist")
-            .data
-            .clone()
+    }
+
+    pub async fn get_crucible_dataset(
+        &self,
+        zpool_id: ZpoolUuid,
+        dataset_id: DatasetUuid,
+    ) -> Arc<CrucibleData> {
+        match self.get_dataset(zpool_id, dataset_id).await {
+            DatasetContents::Crucible(crucible) => crucible.data.clone(),
+            _ => panic!("{zpool_id} / {dataset_id} is not a crucible dataset"),
+        }
     }
 
     pub async fn get_dataset_for_region(
@@ -1146,7 +1334,11 @@ impl Storage {
         regions.pop()
     }
 
-    pub fn drop_dataset(&mut self, zpool_id: ZpoolUuid, dataset_id: Uuid) {
+    pub fn drop_dataset(
+        &mut self,
+        zpool_id: ZpoolUuid,
+        dataset_id: DatasetUuid,
+    ) {
         self.zpools
             .get_mut(&zpool_id)
             .expect("Zpool does not exist")

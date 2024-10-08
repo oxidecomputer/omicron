@@ -365,6 +365,73 @@ impl SledAgentApi for SledAgentSimImpl {
         Ok(HttpResponseUpdatedNoContent())
     }
 
+    async fn support_bundle_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundleListPathParam>,
+    ) -> Result<HttpResponseOk<Vec<SupportBundleMetadata>>, HttpError> {
+        let sa = rqctx.context();
+
+        let SupportBundleListPathParam { zpool_id, dataset_id } =
+            path_params.into_inner();
+
+        let bundles = sa.support_bundle_list(zpool_id, dataset_id).await?;
+        Ok(HttpResponseOk(bundles))
+    }
+
+    async fn support_bundle_create(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+        query_params: Query<SupportBundleCreateQueryParams>,
+        _body: StreamingBody,
+    ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError> {
+        let sa = rqctx.context();
+
+        let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
+            path_params.into_inner();
+        let SupportBundleCreateQueryParams { hash } = query_params.into_inner();
+
+        Ok(HttpResponseCreated(
+            sa.support_bundle_create(
+                zpool_id,
+                dataset_id,
+                support_bundle_id,
+                hash,
+            )
+            .await?,
+        ))
+    }
+
+    async fn support_bundle_get(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+    ) -> Result<HttpResponseHeaders<HttpResponseOk<FreeformBody>>, HttpError>
+    {
+        let sa = rqctx.context();
+        let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
+            path_params.into_inner();
+
+        sa.support_bundle_get(zpool_id, dataset_id, support_bundle_id).await?;
+
+        let body = FreeformBody("simulated support bundle; do not eat".into());
+        let response = HttpResponseHeaders::new_unnamed(HttpResponseOk(body));
+        Ok(response)
+    }
+
+    async fn support_bundle_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let sa = rqctx.context();
+
+        let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
+            path_params.into_inner();
+
+        sa.support_bundle_delete(zpool_id, dataset_id, support_bundle_id)
+            .await?;
+
+        Ok(HttpResponseDeleted())
+    }
+
     // --- Unimplemented endpoints ---
 
     async fn zone_bundle_list_all(
@@ -429,37 +496,6 @@ impl SledAgentApi for SledAgentSimImpl {
         _rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<BTreeMap<Utf8PathBuf, CleanupCount>>, HttpError>
     {
-        method_unimplemented()
-    }
-
-    async fn support_bundle_list(
-        _rqctx: RequestContext<Self::Context>,
-        _path_params: Path<SupportBundleListPathParam>,
-    ) -> Result<HttpResponseOk<Vec<SupportBundleMetadata>>, HttpError> {
-        method_unimplemented()
-    }
-
-    async fn support_bundle_create(
-        _rqctx: RequestContext<Self::Context>,
-        _path_params: Path<SupportBundlePathParam>,
-        _query_params: Query<SupportBundleCreateQueryParams>,
-        _body: StreamingBody,
-    ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError> {
-        method_unimplemented()
-    }
-
-    async fn support_bundle_get(
-        _rqctx: RequestContext<Self::Context>,
-        _path_params: Path<SupportBundlePathParam>,
-    ) -> Result<HttpResponseHeaders<HttpResponseOk<FreeformBody>>, HttpError>
-    {
-        method_unimplemented()
-    }
-
-    async fn support_bundle_delete(
-        _rqctx: RequestContext<Self::Context>,
-        _path_params: Path<SupportBundlePathParam>,
-    ) -> Result<HttpResponseDeleted, HttpError> {
         method_unimplemented()
     }
 
