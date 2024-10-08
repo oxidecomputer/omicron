@@ -884,6 +884,16 @@ impl super::Nexus {
                 // remain "Migrating" (not "Stopping") until its migration ID is
                 // unset, and it seems a bit sad to return a "Migrating"
                 // instance to a caller who tries to force-kill it.
+                //
+                // TODO(eliza): in the case where we are terminating both an
+                // active VMM and migration target, we will unregister them in
+                // sequence, running separate update sagas for both VMMs being
+                // terminated. It would be a bit more efficient to terminate
+                // both VMMs, update CRDB, and then run a *single* update saga
+                // to process both VMMs being destroyed. However, this requires
+                // a bit of annoying refactoring to existing APIs, and I'm not
+                // sure if improving the `instance-force-terminate` endpoint's
+                // latency is particularly important...
                 if let Some((_, saga)) = process_vmm_update(
                     &self.db_datastore,
                     opctx,
