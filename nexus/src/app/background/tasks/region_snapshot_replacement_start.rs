@@ -401,7 +401,7 @@ mod test {
 
                 datastore
                     .region_snapshot_create(RegionSnapshot::new(
-                        dataset.id,
+                        *dataset.id.as_untyped_uuid(),
                         region_id,
                         snapshot_id,
                         String::from("[fd00:1122:3344::101]:12345"),

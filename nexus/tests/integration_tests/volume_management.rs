@@ -30,6 +30,7 @@ use omicron_common::api::external::Name;
 use omicron_common::api::internal;
 use omicron_uuid_kinds::DownstairsKind;
 use omicron_uuid_kinds::DownstairsRegionKind;
+use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::TypedUuid;
 use omicron_uuid_kinds::UpstairsKind;
 use omicron_uuid_kinds::UpstairsRepairKind;
@@ -2225,7 +2226,7 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
             &region_snapshots[i];
         datastore
             .region_snapshot_create(nexus_db_model::RegionSnapshot {
-                dataset_id: *dataset_id,
+                dataset_id: *dataset_id.as_untyped_uuid(),
                 region_id: *region_id,
                 snapshot_id: *snapshot_id,
                 snapshot_addr: snapshot_addr.clone(),
@@ -2292,7 +2293,11 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
     for i in 0..3 {
         let (dataset_id, region_id, snapshot_id, _) = region_snapshots[i];
         let region_snapshot = datastore
-            .region_snapshot_get(dataset_id, region_id, snapshot_id)
+            .region_snapshot_get(
+                *dataset_id.as_untyped_uuid(),
+                region_id,
+                snapshot_id,
+            )
             .await
             .unwrap()
             .unwrap();
@@ -2309,7 +2314,11 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
     for i in 0..3 {
         let (dataset_id, region_id, snapshot_id, _) = region_snapshots[i];
         let region_snapshot = datastore
-            .region_snapshot_get(dataset_id, region_id, snapshot_id)
+            .region_snapshot_get(
+                *dataset_id.as_untyped_uuid(),
+                region_id,
+                snapshot_id,
+            )
             .await
             .unwrap()
             .unwrap();
@@ -2335,7 +2344,7 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
             &region_snapshots[i];
         datastore
             .region_snapshot_create(nexus_db_model::RegionSnapshot {
-                dataset_id: *dataset_id,
+                dataset_id: *dataset_id.as_untyped_uuid(),
                 region_id: *region_id,
                 snapshot_id: *snapshot_id,
                 snapshot_addr: snapshot_addr.clone(),
@@ -2402,7 +2411,11 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
     for i in 0..3 {
         let (dataset_id, region_id, snapshot_id, _) = region_snapshots[i];
         let region_snapshot = datastore
-            .region_snapshot_get(dataset_id, region_id, snapshot_id)
+            .region_snapshot_get(
+                *dataset_id.as_untyped_uuid(),
+                region_id,
+                snapshot_id,
+            )
             .await
             .unwrap()
             .unwrap();
@@ -2413,7 +2426,11 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
     for i in 3..6 {
         let (dataset_id, region_id, snapshot_id, _) = region_snapshots[i];
         let region_snapshot = datastore
-            .region_snapshot_get(dataset_id, region_id, snapshot_id)
+            .region_snapshot_get(
+                *dataset_id.as_untyped_uuid(),
+                region_id,
+                snapshot_id,
+            )
             .await
             .unwrap()
             .unwrap();
@@ -2432,7 +2449,11 @@ async fn test_keep_your_targets_straight(cptestctx: &ControlPlaneTestContext) {
     for i in 0..6 {
         let (dataset_id, region_id, snapshot_id, _) = region_snapshots[i];
         let region_snapshot = datastore
-            .region_snapshot_get(dataset_id, region_id, snapshot_id)
+            .region_snapshot_get(
+                *dataset_id.as_untyped_uuid(),
+                region_id,
+                snapshot_id,
+            )
             .await
             .unwrap()
             .unwrap();

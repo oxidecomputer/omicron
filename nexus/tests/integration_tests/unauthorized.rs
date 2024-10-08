@@ -19,6 +19,7 @@ use nexus_test_utils::http_testing::NexusRequest;
 use nexus_test_utils::http_testing::RequestBuilder;
 use nexus_test_utils::http_testing::TestResponse;
 use nexus_test_utils_macros::nexus_test;
+use omicron_uuid_kinds::DatasetUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use once_cell::sync::Lazy;
 
@@ -63,7 +64,7 @@ async fn test_unauthorized(cptestctx: &ControlPlaneTestContext) {
             sled_id,
             nexus_test_utils::PHYSICAL_DISK_UUID.parse().unwrap(),
             ZpoolUuid::new_v4(),
-            uuid::Uuid::new_v4(),
+            DatasetUuid::new_v4(),
             DiskTest::DEFAULT_ZPOOL_SIZE_GIB,
         )
         .await;
