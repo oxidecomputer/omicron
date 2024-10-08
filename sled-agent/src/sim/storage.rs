@@ -1088,7 +1088,7 @@ impl Storage {
         let DatasetContents::Debug(debug) = dataset else {
             return Err(HttpError::for_bad_request(
                 None,
-                format!("Not a debug dataset"),
+                format!("Not a debug dataset: {zpool_id} / {dataset_id}"),
             ));
         };
 
@@ -1116,7 +1116,7 @@ impl Storage {
         let DatasetContents::Debug(debug) = dataset else {
             return Err(HttpError::for_bad_request(
                 None,
-                format!("Not a debug dataset"),
+                format!("Not a debug dataset: {zpool_id} / {dataset_id}"),
             ));
         };
 
