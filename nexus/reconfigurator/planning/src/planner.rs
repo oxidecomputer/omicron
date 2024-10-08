@@ -2587,7 +2587,8 @@ mod test {
         assert_eq!(
             blueprint3
                 .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
-                .filter(|(_, zone)| zone.zone_type.is_clickhouse())
+                .filter(|(sled, zone)| *sled != sled_1
+                    && zone.zone_type.is_clickhouse())
                 .count(),
             1,
             "can't find replacement ClickHouse zone"
