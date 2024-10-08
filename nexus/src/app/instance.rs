@@ -932,7 +932,7 @@ impl super::Nexus {
                 info!(
                     opctx.log,
                     "asked to force terminate an instance's {vmm_role} VMM ;
-                     thatwas already unregistered";
+                     that was already unregistered";
                     "instance_id" => %authz_instance.id(),
                     "vmm_id" => %propolis_id,
                     "sled_id" => %sled_id,
