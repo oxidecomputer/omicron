@@ -240,7 +240,7 @@ impl ExampleSystemBuilder {
             .to_collection_builder()
             .expect("failed to build collection")
             .build();
-e
+
         // Now make a blueprint and collection with some zones on each sled.
         let mut builder = BlueprintBuilder::new_based_on(
             &self.log,
