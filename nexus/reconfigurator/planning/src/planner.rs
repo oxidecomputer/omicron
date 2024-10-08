@@ -1106,6 +1106,14 @@ mod test {
         // which it would by default (because we have only one sled).
         builder.policy_mut().target_internal_dns_zone_count = 1;
 
+        // And we don't want it to add any ClickHouse zones,
+        // which it also would by default.
+        builder.policy_mut().clickhouse_policy = Some(ClickhousePolicy {
+            deploy_with_standalone: false,
+            target_servers: 0,
+            target_keepers: 0,
+        });
+
         let input = builder.build();
         let blueprint2 = Planner::new_based_on(
             logctx.log.clone(),
