@@ -17,8 +17,8 @@ use omicron_common::{
     api::internal::{
         nexus::{DiskRuntimeState, SledVmmState, UpdateArtifactId},
         shared::{
-            ResolvedVpcRouteSet, ResolvedVpcRouteState, SledIdentifiers,
-            SwitchPorts, VirtualNetworkInterfaceHost,
+            ExternalIpGatewayMap, ResolvedVpcRouteSet, ResolvedVpcRouteState,
+            SledIdentifiers, SwitchPorts, VirtualNetworkInterfaceHost,
         },
     },
     disk::{
@@ -486,6 +486,16 @@ pub trait SledAgentApi {
     async fn set_vpc_routes(
         request_context: RequestContext<Self::Context>,
         body: TypedBody<Vec<ResolvedVpcRouteSet>>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
+
+    /// Update per-NIC IP address <-> internet gateway mappings.
+    #[endpoint {
+        method = PUT,
+        path = "/eip-gateways",
+    }]
+    async fn set_eip_gateways(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<ExternalIpGatewayMap>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 }
 

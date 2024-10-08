@@ -127,25 +127,58 @@ pub fn error_for_enoent() -> String {
 /// This allows use to use expectorate to verify the shape of the CLI output.
 #[derive(Clone, Debug)]
 pub struct Redactor<'a> {
-    redact_uuids: bool,
-    extra: ExtraRedactions<'a>,
+    basic: bool,
+    uuids: bool,
+    extra: Vec<(&'a str, String)>,
+}
+
+impl Default for Redactor<'_> {
+    fn default() -> Self {
+        Self { basic: true, uuids: true, extra: Vec::new() }
+    }
 }
 
 impl<'a> Redactor<'a> {
-    pub fn new() -> Self {
-        Self { redact_uuids: true, extra: ExtraRedactions::new() }
+    /// Create a new redactor that does not do any redactions.
+    pub fn noop() -> Self {
+        Self { basic: false, uuids: false, extra: Vec::new() }
     }
 
-    pub fn redact_uuids(&mut self, redact_uuids: bool) -> &mut Self {
-        self.redact_uuids = redact_uuids;
+    pub fn basic(&mut self, basic: bool) -> &mut Self {
+        self.basic = basic;
         self
     }
 
-    pub fn extra(
+    pub fn uuids(&mut self, uuids: bool) -> &mut Self {
+        self.uuids = uuids;
+        self
+    }
+
+    pub fn extra_fixed_length(
         &mut self,
-        extra_redactions: ExtraRedactions<'a>,
+        name: &str,
+        text_to_redact: &'a str,
     ) -> &mut Self {
-        self.extra = extra_redactions;
+        // Use the same number of chars as the number of bytes in
+        // text_to_redact. We're almost entirely in ASCII-land so they're the
+        // same, and getting the length right is nice but doesn't matter for
+        // correctness.
+        //
+        // A technically more correct impl would use unicode-width, but ehhh.
+        let replacement = fill_redaction_text(name, text_to_redact.len());
+        self.extra.push((text_to_redact, replacement));
+        self
+    }
+
+    pub fn extra_variable_length(
+        &mut self,
+        name: &str,
+        text_to_redact: &'a str,
+    ) -> &mut Self {
+        let gen = format!("<{}_REDACTED>", name.to_uppercase());
+        let replacement = gen.to_string();
+
+        self.extra.push((text_to_redact, replacement));
         self
     }
 
@@ -155,13 +188,14 @@ impl<'a> Redactor<'a> {
         // substring of something that should be handled by extra_redactions (e.g.
         // a temporary path).
         let mut s = input.to_owned();
-        for (name, replacement) in &self.extra.redactions {
+        for (name, replacement) in &self.extra {
             s = s.replace(name, replacement);
         }
 
-        s = redact_basic(&s);
-
-        if self.redact_uuids {
+        if self.basic {
+            s = redact_basic(&s);
+        }
+        if self.uuids {
             s = redact_uuids(&s);
         }
 
@@ -254,49 +288,6 @@ fn redact_uuids(input: &str) -> String {
         .to_string()
 }
 
-/// Represents a list of extra redactions for [`Redactor`].
-///
-/// Extra redactions are applied in-order, before any builtin redactions.
-#[derive(Clone, Debug, Default)]
-pub struct ExtraRedactions<'a> {
-    // A pair of redaction and replacement strings.
-    redactions: Vec<(&'a str, String)>,
-}
-
-impl<'a> ExtraRedactions<'a> {
-    pub fn new() -> Self {
-        Self { redactions: Vec::new() }
-    }
-
-    pub fn fixed_length(
-        &mut self,
-        name: &str,
-        text_to_redact: &'a str,
-    ) -> &mut Self {
-        // Use the same number of chars as the number of bytes in
-        // text_to_redact. We're almost entirely in ASCII-land so they're the
-        // same, and getting the length right is nice but doesn't matter for
-        // correctness.
-        //
-        // A technically more correct impl would use unicode-width, but ehhh.
-        let replacement = fill_redaction_text(name, text_to_redact.len());
-        self.redactions.push((text_to_redact, replacement));
-        self
-    }
-
-    pub fn variable_length(
-        &mut self,
-        name: &str,
-        text_to_redact: &'a str,
-    ) -> &mut Self {
-        let gen = format!("<{}_REDACTED>", name.to_uppercase());
-        let replacement = gen.to_string();
-
-        self.redactions.push((text_to_redact, replacement));
-        self
-    }
-}
-
 fn fill_redaction_text(name: &str, text_to_redact_len: usize) -> String {
     // The overall plan is to generate a string of the form
     // ---<REDACTED_NAME>---, depending on the length of the text to
@@ -334,12 +325,14 @@ mod tests {
         let input = "time: 123ms, path: /var/tmp/tmp.456ms123s, \
             path2: /short, \
             path3: /variable-length/path";
-        let mut extra = ExtraRedactions::new();
-        extra
-            .fixed_length("tp", "/var/tmp/tmp.456ms123s")
-            .fixed_length("short_redact", "/short")
-            .variable_length("variable", "/variable-length/path");
-        let actual = Redactor::new().extra(extra).do_redact(input);
+        let mut redactor = Redactor::noop();
+        redactor
+            .extra_fixed_length("tp", "/var/tmp/tmp.456ms123s")
+            .extra_fixed_length("short_redact", "/short")
+            .extra_variable_length("variable", "/variable-length/path");
+        let actual = Redactor::default()
+            .extra_fixed_length("tp", "/var/tmp/tmp.456ms123s")
+            .do_redact(input);
         assert_eq!(
             actual,
             "time: <REDACTED DURATION>ms, path: ....<REDACTED_TP>....., \
@@ -371,7 +364,7 @@ mod tests {
         for time in times {
             let input = format!("{:?}", time);
             assert_eq!(
-                Redactor::new().do_redact(&input),
+                Redactor::default().do_redact(&input),
                 "<REDACTED_TIMESTAMP>",
                 "Failed to redact {:?}",
                 time
