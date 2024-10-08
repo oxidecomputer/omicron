@@ -2764,7 +2764,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "Attach IP pool to internet gateway",
+        "summary": "Attach IP address to internet gateway",
         "operationId": "internet_gateway_ip_address_create",
         "parameters": [
           {
@@ -2828,7 +2828,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "Detach IP pool from internet gateway",
+        "summary": "Detach IP address from internet gateway",
         "operationId": "internet_gateway_ip_address_delete",
         "parameters": [
           {
@@ -16619,9 +16619,6 @@
           "description": {
             "type": "string"
           },
-          "gateway": {
-            "$ref": "#/components/schemas/NameOrId"
-          },
           "name": {
             "$ref": "#/components/schemas/Name"
           }
@@ -16629,7 +16626,6 @@
         "required": [
           "address",
           "description",
-          "gateway",
           "name"
         ]
       },

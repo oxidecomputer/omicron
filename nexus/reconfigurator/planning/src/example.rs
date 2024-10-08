@@ -54,6 +54,8 @@ pub fn example(
 pub struct ExampleSystemBuilder {
     log: slog::Logger,
     test_name: String,
+    // TODO: Store a Policy struct instead of these fields:
+    // https://github.com/oxidecomputer/omicron/issues/6803
     nsleds: usize,
     ndisks_per_sled: u8,
     // None means nsleds
