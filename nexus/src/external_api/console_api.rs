@@ -8,19 +8,6 @@
 //! external API, but in order to avoid CORS issues for now, we are serving
 //! these routes directly from the external API.
 
-// `HeaderName` and `HeaderValue` contain `bytes::Bytes`, which trips
-// the `declare_interior_mutable_const` lint. But in a `const fn`
-// context, the `AtomicPtr` that is used in `Bytes` only ever points
-// to a `&'static str`, so does not have interior mutability in that
-// context.
-//
-// A Clippy bug means that even if you ignore interior mutability of
-// `Bytes` (the default behavior), it will still not ignore it for types
-// where the only interior mutability is through `Bytes`. This is fixed
-// in rust-lang/rust-clippy#12691, which should land in the Rust 1.80
-// toolchain; we can remove this attribute then.
-#![allow(clippy::declare_interior_mutable_const)]
-
 use crate::context::ApiContext;
 use anyhow::Context;
 use camino::{Utf8Path, Utf8PathBuf};

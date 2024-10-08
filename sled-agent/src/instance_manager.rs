@@ -279,6 +279,16 @@ impl InstanceManager {
         rx.await?
     }
 
+    pub async fn refresh_external_ips(&self) -> Result<(), Error> {
+        let (tx, rx) = oneshot::channel();
+        self.inner
+            .tx
+            .send(InstanceManagerRequest::RefreshExternalIps { tx })
+            .await
+            .map_err(|_| Error::FailedSendInstanceManagerClosed)?;
+        rx.await?
+    }
+
     /// Returns the last-set size of the reservoir
     pub fn reservoir_size(&self) -> ByteCount {
         self.inner.vmm_reservoir_manager.reservoir_size()
@@ -362,6 +372,9 @@ enum InstanceManagerRequest {
     DeleteExternalIp {
         propolis_id: PropolisUuid,
         ip: InstanceExternalIpBody,
+        tx: oneshot::Sender<Result<(), Error>>,
+    },
+    RefreshExternalIps {
         tx: oneshot::Sender<Result<(), Error>>,
     },
     GetState {
@@ -469,6 +482,9 @@ impl InstanceManagerRunner {
                         Some(DeleteExternalIp { propolis_id, ip, tx }) => {
                             self.delete_external_ip(tx, propolis_id, &ip).await
                         },
+                        Some(RefreshExternalIps { tx }) => {
+                            self.refresh_external_ips(tx).await
+                        }
                         Some(GetState { propolis_id, tx }) => {
                             // TODO(eliza): it could potentially be nice to
                             // refactor this to use `tokio::sync::watch`, rather
@@ -722,6 +738,31 @@ impl InstanceManagerRunner {
         };
 
         instance.delete_external_ip(tx, ip).await?;
+        Ok(())
+    }
+
+    async fn refresh_external_ips(
+        &self,
+        tx: oneshot::Sender<Result<(), Error>>,
+    ) -> Result<(), Error> {
+        let mut channels = vec![];
+        for (_, instance) in &self.jobs {
+            let (tx, rx_new) = oneshot::channel();
+            instance.refresh_external_ips(tx).await?;
+            channels.push(rx_new);
+        }
+
+        tokio::spawn(async move {
+            for channel in channels {
+                if let Err(e) = channel.await {
+                    let _ = tx.send(Err(e.into()));
+                    return;
+                }
+            }
+
+            let _ = tx.send(Ok(()));
+        });
+
         Ok(())
     }
 

@@ -1430,7 +1430,7 @@ mod test {
                     .expect("can't parse external DNS IP address")
             });
         for addr in external_dns_ips {
-            blueprint_builder.add_external_dns_ip(addr);
+            blueprint_builder.add_external_dns_ip(addr).unwrap();
         }
 
         // Now we can add external DNS zones. We'll add two to the first

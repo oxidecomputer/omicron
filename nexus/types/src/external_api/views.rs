@@ -303,6 +303,45 @@ pub struct VpcRouter {
     pub vpc_id: Uuid,
 }
 
+// INTERNET GATEWAYS
+
+/// An internet gateway provides a path between VPC networks and external
+/// networks.
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InternetGateway {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    /// The VPC to which the gateway belongs.
+    pub vpc_id: Uuid,
+}
+
+/// An IP pool that is attached to an internet gateway
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InternetGatewayIpPool {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    /// The associated internet gateway.
+    pub internet_gateway_id: Uuid,
+
+    /// The associated IP pool.
+    pub ip_pool_id: Uuid,
+}
+
+/// An IP address that is attached to an internet gateway
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InternetGatewayIpAddress {
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+
+    /// The associated internet gateway.
+    pub internet_gateway_id: Uuid,
+
+    /// The associated IP address,
+    pub address: IpAddr,
+}
+
 // IP POOLS
 
 /// A collection of IP ranges. If a pool is linked to a silo, IP addresses from

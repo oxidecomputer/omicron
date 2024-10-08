@@ -240,7 +240,7 @@ impl ExampleSystemBuilder {
             .to_collection_builder()
             .expect("failed to build collection")
             .build();
-
+e
         // Now make a blueprint and collection with some zones on each sled.
         let mut builder = BlueprintBuilder::new_based_on(
             &self.log,
@@ -253,14 +253,21 @@ impl ExampleSystemBuilder {
         builder.set_rng_seed((&self.test_name, "ExampleSystem make_zones"));
 
         // Add as many external IPs as is necessary for external DNS zones. We
-        // pick a start address arbitrarily in the 10.x.x.x range.
+        // pick addresses in the TEST-NET-2 (RFC 5737) range.
         for i in 0..self.external_dns_count.0 {
-            builder.add_external_dns_ip(IpAddr::V4(Ipv4Addr::new(
-                10,
-                49,
-                0,
-                (i + 1).try_into().expect("external_dns_count is always <= 30"),
-            )));
+            builder
+                .add_external_dns_ip(IpAddr::V4(Ipv4Addr::new(
+                    198,
+                    51,
+                    100,
+                    (i + 1)
+                        .try_into()
+                        .expect("external_dns_count is always <= 30"),
+                )))
+                .expect(
+                    "this shouldn't error because provided external IPs \
+                     are all unique",
+                );
         }
 
         for (i, (sled_id, sled_resources)) in
