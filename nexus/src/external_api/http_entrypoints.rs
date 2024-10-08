@@ -4689,6 +4689,344 @@ impl NexusExternalApi for NexusExternalApiImpl {
             .await
     }
 
+    // Internet gateways
+
+    /// List internet gateways
+    async fn internet_gateway_list(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<PaginatedByNameOrId<params::VpcSelector>>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::InternetGateway>>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            let query = query_params.into_inner();
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let scan_params = ScanByNameOrId::from_query(&query)?;
+            let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+            let vpc_lookup =
+                nexus.vpc_lookup(&opctx, scan_params.selector.clone())?;
+            let results = nexus
+                .internet_gateway_list(&opctx, &vpc_lookup, &paginated_by)
+                .await?
+                .into_iter()
+                .map(|s| s.into())
+                .collect();
+            Ok(HttpResponseOk(ScanByNameOrId::results_page(
+                &query,
+                results,
+                &marker_for_name_or_id,
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    /// Fetch internet gateway
+    async fn internet_gateway_view(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::InternetGatewayPath>,
+        query_params: Query<params::OptionalVpcSelector>,
+    ) -> Result<HttpResponseOk<views::InternetGateway>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let selector = params::InternetGatewaySelector {
+                project: query.project,
+                vpc: query.vpc,
+                gateway: path.gateway,
+            };
+            let (.., internet_gateway) = nexus
+                .internet_gateway_lookup(&opctx, selector)?
+                .fetch()
+                .await?;
+            Ok(HttpResponseOk(internet_gateway.into()))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    /// Create VPC internet gateway
+    async fn internet_gateway_create(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<params::VpcSelector>,
+        create_params: TypedBody<params::InternetGatewayCreate>,
+    ) -> Result<HttpResponseCreated<views::InternetGateway>, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let create = create_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let query = query_params.into_inner();
+            let vpc_lookup = nexus.vpc_lookup(&opctx, query)?;
+            let result = nexus
+                .internet_gateway_create(&opctx, &vpc_lookup, &create)
+                .await?;
+            Ok(HttpResponseCreated(result.into()))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    /// Delete internet gateway
+    async fn internet_gateway_delete(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::InternetGatewayPath>,
+        query_params: Query<params::InternetGatewayDeleteSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let selector = params::InternetGatewaySelector {
+                project: query.project,
+                vpc: query.vpc,
+                gateway: path.gateway,
+            };
+            let lookup = nexus.internet_gateway_lookup(&opctx, selector)?;
+            nexus
+                .internet_gateway_delete(&opctx, &lookup, query.cascade)
+                .await?;
+            Ok(HttpResponseDeleted())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    /// List IP pools attached to an internet gateway.
+    async fn internet_gateway_ip_pool_list(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<
+            PaginatedByNameOrId<params::InternetGatewaySelector>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<views::InternetGatewayIpPool>>,
+        HttpError,
+    > {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            let query = query_params.into_inner();
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let scan_params = ScanByNameOrId::from_query(&query)?;
+            let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+            let lookup = nexus.internet_gateway_lookup(
+                &opctx,
+                scan_params.selector.clone(),
+            )?;
+            let results = nexus
+                .internet_gateway_ip_pool_list(&opctx, &lookup, &paginated_by)
+                .await?
+                .into_iter()
+                .map(|route| route.into())
+                .collect();
+            Ok(HttpResponseOk(ScanByNameOrId::results_page(
+                &query,
+                results,
+                &marker_for_name_or_id,
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    /// Attach an IP pool to an internet gateway
+    async fn internet_gateway_ip_pool_create(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<params::InternetGatewaySelector>,
+        create_params: TypedBody<params::InternetGatewayIpPoolCreate>,
+    ) -> Result<HttpResponseCreated<views::InternetGatewayIpPool>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            let query = query_params.into_inner();
+            let create = create_params.into_inner();
+            let lookup = nexus.internet_gateway_lookup(&opctx, query)?;
+            let result = nexus
+                .internet_gateway_ip_pool_attach(&opctx, &lookup, &create)
+                .await?;
+            Ok(HttpResponseCreated(result.into()))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    /// Detach an IP pool from an internet gateway
+    async fn internet_gateway_ip_pool_delete(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::IpPoolPath>,
+        query_params: Query<params::DeleteInternetGatewayElementSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let selector = params::InternetGatewayIpPoolSelector {
+                project: query.project,
+                vpc: query.vpc,
+                gateway: query.gateway,
+                pool: path.pool,
+            };
+            let lookup =
+                nexus.internet_gateway_ip_pool_lookup(&opctx, selector)?;
+            nexus
+                .internet_gateway_ip_pool_detach(&opctx, &lookup, query.cascade)
+                .await?;
+            Ok(HttpResponseDeleted())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    /// List addresses attached to an internet gateway.
+    async fn internet_gateway_ip_address_list(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<
+            PaginatedByNameOrId<params::InternetGatewaySelector>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<views::InternetGatewayIpAddress>>,
+        HttpError,
+    > {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            let query = query_params.into_inner();
+            let pag_params = data_page_params_for(&rqctx, &query)?;
+            let scan_params = ScanByNameOrId::from_query(&query)?;
+            let paginated_by = name_or_id_pagination(&pag_params, scan_params)?;
+            let lookup = nexus.internet_gateway_lookup(
+                &opctx,
+                scan_params.selector.clone(),
+            )?;
+            let results = nexus
+                .internet_gateway_ip_address_list(
+                    &opctx,
+                    &lookup,
+                    &paginated_by,
+                )
+                .await?
+                .into_iter()
+                .map(|route| route.into())
+                .collect();
+            Ok(HttpResponseOk(ScanByNameOrId::results_page(
+                &query,
+                results,
+                &marker_for_name_or_id,
+            )?))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    /// Attach an IP address to an internet gateway
+    async fn internet_gateway_ip_address_create(
+        rqctx: RequestContext<ApiContext>,
+        query_params: Query<params::InternetGatewaySelector>,
+        create_params: TypedBody<params::InternetGatewayIpAddressCreate>,
+    ) -> Result<HttpResponseCreated<views::InternetGatewayIpAddress>, HttpError>
+    {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            let query = query_params.into_inner();
+            let create = create_params.into_inner();
+            let lookup = nexus.internet_gateway_lookup(&opctx, query)?;
+            let route = nexus
+                .internet_gateway_ip_address_attach(&opctx, &lookup, &create)
+                .await?;
+            Ok(HttpResponseCreated(route.into()))
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    /// Detach an IP address from an internet gateway
+    async fn internet_gateway_ip_address_delete(
+        rqctx: RequestContext<ApiContext>,
+        path_params: Path<params::IpAddressPath>,
+        query_params: Query<params::DeleteInternetGatewayElementSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let apictx = rqctx.context();
+        let handler = async {
+            let opctx =
+                crate::context::op_context_for_external_api(&rqctx).await?;
+            let nexus = &apictx.context.nexus;
+            let path = path_params.into_inner();
+            let query = query_params.into_inner();
+            let selector = params::InternetGatewayIpAddressSelector {
+                project: query.project,
+                vpc: query.vpc,
+                gateway: query.gateway,
+                address: path.address,
+            };
+            let lookup =
+                nexus.internet_gateway_ip_address_lookup(&opctx, selector)?;
+            nexus
+                .internet_gateway_ip_address_detach(
+                    &opctx,
+                    &lookup,
+                    query.cascade,
+                )
+                .await?;
+            Ok(HttpResponseDeleted())
+        };
+        apictx
+            .context
+            .external_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
     // Racks
 
     async fn rack_list(

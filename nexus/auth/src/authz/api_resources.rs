@@ -755,6 +755,30 @@ authz_resource! {
 }
 
 authz_resource! {
+    name = "InternetGateway",
+    parent = "Vpc",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = InProject,
+}
+
+authz_resource! {
+    name = "InternetGatewayIpPool",
+    parent = "InternetGateway",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = InProject,
+}
+
+authz_resource! {
+    name = "InternetGatewayIpAddress",
+    parent = "InternetGateway",
+    primary_key = Uuid,
+    roles_allowed = false,
+    polar_snippet = InProject,
+}
+
+authz_resource! {
     name = "FloatingIp",
     parent = "Project",
     primary_key = Uuid,

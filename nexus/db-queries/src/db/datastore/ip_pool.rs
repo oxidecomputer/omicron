@@ -36,12 +36,17 @@ use chrono::Utc;
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
 use ipnetwork::IpNetwork;
+use nexus_db_model::InternetGateway;
+use nexus_db_model::InternetGatewayIpPool;
+use nexus_db_model::Project;
+use nexus_db_model::Vpc;
 use nexus_types::external_api::shared::IpRange;
 use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::DeleteResult;
 use omicron_common::api::external::Error;
+use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::InternalContext;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::LookupResult;
@@ -484,9 +489,11 @@ impl DataStore {
             .authorize(authz::Action::CreateChild, &authz::IP_POOL_LIST)
             .await?;
 
-        diesel::insert_into(dsl::ip_pool_resource)
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let result = diesel::insert_into(dsl::ip_pool_resource)
             .values(ip_pool_resource.clone())
-            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
+            .get_result_async(&*conn)
             .await
             .map_err(|e| {
                 public_error_from_diesel(
@@ -501,7 +508,174 @@ impl DataStore {
                         )
                     ),
                 )
-            })
+            })?;
+
+        if ip_pool_resource.is_default {
+            self.link_default_gateway(
+                opctx,
+                ip_pool_resource.resource_id,
+                ip_pool_resource.ip_pool_id,
+                &conn,
+            )
+            .await?;
+        }
+
+        Ok(result)
+    }
+
+    async fn link_default_gateway(
+        &self,
+        opctx: &OpContext,
+        silo_id: Uuid,
+        ip_pool_id: Uuid,
+        conn: &async_bb8_diesel::Connection<crate::db::DbConnection>,
+    ) -> UpdateResult<()> {
+        use db::schema::internet_gateway::dsl as igw_dsl;
+        use db::schema::internet_gateway_ip_pool::dsl as igw_ip_pool_dsl;
+        use db::schema::project::dsl as project_dsl;
+        use db::schema::vpc::dsl as vpc_dsl;
+
+        let projects = project_dsl::project
+            .filter(project_dsl::time_deleted.is_null())
+            .filter(project_dsl::silo_id.eq(silo_id))
+            .select(Project::as_select())
+            .load_async(conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        for project in &projects {
+            let vpcs = vpc_dsl::vpc
+                .filter(vpc_dsl::time_deleted.is_null())
+                .filter(vpc_dsl::project_id.eq(project.id()))
+                .select(Vpc::as_select())
+                .load_async(conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+            for vpc in &vpcs {
+                let igws = igw_dsl::internet_gateway
+                    .filter(igw_dsl::time_deleted.is_null())
+                    .filter(igw_dsl::name.eq("default"))
+                    .filter(igw_dsl::vpc_id.eq(vpc.id()))
+                    .select(InternetGateway::as_select())
+                    .load_async(conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                    })?;
+
+                for igw in &igws {
+                    let igw_pool = InternetGatewayIpPool::new(
+                        Uuid::new_v4(),
+                        ip_pool_id,
+                        igw.id(),
+                        IdentityMetadataCreateParams {
+                            name: "default".parse().unwrap(),
+                            description: String::from(
+                                "Default internet gateway ip pool",
+                            ),
+                        },
+                    );
+
+                    let _ipp: InternetGatewayIpPool =
+                        match InternetGateway::insert_resource(
+                            igw.id(),
+                            diesel::insert_into(
+                                igw_ip_pool_dsl::internet_gateway_ip_pool,
+                            )
+                            .values(igw_pool),
+                        )
+                        .insert_and_get_result_async(&conn)
+                        .await {
+                            Ok(x) => x,
+                            Err(e) => match e {
+                                AsyncInsertError::CollectionNotFound => {
+                                    return Err(Error::not_found_by_name(
+                                        ResourceType::InternetGateway,
+                                        &"default".parse().unwrap(),
+                                    ))
+                                }
+                                AsyncInsertError::DatabaseError(e) => match e {
+                                    diesel::result::Error::DatabaseError(diesel::result::DatabaseErrorKind::UniqueViolation, _) =>
+                                    {
+                                        return Ok(());
+                                    }
+                                    _ => return Err(public_error_from_diesel(
+                                        e,
+                                        ErrorHandler::Server,
+                                    )),
+                                },
+                            }
+                        };
+                }
+                self.vpc_increment_rpw_version(opctx, vpc.id()).await?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn unlink_ip_pool_gateway(
+        &self,
+        opctx: &OpContext,
+        silo_id: Uuid,
+        ip_pool_id: Uuid,
+        conn: &async_bb8_diesel::Connection<crate::db::DbConnection>,
+    ) -> UpdateResult<()> {
+        use db::schema::internet_gateway::dsl as igw_dsl;
+        use db::schema::internet_gateway_ip_pool::dsl as igw_ip_pool_dsl;
+        use db::schema::project::dsl as project_dsl;
+        use db::schema::vpc::dsl as vpc_dsl;
+
+        let projects = project_dsl::project
+            .filter(project_dsl::time_deleted.is_null())
+            .filter(project_dsl::silo_id.eq(silo_id))
+            .select(Project::as_select())
+            .load_async(conn)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        for project in &projects {
+            let vpcs = vpc_dsl::vpc
+                .filter(vpc_dsl::time_deleted.is_null())
+                .filter(vpc_dsl::project_id.eq(project.id()))
+                .select(Vpc::as_select())
+                .load_async(conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+
+            for vpc in &vpcs {
+                let igws = igw_dsl::internet_gateway
+                    .filter(igw_dsl::time_deleted.is_null())
+                    .filter(igw_dsl::vpc_id.eq(vpc.id()))
+                    .select(InternetGateway::as_select())
+                    .load_async(conn)
+                    .await
+                    .map_err(|e| {
+                        public_error_from_diesel(e, ErrorHandler::Server)
+                    })?;
+
+                for igw in &igws {
+                    diesel::update(igw_ip_pool_dsl::internet_gateway_ip_pool)
+                        .filter(igw_ip_pool_dsl::time_deleted.is_null())
+                        .filter(
+                            igw_ip_pool_dsl::internet_gateway_id.eq(igw.id()),
+                        )
+                        .filter(igw_ip_pool_dsl::ip_pool_id.eq(ip_pool_id))
+                        .set(igw_ip_pool_dsl::time_deleted.eq(Utc::now()))
+                        .execute_async(conn)
+                        .await
+                        .map_err(|e| {
+                            public_error_from_diesel(e, ErrorHandler::Server)
+                        })?;
+                }
+                self.vpc_increment_rpw_version(opctx, vpc.id()).await?;
+            }
+        }
+        Ok(())
     }
 
     pub async fn ip_pool_set_default(
@@ -725,10 +899,12 @@ impl DataStore {
         self.ensure_no_floating_ips_outstanding(opctx, authz_pool, authz_silo)
             .await?;
 
+        let conn = self.pool_connection_authorized(opctx).await?;
+
         diesel::delete(ip_pool_resource::table)
             .filter(ip_pool_resource::ip_pool_id.eq(authz_pool.id()))
             .filter(ip_pool_resource::resource_id.eq(authz_silo.id()))
-            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .execute_async(&*conn)
             .await
             .map(|_rows_deleted| ())
             .map_err(|e| {
@@ -736,7 +912,17 @@ impl DataStore {
                     "error deleting IP pool association to resource: {:?}",
                     e
                 ))
-            })
+            })?;
+
+        self.unlink_ip_pool_gateway(
+            opctx,
+            authz_silo.id(),
+            authz_pool.id(),
+            &conn,
+        )
+        .await?;
+
+        Ok(())
     }
 
     pub async fn ip_pool_list_ranges(

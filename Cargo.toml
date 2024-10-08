@@ -273,11 +273,6 @@ redundant_field_names = "warn"
 # idiomatically declaring a static array of atomics uses `const Atomic`). We
 # warn on this to catch the former, and expect any uses of the latter to allow
 # this locally.
-#
-# Note: any const value with a type containing a `bytes::Bytes` hits this lint,
-# and you should `#![allow]` it for now. This is most likely to be seen with
-# `http::header::{HeaderName, HeaderValue}`. This is a Clippy bug which will be
-# fixed in the Rust 1.80 toolchain (rust-lang/rust-clippy#12691).
 declare_interior_mutable_const = "warn"
 # Also warn on casts, preferring explicit conversions instead.
 #
@@ -425,10 +420,8 @@ macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
 mockall = "0.13"
 newtype_derive = "0.1.6"
-# mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "9e0fe45ca3862176dc31ad8cc83f605f8a7e1a42" }
-# ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "9e0fe45ca3862176dc31ad8cc83f605f8a7e1a42" }
-mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", branch = "hyper-v1-no-merge" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", branch = "hyper-v1-no-merge" }
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "056283eb02b6887fbf27f66a215662520f7c159c" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "056283eb02b6887fbf27f66a215662520f7c159c" }
 multimap = "0.10.0"
 nexus-auth = { path = "nexus/auth" }
 nexus-client = { path = "clients/nexus-client" }
@@ -471,7 +464,7 @@ omicron-test-utils = { path = "test-utils" }
 omicron-workspace-hack = "0.1.0"
 omicron-zone-package = "0.11.1"
 oxide-client = { path = "clients/oxide-client" }
-oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "76878de67229ea113d70503c441eab47ac5dc653", features = [ "api", "std" ] }
+oxide-vpc = { git = "https://github.com/oxidecomputer/opte", rev = "f3002b356da7d0e4ca15beb66a5566a92919baaa", features = [ "api", "std" ] }
 oxlog = { path = "dev-tools/oxlog" }
 oxnet = { git = "https://github.com/oxidecomputer/oxnet" }
 once_cell = "1.19.0"
@@ -481,7 +474,7 @@ openapiv3 = "2.0.0"
 # must match samael's crate!
 openssl = "0.10"
 openssl-sys = "0.9"
-opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "76878de67229ea113d70503c441eab47ac5dc653" }
+opte-ioctl = { git = "https://github.com/oxidecomputer/opte", rev = "f3002b356da7d0e4ca15beb66a5566a92919baaa" }
 oso = "0.27"
 owo-colors = "4.1.0"
 oximeter = { path = "oximeter/oximeter" }
@@ -558,7 +551,7 @@ signal-hook = "0.3"
 signal-hook-tokio = { version = "0.3", features = [ "futures-v0_3" ] }
 sigpipe = "0.1.3"
 similar = { version = "2.6.0", features = ["bytes"] }
-similar-asserts = "1.5.0"
+similar-asserts = "1.6.0"
 # Don't change sled's version on accident; sled's on-disk format is not yet
 # stable and requires manual migrations. In the limit this won't matter because
 # the upgrade system will replace the DNS server zones entirely, but while we
