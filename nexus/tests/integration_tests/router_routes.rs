@@ -488,13 +488,6 @@ async fn test_router_routes_disallow_custom_targets(
             "subnet:a-sub-name-unknown".parse().unwrap(),
             "subnets cannot be used as a target in Custom routers",
         ),
-        // Internet gateways are not fully supported: only 'inetgw:outbound'
-        // is a valid choice.
-        (
-            valid_dest.clone(),
-            "inetgw:not-a-real-gw".parse().unwrap(),
-            "'outbound' is currently the only valid internet gateway",
-        ),
     ];
     _ = create_route(
         client,
