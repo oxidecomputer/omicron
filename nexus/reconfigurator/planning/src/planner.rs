@@ -802,7 +802,6 @@ mod test {
     use nexus_types::deployment::CockroachDbClusterVersion;
     use nexus_types::deployment::CockroachDbPreserveDowngrade;
     use nexus_types::deployment::CockroachDbSettings;
-    use nexus_types::deployment::OmicronZoneNetworkResources;
     use nexus_types::deployment::SledDisk;
     use nexus_types::external_api::views::PhysicalDiskPolicy;
     use nexus_types::external_api::views::PhysicalDiskState;
@@ -813,13 +812,11 @@ mod test {
     use omicron_common::api::external::Generation;
     use omicron_common::disk::DiskIdentity;
     use omicron_test_utils::dev::test_setup_log;
-    use omicron_uuid_kinds::GenericUuid;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
     use omicron_uuid_kinds::ZpoolUuid;
     use std::collections::BTreeSet;
     use std::collections::HashMap;
-    use std::mem;
     use std::net::IpAddr;
     use typed_rng::TypedUuidRng;
 
@@ -1008,69 +1005,16 @@ mod test {
         static TEST_NAME: &str = "planner_add_multiple_nexus_to_one_sled";
         let logctx = test_setup_log(TEST_NAME);
 
-        // Use our example system as a starting point, but strip it down to
-        // just one sled.
-        //
-        // An alternative here would be to pass in nsleds = 1 rather than
-        // DEFAULT_N_SLEDS, but that would cause multiple Nexuses to be added
-        // to the one sled within the example system. Instead, we want there to
-        // be _one_ Nexus on the one sled, and then add more Nexuses to that
-        // within this test.
-        let (sled_id, blueprint1, collection, input) = {
-            let (mut collection, input, mut blueprint) =
-                example(&logctx.log, TEST_NAME);
-
-            // Pick one sled ID to keep and remove the rest.
-            let mut builder = input.into_builder();
-            let keep_sled_id =
-                builder.sleds().keys().next().copied().expect("no sleds");
-            builder.sleds_mut().retain(|&k, _v| keep_sled_id == k);
-            collection.sled_agents.retain(|&k, _v| keep_sled_id == k);
-            collection.omicron_zones.retain(|&k, _v| keep_sled_id == k);
-
-            assert_eq!(collection.sled_agents.len(), 1);
-            assert_eq!(collection.omicron_zones.len(), 1);
-            blueprint.blueprint_zones.retain(|k, _v| keep_sled_id == *k);
-            blueprint.blueprint_disks.retain(|k, _v| keep_sled_id == *k);
-
-            // Also remove all the networking resources for the zones we just
-            // stripped out; i.e., only keep those for `keep_sled_id`.
-            let mut new_network_resources = OmicronZoneNetworkResources::new();
-            let old_network_resources = builder.network_resources_mut();
-            for old_ip in old_network_resources.omicron_zone_external_ips() {
-                if blueprint.all_omicron_zones(BlueprintZoneFilter::All).any(
-                    |(_, zone)| {
-                        zone.zone_type
-                            .external_networking()
-                            .map(|(ip, _nic)| ip.id() == old_ip.ip.id())
-                            .unwrap_or(false)
-                    },
-                ) {
-                    new_network_resources
-                        .add_external_ip(old_ip.zone_id, old_ip.ip)
-                        .expect("copied IP to new input");
-                }
-            }
-            for old_nic in old_network_resources.omicron_zone_nics() {
-                if blueprint.all_omicron_zones(BlueprintZoneFilter::All).any(
-                    |(_, zone)| {
-                        zone.zone_type
-                            .external_networking()
-                            .map(|(_ip, nic)| {
-                                nic.id == old_nic.nic.id.into_untyped_uuid()
-                            })
-                            .unwrap_or(false)
-                    },
-                ) {
-                    new_network_resources
-                        .add_nic(old_nic.zone_id, old_nic.nic)
-                        .expect("copied NIC to new input");
-                }
-            }
-            mem::swap(old_network_resources, &mut &mut new_network_resources);
-
-            (keep_sled_id, blueprint, collection, builder.build())
-        };
+        // Use our example system with one sled and one Nexus instance as a
+        // starting point.
+        let (example, blueprint1) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
+                .nsleds(1)
+                .nexus_count(1)
+                .build();
+        let sled_id = *example.collection.sled_agents.keys().next().unwrap();
+        let input = example.input;
+        let collection = example.collection;
 
         // This blueprint should only have 1 Nexus instance on the one sled we
         // kept.
@@ -1486,7 +1430,7 @@ mod test {
                     .expect("can't parse external DNS IP address")
             });
         for addr in external_dns_ips {
-            blueprint_builder.add_external_dns_ip(addr);
+            blueprint_builder.add_external_dns_ip(addr).unwrap();
         }
 
         // Now we can add external DNS zones. We'll add two to the first
