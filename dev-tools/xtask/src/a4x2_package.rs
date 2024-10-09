@@ -32,6 +32,7 @@ pub struct A4x2PackageArgs {
 }
 
 #[derive(Deserialize, Debug)]
+#[serde(rename_all = "kebab-case")]
 struct NextestConfig {
     nextest_version: NextestConfigVersion,
 }
@@ -50,7 +51,11 @@ pub fn run_cmd(args: A4x2PackageArgs) -> Result<()> {
 
     // XXX does this make sense as a working directory?
     let home_dir = Utf8PathBuf::from(std::env::var("HOME")?);
-    let work_dir = home_dir.join(".cache/a4x2-package");
+    let work_dir = if args.ci {
+        Utf8PathBuf::from("/work/a4x2-package")
+    } else {
+        home_dir.join(".cache/a4x2-package")
+    };
 
     // Delete any results from previous runs. We don't mind if there's errors.
     fs::remove_dir_all(&work_dir).ok();
@@ -59,7 +64,7 @@ pub fn run_cmd(args: A4x2PackageArgs) -> Result<()> {
     fs::create_dir_all(&work_dir)?;
 
     // Output. Maybe in CI we want this to be /out
-    let out_dir = work_dir.join("out");
+    let out_dir = work_dir.join("a4x2-package-out");
     fs::create_dir_all(&out_dir)?;
 
     // Clone of omicron that we can modify without causing trouble for anyone
@@ -69,6 +74,7 @@ pub fn run_cmd(args: A4x2PackageArgs) -> Result<()> {
     // Clone local working tree into work dir. This is nabbed from
     // buildomat-at-home
     {
+        cmd!(sh, "banner 'prepare'").run()?;
         let src_dir = env::current_dir()?;
 
         // Get a ref we can checkout from the local working tree
@@ -76,6 +82,8 @@ pub fn run_cmd(args: A4x2PackageArgs) -> Result<()> {
         if treeish.is_empty() {
             treeish = cmd!(sh, "git rev-parse HEAD {src_dir}").read()?;
         }
+        // sometimes you'll get "<hash>\n<filepath>", but we just want the hash
+        treeish = treeish.lines().next().unwrap().to_string();
 
         // Clone the local source tree into the packaging work dir
         {
@@ -88,8 +96,74 @@ pub fn run_cmd(args: A4x2PackageArgs) -> Result<()> {
         }
     }
 
-    // Testbed stuff
+    if args.end_to_end_tests {
+        cmd!(sh, "banner 'end to end'").run()?;
+        let _popdir = sh.push_dir(&omicron_dir);
+        cmd!(sh, "cargo build -p end-to-end-tests --bin commtest --bin dhcp-server --release").run()?;
+
+        let end_to_end_dir = out_dir.join("end-to-end-tests");
+        sh.create_dir(&end_to_end_dir)?;
+        sh.copy_file("target/release/commtest", &end_to_end_dir)?;
+        sh.copy_file("target/release/dhcp-server", &end_to_end_dir)?;
+    }
+
+    // Generate a bundle with the live tests included and ready to go.
+    if args.live_tests {
+        cmd!(sh, "banner 'live tests'").run()?;
+        let _popdir = sh.push_dir(&omicron_dir);
+
+        // We need nextest available, both to generate the test bundle and to
+        // include in the output tarball to execute the bundle on a4x2.
+        // XXX is it like, fine, to hardcode this? does this work outside of CI?
+        let nextest_path = if args.ci {
+            // In CI, we need to download nextest
+            let config_str = sh.read_file(".config/nextest.toml")?;
+            let nextest_config: NextestConfig = toml::from_str(&config_str)?;
+
+            // This line of bash comes from build-and-test.sh
+            // If you want to rewrite this in rust, be my guest. Make sure you
+            // - retry correctly
+            // - follow redirects correctly
+            // - handle http errors
+            cmd!(sh, "bash -c")
+                .arg(&format!("curl -sSfL --retry 10 https://get.nexte.st/'{}'/illumos | gunzip | tar -xvf - -C ~/.cargo/bin", nextest_config.nextest_version.recommended))
+                .run()?;
+            home_dir.join(".cargo/bin/cargo-nextest")
+        } else {
+            // XXX test nextest exists & is the right version? need to see if
+            // the incidental errors from stuff below already take care of
+            // telling someone outside of CI what they need to be doing.
+            Utf8PathBuf::from(cmd!(sh, "/usr/bin/which cargo-nextest").read()?)
+        };
+
+        // Build and generate the live tests bundle
+        // generates
+        // - target/live-tests-archive.tgz
+        cmd!(sh, "{cargo} xtask live-tests").run()?;
+
+        let live_test_bundle_dir = work_dir.join("live-tests-bundle");
+        sh.create_dir(&live_test_bundle_dir)?;
+
+        // a tar within a tar, a door behind a door
+        cmd!(sh, "tar -xzf target/live-tests-archive.tgz -C {live_test_bundle_dir}").run()?;
+
+        // and we need textest to execute it
+        sh.copy_file(&nextest_path, &live_test_bundle_dir)?;
+
+        // output tar will have live-tests and nextest. this will get uploaded
+        // into one of the a4x2 sleds, which is why it is a self contained tar
+        {
+            // intentionally relative path so the tarball gets relative paths
+            let _popdir = sh.push_dir(&work_dir);
+            let bundle_dir_name = live_test_bundle_dir.file_name().unwrap();
+            cmd!(sh, "tar -czf {out_dir}/live-tests-bundle.tgz {bundle_dir_name}/").run()?;
+        }
+    }
+
+    // Testbed stuff. This needs to happen last because it messes with the
+    // working tree in a way that end-to-end tests doesnt like when building
     {
+        cmd!(sh, "banner testbed").run()?;
         let testbed_dir = work_dir.join("testbed");
         let a4x2_dir = testbed_dir.join("a4x2");
 
@@ -100,6 +174,7 @@ pub fn run_cmd(args: A4x2PackageArgs) -> Result<()> {
 
         // build a4x2
         cmd!(sh, "{cargo} build --release").run()?;
+        sh.copy_file("../target/release/a4x2", &out_dir)?;
 
         // XXX this modifies current working directory, which im not thrilled
         // about. in CI this doesn't matter, but outside CI, what should we do?
@@ -166,63 +241,15 @@ pub fn run_cmd(args: A4x2PackageArgs) -> Result<()> {
         }
 
         // At this point, `cargo-bay` is ready for us
-        cmd!(sh, "tar -czf {out_dir}/cargo-bay.tgz cargo-bay/").run()?;
+        cmd!(sh, "mv cargo-bay/ {out_dir}/cargo-bay/").run()?;
     }
-
-    if args.end_to_end_tests {
-        // XXX
-        unimplemented!("didnt do this yet");
+    // create the final bundle.
+    {
+        cmd!(sh, "banner bundle").run()?;
+        let _popdir = sh.push_dir(&work_dir);
+        let pkg_dir_name = out_dir.file_name().unwrap();
+        cmd!(sh, "tar -czf {pkg_dir_name}.tgz {pkg_dir_name}/").run()?;
     }
-
-    // Generate a bundle with the live tests included and ready to go.
-    if args.live_tests {
-        let _popdir = sh.push_dir(&omicron_dir);
-
-        // We need nextest available, both to generate the test bundle and to
-        // include in the output tarball to execute the bundle on a4x2.
-        // XXX is it like, fine, to hardcode this? does this work outside of CI?
-        let nextest_path = if args.ci {
-            // In CI, we need to download nextest
-            let config_str = sh.read_file(".config/nextest.toml")?;
-            let nextest_config: NextestConfig = toml::from_str(&config_str)?;
-
-            // This line of bash comes from build-and-test.sh
-            // If you want to rewrite this in rust, be my guest. Make sure you
-            // - retry correctly
-            // - follow redirects correctly
-            // - handle http errors
-            cmd!(sh, "bash -c")
-                .arg(&format!("curl -sSfL --retry 10 https://get.nexte.st/'{}'/illumos | gunzip | tar -xvf - -C ~/.cargo/bin", nextest_config.nextest_version.recommended))
-                .run()?;
-            home_dir.join(".cargo/bin/cargo-nextest")
-        } else {
-            // XXX test nextest exists & is the right version? need to see if
-            // the incidental errors from stuff below already take care of
-            // telling someone outside of CI what they need to be doing.
-            Utf8PathBuf::from(cmd!(sh, "/usr/bin/which cargo-nextest").read()?)
-        };
-
-        // Build and generate the live tests bundle
-        // generates
-        // - target/live-tests-archive.tgz
-        cmd!(sh, "{cargo} xtask live-tests").run()?;
-
-        let live_test_bundle_dir = work_dir.join("live-tests-bundle");
-        sh.create_dir(&live_test_bundle_dir)?;
-
-        // a tar within a tar, a door behind a door
-        sh.copy_file("target/live-tests-archive.tgz", &live_test_bundle_dir)?;
-
-        // and we need textest to execute it
-        sh.copy_file(&nextest_path, &live_test_bundle_dir)?;
-
-        // output tar will have live-tests and nextest. this will get uploaded
-        // into one of the a4x2 sleds.
-        // TODO this needs to be relative paths
-        cmd!(sh, "tar -czf {out_dir}/live-tests-bundle.tgz {live_test_bundle_dir}").run()?;
-    }
-
-    println!("hi :)");
 
     Ok(())
 }
