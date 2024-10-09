@@ -306,9 +306,9 @@ pub struct RouteConfig {
     /// The VLAN id associated with this route.
     #[serde(default)]
     pub vlan_id: Option<u16>,
-    /// The local preference associated with this route.
+    /// The RIB priority (i.e. Admin Distance) associated with this route.
     #[serde(default)]
-    pub local_pref: Option<u32>,
+    pub rib_priority: Option<u8>,
 }
 
 #[derive(
@@ -777,7 +777,7 @@ pub struct DhcpConfig {
 #[serde(tag = "type", rename_all = "snake_case", content = "value")]
 pub enum RouterTarget {
     Drop,
-    InternetGateway,
+    InternetGateway(Option<Uuid>),
     Ip(IpAddr),
     VpcSubnet(IpNet),
 }
@@ -835,6 +835,13 @@ pub struct ResolvedVpcRouteSet {
     pub id: RouterId,
     pub version: Option<RouterVersion>,
     pub routes: HashSet<ResolvedVpcRoute>,
+}
+
+/// Per-NIC mappings from external IP addresses to the Internet Gateways
+/// which can choose them as a source.
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq)]
+pub struct ExternalIpGatewayMap {
+    pub mappings: HashMap<Uuid, HashMap<IpAddr, HashSet<Uuid>>>,
 }
 
 /// Describes the purpose of the dataset.

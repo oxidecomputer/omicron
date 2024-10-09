@@ -184,6 +184,7 @@ mod tests {
     use nexus_db_model::Project;
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::params;
+    use nexus_types::silo::DEFAULT_SILO_ID;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_test_utils::dev;
@@ -194,7 +195,7 @@ mod tests {
         datastore: &DataStore,
         opctx: &OpContext,
     ) -> authz::Instance {
-        let silo_id = *nexus_db_fixed_data::silo::DEFAULT_SILO_ID;
+        let silo_id = DEFAULT_SILO_ID;
         let project_id = Uuid::new_v4();
         let instance_id = InstanceUuid::new_v4();
 

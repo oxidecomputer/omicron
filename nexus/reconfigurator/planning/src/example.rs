@@ -23,7 +23,6 @@ pub struct ExampleSystem {
     pub system: SystemDescription,
     pub input: PlanningInput,
     pub collection: Collection,
-    pub blueprint: Blueprint,
     // If we add more types of RNGs than just sleds here, we'll need to
     // expand this to be similar to BlueprintBuilderRng where a root RNG
     // creates sub-RNGs.
@@ -34,17 +33,109 @@ pub struct ExampleSystem {
     pub(crate) sled_rng: TypedUuidRng<SledKind>,
 }
 
-impl ExampleSystem {
-    pub fn new(
-        log: &slog::Logger,
-        test_name: &str,
-        nsleds: usize,
-    ) -> ExampleSystem {
+/// Returns a collection, planning input, and blueprint describing a pretty
+/// simple system.
+///
+/// The test name is used as the RNG seed.
+pub fn example(
+    log: &slog::Logger,
+    test_name: &str,
+) -> (Collection, PlanningInput, Blueprint) {
+    let (example, blueprint) =
+        ExampleSystemBuilder::new(log, test_name).build();
+    (example.collection, example.input, blueprint)
+}
+
+/// A builder for the example system.
+#[derive(Debug, Clone)]
+pub struct ExampleSystemBuilder {
+    log: slog::Logger,
+    test_name: String,
+    nsleds: usize,
+    ndisks_per_sled: u8,
+    create_zones: bool,
+    create_disks_in_blueprint: bool,
+}
+
+impl ExampleSystemBuilder {
+    /// The default number of sleds in the example system.
+    pub const DEFAULT_N_SLEDS: usize = 3;
+
+    pub fn new(log: &slog::Logger, test_name: &str) -> Self {
+        Self {
+            log: log.new(slog::o!("component" => "ExampleSystem", "test_name" => test_name.to_string())),
+            test_name: test_name.to_string(),
+            nsleds: Self::DEFAULT_N_SLEDS,
+            ndisks_per_sled: SledBuilder::DEFAULT_NPOOLS,
+            create_zones: true,
+            create_disks_in_blueprint: true,
+        }
+    }
+
+    /// Set the number of sleds in the example system.
+    ///
+    /// Currently, this value can be anywhere between 0 and 5. (More can be
+    /// added in the future if necessary.)
+    pub fn nsleds(mut self, nsleds: usize) -> Self {
+        self.nsleds = nsleds;
+        self
+    }
+
+    /// Set the number of disks per sled in the example system.
+    ///
+    /// The default value is [`SledBuilder::DEFAULT_NPOOLS`]. A value of 0 is
+    /// permitted.
+    pub fn ndisks_per_sled(mut self, ndisks_per_sled: u8) -> Self {
+        self.ndisks_per_sled = ndisks_per_sled;
+        self
+    }
+
+    /// Create zones in the example system.
+    ///
+    /// The default is `true`.
+    pub fn create_zones(mut self, create_zones: bool) -> Self {
+        self.create_zones = create_zones;
+        self
+    }
+
+    /// Create disks in the blueprint.
+    ///
+    /// The default is `true`.
+    ///
+    /// If [`Self::ndisks_per_sled`] is set to 0, then this is implied: if no
+    /// disks are created, then the blueprint won't have any disks.
+    pub fn create_disks_in_blueprint(mut self, create: bool) -> Self {
+        self.create_disks_in_blueprint = create;
+        self
+    }
+
+    /// Create a new example system with the given modifications.
+    ///
+    /// Return the system, and the initial blueprint that matches it.
+    pub fn build(&self) -> (ExampleSystem, Blueprint) {
+        slog::info!(
+            &self.log,
+            "Creating example system";
+            "nsleds" => self.nsleds,
+            "ndisks_per_sled" => self.ndisks_per_sled,
+            "create_zones" => self.create_zones,
+            "create_disks_in_blueprint" => self.create_disks_in_blueprint,
+        );
+
         let mut system = SystemDescription::new();
-        let mut sled_rng = TypedUuidRng::from_seed(test_name, "ExampleSystem");
-        let sled_ids: Vec<_> = (0..nsleds).map(|_| sled_rng.next()).collect();
+        let mut sled_rng =
+            TypedUuidRng::from_seed(&self.test_name, "ExampleSystem");
+        let sled_ids: Vec<_> =
+            (0..self.nsleds).map(|_| sled_rng.next()).collect();
+
         for sled_id in &sled_ids {
-            let _ = system.sled(SledBuilder::new().id(*sled_id)).unwrap();
+            let _ = system
+                .sled(
+                    SledBuilder::new()
+                        .id(*sled_id)
+                        .npools(self.ndisks_per_sled),
+                )
+                .unwrap();
         }
 
         let mut input_builder = system
@@ -56,7 +147,7 @@ impl ExampleSystem {
         let initial_blueprint = BlueprintBuilder::build_empty_with_sleds_seeded(
             base_input.all_sled_ids(SledFilter::Commissioned),
             "test suite",
-            (test_name, "ExampleSystem initial"),
+            (&self.test_name, "ExampleSystem initial"),
         );
 
         // Start with an empty collection
@@ -67,43 +158,50 @@ impl ExampleSystem {
 
         // Now make a blueprint and collection with some zones on each sled.
         let mut builder = BlueprintBuilder::new_based_on(
-            log,
+            &self.log,
             &initial_blueprint,
             &base_input,
             &collection,
             "test suite",
         )
         .unwrap();
-        builder.set_rng_seed((test_name, "ExampleSystem make_zones"));
+        builder.set_rng_seed((&self.test_name, "ExampleSystem make_zones"));
         for (i, (sled_id, sled_resources)) in
             base_input.all_sled_resources(SledFilter::Commissioned).enumerate()
         {
-            let _ = builder.sled_ensure_zone_ntp(sled_id).unwrap();
-            let _ = builder
-                .sled_ensure_zone_multiple_nexus_with_config(
-                    sled_id,
-                    1,
-                    false,
-                    vec![],
-                )
-                .unwrap();
-            if i < INTERNAL_DNS_REDUNDANCY {
+            if self.create_zones {
+                let _ = builder.sled_ensure_zone_ntp(sled_id).unwrap();
                 let _ = builder
-                    .sled_ensure_zone_multiple_internal_dns(sled_id, 1)
+                    .sled_ensure_zone_multiple_nexus_with_config(
+                        sled_id,
+                        1,
+                        false,
+                        vec![],
+                    )
                     .unwrap();
+                if i < INTERNAL_DNS_REDUNDANCY {
+                    let _ = builder
+                        .sled_ensure_zone_multiple_internal_dns(sled_id, 1)
+                        .unwrap();
+                }
             }
-            let _ = builder.sled_ensure_disks(sled_id, sled_resources).unwrap();
-            for pool_name in sled_resources.zpools.keys() {
-                let _ = builder
-                    .sled_ensure_zone_crucible(sled_id, *pool_name)
-                    .unwrap();
+            if self.create_disks_in_blueprint {
+                let _ =
+                    builder.sled_ensure_disks(sled_id, sled_resources).unwrap();
+            }
+            if self.create_zones {
+                for pool_name in sled_resources.zpools.keys() {
+                    let _ = builder
+                        .sled_ensure_zone_crucible(sled_id, *pool_name)
+                        .unwrap();
+                }
             }
         }
 
         let blueprint = builder.build();
         let mut builder =
             system.to_collection_builder().expect("failed to build collection");
-        builder.set_rng_seed((test_name, "ExampleSystem collection"));
+        builder.set_rng_seed((&self.test_name, "ExampleSystem collection"));
 
         for sled_id in blueprint.sleds() {
             let Some(zones) = blueprint.blueprint_zones.get(&sled_id) else {
@@ -146,29 +244,14 @@ impl ExampleSystem {
                 .unwrap();
         }
 
-        ExampleSystem {
+        // The blueprint evolves separately from the system -- so it's returned
+        // as a separate value.
+        let example = ExampleSystem {
             system,
             input: input_builder.build(),
             collection: builder.build(),
-            blueprint,
             sled_rng,
-        }
+        };
+        (example, blueprint)
     }
-}
-
-/// Returns a collection, planning input, and blueprint describing a pretty
-/// simple system.
-///
-/// The test name is used as the RNG seed.
-///
-/// `n_sleds` is the number of sleds supported. Currently, this value can
-/// be anywhere between 0 and 5. (More can be added in the future if
-/// necessary.)
-pub fn example(
-    log: &slog::Logger,
-    test_name: &str,
-    nsleds: usize,
-) -> (Collection, PlanningInput, Blueprint) {
-    let example = ExampleSystem::new(log, test_name, nsleds);
-    (example.collection, example.input, example.blueprint)
 }

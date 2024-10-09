@@ -1592,6 +1592,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.network_interface (
     transit_ips INET[] NOT NULL DEFAULT ARRAY[]
 );
 
+CREATE INDEX IF NOT EXISTS instance_network_interface_mac
+    ON omicron.public.network_interface (mac) STORING (time_deleted);
+
 /* A view of the network_interface table for just instance-kind records. */
 CREATE VIEW IF NOT EXISTS omicron.public.instance_network_interface AS
 SELECT
@@ -1770,6 +1773,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_router_by_vpc ON omicron.public.vpc_rou
 ) WHERE
     time_deleted IS NULL;
 
+/* Index used to accelerate vpc_increment_rpw_version and list. */
+CREATE INDEX IF NOT EXISTS lookup_routers_in_vpc ON omicron.public.vpc_router (
+    vpc_id
+) WHERE
+    time_deleted IS NULL;
+
 CREATE TYPE IF NOT EXISTS omicron.public.router_route_kind AS ENUM (
     'default',
     'vpc_subnet',
@@ -1799,6 +1808,57 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_route_by_router ON omicron.public.route
     name
 ) WHERE
     time_deleted IS NULL;
+
+CREATE TABLE IF NOT EXISTS omicron.public.internet_gateway (
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    vpc_id UUID NOT NULL,
+    rcgen INT NOT NULL,
+    resolved_version INT NOT NULL DEFAULT 0
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_internet_gateway_by_vpc ON omicron.public.internet_gateway (
+    vpc_id,
+    name
+) WHERE
+    time_deleted IS NULL;
+
+CREATE TABLE IF NOT EXISTS omicron.public.internet_gateway_ip_pool (
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    internet_gateway_id UUID,
+    ip_pool_id UUID
+);
+
+CREATE INDEX IF NOT EXISTS lookup_internet_gateway_ip_pool_by_igw_id ON omicron.public.internet_gateway_ip_pool (
+    internet_gateway_id
+) WHERE
+    time_deleted IS NULL;
+
+CREATE TABLE IF NOT EXISTS omicron.public.internet_gateway_ip_address (
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    internet_gateway_id UUID,
+    address INET
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_internet_gateway_ip_address_by_igw_id ON omicron.public.internet_gateway_ip_address (
+    internet_gateway_id
+) WHERE
+    time_deleted IS NULL;
+
 
 /*
  * An IP Pool, a collection of zero or more IP ranges for external IPs.
@@ -3050,6 +3110,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_collection (
 CREATE INDEX IF NOT EXISTS inv_collection_by_time_started
     ON omicron.public.inv_collection (time_started);
 
+CREATE INDEX IF NOT EXISTS inv_collectionby_time_done
+    ON omicron.public.inv_collection (time_done DESC);
+
 -- list of errors generated during a collection
 CREATE TABLE IF NOT EXISTS omicron.public.inv_collection_error (
     inv_collection_id UUID NOT NULL,
@@ -3440,6 +3503,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone (
 
     PRIMARY KEY (inv_collection_id, id)
 );
+
+CREATE INDEX IF NOT EXISTS inv_omicron_zone_nic_id ON omicron.public.inv_omicron_zone
+    (nic_id) STORING (sled_id, primary_service_ip, second_service_ip, snat_ip);
 
 CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone_nic (
     inv_collection_id UUID NOT NULL,
@@ -4464,7 +4530,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '108.0.0', NULL)
+    (TRUE, NOW(), NOW(), '109.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

@@ -26,7 +26,7 @@ use nexus_db_queries::authn::external::spoof::SPOOF_SCHEME_NAME;
 use nexus_db_queries::authn::external::AuthenticatorContext;
 use nexus_db_queries::authn::external::HttpAuthnScheme;
 use nexus_db_queries::authn::external::SiloUserSilo;
-use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO_ID;
+use nexus_types::silo::DEFAULT_SILO_ID;
 use std::collections::HashMap;
 use std::sync::Mutex;
 use uuid::Uuid;
@@ -342,7 +342,7 @@ impl SiloUserSilo for WhoamiServerState {
             silo_user_id.to_string(),
             "7f927c86-3371-4295-c34a-e3246a4b9c02"
         );
-        Ok(*DEFAULT_SILO_ID)
+        Ok(DEFAULT_SILO_ID)
     }
 }
 
