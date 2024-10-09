@@ -8870,6 +8870,7 @@ dependencies = [
  "assert_matches",
  "camino",
  "camino-tempfile",
+ "chrono",
  "clap",
  "dns-service-client",
  "dropshot",
@@ -8901,6 +8902,7 @@ dependencies = [
  "swrite",
  "tabled",
  "tokio",
+ "typed-rng",
  "uuid",
 ]
 
