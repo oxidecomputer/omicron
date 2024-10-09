@@ -671,55 +671,44 @@ async fn sis_ensure_registered_undo(
                "error" => ?e);
 
         // If the failure came from talking to sled agent, and the error code
-        // indicates the instance or sled might be unhealthy, manual
-        // intervention is likely to be needed, so try to mark the instance as
-        // Failed and then bail on unwinding.
+        // indicates the VMM has been forgotten by sled-agent, try to mark the
+        // VMM as Failed and continue unwinding. If we cannot mark it as failed,
+        // it has presumably just already been unregistered, which is fine.
         //
-        // If sled agent is in good shape but just doesn't know about the
-        // instance, this saga still owns the instance's state, so allow
-        // unwinding to continue.
+        // If we were unable to communicate with the sled agent, then we cannot
+        // properly clean up this VMM, and manual intervention may be required.
         //
         // If some other Nexus error occurred, this saga is in bad shape, so
         // return an error indicating that intervention is needed without trying
         // to modify the instance further.
-        //
-        // TODO(#3238): `instance_unhealthy` does not take an especially nuanced
-        // view of the meanings of the error codes sled agent could return, so
-        // assuming that an error that isn't `instance_unhealthy` means
-        // that everything is hunky-dory and it's OK to continue unwinding may
-        // be a bit of a stretch. See the definition of `instance_unhealthy` for
-        // more details.
         match e {
             InstanceStateChangeError::SledAgent(inner) if inner.vmm_gone() => {
-                error!(osagactx.log(),
-                       "start saga: failing instance after unregister failure";
-                       "instance_id" => %instance_id,
-                       "start_reason" => ?params.reason,
-                       "error" => ?inner);
-
-                if let Err(set_failed_error) = osagactx
+                info!(
+                    osagactx.log(),
+                    "start saga: VMM has either already been unregistered \
+                     or has been forgotten by sled-agent";
+                    "instance_id" => %instance_id,
+                    "start_reason" => ?params.reason,
+                    "error" => %inner
+                );
+                osagactx
                     .nexus()
                     .mark_vmm_failed(&opctx, authz_instance, &db_vmm, &inner)
-                    .await
-                {
-                    error!(osagactx.log(),
-                           "start saga: failed to mark instance as failed";
-                           "instance_id" => %instance_id,
-                           "start_reason" => ?params.reason,
-                           "error" => ?set_failed_error);
-
-                    Err(set_failed_error.into())
-                } else {
-                    Err(inner.0.into())
-                }
-            }
-            InstanceStateChangeError::SledAgent(_) => {
-                info!(osagactx.log(),
-                       "start saga: instance already unregistered from sled";
-                       "instance_id" => %instance_id,
-                       "start_reason" => ?params.reason);
-
+                    .await;
                 Ok(())
+            }
+            InstanceStateChangeError::SledAgent(inner) => {
+                error!(
+                    osagactx.log(),
+                    "start saga: failed to unregister VMM with sled-agent";
+                    "instance_id" => %instance_id,
+                    "error" => %inner,
+                    "start_reason" => ?params.reason,
+                );
+
+                // TODO(eliza): we should probably retry communication errors a
+                // few times before giving up on unwinding entirely!
+                Err(inner.into())
             }
             InstanceStateChangeError::Other(inner) => {
                 error!(osagactx.log(),

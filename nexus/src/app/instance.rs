@@ -679,8 +679,7 @@ impl super::Nexus {
                 (&e, state.vmm())
             {
                 if inner.vmm_gone() {
-                    let _ = self
-                        .mark_vmm_failed(opctx, authz_instance, vmm, inner)
+                    self.mark_vmm_failed(opctx, authz_instance, vmm, inner)
                         .await;
                 }
             }
@@ -759,8 +758,7 @@ impl super::Nexus {
                 (&e, state.vmm())
             {
                 if inner.vmm_gone() {
-                    let _ = self
-                        .mark_vmm_failed(opctx, authz_instance, vmm, inner)
+                    self.mark_vmm_failed(opctx, authz_instance, vmm, inner)
                         .await;
                 }
             }
@@ -924,20 +922,18 @@ impl super::Nexus {
                     "vmm_id" => %propolis_id,
                     "sled_id" => %sled_id,
                 );
-                let _ = self
-                    .mark_vmm_failed(
-                        &opctx,
-                        authz_instance.clone(),
-                        &vmm,
-                        &"instance already unregistered",
-                    )
-                    .await;
+                self.mark_vmm_failed(
+                    &opctx,
+                    authz_instance.clone(),
+                    &vmm,
+                    &"instance already unregistered",
+                )
+                .await;
             }
             // If the error indicates that the VMM wasn't there to terminate,
             // mark it as Failed instead.
             Err(InstanceStateChangeError::SledAgent(e)) if e.vmm_gone() => {
-                let _ = self
-                    .mark_vmm_failed(&opctx, authz_instance.clone(), &vmm, &e)
+                self.mark_vmm_failed(&opctx, authz_instance.clone(), &vmm, &e)
                     .await;
             }
             Err(e) => return Err(e),
@@ -1549,14 +1545,13 @@ impl super::Nexus {
             }
             Err(e) => {
                 if e.vmm_gone() {
-                    let _ = self
-                        .mark_vmm_failed(
-                            &opctx,
-                            authz_instance.clone(),
-                            &initial_vmm,
-                            &e,
-                        )
-                        .await;
+                    self.mark_vmm_failed(
+                        &opctx,
+                        authz_instance.clone(),
+                        &initial_vmm,
+                        &e,
+                    )
+                    .await;
                 }
                 Err(InstanceStateChangeError::SledAgent(e))
             }
@@ -1573,20 +1568,13 @@ impl super::Nexus {
     /// the update saga cannot complete the instance state transition, the
     /// `instance-updater` RPW will be activated to ensure another update saga
     /// is attempted.
-    ///
-    /// This method returns an error if the VMM record could not be marked as
-    /// failed. No error is returned if the instance-update saga could not
-    /// execute, as this may just mean that another saga is already updating the
-    /// instance. The update will be performed eventually even if this method
-    /// could not update the instance.
     pub(crate) async fn mark_vmm_failed<R>(
         &self,
         opctx: &OpContext,
         authz_instance: authz::Instance,
         vmm: &db::model::Vmm,
         reason: &R,
-    ) -> Result<(), Error>
-    where
+    ) where
         R: std::fmt::Display,
     {
         let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
@@ -1604,43 +1592,82 @@ impl super::Nexus {
 
         match self.db_datastore.vmm_update_runtime(&vmm_id, &new_runtime).await
         {
-            Ok(_) => {
-                info!(self.log, "marked VMM as Failed, preparing update saga";
+            Ok(true) => {}
+            // If `vmm_update_runtime` returns `false`, the VMM's generation has
+            // advanced since we observed its state. Presumably, this means
+            // someone else has either already moved it to `Failed`, or
+            // destroyed it gracefully, so we don't need to do anything here.
+            Ok(false) => {
+                info!(
+                    self.log,
+                    "did not mark VMM as Failed: its state has changed in the \
+                     meantime";
                     "instance_id" => %instance_id,
                     "vmm_id" => %vmm_id,
                     "reason" => %reason,
                 );
-                let saga = instance_update::SagaInstanceUpdate::prepare(
-                    &instance_update::Params {
-                        serialized_authn: authn::saga::Serialized::for_opctx(
-                            opctx,
-                        ),
-                        authz_instance,
-                    },
-                )?;
-                // Unlike `notify_vmm_updated`, which spawns the update
-                // saga in a "fire and forget" fashion so that it can return a
-                // HTTP 200 OK as soon as the changed VMM records are persisted
-                // to the database, `mark_vmm_failed` performs the instance
-                // update "synchronously". This is so that we can make a
-                // best-effort attempt to ensure that the instance record will
-                // be in the failed state prior to returning an error to the
-                // caller. That way, the caller will not see an error when
-                // attempting to transition their instance's state, and then,
-                // upon fetching the instance, transiently see an instance state
-                // suggesting it's "doing fine" until the update saga completes.
-                self.update_instance(&opctx.log, saga, instance_id).await;
+                return;
             }
             // XXX: It's not clear what to do with this error; should it be
             // bubbled back up to the caller?
-            Err(e) => error!(self.log,
-                            "failed to write Failed instance state to DB";
-                            "instance_id" => %instance_id,
-                            "vmm_id" => %vmm_id,
-                            "error" => ?e),
+            Err(e) => {
+                error!(
+                    self.log,
+                    "failed to write Failed instance state to DB";
+                    "instance_id" => %instance_id,
+                    "vmm_id" => %vmm_id,
+                    "error" => ?e
+                );
+                return;
+            }
         }
 
-        Ok(())
+        info!(self.log, "marked VMM as Failed, preparing update saga";
+            "instance_id" => %instance_id,
+            "vmm_id" => %vmm_id,
+            "reason" => %reason,
+        );
+        let prepared_saga = instance_update::SagaInstanceUpdate::prepare(
+            &instance_update::Params {
+                serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+                authz_instance,
+            },
+        );
+
+        match prepared_saga {
+            // Unlike `notify_vmm_updated`, which spawns the update saga in a
+            // "fire and forget" fashion so that it can return a HTTP 200 OK as
+            // soon as the changed VMM records are persisted to the database,
+            // `mark_vmm_failed` performs the instance update "synchronously".
+            // This is so that we can make a best-effort attempt to ensure that
+            // the instance record will be in the failed state prior to
+            // returning an error to the caller. That way, the caller will not
+            // see an error when attempting to transition their instance's
+            // state, and then, upon fetching the instance, transiently see an
+            // instance state suggesting it's "doing fine" until the update saga
+            // completes.
+            Ok(saga) => {
+                self.update_instance(&opctx.log, saga, instance_id).await
+            }
+
+            // If we couldn't start the saga, that's not great...but it's not
+            // *terrible*, either, since we *have* successfully advanced the VMM
+            // to the Failed state, so the `instance_updater` background task
+            // will eventually ensure that an update saga is run for this
+            // instance.
+            Err(e) => {
+                error!(
+                    self.log,
+                    "failed to prepare instance-update saga after marking VMM
+                     Failed";
+                    "instance_id" => %instance_id,
+                    "vmm_id" => %vmm_id,
+                    "reason" => %reason,
+                    "error" => %e,
+                );
+                self.background_tasks.task_instance_updater.activate();
+            }
+        }
     }
 
     /// Lists disks attached to the instance.
