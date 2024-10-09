@@ -136,14 +136,28 @@ fn run_apis(apis: &SystemApis, args: ShowDepsArgs) -> Result<()> {
     let metadata = apis.api_metadata();
     for api in metadata.apis() {
         println!("{} (client: {})", api.label, api.client_package_name);
-        for (s, path) in
+        for (s, dep_paths) in
             apis.api_consumers(&api.client_package_name, args.filter)?
         {
             let (repo_name, package_path) = apis.package_label(s)?;
-            println!("    consumed by: {} ({}/{})", s, repo_name, package_path);
             if args.show_deps {
-                for p in path.nodes() {
-                    println!("        via {}", p);
+                println!(
+                    "    consumed by: {} ({}/{}) via paths: {}",
+                    s,
+                    repo_name,
+                    package_path,
+                    dep_paths.len(),
+                );
+                for (i, dep_path) in dep_paths.iter().enumerate() {
+                    let label = if dep_paths.len() > 1 {
+                        format!(" path {}", i + 1)
+                    } else {
+                        String::new()
+                    };
+
+                    for p in dep_path.nodes() {
+                        println!("        via{}: {}", label, p);
+                    }
                 }
             }
         }
