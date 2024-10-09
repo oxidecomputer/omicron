@@ -8,9 +8,15 @@
 //! Once all related region snapshot replacement steps are done, the region
 //! snapshot replacement can be completed.
 
+use crate::app::authn;
 use crate::app::background::BackgroundTask;
+use crate::app::saga::StartSaga;
+use crate::app::sagas;
+use crate::app::sagas::region_snapshot_replacement_finish::*;
+use crate::app::sagas::NexusSaga;
 use futures::future::BoxFuture;
 use futures::FutureExt;
+use nexus_db_model::RegionSnapshotReplacement;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::internal_api::background::RegionSnapshotReplacementFinishStatus;
@@ -19,11 +25,31 @@ use std::sync::Arc;
 
 pub struct RegionSnapshotReplacementFinishDetector {
     datastore: Arc<DataStore>,
+    sagas: Arc<dyn StartSaga>,
 }
 
 impl RegionSnapshotReplacementFinishDetector {
-    pub fn new(datastore: Arc<DataStore>) -> Self {
-        RegionSnapshotReplacementFinishDetector { datastore }
+    pub fn new(datastore: Arc<DataStore>, sagas: Arc<dyn StartSaga>) -> Self {
+        RegionSnapshotReplacementFinishDetector { datastore, sagas }
+    }
+
+    async fn send_finish_request(
+        &self,
+        opctx: &OpContext,
+        request: RegionSnapshotReplacement,
+    ) -> Result<(), omicron_common::api::external::Error> {
+        let params = sagas::region_snapshot_replacement_finish::Params {
+            serialized_authn: authn::saga::Serialized::for_opctx(opctx),
+            request,
+        };
+
+        let saga_dag = SagaRegionSnapshotReplacementFinish::prepare(&params)?;
+
+        // We only care that the saga was started, and don't wish to wait for it
+        // to complete, so use `StartSaga::saga_start`, rather than `saga_run`.
+        self.sagas.saga_start(saga_dag).await?;
+
+        Ok(())
     }
 
     async fn transition_requests_to_done(
@@ -120,21 +146,23 @@ impl RegionSnapshotReplacementFinishDetector {
                     }
                 };
 
-                // Transition region snapshot replacement to Complete
-                match self
-                    .datastore
-                    .set_region_snapshot_replacement_complete(opctx, request.id)
-                    .await
-                {
+                let request_id = request.id;
+
+                match self.send_finish_request(opctx, request).await {
                     Ok(()) => {
-                        let s = format!("set request {} to done", request.id);
+                        let s = format!(
+                            "region snapshot replacement finish invoked ok for \
+                            {request_id}"
+                        );
+
                         info!(&log, "{s}");
-                        status.records_set_to_done.push(s);
+                        status.finish_invoked_ok.push(s);
                     }
 
                     Err(e) => {
                         let s = format!(
-                            "marking snapshot replacement as done failed: {e}"
+                            "invoking region snapshot replacement finish for \
+                            {request_id} failed: {e}",
                         );
                         error!(&log, "{s}");
                         status.errors.push(s);
@@ -185,8 +213,10 @@ mod test {
             datastore.clone(),
         );
 
-        let mut task =
-            RegionSnapshotReplacementFinishDetector::new(datastore.clone());
+        let mut task = RegionSnapshotReplacementFinishDetector::new(
+            datastore.clone(),
+            nexus.sagas.clone(),
+        );
 
         // Noop test
         let result: RegionSnapshotReplacementFinishStatus =
@@ -231,6 +261,7 @@ mod test {
             .unwrap();
 
         let new_region_id = Uuid::new_v4();
+        let new_region_volume_id = Uuid::new_v4();
         let old_snapshot_volume_id = Uuid::new_v4();
 
         datastore
@@ -239,6 +270,7 @@ mod test {
                 request_id,
                 operating_saga_id,
                 new_region_id,
+                new_region_volume_id,
                 old_snapshot_volume_id,
             )
             .await
@@ -334,8 +366,9 @@ mod test {
         assert_eq!(
             result,
             RegionSnapshotReplacementFinishStatus {
-                records_set_to_done: vec![format!(
-                    "set request {request_id} to done"
+                finish_invoked_ok: vec![format!(
+                    "region snapshot replacement finish invoked ok for \
+                    {request_id}"
                 )],
                 errors: vec![],
             },

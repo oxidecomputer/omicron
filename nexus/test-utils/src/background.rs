@@ -305,7 +305,7 @@ pub async fn run_region_snapshot_replacement_finish(
 
     assert!(status.errors.is_empty());
 
-    status.records_set_to_done.len()
+    status.finish_invoked_ok.len()
 }
 
 /// Run all replacement related background tasks until they aren't doing

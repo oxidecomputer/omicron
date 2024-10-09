@@ -4417,7 +4417,8 @@ CREATE TYPE IF NOT EXISTS omicron.public.region_snapshot_replacement_state AS EN
   'replacement_done',
   'deleting_old_volume',
   'running',
-  'complete'
+  'complete',
+  'completing'
 );
 
 CREATE TABLE IF NOT EXISTS omicron.public.region_snapshot_replacement (
@@ -4435,7 +4436,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.region_snapshot_replacement (
 
     replacement_state omicron.public.region_snapshot_replacement_state NOT NULL,
 
-    operating_saga_id UUID
+    operating_saga_id UUID,
+
+    new_region_volume_id UUID
 );
 
 CREATE INDEX IF NOT EXISTS lookup_region_snapshot_replacement_by_state on omicron.public.region_snapshot_replacement (replacement_state);
@@ -4684,7 +4687,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '114.0.0', NULL)
+    (TRUE, NOW(), NOW(), '115.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

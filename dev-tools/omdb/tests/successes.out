@@ -627,7 +627,7 @@ task: "region_snapshot_replacement_finish"
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    total records transitioned to done: 0
+    region snapshot replacement finish sagas started ok: 0
     errors: 0
 
 task: "region_snapshot_replacement_garbage_collection"
@@ -645,6 +645,7 @@ task: "region_snapshot_replacement_start"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total requests created ok: 0
     total start saga invoked ok: 0
+    total requests completed ok: 0
     errors: 0
 
 task: "region_snapshot_replacement_step"
@@ -655,6 +656,7 @@ task: "region_snapshot_replacement_step"
     total step records created ok: 0
     total step garbage collect saga invoked ok: 0
     total step saga invoked ok: 0
+    total steps set to volume_deleted ok: 0
     errors: 0
 
 task: "saga_recovery"
@@ -1070,7 +1072,7 @@ task: "region_snapshot_replacement_finish"
   currently executing: no
   last completed activation: <REDACTED ITERATIONS>, triggered by a periodic timer firing
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
-    total records transitioned to done: 0
+    region snapshot replacement finish sagas started ok: 0
     errors: 0
 
 task: "region_snapshot_replacement_garbage_collection"
@@ -1088,6 +1090,7 @@ task: "region_snapshot_replacement_start"
     started at <REDACTED_TIMESTAMP> (<REDACTED DURATION>s ago) and ran for <REDACTED DURATION>ms
     total requests created ok: 0
     total start saga invoked ok: 0
+    total requests completed ok: 0
     errors: 0
 
 task: "region_snapshot_replacement_step"
@@ -1098,6 +1101,7 @@ task: "region_snapshot_replacement_step"
     total step records created ok: 0
     total step garbage collect saga invoked ok: 0
     total step saga invoked ok: 0
+    total steps set to volume_deleted ok: 0
     errors: 0
 
 task: "saga_recovery"

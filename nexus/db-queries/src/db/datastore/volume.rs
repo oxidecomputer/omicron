@@ -57,6 +57,7 @@ use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
 use sled_agent_client::types::VolumeConstructionRequest;
+use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::net::AddrParseError;
 use std::net::SocketAddr;
@@ -175,6 +176,23 @@ enum ReplaceSnapshotError {
 
     #[error("Multiple volume resource usage records for {0}")]
     MultipleResourceUsageRecords(String),
+}
+
+/// Crucible resources freed by previous volume deletes
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FreedCrucibleResources {
+    /// Regions that previously could not be deleted (often due to region
+    /// snaphots) that were freed by a volume delete
+    pub datasets_and_regions: Vec<(Dataset, Region)>,
+
+    /// Previously soft-deleted volumes that can now be hard-deleted
+    pub volumes: Vec<Uuid>,
+}
+
+impl FreedCrucibleResources {
+    pub fn is_empty(&self) -> bool {
+        self.datasets_and_regions.is_empty() && self.volumes.is_empty()
+    }
 }
 
 impl DataStore {
@@ -1107,12 +1125,12 @@ impl DataStore {
         .await
     }
 
-    /// Find regions for deleted volumes that do not have associated region
-    /// snapshots and are not being used by any other non-deleted volumes, and
-    /// return them for garbage collection
+    /// Find read/write regions for deleted volumes that do not have associated
+    /// region snapshots and are not being used by any other non-deleted
+    /// volumes, and return them for garbage collection
     pub async fn find_deleted_volume_regions(
         &self,
-    ) -> ListResultVec<(Dataset, Region, Option<Volume>)> {
+    ) -> LookupResult<FreedCrucibleResources> {
         let conn = self.pool_connection_unauthorized().await?;
         self.transaction_retry_wrapper("find_deleted_volume_regions")
             .transaction(&conn, |conn| async move {
@@ -1124,8 +1142,7 @@ impl DataStore {
 
     async fn find_deleted_volume_regions_in_txn(
         conn: &async_bb8_diesel::Connection<DbConnection>,
-    ) -> Result<Vec<(Dataset, Region, Option<Volume>)>, diesel::result::Error>
-    {
+    ) -> Result<FreedCrucibleResources, diesel::result::Error> {
         use db::schema::dataset::dsl as dataset_dsl;
         use db::schema::region::dsl as region_dsl;
         use db::schema::region_snapshot::dsl;
@@ -1171,6 +1188,9 @@ impl DataStore {
         let mut deleted_regions =
             Vec::with_capacity(unfiltered_deleted_regions.len());
 
+        let mut volume_set: HashSet<Uuid> =
+            HashSet::with_capacity(unfiltered_deleted_regions.len());
+
         for (dataset, region, region_snapshot, volume) in
             unfiltered_deleted_regions
         {
@@ -1204,10 +1224,61 @@ impl DataStore {
                 continue;
             }
 
+            if let Some(volume) = &volume {
+                volume_set.insert(volume.id());
+            }
+
             deleted_regions.push((dataset, region, volume));
         }
 
-        Ok(deleted_regions)
+        let regions_for_deletion: HashSet<Uuid> =
+            deleted_regions.iter().map(|(_, region, _)| region.id()).collect();
+
+        let mut volumes = Vec::with_capacity(deleted_regions.len());
+
+        for volume_id in volume_set {
+            // Do not return a volume hard-deletion if there are still lingering
+            // read/write regions, unless all those lingering read/write regions
+            // will be deleted from the result of returning from this function.
+            let allocated_rw_regions: HashSet<Uuid> =
+                Self::get_allocated_regions_query(volume_id)
+                    .get_results_async::<(Dataset, Region)>(conn)
+                    .await?
+                    .into_iter()
+                    .filter_map(|(_, region)| {
+                        if !region.read_only() {
+                            Some(region.id())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+
+            if allocated_rw_regions.is_subset(&regions_for_deletion) {
+                // If all the allocated rw regions for this volume are in the
+                // set of regions being returned for deletion, then we can
+                // hard-delete this volume. Read-only region accounting should
+                // have already been updated by soft-deleting this volume.
+                //
+                // Note: we'll be in this branch if allocated_rw_regions is
+                // empty. I believe the only time we'll hit this empty case is
+                // when the volume is fully populated with read-only resources
+                // (read-only regions and region snapshots).
+                volumes.push(volume_id);
+            } else {
+                // Not all r/w regions allocated to this volume are being
+                // deleted here, so we can't hard-delete the volume yet.
+            }
+        }
+
+        Ok(FreedCrucibleResources {
+            datasets_and_regions: deleted_regions
+                .into_iter()
+                .map(|(d, r, _)| (d, r))
+                .collect(),
+
+            volumes,
+        })
     }
 
     pub async fn read_only_resources_associated_with_volume(
@@ -3668,7 +3739,15 @@ impl DataStore {
         let mut paginator = Paginator::new(SQL_BATCH_SIZE);
         let conn = self.pool_connection_authorized(opctx).await?;
 
-        let needle = address.to_string();
+        let needle = match address {
+            SocketAddr::V4(_) => {
+                return Err(Error::internal_error(&format!(
+                    "find_volumes_referencing_socket_addr not ipv6: {address}"
+                )));
+            }
+
+            SocketAddr::V6(addr) => addr,
+        };
 
         while let Some(p) = paginator.next() {
             use db::schema::volume::dsl;
@@ -3685,7 +3764,23 @@ impl DataStore {
             paginator = p.found_batch(&haystack, &|r| r.id());
 
             for volume in haystack {
-                if volume.data().contains(&needle) {
+                let vcr: VolumeConstructionRequest =
+                    match serde_json::from_str(&volume.data()) {
+                        Ok(vcr) => vcr,
+                        Err(e) => {
+                            return Err(Error::internal_error(&format!(
+                                "cannot deserialize volume data for {}: {e}",
+                                volume.id(),
+                            )));
+                        }
+                    };
+
+                let rw_reference = region_in_vcr(&vcr, &needle)
+                    .map_err(|e| Error::internal_error(&e.to_string()))?;
+                let ro_reference = read_only_target_in_vcr(&vcr, &needle)
+                    .map_err(|e| Error::internal_error(&e.to_string()))?;
+
+                if rw_reference || ro_reference {
                     volumes.push(volume);
                 }
             }

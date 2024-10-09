@@ -423,6 +423,20 @@ async fn rsrss_notify_upstairs(
     let params = sagactx.saga_params::<Params>()?;
     let log = sagactx.user_data().log();
 
+    // If the associated volume was deleted, then skip this notification step.
+    // It's likely there is no Upstairs to talk to, but continue with the saga
+    // to transition the step request to Complete, and then perform the
+    // associated clean up.
+
+    let volume_replace_snapshot_result = sagactx
+        .lookup::<VolumeReplaceResult>("volume_replace_snapshot_result")?;
+    if matches!(
+        volume_replace_snapshot_result,
+        VolumeReplaceResult::ExistingVolumeDeleted
+    ) {
+        return Ok(());
+    }
+
     // Make an effort to notify a Propolis if one was booted for this volume.
     // This is best effort: if there is a failure, this saga will unwind and be
     // triggered again for the same request. If there is no Propolis booted for

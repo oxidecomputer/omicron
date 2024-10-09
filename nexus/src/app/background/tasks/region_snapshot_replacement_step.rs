@@ -32,7 +32,7 @@ use futures::future::BoxFuture;
 use futures::FutureExt;
 use nexus_db_model::RegionSnapshotReplacementStep;
 use nexus_db_queries::context::OpContext;
-use nexus_db_queries::db::datastore::region_snapshot_replacement;
+use nexus_db_queries::db::datastore::region_snapshot_replacement::*;
 use nexus_db_queries::db::DataStore;
 use nexus_types::identity::Asset;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStepStatus;
@@ -315,6 +315,21 @@ impl RegionSnapshotReplacementFindAffected {
                 // functions execute), an indefinite amount of work would be
                 // created, continually "moving" the snapshot_addr from
                 // temporary volume to temporary volume.
+                //
+                // If the volume was soft deleted, then skip making a step for
+                // it.
+
+                if volume.time_deleted.is_some() {
+                    info!(
+                        log,
+                        "volume was soft-deleted, skipping creating a step for \
+                        it";
+                        "request id" => ?request.id,
+                        "volume id" => ?volume.id(),
+                    );
+
+                    continue;
+                }
 
                 match self
                     .datastore
@@ -326,7 +341,7 @@ impl RegionSnapshotReplacementFindAffected {
                     .await
                 {
                     Ok(insertion_result) => match insertion_result {
-                        region_snapshot_replacement::InsertStepResult::Inserted { step_id } => {
+                        InsertStepResult::Inserted { step_id } => {
                             let s = format!("created {step_id}");
                             info!(
                                 log,
@@ -337,7 +352,7 @@ impl RegionSnapshotReplacementFindAffected {
                             status.step_records_created_ok.push(s);
                         }
 
-                        region_snapshot_replacement::InsertStepResult::AlreadyHandled { .. } => {
+                        InsertStepResult::AlreadyHandled { .. } => {
                             info!(
                                 log,
                                 "step already exists for volume id";
@@ -345,7 +360,7 @@ impl RegionSnapshotReplacementFindAffected {
                                 "volume id" => ?volume.id(),
                             );
                         }
-                    }
+                    },
 
                     Err(e) => {
                         let s = format!("error creating step request: {e}");
@@ -392,13 +407,79 @@ impl RegionSnapshotReplacementFindAffected {
         };
 
         for request in step_requests {
-            let request_id = request.id;
+            let request_step_id = request.id;
+
+            // Check if the volume was deleted _after_ the replacement step was
+            // created.
+
+            let volume_deleted =
+                match self.datastore.volume_deleted(request.volume_id).await {
+                    Ok(volume_deleted) => volume_deleted,
+
+                    Err(e) => {
+                        let s = format!(
+                            "error checking if volume id {} was \
+                        deleted: {e}",
+                            request.volume_id,
+                        );
+                        error!(&log, "{s}");
+
+                        status.errors.push(s);
+                        continue;
+                    }
+                };
+
+            if volume_deleted {
+                // Volume was soft or hard deleted, so proceed with clean up,
+                // which if this is in state Requested there won't be any
+                // additional associated state, so transition the record to
+                // Completed.
+
+                info!(
+                    &log,
+                    "request {} step {} volume {} was soft or hard deleted!",
+                    request.request_id,
+                    request_step_id,
+                    request.volume_id,
+                );
+
+                let result = self
+                    .datastore
+                    .set_region_snapshot_replacement_step_volume_deleted_from_requested(
+                        opctx, request,
+                    )
+                    .await;
+
+                match result {
+                    Ok(()) => {
+                        let s = format!(
+                            "request step {request_step_id} transitioned from \
+                            requested to volume_deleted"
+                        );
+
+                        info!(&log, "{s}");
+                        status.step_set_volume_deleted_ok.push(s);
+                    }
+
+                    Err(e) => {
+                        let s = format!(
+                            "error transitioning {request_step_id} from \
+                            requested to complete: {e}"
+                        );
+
+                        error!(&log, "{s}");
+                        status.errors.push(s);
+                    }
+                }
+
+                continue;
+            }
 
             match self.send_start_request(opctx, request.clone()).await {
                 Ok(()) => {
                     let s = format!(
                         "region snapshot replacement step saga invoked ok for \
-                        {request_id}"
+                        {request_step_id}"
                     );
 
                     info!(
@@ -413,7 +494,7 @@ impl RegionSnapshotReplacementFindAffected {
                 Err(e) => {
                     let s = format!(
                         "invoking region snapshot replacement step saga for \
-                        {request_id} failed: {e}"
+                        {request_step_id} failed: {e}"
                     );
 
                     error!(
@@ -598,6 +679,7 @@ mod test {
             .unwrap();
 
         let new_region_id = Uuid::new_v4();
+        let new_region_volume_id = Uuid::new_v4();
         let old_snapshot_volume_id = Uuid::new_v4();
 
         datastore
@@ -606,6 +688,7 @@ mod test {
                 request_id,
                 operating_saga_id,
                 new_region_id,
+                new_region_volume_id,
                 old_snapshot_volume_id,
             )
             .await
@@ -746,10 +829,7 @@ mod test {
             .await
             .unwrap();
 
-        assert!(matches!(
-            result,
-            region_snapshot_replacement::InsertStepResult::Inserted { .. }
-        ));
+        assert!(matches!(result, InsertStepResult::Inserted { .. }));
 
         let result = datastore
             .insert_region_snapshot_replacement_step(&opctx, {
@@ -767,10 +847,7 @@ mod test {
             .await
             .unwrap();
 
-        assert!(matches!(
-            result,
-            region_snapshot_replacement::InsertStepResult::Inserted { .. }
-        ));
+        assert!(matches!(result, InsertStepResult::Inserted { .. }));
 
         // Activate the task - it should pick the complete steps up and try to
         // run the region snapshot replacement step garbage collect saga

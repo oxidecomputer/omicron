@@ -23,6 +23,7 @@ use nexus_db_model::RegionSnapshotReplacement;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::internal_api::background::RegionSnapshotReplacementStartStatus;
+use omicron_common::api::external::Error;
 use serde_json::json;
 use std::sync::Arc;
 
@@ -40,7 +41,7 @@ impl RegionSnapshotReplacementDetector {
         &self,
         serialized_authn: authn::saga::Serialized,
         request: RegionSnapshotReplacement,
-    ) -> Result<(), omicron_common::api::external::Error> {
+    ) -> Result<(), Error> {
         let params = sagas::region_snapshot_replacement_start::Params {
             serialized_authn,
             request,
@@ -338,6 +339,7 @@ mod test {
                     "region snapshot replacement start invoked ok for \
                     {request_id}"
                 )],
+                requests_completed_ok: vec![],
                 errors: vec![],
             },
         );

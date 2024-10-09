@@ -2558,38 +2558,47 @@ async fn cmd_db_region_used_by(
 async fn cmd_db_region_find_deleted(
     datastore: &DataStore,
 ) -> Result<(), anyhow::Error> {
-    let datasets_regions_volumes =
+    let freed_crucible_resources =
         datastore.find_deleted_volume_regions().await?;
 
     #[derive(Tabled)]
-    struct Row {
+    struct RegionRow {
         dataset_id: Uuid,
         region_id: Uuid,
-        volume_id: String,
     }
 
-    let rows: Vec<Row> = datasets_regions_volumes
-        .into_iter()
-        .map(|row| {
-            let (dataset, region, volume) = row;
+    #[derive(Tabled)]
+    struct VolumeRow {
+        volume_id: Uuid,
+    }
 
-            Row {
-                dataset_id: dataset.id(),
-                region_id: region.id(),
-                volume_id: if let Some(volume) = volume {
-                    volume.id().to_string()
-                } else {
-                    String::from("")
-                },
-            }
+    let region_rows: Vec<RegionRow> = freed_crucible_resources
+        .datasets_and_regions
+        .iter()
+        .map(|row| {
+            let (dataset, region) = row;
+
+            RegionRow { dataset_id: dataset.id(), region_id: region.id() }
         })
         .collect();
 
-    let table = tabled::Table::new(rows)
+    let table = tabled::Table::new(region_rows)
         .with(tabled::settings::Style::psql())
         .to_string();
 
     println!("{}", table);
+
+    let volume_rows: Vec<VolumeRow> = freed_crucible_resources
+        .volumes
+        .iter()
+        .map(|volume_id| VolumeRow { volume_id: *volume_id })
+        .collect();
+
+    let volume_table = tabled::Table::new(volume_rows)
+        .with(tabled::settings::Style::psql())
+        .to_string();
+
+    println!("{}", volume_table);
 
     Ok(())
 }
