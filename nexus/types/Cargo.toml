@@ -44,6 +44,7 @@ uuid.workspace = true
 api_identity.workspace = true
 dns-service-client.workspace = true
 gateway-client.workspace = true
+internal-dns.workspace = true
 nexus-sled-agent-shared.workspace = true
 omicron-common.workspace = true
 omicron-passwords.workspace = true

@@ -877,7 +877,6 @@ name = "bootstrap-agent-api"
 version = "0.1.0"
 dependencies = [
  "dropshot",
- "nexus-client",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -2004,7 +2003,7 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?branch=hyper-v1-no-merge#b13b5b240f3967de753fd589b1036745d2770b52"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=056283eb02b6887fbf27f66a215662520f7c159c#056283eb02b6887fbf27f66a215662520f7c159c"
 dependencies = [
  "oxnet",
  "percent-encoding",
@@ -4757,7 +4756,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c2a198fb6b0eada2a8df47933734e6d35d350665a33a3593d7164fa52c75c19"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -5093,7 +5092,7 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?branch=hyper-v1-no-merge#b13b5b240f3967de753fd589b1036745d2770b52"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=056283eb02b6887fbf27f66a215662520f7c159c#056283eb02b6887fbf27f66a215662520f7c159c"
 dependencies = [
  "anyhow",
  "chrono",
@@ -5898,6 +5897,7 @@ dependencies = [
  "gateway-client",
  "http 1.1.0",
  "humantime",
+ "internal-dns",
  "ipnetwork",
  "newtype-uuid",
  "newtype_derive",
@@ -8878,7 +8878,6 @@ dependencies = [
  "nexus-client",
  "nexus-db-queries",
  "nexus-inventory",
- "nexus-reconfigurator-execution",
  "nexus-reconfigurator-planning",
  "nexus-reconfigurator-preparation",
  "nexus-sled-agent-shared",
@@ -10140,9 +10139,9 @@ dependencies = [
 
 [[package]]
 name = "similar-asserts"
-version = "1.5.0"
+version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e041bb827d1bfca18f213411d51b665309f1afb37a04a5d1464530e13779fc0f"
+checksum = "cfe85670573cd6f0fa97940f26e7e6601213c3b0555246c24234131f88c5709e"
 dependencies = [
  "console",
  "similar",

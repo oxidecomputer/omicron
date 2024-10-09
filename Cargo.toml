@@ -273,11 +273,6 @@ redundant_field_names = "warn"
 # idiomatically declaring a static array of atomics uses `const Atomic`). We
 # warn on this to catch the former, and expect any uses of the latter to allow
 # this locally.
-#
-# Note: any const value with a type containing a `bytes::Bytes` hits this lint,
-# and you should `#![allow]` it for now. This is most likely to be seen with
-# `http::header::{HeaderName, HeaderValue}`. This is a Clippy bug which will be
-# fixed in the Rust 1.80 toolchain (rust-lang/rust-clippy#12691).
 declare_interior_mutable_const = "warn"
 # Also warn on casts, preferring explicit conversions instead.
 #
@@ -425,10 +420,8 @@ macaddr = { version = "1.0.1", features = ["serde_std"] }
 maplit = "1.0.2"
 mockall = "0.13"
 newtype_derive = "0.1.6"
-# mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "9e0fe45ca3862176dc31ad8cc83f605f8a7e1a42" }
-# ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "9e0fe45ca3862176dc31ad8cc83f605f8a7e1a42" }
-mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", branch = "hyper-v1-no-merge" }
-ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", branch = "hyper-v1-no-merge" }
+mg-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "056283eb02b6887fbf27f66a215662520f7c159c" }
+ddm-admin-client = { git = "https://github.com/oxidecomputer/maghemite", rev = "056283eb02b6887fbf27f66a215662520f7c159c" }
 multimap = "0.10.0"
 nexus-auth = { path = "nexus/auth" }
 nexus-client = { path = "clients/nexus-client" }
@@ -558,7 +551,7 @@ signal-hook = "0.3"
 signal-hook-tokio = { version = "0.3", features = [ "futures-v0_3" ] }
 sigpipe = "0.1.3"
 similar = { version = "2.6.0", features = ["bytes"] }
-similar-asserts = "1.5.0"
+similar-asserts = "1.6.0"
 # Don't change sled's version on accident; sled's on-disk format is not yet
 # stable and requires manual migrations. In the limit this won't matter because
 # the upgrade system will replace the DNS server zones entirely, but while we

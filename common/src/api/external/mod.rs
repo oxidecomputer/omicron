@@ -1570,9 +1570,9 @@ pub struct RouterRoute {
     pub vpc_router_id: Uuid,
     /// Describes the kind of router. Set at creation. `read-only`
     pub kind: RouterRouteKind,
-    /// The location that matched packets should be forwarded to.
+    /// The location that matched packets should be forwarded to
     pub target: RouteTarget,
-    /// Selects which traffic this routing rule will apply to.
+    /// Selects which traffic this routing rule will apply to
     pub destination: RouteDestination,
 }
 
@@ -1581,9 +1581,9 @@ pub struct InternetGatewayIpPool {
     /// Common identifying metadata
     #[serde(flatten)]
     pub identity: IdentityMetadata,
-    /// The ID of the internet gateway to which the IP pool entry belongs.
+    /// The ID of the internet gateway to which the IP pool entry belongs
     pub internet_gateway_id: Uuid,
-    /// The ID of the referenced IP pool.
+    /// The ID of the referenced IP pool
     pub ip_pool_id: Uuid,
 }
 
@@ -1592,9 +1592,9 @@ pub struct InternetGatewayIp {
     /// Common identifying metadata
     #[serde(flatten)]
     pub identity: IdentityMetadata,
-    /// The ID of the internet gateway to which the IP belongs.
+    /// The ID of the internet gateway to which the IP belongs
     pub internet_gateway_id: Uuid,
-    /// The IP address.
+    /// The IP address
     pub address: IpAddr,
 }
 
@@ -2607,8 +2607,8 @@ pub struct SwitchPortRouteConfig {
     /// over an 802.1Q tagged L2 segment.
     pub vlan_id: Option<u16>,
 
-    /// Local preference indicating priority within and across protocols.
-    pub local_pref: Option<u32>,
+    /// RIB Priority indicating priority within and across protocols.
+    pub rib_priority: Option<u8>,
 }
 
 /*
