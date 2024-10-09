@@ -5,10 +5,11 @@
 //! Plan generation for "where should services be initialized".
 
 use camino::Utf8PathBuf;
-use dns_service_client::types::DnsConfigParams;
 use illumos_utils::zpool::ZpoolName;
-use internal_dns::config::{Host, Zone};
-use internal_dns::ServiceName;
+use internal_dns_types::config::{
+    DnsConfigBuilder, DnsConfigParams, Host, Zone,
+};
+use internal_dns_types::names::ServiceName;
 use nexus_sled_agent_shared::inventory::{
     Inventory, OmicronZoneDataset, SledRole,
 };
@@ -386,7 +387,7 @@ impl Plan {
         config: &Config,
         mut sled_info: Vec<SledInfo>,
     ) -> Result<Self, PlanError> {
-        let mut dns_builder = internal_dns::DnsConfigBuilder::new();
+        let mut dns_builder = DnsConfigBuilder::new();
         let mut svc_port_builder = ServicePortBuilder::new(config);
 
         // Scrimlets get DNS records for running Dendrite.

@@ -1,16 +1,20 @@
 [package]
-name = "dns-server-api"
+name = "internal-dns-types"
 version = "0.1.0"
 edition = "2021"
-license = "MPL-2.0"
 
 [lints]
 workspace = true
 
 [dependencies]
+anyhow.workspace = true
 chrono.workspace = true
-dropshot.workspace = true
-internal-dns-types.workspace = true
+omicron-common.workspace = true
 omicron-workspace-hack.workspace = true
+omicron-uuid-kinds.workspace = true
 schemars.workspace = true
 serde.workspace = true
+
+[dev-dependencies]
+expectorate.workspace = true
+serde_json.workspace = true

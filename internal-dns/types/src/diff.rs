@@ -2,12 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::types::DnsConfigZone;
-use crate::types::DnsRecord;
-use crate::types::Srv;
-use crate::DnsRecords;
 use anyhow::ensure;
 use std::collections::BTreeSet;
+use std::collections::HashMap;
+
+use crate::config::DnsConfigZone;
+use crate::config::DnsRecord;
+use crate::config::Srv;
 
 #[derive(Debug)]
 enum NameDiff<'a> {
@@ -16,6 +17,8 @@ enum NameDiff<'a> {
     Changed(&'a str, &'a [DnsRecord], &'a [DnsRecord]),
     Unchanged(&'a str, &'a [DnsRecord]),
 }
+
+type DnsRecords = HashMap<String, Vec<DnsRecord>>;
 
 /// Compare the DNS records contained in two sets of DNS configuration
 #[derive(Debug)]
@@ -155,8 +158,8 @@ impl<'a> std::fmt::Display for DnsDiff<'a> {
                     prefix,
                     match r {
                         DnsRecord::A(addr) => format!("A    {}", addr),
-                        DnsRecord::Aaaa(addr) => format!("AAAA {}", addr),
-                        DnsRecord::Srv(Srv { port, target, .. }) => {
+                        DnsRecord::AAAA(addr) => format!("AAAA {}", addr),
+                        DnsRecord::SRV(Srv { port, target, .. }) => {
                             format!("SRV  port {:5} {}", port, target)
                         }
                     }
@@ -216,8 +219,8 @@ impl<'a> std::fmt::Display for DnsDiff<'a> {
 #[cfg(test)]
 mod test {
     use super::DnsDiff;
-    use crate::types::DnsConfigZone;
-    use crate::types::DnsRecord;
+    use crate::config::DnsConfigZone;
+    use crate::config::DnsRecord;
     use std::collections::HashMap;
     use std::net::Ipv4Addr;
 

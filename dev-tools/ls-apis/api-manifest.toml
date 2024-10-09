@@ -388,18 +388,6 @@ put those conversions into the client rather than omicron_common.
 """
 
 [[dependency_filter_rules]]
-ancestor = "internal-dns"
-client = "dns-service-client"
-evaluation = "bogus"
-note = """
-internal-dns depends on dns-service-client to use its types.  They're only used
-when configuring DNS, which is only done in a couple of components.  But many
-other components use internal-dns solely to read DNS.  This dependency makes it
-look like everything uses the DNS server API, but that's not true.  We should
-consider splitting this crate in two to eliminate this false positive.
-"""
-
-[[dependency_filter_rules]]
 ancestor = "nexus-types"
 client = "gateway-client"
 evaluation = "bogus"
@@ -412,7 +400,8 @@ ancestor = "nexus-types"
 client = "dns-service-client"
 evaluation = "bogus"
 note = """
-nexus-types depends on dns-service-client for defining some types.
+Past versions of nexus-types that are still referenced in the dependency tree
+depended on dns-service-client for defining some types.
 """
 
 [[dependency_filter_rules]]

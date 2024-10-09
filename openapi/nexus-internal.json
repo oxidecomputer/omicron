@@ -3062,7 +3062,6 @@
         ]
       },
       "DnsConfigParams": {
-        "description": "DnsConfigParams\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"generation\", \"time_created\", \"zones\" ], \"properties\": { \"generation\": { \"type\": \"integer\", \"format\": \"uint64\", \"minimum\": 0.0 }, \"time_created\": { \"type\": \"string\", \"format\": \"date-time\" }, \"zones\": { \"type\": \"array\", \"items\": { \"$ref\": \"#/components/schemas/DnsConfigZone\" } } } } ``` </details>",
         "type": "object",
         "properties": {
           "generation": {
@@ -3088,7 +3087,6 @@
         ]
       },
       "DnsConfigZone": {
-        "description": "DnsConfigZone\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"records\", \"zone_name\" ], \"properties\": { \"records\": { \"type\": \"object\", \"additionalProperties\": { \"type\": \"array\", \"items\": { \"$ref\": \"#/components/schemas/DnsRecord\" } } }, \"zone_name\": { \"type\": \"string\" } } } ``` </details>",
         "type": "object",
         "properties": {
           "records": {
@@ -3110,7 +3108,6 @@
         ]
       },
       "DnsRecord": {
-        "description": "DnsRecord\n\n<details><summary>JSON schema</summary>\n\n```json { \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"data\", \"type\" ], \"properties\": { \"data\": { \"type\": \"string\", \"format\": \"ipv4\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"A\" ] } } }, { \"type\": \"object\", \"required\": [ \"data\", \"type\" ], \"properties\": { \"data\": { \"type\": \"string\", \"format\": \"ipv6\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"AAAA\" ] } } }, { \"type\": \"object\", \"required\": [ \"data\", \"type\" ], \"properties\": { \"data\": { \"$ref\": \"#/components/schemas/Srv\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"SRV\" ] } } } ] } ``` </details>",
         "oneOf": [
           {
             "type": "object",
@@ -5327,7 +5324,6 @@
         ]
       },
       "Srv": {
-        "description": "Srv\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"port\", \"prio\", \"target\", \"weight\" ], \"properties\": { \"port\": { \"type\": \"integer\", \"format\": \"uint16\", \"minimum\": 0.0 }, \"prio\": { \"type\": \"integer\", \"format\": \"uint16\", \"minimum\": 0.0 }, \"target\": { \"type\": \"string\" }, \"weight\": { \"type\": \"integer\", \"format\": \"uint16\", \"minimum\": 0.0 } } } ``` </details>",
         "type": "object",
         "properties": {
           "port": {

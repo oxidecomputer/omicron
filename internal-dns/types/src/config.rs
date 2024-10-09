@@ -63,12 +63,13 @@
 use crate::names::{ServiceName, BOUNDARY_NTP_DNS_NAME, DNS_ZONE};
 use anyhow::{anyhow, ensure};
 use core::fmt;
-use dns_service_client::types::{DnsConfigParams, DnsConfigZone, DnsRecord};
 use omicron_common::address::{CLICKHOUSE_ADMIN_PORT, CLICKHOUSE_TCP_PORT};
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::{OmicronZoneUuid, SledUuid};
-use std::collections::BTreeMap;
-use std::net::Ipv6Addr;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, HashMap};
+use std::net::{Ipv4Addr, Ipv6Addr};
 
 /// Used to construct the DNS name for a control plane host
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
@@ -175,7 +176,7 @@ impl Zone {
         Host::Zone(self.clone())
     }
 
-    pub(crate) fn dns_name(&self) -> String {
+    pub fn dns_name(&self) -> String {
         self.to_host().dns_name()
     }
 }
@@ -486,7 +487,7 @@ impl DnsConfigBuilder {
         // Assemble the set of "AAAA" records for sleds.
         let sled_records = self.sleds.into_iter().map(|(sled, sled_ip)| {
             let name = Host::Sled(sled.0).dns_name();
-            (name, vec![DnsRecord::Aaaa(sled_ip)])
+            (name, vec![DnsRecord::AAAA(sled_ip)])
         });
 
         // Assemble the special boundary NTP name to support chrony on internal
@@ -504,7 +505,7 @@ impl DnsConfigBuilder {
                         let zone_ip = self.zones.get(&zone).expect(
                             "service_backend_zone() ensures zones are defined",
                         );
-                        DnsRecord::Aaaa(*zone_ip)
+                        DnsRecord::AAAA(*zone_ip)
                     })
                     .collect::<Vec<DnsRecord>>();
                 (BOUNDARY_NTP_DNS_NAME.to_string(), records)
@@ -512,7 +513,7 @@ impl DnsConfigBuilder {
 
         // Assemble the set of AAAA records for zones.
         let zone_records = self.zones.into_iter().map(|(zone, zone_ip)| {
-            (zone.dns_name(), vec![DnsRecord::Aaaa(zone_ip)])
+            (zone.dns_name(), vec![DnsRecord::AAAA(zone_ip)])
         });
 
         // Assemble the set of SRV records, which implicitly point back at
@@ -523,7 +524,7 @@ impl DnsConfigBuilder {
                 let records = zone2port
                     .into_iter()
                     .map(|(zone, port)| {
-                        DnsRecord::Srv(dns_service_client::types::Srv {
+                        DnsRecord::SRV(Srv {
                             prio: 0,
                             weight: 0,
                             port,
@@ -542,7 +543,7 @@ impl DnsConfigBuilder {
                 let records = sled2port
                     .into_iter()
                     .map(|(sled, port)| {
-                        DnsRecord::Srv(dns_service_client::types::Srv {
+                        DnsRecord::SRV(Srv {
                             prio: 0,
                             weight: 0,
                             port,
@@ -578,10 +579,110 @@ impl DnsConfigBuilder {
     }
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct DnsConfigParams {
+    pub generation: u64,
+    pub time_created: chrono::DateTime<chrono::Utc>,
+    pub zones: Vec<DnsConfigZone>,
+}
+
+impl DnsConfigParams {
+    /// Given a high-level DNS configuration, return a reference to its sole
+    /// DNS zone.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if there are 0 or more than one zones in this
+    /// configuration.
+    pub fn sole_zone(&self) -> Result<&DnsConfigZone, anyhow::Error> {
+        ensure!(
+            self.zones.len() == 1,
+            "expected exactly one DNS zone, but found {}",
+            self.zones.len()
+        );
+        Ok(&self.zones[0])
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct DnsConfig {
+    pub generation: u64,
+    pub time_created: chrono::DateTime<chrono::Utc>,
+    pub time_applied: chrono::DateTime<chrono::Utc>,
+    pub zones: Vec<DnsConfigZone>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct DnsConfigZone {
+    pub zone_name: String,
+    pub records: HashMap<String, Vec<DnsRecord>>,
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+)]
+#[serde(tag = "type", content = "data")]
+pub enum DnsRecord {
+    A(Ipv4Addr),
+    AAAA(Ipv6Addr),
+    SRV(Srv),
+}
+
+// The `From<Ipv4Addr>` and `From<Ipv6Addr>` implementations are very slightly
+// dubious, because a v4 or v6 address could also theoretically map to a DNS
+// PTR record
+// (https://www.cloudflare.com/learning/dns/dns-records/dns-ptr-record/).
+// However, we don't support PTR records at the moment, so this is fine. Would
+// certainly be worth revisiting if we do, though.
+
+impl From<Ipv4Addr> for DnsRecord {
+    fn from(ip: Ipv4Addr) -> Self {
+        DnsRecord::A(ip)
+    }
+}
+
+impl From<Ipv6Addr> for DnsRecord {
+    fn from(ip: Ipv6Addr) -> Self {
+        DnsRecord::AAAA(ip)
+    }
+}
+
+impl From<Srv> for DnsRecord {
+    fn from(srv: Srv) -> Self {
+        DnsRecord::SRV(srv)
+    }
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Serialize,
+    Deserialize,
+    JsonSchema,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+)]
+pub struct Srv {
+    pub prio: u16,
+    pub weight: u16,
+    pub port: u16,
+    pub target: String,
+}
+
 #[cfg(test)]
 mod test {
     use super::{DnsConfigBuilder, Host, ServiceName};
-    use crate::{config::Zone, DNS_ZONE};
+    use crate::{config::Zone, names::DNS_ZONE};
     use omicron_uuid_kinds::{OmicronZoneUuid, SledUuid};
     use std::{collections::BTreeMap, io::Write, net::Ipv6Addr};
 

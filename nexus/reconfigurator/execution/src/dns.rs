@@ -5,7 +5,7 @@
 //! Propagates DNS changes in a given blueprint
 
 use crate::Sled;
-use dns_service_client::DnsDiff;
+use internal_dns_types::diff::DnsDiff;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::Discoverability;
@@ -304,13 +304,12 @@ mod test {
     use crate::test_utils::overridables_for_test;
     use crate::test_utils::realize_blueprint_and_expect;
     use crate::Sled;
-    use dns_service_client::DnsDiff;
-    use internal_dns::config::Host;
-    use internal_dns::config::Zone;
-    use internal_dns::names::BOUNDARY_NTP_DNS_NAME;
-    use internal_dns::resolver::Resolver;
-    use internal_dns::ServiceName;
-    use internal_dns::DNS_ZONE;
+    use internal_dns_resolver::Resolver;
+    use internal_dns_types::config::Host;
+    use internal_dns_types::config::Zone;
+    use internal_dns_types::names::ServiceName;
+    use internal_dns_types::names::BOUNDARY_NTP_DNS_NAME;
+    use internal_dns_types::names::DNS_ZONE;
     use nexus_db_model::DnsGroup;
     use nexus_db_model::Silo;
     use nexus_db_queries::authn;
@@ -798,7 +797,7 @@ mod test {
             .expect("missing boundary NTP DNS name")
             .into_iter()
             .map(|record| match record {
-                DnsRecord::Aaaa(ip) => ip,
+                DnsRecord::AAAA(ip) => ip,
                 _ => panic!("expected AAAA record; got {record:?}"),
             });
         let mut expected_boundary_ntp_srv_targets = boundary_ntp_ips
@@ -825,7 +824,7 @@ mod test {
             let addrs: Vec<_> = records
                 .iter()
                 .filter_map(|dns_record| match dns_record {
-                    DnsRecord::Aaaa(addr) => Some(addr),
+                    DnsRecord::AAAA(addr) => Some(addr),
                     _ => None,
                 })
                 .collect();
@@ -923,7 +922,7 @@ mod test {
             let srvs: Vec<_> = records
                 .iter()
                 .filter_map(|dns_record| match dns_record {
-                    DnsRecord::Srv(srv) => Some(srv),
+                    DnsRecord::SRV(srv) => Some(srv),
                     _ => None,
                 })
                 .collect();
@@ -1009,8 +1008,8 @@ mod test {
                 .into_iter()
                 .map(|record| match record {
                     DnsRecord::A(v) => IpAddr::V4(*v),
-                    DnsRecord::Aaaa(v) => IpAddr::V6(*v),
-                    DnsRecord::Srv(_) => panic!("unexpected SRV record"),
+                    DnsRecord::AAAA(v) => IpAddr::V6(*v),
+                    DnsRecord::SRV(_) => panic!("unexpected SRV record"),
                 })
                 .collect();
             ips.sort();
@@ -1150,13 +1149,13 @@ mod test {
         dns_zone1.records.insert(
             String::from("_nexus._tcp"),
             vec![
-                DnsRecord::Srv(Srv {
+                DnsRecord::SRV(Srv {
                     port: 123,
                     prio: 1,
                     target: String::from("ex1.my-zone"),
                     weight: 2,
                 }),
-                DnsRecord::Srv(Srv {
+                DnsRecord::SRV(Srv {
                     port: 123,
                     prio: 1,
                     target: String::from("ex2.my-zone"),
@@ -1195,7 +1194,7 @@ mod test {
 
         // If we add another record, there should indeed be a new update.
         let records = dns_zone2.records.get_mut("_nexus._tcp").unwrap();
-        records.push(DnsRecord::Srv(Srv {
+        records.push(DnsRecord::SRV(Srv {
             port: 123,
             prio: 1,
             target: String::from("ex3.my-zone"),
@@ -1465,11 +1464,11 @@ mod test {
         let diff = diff_sole_zones(&dns_initial_internal, &dns_latest_internal);
         // There should be one new AAAA record for the zone itself.
         let new_records: Vec<_> = diff.names_added().collect();
-        let (new_name, &[DnsRecord::Aaaa(_)]) = new_records[0] else {
+        let (new_name, &[DnsRecord::AAAA(_)]) = new_records[0] else {
             panic!("did not find expected AAAA record for new Nexus zone");
         };
-        let new_zone_host = internal_dns::config::Host::for_zone(
-            internal_dns::config::Zone::Other(new_zone_id),
+        let new_zone_host = internal_dns_types::config::Host::for_zone(
+            internal_dns_types::config::Zone::Other(new_zone_id),
         );
         assert!(new_zone_host.fqdn().starts_with(new_name));
 
@@ -1483,7 +1482,7 @@ mod test {
         let (name, old_records, new_records) = changed[0];
         assert_eq!(name, ServiceName::Nexus.dns_name());
         let new_srv = subset_plus_one(old_records, new_records);
-        let DnsRecord::Srv(new_srv) = new_srv else {
+        let DnsRecord::SRV(new_srv) = new_srv else {
             panic!("expected SRV record, found {:?}", new_srv);
         };
         assert_eq!(new_srv.target, new_zone_host.fqdn());

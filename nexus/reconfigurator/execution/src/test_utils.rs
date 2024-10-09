@@ -6,7 +6,7 @@
 
 use std::net::Ipv6Addr;
 
-use internal_dns::resolver::Resolver;
+use internal_dns_resolver::Resolver;
 use nexus_db_queries::{context::OpContext, db::DataStore};
 use nexus_types::deployment::{
     execution::{EventBuffer, Overridables},

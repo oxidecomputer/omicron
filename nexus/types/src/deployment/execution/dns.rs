@@ -7,7 +7,7 @@ use std::{
     net::IpAddr,
 };
 
-use internal_dns::{DnsConfigBuilder, ServiceName};
+use internal_dns_types::{config::DnsConfigBuilder, names::ServiceName};
 use omicron_common::api::external::Name;
 use omicron_uuid_kinds::SledUuid;
 
@@ -145,7 +145,7 @@ pub fn blueprint_external_dns_config(
         .into_iter()
         .map(|addr| match addr {
             IpAddr::V4(addr) => DnsRecord::A(addr),
-            IpAddr::V6(addr) => DnsRecord::Aaaa(addr),
+            IpAddr::V6(addr) => DnsRecord::AAAA(addr),
         })
         .collect();
 

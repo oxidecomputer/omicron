@@ -16,11 +16,12 @@ use anyhow::ensure;
 use anyhow::Context;
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
-use dns_service_client::types::DnsConfig;
-use dns_service_client::{
-    types::{DnsConfigParams, DnsConfigZone, DnsRecord, Srv},
-    Client,
-};
+use dns_service_client::Client;
+use internal_dns_types::config::DnsConfig;
+use internal_dns_types::config::DnsConfigParams;
+use internal_dns_types::config::DnsConfigZone;
+use internal_dns_types::config::DnsRecord;
+use internal_dns_types::config::Srv;
 use slog::{Drain, Logger};
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -140,10 +141,10 @@ async fn main() -> Result<()> {
                             DnsRecord::A(addr) => {
                                 println!("        A:    {:?}", addr);
                             }
-                            DnsRecord::Aaaa(addr) => {
+                            DnsRecord::AAAA(addr) => {
                                 println!("        AAAA: {:?}", addr);
                             }
-                            DnsRecord::Srv(srv) => {
+                            DnsRecord::SRV(srv) => {
                                 println!("        SRV:  {}", srv.target);
                                 println!("              port     {}", srv.port);
                                 println!("              priority {}", srv.prio);
@@ -175,7 +176,7 @@ async fn main() -> Result<()> {
                 old_config,
                 &cmd.zone_name,
                 &cmd.name,
-                DnsRecord::Aaaa(cmd.addr),
+                DnsRecord::AAAA(cmd.addr),
             )?;
             client.dns_config_put(&new_config).await.context("updating DNS")?;
         }
@@ -186,7 +187,7 @@ async fn main() -> Result<()> {
                 old_config,
                 &cmd.zone_name,
                 &cmd.name,
-                DnsRecord::Srv(Srv {
+                DnsRecord::SRV(Srv {
                     prio: cmd.prio,
                     weight: cmd.weight,
                     port: cmd.port,

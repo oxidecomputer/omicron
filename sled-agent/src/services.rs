@@ -57,9 +57,9 @@ use illumos_utils::zfs::ZONE_ZFS_RAMDISK_DATASET_MOUNTPOINT;
 use illumos_utils::zone::AddressRequest;
 use illumos_utils::zpool::{PathInPool, ZpoolName};
 use illumos_utils::{execute, PFEXEC};
-use internal_dns::names::BOUNDARY_NTP_DNS_NAME;
-use internal_dns::names::DNS_ZONE;
-use internal_dns::resolver::Resolver;
+use internal_dns_resolver::Resolver;
+use internal_dns_types::names::BOUNDARY_NTP_DNS_NAME;
+use internal_dns_types::names::DNS_ZONE;
 use itertools::Itertools;
 use nexus_config::{ConfigDropshotWithTls, DeploymentConfig};
 use nexus_sled_agent_shared::inventory::{
@@ -267,7 +267,7 @@ pub enum Error {
     ExecutionError(#[from] illumos_utils::ExecutionError),
 
     #[error("Error resolving DNS name: {0}")]
-    ResolveError(#[from] internal_dns::resolver::ResolveError),
+    ResolveError(#[from] internal_dns_resolver::ResolveError),
 
     #[error("Serde error: {0}")]
     SerdeError(#[from] serde_json::Error),

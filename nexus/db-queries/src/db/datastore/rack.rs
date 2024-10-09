@@ -1007,6 +1007,7 @@ mod test {
     use crate::db::model::IpPoolRange;
     use crate::db::model::Sled;
     use async_bb8_diesel::AsyncSimpleConnection;
+    use internal_dns_types::names::DNS_ZONE;
     use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
     use nexus_db_model::{DnsGroup, Generation, InitialDnsGroup, SledUpdate};
     use nexus_inventory::now_db_precision;
@@ -1077,14 +1078,14 @@ mod test {
                 service_ip_pool_ranges: vec![],
                 internal_dns: InitialDnsGroup::new(
                     DnsGroup::Internal,
-                    internal_dns::DNS_ZONE,
+                    DNS_ZONE,
                     "test suite",
                     "test suite",
                     HashMap::new(),
                 ),
                 external_dns: InitialDnsGroup::new(
                     DnsGroup::External,
-                    internal_dns::DNS_ZONE,
+                    DNS_ZONE,
                     "test suite",
                     "test suite",
                     HashMap::new(),
@@ -1104,7 +1105,7 @@ mod test {
                 },
                 recovery_silo_fq_dns_name: format!(
                     "test-silo.sys.{}",
-                    internal_dns::DNS_ZONE
+                    DNS_ZONE
                 ),
                 recovery_user_id: "test-user".parse().unwrap(),
                 // empty string password
@@ -1777,19 +1778,19 @@ mod test {
         let datasets = vec![];
 
         let internal_records = vec![
-            DnsRecord::Aaaa("fe80::1:2:3:4".parse().unwrap()),
-            DnsRecord::Aaaa("fe80::1:2:3:5".parse().unwrap()),
+            DnsRecord::AAAA("fe80::1:2:3:4".parse().unwrap()),
+            DnsRecord::AAAA("fe80::1:2:3:5".parse().unwrap()),
         ];
         let internal_dns = InitialDnsGroup::new(
             DnsGroup::Internal,
-            internal_dns::DNS_ZONE,
+            DNS_ZONE,
             "test suite",
             "initial test suite internal rev",
             HashMap::from([("nexus".to_string(), internal_records.clone())]),
         );
 
         let external_records =
-            vec![DnsRecord::Aaaa("fe80::5:6:7:8".parse().unwrap())];
+            vec![DnsRecord::AAAA("fe80::5:6:7:8".parse().unwrap())];
         let external_dns = InitialDnsGroup::new(
             DnsGroup::External,
             "test-suite.oxide.test",
@@ -1924,10 +1925,7 @@ mod test {
             .unwrap();
         assert_eq!(dns_config_internal.generation, 1);
         assert_eq!(dns_config_internal.zones.len(), 1);
-        assert_eq!(
-            dns_config_internal.zones[0].zone_name,
-            internal_dns::DNS_ZONE
-        );
+        assert_eq!(dns_config_internal.zones[0].zone_name, DNS_ZONE);
         assert_eq!(
             dns_config_internal.zones[0].records,
             HashMap::from([("nexus".to_string(), internal_records)]),

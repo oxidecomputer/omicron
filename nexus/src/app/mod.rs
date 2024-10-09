@@ -15,7 +15,7 @@ use crate::populate::PopulateStatus;
 use crate::DropshotServer;
 use ::oximeter::types::ProducerRegistry;
 use anyhow::anyhow;
-use internal_dns::ServiceName;
+use internal_dns_types::names::ServiceName;
 use nexus_config::NexusConfig;
 use nexus_config::RegionAllocationStrategy;
 use nexus_config::Tunables;
@@ -187,7 +187,7 @@ pub struct Nexus {
     samael_max_issue_delay: std::sync::Mutex<Option<chrono::Duration>>,
 
     /// DNS resolver for internal services
-    internal_resolver: internal_dns::resolver::Resolver,
+    internal_resolver: internal_dns_resolver::Resolver,
 
     /// DNS resolver Nexus uses to resolve an external host
     external_resolver: Arc<external_dns::Resolver>,
@@ -217,7 +217,7 @@ impl Nexus {
     pub(crate) async fn new_with_id(
         rack_id: Uuid,
         log: Logger,
-        resolver: internal_dns::resolver::Resolver,
+        resolver: internal_dns_resolver::Resolver,
         pool: db::Pool,
         producer_registry: &ProducerRegistry,
         config: &NexusConfig,
@@ -932,7 +932,7 @@ impl Nexus {
         *mid
     }
 
-    pub fn resolver(&self) -> &internal_dns::resolver::Resolver {
+    pub fn resolver(&self) -> &internal_dns_resolver::Resolver {
         &self.internal_resolver
     }
 
@@ -993,7 +993,7 @@ pub enum Unimpl {
 }
 
 pub(crate) async fn dpd_clients(
-    resolver: &internal_dns::resolver::Resolver,
+    resolver: &internal_dns_resolver::Resolver,
     log: &slog::Logger,
 ) -> Result<HashMap<SwitchLocation, dpd_client::Client>, String> {
     let mappings = switch_zone_address_mappings(resolver, log).await?;
@@ -1020,7 +1020,7 @@ pub(crate) async fn dpd_clients(
 }
 
 async fn switch_zone_address_mappings(
-    resolver: &internal_dns::resolver::Resolver,
+    resolver: &internal_dns_resolver::Resolver,
     log: &slog::Logger,
 ) -> Result<HashMap<SwitchLocation, Ipv6Addr>, String> {
     let switch_zone_addresses = match resolver

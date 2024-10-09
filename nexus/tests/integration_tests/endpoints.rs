@@ -10,7 +10,7 @@
 use crate::integration_tests::unauthorized::HTTP_SERVER;
 use chrono::Utc;
 use http::method::Method;
-use internal_dns::names::DNS_ZONE_EXTERNAL_TESTING;
+use internal_dns_types::names::DNS_ZONE_EXTERNAL_TESTING;
 use nexus_db_queries::authn;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_db_queries::db::identity::Resource;

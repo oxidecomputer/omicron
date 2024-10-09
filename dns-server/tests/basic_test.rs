@@ -4,16 +4,16 @@
 
 use anyhow::{Context, Result};
 use camino_tempfile::Utf8TempDir;
-use dns_service_client::{
-    types::{DnsConfigParams, DnsConfigZone, DnsRecord, Srv},
-    Client,
-};
+use dns_service_client::Client;
 use dropshot::{test_util::LogContext, HandlerTaskMode};
 use hickory_resolver::error::ResolveErrorKind;
 use hickory_resolver::TokioAsyncResolver;
 use hickory_resolver::{
     config::{NameServerConfig, Protocol, ResolverConfig, ResolverOpts},
     proto::op::ResponseCode,
+};
+use internal_dns_types::config::{
+    DnsConfigParams, DnsConfigZone, DnsRecord, Srv,
 };
 use omicron_test_utils::dev::test_setup_log;
 use slog::o;
@@ -68,7 +68,7 @@ pub async fn aaaa_crud() -> Result<(), anyhow::Error> {
     // add an aaaa record
     let name = "devron".to_string();
     let addr = Ipv6Addr::new(0xfd, 0, 0, 0, 0, 0, 0, 0x1);
-    let aaaa = DnsRecord::Aaaa(addr);
+    let aaaa = DnsRecord::AAAA(addr);
     let input_records = HashMap::from([(name.clone(), vec![aaaa])]);
     dns_records_create(client, TEST_ZONE, input_records.clone()).await?;
 
@@ -104,7 +104,7 @@ pub async fn srv_crud() -> Result<(), anyhow::Error> {
         port: 99,
         target: format!("{target}.{TEST_ZONE}"),
     };
-    let rec = DnsRecord::Srv(srv.clone());
+    let rec = DnsRecord::SRV(srv.clone());
     let input_records = HashMap::from([(name.clone(), vec![rec])]);
     dns_records_create(client, TEST_ZONE, input_records.clone()).await?;
 
@@ -117,7 +117,7 @@ pub async fn srv_crud() -> Result<(), anyhow::Error> {
     let addr2 = Ipv6Addr::new(0xfd, 0, 0, 0, 0, 0, 0, 0x2);
     let input_records = HashMap::from([(
         target.to_string(),
-        vec![DnsRecord::Aaaa(addr1), DnsRecord::Aaaa(addr2)],
+        vec![DnsRecord::AAAA(addr1), DnsRecord::AAAA(addr2)],
     )]);
     dns_records_create(client, TEST_ZONE, input_records.clone()).await?;
 
@@ -150,8 +150,8 @@ pub async fn multi_record_crud() -> Result<(), anyhow::Error> {
     let name = "devron".to_string();
     let addr1 = Ipv6Addr::new(0xfd, 0, 0, 0, 0, 0, 0, 0x1);
     let addr2 = Ipv6Addr::new(0xfd, 0, 0, 0, 0, 0, 0, 0x2);
-    let aaaa1 = DnsRecord::Aaaa(addr1);
-    let aaaa2 = DnsRecord::Aaaa(addr2);
+    let aaaa1 = DnsRecord::AAAA(addr1);
+    let aaaa2 = DnsRecord::AAAA(addr2);
     let input_records = HashMap::from([(name.clone(), vec![aaaa1, aaaa2])]);
     dns_records_create(client, TEST_ZONE, input_records.clone()).await?;
 
@@ -216,7 +216,7 @@ pub async fn name_contains_zone() -> Result<(), anyhow::Error> {
     // add a aaaa record
     let name = "epsilon3.oxide.test".to_string();
     let addr = Ipv6Addr::new(0xfd, 0, 0, 0, 0, 0, 0, 0x1);
-    let aaaa = DnsRecord::Aaaa(addr);
+    let aaaa = DnsRecord::AAAA(addr);
     let input_records = HashMap::from([(name.clone(), vec![aaaa])]);
     dns_records_create(client, "oxide.test", input_records.clone()).await?;
 
@@ -273,7 +273,7 @@ pub async fn nxdomain() -> Result<(), anyhow::Error> {
     // add a record, just to create a zone
     let name = "devron".to_string();
     let addr = Ipv6Addr::new(0xfd, 0, 0, 0, 0, 0, 0, 0x1);
-    let aaaa = DnsRecord::Aaaa(addr);
+    let aaaa = DnsRecord::AAAA(addr);
     dns_records_create(
         client,
         TEST_ZONE,

@@ -45,6 +45,7 @@ use gateway_client::types::SpType;
 use indicatif::ProgressBar;
 use indicatif::ProgressDrawTarget;
 use indicatif::ProgressStyle;
+use internal_dns_types::names::ServiceName;
 use ipnetwork::IpNetwork;
 use nexus_config::PostgresConfigWithUrl;
 use nexus_db_model::Dataset;
@@ -221,10 +222,7 @@ impl DbUrlOptions {
                 );
                 eprintln!("note: (override with --db-url or OMDB_DB_URL)");
                 let addrs = omdb
-                    .dns_lookup_all(
-                        log.clone(),
-                        internal_dns::ServiceName::Cockroach,
-                    )
+                    .dns_lookup_all(log.clone(), ServiceName::Cockroach)
                     .await?;
 
                 format!(
@@ -4515,8 +4513,8 @@ fn print_name(
 
     if records.len() == 1 {
         match &records[0] {
-            DnsRecord::Srv(_) => (),
-            DnsRecord::Aaaa(_) | DnsRecord::A(_) => {
+            DnsRecord::SRV(_) => (),
+            DnsRecord::AAAA(_) | DnsRecord::A(_) => {
                 println!(
                     "{}  {:50} {}",
                     prefix,
@@ -4537,8 +4535,8 @@ fn print_name(
 fn format_record(record: &DnsRecord) -> impl Display {
     match record {
         DnsRecord::A(addr) => format!("A    {}", addr),
-        DnsRecord::Aaaa(addr) => format!("AAAA {}", addr),
-        DnsRecord::Srv(Srv { port, target, .. }) => {
+        DnsRecord::AAAA(addr) => format!("AAAA {}", addr),
+        DnsRecord::SRV(Srv { port, target, .. }) => {
             format!("SRV  port {:5} {}", port, target)
         }
     }

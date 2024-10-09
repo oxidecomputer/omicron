@@ -5,9 +5,9 @@
 //! Background task for keeping track of DNS configuration
 
 use crate::app::background::BackgroundTask;
-use dns_service_client::types::DnsConfigParams;
 use futures::future::BoxFuture;
 use futures::FutureExt;
+use internal_dns_types::config::DnsConfigParams;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;

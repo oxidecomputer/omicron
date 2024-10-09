@@ -138,8 +138,8 @@ impl From<params::DnsRecord> for DnsRecord {
     fn from(value: params::DnsRecord) -> Self {
         match value {
             params::DnsRecord::A(addr) => DnsRecord::A(addr),
-            params::DnsRecord::Aaaa(addr) => DnsRecord::AAAA(addr),
-            params::DnsRecord::Srv(srv) => DnsRecord::SRV(SRV::from(srv)),
+            params::DnsRecord::AAAA(addr) => DnsRecord::AAAA(addr),
+            params::DnsRecord::SRV(srv) => DnsRecord::SRV(SRV::from(srv)),
         }
     }
 }
@@ -148,9 +148,9 @@ impl From<DnsRecord> for params::DnsRecord {
     fn from(value: DnsRecord) -> Self {
         match value {
             DnsRecord::A(addr) => params::DnsRecord::A(addr),
-            DnsRecord::AAAA(addr) => params::DnsRecord::Aaaa(addr),
+            DnsRecord::AAAA(addr) => params::DnsRecord::AAAA(addr),
             DnsRecord::SRV(srv) => {
-                params::DnsRecord::Srv(params::Srv::from(srv))
+                params::DnsRecord::SRV(params::Srv::from(srv))
             }
         }
     }

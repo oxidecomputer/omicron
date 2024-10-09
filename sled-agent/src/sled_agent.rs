@@ -145,7 +145,7 @@ pub enum Error {
     Hardware(String),
 
     #[error("Error resolving DNS name: {0}")]
-    ResolveError(#[from] internal_dns::resolver::ResolveError),
+    ResolveError(#[from] internal_dns_resolver::ResolveError),
 
     #[error(transparent)]
     ZpoolList(#[from] illumos_utils::zpool::ListError),

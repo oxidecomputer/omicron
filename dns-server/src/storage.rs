@@ -94,9 +94,11 @@
 
 use anyhow::{anyhow, Context};
 use camino::Utf8PathBuf;
-use dns_server_api::{DnsConfig, DnsConfigParams, DnsConfigZone, DnsRecord};
 use hickory_proto::rr::LowerName;
 use hickory_resolver::Name;
+use internal_dns_types::config::{
+    DnsConfig, DnsConfigParams, DnsConfigZone, DnsRecord,
+};
 use serde::{Deserialize, Serialize};
 use sled::transaction::ConflictableTransactionError;
 use slog::{debug, error, info, o, warn};
@@ -781,11 +783,11 @@ mod test {
     use anyhow::Context;
     use camino::Utf8PathBuf;
     use camino_tempfile::Utf8TempDir;
-    use dns_server_api::DnsConfigParams;
-    use dns_server_api::DnsConfigZone;
-    use dns_server_api::DnsRecord;
     use hickory_proto::rr::LowerName;
     use hickory_resolver::Name;
+    use internal_dns_types::config::DnsConfigParams;
+    use internal_dns_types::config::DnsConfigZone;
+    use internal_dns_types::config::DnsRecord;
     use omicron_test_utils::dev::test_setup_log;
     use std::collections::BTreeSet;
     use std::collections::HashMap;
