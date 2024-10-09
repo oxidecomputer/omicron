@@ -776,6 +776,14 @@ impl super::Nexus {
 
     /// Forcefully stop a running instance, causing its sled-agent to rudely
     /// terminate its VMM process and unregister the instance.
+    ///
+    /// If the force-terminated instance is migrating, both the active VMM and
+    /// the migration target VMM are forcefully terminated. Once the VMM(s) have
+    /// been destroyed, this method attempts to transition the instance into a
+    /// state where it may be restarted.
+    ///
+    /// If the instance is not currently incarnated by a VMM, this method
+    /// returns without doing anything else.
     pub(crate) async fn instance_force_terminate(
         &self,
         opctx: &OpContext,
@@ -784,55 +792,60 @@ impl super::Nexus {
         let (.., authz_instance) =
             instance_lookup.lookup_for(authz::Action::Modify).await?;
 
-        let db::datastore::InstanceGestalt {
-            instance,
-            active_vmm,
-            target_vmm,
-            migration: _,
-        } = self
-            .db_datastore
-            .instance_fetch_all(opctx, &authz_instance)
-            .await?;
+        let db::datastore::InstanceGestalt { active_vmm, target_vmm, .. } =
+            self.db_datastore
+                .instance_fetch_all(opctx, &authz_instance)
+                .await?;
 
         // If the instance is currently incarnated by VMM process(es), hunt down
         // and destroy them.
-        let terminated_active = match active_vmm {
-            Some(vmm) => {
-                self.instance_force_terminate_vmm(
+        let (terminated_active, terminated_target) = tokio::join! {
+               self.instance_force_terminate_vmm(
                     opctx,
                     &authz_instance,
-                    vmm,
+                    active_vmm,
                     "active",
-                )
-                .await
-            }
-            None => {
-                debug!(
-                    opctx.log,
-                    "asked to force terminate an instance that has no active VMM";
-                    "instance_id" => %authz_instance.id(),
-                    "instance_state" => ?instance.runtime(),
-                );
-                Ok(())
-            }
-        };
-        let terminated_target = match target_vmm {
-            Some(vmm) => {
+                ),
                 self.instance_force_terminate_vmm(
                     opctx,
                     &authz_instance,
-                    vmm,
+                    target_vmm,
                     "target",
-                )
-                .await
-            }
-            None => Ok(()),
+                ),
         };
 
-        // If our attempt to terminate either VMM failed, bail --- but only
-        // after both futures completed.
-        terminated_active?;
-        terminated_target?;
+        // If we terminated either VMM, an instance-update saga will be produced
+        // to update the instance record's state to reflect that its' VMM(s)
+        // have been force-terminated.
+        //
+        // We would like the caller to see the instance they are attempting to
+        // terminate go to "Stopped", so we will run the instance-update saga
+        // synchronously, if possible. This will allow the instance to be
+        // restarted as soon as the `instance_force_terminate` call returns.
+        // Additionallly, trying to run the update saga is important in the case
+        // where a migrating instance is force-terminated, as an instance with a
+        // migration ID will remain "Migrating" (not "Stopping") until its
+        // migration ID is unset, and it seems a bit sad to return a "Migrating"
+        // instance to a caller who tries to force-kill it.
+        //
+        // We do this only after terminating both VMMs, because we would like to
+        // run a single update saga to handle both VMMs being destroyed.
+        let maybe_saga = terminated_active?.or(terminated_target?);
+        if let Some(saga) = maybe_saga {
+            info!(
+                opctx.log,
+                "instance's VMM(s) force terminated, running update saga...";
+                "instance_id" => %authz_instance.id(),
+            );
+            self.sagas
+                .saga_prepare(saga)
+                .await?
+                .start()
+                .await?
+                .wait_until_stopped()
+                .await
+                .into_omicron_result()?;
+        }
 
         // Ladies and gentlemen, we got him!
         self.db_datastore
@@ -842,8 +855,8 @@ impl super::Nexus {
     }
 
     /// Forcefully terminate a VMM associated with an instance (by calling
-    /// [`Self::instance_ensure_unregistered`]), and then update the instance's
-    /// state to reflect that the VMM has been unregistered.
+    /// [`Self::instance_ensure_unregistered`]). If an update saga is necessary
+    /// to update the instance's state, this method returns it.
     ///
     /// # Arguments
     ///
@@ -857,9 +870,10 @@ impl super::Nexus {
         &self,
         opctx: &OpContext,
         authz_instance: &authz::Instance,
-        vmm: db::model::Vmm,
+        vmm: Option<db::model::Vmm>,
         vmm_role: &str,
-    ) -> Result<(), InstanceStateChangeError> {
+    ) -> Result<Option<steno::SagaDag>, InstanceStateChangeError> {
+        let Some(vmm) = vmm else { return Ok(None) };
         let propolis_id = PropolisUuid::from_untyped_uuid(vmm.id);
         let sled_id = SledUuid::from_untyped_uuid(vmm.sled_id);
         let unregister_result =
@@ -875,42 +889,15 @@ impl super::Nexus {
                     "vmm_id" => %propolis_id,
                     "sled_id" => %sled_id,
                 );
-
-                // We would like the caller to see the instance they are
-                // attempting to terminate go to "Stopped", so run the
-                // instance-update saga synchronously if possible. This is
-                // particularly important in the case where a migrating instance
-                // is force-terminated, as an instance with a migration ID will
-                // remain "Migrating" (not "Stopping") until its migration ID is
-                // unset, and it seems a bit sad to return a "Migrating"
-                // instance to a caller who tries to force-kill it.
-                //
-                // TODO(eliza): in the case where we are terminating both an
-                // active VMM and migration target, we will unregister them in
-                // sequence, running separate update sagas for both VMMs being
-                // terminated. It would be a bit more efficient to terminate
-                // both VMMs, update CRDB, and then run a *single* update saga
-                // to process both VMMs being destroyed. However, this requires
-                // a bit of annoying refactoring to existing APIs, and I'm not
-                // sure if improving the `instance-force-terminate` endpoint's
-                // latency is particularly important...
-                if let Some((_, saga)) = process_vmm_update(
+                let maybe_saga = process_vmm_update(
                     &self.db_datastore,
                     opctx,
                     propolis_id,
                     &state,
                 )
-                .await?
-                {
-                    self.sagas
-                        .saga_prepare(saga)
-                        .await?
-                        .start()
-                        .await?
-                        .wait_until_stopped()
-                        .await
-                        .into_omicron_result()?;
-                }
+                .await
+                .map_err(InstanceStateChangeError::Other)?;
+                return Ok(maybe_saga.map(|(_, saga)| saga));
             }
             // If the returned state from sled-agent is `None`, then the
             // instance was already unregistered. This may have been from a
@@ -955,7 +942,8 @@ impl super::Nexus {
             }
             Err(e) => return Err(e),
         }
-        Ok(())
+
+        Ok(None)
     }
 
     /// Idempotently ensures that the sled specified in `db_instance` does not
