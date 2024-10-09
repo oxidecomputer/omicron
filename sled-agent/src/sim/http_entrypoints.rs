@@ -542,6 +542,18 @@ impl SledAgentApi for SledAgentSimImpl {
     ) -> Result<HttpResponseOk<BootstoreStatus>, HttpError> {
         method_unimplemented()
     }
+
+    async fn support_zoneadm_info(
+        _request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
+        method_unimplemented()
+    }
+
+    async fn support_ipadm_info(
+        _request_context: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<FreeformBody>, HttpError> {
+        method_unimplemented()
+    }
 }
 
 fn method_unimplemented<T>() -> Result<T, HttpError> {
