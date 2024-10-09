@@ -6,11 +6,12 @@
 
 use crate::omicron_zone_config::{self, OmicronZoneNic};
 use crate::schema::{
-    hw_baseboard_id, inv_caboose, inv_collection, inv_collection_error,
-    inv_dataset, inv_nvme_disk_firmware, inv_omicron_zone,
-    inv_omicron_zone_nic, inv_physical_disk, inv_root_of_trust,
-    inv_root_of_trust_page, inv_service_processor, inv_sled_agent,
-    inv_sled_omicron_zones, inv_zpool, sw_caboose, sw_root_of_trust_page,
+    hw_baseboard_id, inv_caboose, inv_clickhouse_keeper_membership,
+    inv_collection, inv_collection_error, inv_dataset, inv_nvme_disk_firmware,
+    inv_omicron_zone, inv_omicron_zone_nic, inv_physical_disk,
+    inv_root_of_trust, inv_root_of_trust_page, inv_service_processor,
+    inv_sled_agent, inv_sled_omicron_zones, inv_zpool, sw_caboose,
+    sw_root_of_trust_page,
 };
 use crate::typed_uuid::DbTypedUuid;
 use crate::PhysicalDiskKind;
@@ -21,6 +22,7 @@ use crate::{
 use anyhow::{anyhow, bail, Context, Result};
 use chrono::DateTime;
 use chrono::Utc;
+use clickhouse_admin_types::{ClickhouseKeeperClusterMembership, KeeperId};
 use diesel::backend::Backend;
 use diesel::deserialize::{self, FromSql};
 use diesel::expression::AsExpression;
@@ -46,6 +48,7 @@ use omicron_uuid_kinds::ZpoolKind;
 use omicron_uuid_kinds::ZpoolUuid;
 use omicron_uuid_kinds::{CollectionKind, OmicronZoneKind};
 use omicron_uuid_kinds::{CollectionUuid, OmicronZoneUuid};
+use std::collections::BTreeSet;
 use std::net::{IpAddr, SocketAddrV6};
 use thiserror::Error;
 use uuid::Uuid;
@@ -1723,6 +1726,65 @@ impl InvOmicronZoneNic {
     ) -> Result<NetworkInterface, anyhow::Error> {
         let zone_nic = OmicronZoneNic::from(self);
         zone_nic.into_network_interface_for_zone(zone_id)
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_clickhouse_keeper_membership)]
+pub struct InvClickhouseKeeperMembership {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub queried_keeper_id: i64,
+    pub leader_committed_log_index: i64,
+    pub raft_config: Vec<i64>,
+}
+
+impl TryFrom<InvClickhouseKeeperMembership>
+    for ClickhouseKeeperClusterMembership
+{
+    type Error = anyhow::Error;
+
+    fn try_from(value: InvClickhouseKeeperMembership) -> anyhow::Result<Self> {
+        let err_msg = "clickhouse keeper ID > 2^63";
+        let mut raft_config = BTreeSet::new();
+        for id in value.raft_config {
+            raft_config.insert(KeeperId(id.try_into().context(err_msg)?));
+        }
+        Ok(ClickhouseKeeperClusterMembership {
+            queried_keeper: KeeperId(
+                value.queried_keeper_id.try_into().context(err_msg)?,
+            ),
+            leader_committed_log_index: value
+                .leader_committed_log_index
+                .try_into()
+                .context("log index > 2^63")?,
+            raft_config,
+        })
+    }
+}
+
+impl InvClickhouseKeeperMembership {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        membership: ClickhouseKeeperClusterMembership,
+    ) -> anyhow::Result<InvClickhouseKeeperMembership> {
+        let err_msg = "clickhouse keeper ID > 2^63";
+        let mut raft_config = Vec::with_capacity(membership.raft_config.len());
+        for id in membership.raft_config {
+            raft_config.push(id.0.try_into().context(err_msg)?);
+        }
+        Ok(InvClickhouseKeeperMembership {
+            inv_collection_id: inv_collection_id.into(),
+            queried_keeper_id: membership
+                .queried_keeper
+                .0
+                .try_into()
+                .context(err_msg)?,
+            leader_committed_log_index: membership
+                .leader_committed_log_index
+                .try_into()
+                .context("log index > 2^63")?,
+            raft_config,
+        })
     }
 }
 

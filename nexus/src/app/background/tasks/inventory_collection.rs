@@ -128,7 +128,21 @@ async fn inventory_activate(
         .map(|sockaddr| {
             let url = format!("http://{}", sockaddr);
             let log = opctx.log.new(o!("gateway_url" => url.clone()));
-            Arc::new(gateway_client::Client::new(&url, log))
+            gateway_client::Client::new(&url, log)
+        })
+        .collect::<Vec<_>>();
+
+    // Find clickhouse-admin-keeper clients
+    let keeper_admin_clients = resolver
+        .lookup_socket_v6(ServiceName::ClickhouseAdminKeeper)
+        .await
+        .context("looking up ClickhouseAdminKeeper addresses")
+        .into_iter()
+        .map(|sockaddr| {
+            let url = format!("http://{}", sockaddr);
+            let log =
+                opctx.log.new(o!("clickhouse_admin_keeper_url" => url.clone()));
+            clickhouse_admin_client::Client::new(&url, log)
         })
         .collect::<Vec<_>>();
 
@@ -138,7 +152,8 @@ async fn inventory_activate(
     // Run a collection.
     let inventory = nexus_inventory::Collector::new(
         creator,
-        &mgs_clients,
+        mgs_clients,
+        keeper_admin_clients,
         &sled_enum,
         opctx.log.clone(),
     );
