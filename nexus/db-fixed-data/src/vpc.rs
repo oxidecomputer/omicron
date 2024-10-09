@@ -23,20 +23,27 @@ pub static SERVICES_VPC_ROUTER_ID: Lazy<uuid::Uuid> = Lazy::new(|| {
         .expect("invalid uuid for builtin services vpc router id")
 });
 
-/// UUID of default IPv4 route for built-in Services VPC.
-pub static SERVICES_VPC_DEFAULT_V4_ROUTE_ID: Lazy<uuid::Uuid> =
-    Lazy::new(|| {
-        "001de000-074c-4000-8000-000000000002"
-            .parse()
-            .expect("invalid uuid for builtin services vpc default route id")
-    });
+/// UUID of InternetGateway for built-in Services VPC.
+pub static SERVICES_INTERNET_GATEWAY_ID: Lazy<uuid::Uuid> = Lazy::new(|| {
+    "001de000-074c-4000-8000-000000000002"
+        .parse()
+        .expect("invalid uuid for builtin services internet gateway id")
+});
 
-/// UUID of default IPv6 route for built-in Services VPC.
-pub static SERVICES_VPC_DEFAULT_V6_ROUTE_ID: Lazy<uuid::Uuid> =
+/// UUID of InternetGateway IPv4 default route for built-in Services VPC.
+pub static SERVICES_INTERNET_GATEWAY_DEFAULT_ROUTE_V4: Lazy<uuid::Uuid> =
     Lazy::new(|| {
         "001de000-074c-4000-8000-000000000003"
-            .parse()
-            .expect("invalid uuid for builtin services vpc default route id")
+        .parse()
+        .expect("invalid uuid for builtin services internet gateway default route v4")
+    });
+
+/// UUID of InternetGateway IPv6 default route for built-in Services VPC.
+pub static SERVICES_INTERNET_GATEWAY_DEFAULT_ROUTE_V6: Lazy<uuid::Uuid> =
+    Lazy::new(|| {
+        "001de000-074c-4000-8000-000000000004"
+        .parse()
+        .expect("invalid uuid for builtin services internet gateway default route v4")
     });
 
 /// Built-in VPC for internal services on the rack.

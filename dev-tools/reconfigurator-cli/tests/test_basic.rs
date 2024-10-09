@@ -43,7 +43,7 @@ fn test_basic() {
     let exec = Exec::cmd(path_to_cli()).arg("tests/input/cmds.txt");
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
     assert_exit_code(exit_status, EXIT_SUCCESS, &stderr_text);
-    let stdout_text = Redactor::new().do_redact(&stdout_text);
+    let stdout_text = Redactor::default().do_redact(&stdout_text);
     assert_contents("tests/output/cmd-stdout", &stdout_text);
     assert_contents("tests/output/cmd-stderr", &stderr_text);
 }
