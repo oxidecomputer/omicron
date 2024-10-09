@@ -9,12 +9,12 @@ use anyhow::Result;
 use camino::{Utf8Path, Utf8PathBuf};
 use clap::Parser;
 use serde::Deserialize;
-use std::fs;
-use std::env;
-use xshell::{cmd, Shell};
-use walkdir::WalkDir;
 use sha2::Digest;
+use std::env;
+use std::fs;
 use std::io::{Read, Write};
+use walkdir::WalkDir;
+use xshell::{cmd, Shell};
 
 #[derive(Parser)]
 pub struct A4x2PackageArgs {
@@ -47,7 +47,7 @@ pub fn run_cmd(args: A4x2PackageArgs) -> Result<()> {
     let sh = Shell::new()?;
 
     let cargo =
-    std::env::var("CARGO").unwrap_or_else(|_| String::from("cargo"));
+        std::env::var("CARGO").unwrap_or_else(|_| String::from("cargo"));
 
     // XXX does this make sense as a working directory?
     let home_dir = Utf8PathBuf::from(std::env::var("HOME")?);
@@ -145,7 +145,11 @@ pub fn run_cmd(args: A4x2PackageArgs) -> Result<()> {
         sh.create_dir(&live_test_bundle_dir)?;
 
         // a tar within a tar, a door behind a door
-        cmd!(sh, "tar -xzf target/live-tests-archive.tgz -C {live_test_bundle_dir}").run()?;
+        cmd!(
+            sh,
+            "tar -xzf target/live-tests-archive.tgz -C {live_test_bundle_dir}"
+        )
+        .run()?;
 
         // and we need textest to execute it
         sh.copy_file(&nextest_path, &live_test_bundle_dir)?;
@@ -156,7 +160,11 @@ pub fn run_cmd(args: A4x2PackageArgs) -> Result<()> {
             // intentionally relative path so the tarball gets relative paths
             let _popdir = sh.push_dir(&work_dir);
             let bundle_dir_name = live_test_bundle_dir.file_name().unwrap();
-            cmd!(sh, "tar -czf {out_dir}/live-tests-bundle.tgz {bundle_dir_name}/").run()?;
+            cmd!(
+                sh,
+                "tar -czf {out_dir}/live-tests-bundle.tgz {bundle_dir_name}/"
+            )
+            .run()?;
         }
     }
 
@@ -167,9 +175,11 @@ pub fn run_cmd(args: A4x2PackageArgs) -> Result<()> {
         let testbed_dir = work_dir.join("testbed");
         let a4x2_dir = testbed_dir.join("a4x2");
 
-        cmd!(sh,
-            "git clone https://github.com/oxidecomputer/testbed {testbed_dir}")
-            .run()?;
+        cmd!(
+            sh,
+            "git clone https://github.com/oxidecomputer/testbed {testbed_dir}"
+        )
+        .run()?;
         let _popdir = sh.push_dir(&a4x2_dir);
 
         // build a4x2
@@ -186,6 +196,7 @@ pub fn run_cmd(args: A4x2PackageArgs) -> Result<()> {
             .env("OMICRON", &omicron_dir)
             .run()?;
 
+        // debatable whether this should happen in package or deploy
         cmd!(sh, "./config/fetch-softnpu-artifacts.sh").run()?;
 
         // Deduplicate cargo-bay output amongst g0-g3. They differ on a few
@@ -208,7 +219,8 @@ pub fn run_cmd(args: A4x2PackageArgs) -> Result<()> {
                 continue;
             }
 
-            let g0_path = Utf8PathBuf::from_path_buf(ent.path().to_path_buf()).unwrap();
+            let g0_path =
+                Utf8PathBuf::from_path_buf(ent.path().to_path_buf()).unwrap();
             let g0_hash = sha256(&g0_path)?;
 
             let base_path = g0_path.strip_prefix(&g0_dir)?;
@@ -241,7 +253,8 @@ pub fn run_cmd(args: A4x2PackageArgs) -> Result<()> {
         }
 
         // At this point, `cargo-bay` is ready for us
-        cmd!(sh, "mv cargo-bay/ {out_dir}/cargo-bay/").run()?;
+        // We don't actually need all of config/ but it's a small dir
+        cmd!(sh, "mv cargo-bay/ config/ {out_dir}/").run()?;
     }
     // create the final bundle.
     {
@@ -253,7 +266,6 @@ pub fn run_cmd(args: A4x2PackageArgs) -> Result<()> {
 
     Ok(())
 }
-
 
 fn sha256(path: &Utf8Path) -> Result<Vec<u8>> {
     let mut buf = vec![0u8; 65536];
