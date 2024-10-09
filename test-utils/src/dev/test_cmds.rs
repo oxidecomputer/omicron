@@ -175,9 +175,7 @@ impl<'a> Redactor<'a> {
         name: &str,
         text_to_redact: &'a str,
     ) -> &mut Self {
-        let gen = format!("<{}_REDACTED>", name.to_uppercase());
-        let replacement = gen.to_string();
-
+        let replacement = format!("<{}_REDACTED>", name.to_uppercase());
         self.extra.push((text_to_redact, replacement));
         self
     }
@@ -325,13 +323,10 @@ mod tests {
         let input = "time: 123ms, path: /var/tmp/tmp.456ms123s, \
             path2: /short, \
             path3: /variable-length/path";
-        let mut redactor = Redactor::noop();
-        redactor
-            .extra_fixed_length("tp", "/var/tmp/tmp.456ms123s")
-            .extra_fixed_length("short_redact", "/short")
-            .extra_variable_length("variable", "/variable-length/path");
         let actual = Redactor::default()
             .extra_fixed_length("tp", "/var/tmp/tmp.456ms123s")
+            .extra_fixed_length("short_redact", "/short")
+            .extra_variable_length("variable", "/variable-length/path")
             .do_redact(input);
         assert_eq!(
             actual,
