@@ -939,11 +939,23 @@ pub(crate) mod test {
     ) -> bool {
         use nexus_db_queries::db::schema::volume_resource_usage::dsl;
 
-        let rows = dsl::volume_resource_usage
-            .count()
-            .get_result_async::<i64>(
-                &*datastore.pool_connection_for_tests().await.unwrap(),
-            )
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
+
+        let rows = datastore
+            .transaction_retry_wrapper("no_volume_resource_usage_records_exist")
+            .transaction(&conn, |conn| async move {
+                conn.batch_execute_async(
+                    nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL,
+                )
+                .await
+                .unwrap();
+
+                Ok(dsl::volume_resource_usage
+                    .count()
+                    .get_result_async::<i64>(&conn)
+                    .await
+                    .unwrap())
+            })
             .await
             .unwrap();
 
