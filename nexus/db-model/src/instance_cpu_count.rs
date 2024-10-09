@@ -13,7 +13,15 @@ use serde::Serialize;
 use std::convert::TryFrom;
 
 #[derive(
-    Copy, Clone, Debug, AsExpression, FromSqlRow, Serialize, Deserialize,
+    Copy,
+    Clone,
+    Debug,
+    AsExpression,
+    FromSqlRow,
+    Serialize,
+    Deserialize,
+    PartialEq,
+    Eq,
 )]
 #[diesel(sql_type = sql_types::BigInt)]
 pub struct InstanceCpuCount(pub external::InstanceCpuCount);
