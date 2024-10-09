@@ -877,7 +877,6 @@ name = "bootstrap-agent-api"
 version = "0.1.0"
 dependencies = [
  "dropshot",
- "nexus-client",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
