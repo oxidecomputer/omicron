@@ -129,6 +129,15 @@ pub fn all_apis() -> Vec<ApiSpec> {
             filename: "wicketd.json",
             extra_validation: None,
         },
+        ApiSpec {
+            title: "Oxide Error Reporter API",
+            version: "0.0.1",
+            description: "API for collecting error reports from a reporter.",
+            boundary: ApiBoundary::Internal,
+            api_description: ereporter_api::ereporter_api_mod::stub_api_description,
+            filename: "ereporter.json",
+            extra_validation: None,
+        },
         // Add your APIs here! Please keep this list sorted by filename.
     ]
 }

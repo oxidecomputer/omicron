@@ -1,0 +1,10 @@
+[package]
+name = "ereporter"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ereporter-api = { workspace = true }
+
+[lints]
+workspace = true
