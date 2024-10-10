@@ -54,6 +54,7 @@ mod physical_disk;
 mod physical_disk_kind;
 mod physical_disk_policy;
 mod physical_disk_state;
+mod policy;
 mod probe;
 mod producer_endpoint;
 mod project;
