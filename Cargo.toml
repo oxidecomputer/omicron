@@ -354,7 +354,7 @@ float-ord = "0.3.2"
 flume = "0.11.0"
 foreign-types = "0.3.2"
 fs-err = "2.11.0"
-futures = "0.3.30"
+futures = "0.3.31"
 gateway-api = { path = "gateway-api" }
 gateway-client = { path = "clients/gateway-client" }
 # If you're updating the pinned revision of these MGS dependencies, you should
