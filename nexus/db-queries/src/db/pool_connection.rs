@@ -92,14 +92,13 @@ impl backend::Connector for DieselPgConnector {
         })
         .await
         .expect("Task panicked establishing connection")
-        .map_err(|e| {
+        .inspect_err(|e| {
             warn!(
                 self.log,
                 "Failed to make connection";
                 "error" => e.to_string(),
                 "backend" => backend.address,
             );
-            e
         })?;
         Ok(conn)
     }
