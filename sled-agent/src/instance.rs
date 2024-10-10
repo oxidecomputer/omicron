@@ -102,7 +102,7 @@ pub enum Error {
     InvalidHostname(&'static str),
 
     #[error("Error resolving DNS name: {0}")]
-    ResolveError(#[from] internal_dns::resolver::ResolveError),
+    ResolveError(#[from] internal_dns_resolver::ResolveError),
 
     #[error("Propolis job with ID {0} is registered but not running")]
     VmNotRunning(PropolisUuid),
@@ -1761,7 +1761,7 @@ mod tests {
     use illumos_utils::zone::MockZones;
     use illumos_utils::zone::__mock_MockZones::__boot::Context as MockZonesBootContext;
     use illumos_utils::zone::__mock_MockZones::__id::Context as MockZonesIdContext;
-    use internal_dns::resolver::Resolver;
+    use internal_dns_resolver::Resolver;
     use omicron_common::api::external::{
         ByteCount, Generation, Hostname, InstanceCpuCount,
     };

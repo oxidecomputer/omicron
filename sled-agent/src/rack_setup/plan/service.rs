@@ -5,10 +5,11 @@
 //! Plan generation for "where should services be initialized".
 
 use camino::Utf8PathBuf;
-use dns_service_client::types::DnsConfigParams;
 use illumos_utils::zpool::ZpoolName;
-use internal_dns::config::{Host, Zone};
-use internal_dns::ServiceName;
+use internal_dns_types::config::{
+    DnsConfigBuilder, DnsConfigParams, Host, Zone,
+};
+use internal_dns_types::names::ServiceName;
 use nexus_sled_agent_shared::inventory::{
     Inventory, OmicronZoneDataset, SledRole,
 };
@@ -39,6 +40,7 @@ use omicron_common::ledger::{self, Ledger, Ledgerable};
 use omicron_common::policy::{
     BOUNDARY_NTP_REDUNDANCY, COCKROACHDB_REDUNDANCY, INTERNAL_DNS_REDUNDANCY,
     NEXUS_REDUNDANCY, OXIMETER_REDUNDANCY, RESERVED_INTERNAL_DNS_REDUNDANCY,
+    SINGLE_NODE_CLICKHOUSE_REDUNDANCY,
 };
 use omicron_uuid_kinds::{
     ExternalIpUuid, GenericUuid, OmicronZoneUuid, SledUuid, ZpoolUuid,
@@ -60,9 +62,6 @@ use std::num::Wrapping;
 use thiserror::Error;
 use uuid::Uuid;
 
-// TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
-// when Nexus provisions Clickhouse.
-const CLICKHOUSE_COUNT: usize = 1;
 const MINIMUM_U2_COUNT: usize = 3;
 // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove.
 // when Nexus provisions the Pantry.
@@ -386,7 +385,7 @@ impl Plan {
         config: &Config,
         mut sled_info: Vec<SledInfo>,
     ) -> Result<Self, PlanError> {
-        let mut dns_builder = internal_dns::DnsConfigBuilder::new();
+        let mut dns_builder = DnsConfigBuilder::new();
         let mut svc_port_builder = ServicePortBuilder::new(config);
 
         // Scrimlets get DNS records for running Dendrite.
@@ -672,7 +671,7 @@ impl Plan {
 
         // Provision Clickhouse zones, continuing to stripe across sleds.
         // TODO(https://github.com/oxidecomputer/omicron/issues/732): Remove
-        for _ in 0..CLICKHOUSE_COUNT {
+        for _ in 0..SINGLE_NODE_CLICKHOUSE_REDUNDANCY {
             let sled = {
                 let which_sled =
                     sled_allocator.next().ok_or(PlanError::NotEnoughSleds)?;

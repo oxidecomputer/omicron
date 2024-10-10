@@ -72,10 +72,10 @@ builder: "non_trivial"
     {
       "type": "SRV",
       "data": {
-        "port": 127,
         "prio": 0,
-        "target": "001de000-c04e-4000-8000-000000000002.host.control-plane.oxide.internal",
-        "weight": 0
+        "weight": 0,
+        "port": 127,
+        "target": "001de000-c04e-4000-8000-000000000002.host.control-plane.oxide.internal"
       }
     }
   ],
@@ -83,19 +83,19 @@ builder: "non_trivial"
     {
       "type": "SRV",
       "data": {
-        "port": 123,
         "prio": 0,
-        "target": "001de000-c04e-4000-8000-000000000001.host.control-plane.oxide.internal",
-        "weight": 0
+        "weight": 0,
+        "port": 123,
+        "target": "001de000-c04e-4000-8000-000000000001.host.control-plane.oxide.internal"
       }
     },
     {
       "type": "SRV",
       "data": {
-        "port": 124,
         "prio": 0,
-        "target": "001de000-c04e-4000-8000-000000000002.host.control-plane.oxide.internal",
-        "weight": 0
+        "weight": 0,
+        "port": 124,
+        "target": "001de000-c04e-4000-8000-000000000002.host.control-plane.oxide.internal"
       }
     }
   ],
@@ -103,19 +103,19 @@ builder: "non_trivial"
     {
       "type": "SRV",
       "data": {
-        "port": 125,
         "prio": 0,
-        "target": "001de000-c04e-4000-8000-000000000002.host.control-plane.oxide.internal",
-        "weight": 0
+        "weight": 0,
+        "port": 125,
+        "target": "001de000-c04e-4000-8000-000000000002.host.control-plane.oxide.internal"
       }
     },
     {
       "type": "SRV",
       "data": {
-        "port": 126,
         "prio": 0,
-        "target": "001de000-c04e-4000-8000-000000000003.host.control-plane.oxide.internal",
-        "weight": 0
+        "weight": 0,
+        "port": 126,
+        "target": "001de000-c04e-4000-8000-000000000003.host.control-plane.oxide.internal"
       }
     }
   ],
@@ -123,10 +123,10 @@ builder: "non_trivial"
     {
       "type": "SRV",
       "data": {
-        "port": 123,
         "prio": 0,
-        "target": "001de000-51ed-4000-8000-000000000001.sled.control-plane.oxide.internal",
-        "weight": 0
+        "weight": 0,
+        "port": 123,
+        "target": "001de000-51ed-4000-8000-000000000001.sled.control-plane.oxide.internal"
       }
     }
   ],

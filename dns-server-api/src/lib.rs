@@ -89,14 +89,8 @@
 //! in-progress one.  How large do we allow that queue to grow?  At some point
 //! we'll need to stop queueing them.  So why bother at all?
 
-use std::{
-    collections::HashMap,
-    net::{Ipv4Addr, Ipv6Addr},
-};
-
 use dropshot::{HttpError, HttpResponseOk, RequestContext};
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use internal_dns_types::config::{DnsConfig, DnsConfigParams};
 
 #[dropshot::api_description]
 pub trait DnsServerApi {
@@ -118,43 +112,4 @@ pub trait DnsServerApi {
         rqctx: RequestContext<Self::Context>,
         rq: dropshot::TypedBody<DnsConfigParams>,
     ) -> Result<dropshot::HttpResponseUpdatedNoContent, dropshot::HttpError>;
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-pub struct DnsConfigParams {
-    pub generation: u64,
-    pub time_created: chrono::DateTime<chrono::Utc>,
-    pub zones: Vec<DnsConfigZone>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-pub struct DnsConfig {
-    pub generation: u64,
-    pub time_created: chrono::DateTime<chrono::Utc>,
-    pub time_applied: chrono::DateTime<chrono::Utc>,
-    pub zones: Vec<DnsConfigZone>,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-pub struct DnsConfigZone {
-    pub zone_name: String,
-    pub records: HashMap<String, Vec<DnsRecord>>,
-}
-
-#[allow(clippy::upper_case_acronyms)]
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
-#[serde(tag = "type", content = "data")]
-pub enum DnsRecord {
-    A(Ipv4Addr),
-    AAAA(Ipv6Addr),
-    SRV(SRV),
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq)]
-#[serde(rename = "Srv")]
-pub struct SRV {
-    pub prio: u16,
-    pub weight: u16,
-    pub port: u16,
-    pub target: String,
 }

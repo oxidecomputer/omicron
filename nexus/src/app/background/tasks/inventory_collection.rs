@@ -9,7 +9,7 @@ use anyhow::ensure;
 use anyhow::Context;
 use futures::future::BoxFuture;
 use futures::FutureExt;
-use internal_dns::ServiceName;
+use internal_dns_types::names::ServiceName;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_inventory::InventoryError;
@@ -23,7 +23,7 @@ use tokio::sync::watch;
 /// Background task that reads inventory for the rack
 pub struct InventoryCollector {
     datastore: Arc<DataStore>,
-    resolver: internal_dns::resolver::Resolver,
+    resolver: internal_dns_resolver::Resolver,
     creator: String,
     nkeep: u32,
     disable: bool,
@@ -33,7 +33,7 @@ pub struct InventoryCollector {
 impl InventoryCollector {
     pub fn new(
         datastore: Arc<DataStore>,
-        resolver: internal_dns::resolver::Resolver,
+        resolver: internal_dns_resolver::Resolver,
         creator: &str,
         nkeep: u32,
         disable: bool,
@@ -99,7 +99,7 @@ impl BackgroundTask for InventoryCollector {
 async fn inventory_activate(
     opctx: &OpContext,
     datastore: &DataStore,
-    resolver: &internal_dns::resolver::Resolver,
+    resolver: &internal_dns_resolver::Resolver,
     creator: &str,
     nkeep: u32,
     disabled: bool,
@@ -221,7 +221,7 @@ mod test {
             datastore.clone(),
         );
 
-        let resolver = internal_dns::resolver::Resolver::new_from_addrs(
+        let resolver = internal_dns_resolver::Resolver::new_from_addrs(
             cptestctx.logctx.log.clone(),
             &[cptestctx.internal_dns.dns_server.local_address()],
         )

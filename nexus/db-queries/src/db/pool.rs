@@ -8,6 +8,7 @@
 use super::Config as DbConfig;
 use crate::db::pool_connection::{DieselPgConnector, DieselPgConnectorArgs};
 
+use internal_dns_types::names::ServiceName;
 use qorb::backend;
 use qorb::policy::Policy;
 use qorb::resolver::{AllBackends, Resolver};
@@ -58,7 +59,7 @@ fn make_dns_resolver(
     bootstrap_dns: Vec<SocketAddr>,
 ) -> qorb::resolver::BoxedResolver {
     Box::new(DnsResolver::new(
-        service::Name(internal_dns::ServiceName::Cockroach.srv_name()),
+        service::Name(ServiceName::Cockroach.srv_name()),
         bootstrap_dns,
         DnsResolverConfig {
             hardcoded_ttl: Some(tokio::time::Duration::MAX),
