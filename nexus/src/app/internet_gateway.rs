@@ -203,6 +203,7 @@ impl super::Nexus {
                 let name = name.clone().into();
                 LookupPath::new(opctx, &self.db_datastore)
                     .ip_pool_name(&name)
+                    // change to fetch_for(authz::Action::CreateChild)
                     .fetch()
                     .await?
                     .0
