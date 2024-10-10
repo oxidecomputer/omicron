@@ -25,6 +25,8 @@ use crate::Timeseries;
 use crate::TimeseriesPageSelector;
 use crate::TimeseriesScanParams;
 use crate::TimeseriesSchema;
+use anyhow::anyhow;
+use debug_ignore::DebugIgnore;
 use dropshot::EmptyScanParams;
 use dropshot::PaginationOrder;
 use dropshot::ResultsPage;
@@ -33,6 +35,10 @@ use omicron_common::backoff;
 use oximeter::schema::TimeseriesKey;
 use oximeter::types::Sample;
 use oximeter::TimeseriesName;
+use qorb::backend;
+use qorb::backend::Error as QorbError;
+use qorb::pool::Pool;
+use qorb::resolver::BoxedResolver;
 use regex::Regex;
 use regex::RegexBuilder;
 use slog::debug;
@@ -51,6 +57,7 @@ use std::num::NonZeroU32;
 use std::ops::Bound;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
 use std::time::Instant;
@@ -72,18 +79,127 @@ mod probes {
     fn sql__query__done(_: &usdt::UniqueId) {}
 }
 
+// A "qorb connector" which creates a ReqwestClient for the backend.
+//
+// This also keeps track of the underlying address, so we can use it
+// for making HTTP requests directly to the backend.
+struct ReqwestConnector {}
+
+#[async_trait::async_trait]
+impl backend::Connector for ReqwestConnector {
+    type Connection = ReqwestClient;
+
+    async fn connect(
+        &self,
+        backend: &backend::Backend,
+    ) -> Result<Self::Connection, backend::Error> {
+        Ok(ReqwestClient {
+            client: reqwest::Client::builder()
+                .pool_max_idle_per_host(1)
+                .build()
+                .map_err(|e| QorbError::Other(anyhow!(e)))?,
+            url: format!("http://{}", backend.address),
+        })
+    }
+
+    async fn is_valid(
+        &self,
+        conn: &mut Self::Connection,
+    ) -> Result<(), backend::Error> {
+        handle_db_response(
+            conn.client
+                .get(format!("{}/ping", conn.url))
+                .send()
+                .await
+                .map_err(|err| QorbError::Other(anyhow!(err.to_string())))?,
+        )
+        .await
+        .map_err(|e| QorbError::Other(anyhow!(e)))?;
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct ReqwestClient {
+    url: String,
+    client: reqwest::Client,
+}
+
+#[derive(Debug)]
+pub(crate) enum ClientSource {
+    Static(ReqwestClient),
+    Pool { pool: DebugIgnore<Pool<ReqwestClient>> },
+}
+
+pub(crate) enum ClientVariant {
+    Static(ReqwestClient),
+    Handle(qorb::claim::Handle<ReqwestClient>),
+}
+
+impl ClientVariant {
+    pub(crate) async fn new(source: &ClientSource) -> Result<Self, Error> {
+        let client = match source {
+            ClientSource::Static(client) => {
+                ClientVariant::Static(client.clone())
+            }
+            ClientSource::Pool { pool } => {
+                let handle = pool.claim().await?;
+                ClientVariant::Handle(handle)
+            }
+        };
+        Ok(client)
+    }
+
+    pub(crate) fn url(&self) -> &str {
+        match self {
+            ClientVariant::Static(client) => &client.url,
+            ClientVariant::Handle(handle) => &handle.url,
+        }
+    }
+
+    pub(crate) fn reqwest(&self) -> &reqwest::Client {
+        match self {
+            ClientVariant::Static(client) => &client.client,
+            ClientVariant::Handle(handle) => &handle.client,
+        }
+    }
+}
+
 /// A `Client` to the ClickHouse metrics database.
 #[derive(Debug)]
 pub struct Client {
     _id: Uuid,
     log: Logger,
-    url: String,
-    client: reqwest::Client,
+    source: ClientSource,
     schema: Mutex<BTreeMap<TimeseriesName, TimeseriesSchema>>,
     request_timeout: Duration,
 }
 
 impl Client {
+    /// Construct a Clickhouse client of the database with a connection pool.
+    pub fn new_with_pool(resolver: BoxedResolver, log: &Logger) -> Self {
+        let id = Uuid::new_v4();
+        let log = log.new(slog::o!(
+            "component" => "clickhouse-client",
+            "id" => id.to_string(),
+        ));
+        let schema = Mutex::new(BTreeMap::new());
+        let request_timeout = DEFAULT_REQUEST_TIMEOUT;
+        Self {
+            _id: id,
+            log,
+            source: ClientSource::Pool {
+                pool: DebugIgnore(Pool::new(
+                    resolver,
+                    Arc::new(ReqwestConnector {}),
+                    qorb::policy::Policy::default(),
+                )),
+            },
+            schema,
+            request_timeout,
+        }
+    }
+
     /// Construct a new ClickHouse client of the database at `address`.
     pub fn new(address: SocketAddr, log: &Logger) -> Self {
         Self::new_with_request_timeout(address, log, DEFAULT_REQUEST_TIMEOUT)
@@ -104,19 +220,34 @@ impl Client {
         let client = reqwest::Client::new();
         let url = format!("http://{}", address);
         let schema = Mutex::new(BTreeMap::new());
-        Self { _id: id, log, url, client, schema, request_timeout }
+        Self {
+            _id: id,
+            log,
+            source: ClientSource::Static(ReqwestClient { url, client }),
+            schema,
+            request_timeout,
+        }
     }
 
-    /// Return the url the client is trying to connect to
+    /// Return the url the client is trying to connect to.
+    ///
+    /// For pool-based clients, this returns "dynamic", as the URL may change
+    /// between accesses.
     pub fn url(&self) -> &str {
-        &self.url
+        match &self.source {
+            ClientSource::Static(client) => &client.url,
+            ClientSource::Pool { .. } => "dynamic",
+        }
     }
 
     /// Ping the ClickHouse server to verify connectivitiy.
     pub async fn ping(&self) -> Result<(), Error> {
+        let client = ClientVariant::new(&self.source).await?;
+
         handle_db_response(
-            self.client
-                .get(format!("{}/ping", self.url))
+            client
+                .reqwest()
+                .get(format!("{}/ping", client.url()))
                 .send()
                 .await
                 .map_err(|err| Error::DatabaseUnavailable(err.to_string()))?,
@@ -920,9 +1051,11 @@ impl Client {
         let start = Instant::now();
 
         // Submit the SQL request itself.
-        let response = self
-            .client
-            .post(&self.url)
+        let client = ClientVariant::new(&self.source).await?;
+
+        let response = client
+            .reqwest()
+            .post(client.url())
             .timeout(self.request_timeout)
             .query(&[
                 ("output_format_json_quote_64bit_integers", "0"),

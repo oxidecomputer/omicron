@@ -54,6 +54,12 @@ pub use model::OXIMETER_VERSION;
 
 #[derive(Debug, Error)]
 pub enum Error {
+    #[error("Failed to create reqwest client")]
+    Reqwest(#[from] reqwest::Error),
+
+    #[error("Failed to check out connection to database")]
+    Connection(#[from] qorb::pool::Error),
+
     #[error("Oximeter core error: {0}")]
     Oximeter(#[from] oximeter::MetricsError),
 

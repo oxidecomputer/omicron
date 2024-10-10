@@ -55,9 +55,11 @@ impl Client {
             "original_sql" => &original_query,
             "rewritten_sql" => &rewritten,
         );
-        let request = self
-            .client
-            .post(&self.url)
+        let client = crate::client::ClientVariant::new(&self.source).await?;
+
+        let request = client
+            .reqwest()
+            .post(client.url())
             .query(&[
                 ("output_format_json_quote_64bit_integers", "0"),
                 ("database", crate::DATABASE_NAME),
