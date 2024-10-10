@@ -353,6 +353,7 @@ impl<'a> Planner<'a> {
 
         for zone_kind in [
             DiscretionaryOmicronZone::BoundaryNtp,
+            DiscretionaryOmicronZone::Clickhouse,
             DiscretionaryOmicronZone::ClickhouseKeeper,
             DiscretionaryOmicronZone::ClickhouseServer,
             DiscretionaryOmicronZone::CockroachDb,
@@ -433,6 +434,9 @@ impl<'a> Planner<'a> {
         let target_count = match zone_kind {
             DiscretionaryOmicronZone::BoundaryNtp => {
                 self.input.target_boundary_ntp_zone_count()
+            }
+            DiscretionaryOmicronZone::Clickhouse => {
+                self.input.target_clickhouse_zone_count()
             }
             DiscretionaryOmicronZone::ClickhouseKeeper => {
                 self.input.target_clickhouse_keeper_zone_count()
@@ -530,6 +534,12 @@ impl<'a> Planner<'a> {
                 DiscretionaryOmicronZone::BoundaryNtp => self
                     .blueprint
                     .sled_promote_internal_ntp_to_boundary_ntp(sled_id)?,
+                DiscretionaryOmicronZone::Clickhouse => {
+                    self.blueprint.sled_ensure_zone_multiple_clickhouse(
+                        sled_id,
+                        new_total_zone_count,
+                    )?
+                }
                 DiscretionaryOmicronZone::ClickhouseKeeper => {
                     self.blueprint.sled_ensure_zone_multiple_clickhouse_keeper(
                         sled_id,
@@ -2436,6 +2446,75 @@ mod test {
                 CockroachDbPreserveDowngrade::DoNotModify
             );
         }
+
+        logctx.cleanup_successful();
+    }
+
+    /// Check that the planner can replace a single-node ClickHouse zone.
+    /// This is completely distinct from (and much simpler than) the replicated
+    /// (multi-node) case.
+    #[test]
+    fn test_single_node_clickhouse() {
+        static TEST_NAME: &str = "test_single_node_clickhouse";
+        let logctx = test_setup_log(TEST_NAME);
+
+        // Use our example system as a starting point.
+        let (collection, input, blueprint1) = example(&logctx.log, TEST_NAME);
+
+        // We should start with one ClickHouse zone. Find out which sled it's on.
+        let clickhouse_sleds = blueprint1
+            .all_omicron_zones(BlueprintZoneFilter::All)
+            .filter_map(|(sled, zone)| {
+                zone.zone_type.is_clickhouse().then(|| Some(sled))
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            clickhouse_sleds.len(),
+            1,
+            "can't find ClickHouse zone in initial blueprint"
+        );
+        let clickhouse_sled = clickhouse_sleds[0].expect("missing sled id");
+
+        // Expunge the sled hosting ClickHouse and re-plan. The planner should
+        // immediately replace the zone with one on another (non-expunged) sled.
+        let mut input_builder = input.into_builder();
+        input_builder
+            .sleds_mut()
+            .get_mut(&clickhouse_sled)
+            .expect("can't find sled")
+            .policy = SledPolicy::Expunged;
+        let input = input_builder.build();
+        let blueprint2 = Planner::new_based_on(
+            logctx.log.clone(),
+            &blueprint1,
+            &input,
+            "test_blueprint2",
+            &collection,
+        )
+        .expect("failed to create planner")
+        .with_rng_seed((TEST_NAME, "bp2"))
+        .plan()
+        .expect("failed to re-plan");
+
+        let diff = blueprint2.diff_since_blueprint(&blueprint1);
+        println!("1 -> 2 (expunged sled):\n{}", diff.display());
+        assert_eq!(
+            blueprint2
+                .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+                .filter(|(sled, zone)| *sled != clickhouse_sled
+                    && zone.zone_type.is_clickhouse())
+                .count(),
+            1,
+            "can't find replacement ClickHouse zone"
+        );
+
+        // Test a no-op planning iteration.
+        assert_planning_makes_no_changes(
+            &logctx.log,
+            &blueprint2,
+            &input,
+            TEST_NAME,
+        );
 
         logctx.cleanup_successful();
     }
