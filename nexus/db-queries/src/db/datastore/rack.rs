@@ -1778,8 +1778,8 @@ mod test {
         let datasets = vec![];
 
         let internal_records = vec![
-            DnsRecord::AAAA("fe80::1:2:3:4".parse().unwrap()),
-            DnsRecord::AAAA("fe80::1:2:3:5".parse().unwrap()),
+            DnsRecord::Aaaa("fe80::1:2:3:4".parse().unwrap()),
+            DnsRecord::Aaaa("fe80::1:2:3:5".parse().unwrap()),
         ];
         let internal_dns = InitialDnsGroup::new(
             DnsGroup::Internal,
@@ -1790,7 +1790,7 @@ mod test {
         );
 
         let external_records =
-            vec![DnsRecord::AAAA("fe80::5:6:7:8".parse().unwrap())];
+            vec![DnsRecord::Aaaa("fe80::5:6:7:8".parse().unwrap())];
         let external_dns = InitialDnsGroup::new(
             DnsGroup::External,
             "test-suite.oxide.test",

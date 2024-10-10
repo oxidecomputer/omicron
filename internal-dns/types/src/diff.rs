@@ -158,8 +158,8 @@ impl<'a> std::fmt::Display for DnsDiff<'a> {
                     prefix,
                     match r {
                         DnsRecord::A(addr) => format!("A    {}", addr),
-                        DnsRecord::AAAA(addr) => format!("AAAA {}", addr),
-                        DnsRecord::SRV(Srv { port, target, .. }) => {
+                        DnsRecord::Aaaa(addr) => format!("AAAA {}", addr),
+                        DnsRecord::Srv(Srv { port, target, .. }) => {
                             format!("SRV  port {:5} {}", port, target)
                         }
                     }

@@ -211,7 +211,7 @@ impl super::Nexus {
                     ..
                 }) => Some(match external_ip.ip {
                     IpAddr::V4(addr) => DnsRecord::A(addr),
-                    IpAddr::V6(addr) => DnsRecord::AAAA(addr),
+                    IpAddr::V6(addr) => DnsRecord::Aaaa(addr),
                 }),
                 _ => None,
             })

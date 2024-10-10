@@ -111,7 +111,7 @@ impl super::Nexus {
             .into_iter()
             .map(|addr| match addr {
                 IpAddr::V4(addr) => DnsRecord::A(addr),
-                IpAddr::V6(addr) => DnsRecord::AAAA(addr),
+                IpAddr::V6(addr) => DnsRecord::Aaaa(addr),
             })
             .collect();
 

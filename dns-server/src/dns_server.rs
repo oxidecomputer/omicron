@@ -232,7 +232,7 @@ fn dns_record_to_record(
             Ok(a)
         }
 
-        DnsRecord::AAAA(addr) => {
+        DnsRecord::Aaaa(addr) => {
             let mut aaaa = Record::new();
             aaaa.set_name(name.clone())
                 .set_rr_type(RecordType::AAAA)
@@ -240,7 +240,7 @@ fn dns_record_to_record(
             Ok(aaaa)
         }
 
-        DnsRecord::SRV(Srv { prio, weight, port, target }) => {
+        DnsRecord::Srv(Srv { prio, weight, port, target }) => {
             let tgt = Name::from_str(&target).map_err(|error| {
                 RequestError::ServFail(anyhow!(
                     "serialization failed due to bad SRV target {:?}: {:#}",

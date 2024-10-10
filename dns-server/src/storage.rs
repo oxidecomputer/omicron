@@ -899,7 +899,7 @@ mod test {
         expect(&tc.store, "gen8_name.zone8.internal", Expect::NoZone);
 
         // Update to generation 1, which contains one zone with one name.
-        let dummy_record = DnsRecord::AAAA(Ipv6Addr::LOCALHOST);
+        let dummy_record = DnsRecord::Aaaa(Ipv6Addr::LOCALHOST);
         let update1 = DnsConfigParams {
             time_created: chrono::Utc::now(),
             generation: 1,
@@ -1068,7 +1068,7 @@ mod test {
         assert!(config.zones.is_empty());
 
         // Make one normal update.
-        let dummy_record = DnsRecord::AAAA(Ipv6Addr::LOCALHOST);
+        let dummy_record = DnsRecord::Aaaa(Ipv6Addr::LOCALHOST);
         let update1 = DnsConfigParams {
             time_created: chrono::Utc::now(),
             generation: 1,
@@ -1190,7 +1190,7 @@ mod test {
         let after = chrono::Utc::now();
 
         // Concurrently attempt another update.
-        let dummy_record = DnsRecord::AAAA(Ipv6Addr::LOCALHOST);
+        let dummy_record = DnsRecord::Aaaa(Ipv6Addr::LOCALHOST);
         let update2 = DnsConfigParams {
             time_created: chrono::Utc::now(),
             generation: 1,

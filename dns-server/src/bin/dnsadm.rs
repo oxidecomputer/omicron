@@ -141,10 +141,10 @@ async fn main() -> Result<()> {
                             DnsRecord::A(addr) => {
                                 println!("        A:    {:?}", addr);
                             }
-                            DnsRecord::AAAA(addr) => {
+                            DnsRecord::Aaaa(addr) => {
                                 println!("        AAAA: {:?}", addr);
                             }
-                            DnsRecord::SRV(srv) => {
+                            DnsRecord::Srv(srv) => {
                                 println!("        SRV:  {}", srv.target);
                                 println!("              port     {}", srv.port);
                                 println!("              priority {}", srv.prio);
@@ -176,7 +176,7 @@ async fn main() -> Result<()> {
                 old_config,
                 &cmd.zone_name,
                 &cmd.name,
-                DnsRecord::AAAA(cmd.addr),
+                DnsRecord::Aaaa(cmd.addr),
             )?;
             client.dns_config_put(&new_config).await.context("updating DNS")?;
         }
@@ -187,7 +187,7 @@ async fn main() -> Result<()> {
                 old_config,
                 &cmd.zone_name,
                 &cmd.name,
-                DnsRecord::SRV(Srv {
+                DnsRecord::Srv(Srv {
                     prio: cmd.prio,
                     weight: cmd.weight,
                     port: cmd.port,

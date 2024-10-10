@@ -884,10 +884,10 @@ mod test {
         // Create a zone with a few names in it.
         let before = Utc::now();
         let wendell_records = vec![
-            DnsRecord::AAAA("fe80::2:3".parse().unwrap()),
-            DnsRecord::AAAA("fe80::2:4".parse().unwrap()),
+            DnsRecord::Aaaa("fe80::2:3".parse().unwrap()),
+            DnsRecord::Aaaa("fe80::2:4".parse().unwrap()),
         ];
-        let krabappel_records = vec![DnsRecord::SRV(Srv {
+        let krabappel_records = vec![DnsRecord::Srv(Srv {
             weight: 0,
             prio: 0,
             port: 12345,
@@ -1042,8 +1042,8 @@ mod test {
             comment: "test suite".to_string(),
         };
 
-        let r1 = DnsRecord::AAAA("fe80::1:2:3:4".parse().unwrap());
-        let r2 = DnsRecord::AAAA("fe80::1:1:1:1".parse().unwrap());
+        let r1 = DnsRecord::Aaaa("fe80::1:2:3:4".parse().unwrap());
+        let r2 = DnsRecord::Aaaa("fe80::1:1:1:1".parse().unwrap());
         let records_r1 = vec![r1.clone()];
         let records_r2 = vec![r2.clone()];
         let records_r1r2 = vec![r1, r2];
@@ -1397,8 +1397,8 @@ mod test {
             let name = "n1".to_string();
             let g1 = Generation(1u32.try_into().unwrap());
             let g2 = Generation(2u32.try_into().unwrap());
-            let r1 = DnsRecord::AAAA("fe80::1:2:3:4".parse().unwrap());
-            let r2 = DnsRecord::AAAA("fe80::1:1:1:1".parse().unwrap());
+            let r1 = DnsRecord::Aaaa("fe80::1:2:3:4".parse().unwrap());
+            let r2 = DnsRecord::Aaaa("fe80::1:1:1:1".parse().unwrap());
 
             let error = diesel::insert_into(dsl::dns_name)
                 .values(vec![
@@ -1440,8 +1440,8 @@ mod test {
         assert!(dns_update.names_added.is_empty());
         assert!(dns_update.names_removed.is_empty());
 
-        let aaaa_record1 = DnsRecord::AAAA(Ipv6Addr::LOCALHOST);
-        let aaaa_record2 = DnsRecord::AAAA("fe80::1".parse().unwrap());
+        let aaaa_record1 = DnsRecord::Aaaa(Ipv6Addr::LOCALHOST);
+        let aaaa_record2 = DnsRecord::Aaaa("fe80::1".parse().unwrap());
         let records1 = vec![aaaa_record1];
         let records2 = vec![aaaa_record2];
 
@@ -1578,8 +1578,8 @@ mod test {
         assert_eq!(dns_config.zones.len(), 0);
 
         // Add a few DNS names.
-        let aaaa_record1 = DnsRecord::AAAA(Ipv6Addr::LOCALHOST);
-        let aaaa_record2 = DnsRecord::AAAA("fe80::1".parse().unwrap());
+        let aaaa_record1 = DnsRecord::Aaaa(Ipv6Addr::LOCALHOST);
+        let aaaa_record2 = DnsRecord::Aaaa("fe80::1".parse().unwrap());
         let records1 = vec![aaaa_record1.clone()];
         let records2 = vec![aaaa_record2.clone()];
         let records12 = vec![aaaa_record1, aaaa_record2];
@@ -1896,11 +1896,11 @@ mod test {
             HashMap::from([
                 (
                     "wendell".to_string(),
-                    vec![DnsRecord::AAAA(Ipv6Addr::LOCALHOST)],
+                    vec![DnsRecord::Aaaa(Ipv6Addr::LOCALHOST)],
                 ),
                 (
                     "krabappel".to_string(),
-                    vec![DnsRecord::AAAA(Ipv6Addr::LOCALHOST)],
+                    vec![DnsRecord::Aaaa(Ipv6Addr::LOCALHOST)],
                 ),
             ]),
         );
@@ -1919,7 +1919,7 @@ mod test {
         update1
             .add_name(
                 String::from("nelson"),
-                vec![DnsRecord::AAAA(Ipv6Addr::LOCALHOST)],
+                vec![DnsRecord::Aaaa(Ipv6Addr::LOCALHOST)],
             )
             .unwrap();
         let gen1 = Generation::new();
@@ -1940,7 +1940,7 @@ mod test {
         update2
             .add_name(
                 String::from("hoover"),
-                vec![DnsRecord::AAAA(Ipv6Addr::LOCALHOST)],
+                vec![DnsRecord::Aaaa(Ipv6Addr::LOCALHOST)],
             )
             .unwrap();
         let error = datastore

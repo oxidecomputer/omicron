@@ -1068,7 +1068,7 @@ pub mod test {
                 panic!("zone must have a record for {internal_dns_srv_name}")
             };
             match record.get(0) {
-                Some(DnsRecord::SRV(srv)) => srv,
+                Some(DnsRecord::Srv(srv)) => srv,
                 record => panic!(
                     "expected a SRV record for {internal_dns_srv_name}, found \
                      {record:?}"
@@ -1135,7 +1135,7 @@ pub mod test {
                 .add_name(
                     internal_dns_srv_name,
                     vec![
-                        DnsRecord::SRV(Srv {
+                        DnsRecord::Srv(Srv {
                             prio: 0,
                             weight: 0,
                             port: new_dns_addr.port(),
@@ -1143,14 +1143,14 @@ pub mod test {
                                 "{target}.control-plane.oxide.internal"
                             ),
                         }),
-                        DnsRecord::SRV(initial_srv_record.clone()),
+                        DnsRecord::Srv(initial_srv_record.clone()),
                     ],
                 )
                 .unwrap();
             update
                 .add_name(
                     target.to_string(),
-                    vec![DnsRecord::AAAA(*new_dns_addr.ip())],
+                    vec![DnsRecord::Aaaa(*new_dns_addr.ip())],
                 )
                 .unwrap();
             update
@@ -1280,7 +1280,7 @@ pub mod test {
         update
             .add_name(
                 "we-got-beets".to_string(),
-                vec![nexus_params::DnsRecord::AAAA("fe80::3".parse().unwrap())],
+                vec![nexus_params::DnsRecord::Aaaa("fe80::3".parse().unwrap())],
             )
             .unwrap();
         write_dns_update(opctx, datastore, update).await

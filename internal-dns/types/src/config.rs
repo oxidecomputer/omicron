@@ -487,7 +487,7 @@ impl DnsConfigBuilder {
         // Assemble the set of "AAAA" records for sleds.
         let sled_records = self.sleds.into_iter().map(|(sled, sled_ip)| {
             let name = Host::Sled(sled.0).dns_name();
-            (name, vec![DnsRecord::AAAA(sled_ip)])
+            (name, vec![DnsRecord::Aaaa(sled_ip)])
         });
 
         // Assemble the special boundary NTP name to support chrony on internal
@@ -505,7 +505,7 @@ impl DnsConfigBuilder {
                         let zone_ip = self.zones.get(&zone).expect(
                             "service_backend_zone() ensures zones are defined",
                         );
-                        DnsRecord::AAAA(*zone_ip)
+                        DnsRecord::Aaaa(*zone_ip)
                     })
                     .collect::<Vec<DnsRecord>>();
                 (BOUNDARY_NTP_DNS_NAME.to_string(), records)
@@ -513,7 +513,7 @@ impl DnsConfigBuilder {
 
         // Assemble the set of AAAA records for zones.
         let zone_records = self.zones.into_iter().map(|(zone, zone_ip)| {
-            (zone.dns_name(), vec![DnsRecord::AAAA(zone_ip)])
+            (zone.dns_name(), vec![DnsRecord::Aaaa(zone_ip)])
         });
 
         // Assemble the set of SRV records, which implicitly point back at
@@ -524,7 +524,7 @@ impl DnsConfigBuilder {
                 let records = zone2port
                     .into_iter()
                     .map(|(zone, port)| {
-                        DnsRecord::SRV(Srv {
+                        DnsRecord::Srv(Srv {
                             prio: 0,
                             weight: 0,
                             port,
@@ -543,7 +543,7 @@ impl DnsConfigBuilder {
                 let records = sled2port
                     .into_iter()
                     .map(|(sled, port)| {
-                        DnsRecord::SRV(Srv {
+                        DnsRecord::Srv(Srv {
                             prio: 0,
                             weight: 0,
                             port,
@@ -632,8 +632,13 @@ pub struct DnsConfigZone {
 #[serde(tag = "type", content = "data")]
 pub enum DnsRecord {
     A(Ipv4Addr),
-    AAAA(Ipv6Addr),
-    SRV(Srv),
+    // The renames are because openapi-lint complains about `Aaaa` and `Srv`
+    // not being in screaming snake case. `Aaaa` and `Srv` are the idiomatic
+    // Rust casings, though.
+    #[serde(rename = "AAAA")]
+    Aaaa(Ipv6Addr),
+    #[serde(rename = "SRV")]
+    Srv(Srv),
 }
 
 // The `From<Ipv4Addr>` and `From<Ipv6Addr>` implementations are very slightly
@@ -641,7 +646,7 @@ pub enum DnsRecord {
 // PTR record
 // (https://www.cloudflare.com/learning/dns/dns-records/dns-ptr-record/).
 // However, we don't support PTR records at the moment, so this is fine. Would
-// certainly be worth revisiting if we do, though.
+// certainly be worth revisiting if we do in the future, though.
 
 impl From<Ipv4Addr> for DnsRecord {
     fn from(ip: Ipv4Addr) -> Self {
@@ -651,13 +656,13 @@ impl From<Ipv4Addr> for DnsRecord {
 
 impl From<Ipv6Addr> for DnsRecord {
     fn from(ip: Ipv6Addr) -> Self {
-        DnsRecord::AAAA(ip)
+        DnsRecord::Aaaa(ip)
     }
 }
 
 impl From<Srv> for DnsRecord {
     fn from(srv: Srv) -> Self {
-        DnsRecord::SRV(srv)
+        DnsRecord::Srv(srv)
     }
 }
 
