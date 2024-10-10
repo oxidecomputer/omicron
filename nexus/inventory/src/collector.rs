@@ -16,6 +16,7 @@ use nexus_types::inventory::Collection;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageWhich;
 use slog::o;
+use slog::Logger;
 use slog::{debug, error};
 use std::time::Duration;
 use strum::IntoEnumIterator;
@@ -26,8 +27,8 @@ const SLED_AGENT_TIMEOUT: Duration = Duration::from_secs(60);
 /// Collect all inventory data from an Oxide system
 pub struct Collector<'a> {
     log: slog::Logger,
-    mgs_clients: Option<Vec<gateway_client::Client>>,
-    keeper_admin_clients: Option<Vec<clickhouse_admin_client::Client>>,
+    mgs_clients: Vec<gateway_client::Client>,
+    keeper_admin_clients: Vec<clickhouse_admin_client::Client>,
     sled_agent_lister: &'a (dyn SledAgentEnumerator + Send + Sync),
     in_progress: CollectionBuilder,
 }
@@ -42,8 +43,8 @@ impl<'a> Collector<'a> {
     ) -> Self {
         Collector {
             log,
-            mgs_clients: Some(mgs_clients),
-            keeper_admin_clients: Some(keeper_admin_clients),
+            mgs_clients,
+            keeper_admin_clients,
             sled_agent_lister,
             in_progress: CollectionBuilder::new(creator),
         }
@@ -77,14 +78,18 @@ impl<'a> Collector<'a> {
 
     /// Collect inventory from all MGS instances
     async fn collect_all_mgs(&mut self) {
-        let clients = self.mgs_clients.take().unwrap();
-        for client in &clients {
-            self.collect_one_mgs(&client).await;
+        for client in &self.mgs_clients {
+            Self::collect_one_mgs(client, &self.log, &mut self.in_progress)
+                .await;
         }
     }
 
-    async fn collect_one_mgs(&mut self, client: &gateway_client::Client) {
-        debug!(&self.log, "begin collection from MGS";
+    async fn collect_one_mgs(
+        client: &gateway_client::Client,
+        log: &Logger,
+        in_progress: &mut CollectionBuilder,
+    ) {
+        debug!(log, "begin collection from MGS";
             "mgs_url" => client.baseurl()
         );
 
@@ -106,7 +111,7 @@ impl<'a> Collector<'a> {
         // being able to identify this particular condition.
         let sps = match ignition_result {
             Err(error) => {
-                self.in_progress.found_error(InventoryError::from(error));
+                in_progress.found_error(InventoryError::from(error));
                 return;
             }
 
@@ -142,14 +147,14 @@ impl<'a> Collector<'a> {
                 });
             let sp_state = match result {
                 Err(error) => {
-                    self.in_progress.found_error(InventoryError::from(error));
+                    in_progress.found_error(InventoryError::from(error));
                     continue;
                 }
                 Ok(response) => response.into_inner(),
             };
 
             // Record the state that we found.
-            let Some(baseboard_id) = self.in_progress.found_sp_state(
+            let Some(baseboard_id) = in_progress.found_sp_state(
                 client.baseurl(),
                 sp.type_,
                 sp.slot,
@@ -165,8 +170,7 @@ impl<'a> Collector<'a> {
             // get here for the first MGS client.  Assuming that one succeeds,
             // the other(s) will skip this loop.
             for which in CabooseWhich::iter() {
-                if self.in_progress.found_caboose_already(&baseboard_id, which)
-                {
+                if in_progress.found_caboose_already(&baseboard_id, which) {
                     continue;
                 }
 
@@ -194,20 +198,19 @@ impl<'a> Collector<'a> {
                     });
                 let caboose = match result {
                     Err(error) => {
-                        self.in_progress
-                            .found_error(InventoryError::from(error));
+                        in_progress.found_error(InventoryError::from(error));
                         continue;
                     }
                     Ok(response) => response.into_inner(),
                 };
-                if let Err(error) = self.in_progress.found_caboose(
+                if let Err(error) = in_progress.found_caboose(
                     &baseboard_id,
                     which,
                     client.baseurl(),
                     caboose,
                 ) {
                     error!(
-                        &self.log,
+                        log,
                         "error reporting caboose: {:?} {:?} {:?}: {:#}",
                         baseboard_id,
                         which,
@@ -222,8 +225,7 @@ impl<'a> Collector<'a> {
             // get here for the first MGS client.  Assuming that one succeeds,
             // the other(s) will skip this loop.
             for which in RotPageWhich::iter() {
-                if self.in_progress.found_rot_page_already(&baseboard_id, which)
-                {
+                if in_progress.found_rot_page_already(&baseboard_id, which) {
                     continue;
                 }
 
@@ -273,20 +275,19 @@ impl<'a> Collector<'a> {
 
                 let page = match result {
                     Err(error) => {
-                        self.in_progress
-                            .found_error(InventoryError::from(error));
+                        in_progress.found_error(InventoryError::from(error));
                         continue;
                     }
                     Ok(data_base64) => RotPage { data_base64 },
                 };
-                if let Err(error) = self.in_progress.found_rot_page(
+                if let Err(error) = in_progress.found_rot_page(
                     &baseboard_id,
                     which,
                     client.baseurl(),
                     page,
                 ) {
                     error!(
-                        &self.log,
+                        log,
                         "error reporting rot page: {:?} {:?} {:?}: {:#}",
                         baseboard_id,
                         which,
@@ -375,18 +376,19 @@ impl<'a> Collector<'a> {
     /// Collect inventory from about keepers from all `ClickhouseAdminKeeper`
     /// clients
     async fn collect_all_keepers(&mut self) {
-        let clients = self.keeper_admin_clients.take().unwrap();
-        for client in &clients {
-            self.collect_one_keeper(&client).await;
+        for client in &self.keeper_admin_clients {
+            Self::collect_one_keeper(&client, &self.log, &mut self.in_progress)
+                .await;
         }
     }
 
     /// Collect inventory about one keeper from one `ClickhouseAdminKeeper`
     async fn collect_one_keeper(
-        &mut self,
         client: &clickhouse_admin_client::Client,
+        log: &slog::Logger,
+        in_progress: &mut CollectionBuilder,
     ) {
-        debug!(&self.log, "begin collection from clickhouse-admin-keeper";
+        debug!(log, "begin collection from clickhouse-admin-keeper";
             "keeper_admin_url" => client.baseurl()
         );
 
@@ -396,10 +398,10 @@ impl<'a> Collector<'a> {
 
         match res {
             Err(error) => {
-                self.in_progress.found_error(InventoryError::from(error));
+                in_progress.found_error(InventoryError::from(error));
             }
             Ok(membership) => {
-                self.in_progress.found_clickhouse_keeper_cluster_membership(
+                in_progress.found_clickhouse_keeper_cluster_membership(
                     membership.into_inner(),
                 );
             }

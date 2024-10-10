@@ -2324,10 +2324,7 @@ impl DataStore {
                     memberships.insert(
                         ClickhouseKeeperClusterMembership::try_from(membership)
                             .map_err(|e| {
-                                Error::internal_error(&format!(
-                                    "{:#}",
-                                    e.to_string()
-                                ))
+                                Error::internal_error(&format!("{e:#}",))
                             })?,
                     );
                 }

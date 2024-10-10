@@ -122,6 +122,25 @@ pub struct Collection {
     /// The raft configuration (cluster membership) of the clickhouse keeper
     /// cluster as returned from each available keeper via `clickhouse-admin` in
     /// the `ClickhouseKeeper` zone
+    ///
+    /// Each clickhouse keeper is uniquely identified by its `KeeperId`
+    /// and deployed to a separate omicron zone. The uniqueness of IDs and
+    /// deployments is guaranteed by the reconfigurator. DNS is used to find
+    /// `clickhouse-admin-keeper` servers running in the same zone as keepers
+    /// and retrieve their local knowledge of the raft cluster. Each keeper
+    /// reports its own unique ID along with its membership information. We use
+    /// this information to decide upon the most up to date state (which will
+    /// eventually be reflected to other keepers), so that we can choose how to
+    /// reconfigure our keeper cluster if needed.
+    ///
+    /// All this data is directly reported from the `clickhouse-keeper-admin`
+    /// servers in this format. While we could also cache the zone ID
+    /// in the `ClickhouseKeeper` zones, return that along with the
+    /// `ClickhouseKeeperClusterMembership`,  and map by zone ID here, the
+    /// information would be superfluous. It would be filtered out by the
+    /// reconfigurator planner downstream. It is not necessary for the planners
+    /// to use this since the blueprints already contain the zone ID/ KeeperId
+    /// mappings and guarantee unique pairs.
     pub clickhouse_keeper_cluster_membership:
         BTreeSet<ClickhouseKeeperClusterMembership>,
 }

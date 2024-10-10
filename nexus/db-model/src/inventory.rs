@@ -1746,6 +1746,9 @@ impl TryFrom<InvClickhouseKeeperMembership>
     fn try_from(value: InvClickhouseKeeperMembership) -> anyhow::Result<Self> {
         let err_msg = "clickhouse keeper ID is negative";
         let mut raft_config = BTreeSet::new();
+        // We are not worried about duplicates here, as each
+        // `clickhouse-admin-keeper` reports about its local, unique keeper.
+        // This uniqueness is guaranteed by the blueprint generation mechanism.
         for id in value.raft_config {
             raft_config.insert(KeeperId(id.try_into().context(err_msg)?));
         }
