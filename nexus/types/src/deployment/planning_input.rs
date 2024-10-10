@@ -22,6 +22,7 @@ use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::SourceNatConfigError;
 use omicron_common::disk::DiskIdentity;
+use omicron_common::policy::SINGLE_NODE_CLICKHOUSE_REDUNDANCY;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -115,6 +116,18 @@ impl PlanningInput {
         &self,
     ) -> CockroachDbClusterVersion {
         self.policy.target_cockroachdb_cluster_version
+    }
+
+    pub fn target_clickhouse_zone_count(&self) -> usize {
+        if let Some(policy) = &self.policy.clickhouse_policy {
+            if policy.deploy_with_standalone {
+                SINGLE_NODE_CLICKHOUSE_REDUNDANCY
+            } else {
+                0
+            }
+        } else {
+            SINGLE_NODE_CLICKHOUSE_REDUNDANCY
+        }
     }
 
     pub fn target_clickhouse_server_zone_count(&self) -> usize {

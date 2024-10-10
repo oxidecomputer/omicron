@@ -40,6 +40,10 @@ pub const INTERNAL_DNS_REDUNDANCY: usize = 3;
 /// value.
 pub const RESERVED_INTERNAL_DNS_REDUNDANCY: usize = 5;
 
+/// The amount of redundancy for single-node ClickHouse servers
+/// (*not* replicated aka multi-node clusters).
+pub const SINGLE_NODE_CLICKHOUSE_REDUNDANCY: usize = 1;
+
 /// The amount of redundancy for clickhouse servers
 ///
 /// Clickhouse servers contain lazily replicated data
