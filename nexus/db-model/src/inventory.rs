@@ -1744,7 +1744,7 @@ impl TryFrom<InvClickhouseKeeperMembership>
     type Error = anyhow::Error;
 
     fn try_from(value: InvClickhouseKeeperMembership) -> anyhow::Result<Self> {
-        let err_msg = "clickhouse keeper ID > 2^63";
+        let err_msg = "clickhouse keeper ID is negative";
         let mut raft_config = BTreeSet::new();
         for id in value.raft_config {
             raft_config.insert(KeeperId(id.try_into().context(err_msg)?));
@@ -1756,7 +1756,7 @@ impl TryFrom<InvClickhouseKeeperMembership>
             leader_committed_log_index: value
                 .leader_committed_log_index
                 .try_into()
-                .context("log index > 2^63")?,
+                .context("log index is negative")?,
             raft_config,
         })
     }

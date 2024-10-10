@@ -26,8 +26,8 @@ const SLED_AGENT_TIMEOUT: Duration = Duration::from_secs(60);
 /// Collect all inventory data from an Oxide system
 pub struct Collector<'a> {
     log: slog::Logger,
-    mgs_clients: Vec<gateway_client::Client>,
-    keeper_admin_clients: Vec<clickhouse_admin_client::Client>,
+    mgs_clients: Option<Vec<gateway_client::Client>>,
+    keeper_admin_clients: Option<Vec<clickhouse_admin_client::Client>>,
     sled_agent_lister: &'a (dyn SledAgentEnumerator + Send + Sync),
     in_progress: CollectionBuilder,
 }
@@ -42,8 +42,8 @@ impl<'a> Collector<'a> {
     ) -> Self {
         Collector {
             log,
-            mgs_clients,
-            keeper_admin_clients,
+            mgs_clients: Some(mgs_clients),
+            keeper_admin_clients: Some(keeper_admin_clients),
             sled_agent_lister,
             in_progress: CollectionBuilder::new(creator),
         }
@@ -77,7 +77,7 @@ impl<'a> Collector<'a> {
 
     /// Collect inventory from all MGS instances
     async fn collect_all_mgs(&mut self) {
-        let clients = std::mem::take(&mut self.mgs_clients);
+        let clients = self.mgs_clients.take().unwrap();
         for client in &clients {
             self.collect_one_mgs(&client).await;
         }
@@ -375,7 +375,7 @@ impl<'a> Collector<'a> {
     /// Collect inventory from about keepers from all `ClickhouseAdminKeeper`
     /// clients
     async fn collect_all_keepers(&mut self) {
-        let clients = std::mem::take(&mut self.keeper_admin_clients);
+        let clients = self.keeper_admin_clients.take().unwrap();
         for client in &clients {
             self.collect_one_keeper(&client).await;
         }
