@@ -258,7 +258,7 @@ async fn test_internet_gateway_delete_cascade(ctx: &ControlPlaneTestContext) {
 }
 
 #[nexus_test]
-async fn test_igw_ip_pool_attach_non_admin(ctx: &ControlPlaneTestContext) {
+async fn test_igw_ip_pool_attach_with_silo_user(ctx: &ControlPlaneTestContext) {
     let c = &ctx.external_client;
     test_setup(c).await;
 
