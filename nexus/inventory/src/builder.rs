@@ -32,7 +32,6 @@ use nexus_types::inventory::ServiceProcessor;
 use nexus_types::inventory::SledAgent;
 use nexus_types::inventory::Zpool;
 use omicron_uuid_kinds::CollectionKind;
-use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
@@ -95,7 +94,7 @@ pub struct CollectionBuilder {
     sleds: BTreeMap<SledUuid, SledAgent>,
     omicron_zones: BTreeMap<SledUuid, OmicronZonesFound>,
     clickhouse_keeper_cluster_membership:
-        BTreeMap<OmicronZoneUuid, ClickhouseKeeperClusterMembership>,
+        BTreeSet<ClickhouseKeeperClusterMembership>,
 
     // We just generate one UUID for each collection.
     id_rng: TypedUuidRng<CollectionKind>,
@@ -124,7 +123,7 @@ impl CollectionBuilder {
             rot_pages_found: BTreeMap::new(),
             sleds: BTreeMap::new(),
             omicron_zones: BTreeMap::new(),
-            clickhouse_keeper_cluster_membership: BTreeMap::new(),
+            clickhouse_keeper_cluster_membership: BTreeSet::new(),
             id_rng: TypedUuidRng::from_entropy(),
         }
     }
@@ -571,10 +570,9 @@ impl CollectionBuilder {
     /// clickhouse-admin service running in the keeper zones.
     pub fn found_clickhouse_keeper_cluster_membership(
         &mut self,
-        zone_id: OmicronZoneUuid,
         membership: ClickhouseKeeperClusterMembership,
     ) {
-        self.clickhouse_keeper_cluster_membership.insert(zone_id, membership);
+        self.clickhouse_keeper_cluster_membership.insert(membership);
     }
 }
 

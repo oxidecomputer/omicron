@@ -31,7 +31,6 @@ pub use omicron_common::api::internal::shared::SourceNatConfig;
 pub use omicron_common::zpool_name::ZpoolName;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::DatasetUuid;
-use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::ZpoolUuid;
 use serde::{Deserialize, Serialize};
@@ -124,7 +123,7 @@ pub struct Collection {
     /// cluster as returned from each available keeper via `clickhouse-admin` in
     /// the `ClickhouseKeeper` zone
     pub clickhouse_keeper_cluster_membership:
-        BTreeMap<OmicronZoneUuid, ClickhouseKeeperClusterMembership>,
+        BTreeSet<ClickhouseKeeperClusterMembership>,
 }
 
 impl Collection {
@@ -170,8 +169,8 @@ impl Collection {
     ) -> Option<ClickhouseKeeperClusterMembership> {
         self.clickhouse_keeper_cluster_membership
             .iter()
-            .max_by_key(|(_, membership)| membership.leader_committed_log_index)
-            .map(|(_, membership)| (membership.clone()))
+            .max_by_key(|membership| membership.leader_committed_log_index)
+            .map(|membership| (membership.clone()))
     }
 }
 
