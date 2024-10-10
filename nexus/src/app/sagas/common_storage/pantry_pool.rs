@@ -17,7 +17,7 @@ use std::sync::Arc;
 /// Wrapper around a Crucible pantry client that also remembers its address.
 ///
 /// In most cases when Nexus wants to pick a pantry, it doesn't actually want a
-/// client right then, but instead wants to write down its address for subquent
+/// client right then, but instead wants to write down its address for subsequent
 /// use (and reuse) later. This type carries around a `client` only to perform
 /// health checks as supported by `qorb`; the rest of Nexus only accesses its
 /// `address`.
