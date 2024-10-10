@@ -16,11 +16,12 @@ use anyhow::ensure;
 use anyhow::Context;
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
-use dns_service_client::types::DnsConfig;
-use dns_service_client::{
-    types::{DnsConfigParams, DnsConfigZone, DnsRecord, Srv},
-    Client,
-};
+use dns_service_client::Client;
+use internal_dns_types::config::DnsConfig;
+use internal_dns_types::config::DnsConfigParams;
+use internal_dns_types::config::DnsConfigZone;
+use internal_dns_types::config::DnsRecord;
+use internal_dns_types::config::Srv;
 use slog::{Drain, Logger};
 use std::collections::BTreeMap;
 use std::collections::HashMap;

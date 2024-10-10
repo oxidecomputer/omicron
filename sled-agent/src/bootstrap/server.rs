@@ -32,7 +32,7 @@ use illumos_utils::dladm;
 use illumos_utils::zfs;
 use illumos_utils::zone;
 use illumos_utils::zone::Zones;
-use internal_dns::resolver::Resolver;
+use internal_dns_resolver::Resolver;
 use omicron_common::address::{Ipv6Subnet, AZ_PREFIX};
 use omicron_common::ledger;
 use omicron_common::ledger::Ledger;

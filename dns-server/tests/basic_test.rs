@@ -4,16 +4,16 @@
 
 use anyhow::{Context, Result};
 use camino_tempfile::Utf8TempDir;
-use dns_service_client::{
-    types::{DnsConfigParams, DnsConfigZone, DnsRecord, Srv},
-    Client,
-};
+use dns_service_client::Client;
 use dropshot::{test_util::LogContext, HandlerTaskMode};
 use hickory_resolver::error::ResolveErrorKind;
 use hickory_resolver::TokioAsyncResolver;
 use hickory_resolver::{
     config::{NameServerConfig, Protocol, ResolverConfig, ResolverOpts},
     proto::op::ResponseCode,
+};
+use internal_dns_types::config::{
+    DnsConfigParams, DnsConfigZone, DnsRecord, Srv,
 };
 use omicron_test_utils::dev::test_setup_log;
 use slog::o;

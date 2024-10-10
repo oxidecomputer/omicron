@@ -6,8 +6,8 @@ pub mod reconfigurator;
 
 use anyhow::{anyhow, ensure, Context};
 use dropshot::test_util::LogContext;
-use internal_dns::resolver::Resolver;
-use internal_dns::ServiceName;
+use internal_dns_resolver::Resolver;
+use internal_dns_types::names::ServiceName;
 use nexus_config::PostgresConfigWithUrl;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
@@ -105,7 +105,7 @@ fn create_resolver(log: &slog::Logger) -> Result<Resolver, anyhow::Error> {
     // default value used here.
     let subnet = Ipv6Subnet::new("fd00:1122:3344:0100::".parse().unwrap());
     eprintln!("note: using DNS server for subnet {}", subnet.net());
-    internal_dns::resolver::Resolver::new_from_subnet(log.clone(), subnet)
+    internal_dns_resolver::Resolver::new_from_subnet(log.clone(), subnet)
         .with_context(|| {
             format!("creating DNS resolver for subnet {}", subnet.net())
         })
