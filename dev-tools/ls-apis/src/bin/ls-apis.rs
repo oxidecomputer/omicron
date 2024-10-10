@@ -140,14 +140,14 @@ fn run_apis(apis: &SystemApis, args: ShowDepsArgs) -> Result<()> {
             apis.api_consumers(&api.client_package_name, args.filter)?
         {
             let (repo_name, package_path) = apis.package_label(s)?;
+            println!(
+                "    consumed by: {} ({}/{}) via paths: {}",
+                s,
+                repo_name,
+                package_path,
+                dep_paths.len(),
+            );
             if args.show_deps {
-                println!(
-                    "    consumed by: {} ({}/{}) via paths: {}",
-                    s,
-                    repo_name,
-                    package_path,
-                    dep_paths.len(),
-                );
                 for (i, dep_path) in dep_paths.iter().enumerate() {
                     let label = if dep_paths.len() > 1 {
                         format!(" path {}", i + 1)
