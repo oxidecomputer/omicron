@@ -57,6 +57,7 @@ mod physical_disk_state;
 mod probe;
 mod producer_endpoint;
 mod project;
+mod reconfigurator_policy;
 mod semver_version;
 mod switch_interface;
 mod switch_port;

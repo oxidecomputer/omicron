@@ -43,6 +43,25 @@ ALTER DEFAULT PRIVILEGES GRANT INSERT, SELECT, UPDATE, DELETE ON TABLES to omicr
 ALTER RANGE default CONFIGURE ZONE USING num_replicas = 5;
 
 /*
+ * A reconfigurator planning policy for a single multirack setup
+ *
+ * We currently tie this policy to a rack, as we don't yet support multirack.
+ * Multiple parts of this database schema are going to have to change to support
+ * multirack, so we add one more for now.
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.reconfigurator_policy (
+    -- Monotonically increasing version for all policies
+    --
+    -- This is similar to `bp_target` which will also require being changed for
+    -- multirack to associate with some sort of rack group ID.
+    version INT8 PRIMARY KEY,
+
+    clickhouse_cluster_enabled BOOL NOT NULL
+    clickhouse_single_node_enabled BOOL NOT NULL
+    time_created TIMESTAMPTZ NOT NULL,
+);
+
+/*
  * Racks
  */
 CREATE TABLE IF NOT EXISTS omicron.public.rack (
@@ -4498,7 +4517,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '109.0.0', NULL)
+    (TRUE, NOW(), NOW(), '110.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

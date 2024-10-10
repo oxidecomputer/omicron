@@ -842,6 +842,15 @@ table! {
 }
 
 table! {
+    reconfigurator_policy (version) {
+        version -> Int8,
+        clickhouse_cluster_enabled -> Bool,
+        clickhouse_single_node_enabled -> Bool,
+        time_created -> Timestamptz
+    }
+}
+
+table! {
     rack (id) {
         id -> Uuid,
         time_created -> Timestamptz,
