@@ -18,4 +18,11 @@ impl Svcadm {
         execute(cmd)?;
         Ok(())
     }
+
+    pub fn enable_service(fmri: String) -> Result<(), ExecutionError> {
+        let mut cmd = std::process::Command::new(PFEXEC);
+        let cmd = cmd.args(&[SVCADM, "enable", "-s", &fmri]);
+        execute(cmd)?;
+        Ok(())
+    }
 }

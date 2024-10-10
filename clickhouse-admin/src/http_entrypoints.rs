@@ -11,6 +11,7 @@ use clickhouse_admin_types::{
 use dropshot::{
     HttpError, HttpResponseCreated, HttpResponseOk, RequestContext, TypedBody,
 };
+use illumos_utils::svcadm::Svcadm;
 use std::sync::Arc;
 
 type ClickhouseApiDescription = dropshot::ApiDescription<Arc<ServerContext>>;
@@ -25,28 +26,34 @@ enum ClickhouseAdminImpl {}
 impl ClickhouseAdminApi for ClickhouseAdminImpl {
     type Context = Arc<ServerContext>;
 
-    async fn generate_server_config(
+    async fn generate_server_config_and_enable(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<ServerConfigurableSettings>,
     ) -> Result<HttpResponseCreated<ReplicaConfig>, HttpError> {
         let ctx = rqctx.context();
         let replica_server = body.into_inner();
-        // TODO(https://github.com/oxidecomputer/omicron/issues/5999): Do something
-        // with the generation number `replica_server.generation`
         let output =
             ctx.clickward().generate_server_config(replica_server.settings)?;
+
+        // Once we have generated the client we can safely enable the clickhouse_server service
+        let fmri = "svc:/oxide/clickhouse_server:default".to_string();
+        Svcadm::enable_service(fmri)?;
+
         Ok(HttpResponseCreated(output))
     }
 
-    async fn generate_keeper_config(
+    async fn generate_keeper_config_and_enable(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<KeeperConfigurableSettings>,
     ) -> Result<HttpResponseCreated<KeeperConfig>, HttpError> {
         let ctx = rqctx.context();
         let keeper = body.into_inner();
-        // TODO(https://github.com/oxidecomputer/omicron/issues/5999): Do something
-        // with the generation number `keeper.generation`
         let output = ctx.clickward().generate_keeper_config(keeper.settings)?;
+
+        // Once we have generated the client we can safely enable the clickhouse_keeper service
+        let fmri = "svc:/oxide/clickhouse_keeper:default".to_string();
+        Svcadm::enable_service(fmri)?;
+
         Ok(HttpResponseCreated(output))
     }
 

@@ -4,6 +4,8 @@
 
 //! Wrappers around illumos-specific commands.
 
+use dropshot::HttpError;
+use slog_error_chain::InlineErrorChain;
 #[allow(unused)]
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -69,6 +71,18 @@ pub enum ExecutionError {
 
     #[error("Zone is not running")]
     NotRunning,
+}
+
+impl From<ExecutionError> for HttpError {
+    fn from(err: ExecutionError) -> Self {
+        let message = InlineErrorChain::new(&err).to_string();
+        HttpError {
+            status_code: http::StatusCode::INTERNAL_SERVER_ERROR,
+            error_code: Some(String::from("Internal")),
+            external_message: message.clone(),
+            internal_message: message,
+        }
+    }
 }
 
 // We wrap this method in an inner module to make it possible to mock
