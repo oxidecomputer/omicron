@@ -1243,6 +1243,7 @@ impl DataStore {
             nnics,
             nzpools,
             nerrors,
+            nclickhouse_keeper_membership,
         ) = conn
             .transaction_async(|conn| async move {
                 // Remove the record describing the collection itself.
@@ -1396,6 +1397,18 @@ impl DataStore {
                         .await?
                     };
 
+                // Remove rows for clickhouse keeper membership
+                let nclickhouse_keeper_membership = {
+                    use db::schema::inv_clickhouse_keeper_membership::dsl;
+                    diesel::delete(
+                        dsl::inv_clickhouse_keeper_membership.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ),
+                    )
+                    .execute_async(&conn)
+                    .await?
+                };
+
                 Ok((
                     ncollections,
                     nsps,
@@ -1411,6 +1424,7 @@ impl DataStore {
                     nnics,
                     nzpools,
                     nerrors,
+                    nclickhouse_keeper_membership,
                 ))
             })
             .await
@@ -1437,6 +1451,7 @@ impl DataStore {
             "nnics" => nnics,
             "nzpools" => nzpools,
             "nerrors" => nerrors,
+            "nclickhouse_keeper_membership" => nclickhouse_keeper_membership
         );
 
         Ok(())

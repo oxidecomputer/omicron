@@ -23,6 +23,7 @@ progenitor::generate_api!(
         TypedUuidForOmicronZoneKind = omicron_uuid_kinds::OmicronZoneUuid,
         KeeperConfigurableSettings = clickhouse_admin_api::KeeperConfigurableSettings,
         ServerConfigurableSettings = clickhouse_admin_api::ServerConfigurableSettings,
-        ClickhouseKeeperClusterMembership = clickhouse_admin_types::ClickhouseKeeperClusterMembership
+        ClickhouseKeeperClusterMembership = clickhouse_admin_types::ClickhouseKeeperClusterMembership,
+        KeeperId = clickhouse_admin_types::KeeperId
     }
 );
