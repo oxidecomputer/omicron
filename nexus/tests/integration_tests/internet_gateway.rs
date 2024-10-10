@@ -258,7 +258,7 @@ async fn test_internet_gateway_delete_cascade(ctx: &ControlPlaneTestContext) {
 }
 
 #[nexus_test]
-async fn test_igw_ip_pool_attach_with_silo_user(ctx: &ControlPlaneTestContext) {
+async fn test_igw_ip_pool_attach_silo_user(ctx: &ControlPlaneTestContext) {
     let c = &ctx.external_client;
     test_setup(c).await;
 
@@ -322,6 +322,23 @@ async fn test_igw_ip_pool_attach_with_silo_user(ctx: &ControlPlaneTestContext) {
 
     assert_eq!(igw_pools.items.len(), 1);
     assert_eq!(igw_pools.items[0].identity.name, IP_POOL_ATTACHMENT_NAME);
+
+    // detach doesn't have the authz complication that attach has, but test it anyway
+    let url = format!(
+        "/v1/internet-gateway-ip-pools/{}?project={}&vpc={}&gateway={}&cascade=true",
+        IP_POOL_ATTACHMENT_NAME, PROJECT_NAME, VPC_NAME, IGW_NAME,
+    );
+    NexusRequest::object_delete(&c, &url)
+        .authn_as(AuthnMode::SiloUser(user.id))
+        .execute()
+        .await
+        .unwrap();
+
+    // it's gone
+    let igw_pools =
+        list_internet_gateway_ip_pools(c, PROJECT_NAME, VPC_NAME, IGW_NAME)
+            .await;
+    assert_eq!(igw_pools.len(), 0, "IP pool should not be attached");
 }
 
 async fn test_setup(c: &ClientTestContext) {

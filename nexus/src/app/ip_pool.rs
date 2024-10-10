@@ -92,13 +92,18 @@ impl super::Nexus {
         self.db_datastore.silo_ip_pool_list(opctx, &authz_silo, pagparams).await
     }
 
-    // Look up pool by name or ID, but only return it if it's linked to the
-    // current silo
+    /// Look up linked pool by name or ID. 404 on pools that exist but aren't
+    /// linked to the current silo. Special logic to make sure non-fleet users
+    /// can read the pool.
     pub async fn silo_ip_pool_fetch<'a>(
         &'a self,
         opctx: &'a OpContext,
         pool: &'a NameOrId,
-    ) -> LookupResult<(db::model::IpPool, db::model::IpPoolResource)> {
+    ) -> LookupResult<(
+        authz::IpPool,
+        db::model::IpPool,
+        db::model::IpPoolResource,
+    )> {
         let (authz_pool, pool) = self
             .ip_pool_lookup(opctx, pool)?
             // TODO-robustness: https://github.com/oxidecomputer/omicron/issues/3995
@@ -117,7 +122,7 @@ impl super::Nexus {
         // 404 if no link is found in the current silo
         let link = self.db_datastore.ip_pool_fetch_link(opctx, pool.id()).await;
         match link {
-            Ok(link) => Ok((pool, link)),
+            Ok(link) => Ok((authz_pool, pool, link)),
             Err(_) => Err(authz_pool.not_found()),
         }
     }

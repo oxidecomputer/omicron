@@ -6,7 +6,6 @@
 
 use crate::external_api::params;
 use nexus_auth::authz;
-use nexus_auth::authz::ApiResource;
 use nexus_auth::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::lookup;
@@ -198,16 +197,9 @@ impl super::Nexus {
         let (.., authz_igw, _) =
             lookup.fetch_for(authz::Action::CreateChild).await?;
 
-        // like in silo-scoped IP pool fetch, we have to fetch the
-        // pool and _also_ make sure it's linked to the current silo
-        let (authz_pool, ..) = self
-            .ip_pool_lookup(&opctx, &params.ip_pool)?
-            .fetch_for(authz::Action::CreateChild)
-            .await?;
-        self.db_datastore
-            .ip_pool_fetch_link(opctx, authz_pool.id())
-            .await
-            .map_err(|_| authz_pool.not_found())?;
+        // need to use this method so it works for non-fleet users
+        let (authz_pool, ..) =
+            self.silo_ip_pool_fetch(&opctx, &params.ip_pool).await?;
 
         let id = Uuid::new_v4();
         let route = db::model::InternetGatewayIpPool::new(
