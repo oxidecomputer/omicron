@@ -801,6 +801,7 @@ pub(crate) mod test {
     const SNAPSHOT_NAME: &str = "my-snap";
     const PROJECT_NAME: &str = "springfield-squidport";
 
+    /// Create four zpools, a disk, and a snapshot of that disk
     async fn prepare_for_test(
         cptestctx: &ControlPlaneTestContext,
     ) -> PrepareResult {

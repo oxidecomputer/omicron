@@ -42,28 +42,11 @@ use std::sync::Arc;
 pub struct RegionSnapshotReplacementFindAffected {
     datastore: Arc<DataStore>,
     sagas: Arc<dyn StartSaga>,
-    disabled: bool,
 }
 
 impl RegionSnapshotReplacementFindAffected {
-    #[allow(dead_code)]
     pub fn new(datastore: Arc<DataStore>, sagas: Arc<dyn StartSaga>) -> Self {
-        RegionSnapshotReplacementFindAffected {
-            datastore,
-            sagas,
-            disabled: false,
-        }
-    }
-
-    pub fn disabled(
-        datastore: Arc<DataStore>,
-        sagas: Arc<dyn StartSaga>,
-    ) -> Self {
-        RegionSnapshotReplacementFindAffected {
-            datastore,
-            sagas,
-            disabled: true,
-        }
+        RegionSnapshotReplacementFindAffected { datastore, sagas }
     }
 
     async fn send_start_request(
@@ -452,10 +435,6 @@ impl BackgroundTask for RegionSnapshotReplacementFindAffected {
         async move {
             let mut status = RegionSnapshotReplacementStepStatus::default();
 
-            if self.disabled {
-                return json!(status);
-            }
-
             // Importantly, clean old steps up before finding affected volumes!
             // Otherwise, will continue to find the snapshot in volumes to
             // delete, and will continue to see conflicts in next function.
@@ -499,6 +478,19 @@ mod test {
         snapshot_addr: String,
     ) -> Uuid {
         let new_volume_id = Uuid::new_v4();
+
+        // need to add region snapshot objects to satisfy volume create
+        // transaction's search for resources
+
+        datastore
+            .region_snapshot_create(RegionSnapshot::new(
+                Uuid::new_v4(),
+                Uuid::new_v4(),
+                Uuid::new_v4(),
+                snapshot_addr.clone(),
+            ))
+            .await
+            .unwrap();
 
         let volume_construction_request = VolumeConstructionRequest::Volume {
             id: new_volume_id,
