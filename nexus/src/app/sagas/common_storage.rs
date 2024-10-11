@@ -8,7 +8,6 @@ use super::*;
 
 use crate::Nexus;
 use crucible_pantry_client::types::VolumeConstructionRequest;
-use internal_dns_types::names::ServiceName;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
@@ -16,19 +15,26 @@ use nexus_db_queries::db::lookup::LookupPath;
 use omicron_common::api::external::Error;
 use omicron_common::retry_until_known_result;
 use slog::Logger;
+use slog_error_chain::InlineErrorChain;
 use std::net::SocketAddrV6;
+
+mod pantry_pool;
+
+pub(crate) use pantry_pool::make_pantry_connection_pool;
+pub(crate) use pantry_pool::PooledPantryClient;
 
 // Common Pantry operations
 
 pub(crate) async fn get_pantry_address(
     nexus: &Arc<Nexus>,
 ) -> Result<SocketAddrV6, ActionError> {
-    nexus
-        .resolver()
-        .lookup_socket_v6(ServiceName::CruciblePantry)
-        .await
-        .map_err(|e| e.to_string())
-        .map_err(ActionError::action_failed)
+    let client = nexus.pantry_connection_pool().claim().await.map_err(|e| {
+        ActionError::action_failed(format!(
+            "failed to claim pantry client from pool: {}",
+            InlineErrorChain::new(&e)
+        ))
+    })?;
+    Ok(client.address())
 }
 
 pub(crate) async fn call_pantry_attach_for_disk(

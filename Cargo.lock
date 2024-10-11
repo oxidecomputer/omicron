@@ -4430,6 +4430,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "progenitor",
+ "qorb",
  "reqwest 0.12.7",
  "serde",
  "serde_json",
@@ -6625,6 +6626,7 @@ dependencies = [
  "pretty_assertions",
  "progenitor-client",
  "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=11371b0f3743f8df5b047dc0edc2699f4bdf3927)",
+ "qorb",
  "rand",
  "rcgen",
  "ref-cast",
@@ -7006,6 +7008,7 @@ dependencies = [
  "curve25519-dalek",
  "digest",
  "dof",
+ "dropshot",
  "ecdsa",
  "ed25519-dalek",
  "either",
@@ -7058,6 +7061,7 @@ dependencies = [
  "postgres-types",
  "predicates",
  "proc-macro2",
+ "qorb",
  "quote",
  "regex",
  "regex-automata",
@@ -8660,8 +8664,8 @@ dependencies = [
 
 [[package]]
 name = "qorb"
-version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/qorb?branch=master#9d0cdc4861f8d10cadd90c278e36b8dd833561ec"
+version = "0.0.2"
+source = "git+https://github.com/oxidecomputer/qorb?branch=master#de6f7784790c813931042dcc98c84413ecf11826"
 dependencies = [
  "anyhow",
  "async-trait",

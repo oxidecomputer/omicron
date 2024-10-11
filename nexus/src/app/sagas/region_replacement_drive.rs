@@ -1035,11 +1035,6 @@ async fn srrd_drive_region_replacement_prepare(
                     "disk id" => ?disk.id(),
                 );
 
-                // XXX: internal-dns does not randomize the order of addresses
-                // in its responses: if the first Pantry in the list of
-                // addresses returned by DNS isn't responding, the drive saga
-                // will still continually try to use it.
-
                 let pantry_address = get_pantry_address(nexus).await?;
 
                 DriveAction::Pantry {
