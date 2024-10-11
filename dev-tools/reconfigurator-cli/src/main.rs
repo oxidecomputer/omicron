@@ -11,8 +11,8 @@ use clap::CommandFactory;
 use clap::FromArgMatches;
 use clap::ValueEnum;
 use clap::{Args, Parser, Subcommand};
-use dns_service_client::DnsDiff;
 use indexmap::IndexMap;
+use internal_dns_types::diff::DnsDiff;
 use nexus_inventory::CollectionBuilder;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_planning::blueprint_builder::EnsureMultiple;
@@ -97,7 +97,7 @@ impl ReconfiguratorSim {
             blueprints: IndexMap::new(),
             internal_dns: BTreeMap::new(),
             external_dns: BTreeMap::new(),
-            silo_names: vec!["default-silo".parse().unwrap()],
+            silo_names: vec!["example-silo".parse().unwrap()],
             external_dns_zone_name: String::from("oxide.example"),
             collection_id_rng: TypedUuidRng::from_entropy(),
             num_nexus: None,
@@ -105,11 +105,12 @@ impl ReconfiguratorSim {
         }
     }
 
-    /// Returns true if the REPL needs to be reset before loading an example.
+    /// Returns true if the user has made local changes to the simulated
+    /// system.
     ///
-    /// Loading example systems requires a (mostly) clean slate, which this
-    /// method checks for.
-    fn needs_reset_for_load_example(&self) -> bool {
+    /// This is used when the user asks to load an example system. Doing that
+    /// basically requires a clean slate.
+    fn user_made_system_changes(&self) -> bool {
         // Use this pattern to ensure that if a new field is added to
         // ReconfiguratorSim, it will fail to compile until it's added here.
         let Self {
@@ -136,7 +137,7 @@ impl ReconfiguratorSim {
     }
 
     // Reset the state of the REPL.
-    fn reset(&mut self) {
+    fn wipe(&mut self) {
         *self = Self::new(self.log.clone());
     }
 
@@ -238,7 +239,7 @@ fn main() -> anyhow::Result<()> {
     let cmd = CmdReconfiguratorSim::parse();
 
     let log = dropshot::ConfigLogging::StderrTerminal {
-        level: dropshot::ConfigLoggingLevel::Debug,
+        level: dropshot::ConfigLoggingLevel::Info,
     }
     .to_logger("reconfigurator-sim")
     .context("creating logger")?;
@@ -360,7 +361,7 @@ fn process_entry(sim: &mut ReconfiguratorSim, entry: String) -> LoopResult {
         Commands::LoadExample(args) => cmd_load_example(sim, args),
         Commands::FileContents(args) => cmd_file_contents(args),
         Commands::Save(args) => cmd_save(sim, args),
-        Commands::Reset => cmd_reset(sim),
+        Commands::Wipe => cmd_wipe(sim),
     };
 
     match cmd_result {
@@ -434,7 +435,7 @@ enum Commands {
     /// show information about what's in a saved file
     FileContents(FileContentsArgs),
     /// reset the state of the REPL
-    Reset,
+    Wipe,
 }
 
 #[derive(Debug, Args)]
@@ -566,10 +567,11 @@ struct LoadArgs {
 
 #[derive(Debug, Args)]
 struct LoadExampleArgs {
-    /// Seed for the example system.
+    /// Seed for the RNG that's used to generate the example system.
     ///
-    /// The seed is used to generate a deterministic example system. For tests,
-    /// the seed is typically the name of the test.
+    /// Setting this makes it possible for callers to get deterministic
+    /// results. In automated tests, the seed is typically the name of the
+    /// test.
     #[clap(long, default_value = "reconfigurator_cli_example")]
     seed: String,
 
@@ -742,8 +744,8 @@ fn cmd_inventory_generate(
     // sim.system carries around Omicron zones, which will make their way into
     // the inventory.
     let mut inventory = builder.build();
-    // Assign the next collection ID from the RNG to ensure a consistent ID, in
-    // case the load is seeded.
+    // Assign collection IDs from the RNG. This enables consistent results when
+    // callers have explicitly seeded the RNG (e.g., in tests).
     inventory.id = sim.collection_id_rng.next();
 
     let rv = format!(
@@ -1072,9 +1074,9 @@ fn cmd_save(
     )))
 }
 
-fn cmd_reset(sim: &mut ReconfiguratorSim) -> anyhow::Result<Option<String>> {
-    sim.reset();
-    Ok(Some("reset reconfigurator-sim state".to_string()))
+fn cmd_wipe(sim: &mut ReconfiguratorSim) -> anyhow::Result<Option<String>> {
+    sim.wipe();
+    Ok(Some("wiped reconfigurator-sim state".to_string()))
 }
 
 fn cmd_show(sim: &mut ReconfiguratorSim) -> anyhow::Result<Option<String>> {
@@ -1353,8 +1355,11 @@ fn cmd_load_example(
     sim: &mut ReconfiguratorSim,
     args: LoadExampleArgs,
 ) -> anyhow::Result<Option<String>> {
-    if sim.needs_reset_for_load_example() {
-        bail!("system is not empty; call 'reset' before loading an example");
+    if sim.user_made_system_changes() {
+        bail!(
+            "changes made to simulated system: run `wipe system` before \
+             loading an example system"
+        );
     }
 
     // Generate the example system.

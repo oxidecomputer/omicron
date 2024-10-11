@@ -7,13 +7,12 @@ use hickory_resolver::config::{
 };
 use hickory_resolver::lookup::SrvLookup;
 use hickory_resolver::TokioAsyncResolver;
+use internal_dns_types::names::ServiceName;
 use omicron_common::address::{
     get_internal_dns_server_addresses, Ipv6Subnet, AZ_PREFIX, DNS_PORT,
 };
 use slog::{debug, error, info, trace};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr, SocketAddrV6};
-
-pub type DnsError = dns_service_client::Error<dns_service_client::types::Error>;
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum ResolveError {
@@ -21,10 +20,50 @@ pub enum ResolveError {
     Resolve(#[from] hickory_resolver::error::ResolveError),
 
     #[error("Record not found for SRV key: {}", .0.dns_name())]
-    NotFound(crate::ServiceName),
+    NotFound(ServiceName),
 
     #[error("Record not found for {0}")]
     NotFoundByString(String),
+}
+
+/// A wrapper around a set of bootstrap DNS addresses, providing a convenient
+/// way to construct a [`qorb::resolvers::dns::DnsResolver`] for specific
+/// services.
+#[derive(Debug, Clone)]
+pub struct QorbResolver {
+    bootstrap_dns_ips: Vec<SocketAddr>,
+}
+
+impl QorbResolver {
+    pub fn new(bootstrap_dns_ips: Vec<SocketAddr>) -> Self {
+        Self { bootstrap_dns_ips }
+    }
+
+    pub fn bootstrap_dns_ips(&self) -> &[SocketAddr] {
+        &self.bootstrap_dns_ips
+    }
+
+    pub fn for_service(
+        &self,
+        service: ServiceName,
+    ) -> qorb::resolver::BoxedResolver {
+        let config = qorb::resolvers::dns::DnsResolverConfig {
+            // Ignore the TTL returned by our servers, primarily to avoid
+            // thrashing if they return a TTL of 0 (which they currently do:
+            // https://github.com/oxidecomputer/omicron/issues/6790).
+            hardcoded_ttl: Some(std::time::Duration::MAX),
+            // We don't currently run additional internal DNS servers that
+            // themselves need to be found via a set of bootstrap DNS IPs, but
+            // if we did, we'd populate `resolver_service` here to tell qorb how
+            // to find them.
+            ..Default::default()
+        };
+        Box::new(qorb::resolvers::dns::DnsResolver::new(
+            qorb::service::Name(service.srv_name()),
+            self.bootstrap_dns_ips.clone(),
+            config,
+        ))
+    }
 }
 
 /// A wrapper around a DNS resolver, providing a way to conveniently
@@ -161,7 +200,7 @@ impl Resolver {
     /// need to be looked up to find A/AAAA records.
     pub async fn lookup_srv(
         &self,
-        srv: crate::ServiceName,
+        srv: ServiceName,
     ) -> Result<Vec<(String, u16)>, ResolveError> {
         let name = srv.srv_name();
         trace!(self.log, "lookup_srv"; "dns_name" => &name);
@@ -181,7 +220,7 @@ impl Resolver {
 
     pub async fn lookup_all_ipv6(
         &self,
-        srv: crate::ServiceName,
+        srv: ServiceName,
     ) -> Result<Vec<Ipv6Addr>, ResolveError> {
         let name = srv.srv_name();
         trace!(self.log, "lookup_all_ipv6 srv"; "dns_name" => &name);
@@ -217,7 +256,7 @@ impl Resolver {
     // API that can be improved upon later.
     pub async fn lookup_socket_v6(
         &self,
-        service: crate::ServiceName,
+        service: ServiceName,
     ) -> Result<SocketAddrV6, ResolveError> {
         let name = service.srv_name();
         trace!(self.log, "lookup_socket_v6 srv"; "dns_name" => &name);
@@ -241,7 +280,7 @@ impl Resolver {
     /// targets and return a list of [`SocketAddrV6`].
     pub async fn lookup_all_socket_v6(
         &self,
-        service: crate::ServiceName,
+        service: ServiceName,
     ) -> Result<Vec<SocketAddrV6>, ResolveError> {
         let name = service.srv_name();
         trace!(self.log, "lookup_all_socket_v6 srv"; "dns_name" => &name);
@@ -286,7 +325,7 @@ impl Resolver {
 
     pub async fn lookup_ip(
         &self,
-        srv: crate::ServiceName,
+        srv: ServiceName,
     ) -> Result<IpAddr, ResolveError> {
         let name = srv.srv_name();
         debug!(self.log, "lookup srv"; "dns_name" => &name);
@@ -366,15 +405,16 @@ impl Resolver {
 mod test {
     use super::ResolveError;
     use super::Resolver;
-    use crate::DNS_ZONE;
-    use crate::{DnsConfigBuilder, ServiceName};
     use anyhow::Context;
     use assert_matches::assert_matches;
-    use dns_service_client::types::DnsConfigParams;
     use dropshot::{
         endpoint, ApiDescription, HandlerTaskMode, HttpError, HttpResponseOk,
         RequestContext,
     };
+    use internal_dns_types::config::DnsConfigBuilder;
+    use internal_dns_types::config::DnsConfigParams;
+    use internal_dns_types::names::ServiceName;
+    use internal_dns_types::names::DNS_ZONE;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::OmicronZoneUuid;
     use slog::{o, Logger};
@@ -811,7 +851,7 @@ mod test {
         //
         // We'll use the SRV record for Nexus, even though it's just our
         // standalone test server.
-        let dns_name = crate::ServiceName::Nexus.srv_name();
+        let dns_name = ServiceName::Nexus.srv_name();
         let reqwest_client = reqwest::ClientBuilder::new()
             .dns_resolver(resolver.clone().into())
             .build()
@@ -891,7 +931,7 @@ mod test {
         //
         // We'll use the SRV record for Nexus, even though it's just our
         // standalone test server.
-        let dns_name = crate::ServiceName::Nexus.srv_name();
+        let dns_name = ServiceName::Nexus.srv_name();
         let reqwest_client = reqwest::ClientBuilder::new()
             .dns_resolver(resolver.clone().into())
             .build()

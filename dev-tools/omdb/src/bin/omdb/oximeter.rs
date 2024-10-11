@@ -10,6 +10,7 @@ use anyhow::Context;
 use clap::Args;
 use clap::Subcommand;
 use futures::TryStreamExt;
+use internal_dns_types::names::ServiceName;
 use oximeter_client::types::ProducerEndpoint;
 use oximeter_client::Client;
 use slog::Logger;
@@ -55,10 +56,7 @@ impl OximeterArgs {
                     "note: Oximeter URL not specified.  Will pick one from DNS."
                 );
                 let addr = omdb
-                    .dns_lookup_one(
-                        log.clone(),
-                        internal_dns::ServiceName::Oximeter,
-                    )
+                    .dns_lookup_one(log.clone(), ServiceName::Oximeter)
                     .await?;
                 format!("http://{}", addr)
             }

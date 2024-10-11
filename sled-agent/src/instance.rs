@@ -102,7 +102,7 @@ pub enum Error {
     InvalidHostname(&'static str),
 
     #[error("Error resolving DNS name: {0}")]
-    ResolveError(#[from] internal_dns::resolver::ResolveError),
+    ResolveError(#[from] internal_dns_resolver::ResolveError),
 
     #[error("Propolis job with ID {0} is registered but not running")]
     VmNotRunning(PropolisUuid),
@@ -241,6 +241,9 @@ enum InstanceRequest {
     },
     DeleteExternalIp {
         ip: InstanceExternalIpBody,
+        tx: oneshot::Sender<Result<(), ManagerError>>,
+    },
+    RefreshExternalIps {
         tx: oneshot::Sender<Result<(), ManagerError>>,
     },
 }
@@ -521,6 +524,10 @@ impl InstanceRunner {
                             tx.send(self.delete_external_ip(&ip).await.map_err(|e| e.into()))
                             .map_err(|_| Error::FailedSendClientClosed)
                         },
+                        Some(RefreshExternalIps { tx }) => {
+                            tx.send(self.refresh_external_ips().map_err(|e| e.into()))
+                            .map_err(|_| Error::FailedSendClientClosed)
+                        }
                         None => {
                             warn!(self.log, "Instance request channel closed; shutting down");
                             let mark_failed = false;
@@ -572,6 +579,9 @@ impl InstanceRunner {
                     tx.send(Err(Error::Terminating.into())).map_err(|_| ())
                 }
                 DeleteExternalIp { tx, .. } => {
+                    tx.send(Err(Error::Terminating.into())).map_err(|_| ())
+                }
+                RefreshExternalIps { tx } => {
                     tx.send(Err(Error::Terminating.into())).map_err(|_| ())
                 }
             };
@@ -993,6 +1003,22 @@ impl InstanceRunner {
         Ok(())
     }
 
+    fn refresh_external_ips_inner(&mut self) -> Result<(), Error> {
+        let Some(primary_nic) = self.requested_nics.get(0) else {
+            return Err(Error::Opte(illumos_utils::opte::Error::NoPrimaryNic));
+        };
+
+        self.port_manager.external_ips_ensure(
+            primary_nic.id,
+            primary_nic.kind,
+            Some(self.source_nat),
+            self.ephemeral_ip,
+            &self.floating_ips,
+        )?;
+
+        Ok(())
+    }
+
     async fn delete_external_ip_inner(
         &mut self,
         ip: &InstanceExternalIpBody,
@@ -1336,6 +1362,19 @@ impl Instance {
     ) -> Result<(), Error> {
         self.tx
             .send(InstanceRequest::DeleteExternalIp { ip: *ip, tx })
+            .await
+            .map_err(|_| Error::FailedSendChannelClosed)?;
+        Ok(())
+    }
+
+    /// Reinstalls an instance's set of external IPs within OPTE, using
+    /// up-to-date IP<->IGW mappings. This will not disrupt existing flows.
+    pub async fn refresh_external_ips(
+        &self,
+        tx: oneshot::Sender<Result<(), ManagerError>>,
+    ) -> Result<(), Error> {
+        self.tx
+            .send(InstanceRequest::RefreshExternalIps { tx })
             .await
             .map_err(|_| Error::FailedSendChannelClosed)?;
         Ok(())
@@ -1699,6 +1738,10 @@ impl InstanceRunner {
         }
         out
     }
+
+    fn refresh_external_ips(&mut self) -> Result<(), Error> {
+        self.refresh_external_ips_inner()
+    }
 }
 
 #[cfg(all(test, target_os = "illumos"))]
@@ -1718,7 +1761,7 @@ mod tests {
     use illumos_utils::zone::MockZones;
     use illumos_utils::zone::__mock_MockZones::__boot::Context as MockZonesBootContext;
     use illumos_utils::zone::__mock_MockZones::__id::Context as MockZonesIdContext;
-    use internal_dns::resolver::Resolver;
+    use internal_dns_resolver::Resolver;
     use omicron_common::api::external::{
         ByteCount, Generation, Hostname, InstanceCpuCount,
     };

@@ -1,5 +1,5 @@
 [package]
-name = "internal-dns"
+name = "internal-dns-resolver"
 version = "0.1.0"
 edition = "2021"
 license = "MPL-2.0"
@@ -8,26 +8,25 @@ license = "MPL-2.0"
 workspace = true
 
 [dependencies]
-anyhow.workspace = true
-chrono.workspace = true
-dns-service-client.workspace = true
 futures.workspace = true
-hyper.workspace = true
+hickory-resolver.workspace = true
+internal-dns-types.workspace = true
 omicron-common.workspace = true
-omicron-uuid-kinds.workspace = true
+omicron-workspace-hack.workspace = true
+qorb.workspace = true
 reqwest = { workspace = true, features = ["rustls-tls", "stream"] }
 slog.workspace = true
 thiserror.workspace = true
-hickory-resolver.workspace = true
-uuid.workspace = true
-omicron-workspace-hack.workspace = true
 
 [dev-dependencies]
+anyhow.workspace = true
 assert_matches.workspace = true
 dropshot.workspace = true
 dns-server.workspace = true
+dns-service-client.workspace = true
 expectorate.workspace = true
 omicron-test-utils.workspace = true
+omicron-uuid-kinds.workspace = true
 progenitor.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true

@@ -54,6 +54,8 @@ pub fn example(
 pub struct ExampleSystemBuilder {
     log: slog::Logger,
     test_name: String,
+    // TODO: Store a Policy struct instead of these fields:
+    // https://github.com/oxidecomputer/omicron/issues/6803
     nsleds: usize,
     ndisks_per_sled: u8,
     // None means nsleds
@@ -190,7 +192,7 @@ impl ExampleSystemBuilder {
     pub fn build(&self) -> (ExampleSystem, Blueprint) {
         let nexus_count = self.get_nexus_zones();
 
-        slog::trace!(
+        slog::debug!(
             &self.log,
             "Creating example system";
             "nsleds" => self.nsleds,
@@ -253,14 +255,21 @@ impl ExampleSystemBuilder {
         builder.set_rng_seed((&self.test_name, "ExampleSystem make_zones"));
 
         // Add as many external IPs as is necessary for external DNS zones. We
-        // pick a start address arbitrarily in the 10.x.x.x range.
+        // pick addresses in the TEST-NET-2 (RFC 5737) range.
         for i in 0..self.external_dns_count.0 {
-            builder.add_external_dns_ip(IpAddr::V4(Ipv4Addr::new(
-                10,
-                49,
-                0,
-                (i + 1).try_into().expect("external_dns_count is always <= 30"),
-            )));
+            builder
+                .add_external_dns_ip(IpAddr::V4(Ipv4Addr::new(
+                    198,
+                    51,
+                    100,
+                    (i + 1)
+                        .try_into()
+                        .expect("external_dns_count is always <= 30"),
+                )))
+                .expect(
+                    "this shouldn't error because provided external IPs \
+                     are all unique",
+                );
         }
 
         for (i, (sled_id, sled_resources)) in
@@ -276,6 +285,10 @@ impl ExampleSystemBuilder {
                         vec![],
                     )
                     .unwrap();
+                if i == 0 {
+                    let _ = builder
+                        .sled_ensure_zone_multiple_clickhouse(sled_id, 1);
+                }
                 let _ = builder
                     .sled_ensure_zone_multiple_internal_dns(
                         sled_id,

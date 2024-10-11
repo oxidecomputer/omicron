@@ -7,11 +7,11 @@
 use super::dns_servers::DnsServersList;
 use crate::app::background::BackgroundTask;
 use anyhow::Context;
-use dns_service_client::types::DnsConfigParams;
 use futures::future::BoxFuture;
 use futures::stream;
 use futures::FutureExt;
 use futures::StreamExt;
+use internal_dns_types::config::DnsConfigParams;
 use nexus_db_queries::context::OpContext;
 use serde_json::json;
 use std::collections::BTreeMap;
@@ -180,12 +180,12 @@ mod test {
     use super::DnsPropagator;
     use crate::app::background::tasks::dns_servers::DnsServersList;
     use crate::app::background::BackgroundTask;
-    use dns_service_client::types::DnsConfigParams;
     use httptest::matchers::request;
     use httptest::responders::status_code;
     use httptest::Expectation;
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils_macros::nexus_test;
+    use nexus_types::internal_api::params::DnsConfigParams;
     use serde::Deserialize;
     use serde_json::json;
     use std::collections::BTreeMap;

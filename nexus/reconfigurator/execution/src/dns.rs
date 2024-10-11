@@ -5,7 +5,7 @@
 //! Propagates DNS changes in a given blueprint
 
 use crate::Sled;
-use dns_service_client::DnsDiff;
+use internal_dns_types::diff::DnsDiff;
 use nexus_db_model::DnsGroup;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::datastore::Discoverability;
@@ -304,13 +304,12 @@ mod test {
     use crate::test_utils::overridables_for_test;
     use crate::test_utils::realize_blueprint_and_expect;
     use crate::Sled;
-    use dns_service_client::DnsDiff;
-    use internal_dns::config::Host;
-    use internal_dns::config::Zone;
-    use internal_dns::names::BOUNDARY_NTP_DNS_NAME;
-    use internal_dns::resolver::Resolver;
-    use internal_dns::ServiceName;
-    use internal_dns::DNS_ZONE;
+    use internal_dns_resolver::Resolver;
+    use internal_dns_types::config::Host;
+    use internal_dns_types::config::Zone;
+    use internal_dns_types::names::ServiceName;
+    use internal_dns_types::names::BOUNDARY_NTP_DNS_NAME;
+    use internal_dns_types::names::DNS_ZONE;
     use nexus_db_model::DnsGroup;
     use nexus_db_model::Silo;
     use nexus_db_queries::authn;
@@ -1467,8 +1466,8 @@ mod test {
         let (new_name, &[DnsRecord::Aaaa(_)]) = new_records[0] else {
             panic!("did not find expected AAAA record for new Nexus zone");
         };
-        let new_zone_host = internal_dns::config::Host::for_zone(
-            internal_dns::config::Zone::Other(new_zone_id),
+        let new_zone_host = internal_dns_types::config::Host::for_zone(
+            internal_dns_types::config::Zone::Other(new_zone_id),
         );
         assert!(new_zone_host.fqdn().starts_with(new_name));
 

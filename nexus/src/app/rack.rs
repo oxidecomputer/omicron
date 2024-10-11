@@ -9,6 +9,7 @@ use crate::external_api::params::CertificateCreate;
 use crate::external_api::shared::ServiceUsingCertificate;
 use crate::internal_api::params::RackInitializationRequest;
 use gateway_client::types::SpType;
+use internal_dns_types::names::DNS_ZONE;
 use ipnetwork::{IpNetwork, Ipv6Network};
 use nexus_db_model::DnsGroup;
 use nexus_db_model::InitialDnsGroup;
@@ -177,7 +178,7 @@ impl super::Nexus {
             .internal_dns_zone_config
             .zones
             .into_iter()
-            .find(|z| z.zone_name == internal_dns::DNS_ZONE)
+            .find(|z| z.zone_name == DNS_ZONE)
             .ok_or_else(|| {
                 Error::invalid_request(
                     "expected initial DNS config to include control plane zone",
@@ -592,7 +593,7 @@ impl super::Nexus {
                     dst: r.destination,
                     gw: r.nexthop,
                     vid: r.vlan_id,
-                    local_pref: r.local_pref,
+                    rib_priority: r.rib_priority,
                 })
                 .collect();
 

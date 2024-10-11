@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::Error;
+use anyhow::anyhow;
 use anyhow::bail;
 use debug_ignore::DebugIgnore;
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
@@ -371,11 +372,18 @@ impl<'a> BuilderExternalNetworking<'a> {
     /// which could otherwise only be added via RSS.
     ///
     /// TODO-cleanup: Remove when external DNS addresses are in the policy.
-    pub(crate) fn add_external_dns_ip(&mut self, addr: IpAddr) {
-        assert!(
-            self.available_external_dns_ips.insert(addr),
-            "duplicate external DNS IP address"
-        );
+    pub(crate) fn add_external_dns_ip(
+        &mut self,
+        addr: IpAddr,
+    ) -> Result<(), Error> {
+        if self.available_external_dns_ips.contains(&addr) {
+            return Err(Error::Planner(anyhow!(
+                "external DNS IP address already in use: {addr}"
+            )));
+        }
+
+        self.available_external_dns_ips.insert(addr);
+        Ok(())
     }
 }
 

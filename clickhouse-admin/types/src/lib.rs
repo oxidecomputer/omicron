@@ -907,7 +907,17 @@ impl KeeperConf {
 /// dropshot servers running in `ClickhouseKeeper` zones. state. We include the
 /// leader committed log index known to the current keeper node (whether or not
 /// it is the leader) to determine which configuration is newest.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Deserialize,
+    Serialize,
+    JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub struct ClickhouseKeeperClusterMembership {
     /// Keeper ID of the keeper being queried

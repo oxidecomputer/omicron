@@ -8,8 +8,8 @@ use anyhow::Context;
 use anyhow::Result;
 use clap::Parser;
 use clap::ValueEnum;
-use internal_dns::resolver::ResolveError;
-use internal_dns::resolver::Resolver;
+use internal_dns_resolver::ResolveError;
+use internal_dns_resolver::Resolver;
 use slog::{info, warn};
 use std::net::SocketAddr;
 
@@ -40,15 +40,17 @@ enum ServiceName {
     ClickhouseServer,
 }
 
-impl From<ServiceName> for internal_dns::ServiceName {
+impl From<ServiceName> for internal_dns_types::names::ServiceName {
     fn from(value: ServiceName) -> Self {
         match value {
-            ServiceName::Cockroach => internal_dns::ServiceName::Cockroach,
+            ServiceName::Cockroach => {
+                internal_dns_types::names::ServiceName::Cockroach
+            }
             ServiceName::ClickhouseServer => {
-                internal_dns::ServiceName::ClickhouseServer
+                internal_dns_types::names::ServiceName::ClickhouseServer
             }
             ServiceName::ClickhouseKeeper => {
-                internal_dns::ServiceName::ClickhouseKeeper
+                internal_dns_types::names::ServiceName::ClickhouseKeeper
             }
         }
     }
@@ -79,7 +81,8 @@ async fn main() -> Result<()> {
     let result = omicron_common::backoff::retry_notify(
         omicron_common::backoff::retry_policy_internal_service(),
         || async {
-            let dns_name = internal_dns::ServiceName::from(opt.srv_name);
+            let dns_name =
+                internal_dns_types::names::ServiceName::from(opt.srv_name);
             resolver.lookup_srv(dns_name).await.map_err(|error| match error {
                 ResolveError::Resolve(_)
                 | ResolveError::NotFound(_)

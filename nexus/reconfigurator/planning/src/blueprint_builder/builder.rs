@@ -39,6 +39,7 @@ use nexus_types::inventory::Collection;
 use omicron_common::address::get_sled_address;
 use omicron_common::address::get_switch_zone_address;
 use omicron_common::address::ReservedRackSubnet;
+use omicron_common::address::CLICKHOUSE_HTTP_PORT;
 use omicron_common::address::CP_SERVICES_RESERVED_ADDRESSES;
 use omicron_common::address::DNS_HTTP_PORT;
 use omicron_common::address::DNS_PORT;
@@ -1248,6 +1249,58 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(EnsureMultiple::Changed { added: num_crdb_to_add, removed: 0 })
     }
 
+    fn sled_add_zone_clickhouse(
+        &mut self,
+        sled_id: SledUuid,
+    ) -> Result<Ensure, Error> {
+        let id = self.rng.zone_rng.next();
+        let underlay_address = self.sled_alloc_ip(sled_id)?;
+        let address =
+            SocketAddrV6::new(underlay_address, CLICKHOUSE_HTTP_PORT, 0, 0);
+        let pool_name =
+            self.sled_select_zpool(sled_id, ZoneKind::Clickhouse)?;
+        let zone_type =
+            BlueprintZoneType::Clickhouse(blueprint_zone_type::Clickhouse {
+                address,
+                dataset: OmicronZoneDataset { pool_name: pool_name.clone() },
+            });
+
+        let zone = BlueprintZoneConfig {
+            disposition: BlueprintZoneDisposition::InService,
+            id,
+            underlay_address,
+            filesystem_pool: Some(pool_name),
+            zone_type,
+        };
+        self.sled_add_zone(sled_id, zone)?;
+        Ok(Ensure::Added)
+    }
+
+    pub fn sled_ensure_zone_multiple_clickhouse(
+        &mut self,
+        sled_id: SledUuid,
+        desired_zone_count: usize,
+    ) -> Result<EnsureMultiple, Error> {
+        // How many single-node ClickHouse zones do we want to add?
+        let count =
+            self.sled_num_running_zones_of_kind(sled_id, ZoneKind::Clickhouse);
+        let to_add = match desired_zone_count.checked_sub(count) {
+            Some(0) => return Ok(EnsureMultiple::NotNeeded),
+            Some(n) => n,
+            None => {
+                return Err(Error::Planner(anyhow!(
+                    "removing a single-node ClickHouse zone not yet supported \
+                     (sled {sled_id} has {count}; \
+                     planner wants {desired_zone_count})"
+                )));
+            }
+        };
+        for _ in 0..to_add {
+            self.sled_add_zone_clickhouse(sled_id)?;
+        }
+        Ok(EnsureMultiple::Changed { added: to_add, removed: 0 })
+    }
+
     pub fn sled_ensure_zone_multiple_clickhouse_server(
         &mut self,
         sled_id: SledUuid,
@@ -1275,8 +1328,8 @@ impl<'a> BlueprintBuilder<'a> {
             let underlay_ip = self.sled_alloc_ip(sled_id)?;
             let pool_name =
                 self.sled_select_zpool(sled_id, ZoneKind::ClickhouseServer)?;
-            let port = omicron_common::address::CLICKHOUSE_HTTP_PORT;
-            let address = SocketAddrV6::new(underlay_ip, port, 0, 0);
+            let address =
+                SocketAddrV6::new(underlay_ip, CLICKHOUSE_HTTP_PORT, 0, 0);
             let zone_type = BlueprintZoneType::ClickhouseServer(
                 blueprint_zone_type::ClickhouseServer {
                     address,
@@ -1646,11 +1699,11 @@ impl<'a> BlueprintBuilder<'a> {
     /// ordinarily only come from RSS.
     ///
     /// TODO-cleanup: Remove when external DNS addresses are in the policy.
-    #[track_caller]
-    pub(crate) fn add_external_dns_ip(&mut self, addr: IpAddr) {
-        self.external_networking()
-            .expect("failed to initialize external networking allocator")
-            .add_external_dns_ip(addr);
+    pub(crate) fn add_external_dns_ip(
+        &mut self,
+        addr: IpAddr,
+    ) -> Result<(), Error> {
+        self.external_networking()?.add_external_dns_ip(addr)
     }
 }
 

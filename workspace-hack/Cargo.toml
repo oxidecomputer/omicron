@@ -32,14 +32,15 @@ byteorder = { version = "1.5.0" }
 bytes = { version = "1.7.2", features = ["serde"] }
 chrono = { version = "0.4.38", features = ["serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
-clap = { version = "4.5.18", features = ["cargo", "derive", "env", "wrap_help"] }
-clap_builder = { version = "4.5.18", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
+clap = { version = "4.5.20", features = ["cargo", "derive", "env", "wrap_help"] }
+clap_builder = { version = "4.5.20", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
 console = { version = "0.15.8" }
 crossbeam-epoch = { version = "0.9.18" }
 crossbeam-utils = { version = "0.8.19" }
 crypto-common = { version = "0.1.6", default-features = false, features = ["getrandom", "std"] }
 curve25519-dalek = { version = "4.1.3", features = ["digest", "legacy_compatibility", "rand_core"] }
 digest = { version = "0.10.7", features = ["mac", "oid", "std"] }
+dropshot = { version = "0.12.0", default-features = false, features = ["usdt-probes"] }
 ecdsa = { version = "0.16.9", features = ["pem", "signing", "std", "verifying"] }
 ed25519-dalek = { version = "2.1.1", features = ["digest", "pkcs8", "rand_core"] }
 either = { version = "1.13.0" }
@@ -47,13 +48,13 @@ elliptic-curve = { version = "0.13.8", features = ["ecdh", "hazmat", "pem", "std
 ff = { version = "0.13.0", default-features = false, features = ["alloc"] }
 flate2 = { version = "1.0.34" }
 fs-err = { version = "2.11.0", default-features = false, features = ["tokio"] }
-futures = { version = "0.3.30" }
-futures-channel = { version = "0.3.30", features = ["sink"] }
-futures-core = { version = "0.3.30" }
-futures-io = { version = "0.3.30" }
-futures-sink = { version = "0.3.30" }
-futures-task = { version = "0.3.30", default-features = false, features = ["std"] }
-futures-util = { version = "0.3.30", features = ["channel", "io", "sink"] }
+futures = { version = "0.3.31" }
+futures-channel = { version = "0.3.31", features = ["sink"] }
+futures-core = { version = "0.3.31" }
+futures-io = { version = "0.3.31" }
+futures-sink = { version = "0.3.31" }
+futures-task = { version = "0.3.31", default-features = false, features = ["std"] }
+futures-util = { version = "0.3.31", features = ["channel", "io", "sink"] }
 gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "9bbac475dcaac88286c07a20b6bd3e94fc81d7f0", features = ["std"] }
 generic-array = { version = "0.14.7", default-features = false, features = ["more_lengths", "zeroize"] }
 getrandom = { version = "0.2.14", default-features = false, features = ["js", "rdrand", "std"] }
@@ -86,6 +87,7 @@ pkcs8 = { version = "0.10.2", default-features = false, features = ["encryption"
 postgres-types = { version = "0.2.8", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 predicates = { version = "3.1.2" }
 proc-macro2 = { version = "1.0.86" }
+qorb = { git = "https://github.com/oxidecomputer/qorb", branch = "master", features = ["qtop"] }
 quote = { version = "1.0.37" }
 regex = { version = "1.10.6" }
 regex-automata = { version = "0.4.6", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "unicode"] }
@@ -142,14 +144,15 @@ bytes = { version = "1.7.2", features = ["serde"] }
 cc = { version = "1.0.97", default-features = false, features = ["parallel"] }
 chrono = { version = "0.4.38", features = ["serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
-clap = { version = "4.5.18", features = ["cargo", "derive", "env", "wrap_help"] }
-clap_builder = { version = "4.5.18", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
+clap = { version = "4.5.20", features = ["cargo", "derive", "env", "wrap_help"] }
+clap_builder = { version = "4.5.20", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
 console = { version = "0.15.8" }
 crossbeam-epoch = { version = "0.9.18" }
 crossbeam-utils = { version = "0.8.19" }
 crypto-common = { version = "0.1.6", default-features = false, features = ["getrandom", "std"] }
 curve25519-dalek = { version = "4.1.3", features = ["digest", "legacy_compatibility", "rand_core"] }
 digest = { version = "0.10.7", features = ["mac", "oid", "std"] }
+dropshot = { version = "0.12.0", default-features = false, features = ["usdt-probes"] }
 ecdsa = { version = "0.16.9", features = ["pem", "signing", "std", "verifying"] }
 ed25519-dalek = { version = "2.1.1", features = ["digest", "pkcs8", "rand_core"] }
 either = { version = "1.13.0" }
@@ -157,13 +160,13 @@ elliptic-curve = { version = "0.13.8", features = ["ecdh", "hazmat", "pem", "std
 ff = { version = "0.13.0", default-features = false, features = ["alloc"] }
 flate2 = { version = "1.0.34" }
 fs-err = { version = "2.11.0", default-features = false, features = ["tokio"] }
-futures = { version = "0.3.30" }
-futures-channel = { version = "0.3.30", features = ["sink"] }
-futures-core = { version = "0.3.30" }
-futures-io = { version = "0.3.30" }
-futures-sink = { version = "0.3.30" }
-futures-task = { version = "0.3.30", default-features = false, features = ["std"] }
-futures-util = { version = "0.3.30", features = ["channel", "io", "sink"] }
+futures = { version = "0.3.31" }
+futures-channel = { version = "0.3.31", features = ["sink"] }
+futures-core = { version = "0.3.31" }
+futures-io = { version = "0.3.31" }
+futures-sink = { version = "0.3.31" }
+futures-task = { version = "0.3.31", default-features = false, features = ["std"] }
+futures-util = { version = "0.3.31", features = ["channel", "io", "sink"] }
 gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "9bbac475dcaac88286c07a20b6bd3e94fc81d7f0", features = ["std"] }
 generic-array = { version = "0.14.7", default-features = false, features = ["more_lengths", "zeroize"] }
 getrandom = { version = "0.2.14", default-features = false, features = ["js", "rdrand", "std"] }
@@ -196,6 +199,7 @@ pkcs8 = { version = "0.10.2", default-features = false, features = ["encryption"
 postgres-types = { version = "0.2.8", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 predicates = { version = "3.1.2" }
 proc-macro2 = { version = "1.0.86" }
+qorb = { git = "https://github.com/oxidecomputer/qorb", branch = "master", features = ["qtop"] }
 quote = { version = "1.0.37" }
 regex = { version = "1.10.6" }
 regex-automata = { version = "0.4.6", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "unicode"] }

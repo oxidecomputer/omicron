@@ -877,7 +877,6 @@ name = "bootstrap-agent-api"
 version = "0.1.0"
 dependencies = [
  "dropshot",
- "nexus-client",
  "omicron-common",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -1109,9 +1108,9 @@ dependencies = [
 
 [[package]]
 name = "cfg-expr"
-version = "0.16.0"
+version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "345c78335be0624ed29012dc10c49102196c6882c12dde65d9f35b02da2aada8"
+checksum = "d0890061c4d3223e7267f3bad2ec40b997d64faac1c2815a4a9d95018e2b9e9c"
 dependencies = [
  "smallvec 1.13.2",
  "target-lexicon",
@@ -1243,9 +1242,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.5.18"
+version = "4.5.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b0956a43b323ac1afaffc053ed5c4b7c1f1800bacd1683c353aabbb752515dd3"
+checksum = "b97f376d85a664d5837dbae44bf546e6477a679ff6610010f17276f686d867e8"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -1253,9 +1252,9 @@ dependencies = [
 
 [[package]]
 name = "clap_builder"
-version = "4.5.18"
+version = "4.5.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4d72166dd41634086d5803a47eb71ae740e61d84709c36f3c34110173db3961b"
+checksum = "19bc80abd44e4bed93ca373a0704ccbd1b710dc5749406201bb018272808dc54"
 dependencies = [
  "anstream",
  "anstyle",
@@ -2004,7 +2003,7 @@ dependencies = [
 [[package]]
 name = "ddm-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?branch=hyper-v1-no-merge#b13b5b240f3967de753fd589b1036745d2770b52"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=056283eb02b6887fbf27f66a215662520f7c159c#056283eb02b6887fbf27f66a215662520f7c159c"
 dependencies = [
  "oxnet",
  "percent-encoding",
@@ -2325,6 +2324,7 @@ dependencies = [
  "hickory-resolver",
  "hickory-server",
  "http 1.1.0",
+ "internal-dns-types",
  "omicron-test-utils",
  "omicron-workspace-hack",
  "openapi-lint",
@@ -2352,6 +2352,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "dropshot",
+ "internal-dns-types",
  "omicron-workspace-hack",
  "schemars",
  "serde",
@@ -2361,10 +2362,10 @@ dependencies = [
 name = "dns-service-client"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "chrono",
  "expectorate",
  "http 1.1.0",
+ "internal-dns-types",
  "omicron-workspace-hack",
  "progenitor",
  "reqwest 0.12.7",
@@ -3013,9 +3014,9 @@ checksum = "e6d5a32815ae3f33302d95fdcb2ce17862f8c65363dcfd29360480ba1001fc9c"
 
 [[package]]
 name = "futures"
-version = "0.3.30"
+version = "0.3.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "645c6916888f6cb6350d2550b80fb63e734897a8498abe35cfb732b6487804b0"
+checksum = "65bc07b1a8bc7c85c5f2e110c476c7389b4554ba72af57d8445ea63a576b0876"
 dependencies = [
  "futures-channel",
  "futures-core",
@@ -3028,9 +3029,9 @@ dependencies = [
 
 [[package]]
 name = "futures-channel"
-version = "0.3.30"
+version = "0.3.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eac8f7d7865dcb88bd4373ab671c8cf4508703796caa2b1985a9ca867b3fcb78"
+checksum = "2dff15bf788c671c1934e366d07e30c1814a8ef514e1af724a602e8a2fbe1b10"
 dependencies = [
  "futures-core",
  "futures-sink",
@@ -3038,15 +3039,15 @@ dependencies = [
 
 [[package]]
 name = "futures-core"
-version = "0.3.30"
+version = "0.3.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dfc6580bb841c5a68e9ef15c77ccc837b40a7504914d52e47b8b0e9bbda25a1d"
+checksum = "05f29059c0c2090612e8d742178b0580d2dc940c837851ad723096f87af6663e"
 
 [[package]]
 name = "futures-executor"
-version = "0.3.30"
+version = "0.3.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a576fc72ae164fca6b9db127eaa9a9dda0d61316034f33a0a0d4eda41f02b01d"
+checksum = "1e28d1d997f585e54aebc3f97d39e72338912123a67330d723fdbb564d646c9f"
 dependencies = [
  "futures-core",
  "futures-task",
@@ -3055,9 +3056,9 @@ dependencies = [
 
 [[package]]
 name = "futures-io"
-version = "0.3.30"
+version = "0.3.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a44623e20b9681a318efdd71c299b6b222ed6f231972bfe2f224ebad6311f0c1"
+checksum = "9e5c1b78ca4aae1ac06c48a526a655760685149f0d465d21f37abfe57ce075c6"
 
 [[package]]
 name = "futures-lite"
@@ -3074,9 +3075,9 @@ dependencies = [
 
 [[package]]
 name = "futures-macro"
-version = "0.3.30"
+version = "0.3.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87750cf4b7a4c0625b1529e4c543c2182106e4dedc60a2a6455e00d212c489ac"
+checksum = "162ee34ebcb7c64a8abebc059ce0fee27c2262618d7b60ed8faf72fef13c3650"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3085,15 +3086,15 @@ dependencies = [
 
 [[package]]
 name = "futures-sink"
-version = "0.3.30"
+version = "0.3.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9fb8e00e87438d937621c1c6269e53f536c14d3fbd6a042bb24879e57d474fb5"
+checksum = "e575fab7d1e0dcb8d0c7bcf9a63ee213816ab51902e6d244a95819acacf1d4f7"
 
 [[package]]
 name = "futures-task"
-version = "0.3.30"
+version = "0.3.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38d84fa142264698cdce1a9f9172cf383a0c82de1bddcf3092901442c4097004"
+checksum = "f90f7dce0722e95104fcb095585910c0977252f286e354b5e3bd38902cd99988"
 
 [[package]]
 name = "futures-timer"
@@ -3103,9 +3104,9 @@ checksum = "f288b0a4f20f9a56b5d1da57e2227c661b7b16168e2f72365f57b63326e29b24"
 
 [[package]]
 name = "futures-util"
-version = "0.3.30"
+version = "0.3.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3d6401deb83407ab3da39eba7e33987a73c3df0c82b4bb5813ee871c19c41d48"
+checksum = "9fa08315bb612088cc391249efdc3bc77536f16c91f6cf495e6fbe85b20a4a81"
 dependencies = [
  "futures-channel",
  "futures-core",
@@ -3381,9 +3382,9 @@ dependencies = [
 
 [[package]]
 name = "guppy"
-version = "0.17.7"
+version = "0.17.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3bff2f6a9d515cf6453282af93363f93bdf570792a6f4f619756e46696d773fa"
+checksum = "bf47f1dcacf93614a4181e308b8341f5bf5d4f7ae2f67cc5a078df8e7023ea63"
 dependencies = [
  "ahash",
  "camino",
@@ -4155,7 +4156,7 @@ dependencies = [
 [[package]]
 name = "illumos-sys-hdrs"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=76878de67229ea113d70503c441eab47ac5dc653#76878de67229ea113d70503c441eab47ac5dc653"
+source = "git+https://github.com/oxidecomputer/opte?rev=f3002b356da7d0e4ca15beb66a5566a92919baaa#f3002b356da7d0e4ca15beb66a5566a92919baaa"
 
 [[package]]
 name = "illumos-utils"
@@ -4169,7 +4170,9 @@ dependencies = [
  "camino-tempfile",
  "cfg-if",
  "crucible-smf",
+ "dropshot",
  "futures",
+ "http 1.1.0",
  "ipnetwork",
  "libc",
  "macaddr",
@@ -4186,6 +4189,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
+ "slog-error-chain",
  "smf",
  "thiserror",
  "tokio",
@@ -4393,24 +4397,40 @@ dependencies = [
 ]
 
 [[package]]
-name = "internal-dns"
+name = "internal-dns-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "dropshot",
+ "hickory-resolver",
+ "internal-dns-resolver",
+ "internal-dns-types",
+ "omicron-common",
+ "omicron-workspace-hack",
+ "slog",
+ "tokio",
+]
+
+[[package]]
+name = "internal-dns-resolver"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_matches",
- "chrono",
  "dns-server",
  "dns-service-client",
  "dropshot",
  "expectorate",
  "futures",
  "hickory-resolver",
- "hyper 1.4.1",
+ "internal-dns-types",
  "omicron-common",
  "omicron-test-utils",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "progenitor",
+ "qorb",
  "reqwest 0.12.7",
  "serde",
  "serde_json",
@@ -4419,22 +4439,21 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
- "uuid",
 ]
 
 [[package]]
-name = "internal-dns-cli"
+name = "internal-dns-types"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "clap",
- "dropshot",
- "hickory-resolver",
- "internal-dns",
+ "chrono",
+ "expectorate",
  "omicron-common",
+ "omicron-uuid-kinds",
  "omicron-workspace-hack",
- "slog",
- "tokio",
+ "schemars",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -4472,9 +4491,9 @@ dependencies = [
 
 [[package]]
 name = "ipnet"
-version = "2.10.0"
+version = "2.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "187674a687eed5fe42285b40c6291f9a01517d415fad1c3cbc6a9f778af7fcd4"
+checksum = "ddc24109865250148c2e0f3d25d4f0f479571723792d3802153c60922a4fb708"
 
 [[package]]
 name = "ipnetwork"
@@ -4596,7 +4615,7 @@ dependencies = [
 [[package]]
 name = "kstat-macro"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=76878de67229ea113d70503c441eab47ac5dc653#76878de67229ea113d70503c441eab47ac5dc653"
+source = "git+https://github.com/oxidecomputer/opte?rev=f3002b356da7d0e4ca15beb66a5566a92919baaa#f3002b356da7d0e4ca15beb66a5566a92919baaa"
 dependencies = [
  "quote",
  "syn 2.0.79",
@@ -4757,7 +4776,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c2a198fb6b0eada2a8df47933734e6d35d350665a33a3593d7164fa52c75c19"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -5093,7 +5112,7 @@ dependencies = [
 [[package]]
 name = "mg-admin-client"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/maghemite?branch=hyper-v1-no-merge#b13b5b240f3967de753fd589b1036745d2770b52"
+source = "git+https://github.com/oxidecomputer/maghemite?rev=056283eb02b6887fbf27f66a215662520f7c159c#056283eb02b6887fbf27f66a215662520f7c159c"
 dependencies = [
  "anyhow",
  "chrono",
@@ -5473,7 +5492,8 @@ dependencies = [
  "gateway-client",
  "hyper-rustls 0.26.0",
  "illumos-utils",
- "internal-dns",
+ "internal-dns-resolver",
+ "internal-dns-types",
  "ipnetwork",
  "itertools 0.13.0",
  "macaddr",
@@ -5583,6 +5603,7 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "chrono",
+ "clickhouse-admin-client",
  "clickhouse-admin-types",
  "expectorate",
  "futures",
@@ -5673,10 +5694,10 @@ dependencies = [
  "clickhouse-admin-types",
  "cockroach-admin-client",
  "diesel",
- "dns-service-client",
  "futures",
  "httptest",
- "internal-dns",
+ "internal-dns-resolver",
+ "internal-dns-types",
  "ipnet",
  "newtype-uuid",
  "nexus-config",
@@ -5718,7 +5739,7 @@ dependencies = [
  "expectorate",
  "gateway-client",
  "indexmap 2.5.0",
- "internal-dns",
+ "internal-dns-resolver",
  "ipnet",
  "maplit",
  "nexus-config",
@@ -5842,7 +5863,8 @@ dependencies = [
  "http-body-util",
  "hyper 1.4.1",
  "illumos-utils",
- "internal-dns",
+ "internal-dns-resolver",
+ "internal-dns-types",
  "nexus-client",
  "nexus-config",
  "nexus-db-queries",
@@ -5892,13 +5914,12 @@ dependencies = [
  "cookie",
  "derive-where",
  "derive_more",
- "dns-service-client",
  "dropshot",
  "futures",
  "gateway-client",
  "http 1.1.0",
  "humantime",
- "internal-dns",
+ "internal-dns-types",
  "ipnetwork",
  "newtype-uuid",
  "newtype_derive",
@@ -6461,7 +6482,8 @@ dependencies = [
  "assert_matches",
  "dropshot",
  "futures",
- "internal-dns",
+ "internal-dns-resolver",
+ "internal-dns-types",
  "live-tests-macros",
  "nexus-client",
  "nexus-config",
@@ -6494,11 +6516,14 @@ dependencies = [
  "camino",
  "cargo_metadata",
  "clap",
+ "expectorate",
  "newtype_derive",
+ "omicron-test-utils",
  "omicron-workspace-hack",
  "parse-display",
  "petgraph",
  "serde",
+ "subprocess",
  "toml 0.8.19",
 ]
 
@@ -6518,6 +6543,7 @@ dependencies = [
  "cancel-safe-futures",
  "chrono",
  "clap",
+ "clickhouse-admin-client",
  "cockroach-admin-client",
  "criterion",
  "crucible-agent-client",
@@ -6545,7 +6571,8 @@ dependencies = [
  "hyper 1.4.1",
  "hyper-rustls 0.26.0",
  "illumos-utils",
- "internal-dns",
+ "internal-dns-resolver",
+ "internal-dns-types",
  "ipnetwork",
  "itertools 0.13.0",
  "macaddr",
@@ -6599,6 +6626,7 @@ dependencies = [
  "pretty_assertions",
  "progenitor-client",
  "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=11371b0f3743f8df5b047dc0edc2699f4bdf3927)",
+ "qorb",
  "rand",
  "rcgen",
  "ref-cast",
@@ -6664,7 +6692,8 @@ dependencies = [
  "http 1.1.0",
  "humantime",
  "indicatif",
- "internal-dns",
+ "internal-dns-resolver",
+ "internal-dns-types",
  "ipnetwork",
  "itertools 0.13.0",
  "multimap",
@@ -6833,7 +6862,8 @@ dependencies = [
  "hyper-staticfile",
  "illumos-utils",
  "installinator-common",
- "internal-dns",
+ "internal-dns-resolver",
+ "internal-dns-types",
  "ipnetwork",
  "itertools 0.13.0",
  "key-manager",
@@ -6978,6 +7008,7 @@ dependencies = [
  "curve25519-dalek",
  "digest",
  "dof",
+ "dropshot",
  "ecdsa",
  "ed25519-dalek",
  "either",
@@ -7030,6 +7061,7 @@ dependencies = [
  "postgres-types",
  "predicates",
  "proc-macro2",
+ "qorb",
  "quote",
  "regex",
  "regex-automata",
@@ -7239,7 +7271,7 @@ dependencies = [
 [[package]]
 name = "opte"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=76878de67229ea113d70503c441eab47ac5dc653#76878de67229ea113d70503c441eab47ac5dc653"
+source = "git+https://github.com/oxidecomputer/opte?rev=f3002b356da7d0e4ca15beb66a5566a92919baaa#f3002b356da7d0e4ca15beb66a5566a92919baaa"
 dependencies = [
  "cfg-if",
  "dyn-clone",
@@ -7256,7 +7288,7 @@ dependencies = [
 [[package]]
 name = "opte-api"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=76878de67229ea113d70503c441eab47ac5dc653#76878de67229ea113d70503c441eab47ac5dc653"
+source = "git+https://github.com/oxidecomputer/opte?rev=f3002b356da7d0e4ca15beb66a5566a92919baaa#f3002b356da7d0e4ca15beb66a5566a92919baaa"
 dependencies = [
  "illumos-sys-hdrs",
  "ipnetwork",
@@ -7268,7 +7300,7 @@ dependencies = [
 [[package]]
 name = "opte-ioctl"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=76878de67229ea113d70503c441eab47ac5dc653#76878de67229ea113d70503c441eab47ac5dc653"
+source = "git+https://github.com/oxidecomputer/opte?rev=f3002b356da7d0e4ca15beb66a5566a92919baaa#f3002b356da7d0e4ca15beb66a5566a92919baaa"
 dependencies = [
  "libc",
  "libnet 0.1.0 (git+https://github.com/oxidecomputer/netadm-sys)",
@@ -7336,7 +7368,7 @@ dependencies = [
 [[package]]
 name = "oxide-vpc"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/opte?rev=76878de67229ea113d70503c441eab47ac5dc653#76878de67229ea113d70503c441eab47ac5dc653"
+source = "git+https://github.com/oxidecomputer/opte?rev=f3002b356da7d0e4ca15beb66a5566a92919baaa#f3002b356da7d0e4ca15beb66a5566a92919baaa"
 dependencies = [
  "cfg-if",
  "illumos-sys-hdrs",
@@ -7345,6 +7377,7 @@ dependencies = [
  "serde",
  "smoltcp 0.11.0",
  "tabwriter",
+ "uuid",
  "zerocopy 0.7.34",
 ]
 
@@ -7406,7 +7439,8 @@ dependencies = [
  "expectorate",
  "futures",
  "httpmock",
- "internal-dns",
+ "internal-dns-resolver",
+ "internal-dns-types",
  "nexus-client",
  "nexus-types",
  "omicron-common",
@@ -7534,7 +7568,8 @@ dependencies = [
  "chrono",
  "clap",
  "dropshot",
- "internal-dns",
+ "internal-dns-resolver",
+ "internal-dns-types",
  "nexus-client",
  "omicron-common",
  "omicron-test-utils",
@@ -8629,8 +8664,8 @@ dependencies = [
 
 [[package]]
 name = "qorb"
-version = "0.0.1"
-source = "git+https://github.com/oxidecomputer/qorb?branch=master#9d0cdc4861f8d10cadd90c278e36b8dd833561ec"
+version = "0.0.2"
+source = "git+https://github.com/oxidecomputer/qorb?branch=master#de6f7784790c813931042dcc98c84413ecf11826"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -8871,11 +8906,11 @@ dependencies = [
  "camino-tempfile",
  "chrono",
  "clap",
- "dns-service-client",
  "dropshot",
  "expectorate",
  "humantime",
  "indexmap 2.5.0",
+ "internal-dns-types",
  "nexus-client",
  "nexus-db-queries",
  "nexus-inventory",
@@ -10141,9 +10176,9 @@ dependencies = [
 
 [[package]]
 name = "similar-asserts"
-version = "1.5.0"
+version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e041bb827d1bfca18f213411d51b665309f1afb37a04a5d1464530e13779fc0f"
+checksum = "cfe85670573cd6f0fa97940f26e7e6601213c3b0555246c24234131f88c5709e"
 dependencies = [
  "console",
  "similar",
@@ -11056,9 +11091,9 @@ checksum = "61c41af27dd6d1e27b1b16b489db798443478cef1f06a660c96db617ba5de3b1"
 
 [[package]]
 name = "target-spec"
-version = "3.2.1"
+version = "3.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "419ccf3482090c626619fa2574290aaa00b696f9ab73af08fbf48260565431bf"
+checksum = "4c5743abbf7bc7d5296ae61368b50cd218ac09432281cb5d48b97308d5c27909"
 dependencies = [
  "cfg-expr",
  "guppy-workspace-hack",
@@ -11101,12 +11136,12 @@ dependencies = [
 
 [[package]]
 name = "terminal_size"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21bebf2b7c9e0a515f6e0f8c51dc0f8e4696391e6f1ff30379559f8365fb0df7"
+checksum = "4f599bd7ca042cfdf8f4512b277c02ba102247820f9d9d4a9f521f496751a6ef"
 dependencies = [
  "rustix",
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -12550,7 +12585,8 @@ dependencies = [
  "installinator-api",
  "installinator-client",
  "installinator-common",
- "internal-dns",
+ "internal-dns-resolver",
+ "internal-dns-types",
  "itertools 0.13.0",
  "maplit",
  "omicron-certificates",

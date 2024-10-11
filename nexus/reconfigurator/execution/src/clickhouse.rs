@@ -92,8 +92,11 @@ pub(crate) async fn deploy_nodes(
         let log = log.new(slog::o!("admin_url" => admin_url.clone()));
         futs.push(Either::Left(async move {
             let client = Client::new(&admin_url, log.clone());
-            client.generate_keeper_config(&config).await.map(|_| ()).map_err(
-                |e| {
+            client
+                .generate_keeper_config_and_enable(&config)
+                .await
+                .map(|_| ())
+                .map_err(|e| {
                     anyhow!(
                         concat!(
                             "failed to send config for clickhouse keeper ",
@@ -104,8 +107,7 @@ pub(crate) async fn deploy_nodes(
                         admin_url,
                         e
                     )
-                },
-            )
+                })
         }));
     }
     for config in server_configs {
@@ -119,8 +121,11 @@ pub(crate) async fn deploy_nodes(
         let log = opctx.log.new(slog::o!("admin_url" => admin_url.clone()));
         futs.push(Either::Right(async move {
             let client = Client::new(&admin_url, log.clone());
-            client.generate_server_config(&config).await.map(|_| ()).map_err(
-                |e| {
+            client
+                .generate_server_config_and_enable(&config)
+                .await
+                .map(|_| ())
+                .map_err(|e| {
                     anyhow!(
                         concat!(
                             "failed to send config for clickhouse server ",
@@ -131,8 +136,7 @@ pub(crate) async fn deploy_nodes(
                         admin_url,
                         e
                     )
-                },
-            )
+                })
         }));
     }
 
