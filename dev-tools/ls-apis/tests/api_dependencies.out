@@ -2,7 +2,10 @@ Bootstrap Agent (client: bootstrap-agent-client)
     consumed by: omicron-sled-agent (omicron/sled-agent)
     consumed by: wicketd (omicron/wicketd)
 
-Clickhouse Cluster Admin (client: clickhouse-admin-client)
+Clickhouse Cluster Admin for Keepers (client: clickhouse-admin-keeper-client)
+    consumed by: omicron-nexus (omicron/nexus)
+
+Clickhouse Cluster Admin for Servers (client: clickhouse-admin-server-client)
     consumed by: omicron-nexus (omicron/nexus)
 
 CockroachDB Cluster Admin (client: cockroach-admin-client)
