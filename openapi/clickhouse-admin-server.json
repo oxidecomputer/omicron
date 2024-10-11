@@ -1,7 +1,7 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "ClickHouse Cluster Admin Keeper API",
+    "title": "ClickHouse Cluster Admin Server API",
     "description": "API for interacting with the Oxide control plane's ClickHouse cluster replica servers",
     "contact": {
       "url": "https://oxide.computer",
