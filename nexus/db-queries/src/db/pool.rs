@@ -8,8 +8,8 @@
 use super::Config as DbConfig;
 use crate::db::pool_connection::{DieselPgConnector, DieselPgConnectorArgs};
 
-use internal_dns_types::names::ServiceName;
 use internal_dns_resolver::QorbResolver;
+use internal_dns_types::names::ServiceName;
 use qorb::backend;
 use qorb::policy::Policy;
 use qorb::resolver::{AllBackends, Resolver};
