@@ -454,8 +454,8 @@ to:   blueprint  ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 
 > 
 
-> reset
-reset reconfigurator-sim state
+> wipe
+wiped reconfigurator-sim state
 
 > load-example --seed test-basic --nsleds 1 --ndisks-per-sled 4 --no-zones
 loaded example system with:

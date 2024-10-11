@@ -138,7 +138,7 @@ impl ReconfiguratorSim {
     }
 
     // Reset the state of the REPL.
-    fn reset(&mut self) {
+    fn wipe(&mut self) {
         *self = Self::new(self.log.clone());
     }
 
@@ -362,7 +362,7 @@ fn process_entry(sim: &mut ReconfiguratorSim, entry: String) -> LoopResult {
         Commands::LoadExample(args) => cmd_load_example(sim, args),
         Commands::FileContents(args) => cmd_file_contents(args),
         Commands::Save(args) => cmd_save(sim, args),
-        Commands::Reset => cmd_reset(sim),
+        Commands::Wipe => cmd_wipe(sim),
     };
 
     match cmd_result {
@@ -436,7 +436,7 @@ enum Commands {
     /// show information about what's in a saved file
     FileContents(FileContentsArgs),
     /// reset the state of the REPL
-    Reset,
+    Wipe,
 }
 
 #[derive(Debug, Args)]
@@ -1089,9 +1089,9 @@ fn cmd_save(
     )))
 }
 
-fn cmd_reset(sim: &mut ReconfiguratorSim) -> anyhow::Result<Option<String>> {
-    sim.reset();
-    Ok(Some("reset reconfigurator-sim state".to_string()))
+fn cmd_wipe(sim: &mut ReconfiguratorSim) -> anyhow::Result<Option<String>> {
+    sim.wipe();
+    Ok(Some("wiped reconfigurator-sim state".to_string()))
 }
 
 fn cmd_show(sim: &mut ReconfiguratorSim) -> anyhow::Result<Option<String>> {
