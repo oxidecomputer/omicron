@@ -4170,7 +4170,7 @@ dependencies = [
  "camino-tempfile",
  "cfg-if",
  "crucible-smf",
- "dropshot 0.12.0",
+ "dropshot",
  "futures",
  "http 1.1.0",
  "ipnetwork",
