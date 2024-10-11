@@ -141,11 +141,12 @@ fn run_apis(apis: &SystemApis, args: ShowDepsArgs) -> Result<()> {
         {
             let (repo_name, package_path) = apis.package_label(s)?;
             println!(
-                "    consumed by: {} ({}/{}) via paths: {}",
+                "    consumed by: {} ({}/{}) via {} path{}",
                 s,
                 repo_name,
                 package_path,
                 dep_paths.len(),
+                if dep_paths.len() == 1 { "" } else { "s" },
             );
             if args.show_deps {
                 for (i, dep_path) in dep_paths.iter().enumerate() {

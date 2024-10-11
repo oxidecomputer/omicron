@@ -282,12 +282,12 @@ impl Workspace {
                 let dep_pkg = self.packages_by_id.get(did).unwrap();
                 let dep_node = self.nodes_by_id.get(did).unwrap();
                 func(dep_pkg, &path);
-                let dep_path = path.with_dependency_on(did.clone());
                 if seen.contains(did) {
                     continue;
                 }
 
                 seen.insert(did.clone());
+                let dep_path = path.with_dependency_on(did.clone());
                 remaining.push(Remaining { node: dep_node, path: dep_path });
             }
         }

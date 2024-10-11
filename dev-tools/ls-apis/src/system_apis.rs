@@ -566,7 +566,6 @@ impl<'a> ClientDependenciesTracker<'a> {
 
         // This is the name of a known client package.  Record it.
         let client_pkgname = ClientPackageName::from(pkgname.to_owned());
-
         self.api_consumers
             .entry(client_pkgname.clone())
             .or_insert_with(BTreeMap::new)
