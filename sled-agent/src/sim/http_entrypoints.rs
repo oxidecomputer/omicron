@@ -404,6 +404,7 @@ impl SledAgentApi for SledAgentSimImpl {
     async fn support_bundle_get(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<SupportBundlePathParam>,
+        _body: TypedBody<SupportBundleGetQueryParams>,
     ) -> Result<HttpResponseHeaders<HttpResponseOk<FreeformBody>>, HttpError>
     {
         let sa = rqctx.context();

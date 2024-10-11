@@ -187,6 +187,7 @@ pub trait SledAgentApi {
     async fn support_bundle_get(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<SupportBundlePathParam>,
+        body: TypedBody<SupportBundleGetQueryParams>,
     ) -> Result<HttpResponseHeaders<HttpResponseOk<FreeformBody>>, HttpError>;
 
     /// Delete a service bundle from a particular dataset
@@ -607,10 +608,35 @@ pub struct SupportBundlePathParam {
     pub support_bundle_id: SupportBundleUuid,
 }
 
+/// Path parameters for Support Bundle requests (sled agent API)
+#[derive(Deserialize, JsonSchema)]
+pub struct SupportBundleFilePathParam {
+    #[serde(flatten)]
+    pub parent: SupportBundlePathParam,
+}
+
 /// Metadata about a support bundle
 #[derive(Deserialize, Serialize, JsonSchema)]
 pub struct SupportBundleCreateQueryParams {
     pub hash: ArtifactHash,
+}
+
+/// Query parameters for reading the support bundle
+#[derive(Deserialize, Serialize, JsonSchema)]
+pub struct SupportBundleGetQueryParams {
+    pub query_type: SupportBundleQueryType,
+}
+
+/// Describes the type of access to the support bundle
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SupportBundleQueryType {
+    /// Access the whole support bundle
+    Whole,
+    /// Access the names of all files within the support bundle
+    Index,
+    /// Access a specific file within the support bundle
+    Path { file_path: String },
 }
 
 #[derive(Deserialize, Serialize, JsonSchema, PartialEq)]

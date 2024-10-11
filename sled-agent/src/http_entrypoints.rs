@@ -16,6 +16,7 @@ use dropshot::{
     HttpResponseUpdatedNoContent, Path, Query, RequestContext, StreamingBody,
     TypedBody,
 };
+use futures::TryStreamExt;
 use nexus_sled_agent_shared::inventory::{
     Inventory, OmicronZonesConfig, SledRole,
 };
@@ -51,6 +52,8 @@ use sled_agent_types::zone_bundle::{
     StorageLimit, ZoneBundleId, ZoneBundleMetadata,
 };
 use std::collections::BTreeMap;
+use std::io::Read;
+use tokio_util::io::ReaderStream;
 
 type SledApiDescription = ApiDescription<SledAgent>;
 
@@ -61,6 +64,60 @@ pub fn api() -> SledApiDescription {
 }
 
 enum SledAgentImpl {}
+
+// TODO: Patch the error kinds?
+// TODO: Maybe move this impl out of this file?
+
+fn stream_zip_entry_helper(
+    tx: &tokio::sync::mpsc::Sender<Result<Vec<u8>, HttpError>>,
+    file: std::fs::File,
+    entry_path: String,
+) -> Result<(), HttpError> {
+    let mut archive = zip::ZipArchive::new(file)
+        .map_err(|err| HttpError::for_unavail(None, err.to_string()))?;
+    let mut reader = archive
+        .by_name(&entry_path)
+        .map_err(|err| HttpError::for_unavail(None, err.to_string()))?;
+    if !reader.is_file() {
+        return Err(HttpError::for_unavail(None, "Not a file".to_string()));
+    }
+
+    loop {
+        let mut buf = vec![0; 4096];
+        let n = reader
+            .read(&mut buf)
+            .map_err(|err| HttpError::for_unavail(None, err.to_string()))?;
+        if n == 0 {
+            return Ok::<(), HttpError>(());
+        }
+        buf.truncate(n);
+        tx.blocking_send(Ok(buf))
+            .map_err(|err| HttpError::for_unavail(None, err.to_string()))?;
+    }
+}
+
+// Returns a stream of bytes representing an entry within a zipfile.
+//
+// Q: Why does this spawn a task?
+// A: Two reasons - first, the "zip" crate is synchronous, and secondly,
+// it has strong opinions about the "archive" living as long as the "entry
+// reader". Without a task, streaming an entry from the archive would require
+// a self-referential struct, as described in:
+// https://morestina.net/blog/1868/self-referential-types-for-fun-and-profit
+fn stream_zip_entry(
+    file: std::fs::File,
+    entry_path: String,
+) -> tokio_stream::wrappers::ReceiverStream<Result<Vec<u8>, HttpError>> {
+    let (tx, rx) = tokio::sync::mpsc::channel(16);
+
+    tokio::task::spawn_blocking(move || {
+        if let Err(err) = stream_zip_entry_helper(&tx, file, entry_path) {
+            let _ = tx.blocking_send(Err(err));
+        }
+    });
+
+    tokio_stream::wrappers::ReceiverStream::new(rx)
+}
 
 impl SledAgentApi for SledAgentImpl {
     type Context = SledAgent;
@@ -265,6 +322,7 @@ impl SledAgentApi for SledAgentImpl {
     async fn support_bundle_get(
         rqctx: RequestContext<Self::Context>,
         path_params: Path<SupportBundlePathParam>,
+        body: TypedBody<SupportBundleGetQueryParams>,
     ) -> Result<HttpResponseHeaders<HttpResponseOk<FreeformBody>>, HttpError>
     {
         let sa = rqctx.context();
@@ -275,16 +333,41 @@ impl SledAgentApi for SledAgentImpl {
             .support_bundle_get(zpool_id, dataset_id, support_bundle_id)
             .await?;
 
-        let file_access = hyper_staticfile::vfs::TokioFileAccess::new(file);
-        let file_stream =
-            hyper_staticfile::util::FileBytesStream::new(file_access);
-        let body = Body::wrap(hyper_staticfile::Body::Full(file_stream));
+        let query = body.into_inner().query_type;
+        let (body, content_type) = match query {
+            SupportBundleQueryType::Whole => {
+                let data_stream = ReaderStream::new(file);
+                let body = http_body_util::StreamBody::new(
+                    data_stream.map_ok(|b| hyper::body::Frame::data(b)),
+                );
+                (Body::wrap(body), "application/zip")
+            }
+            SupportBundleQueryType::Index => {
+                let file_std = file.into_std().await;
+                let archive =
+                    zip::ZipArchive::new(file_std).map_err(|err| {
+                        HttpError::for_unavail(None, err.to_string())
+                    })?;
+                let names: Vec<&str> = archive.file_names().collect();
+                let all_names = names.join("\n");
+                (Body::wrap(all_names), "text/plain")
+            }
+            SupportBundleQueryType::Path { file_path } => {
+                let file_std = file.into_std().await;
+                let streamer = http_body_util::StreamBody::new(
+                    stream_zip_entry(file_std, file_path)
+                        .map_ok(|b| hyper::body::Frame::data(b.into())),
+                );
+                (Body::wrap(streamer), "text/plain")
+            }
+        };
+
         let body = FreeformBody(body);
         let mut response =
             HttpResponseHeaders::new_unnamed(HttpResponseOk(body));
         response.headers_mut().append(
             http::header::CONTENT_TYPE,
-            "application/gzip".try_into().unwrap(),
+            content_type.try_into().unwrap(),
         );
         Ok(response)
     }

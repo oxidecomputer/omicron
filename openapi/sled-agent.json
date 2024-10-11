@@ -574,7 +574,7 @@
     },
     "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}": {
       "get": {
-        "summary": "Fetch a service bundle from a particular dataset",
+        "summary": "Fetch a whole service bundle from a particular dataset",
         "operationId": "support_bundle_get",
         "parameters": [
           {
@@ -605,6 +605,16 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SupportBundleGetQueryParams"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "",
@@ -5259,6 +5269,18 @@
         "format": "uint8",
         "minimum": 0
       },
+      "SupportBundleGetQueryParams": {
+        "description": "Query parameters for reading the support bundle",
+        "type": "object",
+        "properties": {
+          "query_type": {
+            "$ref": "#/components/schemas/SupportBundleQueryType"
+          }
+        },
+        "required": [
+          "query_type"
+        ]
+      },
       "SupportBundleMetadata": {
         "description": "Metadata about a support bundle",
         "type": "object",
@@ -5273,6 +5295,60 @@
         "required": [
           "state",
           "support_bundle_id"
+        ]
+      },
+      "SupportBundleQueryType": {
+        "description": "Describes the type of access to the support bundle",
+        "oneOf": [
+          {
+            "description": "Access the whole support bundle",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "whole"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Access the names of all files within the support bundle",
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "index"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "description": "Access a specific file within the support bundle",
+            "type": "object",
+            "properties": {
+              "file_path": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "path"
+                ]
+              }
+            },
+            "required": [
+              "file_path",
+              "type"
+            ]
+          }
         ]
       },
       "SupportBundleState": {
