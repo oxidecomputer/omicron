@@ -447,6 +447,9 @@ impl<'a> Planner<'a> {
             DiscretionaryOmicronZone::CockroachDb => {
                 self.input.target_cockroachdb_zone_count()
             }
+            DiscretionaryOmicronZone::CruciblePantry => {
+                self.input.target_crucible_pantry_zone_count()
+            }
             DiscretionaryOmicronZone::InternalDns => {
                 self.input.target_internal_dns_zone_count()
             }
@@ -557,6 +560,9 @@ impl<'a> Planner<'a> {
                         sled_id,
                         new_total_zone_count,
                     )?
+                }
+                DiscretionaryOmicronZone::CruciblePantry => {
+                    todo!("add {additional_zone_count} pantries")
                 }
                 DiscretionaryOmicronZone::InternalDns => {
                     self.blueprint.sled_ensure_zone_multiple_internal_dns(
