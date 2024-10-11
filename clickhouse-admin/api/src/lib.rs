@@ -11,6 +11,8 @@ use dropshot::{
     HttpError, HttpResponseCreated, HttpResponseOk, RequestContext, TypedBody,
 };
 
+/// API interface for our clickhouse-admin-keeper server
+///
 /// We separate the admin interface for the keeper and server APIs because they
 /// are completely disjoint. We only run a clickhouse keeper *or* clickhouse
 /// server in a given zone, and therefore each admin api is only useful in one
@@ -78,6 +80,8 @@ pub trait ClickhouseAdminKeeperApi {
     ) -> Result<HttpResponseOk<ClickhouseKeeperClusterMembership>, HttpError>;
 }
 
+/// API interface for our clickhouse-admin-server server
+///
 /// We separate the admin interface for the keeper and server APIs because they
 /// are completely disjoint. We only run a clickhouse keeper *or* clickhouse
 /// server in a given zone, and therefore each admin api is only useful in one
