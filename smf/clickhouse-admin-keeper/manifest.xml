@@ -1,0 +1,46 @@
+<?xml version="1.0"?>
+<!DOCTYPE service_bundle SYSTEM "/usr/share/lib/xml/dtd/service_bundle.dtd.1">
+
+<service_bundle type='manifest' name='clickhouse-admin-keeper'>
+
+  <service name='oxide/clickhouse-admin-keeper' type='service' version='1'>
+  <create_default_instance enabled='true' />
+
+  <dependency name='multi_user' grouping='require_all' restart_on='none'
+    type='service'>
+  <service_fmri value='svc:/milestone/multi-user:default' />
+  </dependency>
+
+  <dependency name='zone_network_setup' grouping='require_all' restart_on='none'
+    type='service'>
+  <service_fmri value='svc:/oxide/zone-network-setup:default' />
+  </dependency>
+
+  <exec_method type='method' name='start'
+    exec='ctrun -l child -o noorphan,regent /opt/oxide/clickhouse-admin-keeper/bin/clickhouse-admin-keeper run -c /var/svc/manifest/site/clickhouse-admin-keeper/config.toml -a %{config/http_address} -l %{config/ch_address} -b %{config/ch_binary}  &amp;'
+    timeout_seconds='0' />
+  <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
+
+  <property_group name='config' type='application'>
+    <propval name='http_address' type='astring' value='unknown' />
+    <propval name='ch_address' type='astring' value='unknown' />
+    <propval name='ch_binary' type='astring' value='unknown' />
+  </property_group>
+
+  <property_group name='startd' type='framework'>
+    <propval name='duration' type='astring' value='contract' />
+  </property_group>
+
+  <stability value='Unstable' />
+
+  <template>
+    <common_name>
+      <loctext xml:lang='C'>Omicron ClickHouse Admin Keeper Server</loctext>
+    </common_name>
+    <description>
+      <loctext xml:lang='C'>Administering Oxide's Time-Series Database Coordination Nodes</loctext>
+    </description>
+  </template>
+</service>
+
+</service_bundle>

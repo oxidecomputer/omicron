@@ -242,14 +242,26 @@ output.type = "zone"
 output.intermediate_only = true
 setup_hint = "Run `cargo xtask download clickhouse` to download the necessary binaries"
 
-[package.omicron-clickhouse-admin]
-service_name = "clickhouse-admin"
+[package.omicron-clickhouse-admin-keeper]
+service_name = "clickhouse-admin-keeper"
 only_for_targets.image = "standard"
 source.type = "local"
-source.rust.binary_names = ["clickhouse-admin"]
+source.rust.binary_names = ["clickhouse-admin-keeper"]
 source.rust.release = true
 source.paths = [
-  { from = "smf/clickhouse-admin", to = "/var/svc/manifest/site/clickhouse-admin" },
+  { from = "smf/clickhouse-admin-keeper", to = "/var/svc/manifest/site/clickhouse-admin-keeper" },
+]
+output.type = "zone"
+output.intermediate_only = true
+
+[package.omicron-clickhouse-admin-server]
+service_name = "clickhouse-admin-server"
+only_for_targets.image = "standard"
+source.type = "local"
+source.rust.binary_names = ["clickhouse-admin-server"]
+source.rust.release = true
+source.paths = [
+  { from = "smf/clickhouse-admin-server", to = "/var/svc/manifest/site/clickhouse-admin-server" },
 ]
 output.type = "zone"
 output.intermediate_only = true
