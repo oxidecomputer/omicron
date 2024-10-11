@@ -4170,7 +4170,9 @@ dependencies = [
  "camino-tempfile",
  "cfg-if",
  "crucible-smf",
+ "dropshot 0.12.0",
  "futures",
+ "http 1.1.0",
  "ipnetwork",
  "libc",
  "macaddr",
@@ -4187,6 +4189,7 @@ dependencies = [
  "serde",
  "serde_json",
  "slog",
+ "slog-error-chain",
  "smf",
  "thiserror",
  "tokio",
@@ -4487,9 +4490,9 @@ dependencies = [
 
 [[package]]
 name = "ipnet"
-version = "2.10.0"
+version = "2.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "187674a687eed5fe42285b40c6291f9a01517d415fad1c3cbc6a9f778af7fcd4"
+checksum = "ddc24109865250148c2e0f3d25d4f0f479571723792d3802153c60922a4fb708"
 
 [[package]]
 name = "ipnetwork"
@@ -5599,6 +5602,7 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "chrono",
+ "clickhouse-admin-client",
  "clickhouse-admin-types",
  "expectorate",
  "futures",
@@ -6511,11 +6515,14 @@ dependencies = [
  "camino",
  "cargo_metadata",
  "clap",
+ "expectorate",
  "newtype_derive",
+ "omicron-test-utils",
  "omicron-workspace-hack",
  "parse-display",
  "petgraph",
  "serde",
+ "subprocess",
  "toml 0.8.19",
 ]
 
@@ -6535,6 +6542,7 @@ dependencies = [
  "cancel-safe-futures",
  "chrono",
  "clap",
+ "clickhouse-admin-client",
  "cockroach-admin-client",
  "criterion",
  "crucible-agent-client",

@@ -29,7 +29,7 @@ impl Workspaces {
     /// The data found is validated against `api_metadata`.
     ///
     /// On success, returns `(workspaces, warnings)`, where `warnings` is a list
-    /// of potential inconsistencies between API metadata and Cargo metadata.
+    /// of inconsistencies between API metadata and Cargo metadata.
     pub fn load(
         api_metadata: &AllApiMetadata,
     ) -> Result<(Workspaces, Vec<anyhow::Error>)> {
@@ -139,8 +139,8 @@ impl Workspaces {
                     client_pkgnames_unused.remove(client_pkgname);
                 } else {
                     warnings.push(anyhow!(
-                        "workspace {}: found client package missing from API \
-                         manifest: {}",
+                        "workspace {}: found Progenitor-based client package \
+                         missing from API manifest: {}",
                         workspace.name(),
                         client_pkgname
                     ));

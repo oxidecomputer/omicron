@@ -2629,7 +2629,7 @@ mod test {
         // Updating the inventory to reflect the keepers
         // should result in the same state, except for the
         // `highest_seen_keeper_leader_committed_log_index`
-        let (zone_id, keeper_id) = blueprint3
+        let (_, keeper_id) = blueprint3
             .clickhouse_cluster_config
             .as_ref()
             .unwrap()
@@ -2648,9 +2648,7 @@ mod test {
                 .cloned()
                 .collect(),
         };
-        collection
-            .clickhouse_keeper_cluster_membership
-            .insert(*zone_id, membership);
+        collection.clickhouse_keeper_cluster_membership.insert(membership);
 
         let blueprint4 = Planner::new_based_on(
             log.clone(),
@@ -2764,9 +2762,7 @@ mod test {
                 .cloned()
                 .collect(),
         };
-        collection
-            .clickhouse_keeper_cluster_membership
-            .insert(*zone_id, membership);
+        collection.clickhouse_keeper_cluster_membership.insert(membership);
 
         let blueprint7 = Planner::new_based_on(
             log.clone(),
@@ -2810,9 +2806,7 @@ mod test {
                 .cloned()
                 .collect(),
         };
-        collection
-            .clickhouse_keeper_cluster_membership
-            .insert(*zone_id, membership);
+        collection.clickhouse_keeper_cluster_membership.insert(membership);
         let blueprint8 = Planner::new_based_on(
             log.clone(),
             &blueprint7,
@@ -2914,16 +2908,11 @@ mod test {
 
         collection.clickhouse_keeper_cluster_membership = config
             .keepers
-            .iter()
-            .map(|(zone_id, keeper_id)| {
-                (
-                    *zone_id,
-                    ClickhouseKeeperClusterMembership {
-                        queried_keeper: *keeper_id,
-                        leader_committed_log_index: 1,
-                        raft_config: raft_config.clone(),
-                    },
-                )
+            .values()
+            .map(|keeper_id| ClickhouseKeeperClusterMembership {
+                queried_keeper: *keeper_id,
+                leader_committed_log_index: 1,
+                raft_config: raft_config.clone(),
             })
             .collect();
 
@@ -2950,6 +2939,15 @@ mod test {
         let (sled_id, bp_zone_config) = blueprint3
             .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
             .find(|(_, z)| z.zone_type.is_clickhouse_keeper())
+            .unwrap();
+
+        // What's the keeper id for this expunged zone?
+        let expunged_keeper_id = blueprint3
+            .clickhouse_cluster_config
+            .as_ref()
+            .unwrap()
+            .keepers
+            .get(&bp_zone_config.id)
             .unwrap();
 
         // Expunge a keeper zone
@@ -3005,16 +3003,16 @@ mod test {
         // Remove the keeper for the expunged zone
         collection
             .clickhouse_keeper_cluster_membership
-            .remove(&bp_zone_config.id);
+            .retain(|m| m.queried_keeper != *expunged_keeper_id);
 
         // Update the inventory on at least one of the remaining nodes.
-        let existing = collection
+        let mut existing = collection
             .clickhouse_keeper_cluster_membership
-            .first_entry()
-            .unwrap()
-            .into_mut();
+            .pop_first()
+            .unwrap();
         existing.leader_committed_log_index = 3;
         existing.raft_config = config.keepers.values().cloned().collect();
+        collection.clickhouse_keeper_cluster_membership.insert(existing);
 
         let blueprint6 = Planner::new_based_on(
             log.clone(),

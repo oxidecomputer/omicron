@@ -3515,6 +3515,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone_nic (
     PRIMARY KEY (inv_collection_id, id)
 );
 
+CREATE TABLE IF NOT EXISTS omicron.public.inv_clickhouse_keeper_membership (
+    inv_collection_id UUID NOT NULL,
+    queried_keeper_id INT8 NOT NULL,
+    leader_committed_log_index INT8 NOT NULL,
+    raft_config INT8[] NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, queried_keeper_id)
+);
+
 /*
  * System-level blueprints
  *
@@ -4487,7 +4496,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '108.0.0', NULL)
+    (TRUE, NOW(), NOW(), '109.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

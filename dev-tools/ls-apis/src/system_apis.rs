@@ -67,9 +67,17 @@ impl SystemApis {
         // Load Cargo metadata and validate it against the manifest.
         let (workspaces, warnings) = Workspaces::load(&api_metadata)?;
         if !warnings.is_empty() {
+            // We treat these warnings as fatal here.
             for e in warnings {
-                eprintln!("warning: {:#}", e);
+                eprintln!("error: {:#}", e);
             }
+
+            bail!(
+                "found inconsistency between API manifest ({}) and \
+                 information found from the Cargo dependency tree \
+                 (see above)",
+                &args.api_manifest_path
+            );
         }
 
         // Create an index of server package names, mapping each one to the API
@@ -427,6 +435,22 @@ impl<'a> ServerComponentsTracker<'a> {
         // "dependency_filter_rules" metadata.
         if **server_pkgname == "crucible-pantry"
             && *api.client_package_name == "crucible-control-client"
+        {
+            eprintln!(
+                "note: ignoring Cargo dependency from crucible-pantry -> \
+                 ... -> crucible-control-client",
+            );
+            return;
+        }
+
+        // TODO Work around omicron#6829.
+        // Through the dependency tree, omicron-nexus appears to export the
+        // clickhouse-admin-api, but it doesn't really.
+        // This is just like the Crucible Pantry one above in that we can't
+        // build our data model unless we ignore it so we have to hardcode this
+        // here rather than use "dependency_filter_rules".
+        if **server_pkgname == "omicron-nexus"
+            && *api.client_package_name == "clickhouse-admin-client"
         {
             eprintln!(
                 "note: ignoring Cargo dependency from crucible-pantry -> \
