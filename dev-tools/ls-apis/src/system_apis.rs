@@ -244,7 +244,7 @@ impl SystemApis {
         &self,
         client: &ClientPackageName,
         filter: ApiDependencyFilter,
-    ) -> Result<impl Iterator<Item = (&ServerComponentName, &DepPath)> + '_>
+    ) -> Result<impl Iterator<Item = (&ServerComponentName, Vec<&DepPath>)> + '_>
     {
         let mut rv = Vec::new();
 
@@ -253,7 +253,7 @@ impl SystemApis {
         };
 
         for (server_pkgname, dep_paths) in api_consumers {
-            let mut include = None;
+            let mut include = Vec::new();
             for p in dep_paths {
                 if filter.should_include(
                     &self.api_metadata,
@@ -261,13 +261,12 @@ impl SystemApis {
                     &client,
                     p,
                 )? {
-                    include = Some(p);
-                    break;
+                    include.push(p);
                 }
             }
 
-            if let Some(p) = include {
-                rv.push((server_pkgname, p))
+            if !include.is_empty() {
+                rv.push((server_pkgname, include))
             }
         }
 
