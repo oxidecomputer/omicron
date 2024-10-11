@@ -187,8 +187,9 @@ impl<T: StorageBackend> ArtifactStore<T> {
         }
     }
 
-    /// PUT operation (served by Sled Agent API)
-    pub(crate) async fn put(
+    /// Common implementation for all artifact write operations, generic over a
+    /// stream of bytes.
+    async fn put_impl(
         &self,
         sha256: ArtifactHash,
         stream: impl Stream<Item = Result<impl AsRef<[u8]>, Error>>,
@@ -276,7 +277,7 @@ impl<T: StorageBackend> ArtifactStore<T> {
         sha256: ArtifactHash,
         body: StreamingBody,
     ) -> Result<(), Error> {
-        self.put(sha256, body.into_stream().map_err(Error::Body)).await
+        self.put_impl(sha256, body.into_stream().map_err(Error::Body)).await
     }
 
     /// POST operation (served by Sled Agent API)
@@ -311,7 +312,7 @@ impl<T: StorageBackend> ArtifactStore<T> {
                 address,
                 err: repo_depot_client::ClientError::ResponseBodyError(err),
             });
-        self.put(sha256, stream).await
+        self.put_impl(sha256, stream).await
     }
 
     /// DELETE operation (served by Sled Agent API)
@@ -556,7 +557,7 @@ mod test {
         // 3. we don't fail trying to create TEMP_SUBDIR twice
         for _ in 0..2 {
             store
-                .put(TEST_HASH, stream::once(async { Ok(TEST_ARTIFACT) }))
+                .put_impl(TEST_HASH, stream::once(async { Ok(TEST_ARTIFACT) }))
                 .await
                 .unwrap();
             // get succeeds, file reads back OK
@@ -591,7 +592,7 @@ mod test {
 
         assert!(matches!(
             store
-                .put(TEST_HASH, stream::once(async { Ok(TEST_ARTIFACT) }))
+                .put_impl(TEST_HASH, stream::once(async { Ok(TEST_ARTIFACT) }))
                 .await,
             Err(Error::NoUpdateDataset)
         ));
