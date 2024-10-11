@@ -45,6 +45,7 @@ use gateway_client::types::SpType;
 use indicatif::ProgressBar;
 use indicatif::ProgressDrawTarget;
 use indicatif::ProgressStyle;
+use internal_dns_types::names::ServiceName;
 use ipnetwork::IpNetwork;
 use nexus_config::PostgresConfigWithUrl;
 use nexus_db_model::Dataset;
@@ -221,10 +222,7 @@ impl DbUrlOptions {
                 );
                 eprintln!("note: (override with --db-url or OMDB_DB_URL)");
                 let addrs = omdb
-                    .dns_lookup_all(
-                        log.clone(),
-                        internal_dns::ServiceName::Cockroach,
-                    )
+                    .dns_lookup_all(log.clone(), ServiceName::Cockroach)
                     .await?;
 
                 format!(

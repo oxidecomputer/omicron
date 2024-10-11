@@ -16,8 +16,8 @@ use nexus_types::inventory::Collection;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageWhich;
 use slog::o;
+use slog::Logger;
 use slog::{debug, error};
-use std::sync::Arc;
 use std::time::Duration;
 use strum::IntoEnumIterator;
 
@@ -27,7 +27,8 @@ const SLED_AGENT_TIMEOUT: Duration = Duration::from_secs(60);
 /// Collect all inventory data from an Oxide system
 pub struct Collector<'a> {
     log: slog::Logger,
-    mgs_clients: Vec<Arc<gateway_client::Client>>,
+    mgs_clients: Vec<gateway_client::Client>,
+    keeper_admin_clients: Vec<clickhouse_admin_client::Client>,
     sled_agent_lister: &'a (dyn SledAgentEnumerator + Send + Sync),
     in_progress: CollectionBuilder,
 }
@@ -35,13 +36,15 @@ pub struct Collector<'a> {
 impl<'a> Collector<'a> {
     pub fn new(
         creator: &str,
-        mgs_clients: &[Arc<gateway_client::Client>],
+        mgs_clients: Vec<gateway_client::Client>,
+        keeper_admin_clients: Vec<clickhouse_admin_client::Client>,
         sled_agent_lister: &'a (dyn SledAgentEnumerator + Send + Sync),
         log: slog::Logger,
     ) -> Self {
         Collector {
             log,
-            mgs_clients: mgs_clients.to_vec(),
+            mgs_clients,
+            keeper_admin_clients,
             sled_agent_lister,
             in_progress: CollectionBuilder::new(creator),
         }
@@ -66,6 +69,7 @@ impl<'a> Collector<'a> {
 
         self.collect_all_mgs().await;
         self.collect_all_sled_agents().await;
+        self.collect_all_keepers().await;
 
         debug!(&self.log, "finished collection");
 
@@ -74,14 +78,18 @@ impl<'a> Collector<'a> {
 
     /// Collect inventory from all MGS instances
     async fn collect_all_mgs(&mut self) {
-        let clients = self.mgs_clients.clone();
-        for client in &clients {
-            self.collect_one_mgs(&client).await;
+        for client in &self.mgs_clients {
+            Self::collect_one_mgs(client, &self.log, &mut self.in_progress)
+                .await;
         }
     }
 
-    async fn collect_one_mgs(&mut self, client: &gateway_client::Client) {
-        debug!(&self.log, "begin collection from MGS";
+    async fn collect_one_mgs(
+        client: &gateway_client::Client,
+        log: &Logger,
+        in_progress: &mut CollectionBuilder,
+    ) {
+        debug!(log, "begin collection from MGS";
             "mgs_url" => client.baseurl()
         );
 
@@ -103,7 +111,7 @@ impl<'a> Collector<'a> {
         // being able to identify this particular condition.
         let sps = match ignition_result {
             Err(error) => {
-                self.in_progress.found_error(InventoryError::from(error));
+                in_progress.found_error(InventoryError::from(error));
                 return;
             }
 
@@ -139,14 +147,14 @@ impl<'a> Collector<'a> {
                 });
             let sp_state = match result {
                 Err(error) => {
-                    self.in_progress.found_error(InventoryError::from(error));
+                    in_progress.found_error(InventoryError::from(error));
                     continue;
                 }
                 Ok(response) => response.into_inner(),
             };
 
             // Record the state that we found.
-            let Some(baseboard_id) = self.in_progress.found_sp_state(
+            let Some(baseboard_id) = in_progress.found_sp_state(
                 client.baseurl(),
                 sp.type_,
                 sp.slot,
@@ -162,8 +170,7 @@ impl<'a> Collector<'a> {
             // get here for the first MGS client.  Assuming that one succeeds,
             // the other(s) will skip this loop.
             for which in CabooseWhich::iter() {
-                if self.in_progress.found_caboose_already(&baseboard_id, which)
-                {
+                if in_progress.found_caboose_already(&baseboard_id, which) {
                     continue;
                 }
 
@@ -191,20 +198,19 @@ impl<'a> Collector<'a> {
                     });
                 let caboose = match result {
                     Err(error) => {
-                        self.in_progress
-                            .found_error(InventoryError::from(error));
+                        in_progress.found_error(InventoryError::from(error));
                         continue;
                     }
                     Ok(response) => response.into_inner(),
                 };
-                if let Err(error) = self.in_progress.found_caboose(
+                if let Err(error) = in_progress.found_caboose(
                     &baseboard_id,
                     which,
                     client.baseurl(),
                     caboose,
                 ) {
                     error!(
-                        &self.log,
+                        log,
                         "error reporting caboose: {:?} {:?} {:?}: {:#}",
                         baseboard_id,
                         which,
@@ -219,8 +225,7 @@ impl<'a> Collector<'a> {
             // get here for the first MGS client.  Assuming that one succeeds,
             // the other(s) will skip this loop.
             for which in RotPageWhich::iter() {
-                if self.in_progress.found_rot_page_already(&baseboard_id, which)
-                {
+                if in_progress.found_rot_page_already(&baseboard_id, which) {
                     continue;
                 }
 
@@ -270,20 +275,19 @@ impl<'a> Collector<'a> {
 
                 let page = match result {
                     Err(error) => {
-                        self.in_progress
-                            .found_error(InventoryError::from(error));
+                        in_progress.found_error(InventoryError::from(error));
                         continue;
                     }
                     Ok(data_base64) => RotPage { data_base64 },
                 };
-                if let Err(error) = self.in_progress.found_rot_page(
+                if let Err(error) = in_progress.found_rot_page(
                     &baseboard_id,
                     which,
                     client.baseurl(),
                     page,
                 ) {
                     error!(
-                        &self.log,
+                        log,
                         "error reporting rot page: {:?} {:?} {:?}: {:#}",
                         baseboard_id,
                         which,
@@ -312,11 +316,11 @@ impl<'a> Collector<'a> {
                 .timeout(SLED_AGENT_TIMEOUT)
                 .build()
                 .unwrap();
-            let client = Arc::new(sled_agent_client::Client::new_with_client(
+            let client = sled_agent_client::Client::new_with_client(
                 &url,
                 reqwest_client,
                 log,
-            ));
+            );
 
             if let Err(error) = self.collect_one_sled_agent(&client).await {
                 error!(
@@ -368,6 +372,41 @@ impl<'a> Collector<'a> {
             ),
         }
     }
+
+    /// Collect inventory from about keepers from all `ClickhouseAdminKeeper`
+    /// clients
+    async fn collect_all_keepers(&mut self) {
+        for client in &self.keeper_admin_clients {
+            Self::collect_one_keeper(&client, &self.log, &mut self.in_progress)
+                .await;
+        }
+    }
+
+    /// Collect inventory about one keeper from one `ClickhouseAdminKeeper`
+    async fn collect_one_keeper(
+        client: &clickhouse_admin_client::Client,
+        log: &slog::Logger,
+        in_progress: &mut CollectionBuilder,
+    ) {
+        debug!(log, "begin collection from clickhouse-admin-keeper";
+            "keeper_admin_url" => client.baseurl()
+        );
+
+        let res = client.keeper_cluster_membership().await.with_context(|| {
+            format!("Clickhouse Keeper {:?}: inventory", &client.baseurl())
+        });
+
+        match res {
+            Err(error) => {
+                in_progress.found_error(InventoryError::from(error));
+            }
+            Ok(membership) => {
+                in_progress.found_clickhouse_keeper_cluster_membership(
+                    membership.into_inner(),
+                );
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -388,7 +427,6 @@ mod test {
     use std::fmt::Write;
     use std::net::Ipv6Addr;
     use std::net::SocketAddrV6;
-    use std::sync::Arc;
 
     fn dump_collection(collection: &Collection) -> String {
         // Construct a stable, human-readable summary of the Collection
@@ -594,12 +632,15 @@ mod test {
         let sled1_url = format!("http://{}/", sled1.http_server.local_addr());
         let sled2_url = format!("http://{}/", sled2.http_server.local_addr());
         let mgs_url = format!("http://{}/", gwtestctx.client.bind_address);
-        let mgs_client =
-            Arc::new(gateway_client::Client::new(&mgs_url, log.clone()));
+        let mgs_client = gateway_client::Client::new(&mgs_url, log.clone());
         let sled_enum = StaticSledAgentEnumerator::new([sled1_url, sled2_url]);
+        // We don't have any mocks for this, and it's unclear how much value
+        // there would be in providing them at this juncture.
+        let keeper_clients = Vec::new();
         let collector = Collector::new(
             "test-suite",
-            &[mgs_client],
+            vec![mgs_client],
+            keeper_clients,
             &sled_enum,
             log.clone(),
         );
@@ -651,13 +692,20 @@ mod test {
             .into_iter()
             .map(|g| {
                 let url = format!("http://{}/", g.client.bind_address);
-                let client = gateway_client::Client::new(&url, log.clone());
-                Arc::new(client)
+                gateway_client::Client::new(&url, log.clone())
             })
             .collect::<Vec<_>>();
         let sled_enum = StaticSledAgentEnumerator::new([sled1_url, sled2_url]);
-        let collector =
-            Collector::new("test-suite", &mgs_clients, &sled_enum, log.clone());
+        // We don't have any mocks for this, and it's unclear how much value
+        // there would be in providing them at this juncture.
+        let keeper_clients = Vec::new();
+        let collector = Collector::new(
+            "test-suite",
+            mgs_clients,
+            keeper_clients,
+            &sled_enum,
+            log.clone(),
+        );
         let collection = collector
             .collect_all()
             .await
@@ -686,19 +734,25 @@ mod test {
         let log = &gwtestctx.logctx.log;
         let real_client = {
             let url = format!("http://{}/", gwtestctx.client.bind_address);
-            let client = gateway_client::Client::new(&url, log.clone());
-            Arc::new(client)
+            gateway_client::Client::new(&url, log.clone())
         };
         let bad_client = {
             // This IP range is guaranteed by RFC 6666 to discard traffic.
             let url = "http://[100::1]:12345";
-            let client = gateway_client::Client::new(url, log.clone());
-            Arc::new(client)
+            gateway_client::Client::new(url, log.clone())
         };
-        let mgs_clients = &[bad_client, real_client];
+        let mgs_clients = vec![bad_client, real_client];
         let sled_enum = StaticSledAgentEnumerator::empty();
-        let collector =
-            Collector::new("test-suite", mgs_clients, &sled_enum, log.clone());
+        // We don't have any mocks for this, and it's unclear how much value
+        // there would be in providing them at this juncture.
+        let keeper_clients = Vec::new();
+        let collector = Collector::new(
+            "test-suite",
+            mgs_clients,
+            keeper_clients,
+            &sled_enum,
+            log.clone(),
+        );
         let collection = collector
             .collect_all()
             .await
@@ -730,13 +784,16 @@ mod test {
         let sled1_url = format!("http://{}/", sled1.http_server.local_addr());
         let sledbogus_url = String::from("http://[100::1]:45678");
         let mgs_url = format!("http://{}/", gwtestctx.client.bind_address);
-        let mgs_client =
-            Arc::new(gateway_client::Client::new(&mgs_url, log.clone()));
+        let mgs_client = gateway_client::Client::new(&mgs_url, log.clone());
         let sled_enum =
             StaticSledAgentEnumerator::new([sled1_url, sledbogus_url]);
+        // We don't have any mocks for this, and it's unclear how much value
+        // there would be in providing them at this juncture.
+        let keeper_clients = Vec::new();
         let collector = Collector::new(
             "test-suite",
-            &[mgs_client],
+            vec![mgs_client],
+            keeper_clients,
             &sled_enum,
             log.clone(),
         );

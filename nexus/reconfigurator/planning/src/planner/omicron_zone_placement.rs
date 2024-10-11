@@ -15,6 +15,7 @@ use std::mem;
 #[cfg_attr(test, derive(test_strategy::Arbitrary))]
 pub(crate) enum DiscretionaryOmicronZone {
     BoundaryNtp,
+    Clickhouse,
     ClickhouseKeeper,
     ClickhouseServer,
     CockroachDb,
@@ -31,6 +32,7 @@ impl DiscretionaryOmicronZone {
     ) -> Option<Self> {
         match zone_type {
             BlueprintZoneType::BoundaryNtp(_) => Some(Self::BoundaryNtp),
+            BlueprintZoneType::Clickhouse(_) => Some(Self::Clickhouse),
             BlueprintZoneType::ClickhouseKeeper(_) => {
                 Some(Self::ClickhouseKeeper)
             }
@@ -43,7 +45,6 @@ impl DiscretionaryOmicronZone {
             BlueprintZoneType::Nexus(_) => Some(Self::Nexus),
             BlueprintZoneType::Oximeter(_) => Some(Self::Oximeter),
             // Zones that we should place but don't yet.
-            BlueprintZoneType::Clickhouse(_)
             | BlueprintZoneType::CruciblePantry(_)
             // Zones that get special handling for placement (all sleds get
             // them, although internal NTP has some interactions with boundary
@@ -58,6 +59,7 @@ impl From<DiscretionaryOmicronZone> for ZoneKind {
     fn from(zone: DiscretionaryOmicronZone) -> Self {
         match zone {
             DiscretionaryOmicronZone::BoundaryNtp => Self::BoundaryNtp,
+            DiscretionaryOmicronZone::Clickhouse => Self::Clickhouse,
             DiscretionaryOmicronZone::ClickhouseKeeper => {
                 Self::ClickhouseKeeper
             }

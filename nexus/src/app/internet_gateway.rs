@@ -197,23 +197,14 @@ impl super::Nexus {
         let (.., authz_igw, _) =
             lookup.fetch_for(authz::Action::CreateChild).await?;
 
-        let ip_pool_id = match params.ip_pool {
-            NameOrId::Id(id) => id,
-            NameOrId::Name(ref name) => {
-                let name = name.clone().into();
-                LookupPath::new(opctx, &self.db_datastore)
-                    .ip_pool_name(&name)
-                    .fetch()
-                    .await?
-                    .0
-                    .id()
-            }
-        };
+        // need to use this method so it works for non-fleet users
+        let (authz_pool, ..) =
+            self.silo_ip_pool_fetch(&opctx, &params.ip_pool).await?;
 
         let id = Uuid::new_v4();
         let route = db::model::InternetGatewayIpPool::new(
             id,
-            ip_pool_id,
+            authz_pool.id(),
             authz_igw.id(),
             params.identity.clone(),
         );

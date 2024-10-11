@@ -221,7 +221,7 @@ impl ServerContext {
                     az_subnet
                 );
                 let resolver =
-                    internal_dns::resolver::Resolver::new_from_subnet(
+                    internal_dns_resolver::Resolver::new_from_subnet(
                         log.new(o!("component" => "DnsResolver")),
                         az_subnet,
                     )
@@ -231,7 +231,7 @@ impl ServerContext {
 
                 (
                     resolver,
-                    internal_dns::resolver::Resolver::servers_from_subnet(
+                    internal_dns_resolver::Resolver::servers_from_subnet(
                         az_subnet,
                     ),
                 )
@@ -242,14 +242,11 @@ impl ServerContext {
                     "Setting up resolver using DNS address: {:?}", address
                 );
 
-                let resolver =
-                    internal_dns::resolver::Resolver::new_from_addrs(
-                        log.new(o!("component" => "DnsResolver")),
-                        &[address],
-                    )
-                    .map_err(|e| {
-                        format!("Failed to create DNS resolver: {}", e)
-                    })?;
+                let resolver = internal_dns_resolver::Resolver::new_from_addrs(
+                    log.new(o!("component" => "DnsResolver")),
+                    &[address],
+                )
+                .map_err(|e| format!("Failed to create DNS resolver: {}", e))?;
 
                 (resolver, vec![address])
             }

@@ -1568,6 +1568,15 @@ table! {
     }
 }
 
+table! {
+    inv_clickhouse_keeper_membership (inv_collection_id, queried_keeper_id) {
+        inv_collection_id -> Uuid,
+        queried_keeper_id -> Int8,
+        leader_committed_log_index -> Int8,
+        raft_config -> Array<Int8>,
+    }
+}
+
 /* blueprints */
 
 table! {

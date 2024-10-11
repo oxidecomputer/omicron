@@ -285,6 +285,10 @@ impl ExampleSystemBuilder {
                         vec![],
                     )
                     .unwrap();
+                if i == 0 {
+                    let _ = builder
+                        .sled_ensure_zone_multiple_clickhouse(sled_id, 1);
+                }
                 let _ = builder
                     .sled_ensure_zone_multiple_internal_dns(
                         sled_id,

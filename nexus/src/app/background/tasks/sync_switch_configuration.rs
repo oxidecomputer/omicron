@@ -14,8 +14,8 @@ use crate::app::{
 use oxnet::Ipv4Net;
 use slog::o;
 
-use internal_dns::resolver::Resolver;
-use internal_dns::ServiceName;
+use internal_dns_resolver::Resolver;
+use internal_dns_types::names::ServiceName;
 use ipnetwork::IpNetwork;
 use nexus_db_model::{
     AddressLotBlock, BgpConfig, BootstoreConfig, LoopbackAddress,

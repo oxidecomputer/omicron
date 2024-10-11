@@ -10,6 +10,7 @@ use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::Omdb;
 use anyhow::Context;
 use clap::Args;
+use internal_dns_types::names::ServiceName;
 use oximeter_db::{
     self,
     shells::oxql::{self, ShellOptions},
@@ -86,7 +87,7 @@ impl OxqlArgs {
                 Ok(SocketAddr::V6(
                     omdb.dns_lookup_one(
                         log.clone(),
-                        internal_dns::ServiceName::Clickhouse,
+                        ServiceName::Clickhouse,
                     )
                     .await
                     .context("failed looking up ClickHouse internal DNS entry")?,

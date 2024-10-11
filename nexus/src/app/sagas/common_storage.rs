@@ -8,7 +8,7 @@ use super::*;
 
 use crate::Nexus;
 use crucible_pantry_client::types::VolumeConstructionRequest;
-use internal_dns::ServiceName;
+use internal_dns_types::names::ServiceName;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
