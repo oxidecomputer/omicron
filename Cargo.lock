@@ -6515,11 +6515,14 @@ dependencies = [
  "camino",
  "cargo_metadata",
  "clap",
+ "expectorate",
  "newtype_derive",
+ "omicron-test-utils",
  "omicron-workspace-hack",
  "parse-display",
  "petgraph",
  "serde",
+ "subprocess",
  "toml 0.8.19",
 ]
 
