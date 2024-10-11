@@ -18,6 +18,9 @@ progenitor::generate_api!(
         slog::debug!(log, "client response"; "result" => ?result);
     }),
     derives = [schemars::JsonSchema],
+    crates = {
+        "omicron-common" = "0.1.0",
+    },
     replace = {
         Duration = std::time::Duration,
         EventReportForInstallinatorSpec = installinator_common::EventReport,

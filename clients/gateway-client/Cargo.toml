@@ -11,6 +11,7 @@ workspace = true
 base64.workspace = true
 chrono.workspace = true
 gateway-messages.workspace = true
+omicron-common.workspace = true
 progenitor.workspace = true
 rand.workspace = true
 reqwest = { workspace = true, features = ["rustls-tls", "stream"] }

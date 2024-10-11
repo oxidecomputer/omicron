@@ -1362,8 +1362,8 @@ impl UpdateDriver {
                 "Setting installinator image ID",
                 move |_cx| async move {
                     let installinator_image_id = InstallinatorImageId {
-                        control_plane: plan.control_plane_hash.to_string(),
-                        host_phase_2: plan.host_phase_2_hash.to_string(),
+                        control_plane: plan.control_plane_hash,
+                        host_phase_2: plan.host_phase_2_hash,
                         update_id: update_cx.update_id,
                     };
                     update_cx

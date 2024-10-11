@@ -3173,6 +3173,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "gateway-messages",
+ "omicron-common",
  "omicron-workspace-hack",
  "progenitor",
  "rand",

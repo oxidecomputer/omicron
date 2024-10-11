@@ -21,6 +21,11 @@
             "description": "The hash of the artifact.",
             "required": true,
             "schema": {
+              "x-rust-type": {
+                "crate": "omicron-common",
+                "path": "omicron_common::update::ArtifactHash",
+                "version": "0.1.0"
+              },
               "type": "string",
               "format": "hex string (32 bytes)"
             }
