@@ -38,6 +38,24 @@ use tokio::io::AsyncWriteExt;
 
 const TEMP_SUBDIR: &str = "tmp";
 
+/// Content-addressable local storage for software artifacts.
+///
+/// Storage for artifacts is backed by datasets that are explicitly designated
+/// for this purpose. The `T: StorageBackend` parameter, which varies between
+/// the real sled agent, the simulated sled agent, and unit tests, specifies
+/// exactly which datasets are available for artifact storage. That's the only
+/// thing `T` is used for. The behavior of storing artifacts as files under
+/// one or more paths is identical for all callers (i.e., both the real and
+/// simulated sled agents).
+///
+/// A given artifact is generally stored on exactly one of the datasets
+/// designated for artifact storage. There's no way to know from its key which
+/// dataset it's stored on. This means:
+///
+/// - for PUT, we pick a dataset and store it there
+/// - for GET, we look in every dataset for it until we find it
+/// - for DELETE, we attempt to delete it from every dataset (even after we've
+///   found it in one of them)
 #[derive(Clone)]
 pub(crate) struct ArtifactStore<T: StorageBackend = StorageHandle> {
     log: Logger,
