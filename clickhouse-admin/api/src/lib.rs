@@ -35,23 +35,23 @@ pub trait ClickhouseAdminApi {
     type Context;
 
     /// Generate a ClickHouse configuration file for a server node on a specified
-    /// directory.
+    /// directory and enable the SMF service.
     #[endpoint {
         method = PUT,
-        path = "/server/config",
+        path = "/server/config-and-enable",
     }]
-    async fn generate_server_config(
+    async fn generate_server_config_and_enable(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<ServerConfigurableSettings>,
     ) -> Result<HttpResponseCreated<ReplicaConfig>, HttpError>;
 
     /// Generate a ClickHouse configuration file for a keeper node on a specified
-    /// directory.
+    /// directory and enable the SMF service.
     #[endpoint {
         method = PUT,
-        path = "/keeper/config",
+        path = "/keeper/config-and-enable",
     }]
-    async fn generate_keeper_config(
+    async fn generate_keeper_config_and_enable(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<KeeperConfigurableSettings>,
     ) -> Result<HttpResponseCreated<KeeperConfig>, HttpError>;

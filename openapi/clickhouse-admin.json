@@ -58,11 +58,11 @@
         }
       }
     },
-    "/keeper/config": {
+    "/keeper/config-and-enable": {
       "put": {
         "summary": "Generate a ClickHouse configuration file for a keeper node on a specified",
-        "description": "directory.",
-        "operationId": "generate_keeper_config",
+        "description": "directory and enable the SMF service.",
+        "operationId": "generate_keeper_config_and_enable",
         "requestBody": {
           "content": {
             "application/json": {
@@ -143,11 +143,11 @@
         }
       }
     },
-    "/server/config": {
+    "/server/config-and-enable": {
       "put": {
         "summary": "Generate a ClickHouse configuration file for a server node on a specified",
-        "description": "directory.",
-        "operationId": "generate_server_config",
+        "description": "directory and enable the SMF service.",
+        "operationId": "generate_server_config_and_enable",
         "requestBody": {
           "content": {
             "application/json": {
