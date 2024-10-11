@@ -16,6 +16,7 @@ use anyhow::Context;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use async_bb8_diesel::AsyncSimpleConnection;
+use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
 use diesel::expression::SelectableHelper;
 use diesel::sql_types::Nullable;
 use diesel::BoolExpressionMethods;
@@ -36,6 +37,7 @@ use nexus_db_model::HwPowerStateEnum;
 use nexus_db_model::HwRotSlot;
 use nexus_db_model::HwRotSlotEnum;
 use nexus_db_model::InvCaboose;
+use nexus_db_model::InvClickhouseKeeperMembership;
 use nexus_db_model::InvCollection;
 use nexus_db_model::InvCollectionError;
 use nexus_db_model::InvDataset;
@@ -243,6 +245,17 @@ impl DataStore {
                 })
             })
             .collect::<Result<Vec<InvOmicronZoneNic>, _>>()?;
+
+        let mut inv_clickhouse_keeper_memberships = Vec::new();
+        for membership in &collection.clickhouse_keeper_cluster_membership {
+            inv_clickhouse_keeper_memberships.push(
+                InvClickhouseKeeperMembership::new(
+                    collection_id,
+                    membership.clone(),
+                )
+                .map_err(|e| Error::internal_error(&e.to_string()))?,
+            );
+        }
 
         // This implementation inserts all records associated with the
         // collection in one transaction.  This is primarily for simplicity.  It
@@ -953,6 +966,15 @@ impl DataStore {
                         .await?;
             }
 
+            // Insert the clickhouse keeper memberships we've received
+            {
+                use db::schema::inv_clickhouse_keeper_membership::dsl;
+                diesel::insert_into(dsl::inv_clickhouse_keeper_membership)
+                    .values(inv_clickhouse_keeper_memberships)
+                    .execute_async(&conn)
+                    .await?;
+            }
+
             // Finally, insert the list of errors.
             {
                 use db::schema::inv_collection_error::dsl as errors_dsl;
@@ -1221,6 +1243,7 @@ impl DataStore {
             nnics,
             nzpools,
             nerrors,
+            nclickhouse_keeper_membership,
         ) = conn
             .transaction_async(|conn| async move {
                 // Remove the record describing the collection itself.
@@ -1374,6 +1397,18 @@ impl DataStore {
                         .await?
                     };
 
+                // Remove rows for clickhouse keeper membership
+                let nclickhouse_keeper_membership = {
+                    use db::schema::inv_clickhouse_keeper_membership::dsl;
+                    diesel::delete(
+                        dsl::inv_clickhouse_keeper_membership.filter(
+                            dsl::inv_collection_id.eq(db_collection_id),
+                        ),
+                    )
+                    .execute_async(&conn)
+                    .await?
+                };
+
                 Ok((
                     ncollections,
                     nsps,
@@ -1389,6 +1424,7 @@ impl DataStore {
                     nnics,
                     nzpools,
                     nerrors,
+                    nclickhouse_keeper_membership,
                 ))
             })
             .await
@@ -1415,6 +1451,7 @@ impl DataStore {
             "nnics" => nnics,
             "nzpools" => nzpools,
             "nerrors" => nerrors,
+            "nclickhouse_keeper_membership" => nclickhouse_keeper_membership
         );
 
         Ok(())
@@ -2264,6 +2301,37 @@ impl DataStore {
             map.zones.zones.push(zone);
         }
 
+        // Now load the clickhouse keeper cluster memberships
+        let clickhouse_keeper_cluster_membership = {
+            use db::schema::inv_clickhouse_keeper_membership::dsl;
+            let mut memberships = BTreeSet::new();
+            let mut paginator = Paginator::new(batch_size);
+            while let Some(p) = paginator.next() {
+                let batch = paginated(
+                    dsl::inv_clickhouse_keeper_membership,
+                    dsl::queried_keeper_id,
+                    &p.current_pagparams(),
+                )
+                .filter(dsl::inv_collection_id.eq(db_id))
+                .select(InvClickhouseKeeperMembership::as_select())
+                .load_async(&*conn)
+                .await
+                .map_err(|e| {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                })?;
+                paginator = p.found_batch(&batch, &|row| row.queried_keeper_id);
+                for membership in batch.into_iter() {
+                    memberships.insert(
+                        ClickhouseKeeperClusterMembership::try_from(membership)
+                            .map_err(|e| {
+                                Error::internal_error(&format!("{e:#}",))
+                            })?,
+                    );
+                }
+            }
+            memberships
+        };
+
         bail_unless!(
             omicron_zone_nics.is_empty(),
             "found extra Omicron zone NICs: {:?}",
@@ -2285,9 +2353,7 @@ impl DataStore {
             rot_pages_found,
             sled_agents,
             omicron_zones,
-            // Currently unused
-            // See: https://github.com/oxidecomputer/omicron/issues/6578
-            clickhouse_keeper_cluster_membership: BTreeMap::new(),
+            clickhouse_keeper_cluster_membership,
         })
     }
 }

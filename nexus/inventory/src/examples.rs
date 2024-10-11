@@ -5,6 +5,8 @@
 //! Example collections used for testing
 
 use crate::CollectionBuilder;
+use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
+use clickhouse_admin_types::KeeperId;
 use gateway_client::types::PowerState;
 use gateway_client::types::RotSlot;
 use gateway_client::types::RotState;
@@ -471,6 +473,14 @@ pub fn representative() -> Representative {
     builder
         .found_sled_omicron_zones("fake sled 15 agent", sled17_id, sled17)
         .unwrap();
+
+    builder.found_clickhouse_keeper_cluster_membership(
+        ClickhouseKeeperClusterMembership {
+            queried_keeper: KeeperId(1),
+            leader_committed_log_index: 1000,
+            raft_config: [KeeperId(1)].into_iter().collect(),
+        },
+    );
 
     Representative {
         builder,
