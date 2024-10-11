@@ -58,8 +58,7 @@ fn test_example() {
     // The example system uses a fixed seed, which means that UUIDs are
     // deterministic. Some of the test commands also use those UUIDs, and it's
     // convenient for everyone if they aren't redacted.
-    let stdout_text =
-        Redactor::new().redact_uuids(false).do_redact(&stdout_text);
+    let stdout_text = Redactor::default().uuids(false).do_redact(&stdout_text);
     assert_contents("tests/output/cmd-example-stdout", &stdout_text);
     assert_contents("tests/output/cmd-example-stderr", &stderr_text);
 }
