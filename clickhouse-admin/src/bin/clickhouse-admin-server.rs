@@ -2,7 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Executable program to run the Omicron ClickHouse admin interface
+//! Executable program to run the Omicron ClickHouse admin interface for
+//! clickhouse servers.
 
 use anyhow::anyhow;
 use camino::Utf8PathBuf;
@@ -14,8 +15,8 @@ use std::net::{SocketAddr, SocketAddrV6};
 
 #[derive(Debug, Parser)]
 #[clap(
-    name = "clickhouse-admin",
-    about = "Omicron ClickHouse cluster admin server"
+    name = "clickhouse-admin-server",
+    about = "Omicron ClickHouse cluster admin server for replica servers"
 )]
 enum Args {
     /// Start the ClickHouse admin server
@@ -57,7 +58,7 @@ async fn main_impl() -> Result<(), CmdError> {
             let clickhouse_cli =
                 ClickhouseCli::new(binary_path, listen_address);
 
-            let server = omicron_clickhouse_admin::start_server(
+            let server = omicron_clickhouse_admin::start_server_admin_server(
                 clickward,
                 clickhouse_cli,
                 config,

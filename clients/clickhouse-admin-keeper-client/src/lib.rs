@@ -2,11 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Interface for making API requests to a clickhouse-admin server running in
+//! Interface for making API requests to a clickhouse-admin-{keeper|server} server running in
 //! an omicron zone.
 
 progenitor::generate_api!(
-    spec = "../../openapi/clickhouse-admin.json",
+    spec = "../../openapi/clickhouse-admin-keeper.json",
     inner_type = slog::Logger,
     pre_hook = (|log: &slog::Logger, request: &reqwest::Request| {
         slog::debug!(log, "client request";
@@ -21,8 +21,7 @@ progenitor::generate_api!(
     derives = [schemars::JsonSchema],
     replace = {
         TypedUuidForOmicronZoneKind = omicron_uuid_kinds::OmicronZoneUuid,
-        KeeperConfigurableSettings = clickhouse_admin_api::KeeperConfigurableSettings,
-        ServerConfigurableSettings = clickhouse_admin_api::ServerConfigurableSettings,
+        KeeperConfigurableSettings = clickhouse_admin_types::KeeperConfigurableSettings,
         ClickhouseKeeperClusterMembership = clickhouse_admin_types::ClickhouseKeeperClusterMembership,
         KeeperId = clickhouse_admin_types::KeeperId
     }

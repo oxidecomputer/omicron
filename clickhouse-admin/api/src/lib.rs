@@ -2,56 +2,29 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use clickhouse_admin_types::config::{KeeperConfig, ReplicaConfig};
 use clickhouse_admin_types::{
-    ClickhouseKeeperClusterMembership, KeeperConf, KeeperSettings, Lgif,
-    RaftConfig, ServerSettings,
+    ClickhouseKeeperClusterMembership, KeeperConf, KeeperConfig,
+    KeeperConfigurableSettings, Lgif, RaftConfig, ReplicaConfig,
+    ServerConfigurableSettings,
 };
 use dropshot::{
     HttpError, HttpResponseCreated, HttpResponseOk, RequestContext, TypedBody,
 };
-use omicron_common::api::external::Generation;
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub struct ServerConfigurableSettings {
-    /// A unique identifier for the configuration generation.
-    pub generation: Generation,
-    /// Configurable settings for a ClickHouse replica server node.
-    pub settings: ServerSettings,
-}
-
-#[derive(Debug, Serialize, Deserialize, JsonSchema)]
-pub struct KeeperConfigurableSettings {
-    /// A unique identifier for the configuration generation.
-    pub generation: Generation,
-    /// Configurable settings for a ClickHouse keeper node.
-    pub settings: KeeperSettings,
-}
 
 #[dropshot::api_description]
-pub trait ClickhouseAdminApi {
+pub trait ClickhouseAdminKeeperApi {
     type Context;
 
-    /// Generate a ClickHouse configuration file for a server node on a specified
-    /// directory and enable the SMF service.
-    #[endpoint {
-        method = PUT,
-        path = "/server/config-and-enable",
-    }]
-    async fn generate_server_config_and_enable(
-        rqctx: RequestContext<Self::Context>,
-        body: TypedBody<ServerConfigurableSettings>,
-    ) -> Result<HttpResponseCreated<ReplicaConfig>, HttpError>;
-
     /// Generate a ClickHouse configuration file for a keeper node on a specified
-    /// directory and enable the SMF service.
+    /// directory and enable the SMF service if not currently enabled.
+    ///
+    /// Note that we cannot start the keeper service until there is an initial
+    /// configuration set via this endpoint.
     #[endpoint {
         method = PUT,
-        path = "/keeper/config-and-enable",
+        path = "/config",
     }]
-    async fn generate_keeper_config_and_enable(
+    async fn generate_config(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<KeeperConfigurableSettings>,
     ) -> Result<HttpResponseCreated<KeeperConfig>, HttpError>;
@@ -94,4 +67,20 @@ pub trait ClickhouseAdminApi {
     async fn keeper_cluster_membership(
         rqctx: RequestContext<Self::Context>,
     ) -> Result<HttpResponseOk<ClickhouseKeeperClusterMembership>, HttpError>;
+}
+
+#[dropshot::api_description]
+pub trait ClickhouseAdminServerApi {
+    type Context;
+
+    /// Generate a ClickHouse configuration file for a server node on a specified
+    /// directory and enable the SMF service.
+    #[endpoint {
+        method = PUT,
+        path = "/config"
+    }]
+    async fn generate_config(
+        rqctx: RequestContext<Self::Context>,
+        body: TypedBody<ServerConfigurableSettings>,
+    ) -> Result<HttpResponseCreated<ReplicaConfig>, HttpError>;
 }

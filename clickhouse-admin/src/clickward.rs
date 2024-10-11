@@ -2,8 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use clickhouse_admin_types::config::{KeeperConfig, ReplicaConfig};
-use clickhouse_admin_types::{KeeperSettings, ServerSettings};
+use clickhouse_admin_types::{
+    KeeperConfig, KeeperSettings, ReplicaConfig, ServerSettings,
+};
 use dropshot::HttpError;
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
 
