@@ -18,3 +18,8 @@ petgraph.workspace = true
 serde.workspace = true
 toml.workspace = true
 omicron-workspace-hack.workspace = true
+
+[dev-dependencies]
+expectorate.workspace = true
+omicron-test-utils.workspace = true
+subprocess.workspace = true
