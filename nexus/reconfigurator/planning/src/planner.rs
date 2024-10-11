@@ -357,6 +357,7 @@ impl<'a> Planner<'a> {
             DiscretionaryOmicronZone::ClickhouseKeeper,
             DiscretionaryOmicronZone::ClickhouseServer,
             DiscretionaryOmicronZone::CockroachDb,
+            DiscretionaryOmicronZone::CruciblePantry,
             DiscretionaryOmicronZone::InternalDns,
             DiscretionaryOmicronZone::ExternalDns,
             DiscretionaryOmicronZone::Nexus,
@@ -562,7 +563,10 @@ impl<'a> Planner<'a> {
                     )?
                 }
                 DiscretionaryOmicronZone::CruciblePantry => {
-                    todo!("add {additional_zone_count} pantries")
+                    self.blueprint.sled_ensure_zone_multiple_crucible_pantry(
+                        sled_id,
+                        new_total_zone_count,
+                    )?
                 }
                 DiscretionaryOmicronZone::InternalDns => {
                     self.blueprint.sled_ensure_zone_multiple_internal_dns(
@@ -827,6 +831,7 @@ mod test {
     use nexus_types::inventory::OmicronZonesFound;
     use omicron_common::api::external::Generation;
     use omicron_common::disk::DiskIdentity;
+    use omicron_common::policy::CRUCIBLE_PANTRY_REDUNDANCY;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::PhysicalDiskUuid;
     use omicron_uuid_kinds::SledUuid;
@@ -1970,8 +1975,9 @@ mod test {
         // * each of those 2 sleds should get exactly 3 new Nexuses
         builder.policy_mut().target_nexus_zone_count = 9;
 
-        // Disable addition of internal DNS zones.
+        // Disable addition of zone types we're not checking for below.
         builder.policy_mut().target_internal_dns_zone_count = 0;
+        builder.policy_mut().target_crucible_pantry_zone_count = 0;
 
         let input = builder.build();
         let mut blueprint2 = Planner::new_based_on(
@@ -2452,6 +2458,76 @@ mod test {
                 CockroachDbPreserveDowngrade::DoNotModify
             );
         }
+
+        logctx.cleanup_successful();
+    }
+
+    #[test]
+    fn test_crucible_pantry() {
+        static TEST_NAME: &str = "test_crucible_pantry";
+        let logctx = test_setup_log(TEST_NAME);
+
+        // Use our example system as a starting point.
+        let (collection, input, blueprint1) = example(&logctx.log, TEST_NAME);
+
+        // We should start with CRUCIBLE_PANTRY_REDUNDANCY pantries spread out
+        // to at most 1 per sled. Find one of the sleds running one.
+        let pantry_sleds = blueprint1
+            .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+            .filter_map(|(sled_id, zone)| {
+                zone.zone_type.is_crucible_pantry().then_some(sled_id)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            pantry_sleds.len(),
+            CRUCIBLE_PANTRY_REDUNDANCY,
+            "expected {CRUCIBLE_PANTRY_REDUNDANCY} pantries, but found {}",
+            pantry_sleds.len(),
+        );
+
+        // Expunge one of the pantry-hosting sleds and re-plan. The planner
+        // should immediately replace the zone with one on another
+        // (non-expunged) sled.
+        let expunged_sled_id = pantry_sleds[0];
+
+        let mut input_builder = input.into_builder();
+        input_builder
+            .sleds_mut()
+            .get_mut(&expunged_sled_id)
+            .expect("can't find sled")
+            .policy = SledPolicy::Expunged;
+        let input = input_builder.build();
+        let blueprint2 = Planner::new_based_on(
+            logctx.log.clone(),
+            &blueprint1,
+            &input,
+            "test_blueprint2",
+            &collection,
+        )
+        .expect("failed to create planner")
+        .with_rng_seed((TEST_NAME, "bp2"))
+        .plan()
+        .expect("failed to re-plan");
+
+        let diff = blueprint2.diff_since_blueprint(&blueprint1);
+        println!("1 -> 2 (expunged sled):\n{}", diff.display());
+        assert_eq!(
+            blueprint2
+                .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+                .filter(|(sled_id, zone)| *sled_id != expunged_sled_id
+                    && zone.zone_type.is_crucible_pantry())
+                .count(),
+            CRUCIBLE_PANTRY_REDUNDANCY,
+            "can't find replacement pantry zone"
+        );
+
+        // Test a no-op planning iteration.
+        assert_planning_makes_no_changes(
+            &logctx.log,
+            &blueprint2,
+            &input,
+            TEST_NAME,
+        );
 
         logctx.cleanup_successful();
     }

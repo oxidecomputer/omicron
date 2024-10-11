@@ -34,10 +34,11 @@ parent:    516e80a3-b362-4fac-bd3c-4559717120dd
     crucible          cf87d2a3-d323-44a3-a87e-adc4ef6c75f4   in service    fd00:1122:3344:101::27
     crucible          f68846ad-4619-4747-8293-a2b4aeeafc5b   in service    fd00:1122:3344:101::29
     crucible_pantry   15dbaa30-1539-49d6-970d-ba5962960f33   in service    fd00:1122:3344:101::23
+    crucible_pantry   ff9ce09c-afbf-425b-bbfa-3d8fb254f98e   in service    fd00:1122:3344:101::2e
     internal_dns      eac6c0a0-baa5-4490-9cee-65198b7fbd9c   in service    fd00:1122:3344:2::1   
-    internal_dns      ff9ce09c-afbf-425b-bbfa-3d8fb254f98e   in service    fd00:1122:3344:1::1   
     internal_ntp      1ec4cc7b-2f00-4d13-8176-3b9815533ae9   in service    fd00:1122:3344:101::21
     nexus             3d4143df-e212-4774-9258-7d9b421fac2e   in service    fd00:1122:3344:101::22
+    nexus             845869e9-ecb2-4ec3-b6b8-2a836e459243   in service    fd00:1122:3344:101::2f
 
 
 
@@ -76,8 +77,8 @@ parent:    516e80a3-b362-4fac-bd3c-4559717120dd
     crucible          eb034526-1767-4cc4-8225-ec962265710b   in service    fd00:1122:3344:102::27
     crucible_pantry   b7402110-d88f-4ca4-8391-4a2fda6ad271   in service    fd00:1122:3344:102::23
     internal_dns      5c78756d-6182-4c27-a507-3419e8dbe76b   in service    fd00:1122:3344:3::1   
+    internal_dns      e639b672-27c4-4ecb-82c1-d672eb1ccf4e   in service    fd00:1122:3344:1::1   
     internal_ntp      c552280f-ba02-4f8d-9049-bd269e6b7845   in service    fd00:1122:3344:102::21
-    nexus             e639b672-27c4-4ecb-82c1-d672eb1ccf4e   in service    fd00:1122:3344:102::2f
     nexus             e6d0df1f-9f98-4c5a-9540-8444d1185c7d   in service    fd00:1122:3344:102::22
 
 
