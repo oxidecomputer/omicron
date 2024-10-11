@@ -2,8 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Interface for making API requests to a clickhouse-admin-{keeper|server} server running in
-//! an omicron zone.
+//! Interface for making API requests to a clickhouse-admin-keeper server
+//! running in an omicron zone.
 
 progenitor::generate_api!(
     spec = "../../openapi/clickhouse-admin-keeper.json",

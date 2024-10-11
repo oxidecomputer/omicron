@@ -38,7 +38,7 @@ pub fn all_apis() -> Vec<ApiSpec> {
             extra_validation: None,
         },
         ApiSpec {
-            title: "ClickHouse Cluster Admin Keeper API",
+            title: "ClickHouse Cluster Admin Servr API",
             version: "0.0.1",
             description: "API for interacting with the Oxide \
                 control plane's ClickHouse cluster replica servers",

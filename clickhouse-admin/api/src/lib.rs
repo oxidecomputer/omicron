@@ -11,6 +11,15 @@ use dropshot::{
     HttpError, HttpResponseCreated, HttpResponseOk, RequestContext, TypedBody,
 };
 
+/// We separate the admin interface for the keeper and server APIs because they
+/// are completely disjoint. We only run a clickhouse keeper *or* clickhouse
+/// server in a given zone, and therefore each admin api is only useful in one
+/// of the zones. Using separate APIs and clients prevents us from having to
+/// mark a given endpoint `unimplemented` in the case of it not being usable
+/// with one of the zone types.
+///
+/// Nonetheless, the interfaces themselves are small and serve a similar
+/// purpose. Therfore we combine them into the same crate.
 #[dropshot::api_description]
 pub trait ClickhouseAdminKeeperApi {
     type Context;
@@ -69,6 +78,15 @@ pub trait ClickhouseAdminKeeperApi {
     ) -> Result<HttpResponseOk<ClickhouseKeeperClusterMembership>, HttpError>;
 }
 
+/// We separate the admin interface for the keeper and server APIs because they
+/// are completely disjoint. We only run a clickhouse keeper *or* clickhouse
+/// server in a given zone, and therefore each admin api is only useful in one
+/// of the zones. Using separate APIs and clients prevents us from having to
+/// mark a given endpoint `unimplemented` in the case of it not being usable
+/// with one of the zone types.
+///
+/// Nonetheless, the interfaces themselves are small and serve a similar
+/// purpose. Therfore we combine them into the same crate.
 #[dropshot::api_description]
 pub trait ClickhouseAdminServerApi {
     type Context;
