@@ -8904,6 +8904,7 @@ dependencies = [
  "assert_matches",
  "camino",
  "camino-tempfile",
+ "chrono",
  "clap",
  "dropshot",
  "expectorate",
@@ -8935,6 +8936,7 @@ dependencies = [
  "swrite",
  "tabled",
  "tokio",
+ "typed-rng",
  "uuid",
 ]
 

@@ -192,7 +192,7 @@ impl ExampleSystemBuilder {
     pub fn build(&self) -> (ExampleSystem, Blueprint) {
         let nexus_count = self.get_nexus_zones();
 
-        slog::info!(
+        slog::debug!(
             &self.log,
             "Creating example system";
             "nsleds" => self.nsleds,
