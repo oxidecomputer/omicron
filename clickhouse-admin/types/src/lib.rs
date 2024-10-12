@@ -7,7 +7,12 @@ use atomicwrites::AtomicFile;
 use camino::Utf8PathBuf;
 use derive_more::{Add, AddAssign, Display, From};
 use itertools::Itertools;
-use schemars::JsonSchema;
+use omicron_common::api::external::Generation;
+use schemars::{
+    gen::SchemaGenerator,
+    schema::{Schema, SchemaObject},
+    JsonSchema,
+};
 use serde::{Deserialize, Serialize};
 use slog::{info, Logger};
 use std::collections::BTreeSet;
@@ -16,8 +21,20 @@ use std::io::{ErrorKind, Write};
 use std::net::Ipv6Addr;
 use std::str::FromStr;
 
-pub mod config;
-use config::*;
+mod config;
+pub use config::{
+    ClickhouseHost, KeeperConfig, KeeperConfigsForReplica, KeeperNodeConfig,
+    LogConfig, LogLevel, Macros, NodeType, RaftServerConfig,
+    RaftServerSettings, RaftServers, ReplicaConfig, ServerNodeConfig,
+};
+
+// Used for schemars to be able to be used with camino:
+// See https://github.com/camino-rs/camino/issues/91#issuecomment-2027908513
+pub fn path_schema(gen: &mut SchemaGenerator) -> Schema {
+    let mut schema: SchemaObject = <String>::json_schema(gen).into();
+    schema.format = Some("Utf8PathBuf".to_owned());
+    schema.into()
+}
 
 pub const OXIMETER_CLUSTER: &str = "oximeter_cluster";
 
@@ -58,6 +75,26 @@ pub struct KeeperId(pub u64);
     Deserialize,
 )]
 pub struct ServerId(pub u64);
+
+/// The top most type for configuring clickhouse-servers via
+/// clickhouse-admin-server-api
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct ServerConfigurableSettings {
+    /// A unique identifier for the configuration generation.
+    pub generation: Generation,
+    /// Configurable settings for a ClickHouse replica server node.
+    pub settings: ServerSettings,
+}
+
+/// The top most type for configuring clickhouse-servers via
+/// clickhouse-admin-keeper-api
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct KeeperConfigurableSettings {
+    /// A unique identifier for the configuration generation.
+    pub generation: Generation,
+    /// Configurable settings for a ClickHouse keeper node.
+    pub settings: KeeperSettings,
+}
 
 /// Configurable settings for a ClickHouse replica server node.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]

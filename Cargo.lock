@@ -1295,11 +1295,25 @@ dependencies = [
 ]
 
 [[package]]
-name = "clickhouse-admin-client"
+name = "clickhouse-admin-keeper-client"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "clickhouse-admin-api",
+ "clickhouse-admin-types",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "progenitor",
+ "reqwest 0.12.7",
+ "schemars",
+ "serde",
+ "slog",
+]
+
+[[package]]
+name = "clickhouse-admin-server-client"
+version = "0.1.0"
+dependencies = [
+ "chrono",
  "clickhouse-admin-types",
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
@@ -5603,7 +5617,8 @@ dependencies = [
  "anyhow",
  "base64 0.22.1",
  "chrono",
- "clickhouse-admin-client",
+ "clickhouse-admin-keeper-client",
+ "clickhouse-admin-server-client",
  "clickhouse-admin-types",
  "expectorate",
  "futures",
@@ -5689,8 +5704,8 @@ dependencies = [
  "async-bb8-diesel",
  "camino",
  "chrono",
- "clickhouse-admin-api",
- "clickhouse-admin-client",
+ "clickhouse-admin-keeper-client",
+ "clickhouse-admin-server-client",
  "clickhouse-admin-types",
  "cockroach-admin-client",
  "diesel",
@@ -6543,7 +6558,8 @@ dependencies = [
  "cancel-safe-futures",
  "chrono",
  "clap",
- "clickhouse-admin-client",
+ "clickhouse-admin-keeper-client",
+ "clickhouse-admin-server-client",
  "cockroach-admin-client",
  "criterion",
  "crucible-agent-client",

@@ -28,7 +28,7 @@ const SLED_AGENT_TIMEOUT: Duration = Duration::from_secs(60);
 pub struct Collector<'a> {
     log: slog::Logger,
     mgs_clients: Vec<gateway_client::Client>,
-    keeper_admin_clients: Vec<clickhouse_admin_client::Client>,
+    keeper_admin_clients: Vec<clickhouse_admin_keeper_client::Client>,
     sled_agent_lister: &'a (dyn SledAgentEnumerator + Send + Sync),
     in_progress: CollectionBuilder,
 }
@@ -37,7 +37,7 @@ impl<'a> Collector<'a> {
     pub fn new(
         creator: &str,
         mgs_clients: Vec<gateway_client::Client>,
-        keeper_admin_clients: Vec<clickhouse_admin_client::Client>,
+        keeper_admin_clients: Vec<clickhouse_admin_keeper_client::Client>,
         sled_agent_lister: &'a (dyn SledAgentEnumerator + Send + Sync),
         log: slog::Logger,
     ) -> Self {
@@ -384,7 +384,7 @@ impl<'a> Collector<'a> {
 
     /// Collect inventory about one keeper from one `ClickhouseAdminKeeper`
     async fn collect_one_keeper(
-        client: &clickhouse_admin_client::Client,
+        client: &clickhouse_admin_keeper_client::Client,
         log: &slog::Logger,
         in_progress: &mut CollectionBuilder,
     ) {

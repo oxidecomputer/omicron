@@ -12,8 +12,8 @@ omicron-rpaths.workspace = true
 [dependencies]
 anyhow.workspace = true
 camino.workspace = true
-clickhouse-admin-api.workspace = true
-clickhouse-admin-client.workspace = true
+clickhouse-admin-keeper-client.workspace = true
+clickhouse-admin-server-client.workspace = true
 clickhouse-admin-types.workspace = true
 cockroach-admin-client.workspace = true
 chrono.workspace = true
