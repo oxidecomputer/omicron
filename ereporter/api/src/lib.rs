@@ -10,7 +10,7 @@ use dropshot::{
 use omicron_common::api::external::Generation;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 use uuid::Uuid;
 
 #[dropshot::api_description]
@@ -62,5 +62,5 @@ pub struct Ereport {
     /// The UTC timestamp when this ereport was observed, as determined by the reporter.
     pub time_created: DateTime<Utc>,
     /// The set of facts (key-value pairs) associated with this ereport.
-    pub facts: BTreeMap<String, String>,
+    pub facts: HashMap<String, String>,
 }

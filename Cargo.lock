@@ -2721,7 +2721,15 @@ checksum = "5443807d6dff69373d433ab9ef5378ad8df50ca6298caf15de6e52e24aaf54d5"
 name = "ereporter"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "chrono",
+ "dropshot",
  "ereporter-api",
+ "omicron-common",
+ "omicron-workspace-hack",
+ "slog",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]
