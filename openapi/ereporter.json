@@ -12,7 +12,7 @@
   "paths": {
     "/ereports": {
       "get": {
-        "summary": "Get a list of ereports , paginated by sequence number.",
+        "summary": "Get a list of ereports, paginated by sequence number.",
         "operationId": "ereports_list",
         "parameters": [
           {
@@ -61,7 +61,8 @@
     },
     "/ereports/{seq}": {
       "delete": {
-        "summary": "Truncate ereports with sequence numbers less than or equal to `seq`.",
+        "summary": "Informs the reporter that it may freely discard ereports with sequence",
+        "description": "numbers less than or equal to `seq`.",
         "operationId": "ereports_truncate",
         "parameters": [
           {

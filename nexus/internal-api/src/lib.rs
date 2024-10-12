@@ -20,15 +20,16 @@ use nexus_types::{
     },
     internal_api::{
         params::{
-            InstanceMigrateRequest, OximeterInfo, RackInitializationRequest,
-            SledAgentInfo, SwitchPutRequest, SwitchPutResponse,
+            EreporterInfo, InstanceMigrateRequest, OximeterInfo,
+            RackInitializationRequest, SledAgentInfo, SwitchPutRequest,
+            SwitchPutResponse,
         },
         views::{BackgroundTask, DemoSaga, Ipv4NatEntryView, Saga},
     },
 };
 use omicron_common::{
     api::{
-        external::{http_pagination::PaginatedById, Instance},
+        external::{http_pagination::PaginatedById, Generation, Instance},
         internal::nexus::{
             DiskRuntimeState, DownstairsClientStopRequest,
             DownstairsClientStopped, ProducerEndpoint,
@@ -530,6 +531,19 @@ pub trait NexusInternalApi {
         path_params: Path<ProbePathParam>,
         query_params: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<Vec<ProbeInfo>>, HttpError>;
+
+    // Error reports
+
+    /// Register an error reporter with Nexus, returning the next sequence
+    /// number for an error report from that reporter.
+    #[endpoint {
+        method = POST,
+        path = "/ereport/reporters",
+    }]
+    async fn cpapi_ereporters_post(
+        request_context: RequestContext<Self::Context>,
+        identity: TypedBody<EreporterInfo>,
+    ) -> Result<HttpResponseOk<EreporterRegistered>, HttpError>;
 }
 
 /// Path parameters for Sled Agent requests (internal API)
@@ -648,4 +662,13 @@ pub struct SledId {
 #[derive(Deserialize, JsonSchema)]
 pub struct ProbePathParam {
     pub sled: Uuid,
+}
+
+/// Response to error reporter registration requests.
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct EreporterRegistered {
+    /// The starting sequence number of the next error report from this
+    /// reporter. If the reporter has not been seen by Nexus previously, this
+    /// may be 0.
+    pub seq: Generation,
 }

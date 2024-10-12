@@ -7,12 +7,16 @@ edition = "2021"
 anyhow.workspace = true
 chrono.workspace = true
 dropshot.workspace = true
-ereporter-api = { workspace = true }
-tokio = { workspace = true, features = ["sync"] }
+ereporter-api.workspace = true
+internal-dns.workspace = true
+nexus-client.workspace = true
 omicron-common.workspace = true
 omicron-workspace-hack.workspace = true
 uuid.workspace = true
+serde.workspace = true
 slog.workspace = true
+slog-dtrace.workspace = true
+tokio = { workspace = true, features = ["sync"] }
 
 [lints]
 workspace = true

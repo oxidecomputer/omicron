@@ -30,6 +30,7 @@ use nexus_types::external_api::params::UninitializedSledId;
 use nexus_types::external_api::shared::ProbeInfo;
 use nexus_types::external_api::shared::UninitializedSled;
 use nexus_types::external_api::views::SledPolicy;
+use nexus_types::internal_api::params::EreporterInfo;
 use nexus_types::internal_api::params::InstanceMigrateRequest;
 use nexus_types::internal_api::params::SledAgentInfo;
 use nexus_types::internal_api::params::SwitchPutRequest;
@@ -932,6 +933,25 @@ impl NexusInternalApi for NexusInternalApiImpl {
                 nexus
                     .probe_list_for_sled(&opctx, &pagparams, path.sled)
                     .await?,
+            ))
+        };
+        apictx
+            .internal_latencies
+            .instrument_dropshot_handler(&rqctx, handler)
+            .await
+    }
+
+    async fn cpapi_ereporters_post(
+        rqctx: RequestContext<Self::Context>,
+        _identity: TypedBody<EreporterInfo>,
+    ) -> Result<HttpResponseOk<EreporterRegistered>, HttpError> {
+        let apictx = &rqctx.context().context;
+        let handler = async {
+            // TODO(eliza): ACTUALLY IMPLEMENT THIS PART LOL
+            Err(HttpError::for_unavail(
+                Some("NOT YET IMPLEMENTED LMAO".to_string()),
+                "TODO eliza actually implement this part lol lmao :)"
+                    .to_string(),
             ))
         };
         apictx

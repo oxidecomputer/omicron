@@ -2725,9 +2725,13 @@ dependencies = [
  "chrono",
  "dropshot",
  "ereporter-api",
+ "internal-dns",
+ "nexus-client",
  "omicron-common",
  "omicron-workspace-hack",
+ "serde",
  "slog",
+ "slog-dtrace",
  "tokio",
  "uuid",
 ]

@@ -746,6 +746,41 @@
         }
       }
     },
+    "/ereport/reporters": {
+      "post": {
+        "summary": "Register an error reporter with Nexus, returning the next sequence",
+        "description": "number for an error report from that reporter.",
+        "operationId": "cpapi_ereporters_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EreporterInfo"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EreporterRegistered"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/instances/{instance_id}/migrate": {
       "post": {
         "operationId": "instance_migrate",
@@ -3262,6 +3297,42 @@
         "required": [
           "nanos",
           "secs"
+        ]
+      },
+      "EreporterInfo": {
+        "description": "Message sent by an error reporter to register itself with Nexus.",
+        "type": "object",
+        "properties": {
+          "address": {
+            "description": "The address on which the error reporter server listens for ingestion requests.",
+            "type": "string"
+          },
+          "reporter_id": {
+            "description": "The UUID of the reporting entity.",
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "address",
+          "reporter_id"
+        ]
+      },
+      "EreporterRegistered": {
+        "description": "Response to error reporter registration requests.",
+        "type": "object",
+        "properties": {
+          "seq": {
+            "description": "The starting sequence number of the next error report from this reporter. If the reporter has not been seen by Nexus previously, this may be 0.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          }
+        },
+        "required": [
+          "seq"
         ]
       },
       "Error": {
