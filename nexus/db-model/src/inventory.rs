@@ -31,9 +31,7 @@ use diesel::serialize::ToSql;
 use diesel::{serialize, sql_types};
 use ipnetwork::IpNetwork;
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
-use nexus_sled_agent_shared::inventory::{
-    OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
-};
+use nexus_sled_agent_shared::inventory::{OmicronZoneConfig, OmicronZoneType};
 use nexus_types::inventory::{
     BaseboardId, Caboose, Collection, NvmeFirmware, PowerState, RotPage,
     RotSlot,
@@ -1178,7 +1176,11 @@ impl From<InvDataset> for nexus_types::inventory::Dataset {
     }
 }
 
-/// See [`nexus_types::inventory::OmicronZonesFound`].
+/// Information about a sled's Omicron zones, part of
+/// [`nexus_types::inventory::SledAgent`].
+///
+/// TODO: This table is vestigial and can be combined with `InvSledAgent`. See
+/// [issue #6770](https://github.com/oxidecomputer/omicron/issues/6770).
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_sled_omicron_zones)]
 pub struct InvSledOmicronZones {
@@ -1192,28 +1194,14 @@ pub struct InvSledOmicronZones {
 impl InvSledOmicronZones {
     pub fn new(
         inv_collection_id: CollectionUuid,
-        zones_found: &nexus_types::inventory::OmicronZonesFound,
+        sled_agent: &nexus_types::inventory::SledAgent,
     ) -> InvSledOmicronZones {
         InvSledOmicronZones {
             inv_collection_id: inv_collection_id.into(),
-            time_collected: zones_found.time_collected,
-            source: zones_found.source.clone(),
-            sled_id: zones_found.sled_id.into(),
-            generation: Generation(zones_found.zones.generation),
-        }
-    }
-
-    pub fn into_uninit_zones_found(
-        self,
-    ) -> nexus_types::inventory::OmicronZonesFound {
-        nexus_types::inventory::OmicronZonesFound {
-            time_collected: self.time_collected,
-            source: self.source,
-            sled_id: self.sled_id.into(),
-            zones: OmicronZonesConfig {
-                generation: *self.generation,
-                zones: Vec::new(),
-            },
+            time_collected: sled_agent.time_collected,
+            source: sled_agent.source.clone(),
+            sled_id: sled_agent.sled_id.into(),
+            generation: Generation(sled_agent.omicron_zones.generation),
         }
     }
 }

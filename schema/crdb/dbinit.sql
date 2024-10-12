@@ -3391,6 +3391,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_dataset (
     PRIMARY KEY (inv_collection_id, sled_id, name)
 );
 
+-- TODO: This table is vestigial and can be combined with `inv_sled_agent`. See
+-- https://github.com/oxidecomputer/omicron/issues/6770.
 CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_omicron_zones (
     -- where this observation came from
     -- (foreign key into `inv_collection` table)

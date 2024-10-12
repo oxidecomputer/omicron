@@ -634,13 +634,12 @@ mod test {
         // Also assume any sled in the collection is active.
         let mut sled_state = BTreeMap::new();
 
-        for (sled_id, zones_config) in collection.omicron_zones {
+        for (sled_id, sa) in collection.sled_agents {
             blueprint_zones.insert(
                 sled_id,
                 BlueprintZonesConfig {
-                    generation: zones_config.zones.generation,
-                    zones: zones_config
-                        .zones
+                    generation: sa.omicron_zones.generation,
+                    zones: sa.omicron_zones
                         .zones
                         .into_iter()
                         .map(|config| -> BlueprintZoneConfig {

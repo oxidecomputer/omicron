@@ -290,10 +290,14 @@ impl<'a> Planner<'a> {
             // problem here.
             let has_ntp_inventory = self
                 .inventory
-                .omicron_zones
+                .sled_agents
                 .get(&sled_id)
-                .map(|sled_zones| {
-                    sled_zones.zones.zones.iter().any(|z| z.zone_type.is_ntp())
+                .map(|sled_agent| {
+                    sled_agent
+                        .omicron_zones
+                        .zones
+                        .iter()
+                        .any(|z| z.zone_type.is_ntp())
                 })
                 .unwrap_or(false);
             if !has_ntp_inventory {
@@ -801,7 +805,6 @@ mod test {
     use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
     use clickhouse_admin_types::KeeperId;
     use expectorate::assert_contents;
-    use nexus_inventory::now_db_precision;
     use nexus_sled_agent_shared::inventory::ZoneKind;
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::deployment::BlueprintDiff;
@@ -818,7 +821,6 @@ mod test {
     use nexus_types::external_api::views::SledPolicy;
     use nexus_types::external_api::views::SledProvisionPolicy;
     use nexus_types::external_api::views::SledState;
-    use nexus_types::inventory::OmicronZonesFound;
     use omicron_common::api::external::Generation;
     use omicron_common::disk::DiskIdentity;
     use omicron_test_utils::dev::test_setup_log;
@@ -935,25 +937,24 @@ mod test {
         verify_blueprint(&blueprint4);
 
         // Now update the inventory to have the requested NTP zone.
-        let mut collection = example.collection.clone();
-        assert!(collection
-            .omicron_zones
-            .insert(
+        //
+        // TODO: mutating example.system doesn't automatically update
+        // example.collection -- this should be addressed via API improvements.
+        example
+            .system
+            .sled_set_omicron_zones(
                 new_sled_id,
-                OmicronZonesFound {
-                    time_collected: now_db_precision(),
-                    source: String::from("test suite"),
-                    sled_id: new_sled_id,
-                    zones: blueprint4
-                        .blueprint_zones
-                        .get(&new_sled_id)
-                        .expect("blueprint should contain zones for new sled")
-                        .to_omicron_zones_config(
-                            BlueprintZoneFilter::ShouldBeRunning
-                        )
-                }
+                blueprint4
+                    .blueprint_zones
+                    .get(&new_sled_id)
+                    .expect("blueprint should contain zones for new sled")
+                    .to_omicron_zones_config(
+                        BlueprintZoneFilter::ShouldBeRunning,
+                    ),
             )
-            .is_none());
+            .unwrap();
+        let collection =
+            example.system.to_collection_builder().unwrap().build();
 
         // Check that the next step is to add Crucible zones
         let blueprint5 = Planner::new_based_on(

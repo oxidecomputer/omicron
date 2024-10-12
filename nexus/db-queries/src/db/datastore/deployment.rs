@@ -1882,10 +1882,6 @@ mod tests {
             &mut collection.sled_agents,
             &mut base_collection.sled_agents,
         );
-        mem::swap(
-            &mut collection.omicron_zones,
-            &mut base_collection.omicron_zones,
-        );
 
         // Treat this blueprint as the initial blueprint for the system.
         blueprint.parent_blueprint_id = None;
@@ -1999,7 +1995,7 @@ mod tests {
         );
         assert_eq!(
             blueprint1.blueprint_zones.len(),
-            collection.omicron_zones.len()
+            collection.sled_agents.len()
         );
         assert_eq!(
             blueprint1.all_omicron_zones(BlueprintZoneFilter::All).count(),

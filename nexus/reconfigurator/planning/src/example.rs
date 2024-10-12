@@ -316,10 +316,6 @@ impl ExampleSystemBuilder {
         }
 
         let blueprint = builder.build();
-        let mut builder =
-            system.to_collection_builder().expect("failed to build collection");
-        builder.set_rng_seed((&self.test_name, "ExampleSystem collection"));
-
         for sled_id in blueprint.sleds() {
             let Some(zones) = blueprint.blueprint_zones.get(&sled_id) else {
                 continue;
@@ -350,9 +346,8 @@ impl ExampleSystemBuilder {
         }
 
         for (sled_id, zones) in &blueprint.blueprint_zones {
-            builder
-                .found_sled_omicron_zones(
-                    "fake sled agent",
+            system
+                .sled_set_omicron_zones(
                     *sled_id,
                     zones.to_omicron_zones_config(
                         BlueprintZoneFilter::ShouldBeRunning,
@@ -360,6 +355,10 @@ impl ExampleSystemBuilder {
                 )
                 .unwrap();
         }
+
+        let mut builder =
+            system.to_collection_builder().expect("failed to build collection");
+        builder.set_rng_seed((&self.test_name, "ExampleSystem collection"));
 
         // The blueprint evolves separately from the system -- so it's returned
         // as a separate value.

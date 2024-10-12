@@ -223,7 +223,7 @@ mod tests {
         // Create another zpool on one of the sleds, so we can add new
         // zones that use it.
         let new_zpool_id = ZpoolUuid::new_v4();
-        for &sled_id in collection.omicron_zones.keys().take(1) {
+        for &sled_id in collection.sled_agents.keys().take(1) {
             let zpool = Zpool::new(
                 new_zpool_id.into_untyped_uuid(),
                 sled_id.into_untyped_uuid(),

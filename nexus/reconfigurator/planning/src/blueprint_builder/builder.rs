@@ -2480,7 +2480,7 @@ pub mod test {
         let err = builder
             .sled_ensure_zone_multiple_nexus(
                 collection
-                    .omicron_zones
+                    .sled_agents
                     .keys()
                     .next()
                     .copied()
@@ -2509,10 +2509,10 @@ pub mod test {
         // `sled_id`.
         let sled_id = {
             let mut selected_sled_id = None;
-            for (sled_id, zones) in &mut collection.omicron_zones {
-                let nzones_before_retain = zones.zones.zones.len();
-                zones.zones.zones.retain(|z| !z.zone_type.is_nexus());
-                if zones.zones.zones.len() < nzones_before_retain {
+            for (sled_id, sa) in &mut collection.sled_agents {
+                let nzones_before_retain = sa.omicron_zones.zones.len();
+                sa.omicron_zones.zones.retain(|z| !z.zone_type.is_nexus());
+                if sa.omicron_zones.zones.len() < nzones_before_retain {
                     selected_sled_id = Some(*sled_id);
                     // Also remove this zone from the blueprint.
                     let mut removed_nexus = None;

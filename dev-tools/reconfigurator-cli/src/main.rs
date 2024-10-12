@@ -21,7 +21,6 @@ use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::system::{
     SledBuilder, SledHwInventory, SystemDescription,
 };
-use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::execution;
 use nexus_types::deployment::execution::blueprint_external_dns_config;
@@ -739,25 +738,11 @@ fn cmd_inventory_list(
 fn cmd_inventory_generate(
     sim: &mut ReconfiguratorSim,
 ) -> anyhow::Result<Option<String>> {
-    let mut builder =
+    let builder =
         sim.system.to_collection_builder().context("generating inventory")?;
-    // For an inventory we just generated from thin air, pretend like each sled
-    // has no zones on it.
-    let planning_input =
-        sim.system.to_planning_input_builder().unwrap().build();
-    for sled_id in planning_input.all_sled_ids(SledFilter::Commissioned) {
-        builder
-            .found_sled_omicron_zones(
-                "fake sled agent",
-                sled_id,
-                OmicronZonesConfig {
-                    generation: Generation::new(),
-                    zones: vec![],
-                },
-            )
-            .context("recording Omicron zones")?;
-    }
 
+    // sim.system carries around Omicron zones, which will make their way into
+    // the inventory.
     let mut inventory = builder.build();
     // Assign collection IDs from the RNG. This enables consistent results when
     // callers have explicitly seeded the RNG (e.g., in tests).

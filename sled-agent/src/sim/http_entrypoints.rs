@@ -326,13 +326,6 @@ impl SledAgentApi for SledAgentSimImpl {
         Ok(HttpResponseOk(sa.omicron_physical_disks_list().await?))
     }
 
-    async fn omicron_zones_get(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<OmicronZonesConfig>, HttpError> {
-        let sa = rqctx.context();
-        Ok(HttpResponseOk(sa.omicron_zones_list().await))
-    }
-
     async fn omicron_zones_put(
         rqctx: RequestContext<Self::Context>,
         body: TypedBody<OmicronZonesConfig>,
