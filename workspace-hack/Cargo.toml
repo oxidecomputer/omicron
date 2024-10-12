@@ -92,7 +92,7 @@ quote = { version = "1.0.37" }
 regex = { version = "1.10.6" }
 regex-automata = { version = "0.4.6", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "unicode"] }
 regex-syntax = { version = "0.8.4" }
-reqwest = { version = "0.12.7", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
+reqwest = { version = "0.12.8", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
 ring = { version = "0.17.8", features = ["std"] }
 rsa = { version = "0.9.6", features = ["serde", "sha2"] }
 schemars = { version = "0.8.21", features = ["bytes", "chrono", "uuid1"] }
@@ -204,7 +204,7 @@ quote = { version = "1.0.37" }
 regex = { version = "1.10.6" }
 regex-automata = { version = "0.4.6", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "unicode"] }
 regex-syntax = { version = "0.8.4" }
-reqwest = { version = "0.12.7", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
+reqwest = { version = "0.12.8", features = ["blocking", "cookies", "json", "rustls-tls", "stream"] }
 ring = { version = "0.17.8", features = ["std"] }
 rsa = { version = "0.9.6", features = ["serde", "sha2"] }
 schemars = { version = "0.8.21", features = ["bytes", "chrono", "uuid1"] }
