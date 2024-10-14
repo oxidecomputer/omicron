@@ -99,6 +99,7 @@ use hickory_resolver::Name;
 use internal_dns_types::config::{
     DnsConfig, DnsConfigParams, DnsConfigZone, DnsRecord,
 };
+use omicron_common::api::external::Generation;
 use serde::{Deserialize, Serialize};
 use sled::transaction::ConflictableTransactionError;
 use slog::{debug, error, info, o, warn};
@@ -132,7 +133,7 @@ pub struct Store {
 
 #[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
 struct CurrentConfig {
-    generation: u64,
+    generation: Generation,
     zones: Vec<String>,
     time_created: chrono::DateTime<chrono::Utc>,
     time_applied: chrono::DateTime<chrono::Utc>,
@@ -144,7 +145,10 @@ pub enum UpdateError {
         "unsupported attempt to update to generation \
         {attempted_generation} while at generation {current_generation}"
     )]
-    BadUpdateGeneration { current_generation: u64, attempted_generation: u64 },
+    BadUpdateGeneration {
+        current_generation: Generation,
+        attempted_generation: Generation,
+    },
 
     #[error(
         "update already in progress (from req_id {req_id:?}, \
@@ -153,7 +157,7 @@ pub enum UpdateError {
     UpdateInProgress {
         start_time: chrono::DateTime<chrono::Utc>,
         elapsed: chrono::Duration,
-        generation: u64,
+        generation: Generation,
         req_id: String,
     },
 
@@ -193,7 +197,7 @@ impl Store {
         if store.read_config_optional()?.is_none() {
             let now = chrono::Utc::now();
             let initial_config_bytes = serde_json::to_vec(&CurrentConfig {
-                generation: 0,
+                generation: 0.into(),
                 zones: vec![],
                 time_created: now,
                 time_applied: now,
@@ -234,7 +238,7 @@ impl Store {
             .transpose()
     }
 
-    fn tree_name_for_zone(zone_name: &str, generation: u64) -> String {
+    fn tree_name_for_zone(zone_name: &str, generation: Generation) -> String {
         format!("generation_{}_zone_{}", generation, zone_name)
     }
 
@@ -302,7 +306,7 @@ impl Store {
     async fn begin_update<'a, 'b>(
         &'a self,
         req_id: &'b str,
-        generation: u64,
+        generation: Generation,
     ) -> Result<UpdateGuard<'a, 'b>, UpdateError> {
         if self.poisoned.load(Ordering::SeqCst) {
             panic!(
@@ -344,7 +348,7 @@ impl Store {
     ) -> Result<(), UpdateError> {
         let log = &self.log.new(o!(
             "req_id" => req_id.to_owned(),
-            "new_generation" => config.generation
+            "new_generation" => u64::from(config.generation),
         ));
 
         // Lock out concurrent updates.  We must not return until we've released
@@ -512,7 +516,7 @@ impl Store {
         self.prune_trees(trees_to_prune, "too new");
     }
 
-    fn all_name_trees(&self) -> impl Iterator<Item = (u64, String)> {
+    fn all_name_trees(&self) -> impl Iterator<Item = (Generation, String)> {
         self.db.tree_names().into_iter().filter_map(|tree_name_bytes| {
             let tree_name = std::str::from_utf8(&tree_name_bytes).ok()?;
             let parts = tree_name.splitn(4, '_').collect::<Vec<_>>();
@@ -523,7 +527,8 @@ impl Store {
                 return None;
             }
 
-            let gen_num = parts[1].parse::<u64>().ok()?;
+            let gen_num =
+                Generation::try_from(parts[1].parse::<u64>().ok()?).ok()?;
             Some((gen_num, tree_name.to_owned()))
         })
     }
@@ -694,7 +699,7 @@ pub(crate) enum QueryError {
 struct UpdateInfo {
     start_time: chrono::DateTime<chrono::Utc>,
     start_instant: std::time::Instant,
-    generation: u64,
+    generation: Generation,
     req_id: String,
 }
 
@@ -788,6 +793,7 @@ mod test {
     use internal_dns_types::config::DnsConfigParams;
     use internal_dns_types::config::DnsConfigZone;
     use internal_dns_types::config::DnsRecord;
+    use omicron_common::api::external::Generation;
     use omicron_test_utils::dev::test_setup_log;
     use std::collections::BTreeSet;
     use std::collections::HashMap;
@@ -874,11 +880,11 @@ mod test {
     /// Returns an ordered list of the generation numbers that have trees in
     /// the underlying Store's database.  This is used to verify the
     /// behavior around pruning trees.
-    fn generations_with_trees(store: &Store) -> Vec<u64> {
+    fn generations_with_trees(store: &Store) -> Vec<Generation> {
         store
             .all_name_trees()
             .map(|(gen, _)| gen)
-            .collect::<BTreeSet<u64>>()
+            .collect::<BTreeSet<Generation>>()
             .into_iter()
             .collect()
     }
@@ -890,7 +896,7 @@ mod test {
         // Verify the initial configuration.
         assert!(generations_with_trees(&tc.store).is_empty());
         let config = tc.store.dns_config().await.unwrap();
-        assert_eq!(config.generation, 0);
+        assert_eq!(config.generation, Generation::from_u32(0));
         assert!(config.zones.is_empty());
         expect(&tc.store, "gen1_name.zone1.internal", Expect::NoZone);
         expect(&tc.store, "Gen1_name.zone1.internal", Expect::NoZone);
@@ -902,7 +908,7 @@ mod test {
         let dummy_record = DnsRecord::Aaaa(Ipv6Addr::LOCALHOST);
         let update1 = DnsConfigParams {
             time_created: chrono::Utc::now(),
-            generation: 1,
+            generation: Generation::from_u32(1),
             zones: vec![DnsConfigZone {
                 zone_name: "zone1.internal".to_string(),
                 records: HashMap::from([
@@ -913,7 +919,10 @@ mod test {
         };
 
         tc.store.dns_config_update(&update1, "my request id").await.unwrap();
-        assert_eq!(vec![1], generations_with_trees(&tc.store));
+        assert_eq!(
+            vec![Generation::from_u32(1)],
+            generations_with_trees(&tc.store)
+        );
         expect(
             &tc.store,
             "gen1_name.zone1.internal",
@@ -942,7 +951,7 @@ mod test {
         // one of the names from the existing zone.
         let update2 = DnsConfigParams {
             time_created: chrono::Utc::now(),
-            generation: 2,
+            generation: Generation::from_u32(2),
             zones: vec![
                 DnsConfigZone {
                     zone_name: "zone1.internal".to_string(),
@@ -961,7 +970,10 @@ mod test {
             ],
         };
         tc.store.dns_config_update(&update2, "my request id").await.unwrap();
-        assert_eq!(vec![1, 2], generations_with_trees(&tc.store));
+        assert_eq!(
+            vec![Generation::from_u32(1), Generation::from_u32(2)],
+            generations_with_trees(&tc.store)
+        );
         expect(&tc.store, "gen1_name.zone1.internal", Expect::NoName);
         expect(&tc.store, "gen1_name.ZONE1.internal", Expect::NoName);
         expect(&tc.store, "Gen1_name.zone1.internal", Expect::NoName);
@@ -980,7 +992,7 @@ mod test {
         // Do another update, but this time, skip several generation numbers.
         let update8 = DnsConfigParams {
             time_created: chrono::Utc::now(),
-            generation: 8,
+            generation: Generation::from_u32(8),
             zones: vec![DnsConfigZone {
                 zone_name: "zone8.internal".to_string(),
                 records: HashMap::from([(
@@ -990,7 +1002,14 @@ mod test {
             }],
         };
         tc.store.dns_config_update(&update8, "my request id").await.unwrap();
-        assert_eq!(vec![1, 2, 8], generations_with_trees(&tc.store));
+        assert_eq!(
+            vec![
+                Generation::from_u32(1),
+                Generation::from_u32(2),
+                Generation::from_u32(8)
+            ],
+            generations_with_trees(&tc.store)
+        );
         expect(&tc.store, "gen1_name.zone1.internal", Expect::NoZone);
         expect(&tc.store, "shared_name.zone1.internal", Expect::NoZone);
         expect(&tc.store, "gen2_name.zone2.internal", Expect::NoZone);
@@ -1003,7 +1022,14 @@ mod test {
         // Updating to generation 8 again should be a no-op.  It should succeed
         // and show the same behavior.
         tc.store.dns_config_update(&update8, "my request id").await.unwrap();
-        assert_eq!(vec![1, 2, 8], generations_with_trees(&tc.store));
+        assert_eq!(
+            vec![
+                Generation::from_u32(1),
+                Generation::from_u32(2),
+                Generation::from_u32(8)
+            ],
+            generations_with_trees(&tc.store)
+        );
         expect(&tc.store, "gen1_name.zone1.internal", Expect::NoZone);
         expect(&tc.store, "shared_name.zone1.internal", Expect::NoZone);
         expect(&tc.store, "gen2_name.zone2.internal", Expect::NoZone);
@@ -1024,9 +1050,13 @@ mod test {
         println!("{:?}", error);
         match &error {
             UpdateError::BadUpdateGeneration {
-                current_generation: 8,
-                attempted_generation: 2,
-            } => (),
+                current_generation,
+                attempted_generation,
+            } if *current_generation == Generation::from_u32(8)
+                && *attempted_generation == Generation::from_u32(2) =>
+            {
+                ()
+            }
             e => panic!("unexpected failure to update: {:#}", e),
         };
         assert_eq!(
@@ -1042,7 +1072,7 @@ mod test {
         // generation 2), not the last three integers.
         let update9 = DnsConfigParams {
             time_created: chrono::Utc::now(),
-            generation: 9,
+            generation: Generation::from_u32(9),
             zones: vec![DnsConfigZone {
                 zone_name: "zone8.internal".to_string(),
                 records: HashMap::from([(
@@ -1052,7 +1082,14 @@ mod test {
             }],
         };
         tc.store.dns_config_update(&update9, "my request id").await.unwrap();
-        assert_eq!(vec![2, 8, 9], generations_with_trees(&tc.store));
+        assert_eq!(
+            vec![
+                Generation::from_u32(2),
+                Generation::from_u32(8),
+                Generation::from_u32(9)
+            ],
+            generations_with_trees(&tc.store)
+        );
 
         tc.cleanup_successful();
     }
@@ -1064,14 +1101,14 @@ mod test {
         // Initial configuration.
         assert!(generations_with_trees(&tc.store).is_empty());
         let config = tc.store.dns_config().await.unwrap();
-        assert_eq!(config.generation, 0);
+        assert_eq!(config.generation, Generation::from_u32(0));
         assert!(config.zones.is_empty());
 
         // Make one normal update.
         let dummy_record = DnsRecord::Aaaa(Ipv6Addr::LOCALHOST);
         let update1 = DnsConfigParams {
             time_created: chrono::Utc::now(),
-            generation: 1,
+            generation: Generation::from_u32(1),
             zones: vec![DnsConfigZone {
                 zone_name: "zone1.internal".to_string(),
                 records: HashMap::from([(
@@ -1082,7 +1119,10 @@ mod test {
         };
 
         tc.store.dns_config_update(&update1, "my request id").await.unwrap();
-        assert_eq!(vec![1], generations_with_trees(&tc.store));
+        assert_eq!(
+            vec![Generation::from_u32(1)],
+            generations_with_trees(&tc.store)
+        );
 
         // Now make an update to generation 2.  We're going to do this like
         // normal, examine the state, and then we're going to unwind the very
@@ -1096,7 +1136,7 @@ mod test {
         // it's better to test some of this behavior than none.
         let update2 = DnsConfigParams {
             time_created: chrono::Utc::now(),
-            generation: 2,
+            generation: Generation::from_u32(2),
             zones: vec![DnsConfigZone {
                 zone_name: "zone2.internal".to_string(),
                 records: HashMap::from([(
@@ -1107,7 +1147,7 @@ mod test {
         };
 
         let gen1_config = tc.store.read_config().unwrap();
-        assert_eq!(1, gen1_config.generation);
+        assert_eq!(Generation::from_u32(1), gen1_config.generation);
         expect(
             &tc.store,
             "gen1_name.zone1.internal",
@@ -1116,9 +1156,12 @@ mod test {
         expect(&tc.store, "gen2_name.zone2.internal", Expect::NoZone);
 
         tc.store.dns_config_update(&update2, "my request id").await.unwrap();
-        assert_eq!(vec![1, 2], generations_with_trees(&tc.store));
+        assert_eq!(
+            vec![Generation::from_u32(1), Generation::from_u32(2)],
+            generations_with_trees(&tc.store)
+        );
         let gen2_config = tc.store.read_config().unwrap();
-        assert_eq!(2, gen2_config.generation);
+        assert_eq!(Generation::from_u32(2), gen2_config.generation);
         expect(&tc.store, "gen1_name.zone1.internal", Expect::NoZone);
         expect(
             &tc.store,
@@ -1155,7 +1198,10 @@ mod test {
         let config = store.read_config().unwrap();
         assert_eq!(gen1_config, config);
         // We ought to have pruned the tree associated with generation 2.
-        assert_eq!(vec![1], generations_with_trees(&store));
+        assert_eq!(
+            vec![Generation::from_u32(1)],
+            generations_with_trees(&store)
+        );
         // The rest of the behavior ought to be like generation 1.
         expect(
             &store,
@@ -1166,9 +1212,12 @@ mod test {
 
         // Now we can do another update to generation 2.
         store.dns_config_update(&update2, "my request id").await.unwrap();
-        assert_eq!(vec![1, 2], generations_with_trees(&store));
+        assert_eq!(
+            vec![Generation::from_u32(1), Generation::from_u32(2)],
+            generations_with_trees(&store)
+        );
         let gen2_config = store.read_config().unwrap();
-        assert_eq!(2, gen2_config.generation);
+        assert_eq!(Generation::from_u32(2), gen2_config.generation);
         expect(&store, "gen1_name.zone1.internal", Expect::NoZone);
         expect(
             &store,
@@ -1186,14 +1235,15 @@ mod test {
 
         // Begin an update.
         let before = chrono::Utc::now();
-        let update1 = tc.store.begin_update("my req id", 3).await.unwrap();
+        let update1 =
+            tc.store.begin_update("my req id", 3.into()).await.unwrap();
         let after = chrono::Utc::now();
 
         // Concurrently attempt another update.
         let dummy_record = DnsRecord::Aaaa(Ipv6Addr::LOCALHOST);
         let update2 = DnsConfigParams {
             time_created: chrono::Utc::now(),
-            generation: 1,
+            generation: 1.into(),
             zones: vec![DnsConfigZone {
                 zone_name: "zone1.internal".to_string(),
                 records: HashMap::from([(
@@ -1225,7 +1275,7 @@ mod test {
                 req_id,
             } if *start_time >= before
                 && *start_time <= after
-                && *generation == 3
+                && *generation == Generation::from_u32(3)
                 && *req_id == "my req id" =>
             {
                 ()
