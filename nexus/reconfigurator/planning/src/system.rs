@@ -9,6 +9,8 @@ use anyhow::{anyhow, bail, ensure, Context};
 use gateway_client::types::RotState;
 use gateway_client::types::SpState;
 use indexmap::IndexMap;
+use ipnet::Ipv6Net;
+use ipnet::Ipv6Subnets;
 use nexus_inventory::CollectionBuilder;
 use nexus_sled_agent_shared::inventory::Baseboard;
 use nexus_sled_agent_shared::inventory::Inventory;
@@ -50,12 +52,7 @@ use std::collections::BTreeSet;
 use std::fmt::Debug;
 use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
-
-trait SubnetIterator: Iterator<Item = Ipv6Subnet<SLED_PREFIX>> + Debug {}
-impl<T> SubnetIterator for T where
-    T: Iterator<Item = Ipv6Subnet<SLED_PREFIX>> + Debug
-{
-}
+use std::sync::Arc;
 
 /// Describes an actual or synthetic Oxide rack for planning and testing
 ///
@@ -73,11 +70,15 @@ impl<T> SubnetIterator for T where
 ///    assign subnets and maybe even lay out the initial set of zones (which
 ///    does not exist here yet).  This way Reconfigurator and RSS are using the
 ///    same code to do this.
-#[derive(Debug)]
+///
+/// This is cheaply cloneable, and uses copy-on-write semantics for data inside.
+#[derive(Clone, Debug)]
 pub struct SystemDescription {
     collector: Option<String>,
-    sleds: IndexMap<SledUuid, Sled>,
-    sled_subnets: Box<dyn SubnetIterator>,
+    // Arc<Sled> to make cloning cheap. Mutating sleds is uncommon but
+    // possible, in which case we'll clone-on-write with Arc::make_mut.
+    sleds: IndexMap<SledUuid, Arc<Sled>>,
+    sled_subnets: SubnetIterator,
     available_non_scrimlet_slots: BTreeSet<u16>,
     available_scrimlet_slots: BTreeSet<u16>,
     target_boundary_ntp_zone_count: usize,
@@ -124,13 +125,7 @@ impl SystemDescription {
         // Skip the initial DNS subnet.
         // (The same behavior is replicated in RSS in `Plan::create()` in
         // sled-agent/src/rack_setup/plan/sled.rs.)
-        let sled_subnets = Box::new(
-            rack_subnet
-                .subnets(SLED_PREFIX)
-                .unwrap()
-                .skip(1)
-                .map(|s| Ipv6Subnet::new(s.network())),
-        );
+        let sled_subnets = SubnetIterator::new(rack_subnet);
 
         // Policy defaults
         let target_nexus_zone_count = NEXUS_REDUNDANCY;
@@ -283,7 +278,7 @@ impl SystemDescription {
             sled.omicron_zones,
             sled.npools,
         );
-        self.sleds.insert(sled_id, sled);
+        self.sleds.insert(sled_id, Arc::new(sled));
         Ok(self)
     }
 
@@ -309,14 +304,14 @@ impl SystemDescription {
         );
         self.sleds.insert(
             sled_id,
-            Sled::new_full(
+            Arc::new(Sled::new_full(
                 sled_id,
                 sled_policy,
                 sled_state,
                 sled_resources,
                 inventory_sp,
                 inventory_sled_agent,
-            ),
+            )),
         );
         Ok(self)
     }
@@ -345,7 +340,7 @@ impl SystemDescription {
         let sled = self.sleds.get_mut(&sled_id).with_context(|| {
             format!("attempted to access sled {} not found in system", sled_id)
         })?;
-        sled.inventory_sled_agent.omicron_zones = omicron_zones;
+        Arc::make_mut(sled).inventory_sled_agent.omicron_zones = omicron_zones;
         Ok(self)
     }
 
@@ -809,5 +804,29 @@ impl Sled {
 
     fn sled_agent_inventory(&self) -> &Inventory {
         &self.inventory_sled_agent
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct SubnetIterator {
+    subnets: Ipv6Subnets,
+}
+
+impl SubnetIterator {
+    fn new(rack_subnet: Ipv6Net) -> Self {
+        let mut subnets = rack_subnet.subnets(SLED_PREFIX).unwrap();
+        // Skip the initial DNS subnet.
+        // (The same behavior is replicated in RSS in `Plan::create()` in
+        // sled-agent/src/rack_setup/plan/sled.rs.)
+        subnets.next();
+        Self { subnets }
+    }
+}
+
+impl Iterator for SubnetIterator {
+    type Item = Ipv6Subnet<SLED_PREFIX>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.subnets.next().map(|s| Ipv6Subnet::new(s.network()))
     }
 }

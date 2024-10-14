@@ -69,6 +69,28 @@ impl std::fmt::Display for CollectorBug {
     }
 }
 
+/// Random generator of UUIDs for a [`CollectionBuilder`].
+#[derive(Debug, Clone)]
+pub struct CollectionBuilderRng {
+    // We just generate one UUID for each collection.
+    id_rng: TypedUuidRng<CollectionKind>,
+}
+
+impl CollectionBuilderRng {
+    pub fn from_entropy() -> Self {
+        CollectionBuilderRng { id_rng: TypedUuidRng::from_entropy() }
+    }
+
+    pub fn from_seed<H: Hash>(seed: H) -> Self {
+        // Important to add some more bytes here, so that builders with the
+        // same seed but different purposes don't end up with the same UUIDs.
+        const SEED_EXTRA: &str = "collection-builder";
+        CollectionBuilderRng {
+            id_rng: TypedUuidRng::from_seed(seed, SEED_EXTRA),
+        }
+    }
+}
+
 /// Build an inventory [`Collection`]
 ///
 /// This interface is oriented around the interfaces used by an actual
@@ -92,9 +114,10 @@ pub struct CollectionBuilder {
     sleds: BTreeMap<SledUuid, SledAgent>,
     clickhouse_keeper_cluster_membership:
         BTreeSet<ClickhouseKeeperClusterMembership>,
-
-    // We just generate one UUID for each collection.
-    id_rng: TypedUuidRng<CollectionKind>,
+    // CollectionBuilderRng is taken by value, rather than passed in as a
+    // mutable ref, to encourage a tree-like structure where each RNG is
+    // generally independent.
+    rng: CollectionBuilderRng,
 }
 
 impl CollectionBuilder {
@@ -120,7 +143,7 @@ impl CollectionBuilder {
             rot_pages_found: BTreeMap::new(),
             sleds: BTreeMap::new(),
             clickhouse_keeper_cluster_membership: BTreeSet::new(),
-            id_rng: TypedUuidRng::from_entropy(),
+            rng: CollectionBuilderRng::from_entropy(),
         }
     }
 
@@ -133,7 +156,7 @@ impl CollectionBuilder {
         }
 
         Collection {
-            id: self.id_rng.next(),
+            id: self.rng.id_rng.next(),
             errors: self.errors.into_iter().map(|e| e.to_string()).collect(),
             time_started: self.time_started,
             time_done: now_db_precision(),
@@ -151,15 +174,12 @@ impl CollectionBuilder {
         }
     }
 
-    /// Within tests, set a seeded RNG for deterministic results.
+    /// Within tests, set an RNG for deterministic results.
     ///
     /// This will ensure that tests that use this builder will produce the same
     /// results each time they are run.
-    pub fn set_rng_seed<H: Hash>(&mut self, seed: H) -> &mut Self {
-        // Important to add some more bytes here, so that builders with the
-        // same seed but different purposes don't end up with the same UUIDs.
-        const SEED_EXTRA: &str = "collection-builder";
-        self.id_rng.set_seed(seed, SEED_EXTRA);
+    pub fn set_rng(&mut self, rng: CollectionBuilderRng) -> &mut Self {
+        self.rng = rng;
         self
     }
 

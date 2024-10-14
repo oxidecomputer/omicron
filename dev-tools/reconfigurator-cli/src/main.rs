@@ -6,21 +6,20 @@
 
 use anyhow::{anyhow, bail, Context};
 use camino::Utf8PathBuf;
-use chrono::Utc;
 use clap::CommandFactory;
 use clap::FromArgMatches;
 use clap::ValueEnum;
 use clap::{Args, Parser, Subcommand};
-use indexmap::IndexMap;
 use internal_dns_types::diff::DnsDiff;
 use nexus_inventory::CollectionBuilder;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_planning::blueprint_builder::EnsureMultiple;
 use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
 use nexus_reconfigurator_planning::planner::Planner;
-use nexus_reconfigurator_planning::system::{
-    SledBuilder, SledHwInventory, SystemDescription,
-};
+use nexus_reconfigurator_planning::system::{SledBuilder, SystemDescription};
+use nexus_reconfigurator_simulation::MutableSimState;
+use nexus_reconfigurator_simulation::SimState;
+use nexus_reconfigurator_simulation::Simulator;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::execution;
 use nexus_types::deployment::execution::blueprint_external_dns_config;
@@ -29,17 +28,14 @@ use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
-use nexus_types::deployment::SledLookupErrorKind;
 use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
-use nexus_types::internal_api::params::DnsConfigParams;
-use nexus_types::inventory::Collection;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::Name;
 use omicron_common::policy::NEXUS_REDUNDANCY;
-use omicron_uuid_kinds::CollectionKind;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
+use omicron_uuid_kinds::ReconfiguratorSimUuid;
 use omicron_uuid_kinds::SledUuid;
 use omicron_uuid_kinds::VnicUuid;
 use reedline::{Reedline, Signal};
@@ -48,128 +44,47 @@ use std::collections::BTreeMap;
 use std::io::BufRead;
 use swrite::{swriteln, SWrite};
 use tabled::Tabled;
-use typed_rng::TypedUuidRng;
 use uuid::Uuid;
 
 /// REPL state
 #[derive(Debug)]
 struct ReconfiguratorSim {
-    /// describes the sleds in the system
-    ///
-    /// This resembles what we get from the `sled` table in a real system.  It
-    /// also contains enough information to generate inventory collections that
-    /// describe the system.
-    system: SystemDescription,
-
-    /// inventory collections created by the user
-    collections: IndexMap<CollectionUuid, Collection>,
-
-    /// blueprints created by the user
-    blueprints: IndexMap<Uuid, Blueprint>,
-
-    /// internal DNS configurations
-    internal_dns: BTreeMap<Generation, DnsConfigParams>,
-    /// external DNS configurations
-    external_dns: BTreeMap<Generation, DnsConfigParams>,
-
-    /// Set of silo names configured
-    ///
-    /// These are used to determine the contents of external DNS.
-    silo_names: Vec<Name>,
-
-    /// External DNS zone name configured
-    external_dns_zone_name: String,
-
-    /// RNG for collection IDs
-    collection_id_rng: TypedUuidRng<CollectionKind>,
-
-    /// Policy overrides
-    num_nexus: Option<u16>,
-
+    // The simulator currently being used.
+    sim: Simulator,
+    // The current state.
+    current: ReconfiguratorSimUuid,
+    // The current system state
     log: slog::Logger,
 }
 
 impl ReconfiguratorSim {
-    fn new(log: slog::Logger) -> Self {
+    fn new(log: slog::Logger, seed: Option<String>) -> Self {
         Self {
-            system: SystemDescription::new(),
-            collections: IndexMap::new(),
-            blueprints: IndexMap::new(),
-            internal_dns: BTreeMap::new(),
-            external_dns: BTreeMap::new(),
-            silo_names: vec!["example-silo".parse().unwrap()],
-            external_dns_zone_name: String::from("oxide.example"),
-            collection_id_rng: TypedUuidRng::from_entropy(),
-            num_nexus: None,
+            sim: Simulator::new(&log, seed),
+            current: Simulator::ROOT_ID,
             log,
         }
     }
 
-    /// Returns true if the user has made local changes to the simulated
-    /// system.
-    ///
-    /// This is used when the user asks to load an example system. Doing that
-    /// basically requires a clean slate.
-    fn user_made_system_changes(&self) -> bool {
-        // Use this pattern to ensure that if a new field is added to
-        // ReconfiguratorSim, it will fail to compile until it's added here.
-        let Self {
-            system,
-            collections,
-            blueprints,
-            internal_dns,
-            external_dns,
-            // For purposes of this method, we let these policy parameters be
-            // set to any arbitrary value. This lets example systems be
-            // generated using these values.
-            silo_names: _,
-            external_dns_zone_name: _,
-            collection_id_rng: _,
-            num_nexus: _,
-            log: _,
-        } = self;
-
-        system.has_sleds()
-            || !collections.is_empty()
-            || !blueprints.is_empty()
-            || !internal_dns.is_empty()
-            || !external_dns.is_empty()
+    fn current_state(&self) -> &SimState {
+        self.sim
+            .get_state(self.current)
+            .expect("current state should always exist")
     }
 
-    // Reset the state of the REPL.
-    fn wipe(&mut self) {
-        *self = Self::new(self.log.clone());
-    }
-
-    fn blueprint_lookup(&self, id: Uuid) -> Result<&Blueprint, anyhow::Error> {
-        self.blueprints
-            .get(&id)
-            .ok_or_else(|| anyhow!("no such blueprint: {}", id))
-    }
-
-    fn blueprint_insert_new(&mut self, blueprint: Blueprint) {
-        let previous = self.blueprints.insert(blueprint.id, blueprint);
-        assert!(previous.is_none());
-    }
-
-    fn blueprint_insert_loaded(
-        &mut self,
-        blueprint: Blueprint,
-    ) -> Result<(), anyhow::Error> {
-        let entry = self.blueprints.entry(blueprint.id);
-        if let indexmap::map::Entry::Occupied(_) = &entry {
-            return Err(anyhow!("blueprint already exists: {}", blueprint.id));
-        }
-        let _ = entry.or_insert(blueprint);
-        Ok(())
+    fn commit_and_bump(&mut self, description: String, state: MutableSimState) {
+        let new_id = state.commit(description, &mut self.sim);
+        self.current = new_id;
     }
 
     fn planning_input(
         &self,
         parent_blueprint: &Blueprint,
     ) -> anyhow::Result<PlanningInput> {
-        let mut builder = self
-            .system
+        let state = self.current_state();
+        let mut builder = state
+            .system()
+            .description()
             .to_planning_input_builder()
             .context("generating planning input builder")?;
 
@@ -231,6 +146,10 @@ impl ReconfiguratorSim {
 #[derive(Parser, Debug)]
 struct CmdReconfiguratorSim {
     input_file: Option<Utf8PathBuf>,
+
+    /// The RNG seed to initialize the simulator with.
+    #[clap(long)]
+    seed: Option<String>,
 }
 
 // REPL implementation
@@ -244,7 +163,13 @@ fn main() -> anyhow::Result<()> {
     .to_logger("reconfigurator-sim")
     .context("creating logger")?;
 
-    let mut sim = ReconfiguratorSim::new(log);
+    let seed_provided = cmd.seed.is_some();
+    let mut sim = ReconfiguratorSim::new(log, cmd.seed);
+    if seed_provided {
+        println!("using provided RNG seed: {}", sim.sim.initial_seed());
+    } else {
+        println!("generated RNG seed: {}", sim.sim.initial_seed());
+    }
 
     if let Some(input_file) = cmd.input_file {
         let file = std::fs::File::open(&input_file)
@@ -361,7 +286,7 @@ fn process_entry(sim: &mut ReconfiguratorSim, entry: String) -> LoopResult {
         Commands::LoadExample(args) => cmd_load_example(sim, args),
         Commands::FileContents(args) => cmd_file_contents(args),
         Commands::Save(args) => cmd_save(sim, args),
-        Commands::Wipe => cmd_wipe(sim),
+        Commands::Wipe(args) => cmd_wipe(sim, args),
     };
 
     match cmd_result {
@@ -435,7 +360,7 @@ enum Commands {
     /// show information about what's in a saved file
     FileContents(FileContentsArgs),
     /// reset the state of the REPL
-    Wipe,
+    Wipe(WipeArgs),
 }
 
 #[derive(Debug, Args)]
@@ -569,11 +494,11 @@ struct LoadArgs {
 struct LoadExampleArgs {
     /// Seed for the RNG that's used to generate the example system.
     ///
-    /// Setting this makes it possible for callers to get deterministic
-    /// results. In automated tests, the seed is typically the name of the
-    /// test.
-    #[clap(long, default_value = "reconfigurator_cli_example")]
-    seed: String,
+    /// If this is provided, the RNG is updated with this seed before the
+    /// example system is generated. If it's not provided, the existing RNG is
+    /// used.
+    #[clap(long)]
+    seed: Option<String>,
 
     /// The number of sleds in the example system.
     #[clap(short = 's', long, default_value_t = ExampleSystemBuilder::DEFAULT_N_SLEDS)]
@@ -604,13 +529,32 @@ struct SaveArgs {
     filename: Utf8PathBuf,
 }
 
+#[derive(Debug, Args)]
+struct WipeArgs {
+    /// What to wipe
+    #[clap(subcommand)]
+    command: WipeCommand,
+}
+
+#[derive(Debug, Subcommand)]
+enum WipeCommand {
+    /// Wipe everything
+    All,
+    /// Wipe the system
+    System,
+    /// Reset configuration to default
+    Config,
+    /// Reset RNG state
+    Rng,
+}
+
 // Command handlers
 
 fn cmd_silo_list(
     sim: &mut ReconfiguratorSim,
 ) -> anyhow::Result<Option<String>> {
     let mut s = String::new();
-    for silo_name in &sim.silo_names {
+    for silo_name in sim.current_state().config().silo_names() {
         swriteln!(s, "{}", silo_name);
     }
     Ok(Some(s))
@@ -620,11 +564,10 @@ fn cmd_silo_add(
     sim: &mut ReconfiguratorSim,
     args: SiloAddRemoveArgs,
 ) -> anyhow::Result<Option<String>> {
-    if sim.silo_names.contains(&args.silo_name) {
-        bail!("silo already exists: {:?}", &args.silo_name);
-    }
-
-    sim.silo_names.push(args.silo_name);
+    let mut state = sim.current_state().to_mut();
+    let config = state.config_mut();
+    config.add_silo(args.silo_name)?;
+    sim.commit_and_bump("reconfigurator-cli silo-add".to_owned(), state);
     Ok(None)
 }
 
@@ -632,11 +575,10 @@ fn cmd_silo_remove(
     sim: &mut ReconfiguratorSim,
     args: SiloAddRemoveArgs,
 ) -> anyhow::Result<Option<String>> {
-    let size_before = sim.silo_names.len();
-    sim.silo_names.retain(|n| *n != args.silo_name);
-    if sim.silo_names.len() == size_before {
-        bail!("no such silo: {:?}", &args.silo_name);
-    }
+    let mut state = sim.current_state().to_mut();
+    let config = state.config_mut();
+    config.remove_silo(args.silo_name)?;
+    sim.commit_and_bump("reconfigurator-cli silo-remove".to_owned(), state);
     Ok(None)
 }
 
@@ -651,8 +593,10 @@ fn cmd_sled_list(
         subnet: String,
     }
 
-    let planning_input = sim
-        .system
+    let state = sim.current_state();
+    let planning_input = state
+        .system()
+        .description()
         .to_planning_input_builder()
         .context("failed to generate planning input")?
         .build();
@@ -674,21 +618,27 @@ fn cmd_sled_add(
     sim: &mut ReconfiguratorSim,
     add: SledAddArgs,
 ) -> anyhow::Result<Option<String>> {
-    let mut new_sled = SledBuilder::new();
-    if let Some(sled_id) = add.sled_id {
-        new_sled = new_sled.id(sled_id);
-    }
+    let mut state = sim.current_state().to_mut();
+    let sled_id = add.sled_id.unwrap_or_else(|| state.rng_mut().next_sled_id());
+    let new_sled = SledBuilder::new().id(sled_id);
+    state.system_mut().description_mut().sled(new_sled)?;
+    sim.commit_and_bump(
+        format!("reconfigurator-cli sled-add: {sled_id}"),
+        state,
+    );
 
-    let _ = sim.system.sled(new_sled).context("adding sled")?;
-    Ok(Some(String::from("added sled")))
+    // TODO: we should show the sled ID here
+    Ok(Some("added sled".to_owned()))
 }
 
 fn cmd_sled_show(
     sim: &mut ReconfiguratorSim,
     args: SledArgs,
 ) -> anyhow::Result<Option<String>> {
-    let planning_input = sim
-        .system
+    let state = sim.current_state();
+    let planning_input = state
+        .system()
+        .description()
         .to_planning_input_builder()
         .context("failed to generate planning_input builder")?
         .build();
@@ -717,7 +667,8 @@ fn cmd_inventory_list(
         time_done: String,
     }
 
-    let rows = sim.collections.values().map(|collection| {
+    let state = sim.current_state();
+    let rows = state.system().all_collections().map(|collection| {
         let id = collection.id;
         InventoryRow {
             id,
@@ -738,21 +689,22 @@ fn cmd_inventory_list(
 fn cmd_inventory_generate(
     sim: &mut ReconfiguratorSim,
 ) -> anyhow::Result<Option<String>> {
-    let builder =
-        sim.system.to_collection_builder().context("generating inventory")?;
+    let mut state = sim.current_state().to_mut();
+    let builder = state.to_collection_builder()?;
 
-    // sim.system carries around Omicron zones, which will make their way into
+    // The system carries around Omicron zones, which will make their way into
     // the inventory.
-    let mut inventory = builder.build();
-    // Assign collection IDs from the RNG. This enables consistent results when
-    // callers have explicitly seeded the RNG (e.g., in tests).
-    inventory.id = sim.collection_id_rng.next();
+    let inventory = builder.build();
 
     let rv = format!(
         "generated inventory collection {} from configured sleds",
         inventory.id
     );
-    sim.collections.insert(inventory.id, inventory);
+    state.system_mut().add_collection(inventory)?;
+    sim.commit_and_bump(
+        "reconfigurator-cli inventory-generate".to_owned(),
+        state,
+    );
     Ok(Some(rv))
 }
 
@@ -767,7 +719,9 @@ fn cmd_blueprint_list(
         time_created: String,
     }
 
-    let mut rows = sim.blueprints.values().collect::<Vec<_>>();
+    let state = sim.current_state();
+
+    let mut rows = state.system().all_blueprints().collect::<Vec<_>>();
     rows.sort_unstable_by_key(|blueprint| blueprint.time_created);
     let rows = rows.into_iter().map(|blueprint| BlueprintRow {
         id: blueprint.id,
@@ -791,13 +745,15 @@ fn cmd_blueprint_plan(
     sim: &mut ReconfiguratorSim,
     args: BlueprintPlanArgs,
 ) -> anyhow::Result<Option<String>> {
+    let mut state = sim.current_state().to_mut();
+    let rng = state.rng_mut().next_blueprint_rng();
+    let system = state.system_mut();
+
     let parent_blueprint_id = args.parent_blueprint_id;
     let collection_id = args.collection_id;
-    let parent_blueprint = sim.blueprint_lookup(parent_blueprint_id)?;
-    let collection = sim
-        .collections
-        .get(&collection_id)
-        .ok_or_else(|| anyhow!("no such collection: {}", collection_id))?;
+    let parent_blueprint = system.get_blueprint(parent_blueprint_id)?;
+    let collection = system.get_collection(collection_id)?;
+
     let creator = "reconfigurator-sim";
     let planning_input = sim.planning_input(parent_blueprint)?;
     let planner = Planner::new_based_on(
@@ -807,13 +763,18 @@ fn cmd_blueprint_plan(
         creator,
         collection,
     )
-    .context("creating planner")?;
+    .context("creating planner")?
+    .with_rng(rng);
+
     let blueprint = planner.plan().context("generating blueprint")?;
     let rv = format!(
         "generated blueprint {} based on parent blueprint {}",
         blueprint.id, parent_blueprint_id,
     );
-    sim.blueprint_insert_new(blueprint);
+    system.add_blueprint(blueprint)?;
+
+    sim.commit_and_bump("reconfigurator-cli blueprint-plan".to_owned(), state);
+
     Ok(Some(rv))
 }
 
@@ -821,16 +782,24 @@ fn cmd_blueprint_edit(
     sim: &mut ReconfiguratorSim,
     args: BlueprintEditArgs,
 ) -> anyhow::Result<Option<String>> {
+    let mut state = sim.current_state().to_mut();
+    let rng = state.rng_mut().next_blueprint_rng();
+    let system = state.system_mut();
+
     let blueprint_id = args.blueprint_id;
-    let blueprint = sim.blueprint_lookup(blueprint_id)?;
+    let blueprint = system.get_blueprint(blueprint_id)?;
     let creator = args.creator.as_deref().unwrap_or("reconfigurator-cli");
     let planning_input = sim.planning_input(blueprint)?;
-    let latest_collection = sim
-        .collections
-        .iter()
-        .max_by_key(|(_, c)| c.time_started)
-        .map(|(_, c)| c.clone())
+
+    // TODO: We may want to do something other than just using the latest
+    // collection? Using timestamps like this is somewhat dubious, especially
+    // in the presence of merged data from cmd_load.
+    let latest_collection = system
+        .all_collections()
+        .max_by_key(|c| c.time_started)
+        .map(|c| c.clone())
         .unwrap_or_else(|| CollectionBuilder::new("sim").build());
+
     let mut builder = BlueprintBuilder::new_based_on(
         &sim.log,
         blueprint,
@@ -839,6 +808,7 @@ fn cmd_blueprint_edit(
         creator,
     )
     .context("creating blueprint builder")?;
+    builder.set_rng(rng);
 
     if let Some(comment) = args.comment {
         builder.comment(comment);
@@ -892,7 +862,9 @@ fn cmd_blueprint_edit(
         "blueprint {} created from blueprint {}: {}",
         new_blueprint.id, blueprint_id, label
     );
-    sim.blueprint_insert_new(new_blueprint);
+    system.add_blueprint(new_blueprint)?;
+
+    sim.commit_and_bump("reconfigurator-cli blueprint-edit".to_owned(), state);
     Ok(Some(rv))
 }
 
@@ -900,7 +872,8 @@ fn cmd_blueprint_show(
     sim: &mut ReconfiguratorSim,
     args: BlueprintArgs,
 ) -> anyhow::Result<Option<String>> {
-    let blueprint = sim.blueprint_lookup(args.blueprint_id)?;
+    let state = sim.current_state();
+    let blueprint = state.system().get_blueprint(args.blueprint_id)?;
     Ok(Some(format!("{}", blueprint.display())))
 }
 
@@ -911,8 +884,10 @@ fn cmd_blueprint_diff(
     let mut rv = String::new();
     let blueprint1_id = args.blueprint1_id;
     let blueprint2_id = args.blueprint2_id;
-    let blueprint1 = sim.blueprint_lookup(blueprint1_id)?;
-    let blueprint2 = sim.blueprint_lookup(blueprint2_id)?;
+
+    let state = sim.current_state();
+    let blueprint1 = state.system().get_blueprint(blueprint1_id)?;
+    let blueprint2 = state.system().get_blueprint(blueprint2_id)?;
 
     let sled_diff = blueprint2.diff_since_blueprint(&blueprint1);
     swriteln!(rv, "{}", sled_diff.display());
@@ -920,7 +895,7 @@ fn cmd_blueprint_diff(
     // Diff'ing DNS is a little trickier.  First, compute what DNS should be for
     // each blueprint.  To do that we need to construct a list of sleds suitable
     // for the executor.
-    let sleds_by_id = make_sleds_by_id(&sim.system)?;
+    let sleds_by_id = make_sleds_by_id(state.system().description())?;
     let internal_dns_config1 = blueprint_internal_dns_config(
         &blueprint1,
         &sleds_by_id,
@@ -935,15 +910,16 @@ fn cmd_blueprint_diff(
         .context("failed to assemble DNS diff")?;
     swriteln!(rv, "internal DNS:\n{}", dns_diff);
 
+    let external_dns_zone_name = state.config().external_dns_zone_name();
     let external_dns_config1 = blueprint_external_dns_config(
         &blueprint1,
-        &sim.silo_names,
-        sim.external_dns_zone_name.clone(),
+        state.config().silo_names(),
+        external_dns_zone_name.to_owned(),
     );
     let external_dns_config2 = blueprint_external_dns_config(
         &blueprint2,
-        &sim.silo_names,
-        sim.external_dns_zone_name.clone(),
+        state.config().silo_names(),
+        external_dns_zone_name.to_owned(),
     );
     let dns_diff = DnsDiff::new(&external_dns_config1, &external_dns_config2)
         .context("failed to assemble external DNS diff")?;
@@ -983,11 +959,13 @@ fn cmd_blueprint_diff_dns(
     let dns_group = args.dns_group;
     let dns_version = Generation::from(args.dns_version);
     let blueprint_id = args.blueprint_id;
-    let blueprint = sim.blueprint_lookup(blueprint_id)?;
+
+    let state = sim.current_state();
+    let blueprint = state.system().get_blueprint(blueprint_id)?;
 
     let existing_dns_config = match dns_group {
-        CliDnsGroup::Internal => sim.internal_dns.get(&dns_version),
-        CliDnsGroup::External => sim.external_dns.get(&dns_version),
+        CliDnsGroup::Internal => state.system().get_internal_dns(dns_version),
+        CliDnsGroup::External => state.system().get_external_dns(dns_version),
     }
     .ok_or_else(|| {
         anyhow!("no such {:?} DNS version: {}", dns_group, dns_version)
@@ -995,7 +973,7 @@ fn cmd_blueprint_diff_dns(
 
     let blueprint_dns_zone = match dns_group {
         CliDnsGroup::Internal => {
-            let sleds_by_id = make_sleds_by_id(&sim.system)?;
+            let sleds_by_id = make_sleds_by_id(state.system().description())?;
             blueprint_internal_dns_config(
                 blueprint,
                 &sleds_by_id,
@@ -1004,8 +982,8 @@ fn cmd_blueprint_diff_dns(
         }
         CliDnsGroup::External => blueprint_external_dns_config(
             blueprint,
-            &sim.silo_names,
-            sim.external_dns_zone_name.clone(),
+            state.config().silo_names(),
+            state.config().external_dns_zone_name().to_owned(),
         ),
     };
 
@@ -1021,10 +999,10 @@ fn cmd_blueprint_diff_inventory(
 ) -> anyhow::Result<Option<String>> {
     let collection_id = args.collection_id;
     let blueprint_id = args.blueprint_id;
-    let collection = sim.collections.get(&collection_id).ok_or_else(|| {
-        anyhow!("no such inventory collection: {}", collection_id)
-    })?;
-    let blueprint = sim.blueprint_lookup(blueprint_id)?;
+
+    let state = sim.current_state();
+    let collection = state.system().get_collection(collection_id)?;
+    let blueprint = state.system().get_blueprint(blueprint_id)?;
     let diff = blueprint.diff_since_collection(&collection);
     Ok(Some(diff.display().to_string()))
 }
@@ -1034,7 +1012,9 @@ fn cmd_blueprint_save(
     args: BlueprintSaveArgs,
 ) -> anyhow::Result<Option<String>> {
     let blueprint_id = args.blueprint_id;
-    let blueprint = sim.blueprint_lookup(blueprint_id)?;
+
+    let state = sim.current_state();
+    let blueprint = state.system().get_blueprint(blueprint_id)?;
 
     let output_path = &args.filename;
     let output_str = serde_json::to_string_pretty(&blueprint)
@@ -1048,20 +1028,8 @@ fn cmd_save(
     sim: &mut ReconfiguratorSim,
     args: SaveArgs,
 ) -> anyhow::Result<Option<String>> {
-    let planning_input = sim
-        .system
-        .to_planning_input_builder()
-        .context("creating planning input builder")?
-        .build();
-    let saved = UnstableReconfiguratorState {
-        planning_input,
-        collections: sim.collections.values().cloned().collect(),
-        blueprints: sim.blueprints.values().cloned().collect(),
-        internal_dns: sim.internal_dns.clone(),
-        external_dns: sim.external_dns.clone(),
-        silo_names: sim.silo_names.clone(),
-        external_dns_zone_names: vec![sim.external_dns_zone_name.clone()],
-    };
+    let state = sim.current_state();
+    let saved = state.to_serializable()?;
 
     let output_path = &args.filename;
     let output_str =
@@ -1074,36 +1042,80 @@ fn cmd_save(
     )))
 }
 
-fn cmd_wipe(sim: &mut ReconfiguratorSim) -> anyhow::Result<Option<String>> {
-    sim.wipe();
-    Ok(Some("wiped reconfigurator-sim state".to_string()))
+fn cmd_wipe(
+    sim: &mut ReconfiguratorSim,
+    args: WipeArgs,
+) -> anyhow::Result<Option<String>> {
+    let mut state = sim.current_state().to_mut();
+    let output = match args.command {
+        WipeCommand::All => {
+            state.system_mut().wipe();
+            state.config_mut().wipe();
+            state.rng_mut().reset_state();
+            format!(
+                "- wiped system, reconfigurator-sim config, and RNG state\n
+                 - reset seed to {}",
+                state.rng_mut().seed()
+            )
+        }
+        WipeCommand::System => {
+            state.system_mut().wipe();
+            "wiped system".to_string()
+        }
+        WipeCommand::Config => {
+            state.config_mut().wipe();
+            "wiped reconfigurator-sim config".to_string()
+        }
+        WipeCommand::Rng => {
+            // Don't allow wiping the RNG state if the system is non-empty.
+            // Wiping the RNG state is likely to cause duplicate IDs to be
+            // generated.
+            if !state.system_mut().is_empty() {
+                bail!(
+                    "cannot wipe RNG state with non-empty system: \
+                     run `wipe system` first"
+                );
+            }
+            state.rng_mut().reset_state();
+            format!(
+                "- wiped RNG state\n- reset seed to {}",
+                state.rng_mut().seed()
+            )
+        }
+    };
+
+    sim.commit_and_bump(output.clone(), state);
+    Ok(Some(output))
 }
 
 fn cmd_show(sim: &mut ReconfiguratorSim) -> anyhow::Result<Option<String>> {
     let mut s = String::new();
-    do_print_properties(&mut s, sim);
+    let state = sim.current_state();
+    do_print_properties(&mut s, state);
     swriteln!(
         s,
         "target number of Nexus instances: {}",
-        match sim.num_nexus {
-            Some(n) => n.to_string(),
-            None => String::from("default"),
-        }
+        state
+            .config()
+            .num_nexus()
+            .map_or_else(|| "default".to_owned(), |n| n.to_string())
     );
     Ok(Some(s))
 }
 
-fn do_print_properties(s: &mut String, sim: &ReconfiguratorSim) {
+// TODO: consider moving this to a method on `SimState`.
+fn do_print_properties(s: &mut String, state: &SimState) {
     swriteln!(
         s,
         "configured external DNS zone name: {}",
-        sim.external_dns_zone_name,
+        state.config().external_dns_zone_name(),
     );
     swriteln!(
         s,
         "configured silo names: {}",
-        sim.silo_names
-            .iter()
+        state
+            .config()
+            .silo_names()
             .map(|s| s.as_str())
             .collect::<Vec<_>>()
             .join(", ")
@@ -1111,18 +1123,20 @@ fn do_print_properties(s: &mut String, sim: &ReconfiguratorSim) {
     swriteln!(
         s,
         "internal DNS generations: {}",
-        sim.internal_dns
-            .keys()
-            .map(|s| s.to_string())
+        state
+            .system()
+            .all_internal_dns()
+            .map(|params| params.generation.to_string())
             .collect::<Vec<_>>()
             .join(", "),
     );
     swriteln!(
         s,
         "external DNS generations: {}",
-        sim.external_dns
-            .keys()
-            .map(|s| s.to_string())
+        state
+            .system()
+            .all_external_dns()
+            .map(|params| params.generation.to_string())
             .collect::<Vec<_>>()
             .join(", "),
     );
@@ -1132,20 +1146,34 @@ fn cmd_set(
     sim: &mut ReconfiguratorSim,
     args: SetArgs,
 ) -> anyhow::Result<Option<String>> {
-    Ok(Some(match args {
+    let mut state = sim.current_state().to_mut();
+    let rv = match args {
         SetArgs::NumNexus { num_nexus } => {
-            let rv = format!("{:?} -> {}", sim.num_nexus, num_nexus);
-            sim.num_nexus = Some(num_nexus);
-            sim.system.target_nexus_zone_count(usize::from(num_nexus));
+            let rv = format!(
+                "target number of Nexus zones: {:?} -> {}",
+                state.config_mut().num_nexus(),
+                num_nexus
+            );
+            state.config_mut().set_num_nexus(num_nexus);
+            state
+                .system_mut()
+                .description_mut()
+                .target_nexus_zone_count(usize::from(num_nexus));
             rv
         }
         SetArgs::ExternalDnsZoneName { zone_name } => {
-            let rv =
-                format!("{:?} -> {:?}", sim.external_dns_zone_name, zone_name);
-            sim.external_dns_zone_name = zone_name;
+            let rv = format!(
+                "external DNS zone name: {:?} -> {:?}",
+                state.config_mut().external_dns_zone_name(),
+                zone_name
+            );
+            state.config_mut().set_external_dns_zone_name(zone_name);
             rv
         }
-    }))
+    };
+
+    sim.commit_and_bump(format!("reconfigurator-cli set: {}", rv), state);
+    Ok(Some(rv))
 }
 
 fn read_file(
@@ -1166,188 +1194,32 @@ fn cmd_load(
     let collection_id = args.collection_id;
     let loaded = read_file(&input_path)?;
 
+    let mut state = sim.current_state().to_mut();
+    let result = state.merge_serializable(loaded, collection_id)?;
+
+    sim.commit_and_bump(
+        format!("reconfigurator-sim: load {:?}", input_path),
+        state,
+    );
+
     let mut s = String::new();
-
-    let collection_id = match collection_id {
-        Some(s) => s,
-        None => match loaded.collections.len() {
-            1 => loaded.collections[0].id,
-            0 => bail!(
-                "no collection_id specified and file contains 0 collections"
-            ),
-            count => bail!(
-                "no collection_id specified and file contains {} \
-                    collections: {}",
-                count,
-                loaded
-                    .collections
-                    .iter()
-                    .map(|c| c.id.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-        },
-    };
-
-    swriteln!(
-        s,
-        "using collection {} as source of sled inventory data",
-        collection_id
-    );
-    let primary_collection =
-        loaded.collections.iter().find(|c| c.id == collection_id).ok_or_else(
-            || {
-                anyhow!(
-                    "collection {} not found in file {:?}",
-                    collection_id,
-                    input_path
-                )
-            },
-        )?;
-
-    let current_planning_input = sim
-        .system
-        .to_planning_input_builder()
-        .context("generating planning input")?
-        .build();
-    for (sled_id, sled_details) in
-        loaded.planning_input.all_sleds(SledFilter::Commissioned)
-    {
-        match current_planning_input
-            .sled_lookup(SledFilter::Commissioned, sled_id)
-        {
-            Ok(_) => {
-                swriteln!(
-                    s,
-                    "sled {}: skipped (one with \
-                     the same id is already loaded)",
-                    sled_id
-                );
-                continue;
-            }
-            Err(error) => match error.kind() {
-                SledLookupErrorKind::Filtered { .. } => {
-                    swriteln!(
-                        s,
-                        "error: load sled {}: turning a decommissioned sled \
-                         into a commissioned one is not supported",
-                        sled_id
-                    );
-                    continue;
-                }
-                SledLookupErrorKind::Missing => {
-                    // A sled being missing from the input is the only case in
-                    // which we decide to load new sleds. The logic to do that
-                    // is below.
-                }
-            },
-        }
-
-        let Some(inventory_sled_agent) =
-            primary_collection.sled_agents.get(&sled_id)
-        else {
-            swriteln!(
-                s,
-                "error: load sled {}: no inventory found for sled agent in \
-                collection {}",
-                sled_id,
-                collection_id
-            );
-            continue;
-        };
-
-        let inventory_sp = inventory_sled_agent.baseboard_id.as_ref().and_then(
-            |baseboard_id| {
-                let inv_sp = primary_collection.sps.get(baseboard_id);
-                let inv_rot = primary_collection.rots.get(baseboard_id);
-                if let (Some(inv_sp), Some(inv_rot)) = (inv_sp, inv_rot) {
-                    Some(SledHwInventory {
-                        baseboard_id: &baseboard_id,
-                        sp: inv_sp,
-                        rot: inv_rot,
-                    })
-                } else {
-                    None
-                }
-            },
-        );
-
-        let result = sim.system.sled_full(
-            sled_id,
-            sled_details.policy,
-            sled_details.state,
-            sled_details.resources.clone(),
-            inventory_sp,
-            inventory_sled_agent,
-        );
-
-        match result {
-            Ok(_) => swriteln!(s, "sled {} loaded", sled_id),
-            Err(error) => {
-                swriteln!(s, "error: load sled {}: {:#}", sled_id, error)
-            }
-        };
-    }
-
-    for collection in loaded.collections {
-        if sim.collections.contains_key(&collection.id) {
-            swriteln!(
-                s,
-                "collection {}: skipped (one with the \
-                same id is already loaded)",
-                collection.id
-            );
-        } else {
-            swriteln!(s, "collection {} loaded", collection.id);
-            sim.collections.insert(collection.id, collection);
-        }
-    }
-
-    for blueprint in loaded.blueprints {
-        let blueprint_id = blueprint.id;
-        match sim.blueprint_insert_loaded(blueprint) {
-            Ok(_) => {
-                swriteln!(s, "blueprint {} loaded", blueprint_id);
-            }
-            Err(error) => {
-                swriteln!(
-                    s,
-                    "blueprint {}: skipped ({:#})",
-                    blueprint_id,
-                    error
-                );
-            }
-        }
-    }
-
-    sim.system.service_ip_pool_ranges(
-        loaded.planning_input.service_ip_pool_ranges().to_vec(),
-    );
-    swriteln!(
-        s,
-        "loaded service IP pool ranges: {:?}",
-        loaded.planning_input.service_ip_pool_ranges()
-    );
-
-    sim.internal_dns = loaded.internal_dns;
-    sim.external_dns = loaded.external_dns;
-    sim.silo_names = loaded.silo_names;
-
-    let nnames = loaded.external_dns_zone_names.len();
-    if nnames > 0 {
-        if nnames > 1 {
-            swriteln!(
-                s,
-                "warn: found {} external DNS names; using only the first one",
-                nnames
-            );
-        }
-        sim.external_dns_zone_name =
-            loaded.external_dns_zone_names.into_iter().next().unwrap();
-    }
-    do_print_properties(&mut s, sim);
-
     swriteln!(s, "loaded data from {:?}", input_path);
+
+    if !result.warnings.is_empty() {
+        swriteln!(s, "warnings:");
+        for warning in result.warnings {
+            swriteln!(s, "  {}", warning);
+        }
+    }
+
+    if !result.notices.is_empty() {
+        swriteln!(s, "notices:");
+        for notice in result.notices {
+            swriteln!(s, "  {}", notice);
+        }
+    }
+
+    do_print_properties(&mut s, sim.current_state());
     Ok(Some(s))
 }
 
@@ -1355,7 +1227,9 @@ fn cmd_load_example(
     sim: &mut ReconfiguratorSim,
     args: LoadExampleArgs,
 ) -> anyhow::Result<Option<String>> {
-    if sim.user_made_system_changes() {
+    let mut s = String::new();
+    let mut state = sim.current_state().to_mut();
+    if !state.system_mut().is_empty() {
         bail!(
             "changes made to simulated system: run `wipe system` before \
              loading an example system"
@@ -1363,13 +1237,36 @@ fn cmd_load_example(
     }
 
     // Generate the example system.
-    let (example, blueprint) = ExampleSystemBuilder::new(&sim.log, &args.seed)
-        .nsleds(args.nsleds)
-        .ndisks_per_sled(args.ndisks_per_sled)
-        .nexus_count(sim.num_nexus.map_or(NEXUS_REDUNDANCY, |n| n.into()))
-        .create_zones(!args.no_zones)
-        .create_disks_in_blueprint(!args.no_disks_in_blueprint)
-        .build();
+    match args.seed {
+        Some(seed) => {
+            // In this case, reset the RNG state to the provided seed.
+            swriteln!(s, "setting new RNG seed: {}", seed,);
+            state.rng_mut().set_seed(seed);
+        }
+        None => {
+            // In this case, use the existing RNG state.
+            swriteln!(
+                s,
+                "using existing RNG state (seed: {})",
+                state.rng_mut().seed()
+            );
+        }
+    };
+    let rng = state.rng_mut().next_example_rng();
+
+    let (example, blueprint) =
+        ExampleSystemBuilder::new_with_rng(&sim.log, rng)
+            .nsleds(args.nsleds)
+            .ndisks_per_sled(args.ndisks_per_sled)
+            .nexus_count(
+                state
+                    .config_mut()
+                    .num_nexus()
+                    .map_or(NEXUS_REDUNDANCY, |n| n.into()),
+            )
+            .create_zones(!args.no_zones)
+            .create_disks_in_blueprint(!args.no_disks_in_blueprint)
+            .build();
 
     // Generate the internal and external DNS configs based on the blueprint.
     let sleds_by_id = make_sleds_by_id(&example.system)?;
@@ -1378,36 +1275,22 @@ fn cmd_load_example(
         &sleds_by_id,
         &Default::default(),
     )?;
+    let external_dns_zone_name =
+        state.config_mut().external_dns_zone_name().to_owned();
     let external_dns = blueprint_external_dns_config(
         &blueprint,
-        &sim.silo_names,
-        sim.external_dns_zone_name.clone(),
+        state.config_mut().silo_names(),
+        external_dns_zone_name,
     );
 
-    // No more fallible operations from here on out: set the system state.
-    let collection_id = example.collection.id;
     let blueprint_id = blueprint.id;
-    sim.system = example.system;
-    sim.collections.insert(collection_id, example.collection);
-    sim.internal_dns.insert(
-        blueprint.internal_dns_version,
-        DnsConfigParams {
-            generation: blueprint.internal_dns_version.into(),
-            time_created: Utc::now(),
-            zones: vec![internal_dns],
-        },
-    );
-    sim.external_dns.insert(
-        blueprint.external_dns_version,
-        DnsConfigParams {
-            generation: blueprint.external_dns_version.into(),
-            time_created: Utc::now(),
-            zones: vec![external_dns],
-        },
-    );
-    sim.blueprints.insert(blueprint.id, blueprint);
-    sim.collection_id_rng =
-        TypedUuidRng::from_seed(&args.seed, "reconfigurator-cli");
+    let collection_id = example.collection.id;
+
+    state
+        .system_mut()
+        .load_example(example, blueprint, internal_dns, external_dns)
+        .expect("already checked non-empty state above");
+    sim.commit_and_bump("reconfigurator-cli load-example".to_owned(), state);
 
     Ok(Some(format!(
         "loaded example system with:\n\
