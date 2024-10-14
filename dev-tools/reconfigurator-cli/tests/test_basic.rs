@@ -40,7 +40,11 @@ fn path_to_cli() -> PathBuf {
 // Run a battery of simple commands and make sure things basically seem to work.
 #[test]
 fn test_basic() {
-    let exec = Exec::cmd(path_to_cli()).arg("tests/input/cmds.txt");
+    let exec = Exec::cmd(path_to_cli()).args(&[
+        "tests/input/cmds.txt",
+        "--seed",
+        "test_basic",
+    ]);
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
     assert_exit_code(exit_status, EXIT_SUCCESS, &stderr_text);
     let stdout_text = Redactor::default().do_redact(&stdout_text);
@@ -51,7 +55,13 @@ fn test_basic() {
 // Run tests against a loaded example system.
 #[test]
 fn test_example() {
-    let exec = Exec::cmd(path_to_cli()).arg("tests/input/cmds-example.txt");
+    let exec = Exec::cmd(path_to_cli()).args(&[
+        "tests/input/cmds-example.txt",
+        "--seed",
+        // The test commands in test-example load their own seed, so this is
+        // ignored.
+        "test_example",
+    ]);
     let (exit_status, stdout_text, stderr_text) = run_command(exec);
     assert_exit_code(exit_status, EXIT_SUCCESS, &stderr_text);
 

@@ -5797,6 +5797,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "nexus-reconfigurator-simulation"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "indexmap 2.5.0",
+ "nexus-inventory",
+ "nexus-reconfigurator-planning",
+ "nexus-types",
+ "omicron-common",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "petname",
+ "slog",
+ "thiserror",
+ "typed-rng",
+ "uuid",
+]
+
+[[package]]
 name = "nexus-saga-recovery"
 version = "0.1.0"
 dependencies = [
@@ -8065,6 +8085,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "petname"
+version = "2.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9cd31dcfdbbd7431a807ef4df6edd6473228e94d5c805e8cf671227a21bad068"
+dependencies = [
+ "anyhow",
+ "itertools 0.13.0",
+ "proc-macro2",
+ "quote",
+ "rand",
+]
+
+[[package]]
 name = "phf"
 version = "0.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8925,13 +8958,13 @@ dependencies = [
  "dropshot",
  "expectorate",
  "humantime",
- "indexmap 2.5.0",
  "internal-dns-types",
  "nexus-client",
  "nexus-db-queries",
  "nexus-inventory",
  "nexus-reconfigurator-planning",
  "nexus-reconfigurator-preparation",
+ "nexus-reconfigurator-simulation",
  "nexus-sled-agent-shared",
  "nexus-test-utils",
  "nexus-test-utils-macros",
@@ -8952,7 +8985,6 @@ dependencies = [
  "swrite",
  "tabled",
  "tokio",
- "typed-rng",
  "uuid",
 ]
 

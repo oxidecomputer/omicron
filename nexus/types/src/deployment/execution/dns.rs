@@ -134,9 +134,9 @@ pub fn blueprint_internal_dns_config(
     Ok(dns_builder.build_zone())
 }
 
-pub fn blueprint_external_dns_config(
+pub fn blueprint_external_dns_config<'a>(
     blueprint: &Blueprint,
-    silos: &[Name],
+    silos: impl IntoIterator<Item = &'a Name>,
     external_dns_zone_name: String,
 ) -> DnsConfigZone {
     let nexus_external_ips = blueprint_nexus_external_ips(blueprint);
