@@ -83,23 +83,24 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
 
 
     omicron zones at generation 2:
-    ------------------------------------------------------------------------------------------
-    zone type      zone id                                disposition   underlay IP           
-    ------------------------------------------------------------------------------------------
-    clickhouse     fe79023f-c5d5-4be5-ad2c-da4e9e9237e4   in service    fd00:1122:3344:102::23
-    crucible       054f64a5-182c-4c28-8994-d2e082550201   in service    fd00:1122:3344:102::26
-    crucible       3b5bffea-e5ed-44df-8468-fd4fa69757d8   in service    fd00:1122:3344:102::27
-    crucible       53dd7fa4-899e-49ed-9fc2-48222db3e20d   in service    fd00:1122:3344:102::2a
-    crucible       7db307d4-a6ed-4c47-bddf-6759161bf64a   in service    fd00:1122:3344:102::2c
-    crucible       95ad9a1d-4063-4874-974c-2fc92830be27   in service    fd00:1122:3344:102::29
-    crucible       bc095417-e2f0-4e95-b390-9cc3fc6e3c6d   in service    fd00:1122:3344:102::28
-    crucible       d90401f1-fbc2-42cb-bf17-309ee0f922fe   in service    fd00:1122:3344:102::2b
-    crucible       e8f994c0-0a1b-40e6-8db1-40a8ca89e503   in service    fd00:1122:3344:102::2d
-    crucible       eaec16c0-0d44-4847-b2d6-31a5151bae52   in service    fd00:1122:3344:102::24
-    crucible       f97aa057-6485-45d0-9cb4-4af5b0831d48   in service    fd00:1122:3344:102::25
-    internal_dns   8b8f7c02-7a18-4268-b045-2e286b464c5d   in service    fd00:1122:3344:1::1   
-    internal_ntp   c67dd9a4-0d6c-4e9f-b28d-20003f211f7d   in service    fd00:1122:3344:102::21
-    nexus          94b45ce9-d3d8-413a-a76b-865da1f67930   in service    fd00:1122:3344:102::22
+    ---------------------------------------------------------------------------------------------
+    zone type         zone id                                disposition   underlay IP           
+    ---------------------------------------------------------------------------------------------
+    clickhouse        fe79023f-c5d5-4be5-ad2c-da4e9e9237e4   in service    fd00:1122:3344:102::23
+    crucible          054f64a5-182c-4c28-8994-d2e082550201   in service    fd00:1122:3344:102::26
+    crucible          3b5bffea-e5ed-44df-8468-fd4fa69757d8   in service    fd00:1122:3344:102::27
+    crucible          53dd7fa4-899e-49ed-9fc2-48222db3e20d   in service    fd00:1122:3344:102::2a
+    crucible          7db307d4-a6ed-4c47-bddf-6759161bf64a   in service    fd00:1122:3344:102::2c
+    crucible          95ad9a1d-4063-4874-974c-2fc92830be27   in service    fd00:1122:3344:102::29
+    crucible          bc095417-e2f0-4e95-b390-9cc3fc6e3c6d   in service    fd00:1122:3344:102::28
+    crucible          d90401f1-fbc2-42cb-bf17-309ee0f922fe   in service    fd00:1122:3344:102::2b
+    crucible          e8f994c0-0a1b-40e6-8db1-40a8ca89e503   in service    fd00:1122:3344:102::2d
+    crucible          e9bf481e-323e-466e-842f-8107078c7137   in service    fd00:1122:3344:102::2e
+    crucible          f97aa057-6485-45d0-9cb4-4af5b0831d48   in service    fd00:1122:3344:102::25
+    crucible_pantry   eaec16c0-0d44-4847-b2d6-31a5151bae52   in service    fd00:1122:3344:102::24
+    internal_dns      8b8f7c02-7a18-4268-b045-2e286b464c5d   in service    fd00:1122:3344:1::1   
+    internal_ntp      c67dd9a4-0d6c-4e9f-b28d-20003f211f7d   in service    fd00:1122:3344:102::21
+    nexus             94b45ce9-d3d8-413a-a76b-865da1f67930   in service    fd00:1122:3344:102::22
 
 
 
@@ -122,22 +123,23 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
 
 
     omicron zones at generation 2:
-    ------------------------------------------------------------------------------------------
-    zone type      zone id                                disposition   underlay IP           
-    ------------------------------------------------------------------------------------------
-    crucible       728db429-8621-4e1e-9915-282aadfa27d1   in service    fd00:1122:3344:103::24
-    crucible       a999e5fa-3edc-4dac-919a-d7b554cdae58   in service    fd00:1122:3344:103::27
-    crucible       b416f299-c23c-46c8-9820-be2b66ffea0a   in service    fd00:1122:3344:103::28
-    crucible       b5d5491d-b3aa-4727-8b55-f66e0581ea4f   in service    fd00:1122:3344:103::2c
-    crucible       cc1dc86d-bd6f-4929-aa4a-9619012e9393   in service    fd00:1122:3344:103::25
-    crucible       cd3bb540-e605-465f-8c62-177ac482d850   in service    fd00:1122:3344:103::2a
-    crucible       e7dd3e98-7fe7-4827-be7f-395ff9a5f542   in service    fd00:1122:3344:103::23
-    crucible       e8971ab3-fb7d-4ad8-aae3-7f2fe87c51f3   in service    fd00:1122:3344:103::26
-    crucible       f52aa245-7e1b-46c0-8a31-e09725f02caf   in service    fd00:1122:3344:103::2b
-    crucible       fae49024-6cec-444d-a6c4-83658ab015a4   in service    fd00:1122:3344:103::29
-    internal_dns   c8aa84a5-a802-46c9-adcd-d61e9c8393c9   in service    fd00:1122:3344:2::1   
-    internal_ntp   e9bf481e-323e-466e-842f-8107078c7137   in service    fd00:1122:3344:103::21
-    nexus          4f2eb088-7d28-4c4e-a27c-746400ec65ba   in service    fd00:1122:3344:103::22
+    ---------------------------------------------------------------------------------------------
+    zone type         zone id                                disposition   underlay IP           
+    ---------------------------------------------------------------------------------------------
+    crucible          09937ebb-bb6a-495b-bc97-b58076b70a78   in service    fd00:1122:3344:103::2c
+    crucible          a999e5fa-3edc-4dac-919a-d7b554cdae58   in service    fd00:1122:3344:103::26
+    crucible          b416f299-c23c-46c8-9820-be2b66ffea0a   in service    fd00:1122:3344:103::27
+    crucible          b5d5491d-b3aa-4727-8b55-f66e0581ea4f   in service    fd00:1122:3344:103::2b
+    crucible          cc1dc86d-bd6f-4929-aa4a-9619012e9393   in service    fd00:1122:3344:103::24
+    crucible          cd3bb540-e605-465f-8c62-177ac482d850   in service    fd00:1122:3344:103::29
+    crucible          e8971ab3-fb7d-4ad8-aae3-7f2fe87c51f3   in service    fd00:1122:3344:103::25
+    crucible          f3628f0a-2301-4fc8-bcbf-961199771731   in service    fd00:1122:3344:103::2d
+    crucible          f52aa245-7e1b-46c0-8a31-e09725f02caf   in service    fd00:1122:3344:103::2a
+    crucible          fae49024-6cec-444d-a6c4-83658ab015a4   in service    fd00:1122:3344:103::28
+    crucible_pantry   728db429-8621-4e1e-9915-282aadfa27d1   in service    fd00:1122:3344:103::23
+    internal_dns      e7dd3e98-7fe7-4827-be7f-395ff9a5f542   in service    fd00:1122:3344:2::1   
+    internal_ntp      4f2eb088-7d28-4c4e-a27c-746400ec65ba   in service    fd00:1122:3344:103::21
+    nexus             c8aa84a5-a802-46c9-adcd-d61e9c8393c9   in service    fd00:1122:3344:103::22
 
 
 
@@ -160,22 +162,23 @@ parent:    02697f74-b14a-4418-90f0-c28b2a3a6aa9
 
 
     omicron zones at generation 2:
-    ------------------------------------------------------------------------------------------
-    zone type      zone id                                disposition   underlay IP           
-    ------------------------------------------------------------------------------------------
-    crucible       315a3670-d019-425c-b7a6-c9429428b671   in service    fd00:1122:3344:101::25
-    crucible       413d3e02-e19f-400a-9718-a662347538f0   in service    fd00:1122:3344:101::26
-    crucible       6cb330f9-4609-4d6c-98ad-b5cc34245813   in service    fd00:1122:3344:101::2b
-    crucible       6d725df0-0189-4429-b270-3eeb891d39c8   in service    fd00:1122:3344:101::2a
-    crucible       8b47e1e8-0396-4e44-a4a5-ea891405c9f2   in service    fd00:1122:3344:101::24
-    crucible       b43ce109-90d6-46f9-9df0-8c68bfe6d4a0   in service    fd00:1122:3344:101::23
-    crucible       b5443ebd-1f5b-448c-8edc-b4ca25c25db1   in service    fd00:1122:3344:101::27
-    crucible       bb55534c-1042-4af4-ad2f-9590803695ac   in service    fd00:1122:3344:101::29
-    crucible       e135441d-637e-4de9-8023-5ea0096347f3   in service    fd00:1122:3344:101::28
-    crucible       fee71ee6-da42-4a7f-a00e-f56b6a3327ce   in service    fd00:1122:3344:101::2c
-    internal_dns   cbe91cdc-cbb6-4760-aece-6ce08b67e85a   in service    fd00:1122:3344:3::1   
-    internal_ntp   09937ebb-bb6a-495b-bc97-b58076b70a78   in service    fd00:1122:3344:101::21
-    nexus          f3628f0a-2301-4fc8-bcbf-961199771731   in service    fd00:1122:3344:101::22
+    ---------------------------------------------------------------------------------------------
+    zone type         zone id                                disposition   underlay IP           
+    ---------------------------------------------------------------------------------------------
+    crucible          413d3e02-e19f-400a-9718-a662347538f0   in service    fd00:1122:3344:101::24
+    crucible          6cb330f9-4609-4d6c-98ad-b5cc34245813   in service    fd00:1122:3344:101::29
+    crucible          6d725df0-0189-4429-b270-3eeb891d39c8   in service    fd00:1122:3344:101::28
+    crucible          b5443ebd-1f5b-448c-8edc-b4ca25c25db1   in service    fd00:1122:3344:101::25
+    crucible          bb55534c-1042-4af4-ad2f-9590803695ac   in service    fd00:1122:3344:101::27
+    crucible          c4296f9f-f902-4fc7-b896-178e56e60732   in service    fd00:1122:3344:101::2d
+    crucible          d14c165f-6370-4cce-9dba-3c6deb762cfc   in service    fd00:1122:3344:101::2c
+    crucible          de65f128-30f7-422b-a234-d1fc8dd6ef78   in service    fd00:1122:3344:101::2b
+    crucible          e135441d-637e-4de9-8023-5ea0096347f3   in service    fd00:1122:3344:101::26
+    crucible          fee71ee6-da42-4a7f-a00e-f56b6a3327ce   in service    fd00:1122:3344:101::2a
+    crucible_pantry   315a3670-d019-425c-b7a6-c9429428b671   in service    fd00:1122:3344:101::23
+    internal_dns      8b47e1e8-0396-4e44-a4a5-ea891405c9f2   in service    fd00:1122:3344:3::1   
+    internal_ntp      cbe91cdc-cbb6-4760-aece-6ce08b67e85a   in service    fd00:1122:3344:101::21
+    nexus             b43ce109-90d6-46f9-9df0-8c68bfe6d4a0   in service    fd00:1122:3344:101::22
 
 
  COCKROACHDB SETTINGS:
@@ -217,23 +220,24 @@ to:   blueprint  ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 
 
     omicron zones at generation 2:
-    ------------------------------------------------------------------------------------------
-    zone type      zone id                                disposition   underlay IP           
-    ------------------------------------------------------------------------------------------
-    clickhouse     fe79023f-c5d5-4be5-ad2c-da4e9e9237e4   in service    fd00:1122:3344:102::23
-    crucible       054f64a5-182c-4c28-8994-d2e082550201   in service    fd00:1122:3344:102::26
-    crucible       3b5bffea-e5ed-44df-8468-fd4fa69757d8   in service    fd00:1122:3344:102::27
-    crucible       53dd7fa4-899e-49ed-9fc2-48222db3e20d   in service    fd00:1122:3344:102::2a
-    crucible       7db307d4-a6ed-4c47-bddf-6759161bf64a   in service    fd00:1122:3344:102::2c
-    crucible       95ad9a1d-4063-4874-974c-2fc92830be27   in service    fd00:1122:3344:102::29
-    crucible       bc095417-e2f0-4e95-b390-9cc3fc6e3c6d   in service    fd00:1122:3344:102::28
-    crucible       d90401f1-fbc2-42cb-bf17-309ee0f922fe   in service    fd00:1122:3344:102::2b
-    crucible       e8f994c0-0a1b-40e6-8db1-40a8ca89e503   in service    fd00:1122:3344:102::2d
-    crucible       eaec16c0-0d44-4847-b2d6-31a5151bae52   in service    fd00:1122:3344:102::24
-    crucible       f97aa057-6485-45d0-9cb4-4af5b0831d48   in service    fd00:1122:3344:102::25
-    internal_dns   8b8f7c02-7a18-4268-b045-2e286b464c5d   in service    fd00:1122:3344:1::1   
-    internal_ntp   c67dd9a4-0d6c-4e9f-b28d-20003f211f7d   in service    fd00:1122:3344:102::21
-    nexus          94b45ce9-d3d8-413a-a76b-865da1f67930   in service    fd00:1122:3344:102::22
+    ---------------------------------------------------------------------------------------------
+    zone type         zone id                                disposition   underlay IP           
+    ---------------------------------------------------------------------------------------------
+    clickhouse        fe79023f-c5d5-4be5-ad2c-da4e9e9237e4   in service    fd00:1122:3344:102::23
+    crucible          054f64a5-182c-4c28-8994-d2e082550201   in service    fd00:1122:3344:102::26
+    crucible          3b5bffea-e5ed-44df-8468-fd4fa69757d8   in service    fd00:1122:3344:102::27
+    crucible          53dd7fa4-899e-49ed-9fc2-48222db3e20d   in service    fd00:1122:3344:102::2a
+    crucible          7db307d4-a6ed-4c47-bddf-6759161bf64a   in service    fd00:1122:3344:102::2c
+    crucible          95ad9a1d-4063-4874-974c-2fc92830be27   in service    fd00:1122:3344:102::29
+    crucible          bc095417-e2f0-4e95-b390-9cc3fc6e3c6d   in service    fd00:1122:3344:102::28
+    crucible          d90401f1-fbc2-42cb-bf17-309ee0f922fe   in service    fd00:1122:3344:102::2b
+    crucible          e8f994c0-0a1b-40e6-8db1-40a8ca89e503   in service    fd00:1122:3344:102::2d
+    crucible          e9bf481e-323e-466e-842f-8107078c7137   in service    fd00:1122:3344:102::2e
+    crucible          f97aa057-6485-45d0-9cb4-4af5b0831d48   in service    fd00:1122:3344:102::25
+    crucible_pantry   eaec16c0-0d44-4847-b2d6-31a5151bae52   in service    fd00:1122:3344:102::24
+    internal_dns      8b8f7c02-7a18-4268-b045-2e286b464c5d   in service    fd00:1122:3344:1::1   
+    internal_ntp      c67dd9a4-0d6c-4e9f-b28d-20003f211f7d   in service    fd00:1122:3344:102::21
+    nexus             94b45ce9-d3d8-413a-a76b-865da1f67930   in service    fd00:1122:3344:102::22
 
 
   sled 32d8d836-4d8a-4e54-8fa9-f31d79c42646 (active):
@@ -255,22 +259,23 @@ to:   blueprint  ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 
 
     omicron zones at generation 2:
-    ------------------------------------------------------------------------------------------
-    zone type      zone id                                disposition   underlay IP           
-    ------------------------------------------------------------------------------------------
-    crucible       728db429-8621-4e1e-9915-282aadfa27d1   in service    fd00:1122:3344:103::24
-    crucible       a999e5fa-3edc-4dac-919a-d7b554cdae58   in service    fd00:1122:3344:103::27
-    crucible       b416f299-c23c-46c8-9820-be2b66ffea0a   in service    fd00:1122:3344:103::28
-    crucible       b5d5491d-b3aa-4727-8b55-f66e0581ea4f   in service    fd00:1122:3344:103::2c
-    crucible       cc1dc86d-bd6f-4929-aa4a-9619012e9393   in service    fd00:1122:3344:103::25
-    crucible       cd3bb540-e605-465f-8c62-177ac482d850   in service    fd00:1122:3344:103::2a
-    crucible       e7dd3e98-7fe7-4827-be7f-395ff9a5f542   in service    fd00:1122:3344:103::23
-    crucible       e8971ab3-fb7d-4ad8-aae3-7f2fe87c51f3   in service    fd00:1122:3344:103::26
-    crucible       f52aa245-7e1b-46c0-8a31-e09725f02caf   in service    fd00:1122:3344:103::2b
-    crucible       fae49024-6cec-444d-a6c4-83658ab015a4   in service    fd00:1122:3344:103::29
-    internal_dns   c8aa84a5-a802-46c9-adcd-d61e9c8393c9   in service    fd00:1122:3344:2::1   
-    internal_ntp   e9bf481e-323e-466e-842f-8107078c7137   in service    fd00:1122:3344:103::21
-    nexus          4f2eb088-7d28-4c4e-a27c-746400ec65ba   in service    fd00:1122:3344:103::22
+    ---------------------------------------------------------------------------------------------
+    zone type         zone id                                disposition   underlay IP           
+    ---------------------------------------------------------------------------------------------
+    crucible          09937ebb-bb6a-495b-bc97-b58076b70a78   in service    fd00:1122:3344:103::2c
+    crucible          a999e5fa-3edc-4dac-919a-d7b554cdae58   in service    fd00:1122:3344:103::26
+    crucible          b416f299-c23c-46c8-9820-be2b66ffea0a   in service    fd00:1122:3344:103::27
+    crucible          b5d5491d-b3aa-4727-8b55-f66e0581ea4f   in service    fd00:1122:3344:103::2b
+    crucible          cc1dc86d-bd6f-4929-aa4a-9619012e9393   in service    fd00:1122:3344:103::24
+    crucible          cd3bb540-e605-465f-8c62-177ac482d850   in service    fd00:1122:3344:103::29
+    crucible          e8971ab3-fb7d-4ad8-aae3-7f2fe87c51f3   in service    fd00:1122:3344:103::25
+    crucible          f3628f0a-2301-4fc8-bcbf-961199771731   in service    fd00:1122:3344:103::2d
+    crucible          f52aa245-7e1b-46c0-8a31-e09725f02caf   in service    fd00:1122:3344:103::2a
+    crucible          fae49024-6cec-444d-a6c4-83658ab015a4   in service    fd00:1122:3344:103::28
+    crucible_pantry   728db429-8621-4e1e-9915-282aadfa27d1   in service    fd00:1122:3344:103::23
+    internal_dns      e7dd3e98-7fe7-4827-be7f-395ff9a5f542   in service    fd00:1122:3344:2::1   
+    internal_ntp      4f2eb088-7d28-4c4e-a27c-746400ec65ba   in service    fd00:1122:3344:103::21
+    nexus             c8aa84a5-a802-46c9-adcd-d61e9c8393c9   in service    fd00:1122:3344:103::22
 
 
   sled 89d02b1b-478c-401a-8e28-7a26f74fa41b (active):
@@ -292,22 +297,23 @@ to:   blueprint  ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 
 
     omicron zones at generation 2:
-    ------------------------------------------------------------------------------------------
-    zone type      zone id                                disposition   underlay IP           
-    ------------------------------------------------------------------------------------------
-    crucible       315a3670-d019-425c-b7a6-c9429428b671   in service    fd00:1122:3344:101::25
-    crucible       413d3e02-e19f-400a-9718-a662347538f0   in service    fd00:1122:3344:101::26
-    crucible       6cb330f9-4609-4d6c-98ad-b5cc34245813   in service    fd00:1122:3344:101::2b
-    crucible       6d725df0-0189-4429-b270-3eeb891d39c8   in service    fd00:1122:3344:101::2a
-    crucible       8b47e1e8-0396-4e44-a4a5-ea891405c9f2   in service    fd00:1122:3344:101::24
-    crucible       b43ce109-90d6-46f9-9df0-8c68bfe6d4a0   in service    fd00:1122:3344:101::23
-    crucible       b5443ebd-1f5b-448c-8edc-b4ca25c25db1   in service    fd00:1122:3344:101::27
-    crucible       bb55534c-1042-4af4-ad2f-9590803695ac   in service    fd00:1122:3344:101::29
-    crucible       e135441d-637e-4de9-8023-5ea0096347f3   in service    fd00:1122:3344:101::28
-    crucible       fee71ee6-da42-4a7f-a00e-f56b6a3327ce   in service    fd00:1122:3344:101::2c
-    internal_dns   cbe91cdc-cbb6-4760-aece-6ce08b67e85a   in service    fd00:1122:3344:3::1   
-    internal_ntp   09937ebb-bb6a-495b-bc97-b58076b70a78   in service    fd00:1122:3344:101::21
-    nexus          f3628f0a-2301-4fc8-bcbf-961199771731   in service    fd00:1122:3344:101::22
+    ---------------------------------------------------------------------------------------------
+    zone type         zone id                                disposition   underlay IP           
+    ---------------------------------------------------------------------------------------------
+    crucible          413d3e02-e19f-400a-9718-a662347538f0   in service    fd00:1122:3344:101::24
+    crucible          6cb330f9-4609-4d6c-98ad-b5cc34245813   in service    fd00:1122:3344:101::29
+    crucible          6d725df0-0189-4429-b270-3eeb891d39c8   in service    fd00:1122:3344:101::28
+    crucible          b5443ebd-1f5b-448c-8edc-b4ca25c25db1   in service    fd00:1122:3344:101::25
+    crucible          bb55534c-1042-4af4-ad2f-9590803695ac   in service    fd00:1122:3344:101::27
+    crucible          c4296f9f-f902-4fc7-b896-178e56e60732   in service    fd00:1122:3344:101::2d
+    crucible          d14c165f-6370-4cce-9dba-3c6deb762cfc   in service    fd00:1122:3344:101::2c
+    crucible          de65f128-30f7-422b-a234-d1fc8dd6ef78   in service    fd00:1122:3344:101::2b
+    crucible          e135441d-637e-4de9-8023-5ea0096347f3   in service    fd00:1122:3344:101::26
+    crucible          fee71ee6-da42-4a7f-a00e-f56b6a3327ce   in service    fd00:1122:3344:101::2a
+    crucible_pantry   315a3670-d019-425c-b7a6-c9429428b671   in service    fd00:1122:3344:101::23
+    internal_dns      8b47e1e8-0396-4e44-a4a5-ea891405c9f2   in service    fd00:1122:3344:3::1   
+    internal_ntp      cbe91cdc-cbb6-4760-aece-6ce08b67e85a   in service    fd00:1122:3344:101::21
+    nexus             b43ce109-90d6-46f9-9df0-8c68bfe6d4a0   in service    fd00:1122:3344:101::22
 
 
  COCKROACHDB SETTINGS:
@@ -349,23 +355,24 @@ to:   blueprint  ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 
 
     omicron zones at generation 2:
-    ------------------------------------------------------------------------------------------
-    zone type      zone id                                disposition   underlay IP           
-    ------------------------------------------------------------------------------------------
-    clickhouse     fe79023f-c5d5-4be5-ad2c-da4e9e9237e4   in service    fd00:1122:3344:102::23
-    crucible       054f64a5-182c-4c28-8994-d2e082550201   in service    fd00:1122:3344:102::26
-    crucible       3b5bffea-e5ed-44df-8468-fd4fa69757d8   in service    fd00:1122:3344:102::27
-    crucible       53dd7fa4-899e-49ed-9fc2-48222db3e20d   in service    fd00:1122:3344:102::2a
-    crucible       7db307d4-a6ed-4c47-bddf-6759161bf64a   in service    fd00:1122:3344:102::2c
-    crucible       95ad9a1d-4063-4874-974c-2fc92830be27   in service    fd00:1122:3344:102::29
-    crucible       bc095417-e2f0-4e95-b390-9cc3fc6e3c6d   in service    fd00:1122:3344:102::28
-    crucible       d90401f1-fbc2-42cb-bf17-309ee0f922fe   in service    fd00:1122:3344:102::2b
-    crucible       e8f994c0-0a1b-40e6-8db1-40a8ca89e503   in service    fd00:1122:3344:102::2d
-    crucible       eaec16c0-0d44-4847-b2d6-31a5151bae52   in service    fd00:1122:3344:102::24
-    crucible       f97aa057-6485-45d0-9cb4-4af5b0831d48   in service    fd00:1122:3344:102::25
-    internal_dns   8b8f7c02-7a18-4268-b045-2e286b464c5d   in service    fd00:1122:3344:1::1   
-    internal_ntp   c67dd9a4-0d6c-4e9f-b28d-20003f211f7d   in service    fd00:1122:3344:102::21
-    nexus          94b45ce9-d3d8-413a-a76b-865da1f67930   in service    fd00:1122:3344:102::22
+    ---------------------------------------------------------------------------------------------
+    zone type         zone id                                disposition   underlay IP           
+    ---------------------------------------------------------------------------------------------
+    clickhouse        fe79023f-c5d5-4be5-ad2c-da4e9e9237e4   in service    fd00:1122:3344:102::23
+    crucible          054f64a5-182c-4c28-8994-d2e082550201   in service    fd00:1122:3344:102::26
+    crucible          3b5bffea-e5ed-44df-8468-fd4fa69757d8   in service    fd00:1122:3344:102::27
+    crucible          53dd7fa4-899e-49ed-9fc2-48222db3e20d   in service    fd00:1122:3344:102::2a
+    crucible          7db307d4-a6ed-4c47-bddf-6759161bf64a   in service    fd00:1122:3344:102::2c
+    crucible          95ad9a1d-4063-4874-974c-2fc92830be27   in service    fd00:1122:3344:102::29
+    crucible          bc095417-e2f0-4e95-b390-9cc3fc6e3c6d   in service    fd00:1122:3344:102::28
+    crucible          d90401f1-fbc2-42cb-bf17-309ee0f922fe   in service    fd00:1122:3344:102::2b
+    crucible          e8f994c0-0a1b-40e6-8db1-40a8ca89e503   in service    fd00:1122:3344:102::2d
+    crucible          e9bf481e-323e-466e-842f-8107078c7137   in service    fd00:1122:3344:102::2e
+    crucible          f97aa057-6485-45d0-9cb4-4af5b0831d48   in service    fd00:1122:3344:102::25
+    crucible_pantry   eaec16c0-0d44-4847-b2d6-31a5151bae52   in service    fd00:1122:3344:102::24
+    internal_dns      8b8f7c02-7a18-4268-b045-2e286b464c5d   in service    fd00:1122:3344:1::1   
+    internal_ntp      c67dd9a4-0d6c-4e9f-b28d-20003f211f7d   in service    fd00:1122:3344:102::21
+    nexus             94b45ce9-d3d8-413a-a76b-865da1f67930   in service    fd00:1122:3344:102::22
 
 
   sled 32d8d836-4d8a-4e54-8fa9-f31d79c42646 (active):
@@ -387,22 +394,23 @@ to:   blueprint  ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 
 
     omicron zones at generation 2:
-    ------------------------------------------------------------------------------------------
-    zone type      zone id                                disposition   underlay IP           
-    ------------------------------------------------------------------------------------------
-    crucible       728db429-8621-4e1e-9915-282aadfa27d1   in service    fd00:1122:3344:103::24
-    crucible       a999e5fa-3edc-4dac-919a-d7b554cdae58   in service    fd00:1122:3344:103::27
-    crucible       b416f299-c23c-46c8-9820-be2b66ffea0a   in service    fd00:1122:3344:103::28
-    crucible       b5d5491d-b3aa-4727-8b55-f66e0581ea4f   in service    fd00:1122:3344:103::2c
-    crucible       cc1dc86d-bd6f-4929-aa4a-9619012e9393   in service    fd00:1122:3344:103::25
-    crucible       cd3bb540-e605-465f-8c62-177ac482d850   in service    fd00:1122:3344:103::2a
-    crucible       e7dd3e98-7fe7-4827-be7f-395ff9a5f542   in service    fd00:1122:3344:103::23
-    crucible       e8971ab3-fb7d-4ad8-aae3-7f2fe87c51f3   in service    fd00:1122:3344:103::26
-    crucible       f52aa245-7e1b-46c0-8a31-e09725f02caf   in service    fd00:1122:3344:103::2b
-    crucible       fae49024-6cec-444d-a6c4-83658ab015a4   in service    fd00:1122:3344:103::29
-    internal_dns   c8aa84a5-a802-46c9-adcd-d61e9c8393c9   in service    fd00:1122:3344:2::1   
-    internal_ntp   e9bf481e-323e-466e-842f-8107078c7137   in service    fd00:1122:3344:103::21
-    nexus          4f2eb088-7d28-4c4e-a27c-746400ec65ba   in service    fd00:1122:3344:103::22
+    ---------------------------------------------------------------------------------------------
+    zone type         zone id                                disposition   underlay IP           
+    ---------------------------------------------------------------------------------------------
+    crucible          09937ebb-bb6a-495b-bc97-b58076b70a78   in service    fd00:1122:3344:103::2c
+    crucible          a999e5fa-3edc-4dac-919a-d7b554cdae58   in service    fd00:1122:3344:103::26
+    crucible          b416f299-c23c-46c8-9820-be2b66ffea0a   in service    fd00:1122:3344:103::27
+    crucible          b5d5491d-b3aa-4727-8b55-f66e0581ea4f   in service    fd00:1122:3344:103::2b
+    crucible          cc1dc86d-bd6f-4929-aa4a-9619012e9393   in service    fd00:1122:3344:103::24
+    crucible          cd3bb540-e605-465f-8c62-177ac482d850   in service    fd00:1122:3344:103::29
+    crucible          e8971ab3-fb7d-4ad8-aae3-7f2fe87c51f3   in service    fd00:1122:3344:103::25
+    crucible          f3628f0a-2301-4fc8-bcbf-961199771731   in service    fd00:1122:3344:103::2d
+    crucible          f52aa245-7e1b-46c0-8a31-e09725f02caf   in service    fd00:1122:3344:103::2a
+    crucible          fae49024-6cec-444d-a6c4-83658ab015a4   in service    fd00:1122:3344:103::28
+    crucible_pantry   728db429-8621-4e1e-9915-282aadfa27d1   in service    fd00:1122:3344:103::23
+    internal_dns      e7dd3e98-7fe7-4827-be7f-395ff9a5f542   in service    fd00:1122:3344:2::1   
+    internal_ntp      4f2eb088-7d28-4c4e-a27c-746400ec65ba   in service    fd00:1122:3344:103::21
+    nexus             c8aa84a5-a802-46c9-adcd-d61e9c8393c9   in service    fd00:1122:3344:103::22
 
 
   sled 89d02b1b-478c-401a-8e28-7a26f74fa41b (active):
@@ -424,22 +432,23 @@ to:   blueprint  ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 
 
     omicron zones at generation 2:
-    ------------------------------------------------------------------------------------------
-    zone type      zone id                                disposition   underlay IP           
-    ------------------------------------------------------------------------------------------
-    crucible       315a3670-d019-425c-b7a6-c9429428b671   in service    fd00:1122:3344:101::25
-    crucible       413d3e02-e19f-400a-9718-a662347538f0   in service    fd00:1122:3344:101::26
-    crucible       6cb330f9-4609-4d6c-98ad-b5cc34245813   in service    fd00:1122:3344:101::2b
-    crucible       6d725df0-0189-4429-b270-3eeb891d39c8   in service    fd00:1122:3344:101::2a
-    crucible       8b47e1e8-0396-4e44-a4a5-ea891405c9f2   in service    fd00:1122:3344:101::24
-    crucible       b43ce109-90d6-46f9-9df0-8c68bfe6d4a0   in service    fd00:1122:3344:101::23
-    crucible       b5443ebd-1f5b-448c-8edc-b4ca25c25db1   in service    fd00:1122:3344:101::27
-    crucible       bb55534c-1042-4af4-ad2f-9590803695ac   in service    fd00:1122:3344:101::29
-    crucible       e135441d-637e-4de9-8023-5ea0096347f3   in service    fd00:1122:3344:101::28
-    crucible       fee71ee6-da42-4a7f-a00e-f56b6a3327ce   in service    fd00:1122:3344:101::2c
-    internal_dns   cbe91cdc-cbb6-4760-aece-6ce08b67e85a   in service    fd00:1122:3344:3::1   
-    internal_ntp   09937ebb-bb6a-495b-bc97-b58076b70a78   in service    fd00:1122:3344:101::21
-    nexus          f3628f0a-2301-4fc8-bcbf-961199771731   in service    fd00:1122:3344:101::22
+    ---------------------------------------------------------------------------------------------
+    zone type         zone id                                disposition   underlay IP           
+    ---------------------------------------------------------------------------------------------
+    crucible          413d3e02-e19f-400a-9718-a662347538f0   in service    fd00:1122:3344:101::24
+    crucible          6cb330f9-4609-4d6c-98ad-b5cc34245813   in service    fd00:1122:3344:101::29
+    crucible          6d725df0-0189-4429-b270-3eeb891d39c8   in service    fd00:1122:3344:101::28
+    crucible          b5443ebd-1f5b-448c-8edc-b4ca25c25db1   in service    fd00:1122:3344:101::25
+    crucible          bb55534c-1042-4af4-ad2f-9590803695ac   in service    fd00:1122:3344:101::27
+    crucible          c4296f9f-f902-4fc7-b896-178e56e60732   in service    fd00:1122:3344:101::2d
+    crucible          d14c165f-6370-4cce-9dba-3c6deb762cfc   in service    fd00:1122:3344:101::2c
+    crucible          de65f128-30f7-422b-a234-d1fc8dd6ef78   in service    fd00:1122:3344:101::2b
+    crucible          e135441d-637e-4de9-8023-5ea0096347f3   in service    fd00:1122:3344:101::26
+    crucible          fee71ee6-da42-4a7f-a00e-f56b6a3327ce   in service    fd00:1122:3344:101::2a
+    crucible_pantry   315a3670-d019-425c-b7a6-c9429428b671   in service    fd00:1122:3344:101::23
+    internal_dns      8b47e1e8-0396-4e44-a4a5-ea891405c9f2   in service    fd00:1122:3344:3::1   
+    internal_ntp      cbe91cdc-cbb6-4760-aece-6ce08b67e85a   in service    fd00:1122:3344:101::21
+    nexus             b43ce109-90d6-46f9-9df0-8c68bfe6d4a0   in service    fd00:1122:3344:101::22
 
 
  COCKROACHDB SETTINGS:
