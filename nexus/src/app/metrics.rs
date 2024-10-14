@@ -164,4 +164,41 @@ impl super::Nexus {
                 _ => Error::InternalError { internal_message: e.to_string() },
             })
     }
+
+    /// Run an OxQL query against the timeseries database, scoped to a specific project.
+    pub(crate) async fn timeseries_query_project(
+        &self,
+        _opctx: &OpContext,
+        project_lookup: &lookup::Project<'_>,
+        query: impl AsRef<str>,
+    ) -> Result<Vec<oxql_types::Table>, Error> {
+        // Ensure the user has read access to the project
+        let (authz_silo, authz_project) =
+            project_lookup.lookup_for(authz::Action::Read).await?;
+
+        // Ensure the query only refers to the project
+        let filtered_query = format!(
+            "{} | filter silo_id == \"{}\" && project_id == \"{}\"",
+            query.as_ref(),
+            authz_silo.id(),
+            authz_project.id()
+        );
+
+        self.timeseries_client
+            .oxql_query(filtered_query)
+            .await
+            .map(|result| result.tables)
+            .map_err(|e| match e {
+                oximeter_db::Error::DatabaseUnavailable(_) => {
+                    Error::ServiceUnavailable {
+                        internal_message: e.to_string(),
+                    }
+                }
+                oximeter_db::Error::Oxql(_)
+                | oximeter_db::Error::TimeseriesNotFound(_) => {
+                    Error::invalid_request(e.to_string())
+                }
+                _ => Error::InternalError { internal_message: e.to_string() },
+            })
+    }
 }

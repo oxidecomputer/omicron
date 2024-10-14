@@ -73,6 +73,7 @@ login_saml                               POST     /login/{silo_name}/saml/{provi
 API operations found with tag "metrics"
 OPERATION ID                             METHOD   URL PATH
 silo_metric                              GET      /v1/metrics/{metric_name}
+timeseries_query                         POST     /v1/timeseries/query
 
 API operations found with tag "policy"
 OPERATION ID                             METHOD   URL PATH
