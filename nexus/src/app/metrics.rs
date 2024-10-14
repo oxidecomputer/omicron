@@ -178,4 +178,46 @@ impl super::Nexus {
                 _ => Error::InternalError { internal_message: e.to_string() },
             })
     }
+
+    /// Run an OxQL query against the timeseries database, scoped to a specific project.
+    pub(crate) async fn timeseries_query_project(
+        &self,
+        _opctx: &OpContext,
+        project_lookup: &lookup::Project<'_>,
+        query: impl AsRef<str>,
+    ) -> Result<Vec<oxql_types::Table>, Error> {
+        // Ensure the user has read access to the project
+        let (.., authz_project) =
+            project_lookup.lookup_for(authz::Action::Read).await?;
+
+        let parsed_query = oximeter_db::oxql::Query::new(query.as_ref())
+            .map_err(|e| Error::invalid_request(e.to_string()))?;
+
+        // Check that the query only refers to the project
+
+        self.timeseries_client
+            .get()
+            .await
+            .map_err(|e| {
+                Error::internal_error(&format!(
+                    "Cannot access timeseries DB: {}",
+                    e
+                ))
+            })?
+            .oxql_query(query)
+            .await
+            .map(|result| result.tables)
+            .map_err(|e| match e {
+                oximeter_db::Error::DatabaseUnavailable(_) => {
+                    Error::ServiceUnavailable {
+                        internal_message: e.to_string(),
+                    }
+                }
+                oximeter_db::Error::Oxql(_)
+                | oximeter_db::Error::TimeseriesNotFound(_) => {
+                    Error::invalid_request(e.to_string())
+                }
+                _ => Error::InternalError { internal_message: e.to_string() },
+            })
+    }
 }
