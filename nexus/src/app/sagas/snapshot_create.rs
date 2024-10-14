@@ -103,13 +103,11 @@ use anyhow::anyhow;
 use nexus_db_model::Generation;
 use nexus_db_queries::db::identity::{Asset, Resource};
 use nexus_db_queries::db::lookup::LookupPath;
+use omicron_common::api::external::Error;
+use omicron_common::progenitor_operation_retry::ProgenitorOperationRetryError;
 use omicron_common::retry_until_known_result;
 use omicron_common::{
     api::external, progenitor_operation_retry::ProgenitorOperationRetry,
-};
-use omicron_common::{
-    api::external::Error,
-    progenitor_operation_retry::ProgenitorOperationRetryError,
 };
 use omicron_uuid_kinds::{GenericUuid, PropolisUuid, SledUuid};
 use rand::{rngs::StdRng, RngCore, SeedableRng};
