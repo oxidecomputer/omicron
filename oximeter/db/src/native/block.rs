@@ -902,7 +902,7 @@ mod tests {
         assert_eq!(block.n_rows, values.len() as u64 * 2);
         assert_eq!(
             block.columns["a"].values,
-            ValueArray::UInt64(vec![data.as_slice(), data.as_slice()].concat())
+            ValueArray::UInt64([data.as_slice(), data.as_slice()].concat())
         );
     }
 }
