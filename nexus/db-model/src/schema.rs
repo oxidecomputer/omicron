@@ -842,10 +842,12 @@ table! {
 }
 
 table! {
-    reconfigurator_policy (version) {
+    clickhouse_policy (version) {
         version -> Int8,
         clickhouse_cluster_enabled -> Bool,
         clickhouse_single_node_enabled -> Bool,
+        clickhouse_cluster_target_servers -> Int2,
+        clickhouse_cluster_target_keepers -> Int2,
         time_created -> Timestamptz
     }
 }

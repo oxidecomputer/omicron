@@ -29,7 +29,7 @@ static KNOWN_VERSIONS: Lazy<Vec<KnownVersion>> = Lazy::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
-        KnownVersion::new(110, "reconfigurator-policy"),
+        KnownVersion::new(110, "clickhouse-policy"),
         KnownVersion::new(109, "inv-clickhouse-keeper-membership"),
         KnownVersion::new(108, "internet-gateway"),
         KnownVersion::new(107, "add-instance-boot-disk"),
