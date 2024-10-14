@@ -470,18 +470,24 @@ impl Precision {
     }
 
     /// Convert the provided datetime into a timestamp in the right precision.
-    pub(crate) fn scale(&self, value: DateTime<impl chrono::TimeZone>) -> i64 {
+    ///
+    /// This returns `None` if the timestamp cannot be converted to an `i64`,
+    /// which is how ClickHouse stores the values.
+    pub(crate) fn scale(
+        &self,
+        value: DateTime<impl chrono::TimeZone>,
+    ) -> Option<i64> {
         match self.0 {
-            0 => value.timestamp(),
-            1 => value.timestamp_millis() / 100,
-            2 => value.timestamp_millis() / 10,
-            3 => value.timestamp_millis(),
-            4 => value.timestamp_micros() / 100,
-            5 => value.timestamp_micros() / 10,
-            6 => value.timestamp_micros(),
-            7 => value.timestamp_nanos_opt().unwrap() / 100,
-            8 => value.timestamp_nanos_opt().unwrap() / 10,
-            9 => value.timestamp_nanos_opt().unwrap(),
+            0 => Some(value.timestamp()),
+            1 => Some(value.timestamp_millis() / 100),
+            2 => Some(value.timestamp_millis() / 10),
+            3 => Some(value.timestamp_millis()),
+            4 => Some(value.timestamp_micros() / 100),
+            5 => Some(value.timestamp_micros() / 10),
+            6 => Some(value.timestamp_micros()),
+            7 => value.timestamp_nanos_opt().map(|x| x / 100),
+            8 => value.timestamp_nanos_opt().map(|x| x / 10),
+            9 => value.timestamp_nanos_opt(),
             10.. => unreachable!(),
         }
     }
@@ -800,7 +806,8 @@ mod tests {
         let now = Utc::now();
         for precision in 0..=Precision::MAX {
             let prec = Precision(precision);
-            let timestamp = prec.scale(now);
+            let timestamp =
+                prec.scale(now).expect("Current time should fit in an i64");
             let conv = prec.as_conv(&Utc);
             let recovered = conv(&Utc, timestamp);
             let now_with_precision = now.trunc_subsecs(u16::from(prec.0));
@@ -814,6 +821,16 @@ mod tests {
             "
             );
         }
+    }
+
+    #[test]
+    fn datetime64_scale_checks_range() {
+        assert_eq!(
+            Precision(9).scale(chrono::DateTime::<Utc>::MAX_UTC),
+            None,
+            "Should fail to scale a timestamp that doesn't fit in \
+            the range of an i64"
+        );
     }
 
     #[test]

@@ -203,4 +203,7 @@ pub enum Error {
 
     #[error("Cannot concatenate blocks with mismatched structure")]
     MismatchedBlockStructure,
+
+    #[error("Value out of range for corresponding ClickHouse type")]
+    OutOfRange { type_name: String, min: String, max: String, value: String },
 }
