@@ -117,22 +117,22 @@ to:   blueprint f432fcd5-1284-4058-8b4a-9286a3de6163
 
  MODIFIED SLEDS:
 
-  sled b59ec570-2abb-4017-80ce-129d94e7a025 (active):
+  sled ec61eded-c34f-443d-a580-dadf757529c4 (active):
 
     physical disks at generation 1:
     ----------------------------------------------------------------------
     vendor        model        serial                                     
     ----------------------------------------------------------------------
-    fake-vendor   fake-model   serial-1bb5ee5d-c2c6-4eaa-86c4-817d89cf10cf
-    fake-vendor   fake-model   serial-298d1eec-0313-4a42-8af9-0e51299a14ef
-    fake-vendor   fake-model   serial-2eed666f-a10b-42d0-b626-68335d3270b8
-    fake-vendor   fake-model   serial-6cc4d7a7-2a89-4f2f-aa55-5e7a10d0fc08
-    fake-vendor   fake-model   serial-7aad6fd9-b698-4c77-af6b-947be10ba953
-    fake-vendor   fake-model   serial-a5a15e51-c48a-40e4-a2d8-1c7198c1d46b
-    fake-vendor   fake-model   serial-b81d4993-ea5b-4720-b8c8-2360c1121d6e
-    fake-vendor   fake-model   serial-d0064c4d-f5f7-4c89-9f37-0ca475048e79
-    fake-vendor   fake-model   serial-dba739c1-76e4-4b6a-a173-89c938fa13ef
-    fake-vendor   fake-model   serial-e6f289fe-142e-4778-8629-dc87adb53f06
+    fake-vendor   fake-model   serial-28699448-c5d9-49ea-bf7e-627800efe783
+    fake-vendor   fake-model   serial-2c490e96-27f2-4a7f-b440-04d4bfd1e4f6
+    fake-vendor   fake-model   serial-4c3bb1c7-55b6-49b8-b212-516b8f2c26c2
+    fake-vendor   fake-model   serial-5db07562-31a8-43e3-b99e-7c7cb89754b7
+    fake-vendor   fake-model   serial-9451a5d5-b358-4719-b6c1-a0d187da217c
+    fake-vendor   fake-model   serial-bb2e2869-9481-483a-bc49-2bdd62f515f5
+    fake-vendor   fake-model   serial-d5a36c66-4b2f-46e6-96f4-b82debee1a4a
+    fake-vendor   fake-model   serial-f99ec996-ec08-4ccf-9a6e-6c5cab440fb4
+    fake-vendor   fake-model   serial-faccbb39-d686-42a1-a50a-0eb59ba74a87
+    fake-vendor   fake-model   serial-fdfd067b-1d86-444d-a21f-ed33709f3e4d
 
 
     omicron zones generation 2 -> 3:

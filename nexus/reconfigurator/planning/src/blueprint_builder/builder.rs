@@ -250,19 +250,17 @@ impl<'a> BlueprintBuilder<'a> {
         Self::build_empty_with_sleds_impl(
             sled_ids,
             creator,
-            BlueprintBuilderRng::new(),
+            BlueprintBuilderRng::from_entropy(),
         )
     }
 
     /// A version of [`Self::build_empty_with_sleds`] that allows the
-    /// blueprint ID to be generated from a random seed.
-    pub fn build_empty_with_sleds_seeded<H: Hash>(
+    /// blueprint ID to be generated from a deterministic RNG.
+    pub fn build_empty_with_sleds_seeded(
         sled_ids: impl Iterator<Item = SledUuid>,
         creator: &str,
-        seed: H,
+        rng: BlueprintBuilderRng,
     ) -> Blueprint {
-        let mut rng = BlueprintBuilderRng::new();
-        rng.set_seed(seed);
         Self::build_empty_with_sleds_impl(sled_ids, creator, rng)
     }
 
@@ -398,7 +396,7 @@ impl<'a> BlueprintBuilder<'a> {
             creator: creator.to_owned(),
             operations: Vec::new(),
             comments: Vec::new(),
-            rng: BlueprintBuilderRng::new(),
+            rng: BlueprintBuilderRng::from_entropy(),
         })
     }
 
@@ -523,12 +521,12 @@ impl<'a> BlueprintBuilder<'a> {
         self.sled_state.insert(sled_id, desired_state);
     }
 
-    /// Within tests, set a seeded RNG for deterministic results.
+    /// Within tests, set an RNG for deterministic results.
     ///
     /// This will ensure that tests that use this builder will produce the same
     /// results each time they are run.
-    pub fn set_rng_seed<H: Hash>(&mut self, seed: H) -> &mut Self {
-        self.rng.set_seed(seed);
+    pub fn set_rng(&mut self, rng: BlueprintBuilderRng) -> &mut Self {
+        self.rng = rng;
         self
     }
 
@@ -1707,8 +1705,9 @@ impl<'a> BlueprintBuilder<'a> {
     }
 }
 
-#[derive(Debug)]
-struct BlueprintBuilderRng {
+/// Random generator of UUIDs for a [`BlueprintBuilder`].
+#[derive(Debug, Clone)]
+pub struct BlueprintBuilderRng {
     // Have separate RNGs for the different kinds of UUIDs we might add,
     // generated from the main RNG. This is so that e.g. adding a new network
     // interface doesn't alter the blueprint or sled UUID.
@@ -1722,8 +1721,15 @@ struct BlueprintBuilderRng {
 }
 
 impl BlueprintBuilderRng {
-    fn new() -> Self {
+    pub fn from_entropy() -> Self {
         Self::new_from_parent(StdRng::from_entropy())
+    }
+
+    pub fn from_seed<H: Hash>(seed: H) -> Self {
+        // Important to add some more bytes here, so that builders with the
+        // same seed but different purposes don't end up with the same UUIDs.
+        const SEED_EXTRA: &str = "blueprint-builder";
+        Self::new_from_parent(typed_rng::from_seed(seed, SEED_EXTRA))
     }
 
     fn new_from_parent(mut parent: StdRng) -> Self {
@@ -1740,13 +1746,6 @@ impl BlueprintBuilderRng {
             network_interface_rng,
             external_ip_rng,
         }
-    }
-
-    fn set_seed<H: Hash>(&mut self, seed: H) {
-        // Important to add some more bytes here, so that builders with the
-        // same seed but different purposes don't end up with the same UUIDs.
-        const SEED_EXTRA: &str = "blueprint-builder";
-        *self = Self::new_from_parent(typed_rng::from_seed(seed, SEED_EXTRA));
     }
 }
 
@@ -1980,6 +1979,7 @@ impl<'a> BlueprintDisksBuilder<'a> {
 pub mod test {
     use super::*;
     use crate::example::example;
+    use crate::example::ExampleRngState;
     use crate::example::ExampleSystemBuilder;
     use crate::system::SledBuilder;
     use expectorate::assert_contents;
@@ -2118,8 +2118,13 @@ pub mod test {
     fn test_basic() {
         static TEST_NAME: &str = "blueprint_builder_test_basic";
         let logctx = test_setup_log(TEST_NAME);
-        let (mut example, blueprint1) =
-            ExampleSystemBuilder::new(&logctx.log, TEST_NAME).build();
+
+        let mut rng = ExampleRngState::from_seed(TEST_NAME);
+        let (mut example, blueprint1) = ExampleSystemBuilder::new_with_rng(
+            &logctx.log,
+            rng.next_system_rng(),
+        )
+        .build();
         verify_blueprint(&blueprint1);
 
         let mut builder = BlueprintBuilder::new_based_on(
@@ -2155,7 +2160,9 @@ pub mod test {
         assert_eq!(diff.sleds_modified.len(), 0);
 
         // The next step is adding these zones to a new sled.
-        let new_sled_id = example.sled_rng.next();
+        let mut sled_id_rng = rng.next_sled_id_rng();
+        let new_sled_id = sled_id_rng.next();
+
         let _ =
             example.system.sled(SledBuilder::new().id(new_sled_id)).unwrap();
         let input = example.system.to_planning_input_builder().unwrap().build();
