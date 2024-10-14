@@ -1284,11 +1284,12 @@ async fn execute_pantry_drive_action(
     volume_id: Uuid,
     job_id: Uuid,
 ) -> Result<(), ActionError> {
-    // Importantly, _do not use `call_pantry_attach_for_disk`_! That uses
-    // `retry_until_known_result`, which we _do not want here_. The Pantry
-    // attach can fail if there's a racing Volume checkout to be sent to
-    // Propolis. Additionally, that call uses `attach` instead of
-    // `attach_activate_background`, which means it will hang on the activation.
+    // Importantly, _do not use `call_pantry_attach_for_disk`_! That retries
+    // as long as `pantry_address` is still resolvable in DNS, which we _do not
+    // want here_. The Pantry attach can fail if there's a racing Volume
+    // checkout to be sent to Propolis. Additionally, that call uses `attach`
+    // instead of `attach_activate_background`, which means it will hang on the
+    // activation.
 
     let endpoint = format!("http://{}", pantry_address);
     let client = crucible_pantry_client::Client::new(&endpoint);
