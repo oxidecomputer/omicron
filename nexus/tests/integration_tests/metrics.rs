@@ -288,6 +288,27 @@ pub async fn timeseries_query(
     cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
     query: impl ToString,
 ) -> Vec<oxql_types::Table> {
+    execute_timeseries_query(cptestctx, "/v1/timeseries/query", query).await
+}
+
+pub async fn project_timeseries_query(
+    cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
+    project: &str,
+    query: impl ToString,
+) -> Vec<oxql_types::Table> {
+    execute_timeseries_query(
+        cptestctx,
+        &format!("/v1/timeseries/query/projects/{}", project),
+        query,
+    )
+    .await
+}
+
+async fn execute_timeseries_query(
+    cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
+    endpoint: &str,
+    query: impl ToString,
+) -> Vec<oxql_types::Table> {
     // first, make sure the latest timeseries have been collected.
     cptestctx.oximeter.force_collect().await;
 
@@ -300,7 +321,7 @@ pub async fn timeseries_query(
         nexus_test_utils::http_testing::RequestBuilder::new(
             &cptestctx.external_client,
             http::Method::POST,
-            "/v1/timeseries/query",
+            endpoint,
         )
         .body(Some(&body)),
     )
@@ -525,6 +546,41 @@ async fn test_instance_watcher_metrics(
     assert_gte!(ts1_stopping, 1);
     assert_gte!(ts2_starting, 2);
     assert_gte!(ts2_running, 2);
+}
+
+#[nexus_test]
+async fn test_project_timeseries_query(
+    cptestctx: &ControlPlaneTestContext<omicron_nexus::Server>,
+) {
+    let client = &cptestctx.external_client;
+
+    // Create two projects
+    let project1 = create_project(&client, "project1").await;
+    let project2 = create_project(&client, "project2").await;
+
+    // Create resources in each project
+    create_instance(&client, "project1", "instance1").await;
+    create_instance(&client, "project2", "instance2").await;
+
+    // Force a metrics collection
+    cptestctx.oximeter.force_collect().await;
+
+    // Query for project1
+    let query1 = "get virtual_machine:check"; // TODO: add project to query
+    let result1 =
+        project_timeseries_query(&cptestctx, "project1", query1).await;
+
+    // shouldn't work
+    let result1 =
+        project_timeseries_query(&cptestctx, "project2", query1).await;
+
+    // Query for project2
+    let query2 = "get virtual_machine:check";
+    let result2 =
+        project_timeseries_query(&cptestctx, "project2", query2).await;
+
+    // Query with no project specified
+    // Query with nonexistent project
 }
 
 #[nexus_test]

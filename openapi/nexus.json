@@ -8838,6 +8838,55 @@
         }
       }
     },
+    "/v1/timeseries/query/project/{project}": {
+      "post": {
+        "tags": [
+          "metrics"
+        ],
+        "summary": "Run project-scoped timeseries query",
+        "description": "Queries are written in OxQL. Queries can only refer to timeseries data from the specified project.",
+        "operationId": "timeseries_query_project",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TimeseriesQuery"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OxqlQueryResult"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/timeseries/schema": {
       "get": {
         "tags": [

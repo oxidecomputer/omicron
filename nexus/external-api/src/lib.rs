@@ -2567,6 +2567,20 @@ pub trait NexusExternalApi {
         body: TypedBody<params::TimeseriesQuery>,
     ) -> Result<HttpResponseOk<views::OxqlQueryResult>, HttpError>;
 
+    /// Run project-scoped timeseries query
+    ///
+    /// Queries are written in OxQL. Queries can only refer to timeseries data from the specified project.
+    #[endpoint {
+        method = POST,
+        path = "/v1/timeseries/query/project/{project}",
+        tags = ["metrics"],
+    }]
+    async fn timeseries_query_project(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::ProjectPath>,
+        body: TypedBody<params::TimeseriesQuery>,
+    ) -> Result<HttpResponseOk<views::OxqlQueryResult>, HttpError>;
+
     // Updates
 
     /// Upload TUF repository
