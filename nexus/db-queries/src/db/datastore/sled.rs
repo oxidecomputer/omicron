@@ -100,6 +100,18 @@ impl DataStore {
     }
 
     /// Confirms that a sled exists and is in-service.
+    pub async fn check_sled_in_service(
+        &self,
+        opctx: &OpContext,
+        sled_id: Uuid,
+    ) -> Result<(), Error> {
+        let conn = &*self.pool_connection_authorized(&opctx).await?;
+        Self::check_sled_in_service_on_connection(conn, sled_id)
+            .await
+            .map_err(From::from)
+    }
+
+    /// Confirms that a sled exists and is in-service.
     ///
     /// This function may be called from a transaction context.
     pub async fn check_sled_in_service_on_connection(
