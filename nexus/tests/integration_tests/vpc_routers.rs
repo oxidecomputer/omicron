@@ -510,6 +510,7 @@ async fn test_vpc_routers_custom_delivered_to_instance(
                     vpc_name: vpc.name().clone(),
                     subnet_name: subnet_name.parse().unwrap(),
                     ip: Some(format!("192.168.{i}.10").parse().unwrap()),
+                    transit_ips: vec![],
                 },
             ]),
             vec![],
