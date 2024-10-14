@@ -134,6 +134,7 @@ pub use block_size::*;
 pub use bootstore::*;
 pub use bytecount::*;
 pub use certificate::*;
+pub use clickhouse_policy::*;
 pub use cockroachdb_node_id::*;
 pub use collection::*;
 pub use console_session::*;

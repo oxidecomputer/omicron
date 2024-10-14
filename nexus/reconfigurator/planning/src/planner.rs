@@ -2622,11 +2622,8 @@ mod test {
 
         // Enable clickhouse clusters via policy
         let mut input_builder = input.into_builder();
-        input_builder.policy_mut().clickhouse_policy = Some(ClickhousePolicy {
-            deploy_with_standalone: true,
-            target_servers,
-            target_keepers,
-        });
+        input_builder.policy_mut().clickhouse_policy =
+            Some(ClickhousePolicy::Both { target_servers, target_keepers });
 
         // Creating a new blueprint should deploy all the new clickhouse zones
         let input = input_builder.build();
@@ -2659,8 +2656,8 @@ mod test {
             .map(|z| z.id)
             .collect();
 
-        assert_eq!(keeper_zone_ids.len(), target_keepers);
-        assert_eq!(server_zone_ids.len(), target_servers);
+        assert_eq!(keeper_zone_ids.len(), target_keepers as usize);
+        assert_eq!(server_zone_ids.len(), target_servers as usize);
 
         // We should be attempting to allocate all servers and keepers since
         // this the initial configuration
@@ -2676,8 +2673,14 @@ mod test {
                 clickhouse_cluster_config.max_used_server_id,
                 (target_servers as u64).into()
             );
-            assert_eq!(clickhouse_cluster_config.keepers.len(), target_keepers);
-            assert_eq!(clickhouse_cluster_config.servers.len(), target_servers);
+            assert_eq!(
+                clickhouse_cluster_config.keepers.len(),
+                target_keepers as usize
+            );
+            assert_eq!(
+                clickhouse_cluster_config.servers.len(),
+                target_servers as usize
+            );
 
             // Ensure that the added keepers are in server zones
             for zone_id in clickhouse_cluster_config.keepers.keys() {
@@ -2769,11 +2772,8 @@ mod test {
         // Enable clickhouse clusters via policy
         let target_keepers = 5;
         let mut input_builder = input.into_builder();
-        input_builder.policy_mut().clickhouse_policy = Some(ClickhousePolicy {
-            deploy_with_standalone: true,
-            target_servers,
-            target_keepers,
-        });
+        input_builder.policy_mut().clickhouse_policy =
+            Some(ClickhousePolicy::Both { target_servers, target_keepers });
         let input = input_builder.build();
         let blueprint5 = Planner::new_based_on(
             log.clone(),
@@ -2799,7 +2799,7 @@ mod test {
             .collect();
 
         // We should have allocated 2 new keeper zones
-        assert_eq!(new_keeper_zone_ids.len(), target_keepers);
+        assert_eq!(new_keeper_zone_ids.len(), target_keepers as usize);
         assert!(keeper_zone_ids.is_subset(&new_keeper_zone_ids));
 
         // We should be trying to provision one new keeper for a keeper zone
@@ -2869,7 +2869,7 @@ mod test {
             bp7_config.keepers.len(),
             bp7_config.max_used_keeper_id.0 as usize
         );
-        assert_eq!(bp7_config.keepers.len(), target_keepers);
+        assert_eq!(bp7_config.keepers.len(), target_keepers as usize);
         assert_eq!(
             bp7_config.highest_seen_keeper_leader_committed_log_index,
             2
@@ -2909,7 +2909,7 @@ mod test {
             bp7_config.max_used_keeper_id
         );
         assert_eq!(bp8_config.keepers, bp7_config.keepers);
-        assert_eq!(bp7_config.keepers.len(), target_keepers);
+        assert_eq!(bp7_config.keepers.len(), target_keepers as usize);
         assert_eq!(
             bp8_config.highest_seen_keeper_leader_committed_log_index,
             3
@@ -2935,11 +2935,8 @@ mod test {
 
         // Enable clickhouse clusters via policy
         let mut input_builder = input.into_builder();
-        input_builder.policy_mut().clickhouse_policy = Some(ClickhousePolicy {
-            deploy_with_standalone: true,
-            target_servers,
-            target_keepers,
-        });
+        input_builder.policy_mut().clickhouse_policy =
+            Some(ClickhousePolicy::Both { target_servers, target_keepers });
         let input = input_builder.build();
 
         // Create a new blueprint to deploy all our clickhouse zones
@@ -2972,8 +2969,8 @@ mod test {
             .map(|z| z.id)
             .collect();
 
-        assert_eq!(keeper_zone_ids.len(), target_keepers);
-        assert_eq!(server_zone_ids.len(), target_servers);
+        assert_eq!(keeper_zone_ids.len(), target_keepers as usize);
+        assert_eq!(server_zone_ids.len(), target_servers as usize);
 
         // Directly manipulate the blueprint and inventory so that the
         // clickhouse clusters are stable
@@ -3118,7 +3115,7 @@ mod test {
         // We've only added one keeper from our desired state
         // This brings us back up to our target count
         assert_eq!(config.keepers.len(), old_config.keepers.len() + 1);
-        assert_eq!(config.keepers.len(), target_keepers);
+        assert_eq!(config.keepers.len(), target_keepers as usize);
         // We've allocated one new keeper
         assert_eq!(
             config.max_used_keeper_id,
@@ -3142,11 +3139,8 @@ mod test {
 
         // Enable clickhouse clusters via policy
         let mut input_builder = input.into_builder();
-        input_builder.policy_mut().clickhouse_policy = Some(ClickhousePolicy {
-            deploy_with_standalone: true,
-            target_servers,
-            target_keepers,
-        });
+        input_builder.policy_mut().clickhouse_policy =
+            Some(ClickhousePolicy::Both { target_servers, target_keepers });
         let input = input_builder.build();
 
         // Create a new blueprint to deploy all our clickhouse zones
@@ -3179,12 +3173,13 @@ mod test {
             .map(|z| z.id)
             .collect();
 
-        assert_eq!(keeper_zone_ids.len(), target_keepers);
-        assert_eq!(server_zone_ids.len(), target_servers);
+        assert_eq!(keeper_zone_ids.len(), target_keepers as usize);
+        assert_eq!(server_zone_ids.len(), target_servers as usize);
 
         // Disable clickhouse clusters via policy
         let mut input_builder = input.into_builder();
-        input_builder.policy_mut().clickhouse_policy = None;
+        input_builder.policy_mut().clickhouse_policy =
+            Some(ClickhousePolicy::SingleNodeOnly);
         let input = input_builder.build();
 
         // Create a new blueprint with the disabled policy

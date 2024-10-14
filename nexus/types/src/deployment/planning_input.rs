@@ -124,10 +124,14 @@ impl PlanningInput {
 
     pub fn target_clickhouse_zone_count(&self) -> usize {
         if let Some(policy) = &self.policy.clickhouse_policy {
-            if policy.deploy_with_standalone {
-                SINGLE_NODE_CLICKHOUSE_REDUNDANCY
-            } else {
-                0
+            match policy {
+                ClickhousePolicy::SingleNodeOnly => {
+                    SINGLE_NODE_CLICKHOUSE_REDUNDANCY
+                }
+                ClickhousePolicy::ClusterOnly { .. } => 0,
+                ClickhousePolicy::Both { .. } => {
+                    SINGLE_NODE_CLICKHOUSE_REDUNDANCY
+                }
             }
         } else {
             SINGLE_NODE_CLICKHOUSE_REDUNDANCY
@@ -138,7 +142,7 @@ impl PlanningInput {
         self.policy
             .clickhouse_policy
             .as_ref()
-            .map(|policy| policy.target_servers)
+            .map(|policy| policy.target_servers() as usize)
             .unwrap_or(0)
     }
 
@@ -146,7 +150,7 @@ impl PlanningInput {
         self.policy
             .clickhouse_policy
             .as_ref()
-            .map(|policy| policy.target_keepers)
+            .map(|policy| policy.target_keepers() as usize)
             .unwrap_or(0)
     }
 
@@ -876,20 +880,34 @@ pub struct Policy {
     pub clickhouse_policy: Option<ClickhousePolicy>,
 }
 
-/// Policy for replicated clickhouse setups
+/// How to deploy clickhouse nodes
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ClickhousePolicy {
-    /// Should we run the single-node cluster alongside the replicated cluster?
-    /// This is stage 1 of our deployment plan as laid out in RFD 468
-    ///
-    /// If this is set to false, then we will only deploy replicated clusters.
-    pub deploy_with_standalone: bool,
+pub enum ClickhousePolicy {
+    SingleNodeOnly,
+    ClusterOnly { target_servers: u8, target_keepers: u8 },
+    Both { target_servers: u8, target_keepers: u8 },
+}
 
-    /// Desired number of clickhouse servers
-    pub target_servers: usize,
+impl ClickhousePolicy {
+    fn target_servers(&self) -> u8 {
+        match self {
+            ClickhousePolicy::SingleNodeOnly => 0,
+            ClickhousePolicy::ClusterOnly { target_servers, .. } => {
+                *target_servers
+            }
+            ClickhousePolicy::Both { target_servers, .. } => *target_servers,
+        }
+    }
 
-    /// Desired number of clickhouse keepers
-    pub target_keepers: usize,
+    fn target_keepers(&self) -> u8 {
+        match self {
+            ClickhousePolicy::SingleNodeOnly => 0,
+            ClickhousePolicy::ClusterOnly { target_keepers, .. } => {
+                *target_keepers
+            }
+            ClickhousePolicy::Both { target_keepers, .. } => *target_keepers,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

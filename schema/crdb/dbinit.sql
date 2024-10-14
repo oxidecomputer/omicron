@@ -42,6 +42,22 @@ ALTER DEFAULT PRIVILEGES GRANT INSERT, SELECT, UPDATE, DELETE ON TABLES to omicr
  */
 ALTER RANGE default CONFIGURE ZONE USING num_replicas = 5;
 
+
+/*
+ * The deployment strategy for clickhouse 
+ */
+CREATE TYPE IF NOT EXISTS omicron.public.clickhouse_mode AS ENUM (
+   -- Only deploy a single node clickhouse 
+   'single_node_only',
+
+   -- Only deploy a clickhouse cluster without any single node deployments 
+   'cluster_only',
+
+   -- Deploy both a single node and cluster deployment.
+   -- This is the strategy for stage 1 described in RFD 468
+   'both'
+);
+
 /*
  * A planning policy for clickhouse for a single multirack setup
  *
@@ -56,11 +72,14 @@ CREATE TABLE IF NOT EXISTS omicron.public.clickhouse_policy (
     -- multirack to associate with some sort of rack group ID.
     version INT8 PRIMARY KEY,
 
-    clickhouse_cluster_enabled BOOL NOT NULL
-    clickhouse_single_node_enabled BOOL NOT NULL
-    clickhouse_cluster_target_servers INT2 NOT NULL
-    clickhouse_cluster_target_keepers INT2 NOT NULL
-    time_created TIMESTAMPTZ NOT NULL,
+    clickhouse_mode omicron.public.clickhouse_mode NOT NULL,
+
+    -- Only greater than 0 when clickhouse cluster is enabled
+    clickhouse_cluster_target_servers INT2 NOT NULL,
+    -- Only greater than 0 when clickhouse cluster is enabled
+    clickhouse_cluster_target_keepers INT2 NOT NULL,
+
+    time_created TIMESTAMPTZ NOT NULL
 );
 
 /*
