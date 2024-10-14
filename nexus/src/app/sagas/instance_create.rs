@@ -599,6 +599,7 @@ async fn create_default_primary_network_interface(
         vpc_name: default_name.clone(),
         subnet_name: default_name.clone(),
         ip: None, // Request an IP address allocation
+        transit_ips: vec![],
     };
 
     // Lookup authz objects, used in the call to actually create the NIC.
