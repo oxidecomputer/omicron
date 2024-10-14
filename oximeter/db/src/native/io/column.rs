@@ -21,7 +21,7 @@ use uuid::Uuid;
 // This is deprecated, but we allow it so we can create a const. The fallible
 // constructor requires unwrapping.
 #[allow(deprecated)]
-const EPOCH: NaiveDate = NaiveDate::from_ymd(1970, 01, 01);
+const EPOCH: NaiveDate = NaiveDate::from_ymd(1970, 1, 1);
 
 // Maximum supported Date in ClickHouse.
 //
