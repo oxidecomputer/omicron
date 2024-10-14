@@ -48,7 +48,7 @@ pub(crate) async fn get_pantry_address(
 // DNS, we can't go back and choose another pantry anyway, so we'll just keep
 // retrying until DNS comes back. All that to say: a failure to resolve DNS is
 // treated as "the pantry is not gone".
-async fn is_pantry_gone(
+pub(super) async fn is_pantry_gone(
     nexus: &Nexus,
     pantry_address: SocketAddrV6,
     log: &Logger,

@@ -91,7 +91,7 @@
 use super::{
     common_storage::{
         call_pantry_attach_for_disk, call_pantry_detach_for_disk,
-        get_pantry_address,
+        get_pantry_address, is_pantry_gone,
     },
     ActionRegistry, NexusActionContext, NexusSaga, SagaInitError,
     ACTION_GENERATE_ID,
@@ -103,9 +103,11 @@ use anyhow::anyhow;
 use nexus_db_model::Generation;
 use nexus_db_queries::db::identity::{Asset, Resource};
 use nexus_db_queries::db::lookup::LookupPath;
-use omicron_common::api::external;
 use omicron_common::api::external::Error;
 use omicron_common::retry_until_known_result;
+use omicron_common::{
+    api::external, progenitor_operation_retry::ProgenitorOperationRetry,
+};
 use omicron_uuid_kinds::{GenericUuid, PropolisUuid, SledUuid};
 use rand::{rngs::StdRng, RngCore, SeedableRng};
 use serde::Deserialize;
@@ -1167,6 +1169,7 @@ async fn ssc_call_pantry_snapshot_for_disk(
     sagactx: NexusActionContext,
 ) -> Result<(), ActionError> {
     let log = sagactx.user_data().log();
+    let nexus = sagactx.user_data().nexus();
     let params = sagactx.saga_params::<Params>()?;
 
     let (pantry_address, _) =
@@ -1185,7 +1188,7 @@ async fn ssc_call_pantry_snapshot_for_disk(
 
     let client = crucible_pantry_client::Client::new(&endpoint);
 
-    retry_until_known_result(log, || async {
+    let snapshot_operation = || async {
         client
             .snapshot(
                 &params.disk_id.to_string(),
@@ -1194,11 +1197,16 @@ async fn ssc_call_pantry_snapshot_for_disk(
                 },
             )
             .await
-    })
-    .await
-    .map_err(|e| {
-        ActionError::action_failed(Error::internal_error(&e.to_string()))
-    })?;
+    };
+    let gone_check =
+        || async { Ok(is_pantry_gone(nexus, pantry_address, log).await) };
+
+    ProgenitorOperationRetry::new(snapshot_operation, gone_check)
+        .run(log)
+        .await
+        .map_err(|e| {
+            ActionError::action_failed(Error::internal_error(&e.to_string()))
+        })?;
 
     Ok(())
 }
