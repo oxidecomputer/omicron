@@ -18,7 +18,7 @@ versions = [
     # switch for its statistics, which is why these fields are included.
     # Dendrite may eventually report statistics about itself, or other aspects
     # not related to the switch, so they belong here, not the target.
-    { added_in = 1, fields = [ "switch_model", "switch_revision", "switch_id", "switch_serial", "switch_slot" ] }
+    { added_in = 1, fields = [ "switch_id", "switch_fab", "switch_lot", "switch_wafer", "switch_wafer_loc_x", "switch_wafer_loc_y", "switch_model", "switch_revision", "switch_serial", "switch_slot" ] }
 ]
 
 [fields.rack_id]
@@ -52,6 +52,26 @@ description = "Revision number of the switch being managed"
 [fields.switch_id]
 type = "uuid"
 description = "ID of the switch being managed"
+
+[fields.switch_fab]
+type = "string"
+description = "Fabric the switch the link is on"
+
+[fields.switch_lot]
+type = "string"
+description = "Lot number of the switch the link is on"
+
+[fields.switch_wafer]
+type = "u8"
+description = "Wafer number of the switch the link is on"
+
+[fields.switch_wafer_loc_x]
+type = "i8"
+description = "X-coordinate wafer location of the switch the link is on"
+
+[fields.switch_wafer_loc_y]
+type = "i8"
+description = "Y-coordinate wafer location of the switch the link is on"
 
 [fields.switch_serial]
 type = "string"

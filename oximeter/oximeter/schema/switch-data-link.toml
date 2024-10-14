@@ -4,8 +4,9 @@ format_version = 1
 name = "switch_data_link"
 description = "A network data link on an Oxide switch"
 authz_scope = "fleet"
+
 versions = [
-    { version = 1, fields = [ "rack_id", "sled_id", "sled_model", "sled_revision", "sled_serial", "switch_id", "switch_model", "switch_revision", "switch_serial", "switch_slot" ] },
+    { version = 1, fields = [ "rack_id", "sled_id", "sled_model", "sled_revision", "sled_serial", "switch_id", "switch_fab", "switch_lot", "switch_wafer", "switch_wafer_loc_x", "switch_wafer_loc_y", "switch_model", "switch_revision", "switch_serial", "switch_slot" ] },
 ]
 
 [[metrics]]
@@ -250,6 +251,26 @@ description = "Serial number of the sled managing the link's switch"
 [fields.switch_id]
 type = "uuid"
 description = "ID of the switch the link is on"
+
+[fields.switch_fab]
+type = "string"
+description = "Fabric the switch the link is on"
+
+[fields.switch_lot]
+type = "string"
+description = "Lot number of the switch the link is on"
+
+[fields.switch_wafer]
+type = "u8"
+description = "Wafer number of the switch the link is on"
+
+[fields.switch_wafer_loc_x]
+type = "i8"
+description = "X-coordinate wafer location of the switch the link is on"
+
+[fields.switch_wafer_loc_y]
+type = "i8"
+description = "Y-coordinate wafer location of the switch the link is on"
 
 [fields.switch_model]
 type = "string"
