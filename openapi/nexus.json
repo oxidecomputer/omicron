@@ -2681,7 +2681,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "List addresses attached to an internet gateway.",
+        "summary": "List IP addresses attached to internet gateway",
         "operationId": "internet_gateway_ip_address_list",
         "parameters": [
           {
@@ -2764,7 +2764,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "Attach ip pool to internet gateway",
+        "summary": "Attach IP address to internet gateway",
         "operationId": "internet_gateway_ip_address_create",
         "parameters": [
           {
@@ -2828,7 +2828,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "Detach ip pool from internet gateway",
+        "summary": "Detach IP address from internet gateway",
         "operationId": "internet_gateway_ip_address_delete",
         "parameters": [
           {
@@ -2891,7 +2891,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "List IP pools attached to an internet gateway.",
+        "summary": "List IP pools attached to internet gateway",
         "operationId": "internet_gateway_ip_pool_list",
         "parameters": [
           {
@@ -2974,7 +2974,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "Attach ip pool to internet gateway",
+        "summary": "Attach IP pool to internet gateway",
         "operationId": "internet_gateway_ip_pool_create",
         "parameters": [
           {
@@ -3038,7 +3038,7 @@
         "tags": [
           "vpcs"
         ],
-        "summary": "Detach ip pool from internet gateway",
+        "summary": "Detach IP pool from internet gateway",
         "operationId": "internet_gateway_ip_pool_delete",
         "parameters": [
           {
@@ -16619,9 +16619,6 @@
           "description": {
             "type": "string"
           },
-          "gateway": {
-            "$ref": "#/components/schemas/NameOrId"
-          },
           "name": {
             "$ref": "#/components/schemas/Name"
           }
@@ -16629,7 +16626,6 @@
         "required": [
           "address",
           "description",
-          "gateway",
           "name"
         ]
       },
@@ -18431,11 +18427,11 @@
             "type": "string",
             "format": "ip"
           },
-          "local_pref": {
+          "rib_priority": {
             "nullable": true,
             "description": "Local preference for route. Higher preference indictes precedence within and across protocols.",
             "type": "integer",
-            "format": "uint32",
+            "format": "uint8",
             "minimum": 0
           },
           "vid": {
@@ -18674,7 +18670,7 @@
             "type": "string"
           },
           "destination": {
-            "description": "Selects which traffic this routing rule will apply to.",
+            "description": "Selects which traffic this routing rule will apply to",
             "allOf": [
               {
                 "$ref": "#/components/schemas/RouteDestination"
@@ -18703,7 +18699,7 @@
             ]
           },
           "target": {
-            "description": "The location that matched packets should be forwarded to.",
+            "description": "The location that matched packets should be forwarded to",
             "allOf": [
               {
                 "$ref": "#/components/schemas/RouteTarget"
@@ -20496,17 +20492,17 @@
             "description": "The interface name this route configuration is assigned to.",
             "type": "string"
           },
-          "local_pref": {
-            "nullable": true,
-            "description": "Local preference indicating priority within and across protocols.",
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          },
           "port_settings_id": {
             "description": "The port settings object this route configuration belongs to.",
             "type": "string",
             "format": "uuid"
+          },
+          "rib_priority": {
+            "nullable": true,
+            "description": "RIB Priority indicating priority within and across protocols.",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
           },
           "vlan_id": {
             "nullable": true,

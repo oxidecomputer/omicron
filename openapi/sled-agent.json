@@ -431,27 +431,6 @@
       }
     },
     "/omicron-zones": {
-      "get": {
-        "operationId": "omicron_zones_get",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OmicronZonesConfig"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
       "put": {
         "operationId": "omicron_zones_put",
         "requestBody": {
@@ -3441,6 +3420,9 @@
               "$ref": "#/components/schemas/InventoryDisk"
             }
           },
+          "omicron_zones": {
+            "$ref": "#/components/schemas/OmicronZonesConfig"
+          },
           "reservoir_size": {
             "$ref": "#/components/schemas/ByteCount"
           },
@@ -3472,6 +3454,7 @@
           "baseboard",
           "datasets",
           "disks",
+          "omicron_zones",
           "reservoir_size",
           "sled_agent_address",
           "sled_id",
@@ -4719,18 +4702,18 @@
               }
             ]
           },
-          "local_pref": {
-            "nullable": true,
-            "description": "The local preference associated with this route.",
-            "default": null,
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          },
           "nexthop": {
             "description": "The nexthop/gateway address.",
             "type": "string",
             "format": "ip"
+          },
+          "rib_priority": {
+            "nullable": true,
+            "description": "The RIB priority (i.e. Admin Distance) associated with this route.",
+            "default": null,
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
           },
           "vlan_id": {
             "nullable": true,

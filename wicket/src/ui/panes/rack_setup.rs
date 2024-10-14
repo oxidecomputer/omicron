@@ -804,34 +804,39 @@ fn rss_config_text<'a>(
                 ],
             ];
 
-            let routes = routes.iter().map(|r| {
-                let RouteConfig { destination, nexthop, vlan_id, local_pref } =
-                    r;
+            let routes =
+                routes.iter().map(|r| {
+                    let RouteConfig {
+                        destination,
+                        nexthop,
+                        vlan_id,
+                        rib_priority,
+                    } = r;
 
-                let mut items = vec![
-                    Span::styled("  • Route         : ", label_style),
-                    Span::styled(
-                        format!("{} -> {}", destination, nexthop),
-                        ok_style,
-                    ),
-                ];
-                if let Some(vlan_id) = vlan_id {
-                    items.extend([
-                        Span::styled(" (vlan_id=", label_style),
-                        Span::styled(vlan_id.to_string(), ok_style),
-                        Span::styled(")", label_style),
-                    ]);
-                }
-                if let Some(local_pref) = local_pref {
-                    items.extend([
-                        Span::styled(" (local_pref=", label_style),
-                        Span::styled(local_pref.to_string(), ok_style),
-                        Span::styled(")", label_style),
-                    ]);
-                }
+                    let mut items = vec![
+                        Span::styled("  • Route         : ", label_style),
+                        Span::styled(
+                            format!("{} -> {}", destination, nexthop),
+                            ok_style,
+                        ),
+                    ];
+                    if let Some(vlan_id) = vlan_id {
+                        items.extend([
+                            Span::styled(" (vlan_id=", label_style),
+                            Span::styled(vlan_id.to_string(), ok_style),
+                            Span::styled(")", label_style),
+                        ]);
+                    }
+                    if let Some(rib_priority) = rib_priority {
+                        items.extend([
+                            Span::styled(" (rib_priority=", label_style),
+                            Span::styled(rib_priority.to_string(), ok_style),
+                            Span::styled(")", label_style),
+                        ]);
+                    }
 
-                items
-            });
+                    items
+                });
 
             let addresses = addresses.iter().map(|a| {
                 let mut items = vec![

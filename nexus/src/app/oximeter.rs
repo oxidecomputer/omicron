@@ -7,8 +7,8 @@
 use crate::external_api::params::ResourceMetrics;
 use crate::internal_api::params::OximeterInfo;
 use dropshot::PaginationParams;
-use internal_dns::resolver::{ResolveError, Resolver};
-use internal_dns::ServiceName;
+use internal_dns_resolver::{ResolveError, Resolver};
+use internal_dns_types::names::ServiceName;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;

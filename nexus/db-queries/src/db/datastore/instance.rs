@@ -1954,6 +1954,7 @@ mod tests {
     use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::params;
     use nexus_types::identity::Asset;
+    use nexus_types::silo::DEFAULT_SILO_ID;
     use omicron_common::api::external;
     use omicron_common::api::external::ByteCount;
     use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -1963,7 +1964,7 @@ mod tests {
         datastore: &DataStore,
         opctx: &OpContext,
     ) -> (authz::Project, Project) {
-        let silo_id = *nexus_db_fixed_data::silo::DEFAULT_SILO_ID;
+        let silo_id = DEFAULT_SILO_ID;
         let project_id = Uuid::new_v4();
         datastore
             .project_create(

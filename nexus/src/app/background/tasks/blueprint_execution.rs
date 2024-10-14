@@ -7,7 +7,7 @@
 use crate::app::background::{Activator, BackgroundTask};
 use futures::future::BoxFuture;
 use futures::FutureExt;
-use internal_dns::resolver::Resolver;
+use internal_dns_resolver::Resolver;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_reconfigurator_execution::RealizeBlueprintOutput;

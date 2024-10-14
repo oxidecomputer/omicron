@@ -4,7 +4,7 @@
 <service_bundle type='manifest' name='clickhouse_server'>
 
   <service name='oxide/clickhouse_server' type='service' version='1'>
-  <create_default_instance enabled='true' />
+  <create_default_instance enabled='false' />
 
   <dependency name='multi_user' grouping='require_all' restart_on='none'
     type='service'>
@@ -25,12 +25,6 @@
     exec='/opt/oxide/lib/svc/manifest/clickhouse_server.sh'
     timeout_seconds='0' />
   <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
-
-  <property_group name='config' type='application'>
-    <propval name='listen_addr' type='astring' value='unknown' />
-    <propval name='listen_port' type='astring' value='unknown' />
-    <propval name='store' type='astring' value='unknown' />
-  </property_group>
 
   <property_group name='startd' type='framework'>
     <propval name='duration' type='astring' value='contract' />

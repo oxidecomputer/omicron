@@ -12,7 +12,8 @@ use crate::app::{
 use crate::app::background::BackgroundTask;
 use futures::future::BoxFuture;
 use futures::FutureExt;
-use internal_dns::{resolver::Resolver, ServiceName};
+use internal_dns_resolver::Resolver;
+use internal_dns_types::names::ServiceName;
 use mg_admin_client::types::{BfdPeerConfig, SessionMode};
 use nexus_db_model::{BfdMode, BfdSession};
 use nexus_db_queries::{context::OpContext, db::DataStore};

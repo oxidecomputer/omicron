@@ -7,12 +7,13 @@
 
 use anyhow::anyhow;
 use camino::Utf8PathBuf;
-use clickhouse_admin_api::KeeperConfigurableSettings;
-use clickhouse_admin_api::ServerConfigurableSettings;
-use clickhouse_admin_client::Client;
-use clickhouse_admin_types::config::ClickhouseHost;
-use clickhouse_admin_types::config::RaftServerSettings;
+use clickhouse_admin_keeper_client::Client as ClickhouseKeeperClient;
+use clickhouse_admin_server_client::Client as ClickhouseServerClient;
+use clickhouse_admin_types::ClickhouseHost;
+use clickhouse_admin_types::KeeperConfigurableSettings;
 use clickhouse_admin_types::KeeperSettings;
+use clickhouse_admin_types::RaftServerSettings;
+use clickhouse_admin_types::ServerConfigurableSettings;
 use clickhouse_admin_types::ServerSettings;
 use futures::future::Either;
 use futures::stream::FuturesUnordered;
@@ -91,21 +92,19 @@ pub(crate) async fn deploy_nodes(
         let admin_url = format!("http://{admin_addr}");
         let log = log.new(slog::o!("admin_url" => admin_url.clone()));
         futs.push(Either::Left(async move {
-            let client = Client::new(&admin_url, log.clone());
-            client.generate_keeper_config(&config).await.map(|_| ()).map_err(
-                |e| {
-                    anyhow!(
-                        concat!(
-                            "failed to send config for clickhouse keeper ",
-                            "with id {} to clickhouse-admin; admin_url = {}",
-                            "error = {}"
-                        ),
-                        config.settings.id,
-                        admin_url,
-                        e
-                    )
-                },
-            )
+            let client = ClickhouseKeeperClient::new(&admin_url, log.clone());
+            client.generate_config(&config).await.map(|_| ()).map_err(|e| {
+                anyhow!(
+                    concat!(
+                        "failed to send config for clickhouse keeper ",
+                        "with id {} to clickhouse-admin-keeper; admin_url = {}",
+                        "error = {}"
+                    ),
+                    config.settings.id,
+                    admin_url,
+                    e
+                )
+            })
         }));
     }
     for config in server_configs {
@@ -118,21 +117,19 @@ pub(crate) async fn deploy_nodes(
         let admin_url = format!("http://{admin_addr}");
         let log = opctx.log.new(slog::o!("admin_url" => admin_url.clone()));
         futs.push(Either::Right(async move {
-            let client = Client::new(&admin_url, log.clone());
-            client.generate_server_config(&config).await.map(|_| ()).map_err(
-                |e| {
-                    anyhow!(
-                        concat!(
-                            "failed to send config for clickhouse server ",
-                            "with id {} to clickhouse-admin; admin_url = {}",
-                            "error = {}"
-                        ),
-                        config.settings.id,
-                        admin_url,
-                        e
-                    )
-                },
-            )
+            let client = ClickhouseServerClient::new(&admin_url, log.clone());
+            client.generate_config(&config).await.map(|_| ()).map_err(|e| {
+                anyhow!(
+                    concat!(
+                        "failed to send config for clickhouse server ",
+                        "with id {} to clickhouse-admin-server; admin_url = {}",
+                        "error = {}"
+                    ),
+                    config.settings.id,
+                    admin_url,
+                    e
+                )
+            })
         }));
     }
 
@@ -277,7 +274,7 @@ fn keeper_configs(
 #[cfg(test)]
 mod test {
     use super::*;
-    use clickhouse_admin_types::config::ClickhouseHost;
+    use clickhouse_admin_types::ClickhouseHost;
     use clickhouse_admin_types::KeeperId;
     use clickhouse_admin_types::ServerId;
     use nexus_sled_agent_shared::inventory::OmicronZoneDataset;

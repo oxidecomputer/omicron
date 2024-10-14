@@ -155,14 +155,6 @@ pub trait SledAgentApi {
     ) -> Result<HttpResponseOk<Vec<String>>, HttpError>;
 
     #[endpoint {
-        method = GET,
-        path = "/omicron-zones",
-    }]
-    async fn omicron_zones_get(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<OmicronZonesConfig>, HttpError>;
-
-    #[endpoint {
         method = PUT,
         path = "/omicron-zones",
     }]

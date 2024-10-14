@@ -6,11 +6,12 @@
 
 use crate::omicron_zone_config::{self, OmicronZoneNic};
 use crate::schema::{
-    hw_baseboard_id, inv_caboose, inv_collection, inv_collection_error,
-    inv_dataset, inv_nvme_disk_firmware, inv_omicron_zone,
-    inv_omicron_zone_nic, inv_physical_disk, inv_root_of_trust,
-    inv_root_of_trust_page, inv_service_processor, inv_sled_agent,
-    inv_sled_omicron_zones, inv_zpool, sw_caboose, sw_root_of_trust_page,
+    hw_baseboard_id, inv_caboose, inv_clickhouse_keeper_membership,
+    inv_collection, inv_collection_error, inv_dataset, inv_nvme_disk_firmware,
+    inv_omicron_zone, inv_omicron_zone_nic, inv_physical_disk,
+    inv_root_of_trust, inv_root_of_trust_page, inv_service_processor,
+    inv_sled_agent, inv_sled_omicron_zones, inv_zpool, sw_caboose,
+    sw_root_of_trust_page,
 };
 use crate::typed_uuid::DbTypedUuid;
 use crate::PhysicalDiskKind;
@@ -21,6 +22,7 @@ use crate::{
 use anyhow::{anyhow, bail, Context, Result};
 use chrono::DateTime;
 use chrono::Utc;
+use clickhouse_admin_types::{ClickhouseKeeperClusterMembership, KeeperId};
 use diesel::backend::Backend;
 use diesel::deserialize::{self, FromSql};
 use diesel::expression::AsExpression;
@@ -29,9 +31,7 @@ use diesel::serialize::ToSql;
 use diesel::{serialize, sql_types};
 use ipnetwork::IpNetwork;
 use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
-use nexus_sled_agent_shared::inventory::{
-    OmicronZoneConfig, OmicronZoneType, OmicronZonesConfig,
-};
+use nexus_sled_agent_shared::inventory::{OmicronZoneConfig, OmicronZoneType};
 use nexus_types::inventory::{
     BaseboardId, Caboose, Collection, NvmeFirmware, PowerState, RotPage,
     RotSlot,
@@ -46,6 +46,7 @@ use omicron_uuid_kinds::ZpoolKind;
 use omicron_uuid_kinds::ZpoolUuid;
 use omicron_uuid_kinds::{CollectionKind, OmicronZoneKind};
 use omicron_uuid_kinds::{CollectionUuid, OmicronZoneUuid};
+use std::collections::BTreeSet;
 use std::net::{IpAddr, SocketAddrV6};
 use thiserror::Error;
 use uuid::Uuid;
@@ -1175,7 +1176,11 @@ impl From<InvDataset> for nexus_types::inventory::Dataset {
     }
 }
 
-/// See [`nexus_types::inventory::OmicronZonesFound`].
+/// Information about a sled's Omicron zones, part of
+/// [`nexus_types::inventory::SledAgent`].
+///
+/// TODO: This table is vestigial and can be combined with `InvSledAgent`. See
+/// [issue #6770](https://github.com/oxidecomputer/omicron/issues/6770).
 #[derive(Queryable, Clone, Debug, Selectable, Insertable)]
 #[diesel(table_name = inv_sled_omicron_zones)]
 pub struct InvSledOmicronZones {
@@ -1189,28 +1194,14 @@ pub struct InvSledOmicronZones {
 impl InvSledOmicronZones {
     pub fn new(
         inv_collection_id: CollectionUuid,
-        zones_found: &nexus_types::inventory::OmicronZonesFound,
+        sled_agent: &nexus_types::inventory::SledAgent,
     ) -> InvSledOmicronZones {
         InvSledOmicronZones {
             inv_collection_id: inv_collection_id.into(),
-            time_collected: zones_found.time_collected,
-            source: zones_found.source.clone(),
-            sled_id: zones_found.sled_id.into(),
-            generation: Generation(zones_found.zones.generation),
-        }
-    }
-
-    pub fn into_uninit_zones_found(
-        self,
-    ) -> nexus_types::inventory::OmicronZonesFound {
-        nexus_types::inventory::OmicronZonesFound {
-            time_collected: self.time_collected,
-            source: self.source,
-            sled_id: self.sled_id.into(),
-            zones: OmicronZonesConfig {
-                generation: *self.generation,
-                zones: Vec::new(),
-            },
+            time_collected: sled_agent.time_collected,
+            source: sled_agent.source.clone(),
+            sled_id: sled_agent.sled_id.into(),
+            generation: Generation(sled_agent.omicron_zones.generation),
         }
     }
 }
@@ -1720,6 +1711,68 @@ impl InvOmicronZoneNic {
     ) -> Result<NetworkInterface, anyhow::Error> {
         let zone_nic = OmicronZoneNic::from(self);
         zone_nic.into_network_interface_for_zone(zone_id)
+    }
+}
+
+#[derive(Queryable, Clone, Debug, Selectable, Insertable)]
+#[diesel(table_name = inv_clickhouse_keeper_membership)]
+pub struct InvClickhouseKeeperMembership {
+    pub inv_collection_id: DbTypedUuid<CollectionKind>,
+    pub queried_keeper_id: i64,
+    pub leader_committed_log_index: i64,
+    pub raft_config: Vec<i64>,
+}
+
+impl TryFrom<InvClickhouseKeeperMembership>
+    for ClickhouseKeeperClusterMembership
+{
+    type Error = anyhow::Error;
+
+    fn try_from(value: InvClickhouseKeeperMembership) -> anyhow::Result<Self> {
+        let err_msg = "clickhouse keeper ID is negative";
+        let mut raft_config = BTreeSet::new();
+        // We are not worried about duplicates here, as each
+        // `clickhouse-admin-keeper` reports about its local, unique keeper.
+        // This uniqueness is guaranteed by the blueprint generation mechanism.
+        for id in value.raft_config {
+            raft_config.insert(KeeperId(id.try_into().context(err_msg)?));
+        }
+        Ok(ClickhouseKeeperClusterMembership {
+            queried_keeper: KeeperId(
+                value.queried_keeper_id.try_into().context(err_msg)?,
+            ),
+            leader_committed_log_index: value
+                .leader_committed_log_index
+                .try_into()
+                .context("log index is negative")?,
+            raft_config,
+        })
+    }
+}
+
+impl InvClickhouseKeeperMembership {
+    pub fn new(
+        inv_collection_id: CollectionUuid,
+        membership: ClickhouseKeeperClusterMembership,
+    ) -> anyhow::Result<InvClickhouseKeeperMembership> {
+        let err_msg = "clickhouse keeper ID > 2^63";
+        let mut raft_config = Vec::with_capacity(membership.raft_config.len());
+        for id in membership.raft_config {
+            raft_config.push(id.0.try_into().context(err_msg)?);
+        }
+        Ok(InvClickhouseKeeperMembership {
+            inv_collection_id: inv_collection_id.into(),
+            queried_keeper_id: membership
+                .queried_keeper
+                .0
+                .try_into()
+                .context(err_msg)?,
+            leader_committed_log_index: membership
+                .leader_committed_log_index
+                .try_into()
+                .context("log index > 2^63")?,
+            raft_config,
+        })
     }
 }
 

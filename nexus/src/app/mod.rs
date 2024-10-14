@@ -15,7 +15,7 @@ use crate::populate::PopulateStatus;
 use crate::DropshotServer;
 use ::oximeter::types::ProducerRegistry;
 use anyhow::anyhow;
-use internal_dns::ServiceName;
+use internal_dns_types::names::ServiceName;
 use nexus_config::NexusConfig;
 use nexus_config::RegionAllocationStrategy;
 use nexus_config::Tunables;
@@ -32,6 +32,8 @@ use omicron_common::api::external::Error;
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use oximeter_producer::Server as ProducerServer;
+use sagas::common_storage::make_pantry_connection_pool;
+use sagas::common_storage::PooledPantryClient;
 use slog::Logger;
 use std::collections::HashMap;
 use std::net::SocketAddrV6;
@@ -186,8 +188,11 @@ pub struct Nexus {
     // Nexus to not all fail.
     samael_max_issue_delay: std::sync::Mutex<Option<chrono::Duration>>,
 
+    /// Conection pool for Crucible pantries
+    pantry_connection_pool: qorb::pool::Pool<PooledPantryClient>,
+
     /// DNS resolver for internal services
-    internal_resolver: internal_dns::resolver::Resolver,
+    internal_resolver: internal_dns_resolver::Resolver,
 
     /// DNS resolver Nexus uses to resolve an external host
     external_resolver: Arc<external_dns::Resolver>,
@@ -214,10 +219,12 @@ pub struct Nexus {
 impl Nexus {
     /// Create a new Nexus instance for the given rack id `rack_id`
     // TODO-polish revisit rack metadata
+    #[allow(clippy::too_many_arguments)]
     pub(crate) async fn new_with_id(
         rack_id: Uuid,
         log: Logger,
-        resolver: internal_dns::resolver::Resolver,
+        resolver: internal_dns_resolver::Resolver,
+        qorb_resolver: internal_dns_resolver::QorbResolver,
         pool: db::Pool,
         producer_registry: &ProducerRegistry,
         config: &NexusConfig,
@@ -473,6 +480,7 @@ impl Nexus {
                     as Arc<dyn nexus_auth::storage::Storage>,
             ),
             samael_max_issue_delay: std::sync::Mutex::new(None),
+            pantry_connection_pool: make_pantry_connection_pool(&qorb_resolver),
             internal_resolver: resolver.clone(),
             external_resolver,
             external_dns_servers: config
@@ -932,8 +940,14 @@ impl Nexus {
         *mid
     }
 
-    pub fn resolver(&self) -> &internal_dns::resolver::Resolver {
+    pub fn resolver(&self) -> &internal_dns_resolver::Resolver {
         &self.internal_resolver
+    }
+
+    pub(crate) fn pantry_connection_pool(
+        &self,
+    ) -> &qorb::pool::Pool<PooledPantryClient> {
+        &self.pantry_connection_pool
     }
 
     pub(crate) async fn dpd_clients(
@@ -993,7 +1007,7 @@ pub enum Unimpl {
 }
 
 pub(crate) async fn dpd_clients(
-    resolver: &internal_dns::resolver::Resolver,
+    resolver: &internal_dns_resolver::Resolver,
     log: &slog::Logger,
 ) -> Result<HashMap<SwitchLocation, dpd_client::Client>, String> {
     let mappings = switch_zone_address_mappings(resolver, log).await?;
@@ -1020,7 +1034,7 @@ pub(crate) async fn dpd_clients(
 }
 
 async fn switch_zone_address_mappings(
-    resolver: &internal_dns::resolver::Resolver,
+    resolver: &internal_dns_resolver::Resolver,
     log: &slog::Logger,
 ) -> Result<HashMap<SwitchLocation, Ipv6Addr>, String> {
     let switch_zone_addresses = match resolver

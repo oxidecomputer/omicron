@@ -70,7 +70,6 @@ use crate::bootstrap::early_networking::{
     EarlyNetworkSetup, EarlyNetworkSetupError,
 };
 use crate::bootstrap::rss_handle::BootstrapAgentHandle;
-use crate::nexus::d2n_params;
 use crate::rack_setup::plan::service::{
     Plan as ServicePlan, PlanError as ServicePlanError,
 };
@@ -81,8 +80,9 @@ use anyhow::{bail, Context};
 use bootstore::schemes::v0 as bootstore;
 use camino::Utf8PathBuf;
 use chrono::Utc;
-use internal_dns::resolver::{DnsError, Resolver as DnsResolver};
-use internal_dns::ServiceName;
+use dns_service_client::DnsError;
+use internal_dns_resolver::Resolver as DnsResolver;
+use internal_dns_types::names::ServiceName;
 use nexus_client::{
     types as NexusTypes, Client as NexusClient, Error as NexusError,
 };
@@ -200,7 +200,7 @@ pub enum SetupServiceError {
     Dendrite(String),
 
     #[error("Error during DNS lookup: {0}")]
-    DnsResolver(#[from] internal_dns::resolver::ResolveError),
+    DnsResolver(#[from] internal_dns_resolver::ResolveError),
 
     #[error("Bootstore error: {0}")]
     Bootstore(#[from] bootstore::NodeRequestError),
@@ -778,7 +778,7 @@ impl ServiceInner {
                                 destination: r.destination,
                                 nexthop: r.nexthop,
                                 vlan_id: r.vlan_id,
-                                local_pref: r.local_pref,
+                                rib_priority: r.rib_priority,
                             })
                             .collect(),
                         addresses: config
@@ -931,7 +931,7 @@ impl ServiceInner {
             datasets,
             internal_services_ip_pool_ranges,
             certs: config.external_certificates.clone(),
-            internal_dns_zone_config: d2n_params(&service_plan.dns_config),
+            internal_dns_zone_config: service_plan.dns_config.clone(),
             external_dns_zone_name: config.external_dns_zone_name.clone(),
             recovery_silo: config.recovery_silo.clone(),
             rack_network_config,
@@ -1593,7 +1593,8 @@ mod test {
     use super::{Config, OmicronZonesConfigGenerator};
     use crate::rack_setup::plan::service::{Plan as ServicePlan, SledInfo};
     use nexus_sled_agent_shared::inventory::{
-        Baseboard, Inventory, InventoryDisk, OmicronZoneType, SledRole,
+        Baseboard, Inventory, InventoryDisk, OmicronZoneType,
+        OmicronZonesConfig, SledRole,
     };
     use omicron_common::{
         address::{get_sled_address, Ipv6Subnet, SLED_PREFIX},
@@ -1620,6 +1621,10 @@ mod test {
                 usable_hardware_threads: 32,
                 usable_physical_ram: ByteCount::from_gibibytes_u32(16),
                 reservoir_size: ByteCount::from_gibibytes_u32(0),
+                omicron_zones: OmicronZonesConfig {
+                    generation: Generation::new(),
+                    zones: vec![],
+                },
                 disks: (0..u2_count)
                     .map(|i| InventoryDisk {
                         identity: DiskIdentity {

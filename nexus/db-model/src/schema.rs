@@ -188,7 +188,7 @@ table! {
         dst -> Inet,
         gw -> Inet,
         vid -> Nullable<Int4>,
-        local_pref -> Nullable<Int8>,
+        local_pref -> Nullable<Int2>,
     }
 }
 
@@ -1564,6 +1564,15 @@ table! {
         vni -> Int8,
         is_primary -> Bool,
         slot -> Int2,
+    }
+}
+
+table! {
+    inv_clickhouse_keeper_membership (inv_collection_id, queried_keeper_id) {
+        inv_collection_id -> Uuid,
+        queried_keeper_id -> Int8,
+        leader_committed_log_index -> Int8,
+        raft_config -> Array<Int8>,
     }
 }
 

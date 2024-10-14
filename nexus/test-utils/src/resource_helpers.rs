@@ -861,7 +861,6 @@ pub async fn attach_ip_address_to_igw(
         project_name, vpc_name, igw_name,
     );
 
-    let gateway: Name = igw_name.parse().unwrap();
     NexusRequest::objects_post(
         &client,
         url.as_str(),
@@ -870,7 +869,6 @@ pub async fn attach_ip_address_to_igw(
                 name: attachment_name.parse().unwrap(),
                 description: String::from("attached pool descriptoion"),
             },
-            gateway: NameOrId::Name(gateway),
             address,
         },
     )

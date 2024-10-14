@@ -27,14 +27,25 @@ pub fn all_apis() -> Vec<ApiSpec> {
             extra_validation: None,
         },
         ApiSpec {
-            title: "ClickHouse Cluster Admin API",
+            title: "ClickHouse Cluster Admin Keeper API",
             version: "0.0.1",
             description: "API for interacting with the Oxide \
-                control plane's ClickHouse cluster",
+                control plane's ClickHouse cluster keepers",
             boundary: ApiBoundary::Internal,
             api_description:
-                clickhouse_admin_api::clickhouse_admin_api_mod::stub_api_description,
-            filename: "clickhouse-admin.json",
+                clickhouse_admin_api::clickhouse_admin_keeper_api_mod::stub_api_description,
+            filename: "clickhouse-admin-keeper.json",
+            extra_validation: None,
+        },
+        ApiSpec {
+            title: "ClickHouse Cluster Admin Server API",
+            version: "0.0.1",
+            description: "API for interacting with the Oxide \
+                control plane's ClickHouse cluster replica servers",
+            boundary: ApiBoundary::Internal,
+            api_description:
+                clickhouse_admin_api::clickhouse_admin_server_api_mod::stub_api_description,
+            filename: "clickhouse-admin-server.json",
             extra_validation: None,
         },
         ApiSpec {

@@ -4,10 +4,9 @@
 
 use anyhow::Context;
 use camino::Utf8PathBuf;
-use clickhouse_admin_types::config::ClickhouseHost;
 use clickhouse_admin_types::{
-    ClickhouseKeeperClusterMembership, KeeperId, KeeperServerInfo,
-    KeeperServerType, RaftConfig,
+    ClickhouseHost, ClickhouseKeeperClusterMembership, KeeperId,
+    KeeperServerInfo, KeeperServerType, RaftConfig,
 };
 use clickward::{BasePorts, Deployment, DeploymentConfig};
 use dropshot::test_util::log_prefix_for_test;
