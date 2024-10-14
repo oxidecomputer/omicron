@@ -821,6 +821,7 @@ mod test {
     use nexus_types::deployment::BlueprintZoneDisposition;
     use nexus_types::deployment::BlueprintZoneFilter;
     use nexus_types::deployment::BlueprintZoneType;
+    use nexus_types::deployment::ClickhouseMode;
     use nexus_types::deployment::ClickhousePolicy;
     use nexus_types::deployment::CockroachDbClusterVersion;
     use nexus_types::deployment::CockroachDbPreserveDowngrade;
@@ -842,6 +843,12 @@ mod test {
     use std::collections::HashMap;
     use std::net::IpAddr;
     use typed_rng::TypedUuidRng;
+
+    // Generate a ClickhousePolicy ignoring fields we don't care about for
+    /// planner tests
+    fn clickhouse_policy(mode: ClickhouseMode) -> ClickhousePolicy {
+        ClickhousePolicy { version: 0, mode, time_created: Utc::now() }
+    }
 
     /// Runs through a basic sequence of blueprints for adding a sled
     #[test]
@@ -2623,7 +2630,10 @@ mod test {
         // Enable clickhouse clusters via policy
         let mut input_builder = input.into_builder();
         input_builder.policy_mut().clickhouse_policy =
-            Some(ClickhousePolicy::Both { target_servers, target_keepers });
+            Some(clickhouse_policy(ClickhouseMode::Both {
+                target_servers,
+                target_keepers,
+            }));
 
         // Creating a new blueprint should deploy all the new clickhouse zones
         let input = input_builder.build();
@@ -2773,7 +2783,10 @@ mod test {
         let target_keepers = 5;
         let mut input_builder = input.into_builder();
         input_builder.policy_mut().clickhouse_policy =
-            Some(ClickhousePolicy::Both { target_servers, target_keepers });
+            Some(clickhouse_policy(ClickhouseMode::Both {
+                target_servers,
+                target_keepers,
+            }));
         let input = input_builder.build();
         let blueprint5 = Planner::new_based_on(
             log.clone(),
@@ -2936,7 +2949,10 @@ mod test {
         // Enable clickhouse clusters via policy
         let mut input_builder = input.into_builder();
         input_builder.policy_mut().clickhouse_policy =
-            Some(ClickhousePolicy::Both { target_servers, target_keepers });
+            Some(clickhouse_policy(ClickhouseMode::Both {
+                target_servers,
+                target_keepers,
+            }));
         let input = input_builder.build();
 
         // Create a new blueprint to deploy all our clickhouse zones
@@ -3140,7 +3156,10 @@ mod test {
         // Enable clickhouse clusters via policy
         let mut input_builder = input.into_builder();
         input_builder.policy_mut().clickhouse_policy =
-            Some(ClickhousePolicy::Both { target_servers, target_keepers });
+            Some(clickhouse_policy(ClickhouseMode::Both {
+                target_servers,
+                target_keepers,
+            }));
         let input = input_builder.build();
 
         // Create a new blueprint to deploy all our clickhouse zones
@@ -3179,7 +3198,7 @@ mod test {
         // Disable clickhouse clusters via policy
         let mut input_builder = input.into_builder();
         input_builder.policy_mut().clickhouse_policy =
-            Some(ClickhousePolicy::SingleNodeOnly);
+            Some(clickhouse_policy(ClickhouseMode::SingleNodeOnly));
         let input = input_builder.build();
 
         // Create a new blueprint with the disabled policy

@@ -25,7 +25,7 @@ impl DataStore {
         &self,
         opctx: &OpContext,
         pagparams: &DataPageParams<'_, SqlU32>,
-    ) -> ListResultVec<Option<ClickhousePolicy>> {
+    ) -> ListResultVec<ClickhousePolicy> {
         use db::schema::clickhouse_policy;
 
         opctx
@@ -42,6 +42,6 @@ impl DataStore {
         .await
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
-        Ok(policies.into_iter().map(|p| p.into_clickhouse_policy).collect())
+        Ok(policies.into_iter().map(ClickhousePolicy::from).collect())
     }
 }

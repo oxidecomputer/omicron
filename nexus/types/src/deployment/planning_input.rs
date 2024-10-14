@@ -14,6 +14,8 @@ use crate::external_api::views::PhysicalDiskState;
 use crate::external_api::views::SledPolicy;
 use crate::external_api::views::SledProvisionPolicy;
 use crate::external_api::views::SledState;
+use chrono::DateTime;
+use chrono::Utc;
 use clap::ValueEnum;
 use ipnetwork::IpNetwork;
 use omicron_common::address::IpRange;
@@ -124,12 +126,12 @@ impl PlanningInput {
 
     pub fn target_clickhouse_zone_count(&self) -> usize {
         if let Some(policy) = &self.policy.clickhouse_policy {
-            match policy {
-                ClickhousePolicy::SingleNodeOnly => {
+            match policy.mode {
+                ClickhouseMode::SingleNodeOnly => {
                     SINGLE_NODE_CLICKHOUSE_REDUNDANCY
                 }
-                ClickhousePolicy::ClusterOnly { .. } => 0,
-                ClickhousePolicy::Both { .. } => {
+                ClickhouseMode::ClusterOnly { .. } => 0,
+                ClickhouseMode::Both { .. } => {
                     SINGLE_NODE_CLICKHOUSE_REDUNDANCY
                 }
             }
@@ -142,7 +144,7 @@ impl PlanningInput {
         self.policy
             .clickhouse_policy
             .as_ref()
-            .map(|policy| policy.target_servers() as usize)
+            .map(|policy| policy.mode.target_servers() as usize)
             .unwrap_or(0)
     }
 
@@ -150,7 +152,7 @@ impl PlanningInput {
         self.policy
             .clickhouse_policy
             .as_ref()
-            .map(|policy| policy.target_keepers() as usize)
+            .map(|policy| policy.mode.target_keepers() as usize)
             .unwrap_or(0)
     }
 
@@ -880,32 +882,39 @@ pub struct Policy {
     pub clickhouse_policy: Option<ClickhousePolicy>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClickhousePolicy {
+    pub version: u32,
+    pub mode: ClickhouseMode,
+    pub time_created: DateTime<Utc>,
+}
+
 /// How to deploy clickhouse nodes
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ClickhousePolicy {
+pub enum ClickhouseMode {
     SingleNodeOnly,
     ClusterOnly { target_servers: u8, target_keepers: u8 },
     Both { target_servers: u8, target_keepers: u8 },
 }
 
-impl ClickhousePolicy {
+impl ClickhouseMode {
     fn target_servers(&self) -> u8 {
         match self {
-            ClickhousePolicy::SingleNodeOnly => 0,
-            ClickhousePolicy::ClusterOnly { target_servers, .. } => {
+            ClickhouseMode::SingleNodeOnly => 0,
+            ClickhouseMode::ClusterOnly { target_servers, .. } => {
                 *target_servers
             }
-            ClickhousePolicy::Both { target_servers, .. } => *target_servers,
+            ClickhouseMode::Both { target_servers, .. } => *target_servers,
         }
     }
 
     fn target_keepers(&self) -> u8 {
         match self {
-            ClickhousePolicy::SingleNodeOnly => 0,
-            ClickhousePolicy::ClusterOnly { target_keepers, .. } => {
+            ClickhouseMode::SingleNodeOnly => 0,
+            ClickhouseMode::ClusterOnly { target_keepers, .. } => {
                 *target_keepers
             }
-            ClickhousePolicy::Both { target_keepers, .. } => *target_keepers,
+            ClickhouseMode::Both { target_keepers, .. } => *target_keepers,
         }
     }
 }
