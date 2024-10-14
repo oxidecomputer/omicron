@@ -2757,6 +2757,46 @@ async fn test_instance_create_delete_network_interface(
 }
 
 #[nexus_test]
+async fn test_instance_create_hostname_fallback(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let instance_name = "test-hostname-fallback";
+
+    create_project_and_pool(&client).await;
+
+    // Create an instance with no network interfaces
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: instance_name.parse().unwrap(),
+            description: String::from("instance to test updatin nics"),
+        },
+        ncpus: InstanceCpuCount::try_from(2).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(4),
+        hostname: None,
+        user_data: vec![],
+        ssh_public_keys: None,
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::None,
+        external_ips: vec![],
+        disks: vec![],
+        boot_disk: None,
+        start: true,
+        auto_restart_policy: Default::default(),
+    };
+    let instance: Instance = NexusRequest::objects_post(
+        client,
+        &get_instances_url(),
+        &instance_params,
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute_and_parse_unwrap()
+    .await;
+
+    // hostname should fall back to name when not provided
+    assert_eq!(instance.hostname, instance_params.identity.name.to_string());
+}
+
+#[nexus_test]
 async fn test_instance_update_network_interfaces(
     cptestctx: &ControlPlaneTestContext,
 ) {
