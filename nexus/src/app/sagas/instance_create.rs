@@ -526,6 +526,7 @@ async fn create_custom_network_interface(
         instance_id,
         db_subnet.clone(),
         interface_params.identity.clone(),
+        interface_params.transit_ips.clone(),
         interface_params.ip,
     )
     .map_err(ActionError::action_failed)?;
@@ -621,6 +622,7 @@ async fn create_default_primary_network_interface(
         instance_id,
         db_subnet.clone(),
         interface_params.identity.clone(),
+        interface_params.transit_ips.clone(),
         interface_params.ip,
     )
     .map_err(ActionError::action_failed)?;
