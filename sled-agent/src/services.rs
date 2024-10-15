@@ -77,6 +77,7 @@ use omicron_common::address::LLDP_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::TFPORTD_PORT;
 use omicron_common::address::WICKETD_NEXUS_PROXY_PORT;
 use omicron_common::address::WICKETD_PORT;
 use omicron_common::address::{
@@ -2852,17 +2853,68 @@ impl ServiceManager {
                         SwitchService::Tfport { pkt_source, asic } => {
                             info!(self.inner.log, "Setting up tfport service");
                             let mut tfport_config =
-                                PropertyGroupBuilder::new("config")
+                                PropertyGroupBuilder::new("config");
+
+                            tfport_config = tfport_config
+                                .add_property(
+                                    "host",
+                                    "astring",
+                                    &format!("[{}]", Ipv6Addr::LOCALHOST),
+                                )
+                                .add_property(
+                                    "port",
+                                    "astring",
+                                    &format!("{}", DENDRITE_PORT),
+                                );
+
+                            if let Some(i) = info {
+                                tfport_config = tfport_config
                                     .add_property(
-                                        "host",
+                                        "rack_id",
                                         "astring",
-                                        &format!("[{}]", Ipv6Addr::LOCALHOST),
+                                        &i.rack_id.to_string(),
                                     )
                                     .add_property(
-                                        "port",
+                                        "sled_id",
                                         "astring",
-                                        &format!("{}", DENDRITE_PORT),
+                                        &i.config
+                                            .sled_identifiers
+                                            .sled_id
+                                            .to_string(),
+                                    )
+                                    .add_property(
+                                        "sled_model",
+                                        "astring",
+                                        &i.config
+                                            .sled_identifiers
+                                            .model
+                                            .to_string(),
+                                    )
+                                    .add_property(
+                                        "sled_revision",
+                                        "astring",
+                                        &i.config
+                                            .sled_identifiers
+                                            .revision
+                                            .to_string(),
+                                    )
+                                    .add_property(
+                                        "sled_serial",
+                                        "astring",
+                                        &i.config
+                                            .sled_identifiers
+                                            .serial
+                                            .to_string(),
                                     );
+                            }
+
+                            for address in addresses {
+                                tfport_config = tfport_config.add_property(
+                                    "address",
+                                    "astring",
+                                    &format!("[{}]:{}", address, TFPORTD_PORT),
+                                );
+                            }
 
                             let is_gimlet = is_gimlet().map_err(|e| {
                                 Error::Underlay(
