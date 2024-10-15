@@ -36,6 +36,20 @@ pub struct ClickhousePolicy {
     pub time_created: DateTime<Utc>,
 }
 
+impl From<&deployment::ClickhouseMode> for DbClickhouseMode {
+    fn from(value: &deployment::ClickhouseMode) -> Self {
+        match value {
+            deployment::ClickhouseMode::SingleNodeOnly => {
+                DbClickhouseMode::SingleNodeOnly
+            }
+            deployment::ClickhouseMode::ClusterOnly { .. } => {
+                DbClickhouseMode::ClusterOnly
+            }
+            deployment::ClickhouseMode::Both { .. } => DbClickhouseMode::Both,
+        }
+    }
+}
+
 impl From<ClickhousePolicy> for deployment::ClickhousePolicy {
     fn from(value: ClickhousePolicy) -> Self {
         let mode = match value.clickhouse_mode {

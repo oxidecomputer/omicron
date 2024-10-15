@@ -898,7 +898,7 @@ pub enum ClickhouseMode {
 }
 
 impl ClickhouseMode {
-    fn target_servers(&self) -> u8 {
+    pub fn target_servers(&self) -> u8 {
         match self {
             ClickhouseMode::SingleNodeOnly => 0,
             ClickhouseMode::ClusterOnly { target_servers, .. } => {
@@ -908,7 +908,7 @@ impl ClickhouseMode {
         }
     }
 
-    fn target_keepers(&self) -> u8 {
+    pub fn target_keepers(&self) -> u8 {
         match self {
             ClickhouseMode::SingleNodeOnly => 0,
             ClickhouseMode::ClusterOnly { target_keepers, .. } => {
