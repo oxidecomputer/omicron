@@ -16,7 +16,6 @@ use http::StatusCode;
 use itertools::Itertools;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
-use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO_ID;
 use nexus_db_queries::db::lookup::LookupPath;
 use nexus_db_queries::db::DataStore;
 use nexus_test_interface::NexusServer;
@@ -49,6 +48,7 @@ use nexus_types::external_api::views::SshKey;
 use nexus_types::external_api::{params, views};
 use nexus_types::identity::Resource;
 use nexus_types::internal_api::params::InstanceMigrateRequest;
+use nexus_types::silo::DEFAULT_SILO_ID;
 use omicron_common::api::external::ByteCount;
 use omicron_common::api::external::Disk;
 use omicron_common::api::external::DiskState;
@@ -1283,29 +1283,51 @@ async fn test_instance_failed_when_on_expunged_sled(
     let nexus = &apictx.nexus;
     let instance1_name = "romeo";
     let instance2_name = "juliet";
+    let instance3_name = "mercutio";
 
     create_project_and_pool(&client).await;
 
     // Create and start the test instances.
-    let mk_instance = |name: &'static str| async move {
-        let instance_url = get_instance_url(name);
-        let instance = create_instance(client, PROJECT_NAME, name).await;
-        let instance_id = InstanceUuid::from_untyped_uuid(instance.identity.id);
-        instance_simulate(nexus, &instance_id).await;
-        let instance_next = instance_get(&client, &instance_url).await;
-        assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
+    let mk_instance =
+        |name: &'static str, auto_restart: InstanceAutoRestartPolicy| async move {
+            let instance_url = get_instance_url(name);
+            let instance = create_instance_with(
+                client,
+                PROJECT_NAME,
+                name,
+                &params::InstanceNetworkInterfaceAttachment::Default,
+                // Disks=
+                Vec::<params::InstanceDiskAttachment>::new(),
+                // External IPs=
+                Vec::<params::ExternalIpCreate>::new(),
+                true,
+                Some(auto_restart),
+            )
+            .await;
+            let instance_id =
+                InstanceUuid::from_untyped_uuid(instance.identity.id);
+            instance_simulate(nexus, &instance_id).await;
+            let instance_next = instance_get(&client, &instance_url).await;
+            assert_eq!(instance_next.runtime.run_state, InstanceState::Running);
 
-        slog::info!(
-            &cptestctx.logctx.log,
-            "test instance is running";
-            "instance_name" => %name,
-            "instance_id" => %instance_id,
-        );
+            slog::info!(
+                &cptestctx.logctx.log,
+                "test instance is running";
+                "instance_name" => %name,
+                "instance_id" => %instance_id,
+            );
 
-        instance_id
-    };
-    let instance1_id = mk_instance(instance1_name).await;
-    let instance2_id = mk_instance(instance2_name).await;
+            instance_id
+        };
+    // We are going to manually attempt to delete/restart these instances when
+    // they go to `Failed`, so don't allow them to reincarnate.
+    let instance1_id =
+        mk_instance(instance1_name, InstanceAutoRestartPolicy::Never).await;
+    let instance2_id =
+        mk_instance(instance2_name, InstanceAutoRestartPolicy::Never).await;
+    let instance3_id =
+        mk_instance(instance3_name, InstanceAutoRestartPolicy::BestEffort)
+            .await;
 
     // Create a second sled for instances on the Expunged sled to be assigned
     // to.
@@ -1351,11 +1373,17 @@ async fn test_instance_failed_when_on_expunged_sled(
     // ...or restartable.
     expect_instance_start_ok(client, instance2_name).await;
 
-    // The restarted instance shoild now transition back to `Running`, on its
+    // The restarted instance should now transition back to `Running`, on its
     // new sled.
     instance_wait_for_vmm_registration(cptestctx, &instance2_id).await;
     instance_simulate(nexus, &instance2_id).await;
     instance_wait_for_state(client, instance2_id, InstanceState::Running).await;
+
+    // The auto-restartable instance should be...restarted automatically.
+
+    instance_wait_for_vmm_registration(cptestctx, &instance3_id).await;
+    instance_simulate(nexus, &instance3_id).await;
+    instance_wait_for_state(client, instance3_id, InstanceState::Running).await;
 }
 
 // Verifies that the instance-watcher background task transitions an instance
@@ -1613,7 +1641,7 @@ async fn assert_metrics(
             ram
         );
     }
-    for id in &[None, Some(*DEFAULT_SILO_ID)] {
+    for id in &[None, Some(DEFAULT_SILO_ID)] {
         assert_eq!(
             get_latest_system_metric(
                 cptestctx,
@@ -4129,19 +4157,12 @@ async fn test_cannot_detach_boot_disk(cptestctx: &ControlPlaneTestContext) {
     assert_eq!(err.message, "boot disk cannot be detached");
 
     // Change the instance's boot disk.
-    let url_instance_update = format!("/v1/instances/{}", instance.identity.id);
-
-    let builder =
-        RequestBuilder::new(client, http::Method::PUT, &url_instance_update)
-            .body(Some(&params::InstanceUpdate { boot_disk: None }))
-            .expect_status(Some(http::StatusCode::OK));
-    let response = NexusRequest::new(builder)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .expect("can attempt to reconfigure the instance");
-
-    let instance = response.parsed_body::<Instance>().unwrap();
+    let instance = expect_instance_reconfigure_ok(
+        &client,
+        &instance.identity.id,
+        params::InstanceUpdate { boot_disk: None, auto_restart_policy: None },
+    )
+    .await;
     assert_eq!(instance.boot_disk_id, None);
 
     // Now try to detach `disks[0]` again. This should succeed.
@@ -4160,13 +4181,31 @@ async fn test_cannot_detach_boot_disk(cptestctx: &ControlPlaneTestContext) {
 }
 
 #[nexus_test]
-async fn test_updating_running_instance_is_conflict(
+async fn test_updating_running_instance_boot_disk_is_conflict(
     cptestctx: &ControlPlaneTestContext,
 ) {
     let client = &cptestctx.external_client;
     let instance_name = "immediately-running";
 
+    // Test pre-reqs
+    DiskTest::new(&cptestctx).await;
     create_project_and_pool(&client).await;
+
+    create_disk(&client, PROJECT_NAME, "probablydata").await;
+    create_disk(&client, PROJECT_NAME, "alsodata").await;
+
+    // Verify disk is there and currently detached
+    let disks: Vec<Disk> =
+        NexusRequest::iter_collection_authn(client, &get_disks_url(), "", None)
+            .await
+            .expect("failed to list disks")
+            .all_items;
+    assert_eq!(disks.len(), 2);
+    assert_eq!(disks[0].state, DiskState::Detached);
+    assert_eq!(disks[1].state, DiskState::Detached);
+
+    let probablydata = Name::try_from(String::from("probablydata")).unwrap();
+    let alsodata = Name::try_from(String::from("alsodata")).unwrap();
 
     let instance_params = params::InstanceCreate {
         identity: IdentityMetadataCreateParams {
@@ -4180,8 +4219,17 @@ async fn test_updating_running_instance_is_conflict(
         ssh_public_keys: None,
         network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
         external_ips: vec![],
-        disks: vec![],
-        boot_disk: None,
+        disks: vec![
+            params::InstanceDiskAttachment::Attach(
+                params::InstanceDiskAttach { name: probablydata.clone() },
+            ),
+            params::InstanceDiskAttachment::Attach(
+                params::InstanceDiskAttach { name: alsodata.clone() },
+            ),
+        ],
+        boot_disk: Some(params::InstanceDiskAttachment::Attach(
+            params::InstanceDiskAttach { name: probablydata.clone() },
+        )),
         start: true,
         auto_restart_policy: Default::default(),
     };
@@ -4206,21 +4254,31 @@ async fn test_updating_running_instance_is_conflict(
     instance_simulate(nexus, &instance_id).await;
     instance_wait_for_state(client, instance_id, InstanceState::Running).await;
 
-    let url_instance_update = format!("/v1/instances/{}", instance_id);
+    let error = expect_instance_reconfigure_err(
+        &client,
+        &instance_id.into_untyped_uuid(),
+        params::InstanceUpdate {
+            boot_disk: Some(alsodata.clone().into()),
+            auto_restart_policy: None,
+        },
+        http::StatusCode::CONFLICT,
+    )
+    .await;
+    assert_eq!(error.message, "instance must be stopped to set boot disk");
 
-    let builder =
-        RequestBuilder::new(client, http::Method::PUT, &url_instance_update)
-            .body(Some(&params::InstanceUpdate { boot_disk: None }))
-            .expect_status(Some(http::StatusCode::CONFLICT));
-
-    let response = NexusRequest::new(builder)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .expect("can attempt to reconfigure the instance");
-
-    let error = response.parsed_body::<HttpErrorResponseBody>().unwrap();
-    assert_eq!(error.message, "instance must be stopped to update");
+    // However, we can freely change the auto-restart policy of a running
+    // instance.
+    expect_instance_reconfigure_ok(
+        &client,
+        &instance_id.into_untyped_uuid(),
+        params::InstanceUpdate {
+            // Leave the boot disk the same as the one with which the instance
+            // was created.
+            boot_disk: Some(probablydata.clone().into()),
+            auto_restart_policy: Some(InstanceAutoRestartPolicy::BestEffort),
+        },
+    )
+    .await;
 }
 
 #[nexus_test]
@@ -4229,15 +4287,36 @@ async fn test_updating_missing_instance_is_not_found(
 ) {
     const UUID_THAT_DOESNT_EXIST: Uuid =
         Uuid::from_u128(0x12341234_4321_8765_1234_432143214321);
-    let url_instance_update =
-        format!("/v1/instances/{}", UUID_THAT_DOESNT_EXIST);
 
     let client = &cptestctx.external_client;
 
-    let builder =
-        RequestBuilder::new(client, http::Method::PUT, &url_instance_update)
-            .body(Some(&params::InstanceUpdate { boot_disk: None }))
-            .expect_status(Some(http::StatusCode::NOT_FOUND));
+    let error = expect_instance_reconfigure_err(
+        &client,
+        &UUID_THAT_DOESNT_EXIST,
+        params::InstanceUpdate { boot_disk: None, auto_restart_policy: None },
+        http::StatusCode::NOT_FOUND,
+    )
+    .await;
+    assert_eq!(
+        error.message,
+        format!("not found: instance with id \"{}\"", UUID_THAT_DOESNT_EXIST)
+    );
+}
+
+async fn expect_instance_reconfigure_ok(
+    external_client: &ClientTestContext,
+    instance_id: &Uuid,
+    update: params::InstanceUpdate,
+) -> Instance {
+    let url_instance_update = format!("/v1/instances/{instance_id}");
+
+    let builder = RequestBuilder::new(
+        external_client,
+        http::Method::PUT,
+        &url_instance_update,
+    )
+    .body(Some(&update))
+    .expect_status(Some(http::StatusCode::OK));
 
     let response = NexusRequest::new(builder)
         .authn_as(AuthnMode::PrivilegedUser)
@@ -4245,11 +4324,105 @@ async fn test_updating_missing_instance_is_not_found(
         .await
         .expect("can attempt to reconfigure the instance");
 
-    let error = response.parsed_body::<HttpErrorResponseBody>().unwrap();
-    assert_eq!(
-        error.message,
-        format!("not found: instance with id \"{}\"", UUID_THAT_DOESNT_EXIST)
-    );
+    response
+        .parsed_body::<Instance>()
+        .expect("response should be parsed as an instance")
+}
+
+async fn expect_instance_reconfigure_err(
+    external_client: &ClientTestContext,
+    instance_id: &Uuid,
+    update: params::InstanceUpdate,
+    status: http::StatusCode,
+) -> HttpErrorResponseBody {
+    let url_instance_update = format!("/v1/instances/{instance_id}");
+
+    let builder = RequestBuilder::new(
+        external_client,
+        http::Method::PUT,
+        &url_instance_update,
+    )
+    .body(Some(&update))
+    .expect_status(Some(status));
+
+    let response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("can attempt to reconfigure the instance");
+
+    response
+        .parsed_body::<HttpErrorResponseBody>()
+        .expect("error response should parse successfully")
+}
+// Test reconfiguring an instance's auto-restart policy.
+#[nexus_test]
+async fn test_auto_restart_policy_can_be_changed(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    let client = &cptestctx.external_client;
+    let instance_name = "reincarnation-station";
+
+    create_project_and_pool(&client).await;
+
+    let instance_params = params::InstanceCreate {
+        identity: IdentityMetadataCreateParams {
+            name: instance_name.parse().unwrap(),
+            description: String::from("stuff"),
+        },
+        ncpus: InstanceCpuCount::try_from(2).unwrap(),
+        memory: ByteCount::from_gibibytes_u32(4),
+        hostname: instance_name.parse().unwrap(),
+        user_data: vec![],
+        ssh_public_keys: None,
+        network_interfaces: params::InstanceNetworkInterfaceAttachment::Default,
+        external_ips: vec![],
+        boot_disk: None,
+        disks: Vec::new(),
+        start: true,
+        // Start out with None
+        auto_restart_policy: None,
+    };
+
+    let builder =
+        RequestBuilder::new(client, http::Method::POST, &get_instances_url())
+            .body(Some(&instance_params))
+            .expect_status(Some(http::StatusCode::CREATED));
+    let response = NexusRequest::new(builder)
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("Expected instance creation to work!");
+
+    let instance = response.parsed_body::<Instance>().unwrap();
+
+    // Starts out as None.
+    assert_eq!(instance.auto_restart_status.policy, None);
+
+    let assert_reconfigured = |auto_restart_policy| async move {
+        let instance = expect_instance_reconfigure_ok(
+            client,
+            &instance.identity.id,
+            dbg!(params::InstanceUpdate {
+                auto_restart_policy,
+                boot_disk: None,
+            }),
+        )
+        .await;
+        assert_eq!(
+            dbg!(instance).auto_restart_status.policy,
+            auto_restart_policy,
+        );
+    };
+
+    // Reconfigure to Never.
+    assert_reconfigured(Some(InstanceAutoRestartPolicy::Never)).await;
+
+    // Reconfigure to BestEffort
+    assert_reconfigured(Some(InstanceAutoRestartPolicy::BestEffort)).await;
+
+    // Reconfigure back to None.
+    assert_reconfigured(None).await;
 }
 
 // Create an instance with boot disk set to one of its attached disks, then set
@@ -4318,23 +4491,17 @@ async fn test_boot_disk_can_be_changed(cptestctx: &ControlPlaneTestContext) {
 
     assert_eq!(instance.boot_disk_id, Some(disks[0].identity.id));
 
-    // Change the instance's boot disk.
-    let url_instance_update = format!("/v1/instances/{}", instance.identity.id);
+    // Change the instance's boot disk.ity.id);
 
-    let builder =
-        RequestBuilder::new(client, http::Method::PUT, &url_instance_update)
-            .body(Some(&params::InstanceUpdate {
-                boot_disk: Some(disks[1].identity.id.into()),
-            }))
-            .expect_status(Some(http::StatusCode::OK));
-
-    let response = NexusRequest::new(builder)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .expect("can attempt to reconfigure the instance");
-
-    let instance = response.parsed_body::<Instance>().unwrap();
+    let instance = expect_instance_reconfigure_ok(
+        &client,
+        &instance.identity.id,
+        params::InstanceUpdate {
+            boot_disk: Some(disks[1].identity.id.into()),
+            auto_restart_policy: None,
+        },
+    )
+    .await;
     assert_eq!(instance.boot_disk_id, Some(disks[1].identity.id));
 }
 
@@ -4390,22 +4557,16 @@ async fn test_boot_disk_must_be_attached(cptestctx: &ControlPlaneTestContext) {
     let instance = response.parsed_body::<Instance>().unwrap();
 
     // Update the instance's boot disk to the unattached disk. This should fail.
-    let url_instance_update = format!("/v1/instances/{}", instance.identity.id);
-
-    let builder =
-        RequestBuilder::new(client, http::Method::PUT, &url_instance_update)
-            .body(Some(&params::InstanceUpdate {
-                boot_disk: Some(disks[0].identity.id.into()),
-            }))
-            .expect_status(Some(http::StatusCode::CONFLICT));
-    let response = NexusRequest::new(builder)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .expect("can attempt to reconfigure the instance");
-
-    let error =
-        response.parsed_body::<dropshot::HttpErrorResponseBody>().unwrap();
+    let error = expect_instance_reconfigure_err(
+        &client,
+        &instance.identity.id,
+        params::InstanceUpdate {
+            boot_disk: Some(disks[0].identity.id.into()),
+            auto_restart_policy: None,
+        },
+        http::StatusCode::CONFLICT,
+    )
+    .await;
 
     assert_eq!(error.message, format!("boot disk must be attached"));
 
@@ -4427,19 +4588,15 @@ async fn test_boot_disk_must_be_attached(cptestctx: &ControlPlaneTestContext) {
         .expect("can attempt to detach boot disk");
 
     // And now it can be made the boot disk.
-    let builder =
-        RequestBuilder::new(client, http::Method::PUT, &url_instance_update)
-            .body(Some(&params::InstanceUpdate {
-                boot_disk: Some(disks[0].identity.id.into()),
-            }))
-            .expect_status(Some(http::StatusCode::OK));
-    let response = NexusRequest::new(builder)
-        .authn_as(AuthnMode::PrivilegedUser)
-        .execute()
-        .await
-        .expect("can attempt to reconfigure the instance");
-
-    let instance = response.parsed_body::<Instance>().unwrap();
+    let instance = expect_instance_reconfigure_ok(
+        &client,
+        &instance.identity.id,
+        params::InstanceUpdate {
+            boot_disk: Some(disks[0].identity.id.into()),
+            auto_restart_policy: None,
+        },
+    )
+    .await;
     assert_eq!(instance.boot_disk_id, Some(disks[0].identity.id));
 }
 
@@ -6156,7 +6313,6 @@ pub async fn assert_sled_vpc_routes(
                 .await
                 .unwrap()
                 .into_iter()
-                .map(|(dest, target)| ResolvedVpcRoute { dest, target })
                 .collect()
         } else {
             Default::default()
@@ -6173,37 +6329,68 @@ pub async fn assert_sled_vpc_routes(
         .await
         .unwrap()
         .into_iter()
-        .map(|(dest, target)| ResolvedVpcRoute { dest, target })
         .collect();
 
     assert!(!system_routes.is_empty());
 
     let condition = || async {
+        let sys_key = RouterId { vni, kind: RouterKind::System };
+        let custom_key = RouterId {
+            vni,
+            kind: RouterKind::Custom(db_subnet.ipv4_block.0.into()),
+        };
+
         let vpc_routes = sled_agent.vpc_routes.lock().await;
-        let sys_routes_found = vpc_routes.iter().any(|(id, set)| {
-            *id == RouterId { vni, kind: RouterKind::System }
-                && set.routes == system_routes
-        });
-        let custom_routes_found = vpc_routes.iter().any(|(id, set)| {
-            *id == RouterId {
-                vni,
-                kind: RouterKind::Custom(db_subnet.ipv4_block.0.into()),
-            } && set.routes == custom_routes
-        });
+        let sys_routes_found = vpc_routes
+            .iter()
+            .any(|(id, set)| *id == sys_key && set.routes == system_routes);
+        let custom_routes_found = vpc_routes
+            .iter()
+            .any(|(id, set)| *id == custom_key && set.routes == custom_routes);
 
         if sys_routes_found && custom_routes_found {
             Ok(())
         } else {
+            let found_system =
+                vpc_routes.get(&sys_key).cloned().unwrap_or_default();
+            let found_custom =
+                vpc_routes.get(&custom_key).cloned().unwrap_or_default();
+
+            println!("unexpected route setup");
+            println!("vni: {vni:?}");
+            println!("sled: {}", sled_agent.id);
+            println!("subnet: {}", db_subnet.ipv4_block.0);
+            println!("expected system: {system_routes:?}");
+            println!("expected custom {custom_routes:?}");
+            println!("found: {vpc_routes:?}");
+            println!(
+                "\n-----\nsystem diff (-): {:?}",
+                system_routes.difference(&found_system.routes)
+            );
+            println!(
+                "system diff (+): {:?}",
+                found_system.routes.difference(&system_routes)
+            );
+            println!(
+                "custom diff (-): {:?}",
+                custom_routes.difference(&found_custom.routes)
+            );
+            println!(
+                "custom diff (+): {:?}\n-----",
+                found_custom.routes.difference(&custom_routes)
+            );
             Err(CondCheckError::NotYet::<()>)
         }
     };
     wait_for_condition(
         condition,
         &Duration::from_secs(1),
-        &Duration::from_secs(30),
+        &Duration::from_secs(60),
     )
     .await
     .expect("matching vpc routes should be present");
+
+    println!("success! VPC routes as expected for sled {}", sled_agent.id);
 
     (system_routes, custom_routes)
 }

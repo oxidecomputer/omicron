@@ -116,6 +116,13 @@ impl std::str::FromStr for RegionReplacementState {
 /// "finish" notification is seen by the region replacement drive background
 /// task. This check is done before invoking the region replacement drive saga.
 ///
+/// If the volume whose region is being replaced is soft-deleted or
+/// hard-deleted, then the replacement request will be transitioned along the
+/// states to Complete while avoiding operations that are meant to operate on
+/// that volume. If the volume is soft-deleted or hard-deleted while the
+/// replacement request is in the "Requested" state, the replacement request
+/// will transition straight to Complete, and no operations will be performed.
+///
 /// See also: RegionReplacementStep records
 #[derive(
     Queryable,

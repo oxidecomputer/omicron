@@ -67,9 +67,17 @@ impl SystemApis {
         // Load Cargo metadata and validate it against the manifest.
         let (workspaces, warnings) = Workspaces::load(&api_metadata)?;
         if !warnings.is_empty() {
+            // We treat these warnings as fatal here.
             for e in warnings {
-                eprintln!("warning: {:#}", e);
+                eprintln!("error: {:#}", e);
             }
+
+            bail!(
+                "found inconsistency between API manifest ({}) and \
+                 information found from the Cargo dependency tree \
+                 (see above)",
+                &args.api_manifest_path
+            );
         }
 
         // Create an index of server package names, mapping each one to the API

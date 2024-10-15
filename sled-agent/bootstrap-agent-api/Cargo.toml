@@ -9,7 +9,6 @@ workspace = true
 
 [dependencies]
 dropshot.workspace = true
-nexus-client.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true
 omicron-workspace-hack.workspace = true

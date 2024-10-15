@@ -4,11 +4,14 @@
 
 use anyhow::Result;
 use camino::Utf8PathBuf;
-use clickhouse_admin_types::{KeeperConf, Lgif, RaftConfig};
+use clickhouse_admin_types::{
+    ClickhouseKeeperClusterMembership, KeeperConf, KeeperId, Lgif, RaftConfig,
+};
 use dropshot::HttpError;
 use illumos_utils::{output_to_exec_error, ExecutionError};
 use slog::Logger;
 use slog_error_chain::{InlineErrorChain, SlogInlineError};
+use std::collections::BTreeSet;
 use std::ffi::OsStr;
 use std::io;
 use std::net::SocketAddrV6;
@@ -100,6 +103,22 @@ impl ClickhouseCli {
             self.log.clone().unwrap(),
         )
         .await
+    }
+
+    pub async fn keeper_cluster_membership(
+        &self,
+    ) -> Result<ClickhouseKeeperClusterMembership, ClickhouseCliError> {
+        let lgif_output = self.lgif().await?;
+        let conf_output = self.keeper_conf().await?;
+        let raft_output = self.raft_config().await?;
+        let raft_config: BTreeSet<KeeperId> =
+            raft_output.keeper_servers.iter().map(|s| s.server_id).collect();
+
+        Ok(ClickhouseKeeperClusterMembership {
+            queried_keeper: conf_output.server_id,
+            leader_committed_log_index: lgif_output.leader_committed_log_idx,
+            raft_config,
+        })
     }
 
     async fn keeper_client_non_interactive<F, T>(

@@ -1,0 +1,18 @@
+[package]
+name = "clickhouse-admin-server-client"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+chrono.workspace = true
+clickhouse-admin-types.workspace = true
+omicron-uuid-kinds.workspace = true
+progenitor.workspace = true
+reqwest = { workspace = true, features = [ "json", "rustls-tls", "stream" ] }
+schemars.workspace = true
+serde.workspace = true
+slog.workspace = true
+omicron-workspace-hack.workspace = true
+
+[lints]
+workspace = true

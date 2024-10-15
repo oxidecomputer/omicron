@@ -94,9 +94,11 @@
 
 use anyhow::{anyhow, Context};
 use camino::Utf8PathBuf;
-use dns_server_api::{DnsConfig, DnsConfigParams, DnsConfigZone, DnsRecord};
 use hickory_proto::rr::LowerName;
 use hickory_resolver::Name;
+use internal_dns_types::config::{
+    DnsConfig, DnsConfigParams, DnsConfigZone, DnsRecord,
+};
 use serde::{Deserialize, Serialize};
 use sled::transaction::ConflictableTransactionError;
 use slog::{debug, error, info, o, warn};
@@ -781,11 +783,11 @@ mod test {
     use anyhow::Context;
     use camino::Utf8PathBuf;
     use camino_tempfile::Utf8TempDir;
-    use dns_server_api::DnsConfigParams;
-    use dns_server_api::DnsConfigZone;
-    use dns_server_api::DnsRecord;
     use hickory_proto::rr::LowerName;
     use hickory_resolver::Name;
+    use internal_dns_types::config::DnsConfigParams;
+    use internal_dns_types::config::DnsConfigZone;
+    use internal_dns_types::config::DnsRecord;
     use omicron_test_utils::dev::test_setup_log;
     use std::collections::BTreeSet;
     use std::collections::HashMap;
@@ -897,7 +899,7 @@ mod test {
         expect(&tc.store, "gen8_name.zone8.internal", Expect::NoZone);
 
         // Update to generation 1, which contains one zone with one name.
-        let dummy_record = DnsRecord::AAAA(Ipv6Addr::LOCALHOST);
+        let dummy_record = DnsRecord::Aaaa(Ipv6Addr::LOCALHOST);
         let update1 = DnsConfigParams {
             time_created: chrono::Utc::now(),
             generation: 1,
@@ -1066,7 +1068,7 @@ mod test {
         assert!(config.zones.is_empty());
 
         // Make one normal update.
-        let dummy_record = DnsRecord::AAAA(Ipv6Addr::LOCALHOST);
+        let dummy_record = DnsRecord::Aaaa(Ipv6Addr::LOCALHOST);
         let update1 = DnsConfigParams {
             time_created: chrono::Utc::now(),
             generation: 1,
@@ -1188,7 +1190,7 @@ mod test {
         let after = chrono::Utc::now();
 
         // Concurrently attempt another update.
-        let dummy_record = DnsRecord::AAAA(Ipv6Addr::LOCALHOST);
+        let dummy_record = DnsRecord::Aaaa(Ipv6Addr::LOCALHOST);
         let update2 = DnsConfigParams {
             time_created: chrono::Utc::now(),
             generation: 1,

@@ -22,6 +22,7 @@ use clap::Subcommand;
 use clap::ValueEnum;
 use futures::future::try_join;
 use futures::TryStreamExt;
+use internal_dns_types::names::ServiceName;
 use itertools::Itertools;
 use nexus_client::types::ActivationReason;
 use nexus_client::types::BackgroundTask;
@@ -391,10 +392,7 @@ impl NexusArgs {
                     "note: Nexus URL not specified.  Will pick one from DNS."
                 );
                 let addr = omdb
-                    .dns_lookup_one(
-                        log.clone(),
-                        internal_dns::ServiceName::Nexus,
-                    )
+                    .dns_lookup_one(log.clone(), ServiceName::Nexus)
                     .await?;
                 format!("http://{}", addr)
             }
@@ -1126,6 +1124,14 @@ fn print_task_details(bgtask: &BackgroundTask, details: &serde_json::Value) {
                     status.start_invoked_ok.len()
                 );
                 for line in &status.start_invoked_ok {
+                    println!("    > {line}");
+                }
+
+                println!(
+                    "    region replacement requests set to completed ok: {}",
+                    status.requests_completed_ok.len()
+                );
+                for line in &status.requests_completed_ok {
                     println!("    > {line}");
                 }
 

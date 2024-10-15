@@ -12,9 +12,10 @@ use cockroach_admin_client::types::NodeDecommission;
 use cockroach_admin_client::types::NodeId;
 use futures::stream;
 use futures::StreamExt;
-use internal_dns::resolver::Resolver;
-use internal_dns::ServiceName;
+use internal_dns_resolver::Resolver;
+use internal_dns_types::names::ServiceName;
 use nexus_db_queries::context::OpContext;
+use nexus_db_queries::db::datastore::CollectorReassignment;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::BlueprintZoneConfig;
 use nexus_types::deployment::BlueprintZoneDisposition;
@@ -61,7 +62,7 @@ pub(crate) async fn deploy_zones(
 
             let client = nexus_networking::sled_client_from_address(
                 sled_id.into_untyped_uuid(),
-                db_sled.sled_agent_address,
+                db_sled.sled_agent_address(),
                 &opctx.log,
             );
             let omicron_zones = config
@@ -132,6 +133,9 @@ pub(crate) async fn clean_up_expunged_zones<R: CleanupResolver>(
                     )
                     .await,
                 ),
+                BlueprintZoneType::Oximeter(_) => Some(
+                    oximeter_cleanup(opctx, datastore, config.id, &log).await,
+                ),
 
                 // Zones that may or may not need cleanup work - we haven't
                 // gotten to these yet!
@@ -143,8 +147,7 @@ pub(crate) async fn clean_up_expunged_zones<R: CleanupResolver>(
                 | BlueprintZoneType::CruciblePantry(_)
                 | BlueprintZoneType::ExternalDns(_)
                 | BlueprintZoneType::InternalDns(_)
-                | BlueprintZoneType::InternalNtp(_)
-                | BlueprintZoneType::Oximeter(_) => {
+                | BlueprintZoneType::InternalNtp(_) => {
                     warn!(
                         log,
                         "unsupported zone type for expungement cleanup; \
@@ -176,6 +179,42 @@ pub(crate) async fn clean_up_expunged_zones<R: CleanupResolver>(
     } else {
         Err(errors)
     }
+}
+
+async fn oximeter_cleanup(
+    opctx: &OpContext,
+    datastore: &DataStore,
+    zone_id: OmicronZoneUuid,
+    log: &Logger,
+) -> anyhow::Result<()> {
+    // Record that this Oximeter instance is gone.
+    datastore
+        .oximeter_expunge(opctx, zone_id.into_untyped_uuid())
+        .await
+        .context("failed to mark Oximeter instance deleted")?;
+
+    // Reassign any producers it was collecting to other Oximeter instances.
+    match datastore
+        .oximeter_reassign_all_producers(opctx, zone_id.into_untyped_uuid())
+        .await
+        .context("failed to reassign metric producers")?
+    {
+        CollectorReassignment::Complete(n) => {
+            info!(
+                log,
+                "successfully reassigned {n} metric producers \
+                 to new Oximeter collectors"
+            );
+        }
+        CollectorReassignment::NoCollectorsAvailable => {
+            warn!(
+                log,
+                "metric producers need reassignment, but there are no \
+                 available Oximeter collectors"
+            );
+        }
+    }
+    Ok(())
 }
 
 // Helper trait that is implemented by `Resolver`, but allows unit tests to
@@ -311,7 +350,7 @@ mod test {
     use httptest::responders::{json_encoded, status_code};
     use httptest::Expectation;
     use nexus_sled_agent_shared::inventory::{
-        OmicronZoneDataset, OmicronZonesConfig,
+        OmicronZoneDataset, OmicronZonesConfig, SledRole,
     };
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::deployment::{
@@ -351,6 +390,7 @@ mod test {
                 internal_dns_version: Generation::new(),
                 external_dns_version: Generation::new(),
                 cockroachdb_fingerprint: String::new(),
+                clickhouse_cluster_config: None,
                 time_created: chrono::Utc::now(),
                 creator: "test".to_string(),
                 comment: "test blueprint".to_string(),
@@ -380,11 +420,7 @@ mod test {
                     let SocketAddr::V6(addr) = server.addr() else {
                         panic!("Expected Ipv6 address. Got {}", server.addr());
                     };
-                    let sled = Sled {
-                        id: sled_id,
-                        sled_agent_address: addr,
-                        is_scrimlet: false,
-                    };
+                    let sled = Sled::new(sled_id, addr, SledRole::Gimlet);
                     (sled_id, sled)
                 })
                 .collect();

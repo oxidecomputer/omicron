@@ -11,18 +11,17 @@
 use anyhow::anyhow;
 use chrono::DateTime;
 use chrono::Utc;
+use clickhouse_admin_types::ClickhouseKeeperClusterMembership;
 use gateway_client::types::SpComponentCaboose;
 use gateway_client::types::SpState;
 use gateway_client::types::SpType;
 use nexus_sled_agent_shared::inventory::Baseboard;
 use nexus_sled_agent_shared::inventory::Inventory;
-use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
 use nexus_types::inventory::BaseboardId;
 use nexus_types::inventory::Caboose;
 use nexus_types::inventory::CabooseFound;
 use nexus_types::inventory::CabooseWhich;
 use nexus_types::inventory::Collection;
-use nexus_types::inventory::OmicronZonesFound;
 use nexus_types::inventory::RotPage;
 use nexus_types::inventory::RotPageFound;
 use nexus_types::inventory::RotPageWhich;
@@ -91,7 +90,9 @@ pub struct CollectionBuilder {
     rot_pages_found:
         BTreeMap<RotPageWhich, BTreeMap<Arc<BaseboardId>, RotPageFound>>,
     sleds: BTreeMap<SledUuid, SledAgent>,
-    omicron_zones: BTreeMap<SledUuid, OmicronZonesFound>,
+    clickhouse_keeper_cluster_membership:
+        BTreeSet<ClickhouseKeeperClusterMembership>,
+
     // We just generate one UUID for each collection.
     id_rng: TypedUuidRng<CollectionKind>,
 }
@@ -118,7 +119,7 @@ impl CollectionBuilder {
             cabooses_found: BTreeMap::new(),
             rot_pages_found: BTreeMap::new(),
             sleds: BTreeMap::new(),
-            omicron_zones: BTreeMap::new(),
+            clickhouse_keeper_cluster_membership: BTreeSet::new(),
             id_rng: TypedUuidRng::from_entropy(),
         }
     }
@@ -127,8 +128,8 @@ impl CollectionBuilder {
     pub fn build(mut self) -> Collection {
         // This is not strictly necessary.  But for testing, it's helpful for
         // things to be in sorted order.
-        for v in self.omicron_zones.values_mut() {
-            v.zones.zones.sort_by(|a, b| a.id.cmp(&b.id));
+        for v in self.sleds.values_mut() {
+            v.omicron_zones.zones.sort_by(|a, b| a.id.cmp(&b.id));
         }
 
         Collection {
@@ -145,10 +146,8 @@ impl CollectionBuilder {
             cabooses_found: self.cabooses_found,
             rot_pages_found: self.rot_pages_found,
             sled_agents: self.sleds,
-            omicron_zones: self.omicron_zones,
-            // Currently unused
-            // See: https://github.com/oxidecomputer/omicron/issues/6578
-            clickhouse_keeper_cluster_membership: BTreeMap::new(),
+            clickhouse_keeper_cluster_membership: self
+                .clickhouse_keeper_cluster_membership,
         }
     }
 
@@ -512,6 +511,7 @@ impl CollectionBuilder {
             reservoir_size: inventory.reservoir_size,
             time_collected,
             sled_id,
+            omicron_zones: inventory.omicron_zones,
             disks: inventory.disks.into_iter().map(|d| d.into()).collect(),
             zpools: inventory
                 .zpools
@@ -536,30 +536,13 @@ impl CollectionBuilder {
         }
     }
 
-    /// Record information about Omicron zones found on a sled
-    pub fn found_sled_omicron_zones(
+    /// Record information about Keeper cluster membership learned from the
+    /// clickhouse-admin service running in the keeper zones.
+    pub fn found_clickhouse_keeper_cluster_membership(
         &mut self,
-        source: &str,
-        sled_id: SledUuid,
-        zones: OmicronZonesConfig,
-    ) -> Result<(), anyhow::Error> {
-        if let Some(previous) = self.omicron_zones.get(&sled_id) {
-            Err(anyhow!(
-                "sled {sled_id} omicron zones: reported previously: {:?}",
-                previous
-            ))
-        } else {
-            self.omicron_zones.insert(
-                sled_id,
-                OmicronZonesFound {
-                    time_collected: now_db_precision(),
-                    source: source.to_string(),
-                    sled_id,
-                    zones,
-                },
-            );
-            Ok(())
-        }
+        membership: ClickhouseKeeperClusterMembership,
+    ) {
+        self.clickhouse_keeper_cluster_membership.insert(membership);
     }
 }
 
@@ -619,6 +602,7 @@ mod test {
         assert!(collection.rots.is_empty());
         assert!(collection.cabooses_found.is_empty());
         assert!(collection.rot_pages_found.is_empty());
+        assert!(collection.clickhouse_keeper_cluster_membership.is_empty());
     }
 
     // Simple test of a single, fairly typical collection that contains just

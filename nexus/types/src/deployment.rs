@@ -59,6 +59,7 @@ pub use network_resources::OmicronZoneExternalSnatIp;
 pub use network_resources::OmicronZoneNetworkResources;
 pub use network_resources::OmicronZoneNic;
 pub use network_resources::OmicronZoneNicEntry;
+pub use planning_input::ClickhousePolicy;
 pub use planning_input::CockroachDbClusterVersion;
 pub use planning_input::CockroachDbPreserveDowngrade;
 pub use planning_input::CockroachDbSettings;
@@ -165,6 +166,10 @@ pub struct Blueprint {
 
     /// Whether to set `cluster.preserve_downgrade_option` and what to set it to
     pub cockroachdb_setting_preserve_downgrade: CockroachDbPreserveDowngrade,
+
+    /// Allocation of Clickhouse Servers and Keepers for replicated clickhouse
+    /// setups. This is set to `None` if replicated clickhouse is not in use.
+    pub clickhouse_cluster_config: Option<ClickhouseClusterConfig>,
 
     /// when this blueprint was generated (for debugging)
     pub time_created: chrono::DateTime<chrono::Utc>,
@@ -286,11 +291,9 @@ impl Blueprint {
             .collect();
 
         let before_zones = before
-            .omicron_zones
+            .sled_agents
             .iter()
-            .map(|(sled_id, zones_found)| {
-                (*sled_id, zones_found.zones.clone().into())
-            })
+            .map(|(sled_id, sa)| (*sled_id, sa.omicron_zones.clone().into()))
             .collect();
 
         let before_disks = before

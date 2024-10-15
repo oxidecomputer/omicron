@@ -839,6 +839,7 @@ impl SledAgent {
                 self.config.hardware.reservoir_ram,
             )
             .context("reservoir_size")?,
+            omicron_zones: self.fake_zones.lock().await.clone(),
             disks: storage
                 .physical_disks()
                 .values()
@@ -957,7 +958,12 @@ impl SledAgent {
                 {
                     continue;
                 }
-                _ => {}
+                _ => {
+                    println!(
+                        "sled {} successfully installed routes {new:?}",
+                        self.id
+                    );
+                }
             };
 
             routes.insert(

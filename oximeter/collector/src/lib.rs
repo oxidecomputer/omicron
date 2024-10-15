@@ -11,7 +11,7 @@ use dropshot::ConfigLogging;
 use dropshot::HttpError;
 use dropshot::HttpServer;
 use dropshot::HttpServerStarter;
-use internal_dns::ServiceName;
+use internal_dns_types::names::ServiceName;
 use omicron_common::address::get_internal_dns_server_addresses;
 use omicron_common::address::DNS_PORT;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
