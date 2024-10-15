@@ -119,6 +119,13 @@ system_name = "system name override"
 system_description = "system description override"
 port_description = "port description override"
 
+[rack_network_config.switch0.port0.tx_eq]
+pre1 = 0
+pre2 = 0
+main = 26
+post1 = 0
+post2 = 0
+
 [rack_network_config.switch1.port0]
 routes = [{ nexthop = "172.33.0.10", destination = "0.0.0.0/0", vlan_id = 1 }]
 addresses = [{ address = "172.32.0.1/24" }]
@@ -147,6 +154,13 @@ system_name = "system name override"
 system_description = "system description override"
 port_description = "port description override"
 management_addrs = ["172.32.0.4"]
+
+[rack_network_config.switch1.port0.tx_eq]
+pre1 = 0
+pre2 = 0
+main = 26
+post1 = 0
+post2 = 0
 
 [[rack_network_config.bgp]]
 asn = 47

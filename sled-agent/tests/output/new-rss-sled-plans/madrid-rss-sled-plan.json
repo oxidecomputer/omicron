@@ -144,7 +144,8 @@
           "uplink_port_fec": "none",
           "bgp_peers": [],
           "autoneg": false,
-          "lldp": null
+          "lldp": null,
+          "tx_eq": null
         },
         {
           "routes": [
@@ -167,7 +168,8 @@
           "uplink_port_fec": "none",
           "bgp_peers": [],
           "autoneg": false,
-          "lldp": null
+          "lldp": null,
+          "tx_eq": null
         }
       ],
       "bgp": [],
