@@ -7,13 +7,12 @@
 
 use std::sync::Arc;
 
-use camino::Utf8Path;
 use camino_tempfile::Utf8TempDir;
 use futures::lock::Mutex;
-use omicron_common::disk::DatasetsConfig;
+use sled_storage::error::Error as StorageError;
 
 use super::storage::Storage;
-use crate::artifact_store::{Error, StorageBackend};
+use crate::artifact_store::DatasetsManager;
 
 pub(super) struct SimArtifactStorage {
     root: Utf8TempDir,
@@ -29,17 +28,21 @@ impl SimArtifactStorage {
     }
 }
 
-impl StorageBackend for SimArtifactStorage {
-    async fn datasets_config_list(&self) -> Result<DatasetsConfig, Error> {
-        self.backend
+impl DatasetsManager for SimArtifactStorage {
+    async fn artifact_storage_paths(
+        &self,
+    ) -> Result<impl Iterator<Item = camino::Utf8PathBuf> + '_, StorageError>
+    {
+        let config = self
+            .backend
             .lock()
             .await
             .datasets_config_list()
             .await
-            .map_err(|_| Error::NoUpdateDataset)
-    }
-
-    fn mountpoint_root(&self) -> &Utf8Path {
-        self.root.path()
+            .map_err(|_| StorageError::LedgerNotFound)?;
+        Ok(crate::artifact_store::filter_dataset_mountpoints(
+            config,
+            self.root.path(),
+        ))
     }
 }

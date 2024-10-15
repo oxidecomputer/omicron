@@ -31,6 +31,7 @@ use omicron_common::disk::{DatasetKind, DatasetsConfig};
 use omicron_common::update::ArtifactHash;
 use repo_depot_api::*;
 use sha2::{Digest, Sha256};
+use sled_storage::error::Error as StorageError;
 use sled_storage::manager::StorageHandle;
 use slog::{error, info, Logger};
 use tokio::fs::File;
@@ -41,7 +42,7 @@ const TEMP_SUBDIR: &str = "tmp";
 /// Content-addressable local storage for software artifacts.
 ///
 /// Storage for artifacts is backed by datasets that are explicitly designated
-/// for this purpose. The `T: StorageBackend` parameter, which varies between
+/// for this purpose. The `T: DatasetsManager` parameter, which varies between
 /// the real sled agent, the simulated sled agent, and unit tests, specifies
 /// exactly which datasets are available for artifact storage. That's the only
 /// thing `T` is used for. The behavior of storing artifacts as files under
@@ -57,12 +58,12 @@ const TEMP_SUBDIR: &str = "tmp";
 /// - for DELETE, we attempt to delete it from every dataset (even after we've
 ///   found it in one of them)
 #[derive(Clone)]
-pub(crate) struct ArtifactStore<T: StorageBackend> {
+pub(crate) struct ArtifactStore<T: DatasetsManager> {
     log: Logger,
     storage: T,
 }
 
-impl<T: StorageBackend> ArtifactStore<T> {
+impl<T: DatasetsManager> ArtifactStore<T> {
     pub(crate) fn new(log: &Logger, storage: T) -> ArtifactStore<T> {
         ArtifactStore {
             log: log.new(slog::o!("component" => "ArtifactStore")),
@@ -78,28 +79,20 @@ impl ArtifactStore<StorageHandle> {
         dropshot_config: &ConfigDropshot,
     ) -> Result<dropshot::HttpServer<ArtifactStore<StorageHandle>>, StartError>
     {
-        // This function is only called when the real Sled Agent starts up (it
-        // is only defined over `ArtifactStore<StorageHandle>`). In the real
-        // Sled Agent, these datasets are durable and may retain temporary
-        // files leaked during a crash. Upon startup, we attempt to remove the
-        // subdirectory we store temporary files in, logging an error if that
-        // fails.
-
-        // This `datasets_config_list` call is clear enough to the
-        // compiler, but perhaps not to the person reading this code,
-        // because there's two relevant methods in scope: the concrete
-        // `StorageHandle::datasets_config_list` (because T = StorageHandle) and
-        // the generic `<StorageHandle as StorageBackend>::datasets_config_list`.
-        // The reason the concrete function is selected is because these
-        // functions return two different error types, and the `.map_err`
-        // implies that we want a `sled_storage::error::Error`.
-        let config = self
+        // In the real sled agent, the update datasets are durable and may
+        // retain temporary files leaked during a crash. Upon startup, we
+        // attempt to remove the subdirectory we store temporary files in,
+        // logging an error if that fails.
+        //
+        // (This function is part of `start` instead of `new` out of
+        // convenience: this function already needs to be async and fallible,
+        // but `new` doesn't; and all the sled agent implementations that don't
+        // call this function also don't need to run cleanup.)
+        for mountpoint in self
             .storage
-            .datasets_config_list()
+            .artifact_storage_paths()
             .await
-            .map_err(StartError::DatasetConfig)?;
-        for mountpoint in
-            filter_dataset_mountpoints(config, ZPOOL_MOUNTPOINT_ROOT.into())
+            .map_err(StartError::DatasetConfig)?
         {
             let path = mountpoint.join(TEMP_SUBDIR);
             if let Err(err) = tokio::fs::remove_dir_all(&path).await {
@@ -149,7 +142,7 @@ pub enum StartError {
     Dropshot(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
-impl<T: StorageBackend> ArtifactStore<T> {
+impl<T: DatasetsManager> ArtifactStore<T> {
     /// GET operation (served by Repo Depot API)
     pub(crate) async fn get(
         &self,
@@ -157,7 +150,7 @@ impl<T: StorageBackend> ArtifactStore<T> {
     ) -> Result<File, Error> {
         let sha256 = sha256.to_string();
         let mut last_error = None;
-        for mountpoint in self.dataset_mountpoints().await? {
+        for mountpoint in self.storage.artifact_storage_paths().await? {
             let path = mountpoint.join(&sha256);
             match File::open(&path).await {
                 Ok(file) => {
@@ -196,7 +189,8 @@ impl<T: StorageBackend> ArtifactStore<T> {
         stream: impl Stream<Item = Result<impl AsRef<[u8]>, Error>>,
     ) -> Result<(), Error> {
         let mountpoint = self
-            .dataset_mountpoints()
+            .storage
+            .artifact_storage_paths()
             .await?
             .next()
             .ok_or(Error::NoUpdateDataset)?;
@@ -329,7 +323,7 @@ impl<T: StorageBackend> ArtifactStore<T> {
         let sha256 = sha256.to_string();
         let mut any_datasets = false;
         let mut last_error = None;
-        for mountpoint in self.dataset_mountpoints().await? {
+        for mountpoint in self.storage.artifact_storage_paths().await? {
             any_datasets = true;
             let path = mountpoint.join(&sha256);
             match tokio::fs::remove_file(&path).await {
@@ -364,16 +358,19 @@ impl<T: StorageBackend> ArtifactStore<T> {
             Err(Error::NoUpdateDataset)
         }
     }
-
-    async fn dataset_mountpoints(
-        &self,
-    ) -> Result<impl Iterator<Item = Utf8PathBuf> + '_, Error> {
-        let config = self.storage.datasets_config_list().await?;
-        Ok(filter_dataset_mountpoints(config, self.storage.mountpoint_root()))
-    }
 }
 
-fn filter_dataset_mountpoints(
+/// Abstracts over what kind of sled agent we are; each of the real sled agent,
+/// simulated sled agent, and this module's unit tests have different ways of
+/// keeping track of the datasets on the system.
+pub(crate) trait DatasetsManager {
+    async fn artifact_storage_paths(
+        &self,
+    ) -> Result<impl Iterator<Item = Utf8PathBuf> + '_, StorageError>;
+}
+
+/// Iterator `.filter().map()` common to `DatasetsManager` implementations.
+pub(crate) fn filter_dataset_mountpoints(
     config: DatasetsConfig,
     root: &Utf8Path,
 ) -> impl Iterator<Item = Utf8PathBuf> + '_ {
@@ -382,6 +379,15 @@ fn filter_dataset_mountpoints(
         .into_values()
         .filter(|dataset| *dataset.name.dataset() == DatasetKind::Update)
         .map(|dataset| dataset.name.mountpoint(root))
+}
+
+impl DatasetsManager for StorageHandle {
+    async fn artifact_storage_paths(
+        &self,
+    ) -> Result<impl Iterator<Item = Utf8PathBuf> + '_, StorageError> {
+        let config = self.datasets_config_list().await?;
+        Ok(filter_dataset_mountpoints(config, ZPOOL_MOUNTPOINT_ROOT.into()))
+    }
 }
 
 enum RepoDepotImpl {}
@@ -409,7 +415,7 @@ pub(crate) enum Error {
     Body(dropshot::HttpError),
 
     #[error("Error retrieving dataset configuration: {0}")]
-    DatasetConfig(#[source] sled_storage::error::Error),
+    DatasetConfig(#[from] sled_storage::error::Error),
 
     #[error(
         "Error fetching artifact {sha256} from depot at {base_url}: {err}"
@@ -462,24 +468,8 @@ impl From<Error> for HttpError {
     }
 }
 
-pub(crate) trait StorageBackend {
-    async fn datasets_config_list(&self) -> Result<DatasetsConfig, Error>;
-    fn mountpoint_root(&self) -> &Utf8Path;
-}
-
-impl StorageBackend for StorageHandle {
-    async fn datasets_config_list(&self) -> Result<DatasetsConfig, Error> {
-        self.datasets_config_list().await.map_err(Error::DatasetConfig)
-    }
-
-    fn mountpoint_root(&self) -> &Utf8Path {
-        ZPOOL_MOUNTPOINT_ROOT.into()
-    }
-}
-
 #[cfg(test)]
 mod test {
-    use camino::Utf8Path;
     use camino_tempfile::Utf8TempDir;
     use futures::stream;
     use hex_literal::hex;
@@ -490,9 +480,10 @@ mod test {
     use omicron_common::zpool_name::ZpoolName;
     use omicron_test_utils::dev::test_setup_log;
     use omicron_uuid_kinds::{DatasetUuid, ZpoolUuid};
+    use sled_storage::error::Error as StorageError;
     use tokio::io::AsyncReadExt;
 
-    use super::{ArtifactStore, Error, StorageBackend};
+    use super::{ArtifactStore, DatasetsManager, Error};
 
     struct TestBackend {
         datasets: DatasetsConfig,
@@ -528,13 +519,15 @@ mod test {
         }
     }
 
-    impl StorageBackend for TestBackend {
-        async fn datasets_config_list(&self) -> Result<DatasetsConfig, Error> {
-            Ok(self.datasets.clone())
-        }
-
-        fn mountpoint_root(&self) -> &Utf8Path {
-            self.mountpoint_root.path()
+    impl DatasetsManager for TestBackend {
+        async fn artifact_storage_paths(
+            &self,
+        ) -> Result<impl Iterator<Item = camino::Utf8PathBuf> + '_, StorageError>
+        {
+            Ok(super::filter_dataset_mountpoints(
+                self.datasets.clone(),
+                self.mountpoint_root.path(),
+            ))
         }
     }
 
