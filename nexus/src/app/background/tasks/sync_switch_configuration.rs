@@ -1470,11 +1470,11 @@ fn uplinks(
             None
         } else if let Some(x) = &config.tx_eq[0] {
             Some(TxEqConfig {
-		    pre1: x.pre1.map(|p| p.into()),
-		    pre2: x.pre2.map(|p| p.into()),
-		    main: x.main.map(|p| p.into()),
-		    post2: x.post2.map(|p| p.into()),
-		    post1: x.post1.map(|p| p.into()),
+		    pre1: x.pre1,
+		    pre2: x.pre2,
+		    main: x.main,
+		    post2: x.post2,
+		    post1: x.post1,
 	    })
 	} else {
 	    None

@@ -481,7 +481,7 @@ impl DataStore {
                 let tx_eq_ids: Vec<Uuid> = tx_eq_ids_and_nulls
                     .iter()
 		    .cloned()
-                    .filter_map(|c| c)
+                    .flatten()
                     .collect();
 
                 use db::schema::tx_eq_config;
@@ -1212,13 +1212,8 @@ async fn do_switch_port_settings_create(
 
         let tx_eq_config_id = match &c.tx_eq {
             Some(t) => {
-                let config = TxEqConfig::new(
-                    t.pre1.map(|s| s.into()),
-                    t.pre2.map(|s| s.into()),
-                    t.main.map(|s| s.into()),
-                    t.post2.map(|s| s.into()),
-                    t.post1.map(|s| s.into()),
-                );
+                let config =
+                    TxEqConfig::new(t.pre1, t.pre2, t.main, t.post2, t.post1);
                 let tx_eq_config_id = config.id;
                 tx_eq_config.push(Some(config));
                 Some(tx_eq_config_id)
@@ -1249,8 +1244,7 @@ async fn do_switch_port_settings_create(
 
     // We want to insert the Some(config) values into the table, but preserve the
     // full vector of None/Some values.
-    let v: Vec<TxEqConfig> =
-        tx_eq_config.iter().cloned().filter_map(|c| c).collect();
+    let v: Vec<TxEqConfig> = tx_eq_config.iter().flatten().cloned().collect();
     let _ = diesel::insert_into(tx_eq_config_dsl::tx_eq_config)
         .values(v)
         .returning(TxEqConfig::as_returning())

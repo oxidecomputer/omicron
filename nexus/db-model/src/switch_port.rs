@@ -392,6 +392,7 @@ pub struct SwitchPortLinkConfig {
 }
 
 impl SwitchPortLinkConfig {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         port_settings_id: Uuid,
         lldp_link_config_id: Uuid,
