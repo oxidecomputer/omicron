@@ -127,8 +127,8 @@ pub trait IncompleteOnConflictExt {
     /// _logically implies_ the condition on the partial index. With something
     /// like `time_deleted IS NULL` the value of that is not exactly clear, but
     /// you can imagine a partial index on something like `col >= 10`, and
-    /// write `ON CONFLICT (...) WHERE col >= 20`. This is allowed because `col
-    /// >= 20` implies `col >= 10`. (But `WHERE col >= 5` is not allowed.)
+    /// write `ON CONFLICT (...) WHERE col >= 20`. This is allowed because
+    /// `col >= 20` implies `col >= 10`. (But `WHERE col >= 5` is not allowed.)
     ///
     /// ## 4. A similar syntax with a different meaning
     ///
