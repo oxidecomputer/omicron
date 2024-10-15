@@ -5991,6 +5991,42 @@
           }
         ]
       },
+      "TxEqConfig": {
+        "description": "Per-port tx-eq overrides.  This can be used to fine-tune the transceiver equalization settings to improve signal integrity.",
+        "type": "object",
+        "properties": {
+          "main": {
+            "nullable": true,
+            "description": "Main tap",
+            "type": "integer",
+            "format": "int32"
+          },
+          "post1": {
+            "nullable": true,
+            "description": "Post-cursor tap1",
+            "type": "integer",
+            "format": "int32"
+          },
+          "post2": {
+            "nullable": true,
+            "description": "Post-cursor tap2",
+            "type": "integer",
+            "format": "int32"
+          },
+          "pre1": {
+            "nullable": true,
+            "description": "Pre-cursor tap1",
+            "type": "integer",
+            "format": "int32"
+          },
+          "pre2": {
+            "nullable": true,
+            "description": "Pre-cursor tap2",
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
       "TypedUuidForRackInitKind": {
         "type": "string",
         "format": "uuid"
@@ -6629,6 +6665,15 @@
             "items": {
               "$ref": "#/components/schemas/RouteConfig"
             }
+          },
+          "tx_eq": {
+            "nullable": true,
+            "default": null,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TxEqConfig"
+              }
+            ]
           },
           "uplink_port_fec": {
             "$ref": "#/components/schemas/PortFec"

@@ -31,6 +31,7 @@ progenitor::generate_api!(
         BgpConfig = { derives = [Eq, Hash] },
         BgpPeerConfig = { derives = [Eq, Hash] },
         LldpPortConfig = { derives = [Eq, Hash, PartialOrd, Ord] },
+        TxEqConfig = { derives = [Eq, Hash] },
         OmicronPhysicalDiskConfig = { derives = [Eq, Hash, PartialOrd, Ord] },
         PortConfigV2 = { derives = [Eq, Hash] },
         RouteConfig = { derives = [Eq, Hash] },

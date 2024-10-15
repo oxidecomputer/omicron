@@ -322,6 +322,7 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
         autoneg,
         bgp_peers,
         lldp,
+        tx_eq,
     } = cfg;
 
     let mut uplink = Table::new();
@@ -531,6 +532,26 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
             );
         }
         uplink.insert("lldp", Item::Table(lldp));
+    }
+
+    if let Some(t) = tx_eq {
+        let mut tx_eq = Table::new();
+        if let Some(x) = t.pre2 {
+            tx_eq.insert("pre1", string_item(x));
+        }
+        if let Some(x) = t.pre1 {
+            tx_eq.insert("pre1", string_item(x));
+        }
+        if let Some(x) = t.main {
+            tx_eq.insert("main", string_item(x));
+        }
+        if let Some(x) = t.post1 {
+            tx_eq.insert("post1", string_item(x));
+        }
+        if let Some(x) = t.post2 {
+            tx_eq.insert("post2", string_item(x));
+        }
+        uplink.insert("tx_eq", Item::Table(tx_eq));
     }
 
     uplink

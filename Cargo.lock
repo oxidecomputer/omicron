@@ -8609,7 +8609,7 @@ dependencies = [
 [[package]]
 name = "propolis_api_types"
 version = "0.0.0"
-source = "git+https://github.com/oxidecomputer/propolis?rev=fae5334bcad5e864794332c6fed5e6bb9ec88831#fae5334bcad5e864794332c6fed5e6bb9ec88831"
+source = "git+https://github.com/oxidecomputer/propolis?rev=11371b0f3743f8df5b047dc0edc2699f4bdf3927#11371b0f3743f8df5b047dc0edc2699f4bdf3927"
 dependencies = [
  "crucible-client-types",
  "propolis_types",

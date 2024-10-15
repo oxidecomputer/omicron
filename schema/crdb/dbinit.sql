@@ -2743,6 +2743,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.switch_port_settings_link_config (
     speed omicron.public.switch_link_speed,
     autoneg BOOL NOT NULL DEFAULT false,
     lldp_link_config_id UUID,
+    tx_eq_config_id UUID,
 
     PRIMARY KEY (port_settings_id, link_name)
 );
@@ -2759,6 +2760,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.lldp_link_config (
     time_created TIMESTAMPTZ NOT NULL,
     time_modified TIMESTAMPTZ NOT NULL,
     time_deleted TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.tx_eq_config (
+    id UUID PRIMARY KEY,
+    pre1 INT4,
+    pre2 INT4,
+    main INT4,
+    post2 INT4,
+    post1 INT4
 );
 
 CREATE TYPE IF NOT EXISTS omicron.public.switch_interface_kind AS ENUM (
@@ -4421,7 +4431,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '107.0.0', NULL)
+    (TRUE, NOW(), NOW(), '108.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;
