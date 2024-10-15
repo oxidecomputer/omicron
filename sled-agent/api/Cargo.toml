@@ -11,6 +11,7 @@ workspace = true
 camino.workspace = true
 chrono.workspace = true
 dropshot.workspace = true
+http.workspace = true
 nexus-sled-agent-shared.workspace = true
 omicron-common.workspace = true
 omicron-uuid-kinds.workspace = true

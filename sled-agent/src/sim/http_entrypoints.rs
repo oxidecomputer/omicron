@@ -405,17 +405,20 @@ impl SledAgentApi for SledAgentSimImpl {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<SupportBundlePathParam>,
         _body: TypedBody<SupportBundleGetQueryParams>,
-    ) -> Result<HttpResponseHeaders<HttpResponseOk<FreeformBody>>, HttpError>
-    {
+    ) -> Result<http::Response<dropshot::Body>, HttpError> {
         let sa = rqctx.context();
         let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
             path_params.into_inner();
 
         sa.support_bundle_get(zpool_id, dataset_id, support_bundle_id).await?;
 
-        let body = FreeformBody("simulated support bundle; do not eat".into());
-        let response = HttpResponseHeaders::new_unnamed(HttpResponseOk(body));
-        Ok(response)
+        Ok(http::Response::builder()
+            .status(http::StatusCode::OK)
+            .header(http::header::CONTENT_TYPE, "text/html")
+            .body(dropshot::Body::with_content(
+                "simulated support bundle; do not eat",
+            ))
+            .unwrap())
     }
 
     async fn support_bundle_delete(

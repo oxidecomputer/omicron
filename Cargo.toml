@@ -389,6 +389,7 @@ highway = "1.2.0"
 hkdf = "0.12.4"
 http = "1.1.0"
 http-body-util = "0.1.2"
+http-range = "0.1.5"
 httpmock = "0.8.0-alpha.1"
 httptest = "0.16.1"
 hubtools = { git = "https://github.com/oxidecomputer/hubtools.git", branch = "main" }
@@ -631,7 +632,7 @@ wicket-common = { path = "wicket-common" }
 wicketd-api = { path = "wicketd-api" }
 wicketd-client = { path = "clients/wicketd-client" }
 zeroize = { version = "1.8.1", features = ["zeroize_derive", "std"] }
-zip = { version = "0.6.6", default-features = false, features = ["deflate","bzip2"] }
+zip = { version = "2.2.0", default-features = false, features = ["deflate","bzip2"] }
 zone = { version = "0.3", default-features = false, features = ["async"] }
 
 # newtype-uuid is set to default-features = false because we don't want to

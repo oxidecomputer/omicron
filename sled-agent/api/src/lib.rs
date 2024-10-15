@@ -6,7 +6,7 @@ use std::{collections::BTreeMap, time::Duration};
 
 use camino::Utf8PathBuf;
 use dropshot::{
-    FreeformBody, HttpError, HttpResponseCreated, HttpResponseDeleted,
+    Body, FreeformBody, HttpError, HttpResponseCreated, HttpResponseDeleted,
     HttpResponseHeaders, HttpResponseOk, HttpResponseUpdatedNoContent, Path,
     Query, RequestContext, StreamingBody, TypedBody,
 };
@@ -188,7 +188,7 @@ pub trait SledAgentApi {
         rqctx: RequestContext<Self::Context>,
         path_params: Path<SupportBundlePathParam>,
         body: TypedBody<SupportBundleGetQueryParams>,
-    ) -> Result<HttpResponseHeaders<HttpResponseOk<FreeformBody>>, HttpError>;
+    ) -> Result<http::Response<Body>, HttpError>;
 
     /// Delete a service bundle from a particular dataset
     #[endpoint {
@@ -619,6 +619,11 @@ pub struct SupportBundleFilePathParam {
 #[derive(Deserialize, Serialize, JsonSchema)]
 pub struct SupportBundleCreateQueryParams {
     pub hash: ArtifactHash,
+}
+
+#[derive(Deserialize, Serialize, JsonSchema)]
+pub struct SupportBundleGetHeaders {
+    range: String,
 }
 
 /// Query parameters for reading the support bundle

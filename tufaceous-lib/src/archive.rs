@@ -14,7 +14,10 @@ use std::{
     fmt,
     io::{BufReader, BufWriter, Cursor, Read, Seek},
 };
-use zip::{write::FileOptions, CompressionMethod, ZipArchive, ZipWriter};
+use zip::{
+    write::{FileOptions, SimpleFileOptions},
+    CompressionMethod, ZipArchive, ZipWriter,
+};
 
 /// A builder for TUF repo archives.
 #[derive(Debug)]
@@ -65,18 +68,20 @@ impl ArchiveBuilder {
         Ok(())
     }
 
-    pub fn finish(mut self) -> Result<()> {
-        let zip_file = self.writer.finish().with_context(|| {
-            format!("error finalizing archive at `{}`", self.output_path)
+    pub fn finish(self) -> Result<()> {
+        let Self { writer, output_path } = self;
+
+        let zip_file = writer.0.finish().with_context(|| {
+            format!("error finalizing archive at `{}`", output_path)
         })?;
         zip_file.into_inner().with_context(|| {
-            format!("error writing archive at `{}`", self.output_path)
+            format!("error writing archive at `{}`", output_path)
         })?;
 
         Ok(())
     }
 
-    fn file_options() -> FileOptions {
+    fn file_options() -> SimpleFileOptions {
         // The main purpose of the zip archive is to transmit archives that are
         // already compressed, so there's no point trying to re-compress them.
         FileOptions::default().compression_method(CompressionMethod::Stored)

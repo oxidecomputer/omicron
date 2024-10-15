@@ -37,6 +37,7 @@ glob.workspace = true
 hex.workspace = true
 http.workspace = true
 http-body-util.workspace = true
+http-range.workspace = true
 hyper.workspace = true
 hyper-staticfile.workspace = true
 gateway-client.workspace = true

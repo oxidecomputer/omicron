@@ -574,7 +574,7 @@
     },
     "/support-bundles/{zpool_id}/{dataset_id}/{support_bundle_id}": {
       "get": {
-        "summary": "Fetch a whole service bundle from a particular dataset",
+        "summary": "Fetch a service bundle from a particular dataset",
         "operationId": "support_bundle_get",
         "parameters": [
           {
@@ -616,19 +616,13 @@
           "required": true
         },
         "responses": {
-          "200": {
+          "default": {
             "description": "",
             "content": {
               "*/*": {
                 "schema": {}
               }
             }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
           }
         }
       },
