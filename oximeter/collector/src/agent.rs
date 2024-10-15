@@ -21,7 +21,7 @@ use omicron_common::backoff::BackoffError;
 use oximeter::types::ProducerResults;
 use oximeter::types::ProducerResultsItem;
 use oximeter_db::Client;
-use oximeter_db::DbWrite;
+use oximeter_db::{DbInit, DbWrite};
 use qorb::claim::Handle;
 use qorb::pool::Pool;
 use qorb::resolver::BoxedResolver;

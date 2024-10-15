@@ -13,6 +13,7 @@ pub(crate) mod query_summary;
 #[cfg(any(feature = "sql", test))]
 mod sql;
 
+pub use self::dbwrite::DbInit;
 pub use self::dbwrite::DbWrite;
 pub use self::dbwrite::TestDbWrite;
 use crate::client::query_summary::QuerySummary;
@@ -26,6 +27,7 @@ use crate::TimeseriesPageSelector;
 use crate::TimeseriesScanParams;
 use crate::TimeseriesSchema;
 use anyhow::anyhow;
+use anyhow::Context;
 use debug_ignore::DebugIgnore;
 use dropshot::EmptyScanParams;
 use dropshot::PaginationOrder;
@@ -97,6 +99,7 @@ impl backend::Connector for ReqwestConnector {
             client: reqwest::Client::builder()
                 .pool_max_idle_per_host(1)
                 .build()
+                .context("can't connect to database")
                 .map_err(|e| QorbError::Other(anyhow!(e)))?,
             url: format!("http://{}", backend.address),
         })
@@ -111,10 +114,23 @@ impl backend::Connector for ReqwestConnector {
                 .get(format!("{}/ping", conn.url))
                 .send()
                 .await
-                .map_err(|err| QorbError::Other(anyhow!(err.to_string())))?,
+                .context("can't ping database")
+                .map_err(|e| QorbError::Other(anyhow!(e)))?,
         )
         .await
         .map_err(|e| QorbError::Other(anyhow!(e)))?;
+        Ok(())
+    }
+
+    async fn on_acquire(
+        &self,
+        conn: &mut Self::Connection,
+    ) -> Result<(), backend::Error> {
+        let replicated = false; // TODO
+        conn.init_db(replicated, model::OXIMETER_VERSION)
+            .await
+            .context("can't initialize database")
+            .map_err(|e| QorbError::Other(anyhow!(e)))?;
         Ok(())
     }
 }
@@ -123,6 +139,167 @@ impl backend::Connector for ReqwestConnector {
 pub(crate) struct ReqwestClient {
     url: String,
     client: reqwest::Client,
+}
+
+/// If we acquire a connection to a fresh database, we must ensure that
+/// it is initialized (i.e., that the database exists and has the current
+/// schema) before we can insert samples into it. These methods currently
+/// duplicate the work of the [Client] database initialization, but with
+/// somewhat simpler machinery.
+///
+/// TODO: De-duplicate with [Client] `impl`.
+impl ReqwestClient {
+    /// Ensure that the acquired database exists and is up-to-date.
+    async fn init_db(
+        &self,
+        replicated: bool,
+        expected_version: u64,
+    ) -> Result<(), Error> {
+        // Read the version from the DB
+        let version = self.read_latest_version().await?;
+
+        // Decide how to conform the on-disk version with this version of
+        // Oximeter.
+        if version < expected_version {
+            // If the on-storage version is less than the constant embedded into
+            // this binary, the DB is out-of-date. Drop it, and re-populate it
+            // later.
+            if !replicated {
+                self.wipe_single_node_db().await?;
+                self.init_single_node_db().await?;
+            } else {
+                self.wipe_replicated_db().await?;
+                self.init_replicated_db().await?;
+            }
+        } else if version > expected_version {
+            // If the on-storage version is greater than the constant embedded
+            // into this binary, we may have downgraded.
+            return Err(Error::DatabaseVersionMismatch {
+                expected: model::OXIMETER_VERSION,
+                found: version,
+            });
+        } else {
+            // If the version matches, we don't need to update the DB
+            return Ok(());
+        }
+
+        self.insert_version(expected_version).await?;
+        Ok(())
+    }
+
+    /// Read the latest version applied in the database.
+    pub async fn read_latest_version(&self) -> Result<u64, Error> {
+        let sql = format!(
+            "SELECT MAX(value) FROM {db_name}.version;",
+            db_name = crate::DATABASE_NAME,
+        );
+
+        let version = match self.execute(sql).await {
+            Ok(body) if body.is_empty() => 0,
+            Ok(body) => body.trim().parse::<u64>().map_err(|err| {
+                Error::Database(format!("Cannot read version: {err}"))
+            })?,
+            Err(Error::Database(err))
+                // Case 1: The database has not been created.
+                if err.contains(CLICKHOUSE_DB_MISSING) ||
+                // Case 2: The database has been created, but it's old (exists
+                // prior to the version table).
+                    err.contains(CLICKHOUSE_DB_VERSION_MISSING) => 0,
+            Err(err) => return Err(err),
+        };
+        Ok(version)
+    }
+
+    async fn insert_version(&self, version: u64) -> Result<(), Error> {
+        let sql = format!(
+            "INSERT INTO {db_name}.version (*) VALUES ({version}, now());",
+            db_name = crate::DATABASE_NAME,
+        );
+        self.execute(sql).await?;
+        Ok(())
+    }
+
+    /// Execute a SQL statement, awaiting the response as text.
+    ///
+    /// This is intended only to be used for initializing the database.
+    /// It does not implement the logging, probing, or query summarization
+    /// of [`Client::execute_with_body`].
+    async fn execute(&self, sql: String) -> Result<String, Error> {
+        let response = self
+            .client
+            .post(&self.url)
+            .timeout(DEFAULT_REQUEST_TIMEOUT)
+            .query(&[("output_format_json_quote_64bit_integers", "0")])
+            .body(sql)
+            .send()
+            .await
+            .map_err(|err| Error::DatabaseUnavailable(err.to_string()))?;
+
+        // Convert the HTTP response into a database response.
+        let response = handle_db_response(response).await?;
+        response.text().await.map_err(|err| Error::Database(err.to_string()))
+    }
+
+    /// Run one or more SQL statements.
+    ///
+    /// This is intended only to be used for initializing the database.
+    async fn run_many_sql_statements(
+        &self,
+        sql: impl AsRef<str>,
+    ) -> Result<(), Error> {
+        for stmt in sql.as_ref().split(';').filter(|s| !s.trim().is_empty()) {
+            self.execute(stmt.to_string()).await?;
+        }
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl DbInit for ReqwestClient {
+    /// Initialize the replicated telemetry database, creating tables as needed.
+    ///
+    /// We run both db-init files since we want all tables in production.
+    /// These files are intentionally disjoint so that we don't have to
+    /// duplicate any setup.
+    async fn init_replicated_db(&self) -> Result<(), Error> {
+        self.run_many_sql_statements(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/schema/replicated/db-init-1.sql"
+        )))
+        .await?;
+        self.run_many_sql_statements(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/schema/replicated/db-init-2.sql"
+        )))
+        .await
+    }
+
+    /// Wipe the ClickHouse database entirely from a replicated set up.
+    async fn wipe_replicated_db(&self) -> Result<(), Error> {
+        self.run_many_sql_statements(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/schema/replicated/db-wipe.sql"
+        )))
+        .await
+    }
+
+    /// Initialize a single node telemetry database, creating tables as needed.
+    async fn init_single_node_db(&self) -> Result<(), Error> {
+        self.run_many_sql_statements(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/schema/single-node/db-init.sql"
+        )))
+        .await
+    }
+
+    /// Wipe the ClickHouse database entirely from a single node set up.
+    async fn wipe_single_node_db(&self) -> Result<(), Error> {
+        self.run_many_sql_statements(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/schema/single-node/db-wipe.sql"
+        )))
+        .await
+    }
 }
 
 #[derive(Debug)]

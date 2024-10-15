@@ -24,17 +24,9 @@ pub(super) struct UnrolledSampleRows {
     pub rows: BTreeMap<String, Vec<String>>,
 }
 
-/// A trait allowing a [`Client`] to write data into the timeseries database.
-///
-/// The vanilla [`Client`] object allows users to query the timeseries database, returning
-/// timeseries samples corresponding to various filtering criteria. This trait segregates the
-/// methods required for _writing_ new data into the database, and is intended only for use by the
-/// `oximeter-collector` crate.
+/// A trait allowing a client to initialize the timeseries database.
 #[async_trait::async_trait]
-pub trait DbWrite {
-    /// Insert the given samples into the database.
-    async fn insert_samples(&self, samples: &[Sample]) -> Result<(), Error>;
-
+pub trait DbInit {
     /// Initialize the replicated telemetry database, creating tables as needed.
     async fn init_replicated_db(&self) -> Result<(), Error>;
 
@@ -49,16 +41,7 @@ pub trait DbWrite {
 }
 
 #[async_trait::async_trait]
-impl DbWrite for Client {
-    /// Insert the given samples into the database.
-    async fn insert_samples(&self, samples: &[Sample]) -> Result<(), Error> {
-        debug!(self.log, "unrolling {} total samples", samples.len());
-        let UnrolledSampleRows { new_schema, rows } =
-            self.unroll_samples(samples).await;
-        self.save_new_schema_or_remove(new_schema).await?;
-        self.insert_unrolled_samples(rows).await
-    }
-
+impl DbInit for Client {
     /// Initialize the replicated telemetry database, creating tables as needed.
     ///
     /// We run both db-init files since we want all tables in production.
@@ -106,6 +89,30 @@ impl DbWrite for Client {
             "/schema/single-node/db-wipe.sql"
         )))
         .await
+    }
+}
+
+/// A trait allowing a [`Client`] to write data into the timeseries database.
+///
+/// The vanilla [`Client`] object allows users to query the timeseries database, returning
+/// timeseries samples corresponding to various filtering criteria. This trait segregates the
+/// methods required for _writing_ new data into the database, and is intended only for use by the
+/// `oximeter-collector` crate.
+#[async_trait::async_trait]
+pub trait DbWrite {
+    /// Insert the given samples into the database.
+    async fn insert_samples(&self, samples: &[Sample]) -> Result<(), Error>;
+}
+
+#[async_trait::async_trait]
+impl DbWrite for Client {
+    /// Insert the given samples into the database.
+    async fn insert_samples(&self, samples: &[Sample]) -> Result<(), Error> {
+        debug!(self.log, "unrolling {} total samples", samples.len());
+        let UnrolledSampleRows { new_schema, rows } =
+            self.unroll_samples(samples).await;
+        self.save_new_schema_or_remove(new_schema).await?;
+        self.insert_unrolled_samples(rows).await
     }
 }
 

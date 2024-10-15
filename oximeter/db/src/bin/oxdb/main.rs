@@ -14,7 +14,7 @@ use oximeter::{
     types::{Cumulative, Sample},
     Metric, Target,
 };
-use oximeter_db::{make_client, query, Client, DbWrite};
+use oximeter_db::{make_client, query, Client, DbInit, DbWrite};
 use slog::{debug, info, o, Drain, Level, Logger};
 use std::net::IpAddr;
 use uuid::Uuid;

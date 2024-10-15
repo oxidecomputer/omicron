@@ -7,7 +7,7 @@ use clickward::{BasePorts, Deployment, DeploymentConfig, KeeperId};
 use dropshot::test_util::log_prefix_for_test;
 use omicron_test_utils::dev::poll;
 use omicron_test_utils::dev::test_setup_log;
-use oximeter_db::{Client, DbWrite, OxqlResult, Sample, TestDbWrite};
+use oximeter_db::{Client, DbInit, DbWrite, OxqlResult, Sample, TestDbWrite};
 use oximeter_test_utils::wait_for_keepers;
 use slog::{info, Logger};
 use std::collections::BTreeSet;

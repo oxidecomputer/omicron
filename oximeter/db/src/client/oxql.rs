@@ -1110,7 +1110,7 @@ fn update_total_rows_and_check(
 mod tests {
     use super::ConsistentKeyGroup;
     use crate::client::oxql::chunk_consistent_key_groups_impl;
-    use crate::{Client, DbWrite};
+    use crate::{Client, DbInit, DbWrite};
     use crate::{Metric, Target};
     use chrono::{DateTime, Utc};
     use dropshot::test_util::LogContext;

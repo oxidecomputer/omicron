@@ -48,8 +48,8 @@ pub mod sql;
 pub use client::oxql::OxqlResult;
 pub use client::query_summary::QuerySummary;
 pub use client::Client;
-pub use client::DbWrite;
 pub use client::TestDbWrite;
+pub use client::{DbInit, DbWrite};
 pub use model::OXIMETER_VERSION;
 
 #[derive(Debug, Error)]
