@@ -276,6 +276,11 @@ impl DataStore {
         Ok(datastore)
     }
 
+    /// Terminates the underlying pool, stopping it from connecting to backends.
+    pub async fn terminate(&self) {
+        self.pool.terminate().await
+    }
+
     pub fn register_producers(&self, registry: &ProducerRegistry) {
         registry
             .register_producer(

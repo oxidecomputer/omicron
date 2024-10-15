@@ -27,7 +27,7 @@ bit-set = { version = "0.5.3" }
 bit-vec = { version = "0.6.3" }
 bitflags-dff4ba8e3ae991db = { package = "bitflags", version = "1.3.2" }
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.6.0", default-features = false, features = ["serde", "std"] }
-bstr = { version = "1.9.1" }
+bstr = { version = "1.10.0" }
 byteorder = { version = "1.5.0" }
 bytes = { version = "1.7.2", features = ["serde"] }
 chrono = { version = "0.4.38", features = ["serde"] }
@@ -36,7 +36,7 @@ clap = { version = "4.5.20", features = ["cargo", "derive", "env", "wrap_help"] 
 clap_builder = { version = "4.5.20", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
 console = { version = "0.15.8" }
 crossbeam-epoch = { version = "0.9.18" }
-crossbeam-utils = { version = "0.8.19" }
+crossbeam-utils = { version = "0.8.20" }
 crossterm = { version = "0.28.1", features = ["event-stream", "serde"] }
 crypto-common = { version = "0.1.6", default-features = false, features = ["getrandom", "std"] }
 curve25519-dalek = { version = "4.1.3", features = ["digest", "legacy_compatibility", "rand_core"] }
@@ -58,8 +58,9 @@ futures-task = { version = "0.3.31", default-features = false, features = ["std"
 futures-util = { version = "0.3.31", features = ["channel", "io", "sink"] }
 gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "9bbac475dcaac88286c07a20b6bd3e94fc81d7f0", features = ["std"] }
 generic-array = { version = "0.14.7", default-features = false, features = ["more_lengths", "zeroize"] }
-getrandom = { version = "0.2.14", default-features = false, features = ["js", "rdrand", "std"] }
+getrandom = { version = "0.2.15", default-features = false, features = ["js", "rdrand", "std"] }
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
+hashbrown = { version = "0.15.0" }
 hex = { version = "0.4.3", features = ["serde"] }
 hickory-proto = { version = "0.24.1", features = ["text-parsing"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
@@ -73,7 +74,7 @@ lazy_static = { version = "1.5.0", default-features = false, features = ["spin_n
 libc = { version = "0.2.159", features = ["extra_traits"] }
 log = { version = "0.4.22", default-features = false, features = ["kv_unstable", "std"] }
 managed = { version = "0.8.0", default-features = false, features = ["alloc", "map"] }
-memchr = { version = "2.7.2" }
+memchr = { version = "2.7.4" }
 nom = { version = "7.1.3" }
 num-bigint-dig = { version = "0.8.4", default-features = false, features = ["i128", "prime", "serde", "u64_digit", "zeroize"] }
 num-integer = { version = "0.1.46", features = ["i128"] }
@@ -83,12 +84,15 @@ openapiv3 = { version = "2.0.0", default-features = false, features = ["skip_ser
 peg-runtime = { version = "0.8.3", default-features = false, features = ["std"] }
 pem-rfc7468 = { version = "0.7.0", default-features = false, features = ["std"] }
 petgraph = { version = "0.6.5", features = ["serde-1"] }
+phf = { version = "0.11.2" }
+phf_shared = { version = "0.11.2" }
 pkcs8 = { version = "0.10.2", default-features = false, features = ["encryption", "pem", "std"] }
 postgres-types = { version = "0.2.8", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 predicates = { version = "3.1.2" }
 proc-macro2 = { version = "1.0.87" }
 qorb = { git = "https://github.com/oxidecomputer/qorb", rev = "88452176c7a9a573cf300d42a7c8147328224ce1", features = ["qtop"] }
 quote = { version = "1.0.37" }
+rand = { version = "0.8.5", features = ["small_rng"] }
 regex = { version = "1.11.0" }
 regex-automata = { version = "0.4.8", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "unicode"] }
 regex-syntax = { version = "0.8.5" }
@@ -107,7 +111,7 @@ slog = { version = "2.7.0", features = ["dynamic-keys", "max_level_trace", "rele
 smallvec = { version = "1.13.2", default-features = false, features = ["const_new"] }
 spin = { version = "0.9.8" }
 string_cache = { version = "0.8.7" }
-subtle = { version = "2.5.0" }
+subtle = { version = "2.6.1" }
 syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.79", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 time = { version = "0.3.36", features = ["formatting", "local-offset", "macros", "parsing"] }
 tokio = { version = "1.40.0", features = ["full", "test-util"] }
@@ -118,13 +122,13 @@ toml = { version = "0.7.8" }
 toml_datetime = { version = "0.6.8", default-features = false, features = ["serde"] }
 toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.22", features = ["serde"] }
 tracing = { version = "0.1.40", features = ["log"] }
-unicode-bidi = { version = "0.3.15" }
-unicode-normalization = { version = "0.1.23" }
+unicode-bidi = { version = "0.3.17" }
+unicode-normalization = { version = "0.1.24" }
 usdt = { version = "0.5.0" }
 usdt-impl = { version = "0.5.0", default-features = false, features = ["asm", "des"] }
 uuid = { version = "1.10.0", features = ["serde", "v4"] }
 x509-cert = { version = "0.2.5" }
-zerocopy = { version = "0.7.34", features = ["derive", "simd"] }
+zerocopy = { version = "0.7.35", features = ["derive", "simd"] }
 zeroize = { version = "1.8.1", features = ["std", "zeroize_derive"] }
 
 [build-dependencies]
@@ -138,17 +142,17 @@ bit-set = { version = "0.5.3" }
 bit-vec = { version = "0.6.3" }
 bitflags-dff4ba8e3ae991db = { package = "bitflags", version = "1.3.2" }
 bitflags-f595c2ba2a3f28df = { package = "bitflags", version = "2.6.0", default-features = false, features = ["serde", "std"] }
-bstr = { version = "1.9.1" }
+bstr = { version = "1.10.0" }
 byteorder = { version = "1.5.0" }
 bytes = { version = "1.7.2", features = ["serde"] }
-cc = { version = "1.0.97", default-features = false, features = ["parallel"] }
+cc = { version = "1.1.30", default-features = false, features = ["parallel"] }
 chrono = { version = "0.4.38", features = ["serde"] }
 cipher = { version = "0.4.4", default-features = false, features = ["block-padding", "zeroize"] }
 clap = { version = "4.5.20", features = ["cargo", "derive", "env", "wrap_help"] }
 clap_builder = { version = "4.5.20", default-features = false, features = ["cargo", "color", "env", "std", "suggestions", "usage", "wrap_help"] }
 console = { version = "0.15.8" }
 crossbeam-epoch = { version = "0.9.18" }
-crossbeam-utils = { version = "0.8.19" }
+crossbeam-utils = { version = "0.8.20" }
 crossterm = { version = "0.28.1", features = ["event-stream", "serde"] }
 crypto-common = { version = "0.1.6", default-features = false, features = ["getrandom", "std"] }
 curve25519-dalek = { version = "4.1.3", features = ["digest", "legacy_compatibility", "rand_core"] }
@@ -170,8 +174,9 @@ futures-task = { version = "0.3.31", default-features = false, features = ["std"
 futures-util = { version = "0.3.31", features = ["channel", "io", "sink"] }
 gateway-messages = { git = "https://github.com/oxidecomputer/management-gateway-service", rev = "9bbac475dcaac88286c07a20b6bd3e94fc81d7f0", features = ["std"] }
 generic-array = { version = "0.14.7", default-features = false, features = ["more_lengths", "zeroize"] }
-getrandom = { version = "0.2.14", default-features = false, features = ["js", "rdrand", "std"] }
+getrandom = { version = "0.2.15", default-features = false, features = ["js", "rdrand", "std"] }
 group = { version = "0.13.0", default-features = false, features = ["alloc"] }
+hashbrown = { version = "0.15.0" }
 hex = { version = "0.4.3", features = ["serde"] }
 hickory-proto = { version = "0.24.1", features = ["text-parsing"] }
 hmac = { version = "0.12.1", default-features = false, features = ["reset"] }
@@ -185,7 +190,7 @@ lazy_static = { version = "1.5.0", default-features = false, features = ["spin_n
 libc = { version = "0.2.159", features = ["extra_traits"] }
 log = { version = "0.4.22", default-features = false, features = ["kv_unstable", "std"] }
 managed = { version = "0.8.0", default-features = false, features = ["alloc", "map"] }
-memchr = { version = "2.7.2" }
+memchr = { version = "2.7.4" }
 nom = { version = "7.1.3" }
 num-bigint-dig = { version = "0.8.4", default-features = false, features = ["i128", "prime", "serde", "u64_digit", "zeroize"] }
 num-integer = { version = "0.1.46", features = ["i128"] }
@@ -195,12 +200,15 @@ openapiv3 = { version = "2.0.0", default-features = false, features = ["skip_ser
 peg-runtime = { version = "0.8.3", default-features = false, features = ["std"] }
 pem-rfc7468 = { version = "0.7.0", default-features = false, features = ["std"] }
 petgraph = { version = "0.6.5", features = ["serde-1"] }
+phf = { version = "0.11.2" }
+phf_shared = { version = "0.11.2" }
 pkcs8 = { version = "0.10.2", default-features = false, features = ["encryption", "pem", "std"] }
 postgres-types = { version = "0.2.8", default-features = false, features = ["with-chrono-0_4", "with-serde_json-1", "with-uuid-1"] }
 predicates = { version = "3.1.2" }
 proc-macro2 = { version = "1.0.87" }
 qorb = { git = "https://github.com/oxidecomputer/qorb", rev = "88452176c7a9a573cf300d42a7c8147328224ce1", features = ["qtop"] }
 quote = { version = "1.0.37" }
+rand = { version = "0.8.5", features = ["small_rng"] }
 regex = { version = "1.11.0" }
 regex-automata = { version = "0.4.8", default-features = false, features = ["dfa", "hybrid", "meta", "nfa", "perf", "unicode"] }
 regex-syntax = { version = "0.8.5" }
@@ -219,7 +227,7 @@ slog = { version = "2.7.0", features = ["dynamic-keys", "max_level_trace", "rele
 smallvec = { version = "1.13.2", default-features = false, features = ["const_new"] }
 spin = { version = "0.9.8" }
 string_cache = { version = "0.8.7" }
-subtle = { version = "2.5.0" }
+subtle = { version = "2.6.1" }
 syn-dff4ba8e3ae991db = { package = "syn", version = "1.0.109", features = ["extra-traits", "fold", "full", "visit"] }
 syn-f595c2ba2a3f28df = { package = "syn", version = "2.0.79", features = ["extra-traits", "fold", "full", "visit", "visit-mut"] }
 time = { version = "0.3.36", features = ["formatting", "local-offset", "macros", "parsing"] }
@@ -232,14 +240,14 @@ toml = { version = "0.7.8" }
 toml_datetime = { version = "0.6.8", default-features = false, features = ["serde"] }
 toml_edit-3c51e837cfc5589a = { package = "toml_edit", version = "0.22.22", features = ["serde"] }
 tracing = { version = "0.1.40", features = ["log"] }
-unicode-bidi = { version = "0.3.15" }
-unicode-normalization = { version = "0.1.23" }
-unicode-xid = { version = "0.2.4" }
+unicode-bidi = { version = "0.3.17" }
+unicode-normalization = { version = "0.1.24" }
+unicode-xid = { version = "0.2.6" }
 usdt = { version = "0.5.0" }
 usdt-impl = { version = "0.5.0", default-features = false, features = ["asm", "des"] }
 uuid = { version = "1.10.0", features = ["serde", "v4"] }
 x509-cert = { version = "0.2.5" }
-zerocopy = { version = "0.7.34", features = ["derive", "simd"] }
+zerocopy = { version = "0.7.35", features = ["derive", "simd"] }
 zeroize = { version = "1.8.1", features = ["std", "zeroize_derive"] }
 
 [target.x86_64-unknown-linux-gnu.dependencies]
@@ -251,7 +259,7 @@ linux-raw-sys = { version = "0.4.14", default-features = false, features = ["elf
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 once_cell = { version = "1.20.2" }
 rustix = { version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
-rustls = { version = "0.23.10", default-features = false, features = ["logging", "ring", "std", "tls12"] }
+rustls = { version = "0.23.14", default-features = false, features = ["logging", "ring", "std", "tls12"] }
 tokio-rustls = { version = "0.26.0", default-features = false, features = ["logging", "ring", "tls12"] }
 
 [target.x86_64-unknown-linux-gnu.build-dependencies]
@@ -263,7 +271,7 @@ linux-raw-sys = { version = "0.4.14", default-features = false, features = ["elf
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 once_cell = { version = "1.20.2" }
 rustix = { version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
-rustls = { version = "0.23.10", default-features = false, features = ["logging", "ring", "std", "tls12"] }
+rustls = { version = "0.23.14", default-features = false, features = ["logging", "ring", "std", "tls12"] }
 tokio-rustls = { version = "0.26.0", default-features = false, features = ["logging", "ring", "tls12"] }
 
 [target.x86_64-apple-darwin.dependencies]
@@ -273,7 +281,7 @@ hyper-util = { version = "0.1.9", features = ["full"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 once_cell = { version = "1.20.2" }
 rustix = { version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
-rustls = { version = "0.23.10", default-features = false, features = ["logging", "ring", "std", "tls12"] }
+rustls = { version = "0.23.14", default-features = false, features = ["logging", "ring", "std", "tls12"] }
 tokio-rustls = { version = "0.26.0", default-features = false, features = ["logging", "ring", "tls12"] }
 
 [target.x86_64-apple-darwin.build-dependencies]
@@ -283,7 +291,7 @@ hyper-util = { version = "0.1.9", features = ["full"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 once_cell = { version = "1.20.2" }
 rustix = { version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
-rustls = { version = "0.23.10", default-features = false, features = ["logging", "ring", "std", "tls12"] }
+rustls = { version = "0.23.14", default-features = false, features = ["logging", "ring", "std", "tls12"] }
 tokio-rustls = { version = "0.26.0", default-features = false, features = ["logging", "ring", "tls12"] }
 
 [target.aarch64-apple-darwin.dependencies]
@@ -293,7 +301,7 @@ hyper-util = { version = "0.1.9", features = ["full"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 once_cell = { version = "1.20.2" }
 rustix = { version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
-rustls = { version = "0.23.10", default-features = false, features = ["logging", "ring", "std", "tls12"] }
+rustls = { version = "0.23.14", default-features = false, features = ["logging", "ring", "std", "tls12"] }
 tokio-rustls = { version = "0.26.0", default-features = false, features = ["logging", "ring", "tls12"] }
 
 [target.aarch64-apple-darwin.build-dependencies]
@@ -303,7 +311,7 @@ hyper-util = { version = "0.1.9", features = ["full"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 once_cell = { version = "1.20.2" }
 rustix = { version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
-rustls = { version = "0.23.10", default-features = false, features = ["logging", "ring", "std", "tls12"] }
+rustls = { version = "0.23.14", default-features = false, features = ["logging", "ring", "std", "tls12"] }
 tokio-rustls = { version = "0.26.0", default-features = false, features = ["logging", "ring", "tls12"] }
 
 [target.x86_64-unknown-illumos.dependencies]
@@ -315,7 +323,7 @@ indicatif = { version = "0.17.8", features = ["rayon"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 once_cell = { version = "1.20.2" }
 rustix = { version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
-rustls = { version = "0.23.10", default-features = false, features = ["logging", "ring", "std", "tls12"] }
+rustls = { version = "0.23.14", default-features = false, features = ["logging", "ring", "std", "tls12"] }
 tokio-rustls = { version = "0.26.0", default-features = false, features = ["logging", "ring", "tls12"] }
 toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", features = ["serde"] }
 
@@ -328,7 +336,7 @@ indicatif = { version = "0.17.8", features = ["rayon"] }
 mio = { version = "1.0.2", features = ["net", "os-ext"] }
 once_cell = { version = "1.20.2" }
 rustix = { version = "0.38.37", features = ["event", "fs", "net", "pipe", "process", "stdio", "system", "termios", "time"] }
-rustls = { version = "0.23.10", default-features = false, features = ["logging", "ring", "std", "tls12"] }
+rustls = { version = "0.23.14", default-features = false, features = ["logging", "ring", "std", "tls12"] }
 tokio-rustls = { version = "0.26.0", default-features = false, features = ["logging", "ring", "tls12"] }
 toml_edit-cdcf2f9584511fe6 = { package = "toml_edit", version = "0.19.15", features = ["serde"] }
 

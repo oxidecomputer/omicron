@@ -140,4 +140,11 @@ impl Pool {
     ) -> anyhow::Result<qorb::claim::Handle<QorbConnection>> {
         Ok(self.inner.claim().await?)
     }
+
+    /// Stops the qorb background tasks, and causes all future claims to fail
+    pub async fn terminate(
+        &self,
+    ) {
+        self.inner.terminate().await
+    }
 }

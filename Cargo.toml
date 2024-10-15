@@ -312,6 +312,7 @@ cargo_metadata = "0.18.1"
 chacha20poly1305 = "0.10.1"
 cfg-if = "1.0"
 chrono = { version = "0.4", features = [ "serde" ] }
+chrono-tz = "0.10.0"
 ciborium = "0.2.2"
 clap = { version = "4.5", features = ["cargo", "derive", "env", "wrap_help"] }
 clickhouse-admin-api = { path = "clickhouse-admin/api" }
@@ -398,6 +399,7 @@ hyper-util = "0.1.9"
 hyper-rustls = "0.26.0"
 hyper-staticfile = "0.10.0"
 illumos-utils = { path = "illumos-utils" }
+iana-time-zone = "0.1.61"
 indent_write = "2.2.0"
 indexmap = "2.6.0"
 indicatif = { version = "0.17.8", features = ["rayon"] }
@@ -518,7 +520,7 @@ propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = 
 propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "11371b0f3743f8df5b047dc0edc2699f4bdf3927" }
 propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "11371b0f3743f8df5b047dc0edc2699f4bdf3927" }
 proptest = "1.5.0"
-qorb = { git = "https://github.com/oxidecomputer/qorb", rev = "88452176c7a9a573cf300d42a7c8147328224ce1" }
+qorb = { git = "https://github.com/oxidecomputer/qorb", rev = "b9bf692a0c56458512cced4b3414b297e61e7d8f" }
 quote = "1.0"
 rand = "0.8.5"
 rand_core = "0.6.4"
