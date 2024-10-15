@@ -39,6 +39,8 @@ use omicron_common::api::external::Error;
 use omicron_common::api::external::ListResultVec;
 use omicron_common::api::external::ResourceType;
 use omicron_common::bail_unless;
+use omicron_uuid_kinds::GenericUuid;
+use omicron_uuid_kinds::SledUuid;
 use std::fmt;
 use strum::IntoEnumIterator;
 use thiserror::Error;
@@ -100,17 +102,29 @@ impl DataStore {
     }
 
     /// Confirms that a sled exists and is in-service.
+    pub async fn check_sled_in_service(
+        &self,
+        opctx: &OpContext,
+        sled_id: SledUuid,
+    ) -> Result<(), Error> {
+        let conn = &*self.pool_connection_authorized(&opctx).await?;
+        Self::check_sled_in_service_on_connection(conn, sled_id)
+            .await
+            .map_err(From::from)
+    }
+
+    /// Confirms that a sled exists and is in-service.
     ///
     /// This function may be called from a transaction context.
     pub async fn check_sled_in_service_on_connection(
         conn: &async_bb8_diesel::Connection<DbConnection>,
-        sled_id: Uuid,
+        sled_id: SledUuid,
     ) -> Result<(), TransactionError<Error>> {
         use db::schema::sled::dsl;
         let sled_exists_and_in_service = diesel::select(diesel::dsl::exists(
             dsl::sled
                 .filter(dsl::time_deleted.is_null())
-                .filter(dsl::id.eq(sled_id))
+                .filter(dsl::id.eq(sled_id.into_untyped_uuid()))
                 .sled_filter(SledFilter::InService),
         ))
         .get_result_async::<bool>(conn)
