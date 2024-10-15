@@ -24,7 +24,7 @@ pub fn encode(block: Block, mut dst: &mut BytesMut) -> Result<(), Error> {
     io::varuint::encode(block.n_columns, &mut dst);
     io::varuint::encode(block.n_rows, &mut dst);
     for (name, col) in block.columns {
-        io::column::encode(&name, col, &mut dst);
+        io::column::encode(&name, col, &mut dst)?;
     }
     Ok(())
 }

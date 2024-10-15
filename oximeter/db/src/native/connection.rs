@@ -170,6 +170,22 @@ impl Connection {
                         break Err(Error::UnexpectedPacket("Hello"));
                     }
                     ServerPacket::Data(block) => {
+                        probes::data__packet__received!(|| {
+                            (
+                                block.n_columns,
+                                block.n_rows,
+                                block
+                                    .columns
+                                    .iter()
+                                    .map(|(name, col)| {
+                                        (
+                                            name.clone(),
+                                            col.data_type.to_string(),
+                                        )
+                                    })
+                                    .collect::<Vec<_>>(),
+                            )
+                        });
                         // Empty blocks are sent twice: the beginning of the
                         // query so that the client knows the table structure,
                         // and then the end to signal the last data transfer.
@@ -466,7 +482,7 @@ mod tests {
         assert_eq!(block.n_rows, 1);
         let (name, col) = block.columns.first().unwrap();
         assert_eq!(name, "timestamp");
-        assert_eq!(col.data_type, DataType::DateTime);
+        assert!(matches!(col.data_type, DataType::DateTime(_)));
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

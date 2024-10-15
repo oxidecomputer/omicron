@@ -361,7 +361,9 @@ async fn main() -> anyhow::Result<()> {
                 .await?
         }
         #[cfg(feature = "native-sql")]
-        Subcommand::NativeSql => oximeter_db::shells::native::shell().await?,
+        Subcommand::NativeSql => {
+            oximeter_db::shells::native::shell(args.address).await?
+        }
     }
     Ok(())
 }

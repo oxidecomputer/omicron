@@ -726,16 +726,16 @@ impl From<ByteCount> for i64 {
 }
 
 /// Generation numbers stored in the database, used for optimistic concurrency
-/// control.
-///
-/// A generation is a value between 0 and 2**63-1, i.e. equivalent to a u63.
-/// The reason is that we store it as an i64 in the database, and we want to
-/// disallow negative values. (We could potentially use two's complement to
-/// store values greater than that as negative values, but surely 2**63 is
-/// enough.)
-///
-/// TODO: This allows deserialization into a value that's out of range. That's
-/// not correct. See <https://github.com/oxidecomputer/omicron/issues/6865>.
+/// control
+//
+// A generation is a value between 0 and 2**63-1, i.e. equivalent to a u63.
+// The reason is that we store it as an i64 in the database, and we want to
+// disallow negative values. (We could potentially use two's complement to
+// store values greater than that as negative values, but surely 2**63 is
+// enough.)
+//
+// TODO: This allows deserialization into a value that's out of range. That's
+// not correct. See <https://github.com/oxidecomputer/omicron/issues/6865>.
 #[derive(
     Copy,
     Clone,
