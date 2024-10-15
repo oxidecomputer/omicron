@@ -47,8 +47,7 @@ use uuid::Uuid;
 ///         -- we're trying to cacth.
 ///         CAST(
 ///             IF(
-///                (inet_contains_or_equals(ipv4_block, <ipv4_block>) OR
-///                 inet_contains_or_equals(<ipv4_block>, ipv4_block)),
+///                (<ipv4_block> && ipv4_block),
 ///                'ipv4',
 ///                'ipv6'
 ///             )
@@ -61,10 +60,8 @@ use uuid::Uuid;
 ///         time_deleted IS NULL AND
 ///         id != <id> AND
 ///         (
-///             inet_contains_or_equals(ipv4_block, <ipv4_block>) OR
-///             inet_contains_or_equals(<ipv4_block>, ipv4_block) OR
-///             inet_contains_or_equals(ipv6_block, <ipv6_block>) OR
-///             inet_contains_or_equals(<ipv6_block>, ipv6_block)
+///             (ipv4_block && <ipv4_block>) OR
+///             (ipv6_block && <ipv6_block>)
 ///         )
 /// )
 /// INSERT INTO
