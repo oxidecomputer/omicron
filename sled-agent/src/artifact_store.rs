@@ -387,6 +387,8 @@ impl DatasetsManager for StorageHandle {
     }
 }
 
+/// Implementation of the Repo Depot API backed by an
+/// `ArtifactStore<StorageHandle>`.
 enum RepoDepotImpl {}
 
 impl RepoDepotApi for RepoDepotImpl {
