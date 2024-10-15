@@ -735,7 +735,7 @@ impl From<ByteCount> for i64 {
 /// enough.)
 ///
 /// TODO: This allows deserialization into a value that's out of range. That's
-/// not correct. See <https://github.com/oxidecomputer/omicron/issues/6865>.=
+/// not correct. See <https://github.com/oxidecomputer/omicron/issues/6865>.
 #[derive(
     Copy,
     Clone,
