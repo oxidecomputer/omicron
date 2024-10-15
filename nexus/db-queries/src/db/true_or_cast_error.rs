@@ -4,6 +4,7 @@
 
 //! An expression wrapper for forcing errors from CTEs.
 
+use async_bb8_diesel::RunError;
 use diesel::expression::ValidGrouping;
 use diesel::pg::Pg;
 use diesel::query_builder::AstPass;
@@ -78,7 +79,7 @@ where
 /// Returns one of the sentinels if it matches the expected value from
 /// a [`TrueOrCastError`].
 pub fn matches_sentinel(
-    e: &DieselError,
+    e: &RunError,
     sentinels: &[&'static str],
 ) -> Option<&'static str> {
     use diesel::result::DatabaseErrorKind;
@@ -93,7 +94,10 @@ pub fn matches_sentinel(
     match e {
         // Catch the specific errors designed to communicate the failures we
         // want to distinguish.
-        Error::DatabaseError(DatabaseErrorKind::Unknown, info) => {
+        RunError::Diesel(Error::DatabaseError(
+            DatabaseErrorKind::Unknown,
+            info,
+        )) => {
             for sentinel in sentinels {
                 if info.message() == bool_parse_error(sentinel) {
                     return Some(sentinel);

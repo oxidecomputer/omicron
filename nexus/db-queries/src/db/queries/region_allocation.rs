@@ -9,6 +9,7 @@ use crate::db::model::{Dataset, Region};
 use crate::db::raw_query_builder::{QueryBuilder, TypedSqlQuery};
 use crate::db::schema;
 use crate::db::true_or_cast_error::matches_sentinel;
+use async_bb8_diesel::RunError;
 use const_format::concatcp;
 use diesel::pg::Pg;
 use diesel::result::Error as DieselError;
@@ -26,7 +27,7 @@ const NOT_ENOUGH_UNIQUE_ZPOOLS_SENTINEL: &'static str =
 
 /// Translates a generic pool error to an external error based
 /// on messages which may be emitted during region provisioning.
-pub fn from_diesel(e: DieselError) -> external::Error {
+pub fn from_diesel(e: RunError) -> external::Error {
     use crate::db::error;
 
     let sentinels = [

@@ -28,9 +28,9 @@ use crate::db::pool::DbConnection;
 use crate::db::queries::network_interface;
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::RunError;
 use chrono::Utc;
 use diesel::prelude::*;
-use diesel::result::Error as DieselError;
 use nexus_db_model::ServiceNetworkInterface;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -744,7 +744,7 @@ impl DataStore {
         #[derive(Debug)]
         enum NetworkInterfaceUpdateError {
             InstanceNotStopped,
-            FailedToUnsetPrimary(DieselError),
+            FailedToUnsetPrimary(RunError),
         }
 
         let err = OptionalError::new();

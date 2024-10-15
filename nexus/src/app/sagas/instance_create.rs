@@ -1157,10 +1157,8 @@ pub mod test {
         app::sagas::instance_create::SagaInstanceCreate,
         app::sagas::test_helpers, external_api::params,
     };
-    use async_bb8_diesel::AsyncRunQueryDsl;
-    use diesel::{
-        ExpressionMethods, OptionalExtension, QueryDsl, SelectableHelper,
-    };
+    use async_bb8_diesel::{AsyncRunQueryDsl, OptionalExtension};
+    use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
     use dropshot::test_util::ClientTestContext;
     use nexus_db_queries::authn::saga::Serialized;
     use nexus_db_queries::context::OpContext;

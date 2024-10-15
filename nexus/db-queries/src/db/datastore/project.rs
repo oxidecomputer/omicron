@@ -23,6 +23,7 @@ use crate::db::model::VirtualProvisioningCollection;
 use crate::db::pagination::paginated;
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::OptionalExtension;
 use chrono::Utc;
 use diesel::prelude::*;
 use nexus_db_fixed_data::project::SERVICES_PROJECT;

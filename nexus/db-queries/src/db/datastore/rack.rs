@@ -14,6 +14,7 @@ use crate::db::collection_insert::AsyncInsertError;
 use crate::db::collection_insert::DatastoreCollection;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::retryable;
+use crate::db::error::retryable_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::error::MaybeRetryable::*;
 use crate::db::identity::Asset;
@@ -28,6 +29,7 @@ use crate::db::pool::DbConnection;
 use crate::db::TransactionError;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::RunError;
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
@@ -103,26 +105,25 @@ enum RackInitError {
     DatasetInsert { err: AsyncInsertError, zpool_id: Uuid },
     PhysicalDiskInsert(Error),
     ZpoolInsert(Error),
-    RackUpdate { err: DieselError, rack_id: Uuid },
+    RackUpdate { err: RunError, rack_id: Uuid },
     DnsSerialization(Error),
     Silo(Error),
     RoleAssignment(Error),
     // Retryable database error
     Retryable(DieselError),
     // Other non-retryable database error
-    Database(DieselError),
+    Database(RunError),
     // Error adding initial allowed source IP list
     AllowedSourceIpError(Error),
 }
 
 // Catch-all for Diesel error conversion into RackInitError, which
 // can also label errors as retryable.
-impl From<DieselError> for RackInitError {
-    fn from(e: DieselError) -> Self {
-        if retryable(&e) {
-            Self::Retryable(e)
-        } else {
-            Self::Database(e)
+impl From<RunError> for RackInitError {
+    fn from(e: RunError) -> Self {
+        match e {
+            RunError::Diesel(e) if retryable_diesel(&e) => Self::Retryable(e),
+            _ => Self::Database(e),
         }
     }
 }
@@ -679,7 +680,7 @@ impl DataStore {
         let rack = self
             .pool_connection_authorized(opctx)
             .await?
-            .transaction_async(|conn| {
+            .transaction_async::<_, RunError, _, _>(|conn| {
                 let err = err.clone();
                 let log = log.clone();
                 let authz_service_pool = authz_service_pool.clone();
@@ -713,11 +714,11 @@ impl DataStore {
                                 rack_id,
                             })
                             .unwrap();
-                            DieselError::RollbackTransaction
+                            RunError::Diesel(DieselError::RollbackTransaction)
                         })?;
                     if rack.initialized {
                         info!(log, "Early exit: Rack already initialized");
-                        return Ok::<_, DieselError>(rack);
+                        return Ok::<_, RunError>(rack);
                     }
 
                     // Otherwise, insert:
@@ -815,7 +816,7 @@ impl DataStore {
                                 error!(log, "Failed to upsert physical disk"; "err" => #%e);
                                 err.set(RackInitError::PhysicalDiskInsert(e.into()))
                                     .unwrap();
-                                return Err(DieselError::RollbackTransaction);
+                                return Err(RunError::Diesel(DieselError::RollbackTransaction));
                             }
                         }
                     }
@@ -827,7 +828,7 @@ impl DataStore {
                             if !matches!(e, TransactionError::CustomError(Error::ObjectAlreadyExists { .. })) {
                                 error!(log, "Failed to upsert zpool"; "err" => #%e);
                                 err.set(RackInitError::ZpoolInsert(e.into())).unwrap();
-                                return Err(DieselError::RollbackTransaction);
+                                return Err(RunError::Diesel(DieselError::RollbackTransaction));
                             }
                         }
                     }
@@ -933,7 +934,7 @@ impl DataStore {
                                 rack_id,
                             })
                             .unwrap();
-                            DieselError::RollbackTransaction
+                            RunError::Diesel(DieselError::RollbackTransaction)
                         })?;
                     Ok(rack)
                 }

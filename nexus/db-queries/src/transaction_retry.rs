@@ -4,7 +4,7 @@
 
 //! Helper types for performing automatic transaction retries
 
-use async_bb8_diesel::AsyncConnection;
+use async_bb8_diesel::{AsyncConnection, RunError};
 use chrono::Utc;
 use diesel::result::Error as DieselError;
 use oximeter::{types::Sample, MetricsError};
@@ -98,10 +98,10 @@ impl RetryHelper {
         self,
         conn: &async_bb8_diesel::Connection<crate::db::DbConnection>,
         f: Func,
-    ) -> Result<R, DieselError>
+    ) -> Result<R, RunError>
     where
         R: Send + 'static,
-        Fut: std::future::Future<Output = Result<R, DieselError>> + Send,
+        Fut: std::future::Future<Output = Result<R, RunError>> + Send,
         Func: Fn(async_bb8_diesel::Connection<crate::db::DbConnection>) -> Fut
             + Send
             + Sync,
@@ -212,39 +212,31 @@ impl<E: std::fmt::Debug> OptionalError<E> {
     }
 
     /// Sets "Self" to the value of `error` and returns `DieselError::RollbackTransaction`.
-    pub fn bail(&self, err: E) -> DieselError {
+    pub fn bail(&self, err: E) -> RunError {
         (*self.0.lock().unwrap()).replace(err);
-        DieselError::RollbackTransaction
+        RunError::Diesel(DieselError::RollbackTransaction)
     }
 
     /// If `diesel_error` is retryable, returns it without setting Self.
     ///
     /// Otherwise, sets "Self" to the value of `err`, and returns
     /// `DieselError::RollbackTransaction`.
-    pub fn bail_retryable_or(
-        &self,
-        diesel_error: DieselError,
-        err: E,
-    ) -> DieselError {
-        self.bail_retryable_or_else(diesel_error, |_diesel_error| err)
+    pub fn bail_retryable_or(&self, error: RunError, err: E) -> RunError {
+        self.bail_retryable_or_else(error, |_error| err)
     }
 
     /// If `diesel_error` is retryable, returns it without setting Self.
     ///
     /// Otherwise, sets "Self" to the value of `f` applied to `diesel_err`, and
     /// returns `DieselError::RollbackTransaction`.
-    pub fn bail_retryable_or_else<F>(
-        &self,
-        diesel_error: DieselError,
-        f: F,
-    ) -> DieselError
+    pub fn bail_retryable_or_else<F>(&self, error: RunError, f: F) -> RunError
     where
-        F: FnOnce(DieselError) -> E,
+        F: FnOnce(RunError) -> E,
     {
-        if crate::db::error::retryable(&diesel_error) {
-            return diesel_error;
+        if crate::db::error::retryable(&error) {
+            return error;
         } else {
-            self.bail(f(diesel_error))
+            self.bail(f(error))
         }
     }
 
@@ -280,9 +272,16 @@ mod test {
             .transaction_retry_wrapper(
                 "test_transaction_rollback_produces_no_samples",
             )
-            .transaction(&conn, |_conn| async move {
-                Err::<(), _>(diesel::result::Error::RollbackTransaction)
-            })
+            .transaction(
+                &conn,
+                |_conn: async_bb8_diesel::Connection<
+                    diesel_dtrace::DTraceConnection<diesel::PgConnection>,
+                >| async move {
+                    Err::<(), _>(RunError::Diesel(
+                        diesel::result::Error::RollbackTransaction,
+                    ))
+                },
+            )
             .await
             .expect_err("Should have failed");
 
@@ -313,9 +312,13 @@ mod test {
                 "test_transaction_retry_produces_samples",
             )
             .transaction(&conn, |_conn| async move {
-                Err::<(), _>(diesel::result::Error::DatabaseError(
-                    diesel::result::DatabaseErrorKind::SerializationFailure,
-                    Box::new("restart transaction: Retry forever!".to_string()),
+                Err::<(), _>(RunError::Diesel(
+                    diesel::result::Error::DatabaseError(
+                        diesel::result::DatabaseErrorKind::SerializationFailure,
+                        Box::new(
+                            "restart transaction: Retry forever!".to_string(),
+                        ),
+                    ),
                 ))
             })
             .await

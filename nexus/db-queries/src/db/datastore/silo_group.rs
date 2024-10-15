@@ -18,6 +18,7 @@ use crate::db::pagination::paginated;
 use crate::db::IncompleteOnConflictExt;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::OptionalExtension;
 use chrono::Utc;
 use diesel::prelude::*;
 use omicron_common::api::external::CreateResult;

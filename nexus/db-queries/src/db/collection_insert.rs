@@ -11,6 +11,8 @@
 
 use super::pool::DbConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::OptionalExtension;
+use async_bb8_diesel::RunError;
 use diesel::associations::HasTable;
 use diesel::helper_types::*;
 use diesel::pg::Pg;
@@ -171,7 +173,7 @@ pub enum AsyncInsertError {
     /// The collection that the query was inserting into does not exist
     CollectionNotFound,
     /// Other database error
-    DatabaseError(DieselError),
+    DatabaseError(RunError),
 }
 
 impl<ResourceType, ISR, C> InsertIntoCollectionStatement<ResourceType, ISR, C>
@@ -243,24 +245,24 @@ where
     }
 
     /// Check for the intentional division by zero error
-    fn error_is_division_by_zero(err: &diesel::result::Error) -> bool {
+    fn error_is_division_by_zero(err: &RunError) -> bool {
         match err {
             // See
             // https://rfd.shared.oxide.computer/rfd/0192#_dueling_administrators
             // for a full explanation of why we're checking for this. In
             // summary, the CTE generates a division by zero intentionally
             // if the collection doesn't exist in the database.
-            diesel::result::Error::DatabaseError(
+            RunError::Diesel(DieselError::DatabaseError(
                 diesel::result::DatabaseErrorKind::Unknown,
                 info,
-            ) if info.message() == "division by zero" => true,
+            )) if info.message() == "division by zero" => true,
             _ => false,
         }
     }
 
     /// Translate from diesel errors into AsyncInsertError, handling the
     /// intentional division-by-zero error in the CTE.
-    fn translate_async_error(err: DieselError) -> AsyncInsertError {
+    fn translate_async_error(err: RunError) -> AsyncInsertError {
         if Self::error_is_division_by_zero(&err) {
             AsyncInsertError::CollectionNotFound
         } else {

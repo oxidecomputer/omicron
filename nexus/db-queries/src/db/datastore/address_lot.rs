@@ -14,6 +14,7 @@ use crate::db::model::Name;
 use crate::db::model::{AddressLot, AddressLotBlock, AddressLotReservedBlock};
 use crate::db::pagination::paginated;
 use crate::transaction_retry::OptionalError;
+use async_bb8_diesel::RunError;
 use async_bb8_diesel::{AsyncRunQueryDsl, Connection};
 use chrono::Utc;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
@@ -137,7 +138,10 @@ impl DataStore {
                     blocks.push(block);
                 }
 
-                Ok(AddressLotCreateResult { lot: db_lot, blocks })
+                Ok::<_, RunError>(AddressLotCreateResult {
+                    lot: db_lot,
+                    blocks,
+                })
             })
             .await
             .map_err(|e| {

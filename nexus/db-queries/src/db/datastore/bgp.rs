@@ -9,7 +9,7 @@ use crate::db::error::{public_error_from_diesel, ErrorHandler};
 use crate::db::model::{BgpAnnounceSet, BgpAnnouncement, BgpConfig, Name};
 use crate::db::pagination::paginated;
 use crate::transaction_retry::OptionalError;
-use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::{AsyncRunQueryDsl, RunError};
 use chrono::Utc;
 use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
 use ipnetwork::IpNetwork;
@@ -59,7 +59,7 @@ impl DataStore {
                                 error!(opctx.log, "{msg}"; "error" => ?e);
 
                                 match e {
-                                    diesel::result::Error::NotFound => {
+                                    RunError::Diesel(diesel::result::Error::NotFound) => {
                                         err.bail(Error::not_found_by_name(
                                             ResourceType::BgpAnnounceSet,
                                             &name,
@@ -84,7 +84,8 @@ impl DataStore {
                                 error!(opctx.log, "{msg}"; "error" => ?e);
 
                                 match e {
-                                    diesel::result::Error::NotFound => {
+                                    // XXX use public_error_from_diesel_lookup?
+                                    RunError::Diesel(diesel::result::Error::NotFound) => {
                                         err.bail(Error::not_found_by_id(
                                             ResourceType::BgpAnnounceSet,
                                             &id,
@@ -130,7 +131,7 @@ impl DataStore {
                             Ok(v)  => Ok(Some(v)),
                             Err(e) => {
                                 match e {
-                                    diesel::result::Error::NotFound => {
+                                    RunError::Diesel(diesel::result::Error::NotFound) => {
                                         info!(opctx.log, "no matching bgp config found");
                                         Ok(None)
                                     }
@@ -179,7 +180,7 @@ impl DataStore {
                             error!(opctx.log, "{msg}"; "error" => ?e);
 
                             match e {
-                                diesel::result::Error::DatabaseError(kind, _) => {
+                                RunError::Diesel(diesel::result::Error::DatabaseError(kind, _)) => {
                                     match kind {
                                         diesel::result::DatabaseErrorKind::UniqueViolation => {
                                             err.bail(Error::conflict("a field that must be unique conflicts with an existing record"))
@@ -252,7 +253,8 @@ impl DataStore {
                                 error!(opctx.log, "{msg}"; "error" => ?e);
 
                                 match e {
-                                    diesel::result::Error::NotFound => {
+                                    // XXX: use public_error_from_diesel_lookup?
+                                    RunError::Diesel(diesel::result::Error::NotFound) => {
                                         err.bail(Error::not_found_by_id(
                                             ResourceType::BgpConfig,
                                             &id,
@@ -275,7 +277,8 @@ impl DataStore {
                                 error!(opctx.log, "{msg}"; "error" => ?e);
 
                                 match e {
-                                    diesel::result::Error::NotFound => {
+                                    // XXX: use public_error_from_diesel_lookup?
+                                    RunError::Diesel(diesel::result::Error::NotFound) => {
                                         err.bail(Error::not_found_by_name(
                                             ResourceType::BgpConfig,
                                             &name,
@@ -346,7 +349,8 @@ impl DataStore {
                     error!(opctx.log, "{msg}"; "error" => ?e);
 
                     match e {
-                        diesel::result::Error::NotFound => {
+                        // XXX: use public_error_from_diesel_lookup?
+                        RunError::Diesel(diesel::result::Error::NotFound) => {
                             Error::not_found_by_name(
                                 ResourceType::BgpConfig,
                                 &name,
@@ -366,7 +370,8 @@ impl DataStore {
                     error!(opctx.log, "{msg}"; "error" => ?e);
 
                     match e {
-                        diesel::result::Error::NotFound => {
+                        // XXX: use public_error_from_diesel_lookup?
+                        RunError::Diesel(diesel::result::Error::NotFound) => {
                             Error::not_found_by_id(ResourceType::BgpConfig, &id)
                         }
                         _ => Error::internal_error(msg),
@@ -464,11 +469,13 @@ impl DataStore {
                                 error!(opctx.log, "{msg}"; "error" => ?e);
 
                                 match e {
-                                    diesel::result::Error::NotFound => err
-                                        .bail(Error::not_found_by_id(
-                                            ResourceType::BgpAnnounceSet,
-                                            &id,
-                                        )),
+                                    // XXX: use public_error_from_diesel_lookup?
+                                    RunError::Diesel(
+                                        diesel::result::Error::NotFound,
+                                    ) => err.bail(Error::not_found_by_id(
+                                        ResourceType::BgpAnnounceSet,
+                                        &id,
+                                    )),
                                     _ => err.bail(Error::internal_error(msg)),
                                 }
                             }),
@@ -490,11 +497,14 @@ impl DataStore {
                                     error!(opctx.log, "{msg}"; "error" => ?e);
 
                                     match e {
-                                        diesel::result::Error::NotFound => err
-                                            .bail(Error::not_found_by_name(
+                                        RunError::Diesel(
+                                            diesel::result::Error::NotFound,
+                                        ) => {
+                                            err.bail(Error::not_found_by_name(
                                                 ResourceType::BgpAnnounceSet,
                                                 &name,
-                                            )),
+                                            ))
+                                        }
                                         _ => {
                                             err.bail(Error::internal_error(msg))
                                         }
@@ -726,11 +736,12 @@ impl DataStore {
                                 error!(opctx.log, "{msg}"; "error" => ?e);
 
                                 match e {
-                                    diesel::result::Error::NotFound => err
-                                        .bail(Error::not_found_by_id(
-                                            ResourceType::BgpAnnounceSet,
-                                            &id,
-                                        )),
+                                    RunError::Diesel(
+                                        diesel::result::Error::NotFound,
+                                    ) => err.bail(Error::not_found_by_id(
+                                        ResourceType::BgpAnnounceSet,
+                                        &id,
+                                    )),
                                     _ => err.bail(Error::internal_error(msg)),
                                 }
                             }),
@@ -752,11 +763,14 @@ impl DataStore {
                                     error!(opctx.log, "{msg}"; "error" => ?e);
 
                                     match e {
-                                        diesel::result::Error::NotFound => err
-                                            .bail(Error::not_found_by_name(
+                                        RunError::Diesel(
+                                            diesel::result::Error::NotFound,
+                                        ) => {
+                                            err.bail(Error::not_found_by_name(
                                                 ResourceType::BgpAnnounceSet,
                                                 &name,
-                                            )),
+                                            ))
+                                        }
                                         _ => {
                                             err.bail(Error::internal_error(msg))
                                         }
@@ -883,7 +897,7 @@ impl DataStore {
                             error!(opctx.log, "{msg}"; "error" => ?e);
 
                             match e {
-                                diesel::result::Error::NotFound => {
+                                RunError::Diesel(diesel::result::Error::NotFound) => {
                                     let not_found_msg = format!("peer with {addr} not found for port settings {port_settings_id}");
                                     err.bail(Error::non_resourcetype_not_found(not_found_msg))
                                 },
@@ -955,7 +969,7 @@ impl DataStore {
                             error!(opctx.log, "{msg}"; "error" => ?e);
 
                             match e {
-                                diesel::result::Error::NotFound => {
+                                RunError::Diesel(diesel::result::Error::NotFound) => {
                                     let not_found_msg = format!("peer with {addr} not found for port settings {port_settings_id}");
                                     err.bail(Error::non_resourcetype_not_found(not_found_msg))
                                 },

@@ -25,6 +25,7 @@ use crate::db::update_and_check::UpdateStatus;
 use crate::db::TransactionError;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::OptionalExtension;
 use diesel::prelude::*;
 use omicron_common::api::external::Error;
 use uuid::Uuid;

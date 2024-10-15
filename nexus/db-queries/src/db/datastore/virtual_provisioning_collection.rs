@@ -14,6 +14,7 @@ use crate::db::model::VirtualProvisioningCollection;
 use crate::db::pool::DbConnection;
 use crate::db::queries::virtual_provisioning_collection_update::VirtualProvisioningCollectionUpdate;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::RunError;
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
 use omicron_common::api::external::{DeleteResult, Error};
@@ -61,7 +62,7 @@ impl DataStore {
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         virtual_provisioning_collection: VirtualProvisioningCollection,
-    ) -> Result<Vec<VirtualProvisioningCollection>, DieselError> {
+    ) -> Result<Vec<VirtualProvisioningCollection>, RunError> {
         use db::schema::virtual_provisioning_collection::dsl;
 
         let provisions: Vec<VirtualProvisioningCollection> =
@@ -117,7 +118,7 @@ impl DataStore {
         log: &slog::Logger,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         id: Uuid,
-    ) -> Result<(), DieselError> {
+    ) -> Result<(), RunError> {
         use db::schema::virtual_provisioning_collection::dsl;
 
         // NOTE: We don't really need to extract the value we're deleting from
@@ -131,7 +132,7 @@ impl DataStore {
 
         if !collection.is_empty() {
             warn!(log, "Collection deleted while non-empty: {collection:?}");
-            return Err(DieselError::RollbackTransaction);
+            return Err(RunError::Diesel(DieselError::RollbackTransaction));
         }
         Ok(())
     }

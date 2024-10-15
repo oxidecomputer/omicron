@@ -18,6 +18,8 @@ use crate::transaction_retry::OptionalError;
 use anyhow::Context;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::OptionalExtension;
+use async_bb8_diesel::RunError;
 use chrono::DateTime;
 use chrono::Utc;
 use clickhouse_admin_types::{KeeperId, ServerId};
@@ -33,7 +35,6 @@ use diesel::Column;
 use diesel::ExpressionMethods;
 use diesel::Insertable;
 use diesel::IntoSql;
-use diesel::OptionalExtension;
 use diesel::QueryDsl;
 use diesel::RunQueryDsl;
 use nexus_db_model::Blueprint as DbBlueprint;
@@ -1392,7 +1393,7 @@ enum InsertTargetError {
     /// target.
     ParentNotTarget(Uuid),
     /// Any other error
-    Other(DieselError),
+    Other(RunError),
 }
 
 impl From<InsertTargetError> for Error {
@@ -1559,16 +1560,18 @@ const PARENT_NOT_TARGET_ERROR_MESSAGE: &str =
      uuid: incorrect UUID length: parent-not-target";
 
 impl InsertTargetQuery {
-    fn decode_error(&self, err: DieselError) -> InsertTargetError {
+    fn decode_error(&self, err: RunError) -> InsertTargetError {
         match err {
-            DieselError::DatabaseError(DatabaseErrorKind::Unknown, info)
-                if info.message() == NO_SUCH_BLUEPRINT_ERROR_MESSAGE =>
-            {
+            RunError::Diesel(DieselError::DatabaseError(
+                DatabaseErrorKind::Unknown,
+                info,
+            )) if info.message() == NO_SUCH_BLUEPRINT_ERROR_MESSAGE => {
                 InsertTargetError::NoSuchBlueprint(self.target_id)
             }
-            DieselError::DatabaseError(DatabaseErrorKind::Unknown, info)
-                if info.message() == PARENT_NOT_TARGET_ERROR_MESSAGE =>
-            {
+            RunError::Diesel(DieselError::DatabaseError(
+                DatabaseErrorKind::Unknown,
+                info,
+            )) if info.message() == PARENT_NOT_TARGET_ERROR_MESSAGE => {
                 InsertTargetError::ParentNotTarget(self.target_id)
             }
             other => InsertTargetError::Other(other),

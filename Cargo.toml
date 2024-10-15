@@ -810,7 +810,8 @@ opt-level = 3
 # crucible-agent-client = { path = "../crucible/agent-client" }
 # crucible-pantry-client = { path = "../crucible/pantry-client" }
 # crucible-smf = { path = "../crucible/smf" }
-#[patch.crates-io]
+[patch.crates-io]
+async-bb8-diesel = { path = "../async-bb8-diesel" }
 #diesel = { path = "../../diesel/diesel" }
 #[patch."https://github.com/oxidecomputer/diesel-dtrace"]
 #diesel-dtrace = { path = "../diesel-dtrace" }

@@ -35,6 +35,7 @@ use crate::db::queries::external_ip::SAFE_TO_ATTACH_INSTANCE_STATES_CREATING;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::RunError;
 use chrono::Utc;
 use diesel::prelude::*;
 use nexus_db_model::FloatingIpUpdate;
@@ -273,7 +274,7 @@ impl DataStore {
             use diesel::result::Error::DatabaseError;
             use diesel::result::Error::NotFound;
             match e {
-                NotFound => {
+                RunError::Diesel(NotFound) => {
                     if explicit_ip {
                         TransactionError::CustomError(Error::invalid_request(
                             "Requested external IP address not available",
@@ -288,7 +289,9 @@ impl DataStore {
                     }
                 }
                 // Floating IP: name conflict
-                DatabaseError(UniqueViolation, ..) if name.is_some() => {
+                RunError::Diesel(DatabaseError(UniqueViolation, ..))
+                    if name.is_some() =>
+                {
                     TransactionError::CustomError(public_error_from_diesel(
                         e,
                         ErrorHandler::Conflict(
@@ -516,7 +519,7 @@ impl DataStore {
                 })
             },
             // This case occurs for both currently attaching and attached ephemeral IPs:
-            AttachError::DatabaseError(DatabaseError(UniqueViolation, ..))
+            AttachError::DatabaseError(RunError::Diesel(DatabaseError(UniqueViolation, ..)))
                 if kind == IpKind::Ephemeral => {
                 Ok(None)
             },

@@ -12,6 +12,7 @@ use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::model::VolumeRepair;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::RunError;
 use diesel::prelude::*;
 use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
@@ -41,10 +42,10 @@ impl DataStore {
             .await
             .map(|_| ())
             .map_err(|e| match e {
-                DieselError::DatabaseError(
+                RunError::Diesel(DieselError::DatabaseError(
                     DatabaseErrorKind::UniqueViolation,
                     ref error_information,
-                ) if error_information.constraint_name()
+                )) if error_information.constraint_name()
                     == Some("volume_repair_pkey") =>
                 {
                     Error::conflict("volume repair lock")
@@ -85,7 +86,7 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<db::DbConnection>,
         volume_id: Uuid,
         repair_id: Uuid,
-    ) -> Result<VolumeRepair, DieselError> {
+    ) -> Result<VolumeRepair, RunError> {
         use db::schema::volume_repair::dsl;
 
         dsl::volume_repair

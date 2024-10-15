@@ -24,6 +24,7 @@ use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::OptionalExtension;
 use diesel::prelude::*;
 use nexus_config::RegionAllocationStrategy;
 use nexus_types::external_api::params;

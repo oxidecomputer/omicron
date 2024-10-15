@@ -13,6 +13,7 @@ use crate::db::model::Name;
 use crate::db::pool::DbConnection;
 use crate::db::schema;
 use crate::db::true_or_cast_error::{matches_sentinel, TrueOrCastError};
+use async_bb8_diesel::RunError;
 use chrono::DateTime;
 use chrono::Utc;
 use diesel::pg::Pg;
@@ -69,7 +70,7 @@ const REALLOCATION_WITH_DIFFERENT_IP_SENTINEL: &'static str =
     "Reallocation of IP with different value";
 
 /// Translates a generic pool error to an external error.
-pub fn from_diesel(e: DieselError) -> external::Error {
+pub fn from_diesel(e: RunError) -> external::Error {
     use crate::db::error;
 
     let sentinels = [REALLOCATION_WITH_DIFFERENT_IP_SENTINEL];

@@ -827,10 +827,10 @@ pub(crate) mod test {
         app::saga::create_saga_dag, app::sagas::disk_create::Params,
         app::sagas::disk_create::SagaDiskCreate, external_api::params,
     };
-    use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
-    use diesel::{
-        ExpressionMethods, OptionalExtension, QueryDsl, SelectableHelper,
+    use async_bb8_diesel::{
+        AsyncRunQueryDsl, AsyncSimpleConnection, OptionalExtension,
     };
+    use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::{authn::saga::Serialized, db::datastore::DataStore};
     use nexus_test_utils::resource_helpers::create_project;

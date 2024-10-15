@@ -23,7 +23,7 @@ use crate::db::model::{
 };
 use crate::db::pagination::paginated;
 use crate::transaction_retry::OptionalError;
-use async_bb8_diesel::{AsyncRunQueryDsl, Connection};
+use async_bb8_diesel::{AsyncRunQueryDsl, Connection, RunError};
 use diesel::{
     CombineDsl, ExpressionMethods, JoinOnDsl, NullableExpressionMethods,
     PgConnection, QueryDsl, SelectableHelper,
@@ -852,11 +852,11 @@ impl DataStore {
                         .limit(1)
                         .first_async::<String>(&conn)
                         .await
-                        .map_err(|e: diesel::result::Error| {
+                        .map_err(|e: RunError| {
                             let msg = "failed to look up switch port by id";
                             error!(opctx.log, "{msg}"; "error" => ?e);
                             match e {
-                                diesel::result::Error::NotFound => {
+                                RunError::Diesel(diesel::result::Error::NotFound) => {
                                     err.bail(Error::not_found_by_id(
                                         ResourceType::SwitchPort,
                                         &switch_port_id,
@@ -889,7 +889,7 @@ impl DataStore {
                                     let msg = "failed to check if bgp peer exists in switch port settings";
                                     error!(opctx.log, "{msg}"; "error" => ?e);
                                     match e {
-                                        diesel::result::Error::NotFound => {
+                                        RunError::Diesel(diesel::result::Error::NotFound) => {
                                             Ok(None)
                                         }
                                         _ => Err(err.bail(Error::internal_error(msg))),
@@ -1097,7 +1097,7 @@ async fn do_switch_port_settings_create(
     id: Option<Uuid>,
     params: &params::SwitchPortSettingsCreate,
     err: OptionalError<SwitchPortSettingsCreateError>,
-) -> Result<SwitchPortSettingsCombinedResult, diesel::result::Error> {
+) -> Result<SwitchPortSettingsCombinedResult, RunError> {
     use db::schema::{
         address_lot::dsl as address_lot_dsl, bgp_config::dsl as bgp_config_dsl,
         lldp_link_config::dsl as lldp_link_config_dsl,
@@ -1460,7 +1460,7 @@ async fn do_switch_port_settings_delete(
     conn: &Connection<DTraceConnection<PgConnection>>,
     selector: &NameOrId,
     err: OptionalError<SwitchPortSettingsDeleteError>,
-) -> Result<(), diesel::result::Error> {
+) -> Result<(), RunError> {
     use db::schema::switch_port_settings;
     use db::schema::switch_port_settings::dsl as port_settings_dsl;
     let id = match selector {

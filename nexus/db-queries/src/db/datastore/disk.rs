@@ -32,6 +32,7 @@ use crate::db::queries::disk::DiskSetClauseForAttach;
 use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::OptionalExtension;
 use chrono::DateTime;
 use chrono::Utc;
 use diesel::prelude::*;

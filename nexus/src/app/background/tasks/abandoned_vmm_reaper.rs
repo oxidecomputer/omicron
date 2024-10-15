@@ -196,6 +196,7 @@ impl BackgroundTask for AbandonedVmmReaper {
 mod tests {
 
     use super::*;
+    use async_bb8_diesel::OptionalExtension;
     use chrono::Utc;
     use nexus_db_model::ByteCount;
     use nexus_db_model::Generation;
@@ -279,10 +280,7 @@ mod tests {
 
         async fn assert_reaped(&self, datastore: &DataStore) {
             use async_bb8_diesel::AsyncRunQueryDsl;
-            use diesel::{
-                ExpressionMethods, OptionalExtension, QueryDsl,
-                SelectableHelper,
-            };
+            use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
             use nexus_db_queries::db::schema::sled_resource::dsl as sled_resource_dsl;
             use nexus_db_queries::db::schema::vmm::dsl as vmm_dsl;
 

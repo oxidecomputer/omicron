@@ -325,10 +325,8 @@ impl NexusSaga for SagaInstanceIpAttach {
 pub(crate) mod test {
     use super::*;
     use crate::app::{db, saga::create_saga_dag, sagas::test_helpers};
-    use async_bb8_diesel::AsyncRunQueryDsl;
-    use diesel::{
-        ExpressionMethods, OptionalExtension, QueryDsl, SelectableHelper,
-    };
+    use async_bb8_diesel::{AsyncRunQueryDsl, OptionalExtension};
+    use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
     use dropshot::test_util::ClientTestContext;
     use nexus_db_model::{ExternalIp, IpKind};
     use nexus_db_queries::context::OpContext;

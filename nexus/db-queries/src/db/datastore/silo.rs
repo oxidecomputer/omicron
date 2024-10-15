@@ -26,6 +26,7 @@ use crate::db::pagination::Paginator;
 use crate::db::pool::DbConnection;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::OptionalExtension;
 use chrono::Utc;
 use diesel::prelude::*;
 use nexus_db_fixed_data::silo::{DEFAULT_SILO, INTERNAL_SILO};

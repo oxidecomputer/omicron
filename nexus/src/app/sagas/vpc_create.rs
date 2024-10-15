@@ -585,10 +585,8 @@ pub(crate) mod test {
         app::sagas::vpc_create::Params, app::sagas::vpc_create::SagaVpcCreate,
         external_api::params,
     };
-    use async_bb8_diesel::AsyncRunQueryDsl;
-    use diesel::{
-        ExpressionMethods, OptionalExtension, QueryDsl, SelectableHelper,
-    };
+    use async_bb8_diesel::{AsyncRunQueryDsl, OptionalExtension};
+    use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
     use dropshot::test_util::ClientTestContext;
     use nexus_db_queries::db::fixed_data::vpc::SERVICES_INTERNET_GATEWAY_ID;
     use nexus_db_queries::{

@@ -176,6 +176,7 @@ impl BackgroundTask for DecommissionedDiskCleaner {
 mod tests {
     use super::*;
     use async_bb8_diesel::AsyncRunQueryDsl;
+    use async_bb8_diesel::OptionalExtension;
     use diesel::ExpressionMethods;
     use diesel::QueryDsl;
     use nexus_db_model::Dataset;
@@ -325,10 +326,7 @@ mod tests {
 
         async fn has_been_cleaned(&self, datastore: &DataStore) -> bool {
             use async_bb8_diesel::AsyncRunQueryDsl;
-            use diesel::{
-                ExpressionMethods, OptionalExtension, QueryDsl,
-                SelectableHelper,
-            };
+            use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
             use nexus_db_queries::db::schema::zpool::dsl as zpool_dsl;
 
             let conn = datastore.pool_connection_for_tests().await.unwrap();

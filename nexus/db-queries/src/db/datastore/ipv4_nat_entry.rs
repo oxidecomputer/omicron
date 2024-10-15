@@ -5,6 +5,7 @@ use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
 use crate::db::model::{Ipv4NatEntry, Ipv4NatValues};
 use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::RunError;
 use chrono::{DateTime, Utc};
 use diesel::prelude::*;
 use diesel::sql_types::BigInt;
@@ -81,7 +82,7 @@ impl DataStore {
 
         match out {
             Ok(o) => Ok(o),
-            Err(diesel::result::Error::NotFound) => {
+            Err(RunError::Diesel(diesel::result::Error::NotFound)) => {
                 // Idempotent ensure. Annoyingly, we can't easily extract
                 // the existing row as part of the insert query:
                 // - (SELECT ..) UNION (INSERT INTO .. RETURNING ..) isn't

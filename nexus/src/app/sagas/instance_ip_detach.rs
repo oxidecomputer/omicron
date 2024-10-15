@@ -290,10 +290,8 @@ pub(crate) mod test {
         },
         Nexus,
     };
-    use async_bb8_diesel::AsyncRunQueryDsl;
-    use diesel::{
-        ExpressionMethods, OptionalExtension, QueryDsl, SelectableHelper,
-    };
+    use async_bb8_diesel::{AsyncRunQueryDsl, OptionalExtension};
+    use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
     use nexus_db_model::{ExternalIp, IpKind};
     use nexus_db_queries::context::OpContext;
     use nexus_test_utils::resource_helpers::create_instance;

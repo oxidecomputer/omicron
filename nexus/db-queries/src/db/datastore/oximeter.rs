@@ -17,6 +17,8 @@ use crate::db::pagination::paginated;
 use crate::db::pagination::Paginator;
 use crate::db::queries;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::OptionalExtension;
+use async_bb8_diesel::RunError;
 use chrono::DateTime;
 use chrono::Utc;
 use diesel::prelude::*;
@@ -159,10 +161,10 @@ impl DataStore {
             .await
         {
             Ok(n) => Ok(CollectorReassignment::Complete(n)),
-            Err(DieselError::DatabaseError(
+            Err(RunError::Diesel(DieselError::DatabaseError(
                 DatabaseErrorKind::NotNullViolation,
                 _,
-            )) => Ok(CollectorReassignment::NoCollectorsAvailable),
+            ))) => Ok(CollectorReassignment::NoCollectorsAvailable),
             Err(e) => Err(public_error_from_diesel(e, ErrorHandler::Server)),
         }
     }
@@ -186,9 +188,11 @@ impl DataStore {
             .await
         {
             Ok(info) => Ok(info),
-            Err(DieselError::NotFound) => Err(Error::unavail(
-                "no Oximeter instances available for assignment",
-            )),
+            Err(RunError::Diesel(DieselError::NotFound)) => {
+                Err(Error::unavail(
+                    "no Oximeter instances available for assignment",
+                ))
+            }
             Err(e) => Err(public_error_from_diesel(e, ErrorHandler::Server)),
         }
     }

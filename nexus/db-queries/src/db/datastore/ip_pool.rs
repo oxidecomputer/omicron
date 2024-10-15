@@ -32,6 +32,8 @@ use crate::db::queries::ip_pool::FilterOverlappingIpRanges;
 use crate::db::TransactionError;
 use async_bb8_diesel::AsyncConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::OptionalExtension;
+use async_bb8_diesel::RunError;
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
@@ -598,7 +600,7 @@ impl DataStore {
                                     ))
                                 }
                                 AsyncInsertError::DatabaseError(e) => match e {
-                                    diesel::result::Error::DatabaseError(diesel::result::DatabaseErrorKind::UniqueViolation, _) =>
+                                    RunError::Diesel(diesel::result::Error::DatabaseError(diesel::result::DatabaseErrorKind::UniqueViolation, _)) =>
                                     {
                                         return Ok(());
                                     }
@@ -718,7 +720,7 @@ impl DataStore {
         // Errors returned from the below transactions.
         #[derive(Debug)]
         enum IpPoolResourceUpdateError {
-            FailedToUnsetDefault(DieselError),
+            FailedToUnsetDefault(RunError),
         }
         type TxnError = TransactionError<IpPoolResourceUpdateError>;
 
@@ -1013,7 +1015,9 @@ impl DataStore {
                             lookup_type: LookupType::ById(pool_id),
                         }
                     }
-                    AsyncInsertError::DatabaseError(NotFound) => {
+                    AsyncInsertError::DatabaseError(RunError::Diesel(
+                        NotFound,
+                    )) => {
                         // We've filtered out the IP addresses the client provided,
                         // i.e., there's some overlap with existing addresses.
                         Error::invalid_request(

@@ -44,6 +44,8 @@ use crate::db::queries::vpc_subnet::InsertVpcSubnetError;
 use crate::db::queries::vpc_subnet::InsertVpcSubnetQuery;
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::OptionalExtension;
+use async_bb8_diesel::RunError;
 use chrono::Utc;
 use diesel::prelude::*;
 use diesel::result::DatabaseErrorKind;
@@ -481,12 +483,12 @@ impl DataStore {
                     lookup_type: LookupType::ById(project_id),
                 })
             }
-            Err(AsyncInsertError::DatabaseError(
+            Err(AsyncInsertError::DatabaseError(RunError::Diesel(
                 DieselError::DatabaseError(
                     DatabaseErrorKind::NotNullViolation,
                     info,
                 ),
-            )) if info
+            ))) if info
                 .message()
                 .starts_with("null value in column \"vni\"") =>
             {
@@ -2197,7 +2199,9 @@ impl DataStore {
                     .await?;
 
                 if updated_rows != to_update {
-                    return Err(DieselError::RollbackTransaction);
+                    return Err(RunError::Diesel(
+                        DieselError::RollbackTransaction,
+                    ));
                 }
 
                 // Duplicate rules are caught here using the UNIQUE constraint
@@ -2218,9 +2222,13 @@ impl DataStore {
                         .await
                     {
                         Err(Error::Conflict { .. }) => {
-                            return Err(DieselError::RollbackTransaction)
+                            return Err(RunError::Diesel(
+                                DieselError::RollbackTransaction,
+                            ))
                         }
-                        Err(_) => return Err(DieselError::NotFound),
+                        Err(_) => {
+                            return Err(RunError::Diesel(DieselError::NotFound))
+                        }
                         _ => {}
                     }
                 }
@@ -2238,7 +2246,9 @@ impl DataStore {
                     .await?;
 
                 if current_rules.len() != expected_names.len() {
-                    return Err(DieselError::RollbackTransaction);
+                    return Err(RunError::Diesel(
+                        DieselError::RollbackTransaction,
+                    ));
                 }
 
                 for rule in current_rules {
@@ -2247,7 +2257,11 @@ impl DataStore {
                             ExternalRouteKind::VpcSubnet,
                             RouteTarget::Subnet(n),
                         ) if expected_names.contains(Name::ref_cast(&n)) => {}
-                        _ => return Err(DieselError::RollbackTransaction),
+                        _ => {
+                            return Err(RunError::Diesel(
+                                DieselError::RollbackTransaction,
+                            ))
+                        }
                     }
                 }
 

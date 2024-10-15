@@ -18,6 +18,7 @@ use crate::db::update_and_check::UpdateAndCheck;
 use crate::db::update_and_check::UpdateAndQueryResult;
 use crate::db::update_and_check::UpdateStatus;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::RunError;
 use chrono::Utc;
 use diesel::prelude::*;
 use omicron_common::api::external::CreateResult;
@@ -134,7 +135,7 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<db::DbConnection>,
         vmm_id: &PropolisUuid,
         migration: &nexus::MigrationRuntimeState,
-    ) -> Result<UpdateAndQueryResult<Migration>, diesel::result::Error> {
+    ) -> Result<UpdateAndQueryResult<Migration>, RunError> {
         let generation = Generation(migration.r#gen);
         diesel::update(dsl::migration)
             .filter(dsl::id.eq(migration.migration_id))
@@ -156,7 +157,7 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<db::DbConnection>,
         vmm_id: &PropolisUuid,
         migration: &nexus::MigrationRuntimeState,
-    ) -> Result<UpdateAndQueryResult<Migration>, diesel::result::Error> {
+    ) -> Result<UpdateAndQueryResult<Migration>, RunError> {
         let generation = Generation(migration.r#gen);
         diesel::update(dsl::migration)
             .filter(dsl::id.eq(migration.migration_id))

@@ -16,7 +16,7 @@ use super::cte_utils::{
     QueryFromClause, QuerySqlType,
 };
 use super::pool::DbConnection;
-use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::{AsyncRunQueryDsl, RunError};
 use diesel::associations::HasTable;
 use diesel::expression::{AsExpression, Expression};
 use diesel::helper_types::*;
@@ -231,7 +231,7 @@ where
 
 /// Result of [`DetachFromCollectionStatement`] when executed asynchronously
 pub type AsyncDetachFromCollectionResult<ResourceType, C> =
-    Result<ResourceType, DetachError<ResourceType, C, DieselError>>;
+    Result<ResourceType, DetachError<ResourceType, C, RunError>>;
 
 /// Errors returned by [`DetachFromCollectionStatement`].
 #[derive(Debug)]

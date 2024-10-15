@@ -5,6 +5,7 @@
 //! Error handling and conversions.
 
 use crate::transaction_retry::OptionalError;
+use async_bb8_diesel::RunError;
 use diesel::result::DatabaseErrorInformation;
 use diesel::result::DatabaseErrorKind as DieselErrorKind;
 use diesel::result::Error as DieselError;
@@ -26,10 +27,17 @@ pub enum TransactionError<T> {
     /// This error covers failure due to accessing the DB pool or errors
     /// propagated from the DB itself.
     #[error("Database error: {0}")]
-    Database(#[from] DieselError),
+    Database(#[from] RunError),
 }
 
-pub fn retryable(error: &DieselError) -> bool {
+pub fn retryable(error: &RunError) -> bool {
+    match error {
+        RunError::Diesel(error) => retryable_diesel(error),
+        RunError::RuntimeShutdown => false,
+    }
+}
+
+pub fn retryable_diesel(error: &DieselError) -> bool {
     match error {
         DieselError::DatabaseError(kind, boxed_error_information) => match kind
         {
@@ -63,7 +71,9 @@ impl<T> TransactionError<T> {
         use MaybeRetryable::*;
 
         match self {
-            TransactionError::Database(err) if retryable(&err) => {
+            TransactionError::Database(RunError::Diesel(err))
+                if retryable_diesel(&err) =>
+            {
                 Retryable(err)
             }
             _ => NotRetryable(self),
@@ -87,10 +97,12 @@ impl<T: std::fmt::Debug> TransactionError<T> {
     pub fn into_diesel(
         self,
         err: &OptionalError<TransactionError<T>>,
-    ) -> DieselError {
+    ) -> RunError {
         match self.retryable() {
             MaybeRetryable::NotRetryable(txn_error) => err.bail(txn_error),
-            MaybeRetryable::Retryable(diesel_error) => diesel_error,
+            MaybeRetryable::Retryable(diesel_error) => {
+                RunError::Diesel(diesel_error)
+            }
         }
     }
 }
@@ -176,7 +188,7 @@ pub enum ErrorHandler<'a> {
 /// [`ErrorHandler`] may be used to add additional handlers for the error
 /// being returned.
 pub fn public_error_from_diesel(
-    error: DieselError,
+    error: RunError,
     handler: ErrorHandler<'_>,
 ) -> PublicError {
     match handler {
@@ -203,18 +215,18 @@ pub fn public_error_from_diesel(
 /// Converts a Diesel error to an external error, handling "NotFound" using
 /// `make_not_found_error`.
 pub(crate) fn public_error_from_diesel_lookup(
-    error: DieselError,
+    error: RunError,
     resource_type: ResourceType,
     lookup_type: &LookupType,
 ) -> PublicError {
     match error {
-        DieselError::NotFound => {
+        RunError::Diesel(DieselError::NotFound) => {
             lookup_type.clone().into_not_found(resource_type)
         }
-        DieselError::DatabaseError(kind, info) => {
+        RunError::Diesel(DieselError::DatabaseError(kind, info)) => {
             PublicError::internal_error(&format_database_error(kind, &*info))
         }
-        error => {
+        RunError::Diesel(error) => {
             let context =
                 format!("accessing {:?} {:?}", resource_type, lookup_type);
             PublicError::internal_error(&format!(
@@ -222,31 +234,35 @@ pub(crate) fn public_error_from_diesel_lookup(
                 context, error
             ))
         }
+        RunError::RuntimeShutdown => PublicError::runtime_shutdown(),
     }
 }
 
 /// Converts a Diesel error to an external error, when requested as
 /// part of a creation operation.
 pub(crate) fn public_error_from_diesel_create(
-    error: DieselError,
+    error: RunError,
     resource_type: ResourceType,
     object_name: &str,
 ) -> PublicError {
     match error {
-        DieselError::DatabaseError(kind, info) => match kind {
-            DieselErrorKind::UniqueViolation => {
-                PublicError::ObjectAlreadyExists {
-                    type_name: resource_type,
-                    object_name: object_name.to_string(),
+        RunError::Diesel(DieselError::DatabaseError(kind, info)) => {
+            match kind {
+                DieselErrorKind::UniqueViolation => {
+                    PublicError::ObjectAlreadyExists {
+                        type_name: resource_type,
+                        object_name: object_name.to_string(),
+                    }
                 }
+                _ => PublicError::internal_error(&format_database_error(
+                    kind, &*info,
+                )),
             }
-            _ => PublicError::internal_error(&format_database_error(
-                kind, &*info,
-            )),
-        },
-        _ => PublicError::internal_error(&format!(
+        }
+        RunError::Diesel(_) => PublicError::internal_error(&format!(
             "Unknown diesel error creating {:?} called {:?}: {:#}",
             resource_type, object_name, error
         )),
+        RunError::RuntimeShutdown => PublicError::runtime_shutdown(),
     }
 }

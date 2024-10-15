@@ -9,6 +9,7 @@ use crate::db::identity::Resource;
 use crate::db::model::VpcSubnet;
 use crate::db::schema::vpc_subnet::dsl;
 use crate::db::DbConnection;
+use async_bb8_diesel::RunError;
 use diesel::pg::Pg;
 use diesel::prelude::*;
 use diesel::query_builder::*;
@@ -215,15 +216,15 @@ impl InsertVpcSubnetError {
 
     /// Construct an `InsertError` from a Diesel error, catching the desired
     /// cases and building useful errors.
-    pub fn from_diesel(e: DieselError, subnet: &VpcSubnet) -> Self {
+    pub fn from_diesel(e: RunError, subnet: &VpcSubnet) -> Self {
         use crate::db::error;
         use diesel::result::DatabaseErrorKind;
         match e {
             // Attempt to insert an overlapping IPv4 subnet
-            DieselError::DatabaseError(
+            RunError::Diesel(DieselError::DatabaseError(
                 DatabaseErrorKind::Unknown,
                 ref info,
-            ) if info.message()
+            )) if info.message()
                 == Self::OVERLAPPING_IPV4_BLOCK_ERROR_MESSAGE =>
             {
                 InsertVpcSubnetError::OverlappingIpRange(
@@ -232,10 +233,10 @@ impl InsertVpcSubnetError {
             }
 
             // Attempt to insert an overlapping IPv6 subnet
-            DieselError::DatabaseError(
+            RunError::Diesel(DieselError::DatabaseError(
                 DatabaseErrorKind::Unknown,
                 ref info,
-            ) if info.message()
+            )) if info.message()
                 == Self::OVERLAPPING_IPV6_BLOCK_ERROR_MESSAGE =>
             {
                 InsertVpcSubnetError::OverlappingIpRange(
@@ -244,10 +245,10 @@ impl InsertVpcSubnetError {
             }
 
             // Conflicting name for the subnet within a VPC
-            DieselError::DatabaseError(
+            RunError::Diesel(DieselError::DatabaseError(
                 DatabaseErrorKind::UniqueViolation,
                 ref info,
-            ) if info.constraint_name()
+            )) if info.constraint_name()
                 == Some(Self::NAME_CONFLICT_CONSTRAINT) =>
             {
                 InsertVpcSubnetError::External(error::public_error_from_diesel(

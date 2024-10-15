@@ -5,13 +5,15 @@
 //! Queries for inserting and deleting network interfaces.
 
 use crate::db;
-use crate::db::error::{public_error_from_diesel, retryable, ErrorHandler};
+use crate::db::error::{
+    public_error_from_diesel, retryable, retryable_diesel, ErrorHandler,
+};
 use crate::db::model::IncompleteNetworkInterface;
 use crate::db::pool::DbConnection;
 use crate::db::queries::next_item::DefaultShiftGenerator;
 use crate::db::queries::next_item::{NextItem, NextItemSelfJoined};
 use crate::db::schema::network_interface::dsl;
-use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::{AsyncRunQueryDsl, RunError};
 use chrono::DateTime;
 use chrono::Utc;
 use diesel::pg::Pg;
@@ -132,13 +134,13 @@ impl InsertError {
     /// address exhaustion or an attempt to attach an interface to an instance
     /// that is already associated with another VPC.
     pub fn from_diesel(
-        e: DieselError,
+        e: RunError,
         interface: &IncompleteNetworkInterface,
     ) -> Self {
         match e {
             // Catch the specific errors designed to communicate the failures we
             // want to distinguish
-            DieselError::DatabaseError(_, _) => {
+            RunError::Diesel(e @ DieselError::DatabaseError(_, _)) => {
                 decode_database_error(e, interface)
             }
             // Any other error at all is a bug
@@ -217,7 +219,7 @@ impl InsertError {
                 external::Error::not_found_by_id(external::ResourceType::Instance, &id)
             }
             InsertError::Retryable(err) => {
-                public_error_from_diesel(err, ErrorHandler::Server)
+                public_error_from_diesel(RunError::Diesel(err), ErrorHandler::Server)
             }
             InsertError::External(e) => e,
         }
@@ -306,7 +308,7 @@ fn decode_database_error(
         r#"uuid: incorrect UUID length: non-unique-subnets"#,
     );
 
-    if retryable(&err) {
+    if retryable_diesel(&err) {
         return InsertError::Retryable(err);
     }
 
@@ -418,7 +420,7 @@ fn decode_database_error(
                     }
                 };
                 InsertError::External(error::public_error_from_diesel(
-                    err,
+                    RunError::Diesel(err),
                     error::ErrorHandler::Conflict(
                         resource_type,
                         interface.identity.name.as_str(),
@@ -435,14 +437,14 @@ fn decode_database_error(
             }
             // Any other constraint violation is a bug
             _ => InsertError::External(error::public_error_from_diesel(
-                err,
+                RunError::Diesel(err),
                 error::ErrorHandler::Server,
             )),
         },
 
         // Any other error at all is a bug
         _ => InsertError::External(error::public_error_from_diesel(
-            err,
+            RunError::Diesel(err),
             error::ErrorHandler::Server,
         )),
     }
@@ -1529,7 +1531,7 @@ impl DeleteQuery {
     pub async fn execute_and_check(
         self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
-    ) -> Result<bool, DieselError> {
+    ) -> Result<bool, RunError> {
         let (found_id, deleted_id) =
             self.get_result_async::<(Option<Uuid>, Option<Uuid>)>(conn).await?;
         match (found_id, deleted_id) {
@@ -1547,7 +1549,7 @@ impl DeleteQuery {
                      deleted nonexisted interface {deleted}"
                 )
             }
-            (None, None) => Err(DieselError::NotFound),
+            (None, None) => Err(RunError::Diesel(DieselError::NotFound)),
         }
     }
 }
@@ -1669,19 +1671,19 @@ impl DeleteError {
     /// can generate, specifically the intentional errors that indicate that
     /// either the instance is still running, or that the instance has one or
     /// more secondary interfaces.
-    pub fn from_diesel(e: DieselError, query: &DeleteQuery) -> Self {
+    pub fn from_diesel(e: RunError, query: &DeleteQuery) -> Self {
         use crate::db::error;
         match e {
             // Catch the specific errors designed to communicate the failures we
             // want to distinguish
-            DieselError::DatabaseError(_, _) => {
+            RunError::Diesel(e @ DieselError::DatabaseError(_, _)) => {
                 decode_delete_network_interface_database_error(
                     e,
                     query.parent_id,
                 )
             }
             // Faithfully plumb through `NotFound`
-            DieselError::NotFound => {
+            RunError::Diesel(DieselError::NotFound) => {
                 let type_name = match query.kind {
                     NetworkInterfaceKind::Instance => {
                         external::ResourceType::InstanceNetworkInterface
@@ -1782,7 +1784,7 @@ fn decode_delete_network_interface_database_error(
 
         // Any other error at all is a bug
         _ => DeleteError::External(error::public_error_from_diesel(
-            err,
+            RunError::Diesel(err),
             error::ErrorHandler::Server,
         )),
     }

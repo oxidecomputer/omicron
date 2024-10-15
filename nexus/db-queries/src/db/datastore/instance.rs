@@ -40,6 +40,8 @@ use crate::db::update_and_check::UpdateAndQueryResult;
 use crate::db::update_and_check::UpdateStatus;
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::OptionalExtension;
+use async_bb8_diesel::RunError;
 use chrono::Utc;
 use diesel::prelude::*;
 use nexus_db_model::Disk;
@@ -599,7 +601,7 @@ impl DataStore {
         &self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
         authz_instance: &authz::Instance,
-    ) -> Result<InstanceAndActiveVmm, diesel::result::Error> {
+    ) -> Result<InstanceAndActiveVmm, RunError> {
         use db::schema::instance::dsl as instance_dsl;
         use db::schema::vmm::dsl as vmm_dsl;
 
@@ -1124,7 +1126,7 @@ impl DataStore {
         err: &OptionalError<Error>,
         authz_instance: &authz::Instance,
         boot_disk_id: Option<Uuid>,
-    ) -> Result<(), diesel::result::Error> {
+    ) -> Result<(), RunError> {
         use db::schema::disk::dsl as disk_dsl;
         use db::schema::instance::dsl as instance_dsl;
 
@@ -1149,7 +1151,7 @@ impl DataStore {
             .await;
         let instance = match maybe_instance {
             Ok(i) => i,
-            Err(diesel::NotFound) => {
+            Err(RunError::Diesel(diesel::NotFound)) => {
                 // If the instance simply doesn't exist, we
                 // shouldn't retry. Bail with a useful error.
                 return Err(err.bail(Error::not_found_by_id(

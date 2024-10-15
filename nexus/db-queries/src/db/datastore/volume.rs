@@ -29,9 +29,10 @@ use crate::db::DbConnection;
 use crate::transaction_retry::OptionalError;
 use anyhow::bail;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::OptionalExtension;
+use async_bb8_diesel::RunError;
 use chrono::Utc;
 use diesel::prelude::*;
-use diesel::OptionalExtension;
 use nexus_types::identity::Resource;
 use omicron_common::api::external::CreateResult;
 use omicron_common::api::external::DeleteResult;
@@ -867,7 +868,7 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<DbConnection>,
         volume_id: Uuid,
         err: OptionalError<SoftDeleteTransactionError>,
-    ) -> Result<CrucibleResources, diesel::result::Error> {
+    ) -> Result<CrucibleResources, RunError> {
         // Grab the volume, and check if the volume was already soft-deleted.
         // We have to guard against the case where this function is called
         // multiple times, and that is done by soft-deleting the volume during

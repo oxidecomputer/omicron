@@ -14,6 +14,8 @@ use crate::db::error::{public_error_from_diesel, ErrorHandler};
 use crate::db::model::SemverVersion;
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::OptionalExtension;
+use async_bb8_diesel::RunError;
 use diesel::prelude::*;
 use diesel::result::Error as DieselError;
 use nexus_db_model::{ArtifactHash, TufArtifact, TufRepo, TufRepoDescription};
@@ -46,7 +48,7 @@ impl TufRepoInsertResponse {
 async fn artifacts_for_repo(
     repo_id: TypedUuid<TufRepoKind>,
     conn: &async_bb8_diesel::Connection<crate::db::DbConnection>,
-) -> Result<Vec<TufArtifact>, DieselError> {
+) -> Result<Vec<TufArtifact>, RunError> {
     use db::schema::tuf_artifact::dsl as tuf_artifact_dsl;
     use db::schema::tuf_repo_artifact::dsl as tuf_repo_artifact_dsl;
 
@@ -156,7 +158,7 @@ async fn insert_impl(
     conn: async_bb8_diesel::Connection<crate::db::DbConnection>,
     desc: TufRepoDescription,
     err: OptionalError<InsertError>,
-) -> Result<TufRepoInsertResponse, DieselError> {
+) -> Result<TufRepoInsertResponse, RunError> {
     let repo = {
         use db::schema::tuf_repo::dsl;
 

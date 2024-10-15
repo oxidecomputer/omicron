@@ -11,6 +11,7 @@
 
 use super::pool::DbConnection;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::RunError;
 use async_trait::async_trait;
 use diesel::pg::Pg;
 use diesel::prelude::*;
@@ -28,7 +29,7 @@ pub trait ExplainableAsync<Q> {
     async fn explain_async(
         self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
-    ) -> Result<String, DieselError>;
+    ) -> Result<String, RunError>;
 }
 
 #[async_trait]
@@ -44,7 +45,7 @@ where
     async fn explain_async(
         self,
         conn: &async_bb8_diesel::Connection<DbConnection>,
-    ) -> Result<String, DieselError> {
+    ) -> Result<String, RunError> {
         Ok(ExplainStatement { query: self }
             .get_results_async::<String>(conn)
             .await?

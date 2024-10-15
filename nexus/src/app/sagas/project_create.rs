@@ -157,10 +157,10 @@ mod test {
         app::sagas::project_create::Params,
         app::sagas::project_create::SagaProjectCreate, external_api::params,
     };
-    use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
-    use diesel::{
-        ExpressionMethods, OptionalExtension, QueryDsl, SelectableHelper,
+    use async_bb8_diesel::{
+        AsyncRunQueryDsl, AsyncSimpleConnection, OptionalExtension,
     };
+    use diesel::{ExpressionMethods, QueryDsl, SelectableHelper};
     use nexus_db_queries::{
         authn::saga::Serialized, authz, context::OpContext,
         db::datastore::DataStore,

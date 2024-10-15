@@ -276,6 +276,12 @@ impl Error {
         Error::ServiceUnavailable { internal_message: message.to_owned() }
     }
 
+    pub fn runtime_shutdown() -> Error {
+        Error::ServiceUnavailable {
+            internal_message: "Nexus shutting down".to_owned(),
+        }
+    }
+
     /// Generates an [`Error::InsufficientCapacity`] error with external and
     /// and internal messages.
     ///

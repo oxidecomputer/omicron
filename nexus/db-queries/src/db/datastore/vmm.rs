@@ -19,6 +19,7 @@ use crate::db::update_and_check::UpdateAndQueryResult;
 use crate::db::update_and_check::UpdateStatus;
 use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::AsyncRunQueryDsl;
+use async_bb8_diesel::RunError;
 use chrono::Utc;
 use diesel::prelude::*;
 use omicron_common::api::external::CreateResult;
@@ -162,7 +163,7 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<db::DbConnection>,
         vmm_id: &PropolisUuid,
         new_runtime: &VmmRuntimeState,
-    ) -> Result<UpdateAndQueryResult<Vmm>, diesel::result::Error> {
+    ) -> Result<UpdateAndQueryResult<Vmm>, RunError> {
         diesel::update(dsl::vmm)
             .filter(dsl::time_deleted.is_null())
             .filter(dsl::id.eq(vmm_id.into_untyped_uuid()))
