@@ -140,10 +140,10 @@ impl ArtifactStore<StorageHandle> {
 
 #[derive(Debug, thiserror::Error)]
 pub enum StartError {
-    #[error("Error retrieving dataset configuration: {0}")]
+    #[error("Error retrieving dataset configuration")]
     DatasetConfig(#[source] sled_storage::error::Error),
 
-    #[error("Dropshot error while starting Repo Depot service: {0}")]
+    #[error("Dropshot error while starting Repo Depot service")]
     Dropshot(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
@@ -411,12 +411,10 @@ pub(crate) enum Error {
     #[error(transparent)]
     Body(dropshot::HttpError),
 
-    #[error("Error retrieving dataset configuration: {0}")]
+    #[error("Error retrieving dataset configuration")]
     DatasetConfig(#[from] sled_storage::error::Error),
 
-    #[error(
-        "Error fetching artifact {sha256} from depot at {base_url}: {err}"
-    )]
+    #[error("Error fetching artifact {sha256} from depot at {base_url}")]
     DepotCopy {
         sha256: ArtifactHash,
         base_url: String,
@@ -424,7 +422,7 @@ pub(crate) enum Error {
         err: repo_depot_client::ClientError,
     },
 
-    #[error("Failed to {verb} `{path}`: {err}")]
+    #[error("Failed to {verb} `{path}`")]
     File {
         verb: &'static str,
         path: Utf8PathBuf,
