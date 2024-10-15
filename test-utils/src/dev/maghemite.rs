@@ -47,9 +47,9 @@ impl MgdInstance {
             "--no-bgp-dispatcher".into(),
             "--data-dir".into(),
             temp_dir.path().display().to_string(),
-            "--rack-uuid".into(),
+            "--rack-id".into(),
             uuid::Uuid::new_v4().to_string(),
-            "--sled-uuid".into(),
+            "--sled-id".into(),
             uuid::Uuid::new_v4().to_string(),
         ];
 
