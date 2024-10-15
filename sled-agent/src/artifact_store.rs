@@ -57,7 +57,7 @@ const TEMP_SUBDIR: &str = "tmp";
 /// - for DELETE, we attempt to delete it from every dataset (even after we've
 ///   found it in one of them)
 #[derive(Clone)]
-pub(crate) struct ArtifactStore<T: StorageBackend = StorageHandle> {
+pub(crate) struct ArtifactStore<T: StorageBackend> {
     log: Logger,
     storage: T,
 }
@@ -71,12 +71,13 @@ impl<T: StorageBackend> ArtifactStore<T> {
     }
 }
 
-impl ArtifactStore {
+impl ArtifactStore<StorageHandle> {
     pub(crate) async fn start(
         self,
         sled_address: SocketAddrV6,
         dropshot_config: &ConfigDropshot,
-    ) -> Result<dropshot::HttpServer<ArtifactStore>, StartError> {
+    ) -> Result<dropshot::HttpServer<ArtifactStore<StorageHandle>>, StartError>
+    {
         // This function is only called when the real Sled Agent starts up (it
         // is only defined over `ArtifactStore<StorageHandle>`). In the real
         // Sled Agent, these datasets are durable and may retain temporary
@@ -386,7 +387,7 @@ fn filter_dataset_mountpoints(
 enum RepoDepotImpl {}
 
 impl RepoDepotApi for RepoDepotImpl {
-    type Context = ArtifactStore;
+    type Context = ArtifactStore<StorageHandle>;
 
     async fn artifact_get_by_sha256(
         rqctx: RequestContext<Self::Context>,

@@ -356,7 +356,7 @@ struct SledAgentInner {
     probes: ProbeManager,
 
     // Component of Sled Agent responsible for managing the artifact store.
-    repo_depot: dropshot::HttpServer<ArtifactStore>,
+    repo_depot: dropshot::HttpServer<ArtifactStore<StorageHandle>>,
 }
 
 impl SledAgentInner {
@@ -1104,7 +1104,7 @@ impl SledAgent {
         Ok(())
     }
 
-    pub fn artifact_store(&self) -> &ArtifactStore {
+    pub fn artifact_store(&self) -> &ArtifactStore<StorageHandle> {
         &self.inner.repo_depot.app_private()
     }
 
