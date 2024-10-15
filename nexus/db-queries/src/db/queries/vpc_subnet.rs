@@ -107,16 +107,11 @@ impl QueryFragment<Pg> for InsertVpcSubnetQuery {
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
     ) -> diesel::QueryResult<()> {
-        out.push_sql("WITH overlap AS MATERIALIZED (SELECT CAST(IF((inet_contains_or_equals(");
+        out.push_sql("WITH overlap AS MATERIALIZED (SELECT CAST(IF((");
         out.push_identifier(dsl::ipv4_block::NAME)?;
-        out.push_sql(", ");
+        out.push_sql(" && ");
         out.push_bind_param::<sql_types::Inet, _>(&self.ipv4_block)?;
-        out.push_sql(")");
-        out.push_sql("OR inet_contains_or_equals(");
-        out.push_bind_param::<sql_types::Inet, _>(&self.ipv4_block)?;
-        out.push_sql(", ");
-        out.push_identifier(dsl::ipv4_block::NAME)?;
-        out.push_sql(")), ");
+        out.push_sql("), ");
         out.push_bind_param::<sql_types::Text, _>(
             InsertVpcSubnetError::OVERLAPPING_IPV4_BLOCK_SENTINEL,
         )?;
@@ -136,22 +131,14 @@ impl QueryFragment<Pg> for InsertVpcSubnetQuery {
         out.push_identifier(dsl::id::NAME)?;
         out.push_sql(" != ");
         out.push_bind_param::<sql_types::Uuid, Uuid>(&self.subnet.identity.id)?;
-        out.push_sql(" AND (inet_contains_or_equals(");
+        out.push_sql(" AND ((");
         out.push_identifier(dsl::ipv4_block::NAME)?;
-        out.push_sql(", ");
+        out.push_sql(" && ");
         out.push_bind_param::<sql_types::Inet, IpNetwork>(&self.ipv4_block)?;
-        out.push_sql(") OR inet_contains_or_equals(");
-        out.push_bind_param::<sql_types::Inet, IpNetwork>(&self.ipv4_block)?;
-        out.push_sql(", ");
-        out.push_identifier(dsl::ipv4_block::NAME)?;
-        out.push_sql(") OR inet_contains_or_equals(");
+        out.push_sql(") OR (");
         out.push_identifier(dsl::ipv6_block::NAME)?;
-        out.push_sql(", ");
+        out.push_sql(" && ");
         out.push_bind_param::<sql_types::Inet, IpNetwork>(&self.ipv6_block)?;
-        out.push_sql(") OR inet_contains_or_equals(");
-        out.push_bind_param::<sql_types::Inet, IpNetwork>(&self.ipv6_block)?;
-        out.push_sql(", ");
-        out.push_identifier(dsl::ipv6_block::NAME)?;
 
         out.push_sql("))) INSERT INTO ");
         VPC_SUBNET_FROM_CLAUSE.walk_ast(out.reborrow())?;
