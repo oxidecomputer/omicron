@@ -17,13 +17,13 @@ pub(crate) enum ServerReq {
     List {
         start_seq: Option<Generation>,
         limit: usize,
-        tx: oneshot::Sender<Vec<ereporter_api::Ereport>>,
+        tx: oneshot::Sender<Vec<ereporter_api::Entry>>,
     },
 }
 
 pub(crate) struct Buffer {
     pub(crate) seq: Generation,
-    pub(crate) buf: VecDeque<ereporter_api::Ereport>,
+    pub(crate) buf: VecDeque<ereporter_api::Entry>,
     pub(crate) log: slog::Logger,
     pub(crate) id: Uuid,
     pub(crate) ereports: mpsc::Receiver<EreportData>,
@@ -111,12 +111,14 @@ impl Buffer {
     fn push_ereport(&mut self, ereport: EreportData) {
         let EreportData { facts, class, time_created } = ereport;
         let seq = self.seq;
-        self.buf.push_back(ereporter_api::Ereport {
-            facts,
-            class,
-            time_created,
-            reporter_id: self.id,
+        self.buf.push_back(ereporter_api::Entry {
             seq,
+            reporter_id: self.id,
+            value: ereporter_api::EntryKind::Ereport(ereporter_api::Ereport {
+                facts,
+                class,
+                time_created,
+            }),
         });
         self.seq = self.seq.next();
         slog::trace!(

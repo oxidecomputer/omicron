@@ -25,7 +25,7 @@ pub trait EreporterApi {
     async fn ereports_list(
         request_context: RequestContext<Self::Context>,
         query: Query<PaginationParams<EmptyScanParams, Generation>>,
-    ) -> Result<HttpResponseOk<ResultsPage<Ereport>>, HttpError>;
+    ) -> Result<HttpResponseOk<ResultsPage<Entry>>, HttpError>;
 
     /// Informs the reporter that it may freely discard ereports with sequence
     /// numbers less than or equal to `seq`.
@@ -46,14 +46,42 @@ pub struct SeqPathParam {
     pub seq: Generation,
 }
 
-/// An error report.
+/// An entry in the ereport batch returned by a reporter.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
-pub struct Ereport {
+pub struct Entry {
     /// UUID of the entity that generated this ereport.
     pub reporter_id: Uuid,
     /// The ereport's sequence number, unique with regards to ereports generated
     /// by the entity with the `reporter_id`.
     pub seq: Generation,
+
+    pub value: EntryKind,
+}
+
+/// Kinds of entry in a batch.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EntryKind {
+    /// An ereport.
+    Ereport(Ereport),
+    /// Ereports may have been lost.
+    DataLoss {
+        /// The number of ereports that were discarded, if it is known.
+        ///
+        /// If ereports are dropped because a buffer has reached its capacity,
+        /// the reporter is strongly encouraged to attempt to count the number
+        /// of ereports lost. In other cases, such as a reporter crashing and
+        /// restarting, the reporter may not be capable of determining the
+        /// number of ereports that were lost, or even *if* data loss actually
+        /// occurred. Therefore, a `None` here indicates *possible* data loss,
+        /// while a `Some(u32)` indicates *known* data loss.
+        dropped: Option<u32>,
+    },
+}
+
+/// An error report.
+#[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
+pub struct Ereport {
     /// A string indicating the kind of ereport.
     ///
     /// This may be used by diagnosis engines as an indication of what `facts`
