@@ -702,6 +702,7 @@ fn build_port_config(
     use bootstrap_agent_client::types::PortSpeed as BaPortSpeed;
     use bootstrap_agent_client::types::RouteConfig as BaRouteConfig;
     use bootstrap_agent_client::types::SwitchLocation as BaSwitchLocation;
+    use bootstrap_agent_client::types::TxEqConfig as BaTxEqConfig;
     use bootstrap_agent_client::types::UplinkAddressConfig as BaUplinkAddressConfig;
     use omicron_common::api::internal::shared::LldpAdminStatus;
     use omicron_common::api::internal::shared::PortFec;
@@ -806,6 +807,13 @@ fn build_port_config(
             system_description: c.system_description.clone(),
             port_description: c.port_description.clone(),
             management_addrs: c.management_addrs.clone(),
+        }),
+        tx_eq: config.tx_eq.as_ref().map(|c| BaTxEqConfig {
+            pre1: c.pre1,
+            pre2: c.pre2,
+            main: c.main,
+            post2: c.post2,
+            post1: c.post1,
         }),
     }
 }

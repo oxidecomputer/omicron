@@ -458,6 +458,24 @@ pub struct LldpPortConfig {
     pub management_addrs: Option<Vec<IpAddr>>,
 }
 
+/// Per-port tx-eq overrides.  This can be used to fine-tune the transceiver
+/// equalization settings to improve signal integrity.
+#[derive(
+    Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema,
+)]
+pub struct TxEqConfig {
+    /// Pre-cursor tap1
+    pub pre1: Option<i32>,
+    /// Pre-cursor tap2
+    pub pre2: Option<i32>,
+    /// Main tap
+    pub main: Option<i32>,
+    /// Post-cursor tap2
+    pub post2: Option<i32>,
+    /// Post-cursor tap1
+    pub post1: Option<i32>,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 pub struct PortConfigV2 {
     /// The set of routes associated with this port.
@@ -479,6 +497,8 @@ pub struct PortConfigV2 {
     pub autoneg: bool,
     /// LLDP configuration for this port
     pub lldp: Option<LldpPortConfig>,
+    /// TX-EQ configuration for this port
+    pub tx_eq: Option<TxEqConfig>,
 }
 
 /// A set of switch uplinks.
@@ -497,11 +517,17 @@ pub struct HostPortConfig {
     pub addrs: Vec<UplinkAddressConfig>,
 
     pub lldp: Option<LldpPortConfig>,
+    pub tx_eq: Option<TxEqConfig>,
 }
 
 impl From<PortConfigV2> for HostPortConfig {
     fn from(x: PortConfigV2) -> Self {
-        Self { port: x.port, addrs: x.addresses, lldp: x.lldp.clone() }
+        Self {
+            port: x.port,
+            addrs: x.addresses,
+            lldp: x.lldp.clone(),
+            tx_eq: x.tx_eq,
+        }
     }
 }
 

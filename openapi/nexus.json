@@ -17194,6 +17194,15 @@
                 "$ref": "#/components/schemas/LinkSpeed"
               }
             ]
+          },
+          "tx_eq": {
+            "nullable": true,
+            "description": "Optional tx_eq settings",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TxEqConfig"
+              }
+            ]
           }
         },
         "required": [
@@ -20436,6 +20445,12 @@
                 "$ref": "#/components/schemas/LinkSpeed"
               }
             ]
+          },
+          "tx_eq_config_id": {
+            "nullable": true,
+            "description": "The tx_eq configuration id for this link.",
+            "type": "string",
+            "format": "uuid"
           }
         },
         "required": [
@@ -20736,6 +20751,18 @@
               }
             ]
           },
+          "tx_eq": {
+            "description": "TX equalization settings.  These are optional, and most links will not need them.",
+            "type": "array",
+            "items": {
+              "nullable": true,
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/TxEqConfig"
+                }
+              ]
+            }
+          },
           "vlan_interfaces": {
             "description": "Vlan interface settings.",
             "type": "array",
@@ -20754,6 +20781,7 @@
           "port",
           "routes",
           "settings",
+          "tx_eq",
           "vlan_interfaces"
         ]
       },
@@ -20939,6 +20967,42 @@
         "required": [
           "items"
         ]
+      },
+      "TxEqConfig": {
+        "description": "Per-port tx-eq overrides.  This can be used to fine-tune the transceiver equalization settings to improve signal integrity.",
+        "type": "object",
+        "properties": {
+          "main": {
+            "nullable": true,
+            "description": "Main tap",
+            "type": "integer",
+            "format": "int32"
+          },
+          "post1": {
+            "nullable": true,
+            "description": "Post-cursor tap1",
+            "type": "integer",
+            "format": "int32"
+          },
+          "post2": {
+            "nullable": true,
+            "description": "Post-cursor tap2",
+            "type": "integer",
+            "format": "int32"
+          },
+          "pre1": {
+            "nullable": true,
+            "description": "Pre-cursor tap1",
+            "type": "integer",
+            "format": "int32"
+          },
+          "pre2": {
+            "nullable": true,
+            "description": "Pre-cursor tap2",
+            "type": "integer",
+            "format": "int32"
+          }
+        }
       },
       "UninitializedSled": {
         "description": "A sled that has not been added to an initialized rack yet",

@@ -322,6 +322,7 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
         autoneg,
         bgp_peers,
         lldp,
+        tx_eq,
     } = cfg;
 
     let mut uplink = Table::new();
@@ -533,6 +534,26 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
         uplink.insert("lldp", Item::Table(lldp));
     }
 
+    if let Some(t) = tx_eq {
+        let mut tx_eq = Table::new();
+        if let Some(x) = t.pre1 {
+            tx_eq.insert("pre1", i32_item(x));
+        }
+        if let Some(x) = t.pre2 {
+            tx_eq.insert("pre2", i32_item(x));
+        }
+        if let Some(x) = t.main {
+            tx_eq.insert("main", i32_item(x));
+        }
+        if let Some(x) = t.post1 {
+            tx_eq.insert("post1", i32_item(x));
+        }
+        if let Some(x) = t.post2 {
+            tx_eq.insert("post2", i32_item(x));
+        }
+        uplink.insert("tx_eq", Item::Table(tx_eq));
+    }
+
     uplink
 }
 
@@ -554,6 +575,14 @@ fn string_value(s: impl ToString) -> Value {
 
 fn string_item(s: impl ToString) -> Item {
     Item::Value(string_value(s))
+}
+
+fn i32_value(i: i32) -> Value {
+    Value::Integer(Formatted::new(i.into()))
+}
+
+fn i32_item(i: i32) -> Item {
+    Item::Value(i32_value(i))
 }
 
 fn i64_value(i: i64) -> Value {
