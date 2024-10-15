@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Manages update artifacts stored on this sled. The implementation is a very
+//! Manages TUF artifacts stored on this sled. The implementation is a very
 //! basic content-addressed object store.
 //!
 //! GET operations are handled by the "Repo Depot" API, which is deliberately
@@ -98,7 +98,7 @@ impl ArtifactStore {
             .await
             .map_err(StartError::DatasetConfig)?;
         for mountpoint in
-            update_dataset_mountpoints(config, ZPOOL_MOUNTPOINT_ROOT.into())
+            filter_dataset_mountpoints(config, ZPOOL_MOUNTPOINT_ROOT.into())
         {
             let path = mountpoint.join(TEMP_SUBDIR);
             if let Err(err) = tokio::fs::remove_dir_all(&path).await {
@@ -368,11 +368,11 @@ impl<T: StorageBackend> ArtifactStore<T> {
         &self,
     ) -> Result<impl Iterator<Item = Utf8PathBuf> + '_, Error> {
         let config = self.storage.datasets_config_list().await?;
-        Ok(update_dataset_mountpoints(config, self.storage.mountpoint_root()))
+        Ok(filter_dataset_mountpoints(config, self.storage.mountpoint_root()))
     }
 }
 
-fn update_dataset_mountpoints(
+fn filter_dataset_mountpoints(
     config: DatasetsConfig,
     root: &Utf8Path,
 ) -> impl Iterator<Item = Utf8PathBuf> + '_ {
