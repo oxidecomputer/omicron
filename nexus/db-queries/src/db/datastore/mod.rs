@@ -27,7 +27,7 @@ use crate::db::{
     error::{public_error_from_diesel, ErrorHandler},
 };
 use ::oximeter::types::ProducerRegistry;
-use anyhow::{anyhow, bail, Context};
+use anyhow::{bail, Context};
 use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::pg::Pg;
 use diesel::prelude::*;
@@ -196,16 +196,15 @@ impl DataStore {
     /// Ignores the underlying DB version. Should be used with caution, as usage
     /// of this method can construct a Datastore which does not understand
     /// the underlying CockroachDB schema. Data corruption could result.
-    pub fn new_unchecked(log: Logger, pool: Arc<Pool>) -> Result<Self, String> {
-        let datastore = DataStore {
+    pub fn new_unchecked(log: Logger, pool: Arc<Pool>) -> Self {
+        DataStore {
             log,
             pool,
             virtual_provisioning_collection_producer:
                 crate::provisioning::Producer::new(),
             transaction_retry_producer: crate::transaction_retry::Producer::new(
             ),
-        };
-        Ok(datastore)
+        }
     }
 
     /// Constructs a new Datastore object.
@@ -218,7 +217,7 @@ impl DataStore {
         config: Option<&AllSchemaVersions>,
     ) -> Result<Self, String> {
         let datastore =
-            Self::new_unchecked(log.new(o!("component" => "datastore")), pool)?;
+            Self::new_unchecked(log.new(o!("component" => "datastore")), pool);
 
         // Keep looping until we find that the schema matches our expectation.
         const EXPECTED_VERSION: SemverVersion = nexus_db_model::SCHEMA_VERSION;
@@ -251,8 +250,7 @@ impl DataStore {
         pool: Arc<Pool>,
     ) -> Result<Self, anyhow::Error> {
         let datastore =
-            Self::new_unchecked(log.new(o!("component" => "datastore")), pool)
-                .map_err(|e| anyhow!("{}", e))?;
+            Self::new_unchecked(log.new(o!("component" => "datastore")), pool);
         const EXPECTED_VERSION: SemverVersion = nexus_db_model::SCHEMA_VERSION;
         let (found_version, found_target) = datastore
             .database_schema_version()
@@ -523,6 +521,7 @@ mod test {
                 .unwrap();
         assert!(silo_after_project_create.rcgen > silo.rcgen);
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -658,6 +657,7 @@ mod test {
             datastore.session_hard_delete(&opctx, &authz_session).await;
         assert_eq!(delete_again, Ok(()));
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -1066,6 +1066,7 @@ mod test {
             }
         }
 
+        datastore.terminate().await;
         let _ = db.cleanup().await;
         logctx.cleanup_successful();
     }
@@ -1155,6 +1156,7 @@ mod test {
             }
         }
 
+        datastore.terminate().await;
         let _ = db.cleanup().await;
         logctx.cleanup_successful();
     }
@@ -1211,6 +1213,7 @@ mod test {
             assert!(matches!(err, Error::InsufficientCapacity { .. }));
         }
 
+        datastore.terminate().await;
         let _ = db.cleanup().await;
         logctx.cleanup_successful();
     }
@@ -1277,6 +1280,7 @@ mod test {
             assert_eq!(dataset_and_regions1[i], dataset_and_regions2[i],);
         }
 
+        datastore.terminate().await;
         let _ = db.cleanup().await;
         logctx.cleanup_successful();
     }
@@ -1377,6 +1381,7 @@ mod test {
             .await
             .expect("Allocation should have worked after adding zpools to inventory");
 
+        datastore.terminate().await;
         let _ = db.cleanup().await;
         logctx.cleanup_successful();
     }
@@ -1462,6 +1467,7 @@ mod test {
 
         assert!(matches!(err, Error::InsufficientCapacity { .. }));
 
+        datastore.terminate().await;
         let _ = db.cleanup().await;
         logctx.cleanup_successful();
     }
@@ -1580,6 +1586,7 @@ mod test {
             }
         }
 
+        datastore.terminate().await;
         let _ = db.cleanup().await;
         logctx.cleanup_successful();
     }
@@ -1614,6 +1621,7 @@ mod test {
             .await
             .is_err());
 
+        datastore.terminate().await;
         let _ = db.cleanup().await;
         logctx.cleanup_successful();
     }
@@ -1660,6 +1668,7 @@ mod test {
             explanation,
         );
 
+        datastore.terminate().await;
         let _ = db.cleanup().await;
         logctx.cleanup_successful();
     }
@@ -1718,6 +1727,7 @@ mod test {
         let expected_ip = Ipv6Addr::new(0xfd00, 0x1df, 0, 0, 0, 0, 1, 0);
         assert_eq!(ip, expected_ip);
 
+        datastore.terminate().await;
         let _ = db.cleanup().await;
         logctx.cleanup_successful();
     }
@@ -1802,6 +1812,7 @@ mod test {
         datastore.ssh_key_delete(&opctx, &authz_ssh_key).await.unwrap();
 
         // Clean up.
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -1843,6 +1854,7 @@ mod test {
             .unwrap();
         assert!(result.initialized);
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -1869,6 +1881,7 @@ mod test {
         }
 
         // Clean up.
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -1936,6 +1949,7 @@ mod test {
             .expect("Failed to delete instance external IPs");
         assert_eq!(count, 0, "Expected to delete zero IPs for the instance");
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -2002,6 +2016,7 @@ mod test {
             .await
             .is_err());
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -2250,6 +2265,7 @@ mod test {
             }
         }
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

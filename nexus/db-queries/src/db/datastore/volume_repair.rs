@@ -123,6 +123,7 @@ mod test {
 
         assert!(matches!(err, Error::Conflict { .. }));
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

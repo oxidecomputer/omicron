@@ -1298,6 +1298,7 @@ mod test {
             .expect("Should list silo IP pools");
         assert_eq!(silo_pools.len(), 0);
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -1352,6 +1353,7 @@ mod test {
             datastore.ip_pool_is_internal(&opctx, &authz_other_pool).await;
         assert_eq!(is_internal, Ok(false));
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -1503,6 +1505,7 @@ mod test {
         assert_eq!(max_ips.ipv4, 5);
         assert_eq!(max_ips.ipv6, 1208925819614629174706166);
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

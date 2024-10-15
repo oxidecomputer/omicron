@@ -1106,6 +1106,7 @@ mod test {
             .await
             .unwrap_err();
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -1146,6 +1147,7 @@ mod test {
             .await
             .unwrap_err();
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -1300,6 +1302,7 @@ mod test {
             1,
         );
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -1401,6 +1404,7 @@ mod test {
             .await
             .unwrap();
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -1470,6 +1474,7 @@ mod test {
                 .len(),
         );
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -1520,6 +1525,7 @@ mod test {
             }
         );
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -1553,6 +1559,7 @@ mod test {
             .await
             .unwrap_err();
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

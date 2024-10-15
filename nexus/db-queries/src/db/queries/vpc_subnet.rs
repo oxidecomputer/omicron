@@ -318,6 +318,7 @@ mod test {
         let conn = pool.claim().await.unwrap();
         let explain = query.explain_async(&conn).await.unwrap();
         println!("{explain}");
+        pool.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -470,6 +471,7 @@ mod test {
             "Should be able to insert new VPC Subnet with non-overlapping IP ranges"
         );
 
+        db_datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -571,6 +573,7 @@ mod test {
             "Must be able to insert the exact same VPC subnet more than once",
         );
         assert_rows_eq(&inserted, &row);
+        db_datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

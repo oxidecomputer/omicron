@@ -2887,6 +2887,7 @@ mod tests {
         );
         assert_eq!(region_snapshot.deleting, false);
 
+        db_datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -3100,6 +3101,7 @@ mod tests {
             },
         );
 
+        db_datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -3426,6 +3428,7 @@ mod tests {
             },
         );
 
+        db_datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -3502,6 +3505,7 @@ mod tests {
 
         assert!(volumes.is_empty());
 
+        db_datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

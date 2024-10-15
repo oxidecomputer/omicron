@@ -291,6 +291,7 @@ mod tests {
         assert!(pruned.successes.is_empty());
         assert!(pruned.failures.is_empty());
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -357,6 +358,7 @@ mod tests {
 
         collector.verify_and_clear();
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

@@ -2522,6 +2522,7 @@ mod test {
             .await
             .unwrap_err();
         assert!(matches!(err, Error::ObjectNotFound { .. }));
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -3015,6 +3016,7 @@ mod test {
         assert_ne!(coll_counts.rot_pages, 0);
 
         // Clean up.
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -3136,6 +3138,7 @@ mod test {
         );
 
         // Clean up.
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -3161,6 +3164,7 @@ mod test {
             .expect("All inv_... tables should be populated by representative collection");
 
         // Clean up.
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

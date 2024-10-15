@@ -2108,6 +2108,7 @@ mod tests {
         assert!(unlocked, "instance must actually be unlocked");
 
         // Clean up.
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -2172,6 +2173,7 @@ mod tests {
         assert!(!unlocked, "instance should already have been unlocked");
 
         // Clean up.
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -2265,6 +2267,7 @@ mod tests {
         assert!(!unlocked);
 
         // Clean up.
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -2324,6 +2327,7 @@ mod tests {
         .expect("instance should unlock");
 
         // Clean up.
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -2422,6 +2426,7 @@ mod tests {
         assert_eq!(instance.runtime().r#gen, new_runtime.r#gen);
 
         // Clean up.
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -2512,6 +2517,7 @@ mod tests {
         assert_eq!(instance.runtime().nexus_state, new_runtime.nexus_state);
 
         // Clean up.
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -2692,6 +2698,7 @@ mod tests {
         );
 
         // Clean up.
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -2959,6 +2966,7 @@ mod tests {
         assert_eq!(instance.runtime().dst_propolis_id, Some(vmm3.id));
 
         // Clean up.
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -3096,6 +3104,7 @@ mod tests {
         assert_eq!(expected_instances, found_instances);
 
         // Clean up.
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

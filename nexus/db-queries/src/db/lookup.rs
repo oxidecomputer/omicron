@@ -999,6 +999,7 @@ mod test {
             Project::PrimaryKey(_, p)
             if *p == project_id));
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

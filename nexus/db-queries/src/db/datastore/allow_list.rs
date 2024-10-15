@@ -203,6 +203,7 @@ mod tests {
             "Updated allowed IPs are incorrect"
         );
 
+        datastore.terminate().await;
         db.cleanup().await.expect("failed to cleanup database");
         logctx.cleanup_successful();
     }

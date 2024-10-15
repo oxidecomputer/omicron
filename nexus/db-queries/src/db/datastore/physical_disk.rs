@@ -405,6 +405,7 @@ mod test {
             "{err}"
         );
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -454,6 +455,7 @@ mod test {
             .expect("Failed to list physical disks");
         assert_eq!(disks.len(), 2);
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -504,6 +506,7 @@ mod test {
             .await
             .expect("Failed to delete disk");
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -592,6 +595,7 @@ mod test {
             .expect("Failed to list physical disks");
         assert_eq!(disks.len(), 1);
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -670,6 +674,7 @@ mod test {
             .expect("Failed to list physical disks");
         assert_eq!(disks.len(), 1);
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -814,6 +819,7 @@ mod test {
             "Expected string: {expected} within actual error: {actual}",
         );
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -1000,6 +1006,7 @@ mod test {
             .expect("Failed to list uninitialized disks");
         assert_eq!(uninitialized_disks.len(), 0);
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

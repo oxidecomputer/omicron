@@ -383,6 +383,7 @@ mod test {
             expected_datasets,
         );
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

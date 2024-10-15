@@ -891,6 +891,7 @@ mod test {
 
         assert!(matches!(attach, Err(AttachError::CollectionNotFound)));
 
+        pool.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -928,6 +929,7 @@ mod test {
         // The collection should remain unchanged.
         assert_eq!(collection, get_collection(collection_id, &conn).await);
 
+        pool.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -976,6 +978,7 @@ mod test {
         );
         assert_eq!(returned_resource, get_resource(resource_id, &conn).await);
 
+        pool.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -1025,6 +1028,7 @@ mod test {
         );
         assert_eq!(returned_resource, get_resource(resource_id, &conn).await);
 
+        pool.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -1081,6 +1085,7 @@ mod test {
             );
         }
 
+        pool.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -1145,6 +1150,7 @@ mod test {
             _ => panic!("Unexpected error: {:?}", err),
         };
 
+        pool.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -1252,6 +1258,7 @@ mod test {
             _ => panic!("Unexpected error: {:?}", err),
         };
 
+        pool.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -1307,6 +1314,7 @@ mod test {
         assert_eq!(returned_resource, get_resource(resource_id, &conn).await);
         assert_eq!(returned_resource.description(), "new description");
 
+        pool.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -1352,6 +1360,7 @@ mod test {
         .await;
         assert!(matches!(attach, Err(AttachError::ResourceNotFound)));
 
+        pool.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -1408,6 +1417,7 @@ mod test {
             .collection_id
             .is_none());
 
+        pool.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

@@ -991,6 +991,7 @@ mod tests {
         let nics = read_all_service_nics(&datastore, &opctx).await;
         assert_eq!(nics, service_nics);
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

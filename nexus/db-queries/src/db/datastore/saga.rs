@@ -324,6 +324,7 @@ mod test {
         );
 
         // Test cleanup
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -399,6 +400,7 @@ mod test {
         }
 
         // Test cleanup
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -424,6 +426,7 @@ mod test {
         assert_eq!(observed_nodes.len(), 0);
 
         // Test cleanup
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -466,6 +469,7 @@ mod test {
         }
 
         // Test cleanup
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -518,6 +522,7 @@ mod test {
             .expect("updating state to Done again");
 
         // Test cleanup
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -707,6 +712,7 @@ mod test {
         assert_eq!(nreassigned, 0);
 
         // Test cleanup
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

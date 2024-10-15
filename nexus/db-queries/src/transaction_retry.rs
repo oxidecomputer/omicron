@@ -294,6 +294,7 @@ mod test {
             .clone();
         assert_eq!(samples, vec![]);
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -355,6 +356,7 @@ mod test {
             );
         }
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

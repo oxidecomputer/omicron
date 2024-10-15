@@ -520,6 +520,7 @@ mod test {
             .await
             .expect("Failed to ensure schema");
 
+        datastore.terminate().await;
         crdb.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -659,6 +660,7 @@ mod test {
         .collect::<Result<Vec<DataStore>, _>>()
         .expect("Failed to create datastore");
 
+        pool.terminate().await;
         crdb.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -753,8 +755,7 @@ mod test {
 
         // Manually construct the datastore to avoid the backoff timeout.
         // We want to trigger errors, but have no need to wait.
-        let datastore =
-            DataStore::new_unchecked(log.clone(), pool.clone()).unwrap();
+        let datastore = DataStore::new_unchecked(log.clone(), pool.clone());
         while let Err(e) = datastore
             .ensure_schema(&log, SCHEMA_VERSION, Some(&all_versions))
             .await
@@ -780,6 +781,7 @@ mod test {
             .expect("Failed to get data");
         assert_eq!(data, "abcd");
 
+        datastore.terminate().await;
         crdb.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

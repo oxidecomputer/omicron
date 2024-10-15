@@ -1156,6 +1156,7 @@ mod tests {
             .unwrap();
         assert_eq!(it.value, 2);
 
+        pool.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -1212,6 +1213,7 @@ mod tests {
                 "The next item query should not have further items to generate",
             );
 
+        pool.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -1274,6 +1276,7 @@ mod tests {
         >::new_scoped(Uuid::nil(), i32::MIN, i32::MAX);
         let out = query.explain_async(&conn).await.unwrap();
         println!("{out}");
+        pool.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -1310,6 +1313,7 @@ mod tests {
             .get_result_async(&*conn)
             .await
             .expect_err("should not be able to insert after the query range is exhausted");
+        pool.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -1364,6 +1368,7 @@ mod tests {
                 "Should have inserted the next skipped value"
             );
         }
+        pool.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

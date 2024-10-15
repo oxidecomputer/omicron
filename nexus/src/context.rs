@@ -255,6 +255,11 @@ impl ServerContext {
             }
         };
 
+        // Once this database pool is created, it spawns workers which will
+        // be continually attempting to access database backends.
+        //
+        // It must be explicitly terminated, so be cautious about returning
+        // results beyond this point.
         let pool = match &config.deployment.database {
             nexus_config::Database::FromUrl { url } => {
                 info!(
@@ -275,17 +280,24 @@ impl ServerContext {
             }
         };
 
-        let nexus = Nexus::new_with_id(
+        let pool = Arc::new(pool);
+        let nexus = match Nexus::new_with_id(
             rack_id,
             log.new(o!("component" => "nexus")),
             resolver,
             qorb_resolver,
-            pool,
+            pool.clone(),
             &producer_registry,
             config,
             Arc::clone(&authz),
         )
-        .await?;
+        .await {
+            Ok(nexus) => nexus,
+            Err(err) => {
+                pool.terminate().await;
+                return Err(err);
+            }
+        };
 
         Ok(Arc::new(ServerContext {
             nexus,

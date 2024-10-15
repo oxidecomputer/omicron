@@ -1738,6 +1738,7 @@ mod test {
 
         assert_eq!(uplink_ports.len(), 1);
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

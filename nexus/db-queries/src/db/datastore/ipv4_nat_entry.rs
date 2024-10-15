@@ -538,6 +538,7 @@ mod test {
             3
         );
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -682,6 +683,7 @@ mod test {
             4
         );
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -804,6 +806,7 @@ mod test {
                 && entry.version_removed.is_none()
         }));
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -953,6 +956,7 @@ mod test {
         // did we see everything?
         assert_eq!(total_changes, db_records.len());
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

@@ -83,13 +83,19 @@ impl InternalServer {
         .await?;
 
         // Launch the internal server.
-        let server_starter_internal = dropshot::HttpServerStarter::new(
+        let server_starter_internal = match dropshot::HttpServerStarter::new(
             &config.deployment.dropshot_internal,
             internal_api(),
             context.clone(),
             &log.new(o!("component" => "dropshot_internal")),
         )
-        .map_err(|error| format!("initializing internal server: {}", error))?;
+        .map_err(|error| format!("initializing internal server: {}", error)) {
+            Ok(server) => server,
+            Err(err) => {
+                context.context.nexus.datastore().terminate().await;
+                return Err(err);
+            }
+        };
         let http_server_internal = server_starter_internal.start();
 
         Ok(Self {
@@ -204,12 +210,12 @@ impl Server {
         &self.apictx.context
     }
 
-    /// Wait for the given server to shut down
-    ///
-    /// Note that this doesn't initiate a graceful shutdown, so if you call this
-    /// immediately after calling `start()`, the program will block indefinitely
-    /// or until something else initiates a graceful shutdown.
-    pub(crate) async fn wait_for_finish(self) -> Result<(), String> {
+    // Wait for the given server to shut down
+    //
+    // Note that this doesn't initiate a graceful shutdown, so if you call this
+    // immediately after calling `start()`, the program will block indefinitely
+    // or until something else initiates a graceful shutdown.
+    async fn wait_for_finish(self) -> Result<(), String> {
         self.server_context().nexus.wait_for_shutdown().await
     }
 }
@@ -395,7 +401,12 @@ impl nexus_test_interface::NexusServer for Server {
             .close_servers()
             .await
             .expect("failed to close servers during test cleanup");
-        self.wait_for_finish().await.unwrap()
+        self.apictx
+            .context
+            .nexus
+            .datastore()
+            .terminate()
+            .await;
     }
 }
 

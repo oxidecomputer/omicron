@@ -158,6 +158,7 @@ mod test {
             .unwrap();
 
         assert_contents("tests/output/test-explain-output", &explanation);
+        pool.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -187,6 +188,7 @@ mod test {
             "Expected [{}] to contain 'FULL SCAN'",
             explanation
         );
+        pool.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

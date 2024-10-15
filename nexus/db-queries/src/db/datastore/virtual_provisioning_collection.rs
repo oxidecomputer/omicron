@@ -531,6 +531,7 @@ mod test {
             verify_collection_usage(&datastore, &opctx, id, 0, 0, 0).await;
         }
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -644,6 +645,7 @@ mod test {
             verify_collection_usage(&datastore, &opctx, id, 0, 0, 0).await;
         }
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -699,6 +701,7 @@ mod test {
             verify_collection_usage(&datastore, &opctx, id, 0, 0, 0).await;
         }
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -797,6 +800,7 @@ mod test {
             verify_collection_usage(&datastore, &opctx, id, 0, 0, 0).await;
         }
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

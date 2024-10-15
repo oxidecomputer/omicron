@@ -516,6 +516,7 @@ mod test {
         let observed = execute_query(&pool, query).await;
         assert_eq!(observed, vec![(2, 2), (3, 3)]);
 
+        pool.terminate().await;
         let _ = db.cleanup().await;
         logctx.cleanup_successful();
     }
@@ -551,6 +552,7 @@ mod test {
         let observed = execute_query(&pool, query).await;
         assert_eq!(observed, vec![(2, 2), (1, 1)]);
 
+        pool.terminate().await;
         let _ = db.cleanup().await;
         logctx.cleanup_successful();
     }
@@ -605,6 +607,7 @@ mod test {
         let observed = execute_query(&pool, query).await;
         assert_eq!(observed, vec![(1, 1), (2, 1), (3, 1), (1, 2), (2, 3)]);
 
+        pool.terminate().await;
         let _ = db.cleanup().await;
         logctx.cleanup_successful();
     }
@@ -659,6 +662,7 @@ mod test {
         let observed = execute_query(&pool, query).await;
         assert_eq!(observed, vec![(2, 3), (1, 2), (3, 1), (2, 1), (1, 1)]);
 
+        pool.terminate().await;
         let _ = db.cleanup().await;
         logctx.cleanup_successful();
     }
@@ -760,6 +764,7 @@ mod test {
             &[((2, 3), 42), ((3, 1), 50), ((3, 1), 51), ((3, 1), 52)]
         );
 
+        pool.terminate().await;
         let _ = db.cleanup().await;
         logctx.cleanup_successful();
     }

@@ -447,6 +447,7 @@ mod tests {
         assert_eq!(expunged1a, expunged1b);
 
         // Cleanup
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -574,6 +575,7 @@ mod tests {
         }
 
         // Cleanup
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -684,6 +686,7 @@ mod tests {
         );
 
         // Cleanup
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -788,6 +791,7 @@ mod tests {
         assert_eq!(producer_counts[1..].iter().sum::<usize>(), 1000);
 
         // Cleanup
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -895,6 +899,7 @@ mod tests {
         assert_eq!(nproducers, 100);
 
         // Cleanup
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -972,6 +977,7 @@ mod tests {
         .await;
         assert_eq!(expired_producers.as_slice(), &[]);
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

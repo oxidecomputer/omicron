@@ -1246,6 +1246,7 @@ mod tests {
         let ips = read_all_service_ips(&datastore, &opctx).await;
         assert_eq!(ips, external_ips);
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

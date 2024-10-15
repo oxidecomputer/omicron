@@ -979,6 +979,7 @@ mod tests {
             );
         }
 
+        db_datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

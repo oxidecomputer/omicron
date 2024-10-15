@@ -842,6 +842,7 @@ mod test {
                     version for DNS group External, found 0"
         );
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -948,6 +949,7 @@ mod test {
             .expect("failed to read DNS config with batch size 1");
         assert_eq!(dns_config_batch_1, dns_config);
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -1318,6 +1320,7 @@ mod test {
             HashMap::from([("n1".to_string(), records_r2.clone())])
         );
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -1423,6 +1426,7 @@ mod test {
                 .contains("duplicate key value violates unique constraint"));
         }
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -1870,6 +1874,7 @@ mod test {
         assert_eq!(dns_config.zones[1].zone_name, "oxide2.test");
         assert_eq!(dns_config.zones[0].records, dns_config.zones[1].records,);
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -1983,6 +1988,7 @@ mod test {
         assert!(!records.contains_key("krabappel"));
         assert!(records.contains_key("hoover"));
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

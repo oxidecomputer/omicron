@@ -908,6 +908,7 @@ pub(in crate::db::datastore) mod test {
         );
         assert_eq!(observed_sled.reservoir_size, sled_update.reservoir_size);
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -972,6 +973,7 @@ pub(in crate::db::datastore) mod test {
         assert_eq!(observed_sled.reservoir_size, sled_update.reservoir_size);
         assert_eq!(observed_sled.sled_agent_gen, sled_update.sled_agent_gen);
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -1050,6 +1052,7 @@ pub(in crate::db::datastore) mod test {
             "reservoir_size should not have changed"
         );
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -1137,6 +1140,7 @@ pub(in crate::db::datastore) mod test {
                 .unwrap();
         }
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -1262,6 +1266,7 @@ pub(in crate::db::datastore) mod test {
             lookup_physical_disk(&datastore, disk2.id()).await.disk_state
         );
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -1386,6 +1391,7 @@ pub(in crate::db::datastore) mod test {
             .unwrap();
         }
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -1548,6 +1554,7 @@ pub(in crate::db::datastore) mod test {
         assert_eq!(expected_ids, found_ids);
         assert_eq!(found_ids.len(), size);
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

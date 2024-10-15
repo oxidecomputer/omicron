@@ -173,6 +173,7 @@ async fn test_iam_roles_behavior() {
         &std::str::from_utf8(buffer.as_ref()).expect("non-UTF8 output"),
     );
 
+    datastore.terminate().await;
     db.cleanup().await.unwrap();
     logctx.cleanup_successful();
 }
@@ -464,6 +465,7 @@ async fn test_conferred_roles() {
         &std::str::from_utf8(buffer.as_ref()).expect("non-UTF8 output"),
     );
 
+    datastore.terminate().await;
     db.cleanup().await.unwrap();
     logctx.cleanup_successful();
 }

@@ -2889,6 +2889,7 @@ mod tests {
         else {
             panic!("Expected Ok(None) when creating a VPC without any available VNIs");
         };
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -2999,6 +3000,7 @@ mod tests {
             }
             Err(e) => panic!("Unexpected error when inserting VPC: {e}"),
         };
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -3284,6 +3286,7 @@ mod tests {
         )
         .await;
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -3544,6 +3547,7 @@ mod tests {
         )
         .await;
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -3773,6 +3777,7 @@ mod tests {
                 _ => false,
             }));
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

@@ -1128,6 +1128,7 @@ mod tests {
         }
 
         // Clean up.
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -1195,6 +1196,7 @@ mod tests {
         harness.assert_nics_are_deleted_in_datastore(&datastore).await;
 
         // Clean up.
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

@@ -358,6 +358,7 @@ mod tests {
 
         assert_eq!(result, json!({"error": "no blueprint"}));
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -434,6 +435,7 @@ mod tests {
             .await;
         assert_eq!(result, json!({"nsuccess": crdb_zones.len()}));
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -573,6 +575,7 @@ mod tests {
         assert!(crdb_err3.contains(&crdb_zone_id3));
         assert!(crdb_err3.contains(&crdb_zone_id4));
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

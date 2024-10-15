@@ -1233,6 +1233,7 @@ mod test {
             .unwrap();
         assert_eq!(dns_internal, dns_internal2);
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -1661,6 +1662,7 @@ mod test {
         let observed_datasets = get_all_datasets(&datastore).await;
         assert!(observed_datasets.is_empty());
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -1946,6 +1948,7 @@ mod test {
             Some(&external_records)
         );
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -2046,6 +2049,7 @@ mod test {
         assert!(get_all_datasets(&datastore).await.is_empty());
         assert!(get_all_external_ips(&datastore).await.is_empty());
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -2195,6 +2199,7 @@ mod test {
         assert!(get_all_datasets(&datastore).await.is_empty());
         assert!(get_all_external_ips(&datastore).await.is_empty());
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -2288,6 +2293,7 @@ mod test {
             allocations.iter().map(|a| a.subnet_octet).collect::<Vec<_>>()
         );
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -2482,6 +2488,7 @@ mod test {
             next_expected_octet += 1;
         }
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

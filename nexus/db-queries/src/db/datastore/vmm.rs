@@ -724,6 +724,7 @@ mod tests {
         );
 
         // Clean up.
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

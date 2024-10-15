@@ -796,6 +796,7 @@ mod test {
 
         assert!(matches!(detach, Err(DetachManyError::CollectionNotFound)));
 
+        pool.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -838,6 +839,7 @@ mod test {
             get_collection(collection_id, &conn).await
         );
 
+        pool.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -881,6 +883,7 @@ mod test {
             get_collection(collection_id, &conn).await
         );
 
+        pool.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -926,6 +929,7 @@ mod test {
             get_collection(collection_id, &conn).await
         );
 
+        pool.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -1091,6 +1095,7 @@ mod test {
             &collection_id,
         );
 
+        pool.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -1166,6 +1171,7 @@ mod test {
             &collection_id2
         );
 
+        pool.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

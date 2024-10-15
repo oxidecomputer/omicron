@@ -579,6 +579,7 @@ mod test {
         .await;
         assert!(matches!(insert, Err(AsyncInsertError::CollectionNotFound)));
 
+        pool.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -642,6 +643,7 @@ mod test {
         // Make sure rcgen got incremented
         assert_eq!(collection_rcgen, 2);
 
+        pool.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

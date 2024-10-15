@@ -803,6 +803,7 @@ mod test {
 
         assert!(matches!(detach, Err(DetachError::CollectionNotFound)));
 
+        pool.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -839,6 +840,7 @@ mod test {
         // The collection should remain unchanged.
         assert_eq!(collection, get_collection(collection_id, &conn).await);
 
+        pool.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -879,6 +881,7 @@ mod test {
         // The returned value should be the latest value in the DB.
         assert_eq!(returned_resource, get_resource(resource_id, &conn).await);
 
+        pool.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -943,6 +946,7 @@ mod test {
             _ => panic!("Unexpected error: {:?}", err),
         };
 
+        pool.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -987,6 +991,7 @@ mod test {
         .await;
         assert!(matches!(detach, Err(DetachError::ResourceNotFound)));
 
+        pool.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -1044,6 +1049,7 @@ mod test {
             .collection_id
             .is_some());
 
+        pool.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

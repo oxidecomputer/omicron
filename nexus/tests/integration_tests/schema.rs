@@ -1012,6 +1012,7 @@ async fn dbinit_equals_sum_of_all_up() {
             .expect("failed to insert - did we poison the OID cache?");
     }
     std::mem::drop(conn_from_pool);
+    pool.terminate().await;
     std::mem::drop(pool);
     crdb.cleanup().await.unwrap();
 

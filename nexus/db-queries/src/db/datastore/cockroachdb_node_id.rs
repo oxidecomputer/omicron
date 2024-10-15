@@ -160,6 +160,7 @@ mod tests {
             .expect("looked up node ID");
         assert_eq!(node_id.as_deref(), Some(fake_node_id));
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

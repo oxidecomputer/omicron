@@ -1069,6 +1069,7 @@ mod tests {
             .await
             .expect("delete announce set by name");
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

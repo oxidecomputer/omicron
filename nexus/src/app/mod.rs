@@ -218,6 +218,8 @@ pub struct Nexus {
 
 impl Nexus {
     /// Create a new Nexus instance for the given rack id `rack_id`
+    ///
+    /// If this function fails, the pool remains unterminated.
     // TODO-polish revisit rack metadata
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn new_with_id(
@@ -225,12 +227,11 @@ impl Nexus {
         log: Logger,
         resolver: internal_dns_resolver::Resolver,
         qorb_resolver: internal_dns_resolver::QorbResolver,
-        pool: db::Pool,
+        pool: Arc<db::Pool>,
         producer_registry: &ProducerRegistry,
         config: &NexusConfig,
         authz: Arc<authz::Authz>,
     ) -> Result<Arc<Nexus>, String> {
-        let pool = Arc::new(pool);
         let all_versions = config
             .pkg
             .schema
@@ -647,28 +648,33 @@ impl Nexus {
         self.producer_server.lock().unwrap().replace(producer_server);
     }
 
+    /// Terminates all servers.
+    ///
+    /// This function also waits for the servers to shut down.
     pub(crate) async fn close_servers(&self) -> Result<(), String> {
         // NOTE: All these take the lock and swap out of the option immediately,
         // because they are synchronous mutexes, which cannot be held across the
         // await point these `close()` methods expose.
         let external_server = self.external_server.lock().unwrap().take();
+        let mut res = Ok(());
+
         if let Some(server) = external_server {
-            server.close().await?;
+            res = res.and(server.close().await);
         }
         let techport_external_server =
             self.techport_external_server.lock().unwrap().take();
         if let Some(server) = techport_external_server {
-            server.close().await?;
+            res = res.and(server.close().await);
         }
         let internal_server = self.internal_server.lock().unwrap().take();
         if let Some(server) = internal_server {
-            server.close().await?;
+            res = res.and(server.close().await);
         }
         let producer_server = self.producer_server.lock().unwrap().take();
         if let Some(server) = producer_server {
-            server.close().await.map_err(|e| e.to_string())?;
+            res = res.and(server.close().await.map_err(|e| e.to_string()));
         }
-        Ok(())
+        res
     }
 
     pub(crate) async fn wait_for_shutdown(&self) -> Result<(), String> {

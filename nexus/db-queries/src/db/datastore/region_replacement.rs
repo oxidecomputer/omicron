@@ -921,6 +921,7 @@ mod test {
             .await
             .unwrap_err();
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -1014,6 +1015,7 @@ mod test {
         );
         assert_eq!(actual_request.operating_saga_id, None);
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -1081,6 +1083,7 @@ mod test {
             .await
             .unwrap();
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

@@ -1956,6 +1956,7 @@ mod tests {
         // on other tests to check blueprint deletion.
 
         // Clean up.
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -2191,6 +2192,7 @@ mod tests {
         );
 
         // Clean up.
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -2377,6 +2379,7 @@ mod tests {
         );
 
         // Clean up.
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -2490,6 +2493,7 @@ mod tests {
         }
 
         // Clean up.
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -2607,6 +2611,7 @@ mod tests {
             .expect("Should be able to allocate external network resources");
 
         // Clean up.
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -2812,6 +2817,7 @@ mod tests {
         );
 
         // Clean up.
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
