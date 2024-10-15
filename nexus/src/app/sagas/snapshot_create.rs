@@ -848,6 +848,7 @@ async fn ssc_send_snapshot_request_to_sled_agent(
             "instance no longer has an active VMM!",
         )));
     };
+    let sled_id = SledUuid::from_untyped_uuid(sled_id);
 
     info!(log, "asking for disk snapshot from Propolis via sled agent";
           "disk_id" => %params.disk_id,
@@ -857,7 +858,7 @@ async fn ssc_send_snapshot_request_to_sled_agent(
 
     let sled_agent_client = osagactx
         .nexus()
-        .sled_client(&SledUuid::from_untyped_uuid(sled_id))
+        .sled_client(&sled_id)
         .await
         .map_err(ActionError::action_failed)?;
 
