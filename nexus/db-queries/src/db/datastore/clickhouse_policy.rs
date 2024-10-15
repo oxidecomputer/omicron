@@ -102,9 +102,9 @@ impl DataStore {
                  (version, clickhouse_mode, clickhouse_cluster_target_servers, 
                   clickhouse_cluster_target_keepers, time_created) 
                  SELECT $1, $2, $3, $4, $5 
-                  FROM clickhouse_policy where version IN 
+                  FROM clickhouse_policy WHERE version IN 
                     (SELECT version FROM clickhouse_policy WHERE version IN 
-                      (SELECT version FROM clikchouse_policy 
+                      (SELECT version FROM clickhouse_policy 
                         ORDER BY version DESC LIMIT 1) 
                      AND version = $6)",
             )
@@ -215,10 +215,11 @@ mod tests {
 
         // Inserting version 2 should work
         policy.version = 2;
-        assert!(datastore
+        let res = datastore
             .clickhouse_policy_insert_latest_version(&opctx, &policy)
-            .await
-            .is_ok());
+            .await;
+        println!("res = {:?}", res);
+        assert!(res.is_ok());
 
         // Inserting version 4 should not work, since the prior version is 2
         policy.version = 4;
