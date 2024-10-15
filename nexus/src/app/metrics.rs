@@ -187,13 +187,16 @@ impl super::Nexus {
         query: impl AsRef<str>,
     ) -> Result<Vec<oxql_types::Table>, Error> {
         // Ensure the user has read access to the project
-        let (.., authz_project) =
+        let (authz_silo, authz_project) =
             project_lookup.lookup_for(authz::Action::Read).await?;
 
-        let parsed_query = oximeter_db::oxql::Query::new(query.as_ref())
-            .map_err(|e| Error::invalid_request(e.to_string()))?;
-
-        // Check that the query only refers to the project
+        // Ensure the query only refers to the project
+        let filtered_query = format!(
+            "{} | filter silo_id == \"{}\" && project_id == \"{}\"",
+            query.as_ref(),
+            authz_silo.id(),
+            authz_project.id()
+        );
 
         self.timeseries_client
             .get()
@@ -204,7 +207,7 @@ impl super::Nexus {
                     e
                 ))
             })?
-            .oxql_query(query)
+            .oxql_query(filtered_query)
             .await
             .map(|result| result.tables)
             .map_err(|e| match e {

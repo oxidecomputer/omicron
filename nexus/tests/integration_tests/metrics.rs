@@ -11,6 +11,7 @@ use chrono::Utc;
 use dropshot::test_util::ClientTestContext;
 use dropshot::ResultsPage;
 use http::{Method, StatusCode};
+use nexus_test_utils::background::activate_background_task;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
     create_default_ip_pool, create_disk, create_instance, create_project,
@@ -298,7 +299,7 @@ pub async fn project_timeseries_query(
 ) -> Vec<oxql_types::Table> {
     execute_timeseries_query(
         cptestctx,
-        &format!("/v1/timeseries/query/projects/{}", project),
+        &format!("/v1/timeseries/query/project/{}", project),
         query,
     )
     .await
@@ -554,33 +555,70 @@ async fn test_project_timeseries_query(
 ) {
     let client = &cptestctx.external_client;
 
+    create_default_ip_pool(&client).await; // needed for instance create to work
+
     // Create two projects
-    let project1 = create_project(&client, "project1").await;
-    let project2 = create_project(&client, "project2").await;
+    let p1 = create_project(&client, "project1").await;
+    let _p2 = create_project(&client, "project2").await;
 
     // Create resources in each project
-    create_instance(&client, "project1", "instance1").await;
-    create_instance(&client, "project2", "instance2").await;
+    let i1 = create_instance(&client, "project1", "instance1").await;
+    let _i2 = create_instance(&client, "project2", "instance2").await;
 
-    // Force a metrics collection
-    cptestctx.oximeter.force_collect().await;
+    let internal_client = &cptestctx.internal_client;
 
-    // Query for project1
-    let query1 = "get virtual_machine:check"; // TODO: add project to query
-    let result1 =
-        project_timeseries_query(&cptestctx, "project1", query1).await;
-
-    // shouldn't work
-    let result1 =
-        project_timeseries_query(&cptestctx, "project2", query1).await;
-
-    // Query for project2
-    let query2 = "get virtual_machine:check";
-    let result2 =
-        project_timeseries_query(&cptestctx, "project2", query2).await;
+    // get the instance metrics to show up
+    let _ =
+        activate_background_task(&internal_client, "instance_watcher").await;
 
     // Query with no project specified
+    let q1 = "get virtual_machine:check";
+
+    let result = project_timeseries_query(&cptestctx, "project1", q1).await;
+    assert_eq!(result.len(), 1);
+    assert!(result[0].timeseries().len() > 0);
+
+    let result = project_timeseries_query(&cptestctx, "project2", q1).await;
+    assert_eq!(result.len(), 1);
+    assert!(result[0].timeseries().len() > 0);
+
+    // with project specified
+    let q2 = &format!("{} | filter project_id == \"{}\"", q1, p1.identity.id);
+
+    let result = project_timeseries_query(&cptestctx, "project1", q2).await;
+    assert_eq!(result.len(), 1);
+    assert!(result[0].timeseries().len() > 0);
+
+    let result = project_timeseries_query(&cptestctx, "project2", q2).await;
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].timeseries().len(), 0);
+
+    // with instance specified
+    let q3 = &format!("{} | filter instance_id == \"{}\"", q1, i1.identity.id);
+
+    // project containing instance gives me something
+    let result = project_timeseries_query(&cptestctx, "project1", q3).await;
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].timeseries().len(), 1);
+
+    // should be empty or error
+    let result = project_timeseries_query(&cptestctx, "project2", q3).await;
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].timeseries().len(), 0);
+
     // Query with nonexistent project
+    // Also test at least once with project ID in path instead of project name
+
+    // try a project in your silo that you can't read
+    // try a project in another silo
+
+    // now try it adversarially — use a project you can read in the path, but
+    // try to access a fleet metric... if I can find one that will work
+
+    // let q4 = "get hardware_component:temperature";
+    // let result = dbg!(timeseries_query(&cptestctx, q4).await);
+    // let result =
+    //     dbg!(project_timeseries_query(&cptestctx, "project2", q4).await);
 }
 
 #[nexus_test]
