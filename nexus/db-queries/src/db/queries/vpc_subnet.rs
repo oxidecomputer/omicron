@@ -61,7 +61,9 @@ use uuid::Uuid;
 ///         id != <id> AND
 ///         (
 ///             inet_contains_or_equals(ipv4_block, <ipv4_block>) OR
-///             inet_contains_or_equals(ipv6_block, <ipv6_block>)
+///             inet_contains_or_equals(<ipv4_block>, ipv4_block) OR
+///             inet_contains_or_equals(ipv6_block, <ipv6_block>) OR
+///             inet_contains_or_equals(<ipv6_block>, ipv6_block)
 ///         )
 /// )
 /// INSERT INTO
@@ -133,9 +135,17 @@ impl QueryFragment<Pg> for InsertVpcSubnetQuery {
         out.push_sql(", ");
         out.push_bind_param::<sql_types::Inet, IpNetwork>(&self.ipv4_block)?;
         out.push_sql(") OR inet_contains_or_equals(");
+        out.push_bind_param::<sql_types::Inet, IpNetwork>(&self.ipv4_block)?;
+        out.push_sql(", ");
+        out.push_identifier(dsl::ipv4_block::NAME)?;
+        out.push_sql(") OR inet_contains_or_equals(");
         out.push_identifier(dsl::ipv6_block::NAME)?;
         out.push_sql(", ");
         out.push_bind_param::<sql_types::Inet, IpNetwork>(&self.ipv6_block)?;
+        out.push_sql(") OR inet_contains_or_equals(");
+        out.push_bind_param::<sql_types::Inet, IpNetwork>(&self.ipv6_block)?;
+        out.push_sql(", ");
+        out.push_identifier(dsl::ipv6_block::NAME)?;
 
         out.push_sql("))) INSERT INTO ");
         VPC_SUBNET_FROM_CLAUSE.walk_ast(out.reborrow())?;
