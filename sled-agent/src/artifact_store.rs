@@ -284,7 +284,7 @@ impl<T: StorageBackend> ArtifactStore<T> {
     pub(crate) async fn copy_from_depot(
         &self,
         sha256: ArtifactHash,
-        address: SocketAddrV6,
+        depot_base_url: &str,
     ) -> Result<(), Error> {
         static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
             reqwest::ClientBuilder::new()
@@ -295,21 +295,26 @@ impl<T: StorageBackend> ArtifactStore<T> {
         });
 
         let client = repo_depot_client::Client::new_with_client(
-            &format!("http://{address}"),
+            depot_base_url,
             CLIENT.clone(),
-            self.log.new(
-                slog::o!("component" => "Repo Depot client (ArtifactStore)"),
-            ),
+            self.log.new(slog::o!(
+                "component" => "Repo Depot client (ArtifactStore)",
+                "base_url" => depot_base_url.to_owned(),
+            )),
         );
         let stream = client
             .artifact_get_by_sha256(&sha256.to_string())
             .await
-            .map_err(|err| Error::DepotCopy { sha256, address, err })?
+            .map_err(|err| Error::DepotCopy {
+                sha256,
+                base_url: depot_base_url.to_owned(),
+                err,
+            })?
             .into_inner()
             .into_inner()
             .map_err(|err| Error::DepotCopy {
                 sha256,
-                address,
+                base_url: depot_base_url.to_owned(),
                 err: repo_depot_client::ClientError::ResponseBodyError(err),
             });
         self.put_impl(sha256, stream).await
@@ -405,10 +410,12 @@ pub(crate) enum Error {
     #[error("Error retrieving dataset configuration: {0}")]
     DatasetConfig(#[source] sled_storage::error::Error),
 
-    #[error("Error fetching artifact {sha256} from depot {address}: {err}")]
+    #[error(
+        "Error fetching artifact {sha256} from depot at {base_url}: {err}"
+    )]
     DepotCopy {
         sha256: ArtifactHash,
-        address: SocketAddrV6,
+        base_url: String,
         #[source]
         err: repo_depot_client::ClientError,
     },

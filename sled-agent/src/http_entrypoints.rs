@@ -407,11 +407,11 @@ impl SledAgentApi for SledAgentImpl {
         body: TypedBody<ArtifactCopyFromDepotBody>,
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sha256 = path_params.into_inner().sha256;
-        let address = body.into_inner().address;
+        let depot_base_url = body.into_inner().depot_base_url;
         rqctx
             .context()
             .artifact_store()
-            .copy_from_depot(sha256, address)
+            .copy_from_depot(sha256, &depot_base_url)
             .await?;
         Ok(HttpResponseUpdatedNoContent())
     }

@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::{collections::BTreeMap, net::SocketAddrV6, time::Duration};
+use std::{collections::BTreeMap, time::Duration};
 
 use camino::Utf8PathBuf;
 use dropshot::{
@@ -584,7 +584,7 @@ pub struct ArtifactPathParam {
 
 #[derive(Deserialize, JsonSchema)]
 pub struct ArtifactCopyFromDepotBody {
-    pub address: SocketAddrV6,
+    pub depot_base_url: String,
 }
 
 #[derive(Deserialize, JsonSchema)]

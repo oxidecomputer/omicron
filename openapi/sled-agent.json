@@ -1520,12 +1520,12 @@
       "ArtifactCopyFromDepotBody": {
         "type": "object",
         "properties": {
-          "address": {
+          "depot_base_url": {
             "type": "string"
           }
         },
         "required": [
-          "address"
+          "depot_base_url"
         ]
       },
       "Baseboard": {
