@@ -15,6 +15,8 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use diesel::dsl::sql_query;
 use diesel::expression::SelectableHelper;
 use diesel::sql_types;
+use diesel::ExpressionMethods;
+use diesel::OptionalExtension;
 use diesel::QueryDsl;
 use nexus_db_model::ClickhouseModeEnum;
 use nexus_db_model::ClickhousePolicy as DbClickhousePolicy;
@@ -49,6 +51,26 @@ impl DataStore {
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         Ok(policies.into_iter().map(ClickhousePolicy::from).collect())
+    }
+
+    /// Return the clickhouse policy with the highest version
+    pub async fn clickhouse_policy_get_latest(
+        &self,
+        opctx: &OpContext,
+    ) -> Result<Option<ClickhousePolicy>, Error> {
+        opctx.authorize(authz::Action::Read, &authz::BLUEPRINT_CONFIG).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        use db::schema::clickhouse_policy::dsl;
+
+        let latest_policy = dsl::clickhouse_policy
+            .order_by(dsl::version.desc())
+            .first_async::<DbClickhousePolicy>(&*conn)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(latest_policy.map(Into::into))
     }
 
     /// Insert the current version of the policy in the database
