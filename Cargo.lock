@@ -2223,7 +2223,8 @@ dependencies = [
 [[package]]
 name = "diesel-dtrace"
 version = "0.3.0"
-source = "git+https://github.com/oxidecomputer/diesel-dtrace?branch=main#f781d0dbc822adbb49fee509ccd9a5389c34e169"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5318329cce80f28564e585bb5ba4007bdf16865efa13d797a4f0fd4b1fed40f1"
 dependencies = [
  "diesel",
  "serde",
@@ -8713,7 +8714,8 @@ dependencies = [
 [[package]]
 name = "qorb"
 version = "0.0.2"
-source = "git+https://github.com/oxidecomputer/qorb?rev=88452176c7a9a573cf300d42a7c8147328224ce1#88452176c7a9a573cf300d42a7c8147328224ce1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "104066c20d7277d0af40a7333c579a2a71cc6b68c14982d1da2e5747a381a3ed"
 dependencies = [
  "anyhow",
  "async-trait",
