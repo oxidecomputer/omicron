@@ -8,7 +8,6 @@ use super::config::Config;
 use super::http_entrypoints::api as http_api;
 use super::sled_agent::SledAgent;
 use super::storage::PantryServer;
-use crate::nexus::d2n_params;
 use crate::nexus::NexusClient;
 use crate::rack_setup::service::build_initial_blueprint_from_sled_configs;
 use crate::rack_setup::SledConfig;
@@ -19,7 +18,9 @@ use crate::rack_setup::{
 use anyhow::anyhow;
 use crucible_agent_client::types::State as RegionState;
 use illumos_utils::zpool::ZpoolName;
-use internal_dns::ServiceName;
+use internal_dns_types::config::DnsConfigBuilder;
+use internal_dns_types::names::ServiceName;
+use internal_dns_types::names::DNS_ZONE_EXTERNAL_TESTING;
 use nexus_client::types as NexusTypes;
 use nexus_client::types::{IpRange, Ipv4Range, Ipv6Range};
 use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
@@ -334,7 +335,7 @@ pub async fn run_standalone_server(
     } else {
         dns_server::TransientServer::new(&log).await?
     };
-    let mut dns_config_builder = internal_dns::DnsConfigBuilder::new();
+    let mut dns_config_builder = DnsConfigBuilder::new();
 
     // Start the Crucible Pantry
     let pantry_server = server.start_pantry().await;
@@ -554,9 +555,8 @@ pub async fn run_standalone_server(
         datasets,
         internal_services_ip_pool_ranges,
         certs,
-        internal_dns_zone_config: d2n_params(&dns_config),
-        external_dns_zone_name: internal_dns::names::DNS_ZONE_EXTERNAL_TESTING
-            .to_owned(),
+        internal_dns_zone_config: dns_config,
+        external_dns_zone_name: DNS_ZONE_EXTERNAL_TESTING.to_owned(),
         recovery_silo,
         external_port_count: NexusTypes::ExternalPortDiscovery::Static(
             HashMap::new(),

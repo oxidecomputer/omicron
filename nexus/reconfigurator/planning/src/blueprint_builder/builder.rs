@@ -39,6 +39,7 @@ use nexus_types::inventory::Collection;
 use omicron_common::address::get_sled_address;
 use omicron_common::address::get_switch_zone_address;
 use omicron_common::address::ReservedRackSubnet;
+use omicron_common::address::CLICKHOUSE_HTTP_PORT;
 use omicron_common::address::CP_SERVICES_RESERVED_ADDRESSES;
 use omicron_common::address::DNS_HTTP_PORT;
 use omicron_common::address::DNS_PORT;
@@ -1146,6 +1147,97 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(EnsureMultiple::Changed { added: num_nexus_to_add, removed: 0 })
     }
 
+    pub fn sled_ensure_zone_multiple_oximeter(
+        &mut self,
+        sled_id: SledUuid,
+        desired_zone_count: usize,
+    ) -> Result<EnsureMultiple, Error> {
+        // How many Oximeter zones do we need to add?
+        let oximeter_count =
+            self.sled_num_running_zones_of_kind(sled_id, ZoneKind::Oximeter);
+        let num_oximeter_to_add =
+            match desired_zone_count.checked_sub(oximeter_count) {
+                Some(0) => return Ok(EnsureMultiple::NotNeeded),
+                Some(n) => n,
+                None => {
+                    return Err(Error::Planner(anyhow!(
+                        "removing an Oximeter zone not yet supported \
+                         (sled {sled_id} has {oximeter_count}; \
+                         planner wants {desired_zone_count})"
+                    )));
+                }
+            };
+
+        for _ in 0..num_oximeter_to_add {
+            let oximeter_id = self.rng.zone_rng.next();
+            let ip = self.sled_alloc_ip(sled_id)?;
+            let port = omicron_common::address::OXIMETER_PORT;
+            let address = SocketAddrV6::new(ip, port, 0, 0);
+            let zone_type =
+                BlueprintZoneType::Oximeter(blueprint_zone_type::Oximeter {
+                    address,
+                });
+            let filesystem_pool =
+                self.sled_select_zpool(sled_id, zone_type.kind())?;
+
+            let zone = BlueprintZoneConfig {
+                disposition: BlueprintZoneDisposition::InService,
+                id: oximeter_id,
+                underlay_address: ip,
+                filesystem_pool: Some(filesystem_pool),
+                zone_type,
+            };
+            self.sled_add_zone(sled_id, zone)?;
+        }
+
+        Ok(EnsureMultiple::Changed { added: num_oximeter_to_add, removed: 0 })
+    }
+
+    pub fn sled_ensure_zone_multiple_crucible_pantry(
+        &mut self,
+        sled_id: SledUuid,
+        desired_zone_count: usize,
+    ) -> Result<EnsureMultiple, Error> {
+        // How many zones do we need to add?
+        let pantry_count = self
+            .sled_num_running_zones_of_kind(sled_id, ZoneKind::CruciblePantry);
+        let num_pantry_to_add =
+            match desired_zone_count.checked_sub(pantry_count) {
+                Some(0) => return Ok(EnsureMultiple::NotNeeded),
+                Some(n) => n,
+                None => {
+                    return Err(Error::Planner(anyhow!(
+                        "removing a Crucible pantry zone not yet supported \
+                         (sled {sled_id} has {pantry_count}; \
+                         planner wants {desired_zone_count})"
+                    )));
+                }
+            };
+
+        for _ in 0..num_pantry_to_add {
+            let pantry_id = self.rng.zone_rng.next();
+            let ip = self.sled_alloc_ip(sled_id)?;
+            let port = omicron_common::address::CRUCIBLE_PANTRY_PORT;
+            let address = SocketAddrV6::new(ip, port, 0, 0);
+            let zone_type = BlueprintZoneType::CruciblePantry(
+                blueprint_zone_type::CruciblePantry { address },
+            );
+            let filesystem_pool =
+                self.sled_select_zpool(sled_id, zone_type.kind())?;
+
+            let zone = BlueprintZoneConfig {
+                disposition: BlueprintZoneDisposition::InService,
+                id: pantry_id,
+                underlay_address: ip,
+                filesystem_pool: Some(filesystem_pool),
+                zone_type,
+            };
+            self.sled_add_zone(sled_id, zone)?;
+        }
+
+        Ok(EnsureMultiple::Changed { added: num_pantry_to_add, removed: 0 })
+    }
+
     pub fn cockroachdb_preserve_downgrade(
         &mut self,
         version: CockroachDbPreserveDowngrade,
@@ -1202,6 +1294,58 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(EnsureMultiple::Changed { added: num_crdb_to_add, removed: 0 })
     }
 
+    fn sled_add_zone_clickhouse(
+        &mut self,
+        sled_id: SledUuid,
+    ) -> Result<Ensure, Error> {
+        let id = self.rng.zone_rng.next();
+        let underlay_address = self.sled_alloc_ip(sled_id)?;
+        let address =
+            SocketAddrV6::new(underlay_address, CLICKHOUSE_HTTP_PORT, 0, 0);
+        let pool_name =
+            self.sled_select_zpool(sled_id, ZoneKind::Clickhouse)?;
+        let zone_type =
+            BlueprintZoneType::Clickhouse(blueprint_zone_type::Clickhouse {
+                address,
+                dataset: OmicronZoneDataset { pool_name: pool_name.clone() },
+            });
+
+        let zone = BlueprintZoneConfig {
+            disposition: BlueprintZoneDisposition::InService,
+            id,
+            underlay_address,
+            filesystem_pool: Some(pool_name),
+            zone_type,
+        };
+        self.sled_add_zone(sled_id, zone)?;
+        Ok(Ensure::Added)
+    }
+
+    pub fn sled_ensure_zone_multiple_clickhouse(
+        &mut self,
+        sled_id: SledUuid,
+        desired_zone_count: usize,
+    ) -> Result<EnsureMultiple, Error> {
+        // How many single-node ClickHouse zones do we want to add?
+        let count =
+            self.sled_num_running_zones_of_kind(sled_id, ZoneKind::Clickhouse);
+        let to_add = match desired_zone_count.checked_sub(count) {
+            Some(0) => return Ok(EnsureMultiple::NotNeeded),
+            Some(n) => n,
+            None => {
+                return Err(Error::Planner(anyhow!(
+                    "removing a single-node ClickHouse zone not yet supported \
+                     (sled {sled_id} has {count}; \
+                     planner wants {desired_zone_count})"
+                )));
+            }
+        };
+        for _ in 0..to_add {
+            self.sled_add_zone_clickhouse(sled_id)?;
+        }
+        Ok(EnsureMultiple::Changed { added: to_add, removed: 0 })
+    }
+
     pub fn sled_ensure_zone_multiple_clickhouse_server(
         &mut self,
         sled_id: SledUuid,
@@ -1229,8 +1373,8 @@ impl<'a> BlueprintBuilder<'a> {
             let underlay_ip = self.sled_alloc_ip(sled_id)?;
             let pool_name =
                 self.sled_select_zpool(sled_id, ZoneKind::ClickhouseServer)?;
-            let port = omicron_common::address::CLICKHOUSE_HTTP_PORT;
-            let address = SocketAddrV6::new(underlay_ip, port, 0, 0);
+            let address =
+                SocketAddrV6::new(underlay_ip, CLICKHOUSE_HTTP_PORT, 0, 0);
             let zone_type = BlueprintZoneType::ClickhouseServer(
                 blueprint_zone_type::ClickhouseServer {
                     address,
@@ -1600,12 +1744,11 @@ impl<'a> BlueprintBuilder<'a> {
     /// ordinarily only come from RSS.
     ///
     /// TODO-cleanup: Remove when external DNS addresses are in the policy.
-    #[cfg(test)]
-    #[track_caller]
-    pub fn add_external_dns_ip(&mut self, addr: IpAddr) {
-        self.external_networking()
-            .expect("failed to initialize external networking allocator")
-            .add_external_dns_ip(addr);
+    pub(crate) fn add_external_dns_ip(
+        &mut self,
+        addr: IpAddr,
+    ) -> Result<(), Error> {
+        self.external_networking()?.add_external_dns_ip(addr)
     }
 }
 
@@ -1882,7 +2025,7 @@ impl<'a> BlueprintDisksBuilder<'a> {
 pub mod test {
     use super::*;
     use crate::example::example;
-    use crate::example::ExampleSystem;
+    use crate::example::ExampleSystemBuilder;
     use crate::system::SledBuilder;
     use expectorate::assert_contents;
     use nexus_inventory::CollectionBuilder;
@@ -1895,8 +2038,6 @@ pub mod test {
     use slog_error_chain::InlineErrorChain;
     use std::collections::BTreeSet;
     use std::mem;
-
-    pub const DEFAULT_N_SLEDS: usize = 3;
 
     /// Checks various conditions that should be true for all blueprints
     #[track_caller]
@@ -1987,7 +2128,7 @@ pub mod test {
         static TEST_NAME: &str = "blueprint_builder_test_initial";
         let logctx = test_setup_log(TEST_NAME);
         let (collection, input, blueprint_initial) =
-            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+            example(&logctx.log, TEST_NAME);
         verify_blueprint(&blueprint_initial);
 
         let diff = blueprint_initial.diff_since_collection(&collection);
@@ -2022,14 +2163,13 @@ pub mod test {
     fn test_basic() {
         static TEST_NAME: &str = "blueprint_builder_test_basic";
         let logctx = test_setup_log(TEST_NAME);
-        let mut example =
-            ExampleSystem::new(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
-        let blueprint1 = &example.blueprint;
-        verify_blueprint(blueprint1);
+        let (mut example, blueprint1) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME).build();
+        verify_blueprint(&blueprint1);
 
         let mut builder = BlueprintBuilder::new_based_on(
             &logctx.log,
-            blueprint1,
+            &blueprint1,
             &example.input,
             &example.collection,
             "test_basic",
@@ -2181,7 +2321,7 @@ pub mod test {
             "blueprint_builder_test_prune_decommissioned_sleds";
         let logctx = test_setup_log(TEST_NAME);
         let (collection, input, mut blueprint1) =
-            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+            example(&logctx.log, TEST_NAME);
         verify_blueprint(&blueprint1);
 
         // Mark one sled as having a desired state of decommissioned.
@@ -2266,23 +2406,16 @@ pub mod test {
     fn test_add_physical_disks() {
         static TEST_NAME: &str = "blueprint_builder_test_add_physical_disks";
         let logctx = test_setup_log(TEST_NAME);
-        let (collection, input, _) =
-            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
-        let input = {
-            // Clear out the external networking records from `input`, since
-            // we're building an empty blueprint.
-            let mut builder = input.into_builder();
-            *builder.network_resources_mut() =
-                OmicronZoneNetworkResources::new();
-            builder.build()
-        };
 
-        // Start with an empty blueprint (sleds with no zones).
-        let parent = BlueprintBuilder::build_empty_with_sleds_seeded(
-            input.all_sled_ids(SledFilter::Commissioned),
-            "test",
-            TEST_NAME,
-        );
+        // Start with an empty system (sleds with no zones). However, we leave
+        // the disks around so that `sled_ensure_disks` can add them.
+        let (example, parent) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
+                .create_zones(false)
+                .create_disks_in_blueprint(false)
+                .build();
+        let collection = example.collection;
+        let input = example.input;
 
         {
             // We start empty, and can add a disk
@@ -2296,7 +2429,17 @@ pub mod test {
             .expect("failed to create builder");
 
             assert!(builder.disks.changed_disks.is_empty());
-            assert!(builder.disks.parent_disks.is_empty());
+            // In the parent_disks map, we expect entries to be present for
+            // each sled, but not have any disks in them.
+            for (sled_id, disks) in builder.disks.parent_disks {
+                assert_eq!(
+                    disks.disks,
+                    Vec::new(),
+                    "for sled {}, expected no disks present in parent, \
+                     but found some",
+                    sled_id
+                );
+            }
 
             for (sled_id, sled_resources) in
                 input.all_sled_resources(SledFilter::InService)
@@ -2305,12 +2448,25 @@ pub mod test {
                     builder
                         .sled_ensure_disks(sled_id, &sled_resources)
                         .unwrap(),
-                    EnsureMultiple::Changed { added: 10, removed: 0 },
+                    EnsureMultiple::Changed {
+                        added: usize::from(SledBuilder::DEFAULT_NPOOLS),
+                        removed: 0
+                    },
                 );
             }
 
             assert!(!builder.disks.changed_disks.is_empty());
-            assert!(builder.disks.parent_disks.is_empty());
+            // In the parent_disks map, we expect entries to be present for
+            // each sled, but not have any disks in them.
+            for (sled_id, disks) in builder.disks.parent_disks {
+                assert_eq!(
+                    disks.disks,
+                    Vec::new(),
+                    "for sled {}, expected no disks present in parent, \
+                     but found some",
+                    sled_id
+                );
+            }
         }
 
         logctx.cleanup_successful();
@@ -2322,8 +2478,7 @@ pub mod test {
         static TEST_NAME: &str =
             "blueprint_builder_test_zone_filesystem_zpool_colocated";
         let logctx = test_setup_log(TEST_NAME);
-        let (_, _, blueprint) =
-            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+        let (_, _, blueprint) = example(&logctx.log, TEST_NAME);
 
         for (_, zone_config) in &blueprint.blueprint_zones {
             for zone in &zone_config.zones {
@@ -2347,22 +2502,13 @@ pub mod test {
             "blueprint_builder_test_add_nexus_with_no_existing_nexus_zones";
         let logctx = test_setup_log(TEST_NAME);
 
-        // Discard the example blueprint and start with an empty one.
-        let (collection, input, _) =
-            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
-        let input = {
-            // Clear out the external networking records from `input`, since
-            // we're building an empty blueprint.
-            let mut builder = input.into_builder();
-            *builder.network_resources_mut() =
-                OmicronZoneNetworkResources::new();
-            builder.build()
-        };
-        let parent = BlueprintBuilder::build_empty_with_sleds_seeded(
-            input.all_sled_ids(SledFilter::Commissioned),
-            "test",
-            TEST_NAME,
-        );
+        // Start with an empty system (sleds with no zones).
+        let (example, parent) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
+                .create_zones(false)
+                .build();
+        let collection = example.collection;
+        let input = example.input;
 
         // Adding a new Nexus zone currently requires copying settings from an
         // existing Nexus zone. `parent` has no zones, so we should fail if we
@@ -2379,7 +2525,7 @@ pub mod test {
         let err = builder
             .sled_ensure_zone_multiple_nexus(
                 collection
-                    .omicron_zones
+                    .sled_agents
                     .keys()
                     .next()
                     .copied()
@@ -2401,17 +2547,17 @@ pub mod test {
         static TEST_NAME: &str = "blueprint_builder_test_add_nexus_error_cases";
         let logctx = test_setup_log(TEST_NAME);
         let (mut collection, mut input, mut parent) =
-            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+            example(&logctx.log, TEST_NAME);
 
         // Remove the Nexus zone from one of the sleds so that
         // `sled_ensure_zone_nexus` can attempt to add a Nexus zone to
         // `sled_id`.
         let sled_id = {
             let mut selected_sled_id = None;
-            for (sled_id, zones) in &mut collection.omicron_zones {
-                let nzones_before_retain = zones.zones.zones.len();
-                zones.zones.zones.retain(|z| !z.zone_type.is_nexus());
-                if zones.zones.zones.len() < nzones_before_retain {
+            for (sled_id, sa) in &mut collection.sled_agents {
+                let nzones_before_retain = sa.omicron_zones.zones.len();
+                sa.omicron_zones.zones.retain(|z| !z.zone_type.is_nexus());
+                if sa.omicron_zones.zones.len() < nzones_before_retain {
                     selected_sled_id = Some(*sled_id);
                     // Also remove this zone from the blueprint.
                     let mut removed_nexus = None;
@@ -2556,8 +2702,7 @@ pub mod test {
             "blueprint_builder_test_invalid_parent_blueprint_\
              two_zones_with_same_external_ip";
         let logctx = test_setup_log(TEST_NAME);
-        let (collection, input, mut parent) =
-            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+        let (collection, input, mut parent) = example(&logctx.log, TEST_NAME);
 
         // We should fail if the parent blueprint claims to contain two
         // zones with the same external IP. Skim through the zones, copy the
@@ -2615,8 +2760,7 @@ pub mod test {
             "blueprint_builder_test_invalid_parent_blueprint_\
              two_nexus_zones_with_same_nic_ip";
         let logctx = test_setup_log(TEST_NAME);
-        let (collection, input, mut parent) =
-            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+        let (collection, input, mut parent) = example(&logctx.log, TEST_NAME);
 
         // We should fail if the parent blueprint claims to contain two
         // Nexus zones with the same NIC IP. Skim through the zones, copy
@@ -2674,8 +2818,7 @@ pub mod test {
             "blueprint_builder_test_invalid_parent_blueprint_\
              two_zones_with_same_vnic_mac";
         let logctx = test_setup_log(TEST_NAME);
-        let (collection, input, mut parent) =
-            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
+        let (collection, input, mut parent) = example(&logctx.log, TEST_NAME);
 
         // We should fail if the parent blueprint claims to contain two
         // zones with the same service vNIC MAC address. Skim through the
@@ -2732,22 +2875,13 @@ pub mod test {
         static TEST_NAME: &str = "blueprint_builder_test_ensure_cockroachdb";
         let logctx = test_setup_log(TEST_NAME);
 
-        // Discard the example blueprint and start with an empty one.
-        let (collection, input, _) =
-            example(&logctx.log, TEST_NAME, DEFAULT_N_SLEDS);
-        let input = {
-            // Clear out the external networking records from `input`, since
-            // we're building an empty blueprint.
-            let mut builder = input.into_builder();
-            *builder.network_resources_mut() =
-                OmicronZoneNetworkResources::new();
-            builder.build()
-        };
-        let parent = BlueprintBuilder::build_empty_with_sleds_seeded(
-            input.all_sled_ids(SledFilter::Commissioned),
-            "test",
-            TEST_NAME,
-        );
+        // Start with an empty system (sleds with no zones).
+        let (example, parent) =
+            ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
+                .create_zones(false)
+                .build();
+        let collection = example.collection;
+        let input = example.input;
 
         // Pick an arbitrary sled.
         let (target_sled_id, sled_resources) = input

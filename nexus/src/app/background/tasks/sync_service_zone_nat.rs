@@ -12,8 +12,8 @@ use crate::app::background::BackgroundTask;
 use anyhow::Context;
 use futures::future::BoxFuture;
 use futures::FutureExt;
-use internal_dns::resolver::Resolver;
-use internal_dns::ServiceName;
+use internal_dns_resolver::Resolver;
+use internal_dns_types::names::ServiceName;
 use nexus_db_model::Ipv4NatValues;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::lookup::LookupPath;
@@ -107,7 +107,7 @@ impl BackgroundTask for ServiceZoneNatTracker {
             let mut nexus_count = 0;
             let mut dns_count = 0;
 
-            for (sled_id, zones_found) in collection.omicron_zones {
+            for (sled_id, sa) in collection.sled_agents {
                 let (_, sled) = match LookupPath::new(opctx, &self.datastore)
                     .sled_id(sled_id.into_untyped_uuid())
                     .fetch()
@@ -128,7 +128,7 @@ impl BackgroundTask for ServiceZoneNatTracker {
 
                 let sled_address = oxnet::Ipv6Net::host_net(*sled.ip);
 
-                let zones_config: OmicronZonesConfig = zones_found.zones;
+                let zones_config: OmicronZonesConfig = sa.omicron_zones;
                 let zones: Vec<OmicronZoneConfig> = zones_config.zones;
 
                 for zone in zones {

@@ -857,7 +857,7 @@ pub struct BackgroundTasksData {
     pub nexus_id: OmicronZoneUuid,
     /// internal DNS DNS resolver, used when tasks need to contact other
     /// internal services
-    pub resolver: internal_dns::resolver::Resolver,
+    pub resolver: internal_dns_resolver::Resolver,
     /// handle to saga subsystem for starting sagas
     pub saga_starter: Arc<dyn StartSaga>,
     /// Oximeter producer registry (for metrics)
@@ -874,7 +874,7 @@ fn init_dns(
     opctx: &OpContext,
     datastore: Arc<DataStore>,
     dns_group: DnsGroup,
-    resolver: internal_dns::resolver::Resolver,
+    resolver: internal_dns_resolver::Resolver,
     config: &DnsTasksConfig,
     task_config: &Activator,
     task_servers: &Activator,
@@ -949,12 +949,14 @@ pub mod test {
     use crate::app::saga::StartSaga;
     use dropshot::HandlerTaskMode;
     use futures::FutureExt;
+    use internal_dns_types::names::ServiceName;
     use nexus_db_model::DnsGroup;
     use nexus_db_queries::context::OpContext;
     use nexus_db_queries::db::datastore::DnsVersionUpdateBuilder;
     use nexus_db_queries::db::DataStore;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::internal_api::params as nexus_params;
+    use nexus_types::internal_api::params::DnsRecord;
     use omicron_common::api::external::Error;
     use omicron_test_utils::dev::poll;
     use std::net::SocketAddr;
@@ -1057,8 +1059,7 @@ pub mod test {
             .expect("failed to get initial DNS server config");
         assert_eq!(config.generation, 1);
 
-        let internal_dns_srv_name =
-            internal_dns::ServiceName::InternalDns.dns_name();
+        let internal_dns_srv_name = ServiceName::InternalDns.dns_name();
 
         let initial_srv_record = {
             let zone =
@@ -1067,7 +1068,7 @@ pub mod test {
                 panic!("zone must have a record for {internal_dns_srv_name}")
             };
             match record.get(0) {
-                Some(dns_service_client::types::DnsRecord::Srv(srv)) => srv,
+                Some(DnsRecord::Srv(srv)) => srv,
                 record => panic!(
                     "expected a SRV record for {internal_dns_srv_name}, found \
                      {record:?}"

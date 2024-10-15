@@ -971,6 +971,9 @@ pub enum ResourceType {
     IpPool,
     IpPoolResource,
     InstanceNetworkInterface,
+    InternetGateway,
+    InternetGatewayIpPool,
+    InternetGatewayIpAddress,
     PhysicalDisk,
     Rack,
     Service,
@@ -1215,6 +1218,20 @@ pub struct InstanceAutoRestartStatus {
     #[serde(rename = "auto_restart_enabled")]
     pub enabled: bool,
 
+    /// The auto-restart policy configured for this instance, or `None` if no
+    /// explicit policy is configured.
+    ///
+    /// If this is not present, then this instance uses the default auto-restart
+    /// policy, which may or may not allow it to be restarted. The
+    /// `auto_restart_enabled` field indicates whether the instance will be
+    /// automatically restarted.
+    //
+    // Rename this field, as the struct is `#[serde(flatten)]`ed into the
+    // `Instance` type, and we would like the field to be prefixed with
+    // `auto_restart`.
+    #[serde(rename = "auto_restart_policy")]
+    pub policy: Option<InstanceAutoRestartPolicy>,
+
     /// The time at which the auto-restart cooldown period for this instance
     /// completes, permitting it to be automatically restarted again. If the
     /// instance enters the `Failed` state, it will not be restarted until after
@@ -1233,7 +1250,9 @@ pub struct InstanceAutoRestartStatus {
 
 /// A policy determining when an instance should be automatically restarted by
 /// the control plane.
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, Eq, PartialEq,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum InstanceAutoRestartPolicy {
     /// The instance should not be automatically restarted by the control plane
@@ -1551,10 +1570,32 @@ pub struct RouterRoute {
     pub vpc_router_id: Uuid,
     /// Describes the kind of router. Set at creation. `read-only`
     pub kind: RouterRouteKind,
-    /// The location that matched packets should be forwarded to.
+    /// The location that matched packets should be forwarded to
     pub target: RouteTarget,
-    /// Selects which traffic this routing rule will apply to.
+    /// Selects which traffic this routing rule will apply to
     pub destination: RouteDestination,
+}
+
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InternetGatewayIpPool {
+    /// Common identifying metadata
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    /// The ID of the internet gateway to which the IP pool entry belongs
+    pub internet_gateway_id: Uuid,
+    /// The ID of the referenced IP pool
+    pub ip_pool_id: Uuid,
+}
+
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InternetGatewayIp {
+    /// Common identifying metadata
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    /// The ID of the internet gateway to which the IP belongs
+    pub internet_gateway_id: Uuid,
+    /// The IP address
+    pub address: IpAddr,
 }
 
 /// A single rule in a VPC firewall
@@ -2566,8 +2607,8 @@ pub struct SwitchPortRouteConfig {
     /// over an 802.1Q tagged L2 segment.
     pub vlan_id: Option<u16>,
 
-    /// Local preference indicating priority within and across protocols.
-    pub local_pref: Option<u32>,
+    /// RIB Priority indicating priority within and across protocols.
+    pub rib_priority: Option<u8>,
 }
 
 /*

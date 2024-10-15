@@ -8,10 +8,10 @@ license = "MPL-2.0"
 workspace = true
 
 [dependencies]
-anyhow.workspace = true
 chrono.workspace = true
 expectorate.workspace = true
 http.workspace = true
+internal-dns-types.workspace = true
 progenitor.workspace = true
 reqwest = { workspace = true, features = ["json", "rustls-tls", "stream"] }
 schemars.workspace = true

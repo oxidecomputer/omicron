@@ -13,6 +13,9 @@ set -o errexit
 set -o pipefail
 set -o xtrace
 
+# shellcheck source=/dev/null
+source .github/buildomat/ci-env.sh
+
 cargo --version
 rustc --version
 
@@ -48,6 +51,7 @@ mkdir tests
 # deployment phases of buildomat.
 
 files=(
+	.github/buildomat/ci-env.sh
 	out/target/test
 	out/npuzone/*
 	package-manifest.toml

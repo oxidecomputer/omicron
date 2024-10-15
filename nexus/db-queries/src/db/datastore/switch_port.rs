@@ -1237,7 +1237,7 @@ async fn do_switch_port_settings_create(
                 route.dst.into(),
                 route.gw.into(),
                 route.vid.map(Into::into),
-                route.local_pref.map(Into::into),
+                route.rib_priority.map(Into::into),
             ));
         }
     }

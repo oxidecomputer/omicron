@@ -40,8 +40,10 @@ use omicron_common::api::external::LookupType;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::policy::BOUNDARY_NTP_REDUNDANCY;
 use omicron_common::policy::COCKROACHDB_REDUNDANCY;
+use omicron_common::policy::CRUCIBLE_PANTRY_REDUNDANCY;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_common::policy::NEXUS_REDUNDANCY;
+use omicron_common::policy::OXIMETER_REDUNDANCY;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -66,8 +68,10 @@ pub struct PlanningInputFromDb<'a> {
     pub target_boundary_ntp_zone_count: usize,
     pub target_nexus_zone_count: usize,
     pub target_internal_dns_zone_count: usize,
+    pub target_oximeter_zone_count: usize,
     pub target_cockroachdb_zone_count: usize,
     pub target_cockroachdb_cluster_version: CockroachDbClusterVersion,
+    pub target_crucible_pantry_zone_count: usize,
     pub internal_dns_version: nexus_db_model::Generation,
     pub external_dns_version: nexus_db_model::Generation,
     pub cockroachdb_settings: &'a CockroachDbSettings,
@@ -141,9 +145,11 @@ impl PlanningInputFromDb<'_> {
             target_boundary_ntp_zone_count: BOUNDARY_NTP_REDUNDANCY,
             target_nexus_zone_count: NEXUS_REDUNDANCY,
             target_internal_dns_zone_count: INTERNAL_DNS_REDUNDANCY,
+            target_oximeter_zone_count: OXIMETER_REDUNDANCY,
             target_cockroachdb_zone_count: COCKROACHDB_REDUNDANCY,
             target_cockroachdb_cluster_version:
                 CockroachDbClusterVersion::POLICY,
+            target_crucible_pantry_zone_count: CRUCIBLE_PANTRY_REDUNDANCY,
             external_ip_rows: &external_ip_rows,
             service_nic_rows: &service_nic_rows,
             log: &opctx.log,
@@ -165,9 +171,12 @@ impl PlanningInputFromDb<'_> {
             target_boundary_ntp_zone_count: self.target_boundary_ntp_zone_count,
             target_nexus_zone_count: self.target_nexus_zone_count,
             target_internal_dns_zone_count: self.target_internal_dns_zone_count,
+            target_oximeter_zone_count: self.target_oximeter_zone_count,
             target_cockroachdb_zone_count: self.target_cockroachdb_zone_count,
             target_cockroachdb_cluster_version: self
                 .target_cockroachdb_cluster_version,
+            target_crucible_pantry_zone_count: self
+                .target_crucible_pantry_zone_count,
             clickhouse_policy: None,
         };
         let mut builder = PlanningInputBuilder::new(

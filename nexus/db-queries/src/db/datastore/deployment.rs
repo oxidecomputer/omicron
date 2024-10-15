@@ -1869,7 +1869,7 @@ mod tests {
     ) -> (Collection, PlanningInput, Blueprint) {
         // We'll start with an example system.
         let (mut base_collection, planning_input, mut blueprint) =
-            example(log, test_name, 3);
+            example(log, test_name);
 
         // Take a more thorough collection representative (includes SPs,
         // etc.)...
@@ -1881,10 +1881,6 @@ mod tests {
         mem::swap(
             &mut collection.sled_agents,
             &mut base_collection.sled_agents,
-        );
-        mem::swap(
-            &mut collection.omicron_zones,
-            &mut base_collection.omicron_zones,
         );
 
         // Treat this blueprint as the initial blueprint for the system.
@@ -1999,7 +1995,7 @@ mod tests {
         );
         assert_eq!(
             blueprint1.blueprint_zones.len(),
-            collection.omicron_zones.len()
+            collection.sled_agents.len()
         );
         assert_eq!(
             blueprint1.all_omicron_zones(BlueprintZoneFilter::All).count(),

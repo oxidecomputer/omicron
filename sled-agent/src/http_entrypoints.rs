@@ -24,8 +24,8 @@ use omicron_common::api::internal::nexus::{
     DiskRuntimeState, SledVmmState, UpdateArtifactId,
 };
 use omicron_common::api::internal::shared::{
-    ResolvedVpcRouteSet, ResolvedVpcRouteState, SledIdentifiers, SwitchPorts,
-    VirtualNetworkInterfaceHost,
+    ExternalIpGatewayMap, ResolvedVpcRouteSet, ResolvedVpcRouteState,
+    SledIdentifiers, SwitchPorts, VirtualNetworkInterfaceHost,
 };
 use omicron_common::disk::{
     DatasetsConfig, DatasetsManagementResult, DiskVariant,
@@ -256,13 +256,6 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseOk<Vec<String>>, HttpError> {
         let sa = rqctx.context();
         sa.zones_list().await.map(HttpResponseOk).map_err(HttpError::from)
-    }
-
-    async fn omicron_zones_get(
-        rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<OmicronZonesConfig>, HttpError> {
-        let sa = rqctx.context();
-        Ok(HttpResponseOk(sa.omicron_zones_list().await))
     }
 
     async fn omicron_zones_put(
@@ -757,6 +750,15 @@ impl SledAgentApi for SledAgentImpl {
     ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
         let sa = request_context.context();
         sa.set_vpc_routes(body.into_inner())?;
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn set_eip_gateways(
+        request_context: RequestContext<Self::Context>,
+        body: TypedBody<ExternalIpGatewayMap>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sa = request_context.context();
+        sa.set_eip_gateways(body.into_inner()).await?;
         Ok(HttpResponseUpdatedNoContent())
     }
 }

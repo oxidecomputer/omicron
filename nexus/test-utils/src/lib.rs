@@ -9,7 +9,6 @@ use anyhow::Context;
 use anyhow::Result;
 use camino::Utf8Path;
 use chrono::Utc;
-use dns_service_client::types::DnsConfigParams;
 use dropshot::test_util::ClientTestContext;
 use dropshot::test_util::LogContext;
 use dropshot::ConfigLogging;
@@ -23,6 +22,9 @@ use hickory_resolver::config::Protocol;
 use hickory_resolver::config::ResolverConfig;
 use hickory_resolver::config::ResolverOpts;
 use hickory_resolver::TokioAsyncResolver;
+use internal_dns_types::config::DnsConfigBuilder;
+use internal_dns_types::names::ServiceName;
+use internal_dns_types::names::DNS_ZONE_EXTERNAL_TESTING;
 use nexus_config::Database;
 use nexus_config::DpdConfig;
 use nexus_config::InternalDns;
@@ -45,6 +47,7 @@ use nexus_types::deployment::OmicronZoneExternalFloatingIp;
 use nexus_types::external_api::views::SledState;
 use nexus_types::internal_api::params::DatasetCreateRequest;
 use nexus_types::internal_api::params::DatasetPutRequest;
+use nexus_types::internal_api::params::DnsConfigParams;
 use omicron_common::address::DNS_OPTE_IPV4_SUBNET;
 use omicron_common::address::NEXUS_OPTE_IPV4_SUBNET;
 use omicron_common::api::external::Generation;
@@ -203,7 +206,7 @@ pub async fn test_setup<N: NexusServer>(
 
 struct RackInitRequestBuilder {
     datasets: Vec<nexus_types::internal_api::params::DatasetCreateRequest>,
-    internal_dns_config: internal_dns::DnsConfigBuilder,
+    internal_dns_config: DnsConfigBuilder,
     mac_addrs: Box<dyn Iterator<Item = MacAddr> + Send>,
 }
 
@@ -211,7 +214,7 @@ impl RackInitRequestBuilder {
     fn new() -> Self {
         Self {
             datasets: vec![],
-            internal_dns_config: internal_dns::DnsConfigBuilder::new(),
+            internal_dns_config: DnsConfigBuilder::new(),
             mac_addrs: Box::new(MacAddr::iter_system()),
         }
     }
@@ -220,7 +223,7 @@ impl RackInitRequestBuilder {
         &mut self,
         zone_id: OmicronZoneUuid,
         address: SocketAddrV6,
-        service_name: internal_dns::ServiceName,
+        service_name: ServiceName,
     ) {
         let zone = self
             .internal_dns_config
@@ -240,7 +243,7 @@ impl RackInitRequestBuilder {
         dataset_id: Uuid,
         address: SocketAddrV6,
         kind: DatasetKind,
-        service_name: internal_dns::ServiceName,
+        service_name: ServiceName,
     ) {
         self.datasets.push(DatasetCreateRequest {
             zpool_id: zpool_id.into_untyped_uuid(),
@@ -280,7 +283,7 @@ impl RackInitRequestBuilder {
             .host_zone_clickhouse(
                 OmicronZoneUuid::from_untyped_uuid(dataset_id),
                 *address.ip(),
-                internal_dns::ServiceName::Clickhouse,
+                ServiceName::Clickhouse,
                 address.port(),
             )
             .expect("Failed to setup ClickHouse DNS");
@@ -448,7 +451,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             dataset_id,
             address,
             DatasetKind::Cockroach,
-            internal_dns::ServiceName::Cockroach,
+            ServiceName::Cockroach,
         );
         let pool_name = illumos_utils::zpool::ZpoolName::new_external(zpool_id)
             .to_string()
@@ -692,7 +695,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         self.rack_init_builder.add_service_to_dns(
             nexus_id,
             address,
-            internal_dns::ServiceName::Nexus,
+            ServiceName::Nexus,
         );
 
         self.blueprint_zones.push(BlueprintZoneConfig {
@@ -778,8 +781,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         );
 
         // Create a recovery silo
-        let external_dns_zone_name =
-            internal_dns::names::DNS_ZONE_EXTERNAL_TESTING.to_string();
+        let external_dns_zone_name = DNS_ZONE_EXTERNAL_TESTING.to_string();
         let silo_name: Name = "test-suite-silo".parse().unwrap();
         let user_name =
             UserId::try_from("test-privileged".to_string()).unwrap();
@@ -1019,7 +1021,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         self.rack_init_builder.add_service_to_dns(
             zone_id,
             address,
-            internal_dns::ServiceName::CruciblePantry,
+            ServiceName::CruciblePantry,
         );
         self.blueprint_zones.push(BlueprintZoneConfig {
             disposition: BlueprintZoneDisposition::InService,
@@ -1055,7 +1057,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         self.rack_init_builder.add_service_to_dns(
             zone_id,
             dropshot_address,
-            internal_dns::ServiceName::ExternalDns,
+            ServiceName::ExternalDns,
         );
 
         let zpool_id = ZpoolUuid::new_v4();
@@ -1118,7 +1120,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         self.rack_init_builder.add_service_to_dns(
             zone_id,
             http_address,
-            internal_dns::ServiceName::InternalDns,
+            ServiceName::InternalDns,
         );
 
         let zpool_id = ZpoolUuid::new_v4();
