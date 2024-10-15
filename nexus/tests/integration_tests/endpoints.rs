@@ -533,6 +533,7 @@ pub static DEMO_INSTANCE_NIC_CREATE: Lazy<
     vpc_name: DEMO_VPC_NAME.clone(),
     subnet_name: DEMO_VPC_SUBNET_NAME.clone(),
     ip: None,
+    transit_ips: vec![],
 });
 pub static DEMO_INSTANCE_NIC_PUT: Lazy<params::InstanceNetworkInterfaceUpdate> =
     Lazy::new(|| params::InstanceNetworkInterfaceUpdate {
