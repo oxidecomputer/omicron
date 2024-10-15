@@ -359,6 +359,7 @@ mod test {
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::policy::BOUNDARY_NTP_REDUNDANCY;
     use omicron_common::policy::COCKROACHDB_REDUNDANCY;
+    use omicron_common::policy::CRUCIBLE_PANTRY_REDUNDANCY;
     use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
     use omicron_common::policy::NEXUS_REDUNDANCY;
     use omicron_common::policy::OXIMETER_REDUNDANCY;
@@ -1364,6 +1365,7 @@ mod test {
                 target_cockroachdb_zone_count: COCKROACHDB_REDUNDANCY,
                 target_cockroachdb_cluster_version:
                     CockroachDbClusterVersion::POLICY,
+                target_crucible_pantry_zone_count: CRUCIBLE_PANTRY_REDUNDANCY,
                 log,
             }
             .build()

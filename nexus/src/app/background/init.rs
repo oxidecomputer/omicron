@@ -1168,7 +1168,7 @@ pub mod test {
             &cptestctx.logctx.log,
             "initial",
             initial_dns_dropshot_server.local_addr(),
-            2.into(),
+            Generation::from_u32(2),
         )
         .await;
 
@@ -1181,7 +1181,7 @@ pub mod test {
             &cptestctx.logctx.log,
             "new",
             new_dns_dropshot_server.local_addr(),
-            2.into(),
+            Generation::from_u32(2),
         )
         .await;
 

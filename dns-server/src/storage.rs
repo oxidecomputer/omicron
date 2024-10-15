@@ -197,7 +197,7 @@ impl Store {
         if store.read_config_optional()?.is_none() {
             let now = chrono::Utc::now();
             let initial_config_bytes = serde_json::to_vec(&CurrentConfig {
-                generation: 0.into(),
+                generation: Generation::from_u32(0),
                 zones: vec![],
                 time_created: now,
                 time_applied: now,
@@ -1235,15 +1235,18 @@ mod test {
 
         // Begin an update.
         let before = chrono::Utc::now();
-        let update1 =
-            tc.store.begin_update("my req id", 3.into()).await.unwrap();
+        let update1 = tc
+            .store
+            .begin_update("my req id", Generation::from_u32(3))
+            .await
+            .unwrap();
         let after = chrono::Utc::now();
 
         // Concurrently attempt another update.
         let dummy_record = DnsRecord::Aaaa(Ipv6Addr::LOCALHOST);
         let update2 = DnsConfigParams {
             time_created: chrono::Utc::now(),
-            generation: 1.into(),
+            generation: Generation::from_u32(1),
             zones: vec![DnsConfigZone {
                 zone_name: "zone1.internal".to_string(),
                 records: HashMap::from([(
