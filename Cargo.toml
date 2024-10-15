@@ -611,7 +611,7 @@ tokio-util = { version = "0.7.12", features = ["io", "io-util"] }
 toml = "0.8.19"
 toml_edit = "0.22.22"
 tough = { version = "0.17.1", features = [ "http" ] }
-trybuild = "1.0.99"
+trybuild = "1.0.100"
 tufaceous = { path = "tufaceous" }
 tufaceous-lib = { path = "tufaceous-lib" }
 tui-tree-widget = "0.22.0"
