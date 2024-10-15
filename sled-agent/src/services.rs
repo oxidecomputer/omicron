@@ -72,6 +72,7 @@ use omicron_common::address::LLDP_PORT;
 use omicron_common::address::MGS_PORT;
 use omicron_common::address::RACK_PREFIX;
 use omicron_common::address::SLED_PREFIX;
+use omicron_common::address::TFPORTD_PORT;
 use omicron_common::address::WICKETD_NEXUS_PROXY_PORT;
 use omicron_common::address::WICKETD_PORT;
 use omicron_common::address::{
@@ -2822,17 +2823,67 @@ impl ServiceManager {
                         SwitchService::Tfport { pkt_source, asic } => {
                             info!(self.inner.log, "Setting up tfport service");
                             let mut tfport_config =
-                                PropertyGroupBuilder::new("config")
+                                PropertyGroupBuilder::new("config");
+
+                            tfport_config = tfport_config
+                                .add_property(
+                                    "host",
+                                    "astring",
+                                    &format!("[{}]", Ipv6Addr::LOCALHOST),
+                                )
+                                .add_property(
+                                    "port",
+                                    "astring",
+                                    &format!("{}", DENDRITE_PORT),
+                                );
+                            if let Some(i) = info {
+                                tfport_config = tfport_config
                                     .add_property(
-                                        "host",
+                                        "rack_id",
                                         "astring",
-                                        &format!("[{}]", Ipv6Addr::LOCALHOST),
+                                        &i.rack_id.to_string(),
                                     )
                                     .add_property(
-                                        "port",
+                                        "sled_id",
                                         "astring",
-                                        &format!("{}", DENDRITE_PORT),
+                                        &i.config
+                                            .sled_identifiers
+                                            .sled_id
+                                            .to_string(),
+                                    )
+                                    .add_property(
+                                        "sled_model",
+                                        "astring",
+                                        &i.config
+                                            .sled_identifiers
+                                            .model
+                                            .to_string(),
+                                    )
+                                    .add_property(
+                                        "sled_revision",
+                                        "astring",
+                                        &i.config
+                                            .sled_identifiers
+                                            .revision
+                                            .to_string(),
+                                    )
+                                    .add_property(
+                                        "sled_serial",
+                                        "astring",
+                                        &i.config
+                                            .sled_identifiers
+                                            .serial
+                                            .to_string(),
                                     );
+                            }
+
+                            for address in addresses {
+                                tfport_config = tfport_config.add_property(
+                                    "address",
+                                    "astring",
+                                    &format!("[{}]:{}", address, TFPORTD_PORT),
+                                );
+                            }
 
                             let is_gimlet = is_gimlet().map_err(|e| {
                                 Error::Underlay(
@@ -2873,6 +2924,7 @@ impl ServiceManager {
 
                             if is_gimlet
                                 || asic == &DendriteAsic::SoftNpuPropolisDevice
+                                || asic == &DendriteAsic::TofinoAsic
                             {
                                 tfport_config = tfport_config.add_property(
                                     "pkt_source",
@@ -4401,7 +4453,7 @@ impl ServiceManager {
                             } else {
                                 info!(
                                     self.inner.log,
-                                    "no rack_id/sled_id available yet"
+                                    "no sled info available yet"
                                 );
                             }
                             smfh.delpropvalue_default_instance(
@@ -4475,10 +4527,66 @@ impl ServiceManager {
                             smfh.refresh()?;
                             info!(self.inner.log, "refreshed lldpd service with new configuration")
                         }
-                        SwitchService::Tfport { .. } => {
-                            // Since tfport and dpd communicate using localhost,
-                            // the tfport service shouldn't need to be
-                            // restarted.
+                        SwitchService::Tfport { pkt_source, asic } => {
+                            info!(self.inner.log, "configuring tfport service");
+                            if let Some(info) = self.inner.sled_info.get() {
+                                smfh.setprop_default_instance(
+                                    "config/rack_id",
+                                    info.rack_id,
+                                )?;
+                                smfh.setprop_default_instance(
+                                    "config/sled_id",
+                                    info.config.sled_identifiers.sled_id,
+                                )?;
+                                smfh.setprop_default_instance(
+                                    "config/sled_model",
+                                    info.config
+                                        .sled_identifiers
+                                        .model
+                                        .to_string(),
+                                )?;
+                                smfh.setprop_default_instance(
+                                    "config/sled_revision",
+                                    info.config.sled_identifiers.revision,
+                                )?;
+                                smfh.setprop_default_instance(
+                                    "config/sled_serial",
+                                    info.config
+                                        .sled_identifiers
+                                        .serial
+                                        .to_string(),
+                                )?;
+                            } else {
+                                info!(
+                                    self.inner.log,
+                                    "no sled info available yet"
+                                );
+                            }
+                            smfh.delpropvalue_default_instance(
+                                "config/address",
+                                "*",
+                            )?;
+                            for address in &request.addresses {
+                                smfh.addpropvalue_type_default_instance(
+                                    "config/address",
+                                    &format!("[{}]:{}", address, TFPORTD_PORT),
+                                    "astring",
+                                )?;
+                            }
+
+                            match asic {
+                                DendriteAsic::SoftNpuPropolisDevice
+                                | DendriteAsic::TofinoAsic => {
+                                    smfh.setprop_default_instance(
+                                        "config/pkt_source",
+                                        pkt_source,
+                                    )?;
+                                }
+                                _ => {}
+                            }
+
+                            smfh.refresh()?;
+                            info!(self.inner.log, "refreshed tfport service with new configuration")
                         }
                         SwitchService::Pumpkind { .. } => {
                             // Unless we want to plumb through the "only log
