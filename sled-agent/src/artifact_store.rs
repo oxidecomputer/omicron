@@ -408,7 +408,7 @@ impl RepoDepotApi for RepoDepotImpl {
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum Error {
-    #[error(transparent)]
+    #[error("Error while reading request body")]
     Body(dropshot::HttpError),
 
     #[error("Error retrieving dataset configuration")]
@@ -433,7 +433,7 @@ pub(crate) enum Error {
     #[error("Digest mismatch: expected {expected}, actual {actual}")]
     HashMismatch { expected: ArtifactHash, actual: ArtifactHash },
 
-    #[error(transparent)]
+    #[error("Blocking task failed")]
     Join(#[from] tokio::task::JoinError),
 
     #[error("Artifact {sha256} not found")]
