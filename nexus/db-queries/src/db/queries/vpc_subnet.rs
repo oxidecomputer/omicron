@@ -47,7 +47,8 @@ use uuid::Uuid;
 ///         -- we're trying to cacth.
 ///         CAST(
 ///             IF(
-///                 inet_contains_or_equals(ipv4_block, <ipv4_block>),
+///                (inet_contains_or_equals(ipv4_block, <ipv4_block>) OR
+///                 inet_contains_or_equals(<ipv4_block>, ipv4_block)),
 ///                'ipv4',
 ///                'ipv6'
 ///             )
