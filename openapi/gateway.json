@@ -1633,6 +1633,11 @@
         "type": "object",
         "properties": {
           "sha256_hash": {
+            "x-rust-type": {
+              "crate": "omicron-common",
+              "path": "omicron_common::update::ArtifactHash",
+              "version": "0.1.0"
+            },
             "type": "string",
             "format": "hex string (32 bytes)"
           }
@@ -1688,10 +1693,20 @@
         "type": "object",
         "properties": {
           "control_plane": {
+            "x-rust-type": {
+              "crate": "omicron-common",
+              "path": "omicron_common::update::ArtifactHash",
+              "version": "0.1.0"
+            },
             "type": "string",
             "format": "hex string (32 bytes)"
           },
           "host_phase_2": {
+            "x-rust-type": {
+              "crate": "omicron-common",
+              "path": "omicron_common::update::ArtifactHash",
+              "version": "0.1.0"
+            },
             "type": "string",
             "format": "hex string (32 bytes)"
           },

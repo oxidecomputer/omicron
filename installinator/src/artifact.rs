@@ -93,7 +93,7 @@ impl ArtifactClient {
             .client
             .get_artifact_by_hash(
                 artifact_hash_id.kind.as_str(),
-                &artifact_hash_id.hash.to_string(),
+                &artifact_hash_id.hash,
             )
             .await?;
 

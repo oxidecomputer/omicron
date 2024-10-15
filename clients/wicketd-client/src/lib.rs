@@ -18,6 +18,9 @@ progenitor::generate_api!(
         slog::debug!(log, "client response"; "result" => ?result);
     }),
     derives = [schemars::JsonSchema],
+    crates = {
+        "omicron-common" = "0.1.0",
+    },
     patch = {
         CurrentRssUserConfig = { derives = [PartialEq] },
         CurrentRssUserConfigSensitive = { derives = [PartialEq, Eq, PartialOrd, Ord] },

@@ -826,6 +826,11 @@
         "properties": {
           "hash": {
             "description": "The hash of the artifact.",
+            "x-rust-type": {
+              "crate": "omicron-common",
+              "path": "omicron_common::update::ArtifactHash",
+              "version": "0.1.0"
+            },
             "type": "string",
             "format": "hex string (32 bytes)"
           },
@@ -983,6 +988,11 @@
               },
               "sha256": {
                 "description": "A SHA-256 digest of the key.",
+                "x-rust-type": {
+                  "crate": "omicron-common",
+                  "path": "omicron_common::update::ArtifactHash",
+                  "version": "0.1.0"
+                },
                 "type": "string",
                 "format": "hex string (32 bytes)"
               }

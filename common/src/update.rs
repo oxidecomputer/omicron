@@ -288,7 +288,7 @@ impl FromStr for ArtifactKind {
 #[cfg_attr(feature = "testing", derive(test_strategy::Arbitrary))]
 pub struct ArtifactHash(
     #[serde(with = "serde_human_bytes::hex_array")]
-    #[schemars(schema_with = "hex_schema::<32>")]
+    #[schemars(schema_with = "artifact_hash_schema")]
     pub [u8; 32],
 );
 
@@ -325,6 +325,19 @@ impl FromStr for ArtifactHash {
 pub fn hex_schema<const N: usize>(gen: &mut SchemaGenerator) -> Schema {
     let mut schema: SchemaObject = <String>::json_schema(gen).into();
     schema.format = Some(format!("hex string ({N} bytes)"));
+    schema.into()
+}
+
+fn artifact_hash_schema(gen: &mut SchemaGenerator) -> Schema {
+    let mut schema: SchemaObject = hex_schema::<32>(gen).into();
+    schema.extensions.insert(
+        "x-rust-type".into(),
+        serde_json::json!({
+            "crate": env!("CARGO_PKG_NAME"),
+            "version": env!("CARGO_PKG_VERSION"),
+            "path": concat!(module_path!(), "::ArtifactHash"),
+        }),
+    );
     schema.into()
 }
 
