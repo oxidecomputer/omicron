@@ -2,7 +2,6 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use bytes::Bytes;
 use dropshot::Body;
 use dropshot::HttpError;
 use futures::TryStreamExt;
@@ -10,7 +9,6 @@ use hyper::{
     header::{ACCEPT_RANGES, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE},
     Response, StatusCode,
 };
-use tokio::sync::mpsc;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -47,22 +45,20 @@ pub fn bad_range_response(file_size: u64) -> Response<Body> {
 /// Generate a GET response, optionally for a HTTP range request.  The total
 /// file length should be provided, whether or not the expected Content-Length
 /// for a range request is shorter.
-pub fn make_get_response<E>(
+pub fn make_get_response<E, S, D>(
     range: Option<SingleRange>,
     file_length: u64,
     content_type: Option<&str>,
-    rx: mpsc::Receiver<std::result::Result<Bytes, E>>,
+    rx: S,
 ) -> Result<Response<Body>, Error>
 where
-    E: Into<Box<(dyn std::error::Error + Send + Sync + 'static)>>
-        + Send
-        + Sync
-        + 'static,
+    E: Send + Sync + std::error::Error + 'static,
+    D: Into<bytes::Bytes>,
+    S: Send + Sync + futures::stream::Stream<Item = Result<D, E>> + 'static,
 {
     Ok(make_response_common(range, file_length, content_type).body(
         Body::wrap(http_body_util::StreamBody::new(
-            tokio_stream::wrappers::ReceiverStream::new(rx)
-                .map_ok(|b| hyper::body::Frame::data(b)),
+            rx.map_ok(|b| hyper::body::Frame::data(b.into())),
         )),
     )?)
 }
@@ -122,6 +118,7 @@ impl PotentialRange {
     }
 }
 
+#[derive(Clone)]
 pub struct SingleRange(http_range::HttpRange, u64);
 
 impl SingleRange {

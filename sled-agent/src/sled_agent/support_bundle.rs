@@ -12,7 +12,6 @@ use dropshot::Body;
 use dropshot::HttpError;
 use dropshot::StreamingBody;
 use futures::StreamExt;
-use futures::TryStreamExt;
 use omicron_common::api::external::Error as ExternalError;
 use omicron_common::disk::CompressionAlgorithm;
 use omicron_common::disk::DatasetKind;
@@ -55,6 +54,9 @@ pub enum Error {
     Io(#[from] std::io::Error),
 
     #[error(transparent)]
+    Range(#[from] crate::range::Error),
+
+    #[error(transparent)]
     Zip(#[from] ZipError),
 }
 
@@ -70,6 +72,7 @@ impl From<Error> for HttpError {
             }
             Error::Storage(err) => HttpError::from(ExternalError::from(err)),
             Error::Io(err) => HttpError::for_internal_error(err.to_string()),
+            Error::Range(err) => HttpError::for_internal_error(err.to_string()),
             Error::Zip(err) => match err {
                 ZipError::FileNotFound => HttpError::for_not_found(
                     None,
@@ -115,6 +118,7 @@ fn stream_zip_entry_helper(
 
 struct ZipEntryStream {
     stream: tokio_stream::wrappers::ReceiverStream<Result<Vec<u8>, HttpError>>,
+    range: Option<SingleRange>,
     size: u64,
 }
 
@@ -165,16 +169,16 @@ fn stream_zip_entry(
     };
 
     let (tx, rx) = tokio::sync::mpsc::channel(16);
+    let r = range.clone();
     tokio::task::spawn_blocking(move || {
-        if let Err(err) =
-            stream_zip_entry_helper(&tx, archive, entry_path, range)
-        {
+        if let Err(err) = stream_zip_entry_helper(&tx, archive, entry_path, r) {
             let _ = tx.blocking_send(Err(err.into()));
         }
     });
 
     Ok(ZipStreamOutput::Stream(ZipEntryStream {
         stream: tokio_stream::wrappers::ReceiverStream::new(rx),
+        range,
         size,
     }))
 }
@@ -445,41 +449,31 @@ impl SledAgent {
         match query {
             SupportBundleQueryType::Whole => {
                 let len = file.metadata().await?.len();
+                let content_type = Some("application/zip");
 
-                // If this has a range request, we need to validate the range
-                // and put bounds on the part of the file we're reading.
-                let (range, body) = if let Some(range) = range {
+                if let Some(range) = range {
+                    // If this has a range request, we need to validate the range
+                    // and put bounds on the part of the file we're reading.
                     let Ok(range) = range.single_range(len) else {
                         return Ok(crate::range::bad_range_response(len));
                     };
 
                     file.seek(std::io::SeekFrom::Start(range.start())).await?;
                     let limit = range.content_length() as usize;
-                    (
+                    return Ok(crate::range::make_get_response(
                         Some(range),
-                        Body::wrap(http_body_util::StreamBody::new(
-                            ReaderStream::new(file)
-                                .take(limit)
-                                .map_ok(|b| hyper::body::Frame::data(b)),
-                        )),
-                    )
+                        len,
+                        content_type,
+                        ReaderStream::new(file).take(limit),
+                    )?);
                 } else {
-                    (
+                    return Ok(crate::range::make_get_response(
                         None,
-                        Body::wrap(http_body_util::StreamBody::new(
-                            ReaderStream::new(file)
-                                .map_ok(|b| hyper::body::Frame::data(b)),
-                        )),
-                    )
+                        len,
+                        content_type,
+                        ReaderStream::new(file),
+                    )?);
                 };
-
-                return Ok(crate::range::make_response_common(
-                    range,
-                    len,
-                    Some("application/zip"),
-                )
-                .body(body)
-                .unwrap());
             }
             SupportBundleQueryType::Index => {
                 let file_std = file.into_std().await;
@@ -512,7 +506,6 @@ impl SledAgent {
             SupportBundleQueryType::Path { file_path } => {
                 let file_std = file.into_std().await;
 
-                // TODO: Need to bound min/max of entry length
                 let entry_stream =
                     match stream_zip_entry(file_std, file_path, range)? {
                         // We have a valid stream
@@ -523,28 +516,14 @@ impl SledAgent {
                             return Ok(response)
                         }
                     };
-                return Ok(crate::range::make_response_common(
-                    None,
+
+                return Ok(crate::range::make_get_response(
+                    entry_stream.range,
                     entry_stream.size,
                     None,
-                )
-                .body(Body::wrap(http_body_util::StreamBody::new(
-                    entry_stream
-                        .stream
-                        .map_ok(|b| hyper::body::Frame::data(b.into())),
-                )))
-                .unwrap());
-                //                (Body::wrap(streamer), "text/plain")
+                    entry_stream.stream,
+                )?);
             }
         };
-
-        //        let body = FreeformBody(body);
-        //        let mut response =
-        //            HttpResponseHeaders::new_unnamed(HttpResponseOk(body));
-        //        response.headers_mut().append(
-        //            http::header::CONTENT_TYPE,
-        //            content_type.try_into().unwrap(),
-        //        );
-        //        Ok(response)
     }
 }
