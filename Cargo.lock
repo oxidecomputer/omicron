@@ -1699,7 +1699,7 @@ dependencies = [
  "bitflags 2.6.0",
  "crossterm_winapi",
  "futures-core",
- "mio 1.0.2",
+ "mio",
  "parking_lot 0.12.2",
  "rustix",
  "serde",
@@ -5187,18 +5187,6 @@ dependencies = [
 
 [[package]]
 name = "mio"
-version = "0.8.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4a650543ca06a924e8b371db273b2756685faae30f8487da1b56505a8f78b0c"
-dependencies = [
- "libc",
- "log",
- "wasi",
- "windows-sys 0.48.0",
-]
-
-[[package]]
-name = "mio"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "80e04d1dcff3aae0704555fe5fee3bcfaf3d1fdf8a7e521d5b9d2b42acb52cec"
@@ -7010,10 +6998,12 @@ dependencies = [
  "cookie",
  "crossbeam-epoch",
  "crossbeam-utils",
+ "crossterm",
  "crypto-common",
  "curve25519-dalek",
  "digest",
  "dof",
+ "dropshot",
  "ecdsa",
  "ed25519-dalek",
  "either",
@@ -7032,11 +7022,9 @@ dependencies = [
  "generic-array",
  "getrandom",
  "group",
- "hashbrown 0.14.5",
  "hex",
  "hickory-proto",
  "hmac",
- "hyper 0.14.30",
  "hyper 1.4.1",
  "hyper-rustls 0.27.3",
  "hyper-util",
@@ -7052,7 +7040,7 @@ dependencies = [
  "log",
  "managed",
  "memchr",
- "mio 1.0.2",
+ "mio",
  "nom",
  "num-bigint-dig",
  "num-integer",
@@ -7084,7 +7072,6 @@ dependencies = [
  "serde_json",
  "sha1",
  "sha2",
- "signal-hook-mio",
  "similar",
  "slog",
  "smallvec 1.13.2",
@@ -10128,8 +10115,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "34db1a06d485c9142248b7a054f034b349b212551f3dfd19c94d45a754a217cd"
 dependencies = [
  "libc",
- "mio 0.8.11",
- "mio 1.0.2",
+ "mio",
  "signal-hook",
 ]
 
@@ -11398,7 +11384,7 @@ dependencies = [
  "backtrace",
  "bytes",
  "libc",
- "mio 1.0.2",
+ "mio",
  "parking_lot 0.12.2",
  "pin-project-lite",
  "signal-hook-registry",
