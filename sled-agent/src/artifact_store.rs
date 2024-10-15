@@ -15,7 +15,6 @@
 
 use std::io::ErrorKind;
 use std::net::SocketAddrV6;
-use std::sync::LazyLock;
 use std::time::Duration;
 
 use camino::{Utf8Path, Utf8PathBuf};
@@ -60,6 +59,7 @@ const TEMP_SUBDIR: &str = "tmp";
 #[derive(Clone)]
 pub(crate) struct ArtifactStore<T: DatasetsManager> {
     log: Logger,
+    reqwest_client: reqwest::Client,
     storage: T,
 }
 
@@ -67,6 +67,11 @@ impl<T: DatasetsManager> ArtifactStore<T> {
     pub(crate) fn new(log: &Logger, storage: T) -> ArtifactStore<T> {
         ArtifactStore {
             log: log.new(slog::o!("component" => "ArtifactStore")),
+            reqwest_client: reqwest::ClientBuilder::new()
+                .connect_timeout(Duration::from_secs(15))
+                .read_timeout(Duration::from_secs(15))
+                .build()
+                .unwrap(),
             storage,
         }
     }
@@ -281,17 +286,9 @@ impl<T: DatasetsManager> ArtifactStore<T> {
         sha256: ArtifactHash,
         depot_base_url: &str,
     ) -> Result<(), Error> {
-        static CLIENT: LazyLock<reqwest::Client> = LazyLock::new(|| {
-            reqwest::ClientBuilder::new()
-                .connect_timeout(Duration::from_secs(15))
-                .read_timeout(Duration::from_secs(15))
-                .build()
-                .unwrap()
-        });
-
         let client = repo_depot_client::Client::new_with_client(
             depot_base_url,
-            CLIENT.clone(),
+            self.reqwest_client.clone(),
             self.log.new(slog::o!(
                 "component" => "Repo Depot client (ArtifactStore)",
                 "base_url" => depot_base_url.to_owned(),
