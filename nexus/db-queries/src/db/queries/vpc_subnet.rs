@@ -331,8 +331,14 @@ mod test {
             };
         let ipv4_block = "172.30.0.0/22".parse().unwrap();
         let other_ipv4_block = "172.31.0.0/22".parse().unwrap();
+        let overlapping_ipv4_block_longer = "172.30.0.0/21".parse().unwrap();
+        let overlapping_ipv4_block_shorter = "172.30.0.0/23".parse().unwrap();
         let ipv6_block = "fd12:3456:7890::/64".parse().unwrap();
         let other_ipv6_block = "fd00::/64".parse().unwrap();
+        let overlapping_ipv6_block_longer =
+            "fd12:3456:7890::/60".parse().unwrap();
+        let overlapping_ipv6_block_shorter =
+            "fd12:3456:7890::/68".parse().unwrap();
         let name = "a-name".to_string().try_into().unwrap();
         let other_name = "b-name".to_string().try_into().unwrap();
         let description = "some description".to_string();
@@ -402,6 +408,81 @@ mod test {
         assert!(
             matches!(db_datastore.vpc_create_subnet_raw(new_row).await, Ok(_)),
             "Should be able to insert a VPC Subnet with the same ranges in a different VPC",
+        );
+
+        // We shouldn't be able to insert a subnet if the IPv4 or IPv6 blocks overlap.
+        // Explicitly test for different CIDR masks with the same network address
+        let new_row = VpcSubnet::new(
+            other_other_subnet_id,
+            vpc_id,
+            make_id(&other_name, &description),
+            overlapping_ipv4_block_longer,
+            other_ipv6_block,
+        );
+        let err = db_datastore
+            .vpc_create_subnet_raw(new_row)
+            .await
+            .expect_err("Should not be able to insert VPC Subnet with overlapping IPv4 range {overlapping_ipv4_block_longer}");
+        assert_eq!(
+            err,
+            InsertVpcSubnetError::OverlappingIpRange(
+                overlapping_ipv4_block_longer.into()
+            ),
+            "InsertError variant should indicate an IP block overlaps"
+        );
+        let new_row = VpcSubnet::new(
+            other_other_subnet_id,
+            vpc_id,
+            make_id(&other_name, &description),
+            overlapping_ipv4_block_shorter,
+            other_ipv6_block,
+        );
+        let err = db_datastore
+            .vpc_create_subnet_raw(new_row)
+            .await
+            .expect_err("Should not be able to insert VPC Subnet with overlapping IPv4 range {overlapping_ipv4_block_shorter}");
+        assert_eq!(
+            err,
+            InsertVpcSubnetError::OverlappingIpRange(
+                overlapping_ipv4_block_shorter.into()
+            ),
+            "InsertError variant should indicate an IP block overlaps"
+        );
+        let new_row = VpcSubnet::new(
+            other_other_subnet_id,
+            vpc_id,
+            make_id(&other_name, &description),
+            other_ipv4_block,
+            overlapping_ipv6_block_longer,
+        );
+        let err = db_datastore
+            .vpc_create_subnet_raw(new_row)
+            .await
+            .expect_err("Should not be able to insert VPC Subnet with overlapping IPv6 range {overlapping_ipv6_block_longer}");
+        assert_eq!(
+            err,
+            InsertVpcSubnetError::OverlappingIpRange(
+                overlapping_ipv6_block_longer.into()
+            ),
+            "InsertError variant should indicate an IP block overlaps"
+        );
+        let new_row = VpcSubnet::new(
+            other_other_subnet_id,
+            vpc_id,
+            make_id(&other_name, &description),
+            other_ipv4_block,
+            overlapping_ipv6_block_shorter,
+        );
+        let err = db_datastore
+            .vpc_create_subnet_raw(new_row)
+            .await
+            .expect_err("Should not be able to insert VPC Subnet with overlapping IPv6 range {overlapping_ipv6_block_shorter}");
+        assert_eq!(
+            err,
+            InsertVpcSubnetError::OverlappingIpRange(
+                overlapping_ipv6_block_shorter.into()
+            ),
+            "InsertError variant should indicate an IP block overlaps"
         );
 
         // We shouldn't be able to insert a subnet if we change only the
