@@ -117,7 +117,7 @@ impl super::Nexus {
     pub(crate) async fn switch_port_settings_delete(
         &self,
         opctx: &OpContext,
-        params: &params::SwitchPortSettingsSelector,
+        params: &NameOrId,
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         self.db_datastore.switch_port_settings_delete(opctx, params).await

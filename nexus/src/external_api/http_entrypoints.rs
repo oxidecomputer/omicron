@@ -3797,17 +3797,17 @@ async fn networking_switch_port_configuration_create(
 /// Delete switch port settings
 #[endpoint {
     method = DELETE,
-    path = "/v1/system/networking/switch-port-configuration",
+    path = "/v1/system/networking/switch-port-configuration/{configuration}",
     tags = ["system/networking"],
 }]
 async fn networking_switch_port_configuration_delete(
     rqctx: RequestContext<ApiContext>,
-    query_params: Query<params::SwitchPortSettingsSelector>,
+    path_params: Path<params::SwitchPortSettingsInfoSelector>,
 ) -> Result<HttpResponseDeleted, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.context.nexus;
-        let selector = query_params.into_inner();
+        let selector = path_params.into_inner().configuration;
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         nexus.switch_port_settings_delete(&opctx, &selector).await?;
         Ok(HttpResponseDeleted())

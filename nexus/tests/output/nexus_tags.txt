@@ -210,7 +210,7 @@ networking_switch_port_configuration_bgp_peer_community_remove POST     /v1/syst
 networking_switch_port_configuration_bgp_peer_list GET      /v1/system/networking/switch-port-configuration/{configuration}/bgp-peer
 networking_switch_port_configuration_bgp_peer_remove POST     /v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/remove
 networking_switch_port_configuration_create POST     /v1/system/networking/switch-port-configuration
-networking_switch_port_configuration_delete DELETE   /v1/system/networking/switch-port-configuration
+networking_switch_port_configuration_delete DELETE   /v1/system/networking/switch-port-configuration/{configuration}
 networking_switch_port_configuration_geometry_set POST     /v1/system/networking/switch-port-configuration/{configuration}/geometry
 networking_switch_port_configuration_geometry_view GET      /v1/system/networking/switch-port-configuration/{configuration}/geometry
 networking_switch_port_configuration_link_create POST     /v1/system/networking/switch-port-configuration/{configuration}/link

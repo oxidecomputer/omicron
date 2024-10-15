@@ -527,7 +527,7 @@ pub static DEMO_LOOPBACK_CREATE: Lazy<params::LoopbackAddressCreate> =
     });
 
 pub const DEMO_SWITCH_PORT_SETTINGS_URL: &'static str =
-    "/v1/system/networking/switch-port-configuration?port_settings=portofino";
+    "/v1/system/networking/switch-port-configuration";
 pub const DEMO_SWITCH_PORT_SETTINGS_INFO_URL: &'static str =
     "/v1/system/networking/switch-port-configuration/portofino";
 pub static DEMO_SWITCH_PORT_SETTINGS_CREATE: Lazy<
@@ -537,6 +537,15 @@ pub static DEMO_SWITCH_PORT_SETTINGS_CREATE: Lazy<
         name: "portofino".parse().unwrap(),
         description: "just a port".into(),
     })
+});
+
+pub const DEMO_SWITCH_PORT_GEOMETRY_URL: &'static str =
+    "/v1/system/networking/switch-port-configuration/portofino/geometry";
+
+pub static DEMO_SWITCH_PORT_GEOMETRY_CREATE: Lazy<
+    params::SwitchPortConfigCreate,
+> = Lazy::new(|| params::SwitchPortConfigCreate {
+    geometry: params::SwitchPortGeometry::Qsfp28x1,
 });
 
 pub const DEMO_ADDRESS_LOTS_URL: &'static str =
@@ -2304,7 +2313,6 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
                         &*DEMO_SWITCH_PORT_SETTINGS_CREATE).unwrap(),
                 ),
                 AllowedMethod::Get,
-                AllowedMethod::Delete
             ],
         },
 
@@ -2313,7 +2321,21 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
             visibility: Visibility::Public,
             unprivileged_access: UnprivilegedAccess::None,
             allowed_methods: vec![
-                AllowedMethod::GetNonexistent
+                AllowedMethod::Get,
+                AllowedMethod::Delete,
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_SWITCH_PORT_GEOMETRY_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Post(
+                    serde_json::to_value(
+                        &*DEMO_SWITCH_PORT_GEOMETRY_CREATE).unwrap(),
+                ),
+                AllowedMethod::Get,
             ],
         },
 

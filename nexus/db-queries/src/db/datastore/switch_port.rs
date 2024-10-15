@@ -261,14 +261,9 @@ impl DataStore {
     pub async fn switch_port_settings_delete(
         &self,
         opctx: &OpContext,
-        params: &params::SwitchPortSettingsSelector,
+        params: &NameOrId,
     ) -> DeleteResult {
         let conn = self.pool_connection_authorized(opctx).await?;
-
-        let selector = match &params.configuration {
-            None => return Err(Error::invalid_request("name or id required")),
-            Some(name_or_id) => name_or_id,
-        };
 
         let err = OptionalError::new();
 
@@ -278,7 +273,7 @@ impl DataStore {
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 async move {
-                    do_switch_port_settings_delete(&conn, &selector, err).await
+                    do_switch_port_settings_delete(&conn, &params, err).await
                 }
             })
             .await
@@ -290,10 +285,10 @@ impl DataStore {
                         }
                     }
                 } else {
-                    let name = match &params.configuration {
-                        Some(name_or_id) => name_or_id.to_string(),
-                        None => String::new(),
-                    };
+                    let name = match params {
+                        NameOrId::Id(id) => id.to_string(),
+                        NameOrId::Name(name) => name.to_string(),
+        };
                     public_error_from_diesel(
                         e,
                         ErrorHandler::Conflict(

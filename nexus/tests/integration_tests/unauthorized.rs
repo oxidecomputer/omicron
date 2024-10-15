@@ -334,6 +334,20 @@ static SETUP_REQUESTS: Lazy<Vec<SetupReq>> = Lazy::new(|| {
             body: serde_json::to_value(&*DEMO_CERTIFICATE_CREATE).unwrap(),
             id_routes: vec![],
         },
+        // Create a switch port configuration
+        SetupReq::Post {
+            url: &DEMO_SWITCH_PORT_SETTINGS_URL,
+            body: serde_json::to_value(&*DEMO_SWITCH_PORT_SETTINGS_CREATE)
+                .unwrap(),
+            id_routes: vec![],
+        },
+        // Create a switch port geometry
+        SetupReq::Post {
+            url: &DEMO_SWITCH_PORT_GEOMETRY_URL,
+            body: serde_json::to_value(&*DEMO_SWITCH_PORT_GEOMETRY_CREATE)
+                .unwrap(),
+            id_routes: vec![],
+        },
     ]
 });
 
