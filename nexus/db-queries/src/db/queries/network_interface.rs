@@ -1853,7 +1853,7 @@ mod tests {
             },
             ncpus: InstanceCpuCount(4),
             memory: ByteCount::from_gibibytes_u32(4),
-            hostname: "inst".parse().unwrap(),
+            hostname: Some("inst".parse().unwrap()),
             user_data: vec![],
             ssh_public_keys: Some(Vec::new()),
             network_interfaces: InstanceNetworkInterfaceAttachment::None,
