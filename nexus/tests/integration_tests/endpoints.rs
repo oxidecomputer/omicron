@@ -570,7 +570,7 @@ pub const DEMO_SWITCH_PORT_LINK_INFO_URL: &'static str =
 pub const DEMO_SWITCH_PORT_ADDRESS_URL: &'static str =
     "/v1/system/networking/switch-port-configuration/portofino/address";
 
-pub const DEMO_SWITCH_PORT_ADDRESS_ADD_REMOVE: Lazy<params::AddressAddRemove> =
+pub static DEMO_SWITCH_PORT_ADDRESS_ADD_REMOVE: Lazy<params::AddressAddRemove> =
     Lazy::new(|| params::AddressAddRemove {
         interface: "qsfp0".parse().unwrap(),
         address_lot: NameOrId::Name("parkinglot".parse().unwrap()),
@@ -587,7 +587,7 @@ pub const DEMO_SWITCH_PORT_ADDRESS_REMOVE_URL: &'static str =
 pub const DEMO_SWITCH_PORT_ROUTE_URL: &'static str =
     "/v1/system/networking/switch-port-configuration/portofino/route";
 
-pub const DEMO_SWITCH_PORT_ROUTE_ADD_REMOVE: Lazy<params::RouteAddRemove> =
+pub static DEMO_SWITCH_PORT_ROUTE_ADD_REMOVE: Lazy<params::RouteAddRemove> =
     Lazy::new(|| params::RouteAddRemove {
         interface: "qsfp0".parse().unwrap(),
         dst: "0.0.0.0/0".parse().unwrap(),
@@ -605,7 +605,7 @@ pub const DEMO_SWITCH_PORT_ROUTE_REMOVE_URL: &'static str =
 pub const DEMO_SWITCH_PORT_BGP_PEER_URL: &'static str =
     "/v1/system/networking/switch-port-configuration/portofino/bgp-peer";
 
-pub const DEMO_SWITCH_PORT_BGP_PEER_ADD: Lazy<external::BgpPeer> =
+pub static DEMO_SWITCH_PORT_BGP_PEER_ADD: Lazy<external::BgpPeer> =
     Lazy::new(|| external::BgpPeer {
         bgp_config: NameOrId::Name("as47".parse().unwrap()),
         interface_name: "qsfp0".into(),
@@ -629,7 +629,7 @@ pub const DEMO_SWITCH_PORT_BGP_PEER_ADD: Lazy<external::BgpPeer> =
 pub const DEMO_SWITCH_PORT_BGP_PEER_ADD_URL: &'static str =
     "/v1/system/networking/switch-port-configuration/portofino/bgp-peer/add";
 
-pub const DEMO_SWITCH_PORT_BGP_PEER_REMOVE: Lazy<external::BgpPeerRemove> =
+pub static DEMO_SWITCH_PORT_BGP_PEER_REMOVE: Lazy<external::BgpPeerRemove> =
     Lazy::new(|| external::BgpPeerRemove {
         bgp_config: NameOrId::Name("as47".parse().unwrap()),
         interface_name: "qsfp0".into(),
@@ -639,7 +639,7 @@ pub const DEMO_SWITCH_PORT_BGP_PEER_REMOVE: Lazy<external::BgpPeerRemove> =
 pub const DEMO_SWITCH_PORT_BGP_PEER_REMOVE_URL: &'static str =
     "/v1/system/networking/switch-port-configuration/portofino/bgp-peer/remove";
 
-pub const DEMO_SWITCH_PORT_BGP_PEER_ALLOWED_PREFIX: Lazy<
+pub static DEMO_SWITCH_PORT_BGP_PEER_ALLOWED_PREFIX: Lazy<
     params::AllowedPrefixAddRemove,
 > = Lazy::new(|| params::AllowedPrefixAddRemove {
     peer_address: "203.0.113.12".parse().unwrap(),
@@ -668,7 +668,7 @@ pub const DEMO_SWITCH_PORT_BGP_PEER_ALLOW_EXPORT_REMOVE_URL: &'static str =
 pub const DEMO_SWITCH_PORT_BGP_PEER_COMMUNITY_URL: &'static str =
     "/v1/system/networking/switch-port-configuration/portofino/bgp-peer/community?peer_address=203.0.113.12";
 
-pub const DEMO_SWITCH_PORT_BGP_PEER_COMMUNITY_ADD_REMOVE: Lazy<
+pub static DEMO_SWITCH_PORT_BGP_PEER_COMMUNITY_ADD_REMOVE: Lazy<
     params::BgpCommunityAddRemove,
 > = Lazy::new(|| params::BgpCommunityAddRemove {
     peer_address: "203.0.113.12".parse().unwrap(),
