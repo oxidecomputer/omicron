@@ -1251,52 +1251,51 @@ impl DataStore {
 
         // First, grab read-write regions - they're not shared, but they are
         // not candidates for deletion if there are region snapshots
-        {
-            let mut read_write_targets =
-                Vec::with_capacity(3 * num_read_write_subvolumes);
-            read_write_resources_associated_with_volume(
-                &vcr,
-                &mut read_write_targets,
-            );
+        let mut read_write_targets =
+            Vec::with_capacity(3 * num_read_write_subvolumes);
 
-            for target in read_write_targets {
-                let sub_err = OptionalError::new();
+        read_write_resources_associated_with_volume(
+            &vcr,
+            &mut read_write_targets,
+        );
 
-                let maybe_region = Self::target_to_region(
-                    conn, &sub_err, &target, false, // read-write
-                )
-                .await
-                .map_err(|e| {
-                    if let Some(sub_err) = sub_err.take() {
-                        err.bail(SoftDeleteTransactionError::AddressParseError(
-                            sub_err,
-                        ))
-                    } else {
-                        e
-                    }
-                })?;
+        for target in read_write_targets {
+            let sub_err = OptionalError::new();
 
-                let Some(region) = maybe_region else {
-                    return Err(err.bail(
-                        SoftDeleteTransactionError::CouldNotFindResource(
-                            format!("could not find resource for {target}"),
-                        ),
-                    ));
-                };
-
-                // Filter out regions that have any region-snapshots
-                let region_snapshot_count: i64 = {
-                    use db::schema::region_snapshot::dsl;
-                    dsl::region_snapshot
-                        .filter(dsl::region_id.eq(region.id()))
-                        .count()
-                        .get_result_async::<i64>(conn)
-                        .await?
-                };
-
-                if region_snapshot_count == 0 {
-                    regions.push(region.id());
+            let maybe_region = Self::target_to_region(
+                conn, &sub_err, &target, false, // read-write
+            )
+            .await
+            .map_err(|e| {
+                if let Some(sub_err) = sub_err.take() {
+                    err.bail(SoftDeleteTransactionError::AddressParseError(
+                        sub_err,
+                    ))
+                } else {
+                    e
                 }
+            })?;
+
+            let Some(region) = maybe_region else {
+                return Err(err.bail(
+                    SoftDeleteTransactionError::CouldNotFindResource(
+                        format!("could not find resource for {target}"),
+                    ),
+                ));
+            };
+
+            // Filter out regions that have any region-snapshots
+            let region_snapshot_count: i64 = {
+                use db::schema::region_snapshot::dsl;
+                dsl::region_snapshot
+                    .filter(dsl::region_id.eq(region.id()))
+                    .count()
+                    .get_result_async::<i64>(conn)
+                    .await?
+            };
+
+            if region_snapshot_count == 0 {
+                regions.push(region.id());
             }
         }
 
