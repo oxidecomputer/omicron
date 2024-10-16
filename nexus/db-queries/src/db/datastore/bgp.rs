@@ -223,7 +223,7 @@ impl DataStore {
     pub async fn bgp_config_delete(
         &self,
         opctx: &OpContext,
-        sel: &params::BgpConfigSelector,
+        sel: &NameOrId,
     ) -> DeleteResult {
         use db::schema::bgp_config;
         use db::schema::bgp_config::dsl as bgp_config_dsl;
@@ -237,7 +237,7 @@ impl DataStore {
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 async move {
-                    let name_or_id = sel.name_or_id.clone();
+                    let name_or_id = sel.clone();
 
                     let id: Uuid = match name_or_id {
                         NameOrId::Id(id) => bgp_config_dsl::bgp_config

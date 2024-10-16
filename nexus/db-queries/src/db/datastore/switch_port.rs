@@ -26,8 +26,8 @@ use crate::transaction_retry::OptionalError;
 use async_bb8_diesel::{AsyncRunQueryDsl, Connection};
 use diesel::CombineDsl;
 use diesel::{
-    ExpressionMethods, JoinOnDsl, NullableExpressionMethods, PgConnection,
-    QueryDsl, SelectableHelper,
+    ExpressionMethods, JoinOnDsl, NullableExpressionMethods, OptionalExtension,
+    PgConnection, QueryDsl, SelectableHelper,
 };
 use diesel_dtrace::DTraceConnection;
 use ipnetwork::IpNetwork;
@@ -1823,8 +1823,7 @@ impl DataStore {
 
         self.transaction_retry_wrapper(
             "switch_port_configuration_bgp_peer_allow_import_add",
-        )
-            .transaction(&conn, |conn| {
+        ).transaction(&conn, |conn| {
                 let parent_configuration = configuration.clone();
                 let new_settings = prefix.clone();
                 let err = err.clone();
@@ -1857,6 +1856,20 @@ impl DataStore {
                         addr: bgp_peer.into(),
                         prefix: new_settings.prefix.into(),
                     };
+
+                    let found_config = allow_import::table
+                        .filter(allow_import::port_settings_id.eq(allow_import_config.port_settings_id))
+                        .filter(allow_import::interface_name.eq(allow_import_config.interface_name.clone()))
+                        .filter(allow_import::addr.eq(allow_import_config.addr))
+                        .filter(allow_import::prefix.eq(allow_import_config.prefix))
+                        .select(SwitchPortBgpPeerConfigAllowImport::as_select())
+                        .get_result_async(&conn)
+                        .await
+                        .optional()?;
+
+                    if let Some(config) = found_config {
+                        return Ok(config)
+                    }
 
                     let config = diesel::insert_into(allow_import::table)
                         .values(allow_import_config)
@@ -2048,6 +2061,20 @@ impl DataStore {
                         prefix: new_settings.prefix.into(),
                     };
 
+                    let found_config = allow_export::table
+                        .filter(allow_export::port_settings_id.eq(allow_export_config.port_settings_id))
+                        .filter(allow_export::interface_name.eq(allow_export_config.interface_name.clone()))
+                        .filter(allow_export::addr.eq(allow_export_config.addr))
+                        .filter(allow_export::prefix.eq(allow_export_config.prefix))
+                        .select(SwitchPortBgpPeerConfigAllowExport::as_select())
+                        .get_result_async(&conn)
+                        .await
+                        .optional()?;
+
+                    if let Some(config) = found_config {
+                        return Ok(config)
+                    }
+
                     let config = diesel::insert_into(allow_export::table)
                         .values(allow_export_config)
                         .returning(SwitchPortBgpPeerConfigAllowExport::as_returning())
@@ -2237,6 +2264,20 @@ impl DataStore {
                         addr: bgp_peer.into(),
                         community: new_settings.community.into(),
                     };
+
+                    let found_config = communities::table
+                        .filter(communities::port_settings_id.eq(community_config.port_settings_id))
+                        .filter(communities::interface_name.eq(community_config.interface_name.clone()))
+                        .filter(communities::addr.eq(community_config.addr))
+                        .filter(communities::community.eq(community_config.community))
+                        .select(SwitchPortBgpPeerConfigCommunity::as_select())
+                        .get_result_async(&conn)
+                        .await
+                        .optional()?;
+
+                    if let Some(config) = found_config {
+                        return Ok(config)
+                    }
 
                     let config = diesel::insert_into(communities::table)
                         .values(community_config)

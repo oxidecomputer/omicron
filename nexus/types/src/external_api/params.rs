@@ -1671,7 +1671,7 @@ pub struct BgpCommunityAddRemove {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct BgpConfigSelector {
     /// A name or id to use when selecting BGP config.
-    pub name_or_id: NameOrId,
+    pub bgp_config: NameOrId,
 }
 
 /// List BGP configs with an optional name or id.

@@ -47,7 +47,7 @@ impl super::Nexus {
     pub async fn bgp_config_delete(
         &self,
         opctx: &OpContext,
-        sel: &params::BgpConfigSelector,
+        sel: &NameOrId,
     ) -> DeleteResult {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let result = self.db_datastore.bgp_config_delete(opctx, sel).await?;

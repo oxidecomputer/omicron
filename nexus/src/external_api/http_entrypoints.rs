@@ -4940,17 +4940,17 @@ async fn networking_bgp_imported_routes_ipv4(
 /// Delete BGP configuration
 #[endpoint {
     method = DELETE,
-    path = "/v1/system/networking/bgp",
+    path = "/v1/system/networking/bgp/{bgp_config}",
     tags = ["system/networking"],
 }]
 async fn networking_bgp_config_delete(
     rqctx: RequestContext<ApiContext>,
-    sel: Query<params::BgpConfigSelector>,
+    sel: Path<params::BgpConfigSelector>,
 ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.context.nexus;
-        let sel = sel.into_inner();
+        let sel = sel.into_inner().bgp_config;
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         nexus.bgp_config_delete(&opctx, &sel).await?;
         Ok(HttpResponseUpdatedNoContent {})
@@ -4974,14 +4974,14 @@ async fn networking_bgp_config_delete(
 async fn networking_bgp_announce_set_update(
     rqctx: RequestContext<ApiContext>,
     config: TypedBody<params::BgpAnnounceSetCreate>,
-) -> Result<HttpResponseCreated<BgpAnnounceSet>, HttpError> {
+) -> Result<HttpResponseOk<BgpAnnounceSet>, HttpError> {
     let apictx = rqctx.context();
     let handler = async {
         let nexus = &apictx.context.nexus;
         let config = config.into_inner();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         let result = nexus.bgp_update_announce_set(&opctx, &config).await?;
-        Ok(HttpResponseCreated::<BgpAnnounceSet>(result.0.into()))
+        Ok(HttpResponseOk::<BgpAnnounceSet>(result.0.into()))
     };
     apictx
         .context

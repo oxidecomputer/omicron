@@ -6591,7 +6591,9 @@
             "$ref": "#/components/responses/Error"
           }
         }
-      },
+      }
+    },
+    "/v1/system/networking/bgp/{bgp_config}": {
       "delete": {
         "tags": [
           "system/networking"
@@ -6600,8 +6602,8 @@
         "operationId": "networking_bgp_config_delete",
         "parameters": [
           {
-            "in": "query",
-            "name": "name_or_id",
+            "in": "path",
+            "name": "bgp_config",
             "description": "A name or id to use when selecting BGP config.",
             "required": true,
             "schema": {
@@ -6710,8 +6712,8 @@
           "required": true
         },
         "responses": {
-          "201": {
-            "description": "successful creation",
+          "200": {
+            "description": "successful operation",
             "content": {
               "application/json": {
                 "schema": {
