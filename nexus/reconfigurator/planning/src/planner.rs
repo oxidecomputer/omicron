@@ -2686,11 +2686,11 @@ mod test {
             assert_eq!(clickhouse_cluster_config.generation, 2.into());
             assert_eq!(
                 clickhouse_cluster_config.max_used_keeper_id,
-                (target_keepers as u64).into()
+                (u64::from(target_keepers)).into()
             );
             assert_eq!(
                 clickhouse_cluster_config.max_used_server_id,
-                (target_servers as u64).into()
+                (u64::from(target_servers)).into()
             );
             assert_eq!(
                 clickhouse_cluster_config.keepers.len(),
@@ -3000,7 +3000,7 @@ mod test {
         // Directly manipulate the blueprint and inventory so that the
         // clickhouse clusters are stable
         let config = blueprint2.clickhouse_cluster_config.as_mut().unwrap();
-        config.max_used_keeper_id = (target_keepers as u64).into();
+        config.max_used_keeper_id = (u64::from(target_keepers)).into();
         config.keepers = keeper_zone_ids
             .iter()
             .enumerate()
