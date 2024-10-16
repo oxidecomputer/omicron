@@ -384,13 +384,18 @@ impl DepPath {
 }
 
 // Dendrite is not (yet) a public repository, but it's a dependency of
-// Maghemite. We call this function when trying to fetch the Dendrite repository
-// over HTTPS but don't have any authentication credentials (in e.g. ~/netrc).
-// To make local builds as convenient as possible, we will attempt to use SSH
-// to fetch the repository by setting `GIT_CONFIG_*` environment variables to
-// rewrite the repository URL to an SSH URL. If that fails, we'll wrap that
-// error with a helpful message informing the user to either have access via
-// HTTPS or SSH.
+// Maghemite. There are two expected cases for running Omicron tests locally
+// that we know of:
+// - The developer has a Git credential helper of some kind set up to
+//   successfully clone private repositories over HTTPS.
+// - The developer has an SSH agent or other local SSH key that they use to
+//   clone repositories over SSH.
+// We call this function when we fail to fetch the Dendrite repository over
+// HTTPS. Under the assumption that the user falls in the second group.
+// we attempt to use SSH to fetch the repository by setting `GIT_CONFIG_*`
+// environment variables to rewrite the repository URL to an SSH URL. If that
+// fails, we'll verbosely inform the user as to how both methods failed and
+// provide some context.
 //
 // This entire workaround can and very much should go away once Dendrite is
 // public.
@@ -454,7 +459,6 @@ More context: https://github.com/oxidecomputer/omicron/issues/6839
 {original_err:?}
 
 ===== The error that occurred while fetching using SSH (fallback): =====
-{err:?}
-")
+{err:?}")
     })
 }
