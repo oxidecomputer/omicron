@@ -171,7 +171,16 @@ impl Drop for Pool {
         // With this check, we'll reliably panic (rather than flake) if the pool
         // is dropped without terminating these worker tasks.
         if !self.terminated.load(std::sync::atomic::Ordering::SeqCst) {
-            panic!("Pool dropped without invoking `terminate`");
+            // If we're already panicking, don't panic again.
+            // Doing so can ruin test handlers by aborting the process.
+            //
+            // Instead, just drop a message to stderr and carry on.
+            let msg = "Pool dropped without invoking `terminate`";
+            if std::thread::panicking() {
+                eprintln!("{msg}");
+            } else {
+                panic!("{msg}");
+            }
         }
     }
 }
