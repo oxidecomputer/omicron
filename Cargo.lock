@@ -4457,7 +4457,7 @@ dependencies = [
  "omicron-uuid-kinds",
  "omicron-workspace-hack",
  "progenitor",
- "qorb 0.0.2",
+ "qorb",
  "reqwest 0.12.8",
  "serde",
  "serde_json",
@@ -5532,7 +5532,7 @@ dependencies = [
  "pq-sys",
  "predicates",
  "pretty_assertions",
- "qorb 0.0.2",
+ "qorb",
  "rand",
  "rcgen",
  "ref-cast",
@@ -6636,7 +6636,7 @@ dependencies = [
  "pretty_assertions",
  "progenitor-client",
  "propolis-client 0.1.0 (git+https://github.com/oxidecomputer/propolis?rev=11371b0f3743f8df5b047dc0edc2699f4bdf3927)",
- "qorb 0.0.2",
+ "qorb",
  "rand",
  "rcgen",
  "ref-cast",
@@ -7074,7 +7074,7 @@ dependencies = [
  "postgres-types",
  "predicates",
  "proc-macro2",
- "qorb 0.0.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "qorb",
  "quote",
  "rand",
  "regex",
@@ -8713,31 +8713,9 @@ dependencies = [
 
 [[package]]
 name = "qorb"
-version = "0.0.2"
-dependencies = [
- "anyhow",
- "async-trait",
- "debug-ignore",
- "derive-where",
- "dropshot",
- "futures",
- "hickory-resolver",
- "rand",
- "schemars",
- "serde",
- "serde_json",
- "thiserror",
- "tokio",
- "tokio-stream",
- "tokio-tungstenite 0.23.1",
- "tracing",
-]
-
-[[package]]
-name = "qorb"
-version = "0.0.2"
+version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "104066c20d7277d0af40a7333c579a2a71cc6b68c14982d1da2e5747a381a3ed"
+checksum = "15601a1eaea70cb18e7a4f06c625b516d348a1b2d3dc1edbb93f0857636bcafe"
 dependencies = [
  "anyhow",
  "async-trait",

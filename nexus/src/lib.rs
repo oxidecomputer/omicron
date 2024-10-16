@@ -89,7 +89,8 @@ impl InternalServer {
             context.clone(),
             &log.new(o!("component" => "dropshot_internal")),
         )
-        .map_err(|error| format!("initializing internal server: {}", error)) {
+        .map_err(|error| format!("initializing internal server: {}", error))
+        {
             Ok(server) => server,
             Err(err) => {
                 context.context.nexus.datastore().terminate().await;
@@ -227,12 +228,11 @@ impl nexus_test_interface::NexusServer for Server {
     async fn start_internal(
         config: &NexusConfig,
         log: &Logger,
-    ) -> (InternalServer, SocketAddr) {
-        let internal_server =
-            InternalServer::start(config, &log).await.unwrap();
+    ) -> Result<(InternalServer, SocketAddr), String> {
+        let internal_server = InternalServer::start(config, &log).await?;
         internal_server.apictx.context.nexus.wait_for_populate().await.unwrap();
         let addr = internal_server.http_server_internal.local_addr();
-        (internal_server, addr)
+        Ok((internal_server, addr))
     }
 
     async fn start(
@@ -401,12 +401,7 @@ impl nexus_test_interface::NexusServer for Server {
             .close_servers()
             .await
             .expect("failed to close servers during test cleanup");
-        self.apictx
-            .context
-            .nexus
-            .datastore()
-            .terminate()
-            .await;
+        self.apictx.context.nexus.datastore().terminate().await;
     }
 }
 

@@ -291,7 +291,8 @@ impl ServerContext {
             config,
             Arc::clone(&authz),
         )
-        .await {
+        .await
+        {
             Ok(nexus) => nexus,
             Err(err) => {
                 pool.terminate().await;

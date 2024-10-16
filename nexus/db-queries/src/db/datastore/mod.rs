@@ -216,14 +216,31 @@ impl DataStore {
         pool: Arc<Pool>,
         config: Option<&AllSchemaVersions>,
     ) -> Result<Self, String> {
+        Self::new_with_timeout(log, pool, config, None).await
+    }
+
+    pub async fn new_with_timeout(
+        log: &Logger,
+        pool: Arc<Pool>,
+        config: Option<&AllSchemaVersions>,
+        try_for: Option<std::time::Duration>,
+    ) -> Result<Self, String> {
         let datastore =
             Self::new_unchecked(log.new(o!("component" => "datastore")), pool);
+
+        let start = std::time::Instant::now();
 
         // Keep looping until we find that the schema matches our expectation.
         const EXPECTED_VERSION: SemverVersion = nexus_db_model::SCHEMA_VERSION;
         retry_notify(
             retry_policy_internal_service(),
             || async {
+                if let Some(try_for) = try_for {
+                    if std::time::Instant::now() > start + try_for {
+                        return Err(BackoffError::permanent(()));
+                    }
+                }
+
                 match datastore
                     .ensure_schema(&log, EXPECTED_VERSION, config)
                     .await

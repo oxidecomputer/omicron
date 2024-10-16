@@ -520,8 +520,7 @@ propolis_api_types = { git = "https://github.com/oxidecomputer/propolis", rev = 
 propolis-client = { git = "https://github.com/oxidecomputer/propolis", rev = "11371b0f3743f8df5b047dc0edc2699f4bdf3927" }
 propolis-mock-server = { git = "https://github.com/oxidecomputer/propolis", rev = "11371b0f3743f8df5b047dc0edc2699f4bdf3927" }
 proptest = "1.5.0"
-# qorb = { git = "https://github.com/oxidecomputer/qorb", rev = "b9bf692a0c56458512cced4b3414b297e61e7d8f" }
-qorb = { path = "../qorb" }
+qorb = "0.1.0"
 quote = "1.0"
 rand = "0.8.5"
 rand_core = "0.6.4"

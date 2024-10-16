@@ -153,9 +153,7 @@ impl Pool {
     }
 
     /// Stops the qorb background tasks, and causes all future claims to fail
-    pub async fn terminate(
-        &self,
-    ) {
+    pub async fn terminate(&self) {
         let _termination_result = self.inner.terminate().await;
         self.terminated.store(true, std::sync::atomic::Ordering::SeqCst);
     }

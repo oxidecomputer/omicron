@@ -555,6 +555,8 @@ async fn dbinit_version_matches_version_known_to_nexus() {
 #[tokio::test]
 async fn nexus_cannot_apply_update_from_unknown_version() {
     let mut config = load_test_config();
+    config.pkg.tunables.load_timeout = Some(std::time::Duration::from_secs(15));
+
     let mut builder = test_setup(
         &mut config,
         "nexus_cannot_apply_update_from_unknown_version",
@@ -587,9 +589,7 @@ async fn nexus_cannot_apply_update_from_unknown_version() {
         .expect("Failed to update schema");
 
     assert!(
-        timeout(Duration::from_secs(15), builder.start_nexus_internal())
-            .await
-            .is_err(),
+        builder.start_nexus_internal().await.is_err(),
         "Nexus should not have started"
     );
 

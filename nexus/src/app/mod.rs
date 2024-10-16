@@ -240,8 +240,13 @@ impl Nexus {
             .transpose()
             .map_err(|error| format!("{error:#}"))?;
         let db_datastore = Arc::new(
-            db::DataStore::new(&log, Arc::clone(&pool), all_versions.as_ref())
-                .await?,
+            db::DataStore::new_with_timeout(
+                &log,
+                Arc::clone(&pool),
+                all_versions.as_ref(),
+                config.pkg.tunables.load_timeout,
+            )
+            .await?,
         );
         db_datastore.register_producers(producer_registry);
 

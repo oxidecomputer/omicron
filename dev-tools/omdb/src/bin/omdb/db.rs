@@ -254,9 +254,7 @@ impl DbUrlOptions {
         // doesn't match what we expect.  So we use `DataStore::new_unchecked()`
         // here.  We will then check the schema version explicitly and warn the
         // user if it doesn't match.
-        let datastore = Arc::new(
-            DataStore::new_unchecked(log.clone(), pool)
-        );
+        let datastore = Arc::new(DataStore::new_unchecked(log.clone(), pool));
         check_schema_version(&datastore).await;
         Ok(datastore)
     }
