@@ -3121,7 +3121,7 @@ impl DataStore {
                                 )
                             })
                         })?
-                        // XXX be smart enough to .filter the above query
+                        // TODO be smart enough to .filter the above query
                         .into_iter()
                         .filter(|record| record.volume_id == volume_to_delete_id.0)
                         .count();
