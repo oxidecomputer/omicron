@@ -13,8 +13,10 @@
 //!
 //! POST, PUT, and DELETE operations are handled by the Sled Agent API.
 
+use std::collections::BTreeSet;
 use std::io::ErrorKind;
 use std::net::SocketAddrV6;
+use std::str::FromStr;
 use std::time::Duration;
 
 use camino::{Utf8Path, Utf8PathBuf};
@@ -149,6 +151,10 @@ pub enum StartError {
 
 impl<T: DatasetsManager> ArtifactStore<T> {
     /// GET operation (served by Repo Depot API)
+    ///
+    /// We try all datasets, returning early if we find the artifact, logging
+    /// errors as we go. If we don't find it we return the most recent error we
+    /// logged or a NotFound.
     pub(crate) async fn get(
         &self,
         sha256: ArtifactHash,
@@ -183,6 +189,73 @@ impl<T: DatasetsManager> ArtifactStore<T> {
             Err(last_error)
         } else {
             Err(Error::NotFound { sha256 })
+        }
+    }
+
+    /// List operation (served by Sled Agent API)
+    ///
+    /// We try all datasets, logging errors as we go; if we're experiencing I/O
+    /// errors, Nexus should still be aware of the artifacts we think we have.
+    pub(crate) async fn list(&self) -> Result<BTreeSet<ArtifactHash>, Error> {
+        let mut set = BTreeSet::new();
+        let mut any_datasets = false;
+        for mountpoint in self.storage.artifact_storage_paths().await? {
+            any_datasets = true;
+            let mut read_dir = match tokio::fs::read_dir(&mountpoint).await {
+                Ok(read_dir) => read_dir,
+                Err(err) => {
+                    error!(
+                        &self.log,
+                        "Failed to read dir";
+                        "error" => &err,
+                        "path" => mountpoint.as_str(),
+                    );
+                    continue;
+                }
+            };
+            // The semantics of tokio::fs::ReadDir are weird. At least with
+            // `std::fs::ReadDir`, we know when the end of the iterator is,
+            // because `.next()` returns `Option<Result<DirEntry>>`; we could
+            // theoretically log the error and continue trying to retrieve
+            // elements from the iterator (but whether this makes sense to do
+            // is not documented and likely system-dependent).
+            //
+            // The Tokio version returns `Result<Option<DirEntry>>`, which
+            // has no indication of whether there might be more items in
+            // the stream! (The stream adapter in tokio-stream simply calls
+            // `Result::transpose()`, so in theory an error is not the end of
+            // the stream.)
+            //
+            // For lack of any direction we stop reading entries from the stream
+            // on the first error. That way we at least don't get stuck retrying
+            // an operation that will always fail.
+            loop {
+                match read_dir.next_entry().await {
+                    Ok(Some(entry)) => {
+                        if let Ok(file_name) = entry.file_name().into_string() {
+                            if let Ok(hash) = ArtifactHash::from_str(&file_name)
+                            {
+                                set.insert(hash);
+                            }
+                        }
+                    }
+                    Ok(None) => break,
+                    Err(err) => {
+                        error!(
+                            &self.log,
+                            "Failed to read dir";
+                            "error" => &err,
+                            "path" => mountpoint.as_str(),
+                        );
+                        break;
+                    }
+                }
+            }
+        }
+        if any_datasets {
+            Ok(set)
+        } else {
+            Err(Error::NoUpdateDataset)
         }
     }
 
@@ -313,6 +386,9 @@ impl<T: DatasetsManager> ArtifactStore<T> {
     }
 
     /// DELETE operation (served by Sled Agent API)
+    ///
+    /// We attempt to delete the artifact in all datasets, logging errors as we
+    /// go. If any errors occurred we return the most recent error we logged.
     pub(crate) async fn delete(
         &self,
         sha256: ArtifactHash,
@@ -534,11 +610,13 @@ mod test {
     ));
 
     #[tokio::test]
-    async fn get_put_delete() {
+    async fn list_get_put_delete() {
         let log = test_setup_log("get_put_delete");
         let backend = TestBackend::new(1);
         let store = ArtifactStore::new(&log.log, backend);
 
+        // list succeeds with an empty result
+        assert!(store.list().await.unwrap().is_empty());
         // get fails, because it doesn't exist yet
         assert!(matches!(
             store.get(TEST_HASH).await,
@@ -558,6 +636,8 @@ mod test {
                 .put_impl(TEST_HASH, stream::once(async { Ok(TEST_ARTIFACT) }))
                 .await
                 .unwrap();
+            // list lists the file
+            assert!(store.list().await.unwrap().into_iter().eq([TEST_HASH]));
             // get succeeds, file reads back OK
             let mut file = store.get(TEST_HASH).await.unwrap();
             let mut vec = Vec::new();
@@ -568,6 +648,8 @@ mod test {
         // delete succeeds and is idempotent
         for _ in 0..2 {
             store.delete(TEST_HASH).await.unwrap();
+            // list succeeds with an empty result
+            assert!(store.list().await.unwrap().is_empty());
             // get now fails because it no longer exists
             assert!(matches!(
                 store.get(TEST_HASH).await,
@@ -598,6 +680,7 @@ mod test {
             store.get(TEST_HASH).await,
             Err(Error::NotFound { .. })
         ));
+        assert!(matches!(store.list().await, Err(Error::NoUpdateDataset)));
         assert!(matches!(
             store.delete(TEST_HASH).await,
             Err(Error::NoUpdateDataset)

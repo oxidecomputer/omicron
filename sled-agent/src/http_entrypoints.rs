@@ -31,6 +31,7 @@ use omicron_common::disk::{
     DatasetsConfig, DatasetsManagementResult, DiskVariant,
     DisksManagementResult, M2Slot, OmicronPhysicalDisksConfig,
 };
+use omicron_common::update::ArtifactHash;
 use sled_agent_api::*;
 use sled_agent_types::boot_disk::{
     BootDiskOsWriteStatus, BootDiskPathParams, BootDiskUpdatePathParams,
@@ -50,7 +51,7 @@ use sled_agent_types::zone_bundle::{
     BundleUtilization, CleanupContext, CleanupCount, CleanupPeriod,
     StorageLimit, ZoneBundleId, ZoneBundleMetadata,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 type SledApiDescription = ApiDescription<SledAgent>;
 
@@ -399,6 +400,12 @@ impl SledAgentApi for SledAgentImpl {
         let sa = rqctx.context();
         sa.update_artifact(artifact.into_inner()).await.map_err(Error::from)?;
         Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn artifact_list(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<BTreeSet<ArtifactHash>>, HttpError> {
+        Ok(HttpResponseOk(rqctx.context().artifact_store().list().await?))
     }
 
     async fn artifact_copy_from_depot(

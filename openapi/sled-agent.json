@@ -10,6 +10,35 @@
     "version": "0.0.1"
   },
   "paths": {
+    "/artifacts": {
+      "get": {
+        "operationId": "artifact_list",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Set_of_hex_schema",
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "format": "hex string (32 bytes)"
+                  },
+                  "uniqueItems": true
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/artifacts/{sha256}": {
       "put": {
         "operationId": "artifact_put",
