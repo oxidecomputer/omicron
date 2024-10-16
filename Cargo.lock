@@ -7446,6 +7446,7 @@ name = "oximeter-collector"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "camino",
  "chrono",
  "clap",
@@ -7466,6 +7467,7 @@ dependencies = [
  "oximeter-api",
  "oximeter-client",
  "oximeter-db",
+ "qorb",
  "rand",
  "reqwest 0.12.8",
  "schemars",
@@ -7500,6 +7502,7 @@ dependencies = [
  "clickward",
  "criterion",
  "crossterm",
+ "debug-ignore",
  "display-error-chain",
  "dropshot",
  "expectorate",
@@ -7519,6 +7522,7 @@ dependencies = [
  "oximeter-test-utils",
  "oxql-types",
  "peg",
+ "qorb",
  "reedline",
  "regex",
  "reqwest 0.12.8",
