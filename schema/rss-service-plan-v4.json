@@ -467,9 +467,7 @@
       ],
       "properties": {
         "generation": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
+          "$ref": "#/definitions/Generation"
         },
         "time_created": {
           "type": "string",

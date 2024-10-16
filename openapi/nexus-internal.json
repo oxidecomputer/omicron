@@ -3065,9 +3065,7 @@
         "type": "object",
         "properties": {
           "generation": {
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
+            "$ref": "#/components/schemas/Generation"
           },
           "time_created": {
             "type": "string",

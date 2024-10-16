@@ -1392,7 +1392,7 @@ fn cmd_load_example(
     sim.internal_dns.insert(
         blueprint.internal_dns_version,
         DnsConfigParams {
-            generation: blueprint.internal_dns_version.into(),
+            generation: blueprint.internal_dns_version,
             time_created: Utc::now(),
             zones: vec![internal_dns],
         },
@@ -1400,7 +1400,7 @@ fn cmd_load_example(
     sim.external_dns.insert(
         blueprint.external_dns_version,
         DnsConfigParams {
-            generation: blueprint.external_dns_version.into(),
+            generation: blueprint.external_dns_version,
             time_created: Utc::now(),
             zones: vec![external_dns],
         },
