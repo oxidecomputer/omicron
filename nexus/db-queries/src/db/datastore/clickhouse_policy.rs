@@ -206,14 +206,18 @@ mod tests {
         assert!(datastore
             .clickhouse_policy_insert_latest_version(&opctx, &policy)
             .await
-            .is_err());
+            .unwrap_err()
+            .to_string()
+            .contains("policy version must be greater than 0"));
 
         // Inserting version 2 before version 1 should not work
         policy.version = 2;
         assert!(datastore
             .clickhouse_policy_insert_latest_version(&opctx, &policy)
             .await
-            .is_err());
+            .unwrap_err()
+            .to_string()
+            .contains("policy version 2 is not the most recent"));
 
         // Inserting version 1 should work
         policy.version = 1;
@@ -234,7 +238,9 @@ mod tests {
         assert!(datastore
             .clickhouse_policy_insert_latest_version(&opctx, &policy)
             .await
-            .is_err());
+            .unwrap_err()
+            .to_string()
+            .contains("policy version 4 is not the most recent"));
 
         // Inserting version 3 should work
         policy.version = 3;
