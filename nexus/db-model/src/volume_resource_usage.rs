@@ -102,31 +102,40 @@ impl VolumeResourceUsageRecord {
     }
 }
 
-impl From<VolumeResourceUsageRecord> for VolumeResourceUsage {
-    fn from(record: VolumeResourceUsageRecord) -> VolumeResourceUsage {
+impl TryFrom<VolumeResourceUsageRecord> for VolumeResourceUsage {
+    type Error = String;
+
+    fn try_from(
+        record: VolumeResourceUsageRecord,
+    ) -> Result<VolumeResourceUsage, String> {
         match record.usage_type {
             VolumeResourceUsageType::ReadOnlyRegion => {
-                VolumeResourceUsage::ReadOnlyRegion {
-                    region_id: record
-                        .region_id
-                        .expect("valid read-only region usage record"),
-                }
+                let Some(region_id) = record.region_id else {
+                    return Err("valid read-only region usage record".into());
+                };
+
+                Ok(VolumeResourceUsage::ReadOnlyRegion { region_id })
             }
 
             VolumeResourceUsageType::RegionSnapshot => {
-                VolumeResourceUsage::RegionSnapshot {
-                    dataset_id: record
-                        .region_snapshot_dataset_id
-                        .expect("valid region snapshot usage record"),
+                let Some(dataset_id) = record.region_snapshot_dataset_id else {
+                    return Err("valid region snapshot usage record".into());
+                };
 
-                    region_id: record
-                        .region_snapshot_region_id
-                        .expect("valid region snapshot usage record"),
+                let Some(region_id) = record.region_snapshot_region_id else {
+                    return Err("valid region snapshot usage record".into());
+                };
 
-                    snapshot_id: record
-                        .region_snapshot_snapshot_id
-                        .expect("valid region snapshot usage record"),
-                }
+                let Some(snapshot_id) = record.region_snapshot_snapshot_id
+                else {
+                    return Err("valid region snapshot usage record".into());
+                };
+
+                Ok(VolumeResourceUsage::RegionSnapshot {
+                    dataset_id,
+                    region_id,
+                    snapshot_id,
+                })
             }
         }
     }
