@@ -102,11 +102,9 @@ impl DataStore {
                  (version, clickhouse_mode, clickhouse_cluster_target_servers, 
                   clickhouse_cluster_target_keepers, time_created) 
                  SELECT $1, $2, $3, $4, $5 
-                  FROM clickhouse_policy WHERE version IN 
-                    (SELECT version FROM clickhouse_policy WHERE version IN 
-                      (SELECT version FROM clickhouse_policy 
-                        ORDER BY version DESC LIMIT 1) 
-                     AND version = $6)",
+                  FROM clickhouse_policy WHERE version = $6 AND version IN
+                   (SELECT version FROM clickhouse_policy
+                    ORDER BY version DESC LIMIT 1)",
             )
             .bind::<sql_types::BigInt, SqlU32>(policy.version.into())
             .bind::<ClickhouseModeEnum, DbClickhouseMode>((&policy.mode).into())
