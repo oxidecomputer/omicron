@@ -546,6 +546,7 @@ mod test {
             .await
             .expect("Failed to explain query - is it valid SQL?");
 
+        pool.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

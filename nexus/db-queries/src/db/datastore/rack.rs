@@ -1151,7 +1151,7 @@ mod test {
             .dns_config_read(&opctx, DnsGroup::Internal)
             .await
             .unwrap();
-        assert_eq!(dns_internal.generation, 1);
+        assert_eq!(u64::from(dns_internal.generation), 1);
         assert!(dns_internal.time_created >= before);
         assert!(dns_internal.time_created <= after);
         assert_eq!(dns_internal.zones.len(), 0);
@@ -1162,7 +1162,7 @@ mod test {
             .unwrap();
         // The external DNS zone has an extra update due to the initial Silo
         // creation.
-        assert_eq!(dns_internal.generation + 1, dns_external.generation);
+        assert_eq!(dns_internal.generation.next(), dns_external.generation);
         assert_eq!(dns_internal.zones, dns_external.zones);
 
         // Verify the details about the initial Silo.
@@ -1925,7 +1925,7 @@ mod test {
             .dns_config_read(&opctx, DnsGroup::Internal)
             .await
             .unwrap();
-        assert_eq!(dns_config_internal.generation, 1);
+        assert_eq!(u64::from(dns_config_internal.generation), 1);
         assert_eq!(dns_config_internal.zones.len(), 1);
         assert_eq!(dns_config_internal.zones[0].zone_name, DNS_ZONE);
         assert_eq!(
@@ -1937,7 +1937,7 @@ mod test {
             .dns_config_read(&opctx, DnsGroup::External)
             .await
             .unwrap();
-        assert_eq!(dns_config_external.generation, 2);
+        assert_eq!(u64::from(dns_config_external.generation), 2);
         assert_eq!(dns_config_external.zones.len(), 1);
         assert_eq!(
             dns_config_external.zones[0].zone_name,

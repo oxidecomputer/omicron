@@ -282,21 +282,13 @@ impl DataStore {
             }
         }
 
-        let generation =
-            u64::try_from(i64::from(&version.version.0)).map_err(|e| {
-                Error::internal_error(&format!(
-                    "unsupported generation number: {:#}",
-                    e
-                ))
-            })?;
-
         debug!(log, "read DNS config";
             "version" => i64::from(&version.version.0),
             "nzones" => zones.len()
         );
 
         Ok(DnsConfigParams {
-            generation,
+            generation: version.version.0,
             time_created: version.time_created,
             zones,
         })
@@ -816,7 +808,7 @@ mod test {
             .await
             .expect("failed to read DNS config");
         println!("found config: {:?}", dns_config);
-        assert_eq!(dns_config.generation, 1);
+        assert_eq!(u64::from(dns_config.generation), 1);
         // A round-trip through the database reduces the precision of the
         // "time_created" value.
         assert_eq!(
@@ -877,7 +869,7 @@ mod test {
             .await
             .expect("failed to read DNS config");
         println!("found config: {:?}", dns_config);
-        assert_eq!(dns_config.generation, 1);
+        assert_eq!(u64::from(dns_config.generation), 1);
         assert!(dns_config.time_created >= before);
         assert!(dns_config.time_created <= after);
         assert_eq!(dns_config.zones.len(), 0);
@@ -917,7 +909,7 @@ mod test {
             .await
             .expect("failed to read DNS config");
         println!("found config: {:?}", dns_config);
-        assert_eq!(dns_config.generation, 1);
+        assert_eq!(u64::from(dns_config.generation), 1);
         assert!(dns_config.time_created >= before);
         assert!(dns_config.time_created <= after);
         assert_eq!(dns_config.zones.len(), 1);
@@ -1218,7 +1210,7 @@ mod test {
             .await
             .unwrap();
         println!("dns_config_v1: {:?}", dns_config_v1);
-        assert_eq!(dns_config_v1.generation, 1);
+        assert_eq!(u64::from(dns_config_v1.generation), 1);
         assert_eq!(dns_config_v1.zones.len(), 2);
         assert_eq!(dns_config_v1.zones[0].zone_name, "z1.foo");
         assert_eq!(
@@ -1240,7 +1232,7 @@ mod test {
             .await
             .unwrap();
         println!("dns_config_v2: {:?}", dns_config_v2);
-        assert_eq!(dns_config_v2.generation, 2);
+        assert_eq!(u64::from(dns_config_v2.generation), 2);
         assert_eq!(dns_config_v2.zones.len(), 3);
         assert_eq!(dns_config_v2.zones[0].zone_name, "z1.foo");
         assert_eq!(
@@ -1273,7 +1265,7 @@ mod test {
             .await
             .unwrap();
         println!("dns_config_v3: {:?}", dns_config_v3);
-        assert_eq!(dns_config_v3.generation, 3);
+        assert_eq!(u64::from(dns_config_v3.generation), 3);
         assert_eq!(dns_config_v3.zones.len(), 2);
         assert_eq!(dns_config_v3.zones[0].zone_name, "z2.foo");
         assert_eq!(
@@ -1303,7 +1295,7 @@ mod test {
             .await
             .unwrap();
         println!("internal dns_config_v1: {:?}", internal_dns_config_v1);
-        assert_eq!(internal_dns_config_v1.generation, 1);
+        assert_eq!(u64::from(internal_dns_config_v1.generation), 1);
         assert_eq!(internal_dns_config_v1.zones.len(), 0);
 
         // Verify internal version 2.
@@ -1312,7 +1304,7 @@ mod test {
             .await
             .unwrap();
         println!("internal dns_config_v2: {:?}", internal_dns_config_v2);
-        assert_eq!(internal_dns_config_v2.generation, 2);
+        assert_eq!(u64::from(internal_dns_config_v2.generation), 2);
         assert_eq!(internal_dns_config_v2.zones.len(), 1);
         assert_eq!(internal_dns_config_v2.zones[0].zone_name, "z1.foo");
         assert_eq!(
@@ -1578,7 +1570,7 @@ mod test {
             .dns_config_read(&opctx, DnsGroup::External)
             .await
             .unwrap();
-        assert_eq!(dns_config.generation, 1);
+        assert_eq!(u64::from(dns_config.generation), 1);
         assert_eq!(dns_config.zones.len(), 0);
 
         // Add a few DNS names.
@@ -1609,7 +1601,7 @@ mod test {
             .dns_config_read(&opctx, DnsGroup::External)
             .await
             .unwrap();
-        assert_eq!(dns_config.generation, 2);
+        assert_eq!(u64::from(dns_config.generation), 2);
         assert_eq!(dns_config.zones.len(), 2);
         assert_eq!(dns_config.zones[0].zone_name, "oxide1.test");
         assert_eq!(
@@ -1644,7 +1636,7 @@ mod test {
             .dns_config_read(&opctx, DnsGroup::External)
             .await
             .unwrap();
-        assert_eq!(dns_config.generation, 3);
+        assert_eq!(u64::from(dns_config.generation), 3);
         assert_eq!(dns_config.zones.len(), 2);
         assert_eq!(dns_config.zones[0].zone_name, "oxide1.test");
         assert_eq!(
@@ -1677,7 +1669,7 @@ mod test {
             .dns_config_read(&opctx, DnsGroup::External)
             .await
             .unwrap();
-        assert_eq!(dns_config.generation, 4);
+        assert_eq!(u64::from(dns_config.generation), 4);
         assert_eq!(dns_config.zones.len(), 2);
         assert_eq!(dns_config.zones[0].zone_name, "oxide1.test");
         assert_eq!(
@@ -1707,7 +1699,7 @@ mod test {
             .dns_config_read(&opctx, DnsGroup::External)
             .await
             .unwrap();
-        assert_eq!(dns_config.generation, 5);
+        assert_eq!(u64::from(dns_config.generation), 5);
         assert_eq!(dns_config.zones.len(), 2);
         assert_eq!(dns_config.zones[0].zone_name, "oxide1.test");
         assert_eq!(
@@ -1784,7 +1776,7 @@ mod test {
             .dns_config_read(&opctx, DnsGroup::External)
             .await
             .unwrap();
-        assert_eq!(dns_config.generation, 6);
+        assert_eq!(u64::from(dns_config.generation), 6);
         assert_eq!(dns_config.zones.len(), 2);
         assert_eq!(dns_config.zones[0].zone_name, "oxide1.test");
         assert_eq!(
@@ -1797,7 +1789,7 @@ mod test {
             .dns_config_read(&opctx, DnsGroup::Internal)
             .await
             .unwrap();
-        assert_eq!(dns_config.generation, 2);
+        assert_eq!(u64::from(dns_config.generation), 2);
         assert_eq!(dns_config.zones.len(), 1);
         assert_eq!(dns_config.zones[0].zone_name, "oxide3.test");
         assert_eq!(
@@ -1834,7 +1826,7 @@ mod test {
             .dns_config_read(&opctx, DnsGroup::External)
             .await
             .unwrap();
-        assert_eq!(dns_config.generation, 6);
+        assert_eq!(u64::from(dns_config.generation), 6);
 
         // Failure case: cannot add a name that already exists.
         {
@@ -1864,7 +1856,7 @@ mod test {
             .dns_config_read(&opctx, DnsGroup::External)
             .await
             .unwrap();
-        assert_eq!(dns_config.generation, 6);
+        assert_eq!(u64::from(dns_config.generation), 6);
         assert_eq!(dns_config.zones.len(), 2);
         assert_eq!(dns_config.zones[0].zone_name, "oxide1.test");
         assert_eq!(
@@ -1963,7 +1955,7 @@ mod test {
             .await
             .expect("failed to read config");
         let gen2 = nexus_db_model::Generation(gen1.next());
-        assert_eq!(u64::from(*gen2), config.generation);
+        assert_eq!(gen2.0, config.generation);
         assert_eq!(1, config.zones.len());
         let records = &config.zones[0].records;
         assert!(records.contains_key("nelson"));
@@ -1980,7 +1972,7 @@ mod test {
             .dns_config_read(&opctx, DnsGroup::Internal)
             .await
             .expect("failed to read config");
-        assert_eq!(u64::from(gen2.next()), config.generation);
+        assert_eq!(gen2.next(), config.generation);
         assert_eq!(1, config.zones.len());
         let records = &config.zones[0].records;
         assert!(records.contains_key("nelson"));

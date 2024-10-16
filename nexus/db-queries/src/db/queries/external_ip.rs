@@ -915,18 +915,9 @@ mod tests {
             let logctx = dev::test_setup_log(test_name);
             let log = logctx.log.new(o!());
             let db = test_setup_database(&log).await;
-            crate::db::datastore::test_utils::datastore_test(&logctx, &db)
-                .await;
-            let cfg = crate::db::Config { url: db.pg_config().clone() };
-            let pool =
-                Arc::new(crate::db::Pool::new_single_host(&logctx.log, &cfg));
-            let db_datastore = Arc::new(
-                crate::db::DataStore::new(&logctx.log, Arc::clone(&pool), None)
-                    .await
-                    .unwrap(),
-            );
-            let opctx =
-                OpContext::for_tests(log.new(o!()), db_datastore.clone());
+            let (opctx, db_datastore) =
+                crate::db::datastore::test_utils::datastore_test(&logctx, &db)
+                    .await;
             Self { logctx, opctx, db, db_datastore }
         }
 
@@ -1046,6 +1037,7 @@ mod tests {
         }
 
         async fn success(mut self) {
+            self.db_datastore.terminate().await;
             self.db.cleanup().await.unwrap();
             self.logctx.cleanup_successful();
         }

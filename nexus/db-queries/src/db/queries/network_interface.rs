@@ -2021,6 +2021,7 @@ mod tests {
         }
 
         async fn success(mut self) {
+            self.db_datastore.terminate().await;
             self.db.cleanup().await.unwrap();
             self.logctx.cleanup_successful();
         }

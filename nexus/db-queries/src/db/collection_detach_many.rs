@@ -986,6 +986,7 @@ mod test {
             "... and again!"
         );
 
+        pool.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -1037,6 +1038,7 @@ mod test {
             _ => panic!("Unexpected error: {:?}", err),
         };
 
+        pool.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
