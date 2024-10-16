@@ -34,8 +34,9 @@ impl_enum_type!(
 /// this column, and more over a simple integer works for reference counting but
 /// does not tell you _what_ volume that use is from. This can be determined
 /// (see omdb's validate volume references command) but it's information that is
-/// tossed out, as Nexus knows what volumes use what resources! Instead, record
-/// what read-only resources a volume uses here.
+/// tossed out, as Nexus knows what volumes use what resources! Instead of
+/// throwing away that knowledge and only incrementing and decrementing an
+/// integer, record what read-only resources a volume uses in this table.
 ///
 /// Note: users should not use this object directly, and instead use the
 /// [`VolumeResourceUsage`] enum, which is type-safe and will convert to and
