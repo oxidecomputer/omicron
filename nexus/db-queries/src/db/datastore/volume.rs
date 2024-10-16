@@ -1278,9 +1278,9 @@ impl DataStore {
 
             let Some(region) = maybe_region else {
                 return Err(err.bail(
-                    SoftDeleteTransactionError::CouldNotFindResource(
-                        format!("could not find resource for {target}"),
-                    ),
+                    SoftDeleteTransactionError::CouldNotFindResource(format!(
+                        "could not find resource for {target}"
+                    )),
                 ));
             };
 
