@@ -215,11 +215,10 @@ mod tests {
 
         // Inserting version 2 should work
         policy.version = 2;
-        let res = datastore
+        assert!(datastore
             .clickhouse_policy_insert_latest_version(&opctx, &policy)
-            .await;
-        println!("res = {:?}", res);
-        assert!(res.is_ok());
+            .await
+            .is_ok());
 
         // Inserting version 4 should not work, since the prior version is 2
         policy.version = 4;
@@ -249,7 +248,19 @@ mod tests {
             .await
             .unwrap();
 
-        println!("{:#?}", history);
+        for i in 1..=4 {
+            let policy = &history[i - 1];
+            assert_eq!(policy.version, i as u32);
+            if i != 4 {
+                assert!(matches!(policy.mode, ClickhouseMode::SingleNodeOnly));
+                assert_eq!(policy.mode.target_servers(), 0);
+                assert_eq!(policy.mode.target_keepers(), 0);
+            } else {
+                assert!(matches!(policy.mode, ClickhouseMode::Both { .. }));
+                assert_eq!(policy.mode.target_servers(), 3);
+                assert_eq!(policy.mode.target_keepers(), 5);
+            }
+        }
 
         // Clean up.
         db.cleanup().await.unwrap();
