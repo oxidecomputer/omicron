@@ -63,7 +63,8 @@ async fn test_schemas_disjoint() -> anyhow::Result<()> {
     deployment.deploy().context("failed to deploy")?;
 
     let client1 = Client::new_with_request_timeout(
-        deployment.http_addr(1.into())?,
+        deployment.http_addr(1.into()),
+        deployment.native_addr(1.into()),
         log,
         request_timeout,
     );
@@ -158,12 +159,14 @@ async fn test_cluster() -> anyhow::Result<()> {
     deployment.deploy().context("failed to deploy")?;
 
     let client1 = Client::new_with_request_timeout(
-        deployment.http_addr(1.into())?,
+        deployment.http_addr(1.into()),
+        deployment.native_addr(1.into()),
         log,
         request_timeout,
     );
     let client2 = Client::new_with_request_timeout(
-        deployment.http_addr(2.into())?,
+        deployment.http_addr(2.into()),
+        deployment.native_addr(2.into()),
         log,
         request_timeout,
     );
@@ -228,7 +231,8 @@ async fn test_cluster() -> anyhow::Result<()> {
     // Add a 3rd clickhouse server and wait for it to come up
     deployment.add_server().expect("failed to launch a 3rd clickhouse server");
     let client3 = Client::new_with_request_timeout(
-        deployment.http_addr(3.into())?,
+        deployment.http_addr(3.into()),
+        deployment.native_addr(3.into()),
         log,
         request_timeout,
     );
@@ -329,7 +333,8 @@ async fn test_cluster() -> anyhow::Result<()> {
     // few hundred milliseconds. To shorten the length of our test, we create a
     // new client with a shorter timeout.
     let client1_short_timeout = Client::new_with_request_timeout(
-        deployment.http_addr(1.into())?,
+        deployment.http_addr(1.into()),
+        deployment.native_addr(1.into()),
         log,
         Duration::from_secs(2),
     );

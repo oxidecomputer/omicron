@@ -6,13 +6,19 @@
 
 //! Encode / decode a column.
 
-use crate::native::{
-    block::{Column, DataType, ValueArray},
-    io, Error,
-};
-use bytes::{Buf as _, BufMut as _, BytesMut};
-use chrono::{NaiveDate, TimeDelta, TimeZone};
-use std::net::{Ipv4Addr, Ipv6Addr};
+use crate::native::block::Column;
+use crate::native::block::DataType;
+use crate::native::block::ValueArray;
+use crate::native::io;
+use crate::native::Error;
+use bytes::Buf as _;
+use bytes::BufMut as _;
+use bytes::BytesMut;
+use chrono::NaiveDate;
+use chrono::TimeDelta;
+use chrono::TimeZone;
+use std::net::Ipv4Addr;
+use std::net::Ipv6Addr;
 use uuid::Uuid;
 
 // ClickHouse `Date`s are represented as an unsigned 16-bit number of days from

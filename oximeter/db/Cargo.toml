@@ -24,6 +24,7 @@ futures.workspace = true
 gethostname.workspace = true
 highway.workspace = true
 iana-time-zone.workspace = true
+indexmap.workspace = true
 libc.workspace = true
 nom.workspace = true
 num.workspace = true
@@ -53,10 +54,6 @@ workspace = true
 optional = true
 
 [dependencies.display-error-chain]
-workspace = true
-optional = true
-
-[dependencies.indexmap]
 workspace = true
 optional = true
 
@@ -100,7 +97,6 @@ features = [ "rt-multi-thread", "macros" ]
 camino-tempfile.workspace = true
 criterion = { workspace = true, features = [ "async_tokio" ] }
 expectorate.workspace = true
-indexmap.workspace = true
 itertools.workspace = true
 omicron-test-utils.workspace = true
 oximeter-test-utils.workspace = true
@@ -111,9 +107,8 @@ strum.workspace = true
 tempfile.workspace = true
 
 [features]
-default = [ "native-sql", "oxql", "sql" ]
+default = [ "native-sql-shell", "oxql", "sql" ]
 sql = [
-    "dep:indexmap",
     "dep:reedline",
     "dep:rustyline",
     "dep:sqlformat",
@@ -126,10 +121,9 @@ oxql = [
     "dep:reedline",
     "dep:tabled",
 ]
-native-sql = [
+native-sql-shell = [
     "dep:crossterm",
     "dep:display-error-chain",
-    "dep:indexmap",
     "dep:reedline",
     "dep:rustyline",
     "dep:sqlformat",

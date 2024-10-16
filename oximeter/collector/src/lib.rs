@@ -13,16 +13,16 @@ use dropshot::HttpServer;
 use dropshot::HttpServerStarter;
 use internal_dns_types::names::ServiceName;
 use omicron_common::address::get_internal_dns_server_addresses;
+use omicron_common::address::CLICKHOUSE_TCP_PORT;
 use omicron_common::address::DNS_PORT;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::backoff;
 use omicron_common::FileKv;
 use qorb::backend;
-use qorb::resolver::AllBackends;
 use qorb::resolver::BoxedResolver;
-use qorb::resolver::Resolver;
 use qorb::resolvers::dns::DnsResolver;
 use qorb::resolvers::dns::DnsResolverConfig;
+use qorb::resolvers::single_host::SingleHostResolver;
 use qorb::service;
 use serde::Deserialize;
 use serde::Serialize;
@@ -33,14 +33,12 @@ use slog::o;
 use slog::warn;
 use slog::Drain;
 use slog::Logger;
-use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
-use tokio::sync::watch;
 use uuid::Uuid;
 
 mod agent;
@@ -78,11 +76,17 @@ impl From<Error> for HttpError {
 /// Configuration for interacting with the metric database.
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 pub struct DbConfig {
-    /// Optional address of the ClickHouse server.
+    /// Optional address of the ClickHouse server's HTTP interface.
     ///
     /// If "None", will be inferred from DNS.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub address: Option<SocketAddr>,
+
+    /// Optional address of the ClickHouse server's native TCP interface.
+    ///
+    /// If None, will be inferred from DNS.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_address: Option<SocketAddr>,
 
     /// Batch size of samples at which to insert.
     pub batch_size: usize,
@@ -114,6 +118,7 @@ impl DbConfig {
     fn with_address(address: SocketAddr) -> Self {
         Self {
             address: Some(address),
+            native_address: None,
             batch_size: Self::DEFAULT_BATCH_SIZE,
             batch_interval: Self::DEFAULT_BATCH_INTERVAL,
             replicated: Self::DEFAULT_REPLICATED,
@@ -161,29 +166,6 @@ impl Config {
 pub struct OximeterArguments {
     pub id: Uuid,
     pub address: SocketAddrV6,
-}
-
-// Provides an alternative to the DNS resolver for cases where we want to
-// contact a backend without performing resolution.
-struct SingleHostResolver {
-    tx: watch::Sender<AllBackends>,
-}
-
-impl SingleHostResolver {
-    fn new(address: SocketAddr) -> Self {
-        let backends = Arc::new(BTreeMap::from([(
-            backend::Name::new("singleton"),
-            backend::Backend { address },
-        )]));
-        let (tx, _rx) = watch::channel(backends.clone());
-        Self { tx }
-    }
-}
-
-impl Resolver for SingleHostResolver {
-    fn monitor(&mut self) -> watch::Receiver<AllBackends> {
-        self.tx.subscribe()
-    }
 }
 
 // A "qorb connector" which converts a SocketAddr into a nexus_client::Client.
@@ -258,35 +240,55 @@ impl Oximeter {
                 .map(|ip| SocketAddr::new(ip, DNS_PORT))
                 .collect();
 
-        let make_clickhouse_resolver = || -> BoxedResolver {
+        // Closure to create _two_ resolvers, one to resolve the ClickHouse HTTP
+        // SRV record, and one for the native TCP record.
+        //
+        // TODO(cleanup): This should be removed if / when we entirely switch to
+        // the native protocol.
+        let make_clickhouse_resolvers = || -> (BoxedResolver, BoxedResolver) {
             if let Some(address) = config.db.address {
-                Box::new(SingleHostResolver::new(address))
+                let http = Box::new(SingleHostResolver::new(address));
+                let native_addr =
+                    SocketAddr::new(address.ip(), CLICKHOUSE_TCP_PORT);
+                let native = Box::new(SingleHostResolver::new(native_addr));
+                (http, native)
             } else {
-                let service = if config.db.replicated {
+                let http_service = if config.db.replicated {
                     ServiceName::ClickhouseServer
                 } else {
                     ServiceName::Clickhouse
                 };
-                Box::new(DnsResolver::new(
-                    service::Name(service.srv_name()),
+                let http = Box::new(DnsResolver::new(
+                    service::Name(http_service.srv_name()),
                     bootstrap_dns.clone(),
                     DnsResolverConfig {
                         hardcoded_ttl: Some(tokio::time::Duration::MAX),
                         ..Default::default()
                     },
-                ))
+                ));
+                let native = Box::new(DnsResolver::new(
+                    service::Name(ServiceName::ClickhouseNative.srv_name()),
+                    bootstrap_dns.clone(),
+                    DnsResolverConfig {
+                        hardcoded_ttl: Some(tokio::time::Duration::MAX),
+                        ..Default::default()
+                    },
+                ));
+                (http, native)
             }
         };
 
         let make_agent = || async {
             debug!(log, "creating ClickHouse client");
+            let (http_resolver, native_resolver) = make_clickhouse_resolvers();
             Ok(Arc::new(
                 OximeterAgent::with_id(
                     args.id,
                     args.address,
                     config.refresh_interval,
                     config.db,
-                    make_clickhouse_resolver(),
+                    http_resolver,
+                    native_resolver,
                     &log,
                     config.db.replicated,
                 )

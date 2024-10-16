@@ -120,6 +120,7 @@
 //! actually sent if we believe we have an outstanding query.
 
 pub use connection::Connection;
+pub use connection::Pool;
 pub use packets::client::QueryResult;
 pub use packets::server::Exception;
 
