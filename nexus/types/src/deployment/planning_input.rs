@@ -161,7 +161,18 @@ impl PlanningInput {
     }
 
     pub fn clickhouse_cluster_enabled(&self) -> bool {
-        self.policy.clickhouse_policy.is_some()
+        let Some(clickhouse_policy) = &self.policy.clickhouse_policy else {
+            return false;
+        };
+        clickhouse_policy.mode.cluster_enabled()
+    }
+
+    pub fn clickhouse_single_node_enabled(&self) -> bool {
+        let Some(clickhouse_policy) = &self.policy.clickhouse_policy else {
+            // If there is no policy we assume single-node is enabled.
+            return true;
+        };
+        clickhouse_policy.mode.single_node_enabled()
     }
 
     pub fn all_sleds(
@@ -898,6 +909,20 @@ pub enum ClickhouseMode {
 }
 
 impl ClickhouseMode {
+    pub fn cluster_enabled(&self) -> bool {
+        match self {
+            ClickhouseMode::SingleNodeOnly => false,
+            _ => true,
+        }
+    }
+
+    pub fn single_node_enabled(&self) -> bool {
+        match self {
+            ClickhouseMode::ClusterOnly { .. } => false,
+            _ => true,
+        }
+    }
+
     pub fn target_servers(&self) -> u8 {
         match self {
             ClickhouseMode::SingleNodeOnly => 0,
