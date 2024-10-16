@@ -10,11 +10,20 @@
     "version": "0.0.1"
   },
   "paths": {
-    "/ereports": {
+    "/ereports/{reporter_id}": {
       "get": {
-        "summary": "Get a list of ereports, paginated by sequence number.",
+        "summary": "Get a list of ereports from `reporter_id`, paginated by sequence number.",
         "operationId": "ereports_list",
         "parameters": [
+          {
+            "in": "path",
+            "name": "reporter_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
           {
             "in": "query",
             "name": "limit",
@@ -59,12 +68,21 @@
         }
       }
     },
-    "/ereports/{seq}": {
+    "/ereports/{reporter_id}/{seq}": {
       "delete": {
-        "summary": "Informs the reporter that it may freely discard ereports with sequence",
-        "description": "numbers less than or equal to `seq`.",
-        "operationId": "ereports_truncate",
+        "summary": "Informs the reporter with the given `reporter_id` that its ereports up",
+        "description": "to the sequence number `seq` have been successfully ingested into persistant storage.\n\nThe reporter may now freely discard ereports with sequence numbers less than or equal to `seq`.",
+        "operationId": "ereports_acknowledge",
         "parameters": [
+          {
+            "in": "path",
+            "name": "reporter_id",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
           {
             "in": "path",
             "name": "seq",

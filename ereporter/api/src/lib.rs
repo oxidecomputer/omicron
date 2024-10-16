@@ -17,7 +17,7 @@ use uuid::Uuid;
 pub trait EreporterApi {
     type Context;
 
-    /// Get a list of ereports, paginated by sequence number.
+    /// Get a list of ereports from `reporter_id`, paginated by sequence number.
     #[endpoint {
         method = GET,
         path = "/ereports/{reporter_id}"
@@ -28,15 +28,19 @@ pub trait EreporterApi {
         query: Query<PaginationParams<EmptyScanParams, Generation>>,
     ) -> Result<HttpResponseOk<ResultsPage<Entry>>, HttpError>;
 
-    /// Informs the reporter with the given UUID that it may freely discard
-    /// ereports with sequence numbers less than or equal to `seq`.
+    /// Informs the reporter with the given `reporter_id` that its ereports up
+    /// to the sequence number `seq` have been successfully ingested into
+    /// persistant storage.
+    ///
+    /// The reporter may now freely discard ereports with sequence numbers less
+    /// than or equal to `seq`.
     #[endpoint {
         method = DELETE,
         path = "/ereports/{reporter_id}/{seq}"
     }]
-    async fn ereports_truncate(
+    async fn ereports_acknowledge(
         request_context: RequestContext<Self::Context>,
-        path: dropshot::Path<TruncatePathParams>,
+        path: dropshot::Path<AcknowledgePathParams>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 }
 
@@ -46,9 +50,9 @@ pub struct ListPathParams {
     pub reporter_id: Uuid,
 }
 
-/// Path parameters to  the [`EreporterApi::ereports_truncate`] endpoint.
+/// Path parameters to  the [`EreporterApi::ereports_acknowledge`] endpoint.
 #[derive(Clone, Copy, Debug, Deserialize, JsonSchema, Serialize)]
-pub struct TruncatePathParams {
+pub struct AcknowledgePathParams {
     pub reporter_id: Uuid,
     pub seq: Generation,
 }
