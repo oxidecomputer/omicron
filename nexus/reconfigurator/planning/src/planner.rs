@@ -3151,8 +3151,9 @@ mod test {
     }
 
     #[test]
-    fn test_expunge_all_clickhouse_cluster_zones_after_policy_is_disabled() {
-        static TEST_NAME: &str = "planner_expunge_all_clickhouse_cluster_zones_after_policy_is_disabled";
+    fn test_expunge_clickhouse_zones_after_policy_is_changed() {
+        static TEST_NAME: &str =
+            "planner_expunge_clickhouse__zones_after_policy_is_changed";
         let logctx = test_setup_log(TEST_NAME);
         let log = logctx.log.clone();
 
@@ -3204,13 +3205,21 @@ mod test {
         assert_eq!(keeper_zone_ids.len(), target_keepers as usize);
         assert_eq!(server_zone_ids.len(), target_servers as usize);
 
-        // Disable clickhouse clusters via policy
+        // Disable clickhouse single node via policy, and ensure the zone goes
+        // away. First ensure we have one.
+        assert_eq!(
+            1,
+            active_zones.iter().filter(|z| z.zone_type.is_clickhouse()).count()
+        );
         let mut input_builder = input.into_builder();
         input_builder.policy_mut().clickhouse_policy =
-            Some(clickhouse_policy(ClickhouseMode::SingleNodeOnly));
+            Some(clickhouse_policy(ClickhouseMode::ClusterOnly {
+                target_servers,
+                target_keepers,
+            }));
         let input = input_builder.build();
 
-        // Create a new blueprint with the disabled policy
+        // Create a new blueprint with `ClickhouseMode::ClusterOnly`
         let blueprint3 = Planner::new_based_on(
             log.clone(),
             &blueprint2,
@@ -3223,9 +3232,37 @@ mod test {
         .plan()
         .expect("plan");
 
+        // We should have expunged our single-node clickhouse zone
+        let expunged_zones: Vec<_> = blueprint3
+            .all_omicron_zones(BlueprintZoneFilter::Expunged)
+            .map(|(_, z)| z.clone())
+            .collect();
+
+        assert_eq!(1, expunged_zones.len());
+        assert!(expunged_zones.first().unwrap().zone_type.is_clickhouse());
+
+        // Disable clickhouse clusters via policy and restart single node
+        let mut input_builder = input.into_builder();
+        input_builder.policy_mut().clickhouse_policy =
+            Some(clickhouse_policy(ClickhouseMode::SingleNodeOnly));
+        let input = input_builder.build();
+
+        // Create a new blueprint for `ClickhouseMode::SingleNodeOnly`
+        let blueprint4 = Planner::new_based_on(
+            log.clone(),
+            &blueprint3,
+            &input,
+            "test_blueprint4",
+            &collection,
+        )
+        .expect("created planner")
+        .with_rng_seed((TEST_NAME, "bp4"))
+        .plan()
+        .expect("plan");
+
         // All our clickhouse keeper and server zones that we created when we
         // enabled our clickhouse policy should be expunged when we disable it.
-        let expunged_zones: Vec<_> = blueprint3
+        let expunged_zones: Vec<_> = blueprint4
             .all_omicron_zones(BlueprintZoneFilter::Expunged)
             .map(|(_, z)| z.clone())
             .collect();
@@ -3243,6 +3280,15 @@ mod test {
 
         assert_eq!(keeper_zone_ids, expunged_keeper_zone_ids);
         assert_eq!(server_zone_ids, expunged_server_zone_ids);
+
+        // We should have a new single-node clickhouze zone
+        assert_eq!(
+            1,
+            blueprint4
+                .all_omicron_zones(BlueprintZoneFilter::ShouldBeRunning)
+                .filter(|(_, z)| z.zone_type.is_clickhouse())
+                .count()
+        );
 
         logctx.cleanup_successful();
     }
