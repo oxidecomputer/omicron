@@ -653,6 +653,16 @@ impl Nexus {
         self.producer_server.lock().unwrap().replace(producer_server);
     }
 
+    /// Fully terminates Nexus.
+    ///
+    /// Closes all running servers and the connection to the datastore.
+    pub(crate) async fn terminate(&self) -> Result<(), String> {
+        let mut res = Ok(());
+        res = res.and(self.close_servers().await);
+        self.datastore().terminate().await;
+        res
+    }
+
     /// Terminates all servers.
     ///
     /// This function also waits for the servers to shut down.
@@ -682,6 +692,10 @@ impl Nexus {
         res
     }
 
+    /// Awaits termination without triggering it.
+    ///
+    /// To trigger termination, see:
+    /// - [Self::close_servers] or [Self::terminate]
     pub(crate) async fn wait_for_shutdown(&self) -> Result<(), String> {
         // The internal server is the last server to be closed.
         //

@@ -52,6 +52,14 @@ pub trait NexusServer: Send + Sync + 'static {
         log: &Logger,
     ) -> Result<(Self::InternalServer, SocketAddr), String>;
 
+    /// Stops the execution of a `Self::InternalServer`.
+    ///
+    /// This is used to terminate a server which has been
+    /// partially created with `Self::start_internal`, but which
+    /// has not yet been passed to `Self::start`.
+    ///
+    /// Once `Self::start` has been called, the internal server
+    /// may be closed by invoking `Self::close`.
     async fn stop_internal(internal_server: Self::InternalServer);
 
     #[allow(clippy::too_many_arguments)]
