@@ -4489,6 +4489,11 @@ CREATE TYPE IF NOT EXISTS omicron.public.volume_resource_usage_type AS ENUM (
   'region_snapshot'
 );
 
+/*
+ * This table records when a Volume makes use of a read-only resource. When
+ * there are no more entries for a particular read-only resource, then that
+ * resource can be garbage collected.
+ */
 CREATE TABLE IF NOT EXISTS omicron.public.volume_resource_usage (
     usage_id UUID NOT NULL,
 
@@ -4496,13 +4501,43 @@ CREATE TABLE IF NOT EXISTS omicron.public.volume_resource_usage (
 
     usage_type omicron.public.volume_resource_usage_type NOT NULL,
 
+    /*
+     * This column contains a non-NULL value when the usage type is read_only
+     * region
+     */
     region_id UUID,
 
+    /*
+     * These columns contain non-NULL values when the usage type is region
+     * snapshot
+     */
     region_snapshot_dataset_id UUID,
     region_snapshot_region_id UUID,
     region_snapshot_snapshot_id UUID,
 
-    PRIMARY KEY (usage_id)
+    PRIMARY KEY (usage_id),
+
+    CONSTRAINT exactly_one_usage_source CHECK (
+     (
+      (usage_type = 'read_only_region') AND
+      (region_id IS NOT NULL) AND
+      (
+       region_snapshot_dataset_id IS NULL AND
+       region_snapshot_region_id IS NULL AND
+       region_snapshot_snapshot_id IS NULL
+      )
+     )
+    OR
+     (
+      (usage_type = 'region_snapshot') AND
+      (region_id IS NOT NULL) AND
+      (
+       region_snapshot_dataset_id IS NOT NULL AND
+       region_snapshot_region_id IS NOT NULL AND
+       region_snapshot_snapshot_id IS NOT NULL
+      )
+     )
+    )
 );
 
 CREATE INDEX IF NOT EXISTS lookup_volume_resource_usage_by_region on omicron.public.volume_resource_usage (
