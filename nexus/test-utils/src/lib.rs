@@ -1181,6 +1181,9 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         if let Some(server) = self.server {
             server.close().await;
         }
+        if let Some(nexus_internal) = self.nexus_internal {
+            N::stop_internal(nexus_internal).await;
+        }
         if let Some(mut database) = self.database {
             database.cleanup().await.unwrap();
         }

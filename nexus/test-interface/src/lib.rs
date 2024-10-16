@@ -52,6 +52,8 @@ pub trait NexusServer: Send + Sync + 'static {
         log: &Logger,
     ) -> Result<(Self::InternalServer, SocketAddr), String>;
 
+    async fn stop_internal(internal_server: Self::InternalServer);
+
     #[allow(clippy::too_many_arguments)]
     async fn start(
         internal_server: Self::InternalServer,

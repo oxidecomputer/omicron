@@ -235,6 +235,18 @@ impl nexus_test_interface::NexusServer for Server {
         Ok((internal_server, addr))
     }
 
+    // TODO: De-dup with the "fn close" below?
+    async fn stop_internal(internal_server: InternalServer) {
+        internal_server
+            .apictx
+            .context
+            .nexus
+            .close_servers()
+            .await
+            .expect("failed to close servers during test cleanup");
+        internal_server.apictx.context.nexus.datastore().terminate().await;
+    }
+
     async fn start(
         internal_server: InternalServer,
         config: &NexusConfig,
