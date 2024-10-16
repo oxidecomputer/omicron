@@ -15,7 +15,9 @@ omicron-workspace-hack.workspace = true
 uuid.workspace = true
 serde.workspace = true
 slog.workspace = true
+slog-error-chain.workspace = true
 slog-dtrace.workspace = true
+thiserror.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 
 [lints]

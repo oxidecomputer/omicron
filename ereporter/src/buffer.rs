@@ -2,11 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use crate::server;
 use crate::EreportData;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
 use std::collections::VecDeque;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, watch};
 use uuid::Uuid;
 
 pub(crate) enum ServerReq {
@@ -21,16 +22,58 @@ pub(crate) enum ServerReq {
     },
 }
 
-pub(crate) struct Buffer {
-    pub(crate) seq: Generation,
-    pub(crate) buf: VecDeque<ereporter_api::Entry>,
-    pub(crate) log: slog::Logger,
-    pub(crate) id: Uuid,
-    pub(crate) ereports: mpsc::Receiver<EreportData>,
-    pub(crate) requests: mpsc::Receiver<ServerReq>,
+pub(crate) struct BufferWorker {
+    seq: Generation,
+    buf: VecDeque<ereporter_api::Entry>,
+    log: slog::Logger,
+    id: Uuid,
+    ereports: mpsc::Receiver<EreportData>,
+    requests: mpsc::Receiver<ServerReq>,
 }
 
-impl Buffer {
+#[derive(Debug)]
+pub(crate) struct Handle {
+    pub(crate) requests: mpsc::Sender<ServerReq>,
+    pub(crate) ereports: mpsc::Sender<EreportData>,
+    pub(crate) task: tokio::task::JoinHandle<()>,
+}
+
+impl BufferWorker {
+    pub(crate) fn spawn(
+        id: Uuid,
+        log: &slog::Logger,
+        buffer_capacity: usize,
+        mut server: watch::Receiver<Option<server::State>>,
+    ) -> Handle {
+        let (requests_tx, requests) = mpsc::channel(128);
+        let (ereports_tx, ereports) = mpsc::channel(buffer_capacity);
+        let log = log.new(slog::o!("reporter_id" => id.to_string()));
+        let task = tokio::task::spawn(async move {
+            // Wait for the server to come up, and then register the reporter.
+            let seq = loop {
+                let state = server.borrow_and_update().as_ref().cloned();
+                if let Some(server) = state {
+                    break server.register_reporter(&log, id).await;
+                }
+                if server.changed().await.is_err() {
+                    slog::warn!(log, "server disappeared surprisingly before we could register the reporter!");
+                    return;
+                }
+            };
+            // Start running the buffer worker.
+            let worker = Self {
+                seq,
+                buf: VecDeque::with_capacity(buffer_capacity),
+                log,
+                id,
+                ereports,
+                requests,
+            };
+            worker.run().await
+        });
+        Handle { ereports: ereports_tx, requests: requests_tx, task }
+    }
+
     pub(crate) async fn run(mut self) {
         while let Some(req) = self.requests.recv().await {
             match req {
@@ -120,7 +163,7 @@ impl Buffer {
                 time_created,
             }),
         });
-        self.seq = self.seq.next();
+        self.seq = seq.next();
         slog::trace!(
             self.log,
             "recorded ereport";

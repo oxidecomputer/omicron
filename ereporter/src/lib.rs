@@ -8,6 +8,8 @@ use std::collections::HashMap;
 use tokio::sync::mpsc;
 
 mod buffer;
+pub mod proxy;
+pub mod registry;
 pub mod server;
 
 #[must_use = "an `EreportBuilder` does nothing unless `submit()` is called"]
@@ -54,7 +56,7 @@ impl EreportBuilder {
 
 /// A reporter handle used to generate ereports.
 #[derive(Clone, Debug)]
-pub struct Reporter(pub(crate) tokio::sync::mpsc::Sender<EreportData>);
+pub struct Reporter(pub(crate) mpsc::Sender<EreportData>);
 
 impl Reporter {
     /// Begin constructing a new ereport, returning an [`EreportBuilder`].
