@@ -13,6 +13,7 @@ use http::method::Method;
 use http::StatusCode;
 use nexus_config::RegionAllocationStrategy;
 use nexus_db_model::RegionSnapshotReplacement;
+use nexus_db_model::RegionSnapshotReplacementState;
 use nexus_db_model::VolumeResourceUsage;
 use nexus_db_model::VolumeResourceUsageRecord;
 use nexus_db_queries::context::OpContext;
@@ -50,6 +51,8 @@ use omicron_common::api::external::Disk;
 use omicron_common::api::external::IdentityMetadataCreateParams;
 use omicron_common::api::external::Name;
 use omicron_common::api::internal;
+use omicron_test_utils::dev::poll::wait_for_condition;
+use omicron_test_utils::dev::poll::CondCheckError;
 use omicron_uuid_kinds::DownstairsKind;
 use omicron_uuid_kinds::DownstairsRegionKind;
 use omicron_uuid_kinds::GenericUuid;
@@ -3757,22 +3760,14 @@ impl TestReadOnlyRegionReferenceUsage {
             .any(|(_, r)| r.id() == self.region.id()));
     }
 
-    pub async fn region_returned_by_find_deleted_volume_regions(&self) {
-        let deleted_volume_regions =
-            self.datastore.find_deleted_volume_regions().await.unwrap();
-
-        assert!(deleted_volume_regions
-            .into_iter()
-            .any(|(_, r, _, _)| r.id() == self.region.id()));
-    }
-
+    // read-only regions should never be returned by find_deleted_volume_regions
     pub async fn region_not_returned_by_find_deleted_volume_regions(&self) {
         let deleted_volume_regions =
             self.datastore.find_deleted_volume_regions().await.unwrap();
 
         assert!(!deleted_volume_regions
             .into_iter()
-            .any(|(_, r, _, _)| r.id() == self.region.id()));
+            .any(|(_, r, _)| r.id() == self.region.id()));
     }
 
     pub async fn create_first_volume_region_in_rop(&self) {
@@ -3923,9 +3918,9 @@ async fn test_read_only_region_reference_usage_sanity(
 
     harness.validate_region_returned_for_cleanup().await;
 
-    // It should be returned by find_deleted_volume_regions.
+    // It should not be returned by find_deleted_volume_regions.
 
-    harness.region_returned_by_find_deleted_volume_regions().await;
+    harness.region_not_returned_by_find_deleted_volume_regions().await;
 }
 
 /// Assert that creating a volume with a read-only region in the ROP creates an
@@ -3960,9 +3955,9 @@ async fn test_read_only_region_reference_sanity_rop(
 
     harness.validate_region_returned_for_cleanup().await;
 
-    // It should be returned by find_deleted_volume_regions.
+    // It should not be returned by find_deleted_volume_regions.
 
-    harness.region_returned_by_find_deleted_volume_regions().await;
+    harness.region_not_returned_by_find_deleted_volume_regions().await;
 }
 
 /// Assert that creating multiple volumes with a read-only region creates the
@@ -4007,7 +4002,9 @@ async fn test_read_only_region_reference_sanity_multi(
 
     harness.validate_region_returned_for_cleanup().await;
 
-    harness.region_returned_by_find_deleted_volume_regions().await;
+    // It should not be returned by find_deleted_volume_regions.
+
+    harness.region_not_returned_by_find_deleted_volume_regions().await;
 }
 
 /// Assert that creating multiple volumes with a read-only region in the ROP
@@ -4052,7 +4049,9 @@ async fn test_read_only_region_reference_sanity_rop_multi(
 
     harness.validate_region_returned_for_cleanup().await;
 
-    harness.region_returned_by_find_deleted_volume_regions().await;
+    // It should not be returned by find_deleted_volume_regions.
+
+    harness.region_not_returned_by_find_deleted_volume_regions().await;
 }
 
 /// Assert that a read-only region is properly reference counted and not
@@ -5529,4 +5528,303 @@ async fn test_migrate_to_ref_count_with_records_region_snapshot_deleting(
     let records_after = get_volume_resource_usage_records(&datastore).await;
 
     assert_eq!(records_before, records_after);
+}
+
+#[nexus_test]
+async fn test_double_layer_with_read_only_region_delete(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    // 1) Create disk, snapshot, then two disks from those snapshots
+    // 2) Replace one of the region snapshots in that snapshot volume with a
+    //    read-only region
+    // 3) Delete in the following order: disk, snapshot, then two disks from the
+    //    snapshot - after each delete, verify that crucible resources were not
+    //    prematurely deleted
+    // 6) At the end, assert that all Crucible resources were cleaned up
+
+    let client = &cptestctx.external_client;
+    let internal_client = &cptestctx.internal_client;
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    // Four zpools are required for region replacement or region snapshot
+    // replacement
+    let disk_test = DiskTestBuilder::new(&cptestctx)
+        .on_specific_sled(cptestctx.first_sled())
+        .with_zpool_count(4)
+        .build()
+        .await;
+
+    create_project_and_pool(client).await;
+
+    let disk = create_disk(&client, PROJECT_NAME, "disk").await;
+
+    let snapshot =
+        create_snapshot(&client, PROJECT_NAME, "disk", "snapshot").await;
+
+    let _disk_from_snapshot = create_disk_from_snapshot(
+        &client,
+        PROJECT_NAME,
+        "disk-from-snapshot",
+        snapshot.identity.id,
+    )
+    .await;
+
+    let _another_disk_from_snapshot = create_disk_from_snapshot(
+        &client,
+        PROJECT_NAME,
+        "another-disk-from-snapshot",
+        snapshot.identity.id,
+    )
+    .await;
+
+    // Perform region snapshot replacement for one of the snapshot's targets,
+    // causing a read-only region to be created.
+
+    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+        .disk_id(disk.identity.id)
+        .fetch()
+        .await
+        .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id));
+
+    let allocated_regions =
+        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+
+    assert_eq!(allocated_regions.len(), 3);
+
+    let (dataset, region) = &allocated_regions[0];
+
+    let request = RegionSnapshotReplacement::new(
+        dataset.id(),
+        region.id(),
+        snapshot.identity.id,
+    );
+
+    datastore
+        .insert_region_snapshot_replacement_request(&opctx, request)
+        .await
+        .unwrap();
+
+    run_replacement_tasks_to_completion(&internal_client).await;
+
+    assert!(!disk_test.crucible_resources_deleted().await);
+
+    // Delete the disk and snapshot
+
+    NexusRequest::object_delete(client, &get_disk_url("disk"))
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to delete disk");
+
+    NexusRequest::object_delete(client, &get_snapshot_url("snapshot"))
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to delete snapshot");
+
+    assert!(!disk_test.crucible_resources_deleted().await);
+
+    // Delete disk-from-snapshot
+
+    NexusRequest::object_delete(client, &get_disk_url("disk-from-snapshot"))
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to delete disk-from-snapshot");
+
+    assert!(!disk_test.crucible_resources_deleted().await);
+
+    // Finally, delete another-disk-from-snapshot
+
+    NexusRequest::object_delete(
+        client,
+        &get_disk_url("another-disk-from-snapshot"),
+    )
+    .authn_as(AuthnMode::PrivilegedUser)
+    .execute()
+    .await
+    .expect("failed to delete another-disk-from-snapshot");
+
+    assert!(disk_test.crucible_resources_deleted().await);
+}
+
+#[nexus_test]
+async fn test_double_layer_snapshot_with_read_only_region_delete_2(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    // 1) Create disk, then a snapshot
+    // 2) Replace two of the region snapshots in that snapshot volume with
+    //    read-only regions
+    // 3) Create a disk from the snapshot
+    // 4) Replace the last of the region snapshots in that snapshot volume with
+    //    a read-only region
+    // 5) Delete in the following order: disk, snapshot, then the disk from the
+    //    snapshot - after each delete, verify that crucible resources were not
+    //    prematurely deleted
+    // 6) At the end, assert that all Crucible resources were cleaned up
+
+    let client = &cptestctx.external_client;
+    let internal_client = &cptestctx.internal_client;
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    // Four zpools are required for region replacement or region snapshot
+    // replacement
+    let disk_test = DiskTestBuilder::new(&cptestctx)
+        .on_specific_sled(cptestctx.first_sled())
+        .with_zpool_count(4)
+        .build()
+        .await;
+
+    create_project_and_pool(client).await;
+
+    let disk = create_disk(&client, PROJECT_NAME, "disk").await;
+
+    let snapshot =
+        create_snapshot(&client, PROJECT_NAME, "disk", "snapshot").await;
+
+    // Perform region snapshot replacement for two of the snapshot's targets,
+    // causing two read-only regions to be created.
+
+    let (.., db_disk) = LookupPath::new(&opctx, &datastore)
+        .disk_id(disk.identity.id)
+        .fetch()
+        .await
+        .unwrap_or_else(|_| panic!("disk {:?} should exist", disk.identity.id));
+
+    let allocated_regions =
+        datastore.get_allocated_regions(db_disk.volume_id).await.unwrap();
+
+    assert_eq!(allocated_regions.len(), 3);
+
+    let (dataset, region) = &allocated_regions[0];
+
+    let request = RegionSnapshotReplacement::new(
+        dataset.id(),
+        region.id(),
+        snapshot.identity.id,
+    );
+
+    let request_id = request.id;
+
+    datastore
+        .insert_region_snapshot_replacement_request(&opctx, request)
+        .await
+        .unwrap();
+
+    run_replacement_tasks_to_completion(&internal_client).await;
+
+    wait_for_condition(
+        || {
+            let datastore = datastore.clone();
+            let opctx = OpContext::for_tests(
+                cptestctx.logctx.log.new(o!()),
+                datastore.clone(),
+            );
+
+            async move {
+                let request = datastore
+                    .get_region_snapshot_replacement_request_by_id(
+                        &opctx, request_id,
+                    )
+                    .await
+                    .unwrap();
+
+                let state = request.replacement_state;
+
+                if state == RegionSnapshotReplacementState::Complete {
+                    Ok(())
+                } else {
+                    Err(CondCheckError::<()>::NotYet)
+                }
+            }
+        },
+        &std::time::Duration::from_millis(500),
+        &std::time::Duration::from_secs(60),
+    )
+    .await
+    .expect("request transitioned to expected state");
+
+    let (dataset, region) = &allocated_regions[1];
+
+    let request = RegionSnapshotReplacement::new(
+        dataset.id(),
+        region.id(),
+        snapshot.identity.id,
+    );
+
+    datastore
+        .insert_region_snapshot_replacement_request(&opctx, request)
+        .await
+        .unwrap();
+
+    run_replacement_tasks_to_completion(&internal_client).await;
+
+    assert!(!disk_test.crucible_resources_deleted().await);
+
+    // Create a disk from the snapshot
+
+    let _disk_from_snapshot = create_disk_from_snapshot(
+        &client,
+        PROJECT_NAME,
+        "disk-from-snapshot",
+        snapshot.identity.id,
+    )
+    .await;
+
+    // Replace the last of the region snapshot targets
+
+    let (dataset, region) = &allocated_regions[2];
+
+    let request = RegionSnapshotReplacement::new(
+        dataset.id(),
+        region.id(),
+        snapshot.identity.id,
+    );
+
+    datastore
+        .insert_region_snapshot_replacement_request(&opctx, request)
+        .await
+        .unwrap();
+
+    run_replacement_tasks_to_completion(&internal_client).await;
+
+    assert!(!disk_test.crucible_resources_deleted().await);
+
+    // Delete the disk and snapshot
+
+    NexusRequest::object_delete(client, &get_disk_url("disk"))
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to delete disk");
+
+    assert!(!disk_test.crucible_resources_deleted().await);
+
+    NexusRequest::object_delete(client, &get_snapshot_url("snapshot"))
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to delete snapshot");
+
+    assert!(!disk_test.crucible_resources_deleted().await);
+
+    // Delete disk-from-snapshot
+
+    NexusRequest::object_delete(client, &get_disk_url("disk-from-snapshot"))
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to delete disk-from-snapshot");
+
+    // Assert everything was cleaned up
+
+    assert!(disk_test.crucible_resources_deleted().await);
 }

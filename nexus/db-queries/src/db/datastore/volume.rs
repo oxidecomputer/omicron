@@ -192,6 +192,10 @@ impl DataStore {
             }
         }
 
+        // After volume creation, validate invariants for all volumes
+        #[cfg(any(test, feature = "testing"))]
+        Self::validate_volume_invariants(&conn).await?;
+
         Ok(volume)
     }
 
@@ -1019,10 +1023,11 @@ impl DataStore {
     }
 
     /// Find regions for deleted volumes that do not have associated region
-    /// snapshots and are not being used by any other non-deleted volumes
+    /// snapshots and are not being used by any other non-deleted volumes, and
+    /// return them for garbage collection
     pub async fn find_deleted_volume_regions(
         &self,
-    ) -> ListResultVec<(Dataset, Region, Option<RegionSnapshot>, Volume)> {
+    ) -> ListResultVec<(Dataset, Region, Option<Volume>)> {
         let conn = self.pool_connection_unauthorized().await?;
         self.transaction_retry_wrapper("find_deleted_volume_regions")
             .transaction(&conn, |conn| async move {
@@ -1034,19 +1039,19 @@ impl DataStore {
 
     async fn find_deleted_volume_regions_txn(
         conn: &async_bb8_diesel::Connection<DbConnection>,
-    ) -> Result<
-        Vec<(Dataset, Region, Option<RegionSnapshot>, Volume)>,
-        diesel::result::Error,
-    > {
+    ) -> Result<Vec<(Dataset, Region, Option<Volume>)>, diesel::result::Error>
+    {
         use db::schema::dataset::dsl as dataset_dsl;
         use db::schema::region::dsl as region_dsl;
         use db::schema::region_snapshot::dsl;
         use db::schema::volume::dsl as volume_dsl;
-        use db::schema::volume_resource_usage::dsl as ru_dsl;
 
-        // Find all regions and datasets
-        let tuples_superset = region_dsl::region
-            .inner_join(
+        // Find all read-write regions (read-only region cleanup is taken care
+        // of in soft_delete_volume_txn!) and their associated datasets
+        let unfiltered_deleted_regions = region_dsl::region
+            .filter(region_dsl::read_only.eq(false))
+            // the volume may be hard deleted, so use a left join here
+            .left_join(
                 volume_dsl::volume.on(region_dsl::volume_id.eq(volume_dsl::id)),
             )
             .inner_join(
@@ -1054,53 +1059,70 @@ impl DataStore {
                     .on(region_dsl::dataset_id.eq(dataset_dsl::id)),
             )
             // where there either are no region snapshots, or the region
-            // snapshot volume references have gone to zero
+            // snapshot volume has deleted = true
             .left_join(
                 dsl::region_snapshot.on(dsl::region_id
                     .eq(region_dsl::id)
                     .and(dsl::dataset_id.eq(dataset_dsl::id))),
             )
-            .filter(
-                dsl::volume_references
-                    .eq(0)
-                    // Despite the SQL specifying that this column is NOT NULL,
-                    // this null check is required for this function to work!
-                    // It's possible that the left join of region_snapshot above
-                    // could join zero rows, making this null.
-                    .or(dsl::volume_references.is_null()),
-            )
-            // where the volume has already been soft-deleted
-            .filter(volume_dsl::time_deleted.is_not_null())
+            .filter(dsl::deleting.eq(true).or(dsl::deleting.is_null()))
             // and return them (along with the volume so it can be hard deleted)
             .select((
                 Dataset::as_select(),
                 Region::as_select(),
                 Option::<RegionSnapshot>::as_select(),
-                Volume::as_select(),
+                // Diesel can't express a difference between
+                //
+                // a) the volume record existing and the nullable
+                //    volume.time_deleted column being set to null
+                // b) the volume record does not exist (null due to left join)
+                //
+                // so return an Option and check below
+                Option::<Volume>::as_select(),
             ))
             .load_async(conn)
             .await?;
 
-        // Filter out read-only regions that are still being used by volumes
-        let mut tuples = Vec::with_capacity(tuples_superset.len());
+        let mut deleted_regions =
+            Vec::with_capacity(unfiltered_deleted_regions.len());
 
-        for (dataset, region, region_snapshot, volume) in tuples_superset {
-            let region_usage_left = ru_dsl::volume_resource_usage
-                .filter(
-                    ru_dsl::usage_type
-                        .eq(VolumeResourceUsageType::ReadOnlyRegion),
-                )
-                .filter(ru_dsl::region_id.eq(region.id()))
-                .count()
-                .get_result_async::<i64>(conn)
-                .await?;
+        for (dataset, region, region_snapshot, volume) in
+            unfiltered_deleted_regions
+        {
+            // only operate on soft or hard deleted volumes
+            let deleted = match &volume {
+                Some(volume) => volume.time_deleted.is_some(),
+                None => true,
+            };
 
-            if region_usage_left == 0 {
-                tuples.push((dataset, region, region_snapshot, volume));
+            if !deleted {
+                continue;
             }
+
+            if region_snapshot.is_some() {
+                // We cannot delete this region: the presence of the region
+                // snapshot record means that the Crucible agent's snapshot has
+                // not been deleted yet (as the lifetime of the region snapshot
+                // record is equal to or longer than the lifetime of the
+                // Crucible agent's snapshot).
+                //
+                // This condition can occur when multiple volume delete sagas
+                // run concurrently: one will decrement the crucible resources
+                // (but hasn't made the appropriate DELETE calls to the
+                // appropriate Agents to tombstone the running snapshots and
+                // snapshots yet), and the other will be in the "delete freed
+                // regions" saga node trying to delete the region. Without this
+                // check, This race results in the Crucible Agent returning
+                // "must delete snapshots first" and causing saga unwinds.
+                //
+                // Another volume delete will pick up this region and remove it.
+                continue;
+            }
+
+            deleted_regions.push((dataset, region, volume));
         }
 
-        Ok(tuples)
+        Ok(deleted_regions)
     }
 
     pub async fn read_only_resources_associated_with_volume(
@@ -1477,6 +1499,10 @@ impl DataStore {
             }
         }
 
+        // After volume deletion, validate invariants for all volumes
+        #[cfg(any(test, feature = "testing"))]
+        Self::validate_volume_invariants(&conn).await?;
+
         Ok(resources_to_delete)
     }
 
@@ -1734,6 +1760,11 @@ impl DataStore {
                                         })
                                     })?;
                                 }
+
+                                // After read-only parent removal, validate
+                                // invariants for all volumes
+                                #[cfg(any(test, feature = "testing"))]
+                                Self::validate_volume_invariants(&conn).await?;
 
                                 Ok(true)
                             }
@@ -2713,6 +2744,11 @@ impl DataStore {
                             })
                         })?;
 
+                    // After region replacement, validate invariants for all
+                    // volumes
+                    #[cfg(any(test, feature = "testing"))]
+                    Self::validate_volume_invariants(&conn).await?;
+
                     Ok(VolumeReplaceResult::Done)
                 }
             })
@@ -3142,6 +3178,11 @@ impl DataStore {
                         ));
                     }
 
+                    // After region snapshot replacement, validate invariants
+                    // for all volumes
+                    #[cfg(any(test, feature = "testing"))]
+                    Self::validate_volume_invariants(&conn).await?;
+
                     Ok(VolumeReplaceResult::Done)
                 }
             })
@@ -3537,6 +3578,120 @@ impl DataStore {
         }
 
         Ok(volumes)
+    }
+}
+
+// Add some validation that runs only for tests
+#[cfg(any(test, feature = "testing"))]
+impl DataStore {
+    fn volume_invariant_violated(msg: String) -> diesel::result::Error {
+        diesel::result::Error::DatabaseError(
+            diesel::result::DatabaseErrorKind::CheckViolation,
+            Box::new(msg),
+        )
+    }
+
+    /// Tests each Volume to see if invariants hold
+    ///
+    /// If an invariant is violated, this function returns a `CheckViolation`
+    /// with the text of what invariant was violated.
+    pub(crate) async fn validate_volume_invariants(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+    ) -> Result<(), diesel::result::Error> {
+        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+
+        while let Some(p) = paginator.next() {
+            use db::schema::volume::dsl;
+            let haystack =
+                paginated(dsl::volume, dsl::id, &p.current_pagparams())
+                    .select(Volume::as_select())
+                    .get_results_async::<Volume>(conn)
+                    .await
+                    .unwrap();
+
+            paginator = p.found_batch(&haystack, &|r| r.id());
+
+            for volume in haystack {
+                Self::validate_volume_has_all_resources(&conn, volume).await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Assert that the resources that comprise non-deleted volumes have not
+    /// been prematurely deleted.
+    async fn validate_volume_has_all_resources(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        volume: Volume,
+    ) -> Result<(), diesel::result::Error> {
+        if volume.time_deleted.is_some() {
+            // Do not need to validate resources for soft-deleted volumes
+            return Ok(());
+        }
+
+        let vcr: VolumeConstructionRequest =
+            serde_json::from_str(&volume.data()).unwrap();
+
+        // validate all read/write resources still exist
+
+        let num_read_write_subvolumes = count_read_write_sub_volumes(&vcr);
+
+        let mut read_write_targets =
+            Vec::with_capacity(3 * num_read_write_subvolumes);
+
+        read_write_resources_associated_with_volume(
+            &vcr,
+            &mut read_write_targets,
+        );
+
+        for target in read_write_targets {
+            let sub_err = OptionalError::new();
+
+            let maybe_region = DataStore::target_to_region(
+                conn, &sub_err, &target, false, // read-write
+            )
+            .await
+            .unwrap();
+
+            let Some(_region) = maybe_region else {
+                return Err(Self::volume_invariant_violated(format!(
+                    "could not find resource for {target}"
+                )));
+            };
+        }
+
+        // validate all read-only resources still exist
+
+        let crucible_targets = {
+            let mut crucible_targets = CrucibleTargets::default();
+            read_only_resources_associated_with_volume(
+                &vcr,
+                &mut crucible_targets,
+            );
+            crucible_targets
+        };
+
+        for read_only_target in &crucible_targets.read_only_targets {
+            let sub_err = OptionalError::new();
+
+            let maybe_usage =
+                DataStore::read_only_target_to_volume_resource_usage(
+                    conn,
+                    &sub_err,
+                    read_only_target,
+                )
+                .await
+                .unwrap();
+
+            let Some(_usage) = maybe_usage else {
+                return Err(Self::volume_invariant_violated(format!(
+                    "could not find resource for {read_only_target}"
+                )));
+            };
+        }
+
+        Ok(())
     }
 }
 

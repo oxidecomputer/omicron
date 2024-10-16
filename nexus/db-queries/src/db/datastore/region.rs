@@ -362,6 +362,12 @@ impl DataStore {
                             )
                             .execute_async(&conn).await?;
                     }
+
+                    // Whenever a region is hard-deleted, validate invariants
+                    // for all volumes
+                    #[cfg(any(test, feature = "testing"))]
+                    Self::validate_volume_invariants(&conn).await?;
+
                     Ok(())
                 }
             })

@@ -2451,26 +2451,22 @@ async fn cmd_db_region_find_deleted(
     struct Row {
         dataset_id: Uuid,
         region_id: Uuid,
-        region_snapshot_id: String,
-        volume_id: Uuid,
+        volume_id: String,
     }
 
     let rows: Vec<Row> = datasets_regions_volumes
         .into_iter()
         .map(|row| {
-            let (dataset, region, region_snapshot, volume) = row;
+            let (dataset, region, volume) = row;
 
             Row {
                 dataset_id: dataset.id(),
                 region_id: region.id(),
-                region_snapshot_id: if let Some(region_snapshot) =
-                    region_snapshot
-                {
-                    region_snapshot.snapshot_id.to_string()
+                volume_id: if let Some(volume) = volume {
+                    volume.id().to_string()
                 } else {
                     String::from("")
                 },
-                volume_id: volume.id(),
             }
         })
         .collect();

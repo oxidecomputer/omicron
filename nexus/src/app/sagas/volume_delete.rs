@@ -29,7 +29,7 @@ use super::NexusSaga;
 use crate::app::sagas::declare_saga_actions;
 use nexus_db_model::Dataset;
 use nexus_db_model::Region;
-use nexus_db_model::RegionSnapshot;
+use nexus_db_model::Volume;
 use nexus_db_queries::authn;
 use nexus_db_queries::db::datastore::CrucibleResources;
 use nexus_types::identity::Asset;
@@ -330,8 +330,7 @@ async fn svd_delete_crucible_snapshot_records(
     Ok(())
 }
 
-type FreedCrucibleRegions =
-    Vec<(Dataset, Region, Option<RegionSnapshot>, Uuid)>;
+type FreedCrucibleRegions = Vec<(Dataset, Region, Option<Uuid>)>;
 
 /// Deleting region snapshots in a previous saga node may have freed up regions
 /// that were deleted in the DB but couldn't be deleted by the Crucible Agent
@@ -394,7 +393,7 @@ type FreedCrucibleRegions =
 /// The disk's volume has no read only resources, while the snapshot's volume
 /// does. The disk volume's targets are all regions (backed by downstairs that
 /// are read/write) while the snapshot volume's targets are all snapshots
-/// (backed by volumes that are read-only). The two volumes are linked in the
+/// (backed by downstairs that are read-only). The two volumes are linked in the
 /// sense that the snapshots from the second are contained *within* the regions
 /// of the first, reflecting the resource nesting from ZFS. This is also
 /// reflected in the REST endpoint that the Crucible agent uses:
@@ -436,7 +435,7 @@ async fn svd_find_freed_crucible_regions(
     // Don't serialize the whole Volume, as the data field contains key material!
     Ok(freed_datasets_regions_and_volumes
         .into_iter()
-        .map(|x| (x.0, x.1, x.2, x.3.id()))
+        .map(|x| (x.0, x.1, x.2.map(|v: Volume| v.id())))
         .collect())
 }
 
@@ -451,23 +450,7 @@ async fn svd_delete_freed_crucible_regions(
     let freed_datasets_regions_and_volumes =
         sagactx.lookup::<FreedCrucibleRegions>("freed_crucible_regions")?;
 
-    for (dataset, region, region_snapshot, volume_id) in
-        freed_datasets_regions_and_volumes
-    {
-        if region_snapshot.is_some() {
-            // We cannot delete this region yet, the snapshot has not been
-            // deleted. This can occur when multiple volume delete sagas run
-            // concurrently: one will decrement the crucible resources (but
-            // hasn't made the appropriate DELETE calls to remove the running
-            // snapshots and snapshots yet), and the other will be here trying
-            // to delete the region. This race results in the crucible agent
-            // returning "must delete snapshots first" and causing saga unwinds.
-            //
-            // Another volume delete (probably the one racing with this one!)
-            // will pick up this region and remove it.
-            continue;
-        }
-
+    for (dataset, region, volume_id) in freed_datasets_regions_and_volumes {
         // Send DELETE calls to the corresponding Crucible agents
         osagactx
             .nexus()
@@ -496,14 +479,16 @@ async fn svd_delete_freed_crucible_regions(
             })?;
 
         // Remove volume DB record
-        osagactx.datastore().volume_hard_delete(volume_id).await.map_err(
-            |e| {
-                ActionError::action_failed(format!(
-                    "failed to volume_hard_delete {}: {:?}",
-                    volume_id, e,
-                ))
-            },
-        )?;
+        if let Some(volume_id) = volume_id {
+            osagactx.datastore().volume_hard_delete(volume_id).await.map_err(
+                |e| {
+                    ActionError::action_failed(format!(
+                        "failed to volume_hard_delete {}: {:?}",
+                        volume_id, e,
+                    ))
+                },
+            )?;
+        }
     }
 
     Ok(())

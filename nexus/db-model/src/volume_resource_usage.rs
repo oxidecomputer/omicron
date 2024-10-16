@@ -29,7 +29,7 @@ impl_enum_type!(
 ///
 /// Read-only resources can be used by many volumes, and because of this they
 /// need to have a reference count so they can be deleted when they're not
-/// referenced anymore. The region_snapshot table uses a `volume_references`
+/// referenced anymore. The region_snapshot table used a `volume_references`
 /// column, which counts how many uses there are. The region table does not have
 /// this column, and more over a simple integer works for reference counting but
 /// does not tell you _what_ volume that use is from. This can be determined

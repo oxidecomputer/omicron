@@ -58,7 +58,6 @@ use crate::app::db::datastore::ReplacementTarget;
 use crate::app::db::datastore::VolumeReplaceResult;
 use crate::app::db::datastore::VolumeToDelete;
 use crate::app::db::datastore::VolumeWithTarget;
-use crate::app::db::lookup::LookupPath;
 use crate::app::sagas::common_storage::find_only_new_region;
 use crate::app::sagas::declare_saga_actions;
 use crate::app::RegionAllocationStrategy;
@@ -242,11 +241,20 @@ async fn rsrss_get_alloc_region_params(
     );
 
     // Look up the existing snapshot
-    let (.., db_snapshot) = LookupPath::new(&opctx, &osagactx.datastore())
-        .snapshot_id(params.request.old_snapshot_id)
-        .fetch()
+    let maybe_db_snapshot = osagactx
+        .datastore()
+        .snapshot_get(&opctx, params.request.old_snapshot_id)
         .await
         .map_err(ActionError::action_failed)?;
+
+    let Some(db_snapshot) = maybe_db_snapshot else {
+        return Err(ActionError::action_failed(Error::internal_error(
+            &format!(
+                "snapshot {} was hard deleted!",
+                params.request.old_snapshot_id
+            ),
+        )));
+    };
 
     // Find the region to replace
     let db_region = osagactx
@@ -480,11 +488,21 @@ async fn rsrss_get_old_snapshot_volume_id(
         &params.serialized_authn,
     );
 
-    let (.., db_snapshot) = LookupPath::new(&opctx, &osagactx.datastore())
-        .snapshot_id(params.request.old_snapshot_id)
-        .fetch()
+    // Look up the existing snapshot
+    let maybe_db_snapshot = osagactx
+        .datastore()
+        .snapshot_get(&opctx, params.request.old_snapshot_id)
         .await
         .map_err(ActionError::action_failed)?;
+
+    let Some(db_snapshot) = maybe_db_snapshot else {
+        return Err(ActionError::action_failed(Error::internal_error(
+            &format!(
+                "snapshot {} was hard deleted!",
+                params.request.old_snapshot_id
+            ),
+        )));
+    };
 
     Ok(db_snapshot.volume_id)
 }
@@ -510,6 +528,13 @@ async fn rsrss_create_fake_volume(
             gen: 0,
             opts: CrucibleOpts {
                 id: new_volume_id,
+                // Do not put the new region ID here: it will be deleted during
+                // the associated garbage collection saga if
+                // `volume_replace_snapshot` does not perform the swap (which
+                // happens when the snapshot volume is deleted) and we still
+                // want it to exist when performing other replacement steps. If
+                // the replacement does occur, then the old address will swapped
+                // in here.
                 target: vec![],
                 lossy: false,
                 flush_timeout: None,
@@ -673,14 +698,15 @@ async fn rsrss_replace_snapshot_in_volume(
         }
 
         VolumeReplaceResult::ExistingVolumeDeleted => {
-            // Unwind the saga here to clean up the resources allocated during
-            // this saga. The associated background task will transition this
-            // request's state to Completed.
+            // If the snapshot volume was deleted, we still want to proceed with
+            // replacing the rest of the uses of the region snapshot. Note this
+            // also covers the case where this saga node runs (performing the
+            // replacement), the executor crashes before it can record that
+            // success, and then before this node is rerun the snapshot is
+            // deleted. If this saga unwound here, that would violate the
+            // property of idempotency.
 
-            Err(ActionError::action_failed(format!(
-                "existing volume {} deleted",
-                replacement_params.old_volume_id
-            )))
+            Ok(())
         }
     }
 }

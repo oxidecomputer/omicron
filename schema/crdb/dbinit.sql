@@ -622,6 +622,9 @@ CREATE INDEX IF NOT EXISTS lookup_regions_missing_ports
     on omicron.public.region (id)
     WHERE port IS NULL;
 
+CREATE INDEX IF NOT EXISTS lookup_regions_by_read_only
+    on omicron.public.region (read_only);
+
 /*
  * A snapshot of a region, within a dataset.
  */

@@ -216,14 +216,16 @@ impl RegionSnapshotReplacementFindAffected {
                 Ok(Some(region_snapshot)) => region_snapshot,
 
                 Ok(None) => {
+                    // If the associated region snapshot was deleted, then there
+                    // are no more volumes that reference it. This is not an
+                    // error! Continue processing the other requests.
                     let s = format!(
-                        "region snapshot {} {} {} not found!",
+                        "region snapshot {} {} {} not found",
                         request.old_dataset_id,
                         request.old_region_id,
                         request.old_snapshot_id,
                     );
-                    error!(&log, "{s}");
-                    status.errors.push(s);
+                    info!(&log, "{s}");
 
                     continue;
                 }
