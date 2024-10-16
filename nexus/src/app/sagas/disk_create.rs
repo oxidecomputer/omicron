@@ -769,7 +769,13 @@ async fn sdc_call_pantry_attach_for_disk_undo(
 
     let pantry_address = sagactx.lookup::<SocketAddrV6>("pantry_address")?;
 
-    call_pantry_detach_for_disk(&log, disk_id, pantry_address).await?;
+    call_pantry_detach_for_disk(
+        sagactx.user_data().nexus(),
+        &log,
+        disk_id,
+        pantry_address,
+    )
+    .await?;
 
     Ok(())
 }
