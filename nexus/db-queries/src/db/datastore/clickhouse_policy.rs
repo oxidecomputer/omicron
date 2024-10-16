@@ -95,30 +95,7 @@ impl DataStore {
         let num_inserted = if policy.version == 1 {
             self.clickhouse_policy_insert_first_policy(opctx, &policy).await?
         } else {
-            let prev_version = policy.version - 1;
-
-            sql_query(
-                r"INSERT INTO clickhouse_policy 
-                 (version, clickhouse_mode, clickhouse_cluster_target_servers, 
-                  clickhouse_cluster_target_keepers, time_created) 
-                 SELECT $1, $2, $3, $4, $5 
-                  FROM clickhouse_policy WHERE version = $6 AND version IN
-                   (SELECT version FROM clickhouse_policy
-                    ORDER BY version DESC LIMIT 1)",
-            )
-            .bind::<sql_types::BigInt, SqlU32>(policy.version.into())
-            .bind::<ClickhouseModeEnum, DbClickhouseMode>((&policy.mode).into())
-            .bind::<sql_types::SmallInt, SqlU8>(
-                policy.mode.target_servers().into(),
-            )
-            .bind::<sql_types::SmallInt, SqlU8>(
-                policy.mode.target_keepers().into(),
-            )
-            .bind::<sql_types::Timestamptz, _>(policy.time_created)
-            .bind::<sql_types::BigInt, SqlU32>(prev_version.into())
-            .execute_async(&*self.pool_connection_authorized(opctx).await?)
-            .await
-            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?
+            self.clickhouse_policy_insert_next_policy(opctx, &policy).await?
         };
 
         match num_inserted {
@@ -133,6 +110,40 @@ impl DataStore {
         }
     }
 
+    /// Insert the next version of the policy in the database
+    ///
+    /// Only succeeds if the prior version is the latest version currently
+    /// in the `clickhouse_policy` table.
+    ///
+    /// Panics if `policy.version <= 1`;
+    async fn clickhouse_policy_insert_next_policy(
+        &self,
+        opctx: &OpContext,
+        policy: &ClickhousePolicy,
+    ) -> Result<usize, Error> {
+        assert!(policy.version > 1);
+        let prev_version = policy.version - 1;
+
+        sql_query(
+            r"INSERT INTO clickhouse_policy
+                 (version, clickhouse_mode, clickhouse_cluster_target_servers,
+                  clickhouse_cluster_target_keepers, time_created)
+                 SELECT $1, $2, $3, $4, $5
+                  FROM clickhouse_policy WHERE version = $6 AND version IN
+                   (SELECT version FROM clickhouse_policy
+                    ORDER BY version DESC LIMIT 1)",
+        )
+        .bind::<sql_types::BigInt, SqlU32>(policy.version.into())
+        .bind::<ClickhouseModeEnum, DbClickhouseMode>((&policy.mode).into())
+        .bind::<sql_types::SmallInt, SqlU8>(policy.mode.target_servers().into())
+        .bind::<sql_types::SmallInt, SqlU8>(policy.mode.target_keepers().into())
+        .bind::<sql_types::Timestamptz, _>(policy.time_created)
+        .bind::<sql_types::BigInt, SqlU32>(prev_version.into())
+        .execute_async(&*self.pool_connection_authorized(opctx).await?)
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
     /// Insert the first clickhouse policy in the database at version 1.
     ///
     /// Only insert this policy if no other policy exists yet.
@@ -144,10 +155,10 @@ impl DataStore {
         policy: &ClickhousePolicy,
     ) -> Result<usize, Error> {
         sql_query(
-            r"INSERT INTO clickhouse_policy 
-              (version, clickhouse_mode, clickhouse_cluster_target_servers, 
-               clickhouse_cluster_target_keepers, time_created) 
-             SELECT $1, $2, $3, $4, $5 
+            r"INSERT INTO clickhouse_policy
+              (version, clickhouse_mode, clickhouse_cluster_target_servers,
+               clickhouse_cluster_target_keepers, time_created)
+             SELECT $1, $2, $3, $4, $5
              WHERE NOT EXISTS (SELECT * FROM clickhouse_policy)",
         )
         .bind::<sql_types::BigInt, SqlU32>(policy.version.into())

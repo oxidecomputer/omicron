@@ -125,18 +125,12 @@ impl PlanningInput {
     }
 
     pub fn target_clickhouse_zone_count(&self) -> usize {
-        if let Some(policy) = &self.policy.clickhouse_policy {
-            match policy.mode {
-                ClickhouseMode::SingleNodeOnly => {
-                    SINGLE_NODE_CLICKHOUSE_REDUNDANCY
-                }
-                ClickhouseMode::ClusterOnly { .. } => 0,
-                ClickhouseMode::Both { .. } => {
-                    SINGLE_NODE_CLICKHOUSE_REDUNDANCY
-                }
-            }
-        } else {
-            SINGLE_NODE_CLICKHOUSE_REDUNDANCY
+        match self.policy.clickhouse_policy.as_ref().map(|policy| &policy.mode)
+        {
+            Some(&ClickhouseMode::ClusterOnly { .. }) => 0,
+            Some(&ClickhouseMode::SingleNodeOnly)
+            | Some(&ClickhouseMode::Both { .. })
+            | None => SINGLE_NODE_CLICKHOUSE_REDUNDANCY,
         }
     }
 
@@ -144,7 +138,7 @@ impl PlanningInput {
         self.policy
             .clickhouse_policy
             .as_ref()
-            .map(|policy| policy.mode.target_servers() as usize)
+            .map(|policy| usize::from(policy.mode.target_servers()))
             .unwrap_or(0)
     }
 
@@ -152,7 +146,7 @@ impl PlanningInput {
         self.policy
             .clickhouse_policy
             .as_ref()
-            .map(|policy| policy.mode.target_keepers() as usize)
+            .map(|policy| usize::from(policy.mode.target_keepers()))
             .unwrap_or(0)
     }
 
@@ -912,14 +906,17 @@ impl ClickhouseMode {
     pub fn cluster_enabled(&self) -> bool {
         match self {
             ClickhouseMode::SingleNodeOnly => false,
-            _ => true,
+            ClickhouseMode::ClusterOnly { .. }
+            | ClickhouseMode::Both { .. } => true,
         }
     }
 
     pub fn single_node_enabled(&self) -> bool {
         match self {
             ClickhouseMode::ClusterOnly { .. } => false,
-            _ => true,
+            ClickhouseMode::SingleNodeOnly | ClickhouseMode::Both { .. } => {
+                true
+            }
         }
     }
 
