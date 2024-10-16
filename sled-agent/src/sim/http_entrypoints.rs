@@ -35,6 +35,7 @@ use omicron_common::disk::DatasetsConfig;
 use omicron_common::disk::DatasetsManagementResult;
 use omicron_common::disk::DisksManagementResult;
 use omicron_common::disk::OmicronPhysicalDisksConfig;
+use omicron_common::update::ArtifactHash;
 use sled_agent_api::*;
 use sled_agent_types::boot_disk::BootDiskOsWriteStatus;
 use sled_agent_types::boot_disk::BootDiskPathParams;
@@ -57,6 +58,7 @@ use sled_agent_types::zone_bundle::CleanupCount;
 use sled_agent_types::zone_bundle::ZoneBundleId;
 use sled_agent_types::zone_bundle::ZoneBundleMetadata;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use super::sled_agent::SledAgent;
@@ -180,6 +182,46 @@ impl SledAgentApi for SledAgentSimImpl {
             .await
             .map_err(|e| HttpError::for_internal_error(e.to_string()))?;
         Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn artifact_list(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<BTreeSet<ArtifactHash>>, HttpError> {
+        Ok(HttpResponseOk(rqctx.context().artifact_store().list().await?))
+    }
+
+    async fn artifact_copy_from_depot(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<ArtifactPathParam>,
+        body: TypedBody<ArtifactCopyFromDepotBody>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sha256 = path_params.into_inner().sha256;
+        let depot_base_url = body.into_inner().depot_base_url;
+        rqctx
+            .context()
+            .artifact_store()
+            .copy_from_depot(sha256, &depot_base_url)
+            .await?;
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn artifact_put(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<ArtifactPathParam>,
+        body: StreamingBody,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let sha256 = path_params.into_inner().sha256;
+        rqctx.context().artifact_store().put_body(sha256, body).await?;
+        Ok(HttpResponseUpdatedNoContent())
+    }
+
+    async fn artifact_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<ArtifactPathParam>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let sha256 = path_params.into_inner().sha256;
+        rqctx.context().artifact_store().delete(sha256).await?;
+        Ok(HttpResponseDeleted())
     }
 
     async fn vmm_issue_disk_snapshot_request(
