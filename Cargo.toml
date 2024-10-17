@@ -43,6 +43,7 @@ members = [
     "end-to-end-tests",
     "ereporter",
     "ereporter/api",
+    "ereporter/tester-ingester",
     "gateway",
     "gateway-api",
     "gateway-cli",
@@ -168,6 +169,7 @@ default-members = [
     "end-to-end-tests",
     "ereporter",
     "ereporter/api",
+    "ereporter/tester-ingester",
     "gateway",
     "gateway-api",
     "gateway-cli",
@@ -351,6 +353,7 @@ dropshot = { version = "0.12.0", features = [ "usdt-probes" ] }
 dyn-clone = "1.0.17"
 either = "1.13.0"
 ereporter-api = { path = "ereporter/api" }
+ereporter-client = { path = "clients/ereporter-client" }
 ereporter = { path = "ereporter" }
 expectorate = "1.1.0"
 fatfs = "0.3.6"
