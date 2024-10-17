@@ -35,8 +35,11 @@ use nexus_client::types::SagaState;
 use nexus_client::types::SledSelector;
 use nexus_client::types::UninitializedSledId;
 use nexus_db_queries::db::lookup::LookupPath;
+use nexus_inventory::now_db_precision;
 use nexus_saga_recovery::LastPass;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::ClickhouseMode;
+use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::internal_api::background::AbandonedVmmReaperStatus;
 use nexus_types::internal_api::background::InstanceReincarnationStatus;
 use nexus_types::internal_api::background::InstanceUpdaterStatus;
@@ -321,11 +324,11 @@ struct ClickhousePolicySetArgs {
     mode: ClickhousePolicyMode,
 
     /// The number of servers in a clickhouse cluster
-    #[arg(default_value_t = 3)]
-    target_servers: usize,
+    #[arg(long, default_value_t = 3)]
+    target_servers: u8,
     /// The number of keepers in a clickhouse cluster
-    #[arg(default_value_t = 5)]
-    target_keepers: usize,
+    #[arg(long, default_value_t = 5)]
+    target_keepers: u8,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -2444,7 +2447,27 @@ async fn cmd_nexus_clickhouse_policy_get(
             }
         }
         Ok(policy) => {
-            println!("{policy:#?}");
+            println!("Clickhouse Policy: ");
+            println!("    version: {}", policy.version);
+            println!("    creation time: {}", policy.time_created);
+            match policy.mode {
+                ClickhouseMode::SingleNodeOnly => {
+                    println!("    mode: single-node-only");
+                }
+                ClickhouseMode::ClusterOnly {
+                    target_servers,
+                    target_keepers,
+                } => {
+                    println!("    mode: cluster-only");
+                    println!("    target-servers: {}", target_servers);
+                    println!("    target-keepers: {}", target_keepers);
+                }
+                ClickhouseMode::Both { target_servers, target_keepers } => {
+                    println!("    mode: both single-node and cluster");
+                    println!("    target-servers: {}", target_servers);
+                    println!("    target-keepers: {}", target_keepers);
+                }
+            }
         }
     }
 
@@ -2456,7 +2479,49 @@ async fn cmd_nexus_clickhouse_policy_set(
     args: &ClickhousePolicySetArgs,
     _destruction_token: DestructiveOperationToken,
 ) -> Result<(), anyhow::Error> {
-    todo!()
+    let mode = match args.mode {
+        ClickhousePolicyMode::SingleNodeOnly => ClickhouseMode::SingleNodeOnly,
+        ClickhousePolicyMode::ClusterOnly => ClickhouseMode::ClusterOnly {
+            target_servers: args.target_servers,
+            target_keepers: args.target_keepers,
+        },
+        ClickhousePolicyMode::Both => ClickhouseMode::Both {
+            target_servers: args.target_servers,
+            target_keepers: args.target_keepers,
+        },
+    };
+
+    let res = client.clickhouse_policy_get().await;
+    let new_policy = match res {
+        Err(err) => {
+            if err.status() == Some(StatusCode::NOT_FOUND) {
+                ClickhousePolicy {
+                    version: 1,
+                    mode,
+                    time_created: now_db_precision(),
+                }
+            } else {
+                eprintln!("error: {:#}", err);
+                return Err(err).context("retrieving clickhouse policy");
+            }
+        }
+        Ok(policy) => ClickhousePolicy {
+            version: policy.version + 1,
+            mode,
+            time_created: now_db_precision(),
+        },
+    };
+
+    client.clickhouse_policy_set(&new_policy).await.with_context(|| {
+        format!("inserting new context at version {}", new_policy.version)
+    })?;
+
+    println!(
+        "Successfully inserted new policy at version {}",
+        new_policy.version
+    );
+
+    Ok(())
 }
 
 /// Runs `omdb nexus sagas list`
