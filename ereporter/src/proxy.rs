@@ -1,12 +1,11 @@
 // This Source Code Form is subject to the terms of the Mozilla Public
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
-
+#![allow(dead_code)] // TODO(eliza): i'm still working on this bit
 use ereporter_api::Entry;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
 use std::future::Future;
-use std::sync::Arc;
 use tokio::sync::{mpsc, watch};
 use uuid::Uuid;
 
