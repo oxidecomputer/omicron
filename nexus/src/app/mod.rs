@@ -673,21 +673,35 @@ impl Nexus {
         let external_server = self.external_server.lock().unwrap().take();
         let mut res = Ok(());
 
+        let extend_err =
+            |mut res: &mut Result<(), String>, mut new: Result<(), String>| {
+                match (&mut res, &mut new) {
+                    (Err(s), Err(new_err)) => {
+                        s.push_str(&format!(", {new_err}"))
+                    }
+                    (Ok(()), Err(_)) => *res = new,
+                    (_, Ok(())) => (),
+                }
+            };
+
         if let Some(server) = external_server {
-            res = res.and(server.close().await);
+            extend_err(&mut res, server.close().await);
         }
         let techport_external_server =
             self.techport_external_server.lock().unwrap().take();
         if let Some(server) = techport_external_server {
-            res = res.and(server.close().await);
+            extend_err(&mut res, server.close().await);
         }
         let internal_server = self.internal_server.lock().unwrap().take();
         if let Some(server) = internal_server {
-            res = res.and(server.close().await);
+            extend_err(&mut res, server.close().await);
         }
         let producer_server = self.producer_server.lock().unwrap().take();
         if let Some(server) = producer_server {
-            res = res.and(server.close().await.map_err(|e| e.to_string()));
+            extend_err(
+                &mut res,
+                server.close().await.map_err(|e| e.to_string()),
+            );
         }
         res
     }
