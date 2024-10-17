@@ -44,7 +44,7 @@ pub trait EreporterApi {
     ) -> Result<HttpResponseDeleted, HttpError>;
 }
 
-/// Path parameters to the [`EreporterAPi::ereports_list`] endpoint.
+/// Path parameters to the [`EreporterApi::ereports_list`] endpoint.
 #[derive(Clone, Copy, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct ListPathParams {
     pub reporter_id: Uuid,
