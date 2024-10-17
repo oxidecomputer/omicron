@@ -279,3 +279,5 @@ async fn test_keeper_cluster_membership() -> anyhow::Result<()> {
     logctx.cleanup_successful();
     Ok(())
 }
+
+// TODO: single-node admin test

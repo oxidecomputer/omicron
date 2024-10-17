@@ -2,7 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use context::ServerContext;
+use context::{ServerContext, SingleServerContext};
+use dropshot::{HttpServer, HttpServerStarter};
 use omicron_common::FileKv;
 use slog::{debug, error, Drain};
 use slog_dtrace::ProbeRegistration;
@@ -31,15 +32,13 @@ pub enum StartError {
     InitializeHttpServer(#[source] Box<dyn Error + Send + Sync>),
 }
 
-pub type Server = dropshot::HttpServer<Arc<ServerContext>>;
-
 /// Start the dropshot server for `clickhouse-admin-server` which
 /// manages clickhouse replica servers.
 pub async fn start_server_admin_server(
     clickward: Clickward,
     clickhouse_cli: ClickhouseCli,
     server_config: Config,
-) -> Result<Server, StartError> {
+) -> Result<HttpServer<Arc<ServerContext>>, StartError> {
     let (drain, registration) = slog_dtrace::with_drain(
         server_config
             .log
@@ -64,7 +63,7 @@ pub async fn start_server_admin_server(
             .with_log(log.new(slog::o!("component" => "ClickhouseCli"))),
         log.new(slog::o!("component" => "ServerContext")),
     );
-    let http_server_starter = dropshot::HttpServerStarter::new(
+    let http_server_starter = HttpServerStarter::new(
         &server_config.dropshot,
         http_entrypoints::clickhouse_admin_server_api(),
         Arc::new(context),
@@ -81,7 +80,7 @@ pub async fn start_keeper_admin_server(
     clickward: Clickward,
     clickhouse_cli: ClickhouseCli,
     server_config: Config,
-) -> Result<Server, StartError> {
+) -> Result<HttpServer<Arc<ServerContext>>, StartError> {
     let (drain, registration) = slog_dtrace::with_drain(
         server_config
             .log
@@ -106,9 +105,45 @@ pub async fn start_keeper_admin_server(
             .with_log(log.new(slog::o!("component" => "ClickhouseCli"))),
         log.new(slog::o!("component" => "ServerContext")),
     );
-    let http_server_starter = dropshot::HttpServerStarter::new(
+    let http_server_starter = HttpServerStarter::new(
         &server_config.dropshot,
         http_entrypoints::clickhouse_admin_keeper_api(),
+        Arc::new(context),
+        &log.new(slog::o!("component" => "dropshot")),
+    )
+    .map_err(StartError::InitializeHttpServer)?;
+
+    Ok(http_server_starter.start())
+}
+
+/// Start the dropshot server for `clickhouse-admin-single` which
+/// manages a single-node ClickHouse database.
+pub async fn start_single_admin_server(
+    clickhouse_cli: ClickhouseCli,
+    server_config: Config,
+) -> Result<HttpServer<Arc<SingleServerContext>>, StartError> {
+    let (drain, registration) = slog_dtrace::with_drain(
+        server_config
+            .log
+            .to_logger("clickhouse-admin-keeper")
+            .map_err(StartError::InitializeLogger)?,
+    );
+    let log = slog::Logger::root(drain.fuse(), slog::o!(FileKv));
+    match registration {
+        ProbeRegistration::Success => {
+            debug!(log, "registered DTrace probes");
+        }
+        ProbeRegistration::Failed(err) => {
+            let err = StartError::RegisterDtraceProbes(err);
+            error!(log, "failed to register DTrace probes"; &err);
+            return Err(err);
+        }
+    }
+
+    let context = SingleServerContext::new(clickhouse_cli);
+    let http_server_starter = HttpServerStarter::new(
+        &server_config.dropshot,
+        http_entrypoints::clickhouse_admin_single_api(),
         Arc::new(context),
         &log.new(slog::o!("component" => "dropshot")),
     )
