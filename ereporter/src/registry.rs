@@ -29,7 +29,7 @@ pub struct ReporterRegistry(pub(crate) Arc<RegistryInner>);
 /// Either configuration for building a logger, or an actual logger already
 /// instantiated.
 ///
-/// This can be used to start a [`Server`] with a new logger or a child of a
+/// This can be used to start a [`ReporterRegistry`] with a new logger or a child of a
 /// parent logger if desired.
 #[derive(Debug, Clone)]
 pub enum LogConfig {
