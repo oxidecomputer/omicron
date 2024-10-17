@@ -47,7 +47,7 @@ impl ReporterRegistry {
     ) -> anyhow::Result<RunningServer> {
         let log = &self.0.log;
 
-        let _server = {
+        let server = {
             let dropshot_cfg = ConfigDropshot {
                 bind_address: config.server_address,
                 request_body_max_bytes: config.request_body_max_bytes,
@@ -117,9 +117,15 @@ impl ReporterRegistry {
 
         self.0
             .server_tx
-            .send(Some(State { server_address: config.server_address, nexus }))
+            .send(Some(State {
+                // Use the server's actual address once it has been bound,
+                // rather than the configured address, since the configured port
+                // may be :0.
+                server_address: server.local_addr(),
+                nexus,
+            }))
             .expect("receivers should never be dropped");
-        Ok(RunningServer { _server })
+        Ok(RunningServer { _server: server })
     }
 }
 
