@@ -887,7 +887,7 @@ pub struct Policy {
     pub clickhouse_policy: Option<ClickhousePolicy>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ClickhousePolicy {
     pub version: u32,
     pub mode: ClickhouseMode,
@@ -895,7 +895,8 @@ pub struct ClickhousePolicy {
 }
 
 /// How to deploy clickhouse nodes
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", tag = "type", content = "value")]
 pub enum ClickhouseMode {
     SingleNodeOnly,
     ClusterOnly { target_servers: u8, target_keepers: u8 },
