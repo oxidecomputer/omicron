@@ -10,4 +10,4 @@ set -o pipefail
 # Otherwise, it does not automatically detect the configuration files, nor does
 # it append them when necessary
 cd /opt/oxide/clickhouse_keeper/
-exec ./clickhouse keeper &
+exec /opt/oxide/clickhouse_keeper/clickhouse keeper --config /opt/oxide/clickhouse_keeper/keeper_config.xml &
