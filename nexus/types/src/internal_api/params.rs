@@ -214,3 +214,14 @@ pub struct InstanceMigrateRequest {
     /// The ID of the sled to which to migrate the target instance.
     pub dst_sled_id: Uuid,
 }
+
+/// Message sent by an error reporter to register itself with Nexus.
+#[derive(Debug, Clone, Copy, JsonSchema, Serialize, Deserialize)]
+pub struct EreporterInfo {
+    /// The UUID of the reporting entity.
+    pub reporter_id: Uuid,
+
+    /// The address on which the error reporter server listens for ingestion
+    /// requests.
+    pub address: SocketAddr,
+}

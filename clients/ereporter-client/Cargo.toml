@@ -1,0 +1,19 @@
+[package]
+name = "ereporter-client"
+version = "0.1.0"
+edition = "2021"
+license = "MPL-2.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+chrono.workspace = true
+futures.workspace = true
+omicron-common.workspace = true
+progenitor.workspace = true
+reqwest = { workspace = true, features = ["json", "rustls-tls", "stream"] }
+serde.workspace = true
+slog.workspace = true
+uuid.workspace = true
+omicron-workspace-hack.workspace = true
