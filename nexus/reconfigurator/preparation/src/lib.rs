@@ -16,6 +16,7 @@ use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
+use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbSettings;
 use nexus_types::deployment::OmicronZoneExternalIp;
@@ -75,6 +76,7 @@ pub struct PlanningInputFromDb<'a> {
     pub internal_dns_version: nexus_db_model::Generation,
     pub external_dns_version: nexus_db_model::Generation,
     pub cockroachdb_settings: &'a CockroachDbSettings,
+    pub clickhouse_policy: Option<ClickhousePolicy>,
     pub log: &'a Logger,
 }
 
@@ -138,6 +140,11 @@ impl PlanningInputFromDb<'_> {
             .await
             .internal_context("fetching cockroachdb settings")?;
 
+        let clickhouse_policy = datastore
+            .clickhouse_policy_get_latest(opctx)
+            .await
+            .internal_context("fetching clickhouse policy")?;
+
         let planning_input = PlanningInputFromDb {
             sled_rows: &sled_rows,
             zpool_rows: &zpool_rows,
@@ -156,6 +163,7 @@ impl PlanningInputFromDb<'_> {
             internal_dns_version,
             external_dns_version,
             cockroachdb_settings: &cockroachdb_settings,
+            clickhouse_policy,
         }
         .build()
         .internal_context("assembling planning_input")?;
@@ -177,7 +185,7 @@ impl PlanningInputFromDb<'_> {
                 .target_cockroachdb_cluster_version,
             target_crucible_pantry_zone_count: self
                 .target_crucible_pantry_zone_count,
-            clickhouse_policy: None,
+            clickhouse_policy: self.clickhouse_policy.clone(),
         };
         let mut builder = PlanningInputBuilder::new(
             policy,
