@@ -17,21 +17,9 @@ use futures::future::try_join_all;
 use nexus_db_model::SledState;
 use nexus_types::external_api::views::SledPolicy;
 use nexus_types::external_api::views::SledProvisionPolicy;
-use omicron_test_utils::dev::db::CockroachInstance;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledUuid;
-use slog::Logger;
-use std::sync::Arc;
 use strum::EnumCount;
-use uuid::Uuid;
-
-pub(crate) async fn datastore_test(
-    log: &Logger,
-    db: &CockroachInstance,
-) -> (OpContext, Arc<DataStore>) {
-    let rack_id = Uuid::parse_str(nexus_test_utils::RACK_UUID).unwrap();
-    super::pub_test_utils::datastore_test(log, db, rack_id).await
-}
 
 /// Denotes a specific way in which a sled is ineligible.
 ///

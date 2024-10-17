@@ -321,12 +321,12 @@ impl DataStore {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::datastore::test::{
         sled_baseboard_for_test, sled_system_hardware_for_test,
     };
     use crate::db::lookup::LookupPath;
     use crate::db::model::{PhysicalDiskKind, Sled, SledUpdate};
+    use crate::db::pub_test_utils::TestDatabase;
     use dropshot::PaginationOrder;
     use nexus_db_model::Generation;
     use nexus_sled_agent_shared::inventory::{

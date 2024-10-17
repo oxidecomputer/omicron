@@ -292,7 +292,7 @@ impl DataStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::datastore::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::TestDatabase;
     use nexus_types::internal_api::params;
     use omicron_common::api::internal::nexus;
     use omicron_test_utils::dev;

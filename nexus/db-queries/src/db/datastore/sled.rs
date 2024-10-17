@@ -824,7 +824,6 @@ impl TransitionError {
 #[cfg(test)]
 pub(in crate::db::datastore) mod test {
     use super::*;
-    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::datastore::test::{
         sled_baseboard_for_test, sled_system_hardware_for_test,
     };
@@ -834,6 +833,7 @@ pub(in crate::db::datastore) mod test {
     use crate::db::lookup::LookupPath;
     use crate::db::model::ByteCount;
     use crate::db::model::SqlU32;
+    use crate::db::pub_test_utils::TestDatabase;
     use anyhow::{Context, Result};
     use itertools::Itertools;
     use nexus_db_model::Generation;

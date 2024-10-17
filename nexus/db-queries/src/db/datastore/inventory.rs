@@ -2444,8 +2444,8 @@ impl DataStoreInventoryTest for DataStore {
 #[cfg(test)]
 mod test {
     use crate::db::datastore::inventory::DataStoreInventoryTest;
-    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::datastore::DataStoreConnection;
+    use crate::db::pub_test_utils::TestDatabase;
     use crate::db::raw_query_builder::{QueryBuilder, TrustedStr};
     use crate::db::schema;
     use crate::db::DataStore;

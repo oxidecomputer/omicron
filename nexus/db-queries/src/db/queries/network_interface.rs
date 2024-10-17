@@ -1797,7 +1797,6 @@ mod tests {
     use super::NUM_INITIAL_RESERVED_IP_ADDRESSES;
     use crate::authz;
     use crate::context::OpContext;
-    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::datastore::DataStore;
     use crate::db::identity::Resource;
     use crate::db::lookup::LookupPath;
@@ -1808,6 +1807,7 @@ mod tests {
     use crate::db::model::NetworkInterface;
     use crate::db::model::Project;
     use crate::db::model::VpcSubnet;
+    use crate::db::pub_test_utils::TestDatabase;
     use crate::db::queries::network_interface::last_available_address;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use dropshot::test_util::LogContext;

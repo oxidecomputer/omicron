@@ -1121,10 +1121,10 @@ mod test {
     use std::num::NonZeroU32;
 
     use crate::authz;
-    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::model::{
         IpPool, IpPoolResource, IpPoolResourceType, Project,
     };
+    use crate::db::pub_test_utils::TestDatabase;
     use assert_matches::assert_matches;
     use nexus_types::external_api::params;
     use nexus_types::identity::Resource;
