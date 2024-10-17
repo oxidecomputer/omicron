@@ -125,7 +125,7 @@ impl BufferWorker {
                 }
                 ServerReq::TruncateTo { seq, tx } => {
                     let prev_len = self.buf.len();
-                    self.buf.retain(|ereport| ereport.seq <= seq);
+                    self.buf.retain(|ereport| ereport.seq > seq);
 
                     slog::info!(
                         self.log,
@@ -143,7 +143,6 @@ impl BufferWorker {
                             "client canceled truncate request"
                         );
                     }
-                    todo!()
                 }
             }
         }
