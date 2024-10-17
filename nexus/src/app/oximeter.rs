@@ -12,7 +12,7 @@ use internal_dns_types::names::ServiceName;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
 use nexus_db_queries::db::DataStore;
-use omicron_common::address::CLICKHOUSE_HTTP_PORT;
+use omicron_common::address::CLICKHOUSE_TCP_PORT;
 use omicron_common::api::external::{DataPageParams, Error, ListResultVec};
 use omicron_common::api::internal::nexus::{self, ProducerEndpoint};
 use oximeter_client::Client as OximeterClient;
@@ -60,15 +60,26 @@ impl LazyTimeseriesClient {
     pub(crate) async fn get(
         &self,
     ) -> Result<oximeter_db::Client, ResolveError> {
-        let address = match &self.source {
-            ClientSource::FromIp { address } => *address,
-            ClientSource::FromDns { resolver } => SocketAddr::new(
-                resolver.lookup_ip(ServiceName::Clickhouse).await?,
-                CLICKHOUSE_HTTP_PORT,
-            ),
+        let (http_address, native_address) = match &self.source {
+            ClientSource::FromIp { address } => {
+                let native_address =
+                    SocketAddr::new(address.ip(), CLICKHOUSE_TCP_PORT);
+                (*address, native_address)
+            }
+            ClientSource::FromDns { resolver } => {
+                let http_address = SocketAddr::from(
+                    resolver.lookup_socket_v6(ServiceName::Clickhouse).await?,
+                );
+                let native_address = SocketAddr::from(
+                    resolver
+                        .lookup_socket_v6(ServiceName::ClickhouseNative)
+                        .await?,
+                );
+                (http_address, native_address)
+            }
         };
 
-        Ok(oximeter_db::Client::new(address, &self.log))
+        Ok(oximeter_db::Client::new(http_address, native_address, &self.log))
     }
 }
 

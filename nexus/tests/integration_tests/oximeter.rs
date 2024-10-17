@@ -118,7 +118,12 @@ async fn test_oximeter_reregistration() {
 
     // ClickHouse client for verifying collection.
     let ch_address = context.clickhouse.http_address().into();
-    let client = oximeter_db::Client::new(ch_address, &context.logctx.log);
+    let native_address = context.clickhouse.native_address().into();
+    let client = oximeter_db::Client::new(
+        ch_address,
+        native_address,
+        &context.logctx.log,
+    );
     client
         .init_single_node_db()
         .await
@@ -302,6 +307,7 @@ async fn test_oximeter_reregistration() {
         context.logctx.log.new(o!("component" => "oximeter")),
         context.server.get_http_server_internal_address().await,
         context.clickhouse.http_address().port(),
+        context.clickhouse.native_address().port(),
         oximeter_id,
     )
     .await

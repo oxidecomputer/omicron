@@ -63,7 +63,8 @@ async fn test_schemas_disjoint() -> anyhow::Result<()> {
     deployment.deploy().context("failed to deploy")?;
 
     let client1 = Client::new_with_request_timeout(
-        deployment.http_addr(1.into())?,
+        deployment.http_addr(1.into()),
+        deployment.native_addr(1.into()),
         log,
         request_timeout,
     );
@@ -158,12 +159,14 @@ async fn test_cluster() -> anyhow::Result<()> {
     deployment.deploy().context("failed to deploy")?;
 
     let client1 = Client::new_with_request_timeout(
-        deployment.http_addr(1.into())?,
+        deployment.http_addr(1.into()),
+        deployment.native_addr(1.into()),
         log,
         request_timeout,
     );
     let client2 = Client::new_with_request_timeout(
-        deployment.http_addr(2.into())?,
+        deployment.http_addr(2.into()),
+        deployment.native_addr(2.into()),
         log,
         request_timeout,
     );
@@ -228,7 +231,8 @@ async fn test_cluster() -> anyhow::Result<()> {
     // Add a 3rd clickhouse server and wait for it to come up
     deployment.add_server().expect("failed to launch a 3rd clickhouse server");
     let client3 = Client::new_with_request_timeout(
-        deployment.http_addr(3.into())?,
+        deployment.http_addr(3.into()),
+        deployment.native_addr(3.into()),
         log,
         request_timeout,
     );
@@ -329,7 +333,8 @@ async fn test_cluster() -> anyhow::Result<()> {
     // few hundred milliseconds. To shorten the length of our test, we create a
     // new client with a shorter timeout.
     let client1_short_timeout = Client::new_with_request_timeout(
-        deployment.http_addr(1.into())?,
+        deployment.http_addr(1.into()),
+        deployment.native_addr(1.into()),
         log,
         Duration::from_secs(2),
     );
@@ -450,7 +455,7 @@ async fn wait_for_num_points(
     Ok(())
 }
 
-/// Try to ping the server until it is responds.
+/// Try to ping the server until it responds.
 async fn wait_for_ping(log: &Logger, client: &Client) -> anyhow::Result<()> {
     poll::wait_for_condition(
         || async {
@@ -459,8 +464,8 @@ async fn wait_for_ping(log: &Logger, client: &Client) -> anyhow::Result<()> {
                 .await
                 .map_err(|_| poll::CondCheckError::<oximeter_db::Error>::NotYet)
         },
-        &Duration::from_millis(1),
-        &Duration::from_secs(10),
+        &Duration::from_millis(100),
+        &Duration::from_secs(30),
     )
     .await
     .with_context(|| {

@@ -6,12 +6,14 @@
 
 //! Decode packets from the ClickHouse server.
 
-use crate::native::{
-    io,
-    packets::server::{Hello, Packet, PasswordComplexityRule},
-    probes, Error,
-};
-use bytes::{Buf as _, BytesMut};
+use crate::native::io;
+use crate::native::packets::server::Hello;
+use crate::native::packets::server::Packet;
+use crate::native::packets::server::PasswordComplexityRule;
+use crate::native::probes;
+use crate::native::Error;
+use bytes::Buf as _;
+use bytes::BytesMut;
 
 /// A decoder for packets from the ClickHouse server.
 #[derive(Debug)]
@@ -199,7 +201,9 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::native::packets::server::{Exception, Progress, REVISION};
+    use crate::native::packets::server::Exception;
+    use crate::native::packets::server::Progress;
+    use crate::native::packets::server::REVISION;
     use bytes::BufMut as _;
     use tokio_util::codec::Decoder as _;
 

@@ -6,7 +6,8 @@
 
 //! Packets sent from the server.
 
-use std::{fmt, time::Duration};
+use std::fmt;
+use std::time::Duration;
 
 use crate::native::block::Block;
 

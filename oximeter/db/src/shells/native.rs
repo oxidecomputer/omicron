@@ -10,15 +10,14 @@ use crate::native::{self, block::ValueArray, QueryResult};
 use anyhow::Context as _;
 use crossterm::style::Stylize;
 use display_error_chain::DisplayErrorChain;
-use omicron_common::address::CLICKHOUSE_TCP_PORT;
 use reedline::{DefaultPrompt, DefaultPromptSegment, Reedline, Signal};
 use std::net::{IpAddr, SocketAddr};
 use tabled::{builder::Builder, settings::Style};
 
 /// Run the native SQL shell.
-pub async fn shell(addr: IpAddr) -> anyhow::Result<()> {
+pub async fn shell(addr: IpAddr, port: u16) -> anyhow::Result<()> {
     usdt::register_probes()?;
-    let addr = SocketAddr::new(addr, CLICKHOUSE_TCP_PORT);
+    let addr = SocketAddr::new(addr, port);
     let mut conn = native::Connection::new(addr)
         .await
         .context("Trying to connect to ClickHouse server")?;

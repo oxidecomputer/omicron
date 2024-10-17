@@ -6,10 +6,13 @@
 
 //! Encoding and decoding data blocks.
 
-use crate::native::block::{Block, BlockInfo};
+use crate::native::block::Block;
+use crate::native::block::BlockInfo;
 use crate::native::io;
 use crate::native::Error;
-use bytes::{Buf as _, BufMut as _, BytesMut};
+use bytes::Buf as _;
+use bytes::BufMut as _;
+use bytes::BytesMut;
 use indexmap::IndexMap;
 
 /// Encode a data packet to the server.
@@ -102,7 +105,8 @@ fn encode_block_info(info: BlockInfo, mut dst: &mut BytesMut) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::native::block::{Column, ValueArray};
+    use crate::native::block::Column;
+    use crate::native::block::ValueArray;
 
     // Expected data block.
     //
