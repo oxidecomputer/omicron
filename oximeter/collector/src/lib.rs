@@ -13,7 +13,6 @@ use dropshot::HttpServer;
 use dropshot::HttpServerStarter;
 use internal_dns_types::names::ServiceName;
 use omicron_common::address::get_internal_dns_server_addresses;
-use omicron_common::address::CLICKHOUSE_TCP_PORT;
 use omicron_common::address::DNS_PORT;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::backoff;
@@ -240,42 +239,42 @@ impl Oximeter {
                 .map(|ip| SocketAddr::new(ip, DNS_PORT))
                 .collect();
 
+        // Closure to create a single resolver.
+        let make_resolver =
+            |maybe_address, srv_name: ServiceName| -> BoxedResolver {
+                if let Some(address) = maybe_address {
+                    Box::new(SingleHostResolver::new(address))
+                } else {
+                    Box::new(DnsResolver::new(
+                        service::Name(srv_name.srv_name()),
+                        bootstrap_dns.clone(),
+                        DnsResolverConfig {
+                            hardcoded_ttl: Some(tokio::time::Duration::MAX),
+                            ..Default::default()
+                        },
+                    ))
+                }
+            };
+
         // Closure to create _two_ resolvers, one to resolve the ClickHouse HTTP
         // SRV record, and one for the native TCP record.
         //
         // TODO(cleanup): This should be removed if / when we entirely switch to
         // the native protocol.
         let make_clickhouse_resolvers = || -> (BoxedResolver, BoxedResolver) {
-            if let Some(address) = config.db.address {
-                let http = Box::new(SingleHostResolver::new(address));
-                let native_addr =
-                    SocketAddr::new(address.ip(), CLICKHOUSE_TCP_PORT);
-                let native = Box::new(SingleHostResolver::new(native_addr));
-                (http, native)
-            } else {
-                let http_service = if config.db.replicated {
+            let http_resolver = make_resolver(
+                config.db.address,
+                if config.db.replicated {
                     ServiceName::ClickhouseServer
                 } else {
                     ServiceName::Clickhouse
-                };
-                let http = Box::new(DnsResolver::new(
-                    service::Name(http_service.srv_name()),
-                    bootstrap_dns.clone(),
-                    DnsResolverConfig {
-                        hardcoded_ttl: Some(tokio::time::Duration::MAX),
-                        ..Default::default()
-                    },
-                ));
-                let native = Box::new(DnsResolver::new(
-                    service::Name(ServiceName::ClickhouseNative.srv_name()),
-                    bootstrap_dns.clone(),
-                    DnsResolverConfig {
-                        hardcoded_ttl: Some(tokio::time::Duration::MAX),
-                        ..Default::default()
-                    },
-                ));
-                (http, native)
-            }
+                },
+            );
+            let native_resolver = make_resolver(
+                config.db.native_address,
+                ServiceName::ClickhouseNative,
+            );
+            (http_resolver, native_resolver)
         };
 
         let make_agent = || async {
