@@ -9,6 +9,7 @@ use anyhow::anyhow;
 use camino::Utf8PathBuf;
 use clickhouse_admin_keeper_client::Client as ClickhouseKeeperClient;
 use clickhouse_admin_server_client::Client as ClickhouseServerClient;
+use clickhouse_admin_single_client::Client as ClickhouseSingleClient;
 use clickhouse_admin_types::ClickhouseHost;
 use clickhouse_admin_types::KeeperConfigurableSettings;
 use clickhouse_admin_types::KeeperSettings;
@@ -158,6 +159,36 @@ pub(crate) async fn deploy_nodes(
     );
 
     Ok(())
+}
+
+pub(crate) async fn deploy_single_node(
+    opctx: &OpContext,
+    zones: &BTreeMap<SledUuid, BlueprintZonesConfig>,
+) -> Result<(), anyhow::Error> {
+    if let Some(zone) = zones
+        .values()
+        .flat_map(|zones| {
+            zones.zones.iter().find(|zone| zone.zone_type.is_clickhouse())
+        })
+        .next()
+    {
+        let admin_addr = SocketAddr::V6(SocketAddrV6::new(
+            zone.underlay_ip(),
+            CLICKHOUSE_ADMIN_PORT,
+            0,
+            0,
+        ));
+        let admin_url = format!("http://{admin_addr}");
+        let log = opctx.log.new(slog::o!("admin_url" => admin_url.clone()));
+        let client = ClickhouseSingleClient::new(&admin_url, log.clone());
+        client.init_db().await.map(|_| ()).map_err(|e| {
+            anyhow!(
+                "failed to initialize single-node clickhouse database: {e}",
+            )
+        })
+    } else {
+        Ok(())
+    }
 }
 
 fn server_configs(

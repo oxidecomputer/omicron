@@ -8,6 +8,7 @@ members = [
     "clients/bootstrap-agent-client",
     "clients/clickhouse-admin-keeper-client",
     "clients/clickhouse-admin-server-client",
+    "clients/clickhouse-admin-single-client",
     "clients/cockroach-admin-client",
     "clients/ddm-admin-client",
     "clients/dns-service-client",
@@ -133,6 +134,7 @@ default-members = [
     "clients/bootstrap-agent-client",
     "clients/clickhouse-admin-keeper-client",
     "clients/clickhouse-admin-server-client",
+    "clients/clickhouse-admin-single-client",
     "clients/cockroach-admin-client",
     "clients/ddm-admin-client",
     "clients/dns-service-client",
@@ -323,6 +325,7 @@ clap = { version = "4.5", features = ["cargo", "derive", "env", "wrap_help"] }
 clickhouse-admin-api = { path = "clickhouse-admin/api" }
 clickhouse-admin-keeper-client = { path = "clients/clickhouse-admin-keeper-client" }
 clickhouse-admin-server-client = { path = "clients/clickhouse-admin-server-client" }
+clickhouse-admin-single-client = { path = "clients/clickhouse-admin-single-client" }
 clickhouse-admin-types = { path = "clickhouse-admin/types" }
 clickward = { git = "https://github.com/oxidecomputer/clickward", rev = "a1b342c2558e835d09e6e39a40d3de798a29c2f" }
 cockroach-admin-api = { path = "cockroach-admin/api" }

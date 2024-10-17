@@ -182,6 +182,12 @@ pub async fn realize_blueprint_with_overrides(
         blueprint,
     );
 
+    register_deploy_clickhouse_single_node_step(
+        &engine.for_component(ExecutionComponent::Clickhouse),
+        &opctx,
+        blueprint,
+    );
+
     let reassign_saga_output = register_reassign_sagas_step(
         &engine.for_component(ExecutionComponent::OmicronZones),
         &opctx,
@@ -543,6 +549,27 @@ fn register_deploy_clickhouse_cluster_nodes_step<'a>(
                     .map_err(merge_anyhow_list)?;
                 }
 
+                StepSuccess::new(()).into()
+            },
+        )
+        .register();
+}
+
+fn register_deploy_clickhouse_single_node_step<'a>(
+    registrar: &ComponentRegistrar<'_, 'a>,
+    opctx: &'a OpContext,
+    blueprint: &'a Blueprint,
+) {
+    registrar
+        .new_step(
+            ExecutionStepId::Ensure,
+            "Deploy single-node clickhouse cluster",
+            move |_cx| async move {
+                clickhouse::deploy_single_node(
+                    &opctx,
+                    &blueprint.blueprint_zones,
+                )
+                .await?;
                 StepSuccess::new(()).into()
             },
         )
