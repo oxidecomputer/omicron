@@ -2885,7 +2885,7 @@ mod tests {
         );
         assert_eq!(region_snapshot.deleting, false);
 
-        datastore.terminate().await;
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
