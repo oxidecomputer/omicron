@@ -17,7 +17,7 @@
   </dependency>
 
   <exec_method type='method' name='start'
-    exec='ctrun -l child -o noorphan,regent /opt/oxide/clickhouse-admin-keeper/bin/clickhouse-admin-keeper run --config /var/svc/manifest/site/clickhouse-admin-keeper/config.toml --http-address %{config/http_address} --listen-address %{config/ch_address} --binary-path %{config/ch_binary}  &amp;'
+    exec='ctrun -l child -o noorphan,regent /opt/oxide/omicron-clickhouse-admin/bin/clickhouse-admin-keeper run --config /var/svc/manifest/site/clickhouse-admin-keeper/config.toml --http-address %{config/http_address} --listen-address %{config/ch_address} --binary-path %{config/ch_binary}  &amp;'
     timeout_seconds='0' />
   <exec_method type='method' name='stop' exec=':kill' timeout_seconds='0' />
 
