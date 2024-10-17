@@ -18,7 +18,6 @@ pub use self::dbwrite::TestDbWrite;
 use crate::client::query_summary::QuerySummary;
 use crate::model;
 use crate::native;
-use crate::native::connection::default_pool_policy;
 use crate::query;
 use crate::Error;
 use crate::Metric;
@@ -208,7 +207,7 @@ impl Client {
             native_pool: DebugIgnore(Pool::new(
                 native_resolver,
                 Arc::new(native::connection::Connector),
-                default_pool_policy(),
+                Default::default(),
             )),
             schema,
             request_timeout,
@@ -252,7 +251,7 @@ impl Client {
             native_pool: DebugIgnore(Pool::new(
                 Box::new(SingleHostResolver::new(native_address)),
                 Arc::new(native::connection::Connector),
-                default_pool_policy(),
+                Default::default(),
             )),
             schema,
             request_timeout,
@@ -270,9 +269,11 @@ impl Client {
         }
     }
 
-    /// Ping the ClickHouse server to verify connectivitiy.
+    /// Ping the ClickHouse server to verify connectivity.
     pub async fn ping(&self) -> Result<(), Error> {
-        self.native_pool.claim().await?.ping().await.map_err(Error::Native)?;
+        let mut handle = self.native_pool.claim().await?;
+        trace!(self.log, "acquired native pool claim");
+        handle.ping().await.map_err(Error::Native)?;
         trace!(self.log, "successful ping of ClickHouse server");
         Ok(())
     }

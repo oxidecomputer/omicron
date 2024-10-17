@@ -455,7 +455,7 @@ async fn wait_for_num_points(
     Ok(())
 }
 
-/// Try to ping the server until it is responds.
+/// Try to ping the server until it responds.
 async fn wait_for_ping(log: &Logger, client: &Client) -> anyhow::Result<()> {
     poll::wait_for_condition(
         || async {
@@ -464,8 +464,8 @@ async fn wait_for_ping(log: &Logger, client: &Client) -> anyhow::Result<()> {
                 .await
                 .map_err(|_| poll::CondCheckError::<oximeter_db::Error>::NotYet)
         },
-        &Duration::from_millis(1),
-        &Duration::from_secs(10),
+        &Duration::from_millis(100),
+        &Duration::from_secs(30),
     )
     .await
     .with_context(|| {

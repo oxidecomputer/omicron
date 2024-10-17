@@ -137,6 +137,9 @@ mod probes {
     /// Emitted when we receive a packet from the server, with its kind.
     fn packet__received(kind: &str) {}
 
+    /// Emitted when we learn we've been disconnected from the server.
+    fn disconnected() {}
+
     /// Emitted when we receive a data packet, with details about the size and
     /// data types for each column.
     fn data__packet__received(

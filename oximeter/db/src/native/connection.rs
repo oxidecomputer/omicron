@@ -36,14 +36,6 @@ use uuid::Uuid;
 /// A pool of connections to a ClickHouse server over the native protocol.
 pub type Pool = qorb::pool::Pool<Connection>;
 
-/// The default connection pooling policy for native TCP connections.
-pub fn default_pool_policy() -> qorb::policy::Policy {
-    qorb::policy::Policy {
-        claim_timeout: std::time::Duration::from_secs(10),
-        ..Default::default()
-    }
-}
-
 /// A type for making connections to a ClickHouse server.
 #[derive(Clone, Copy, Debug)]
 pub struct Connector;
@@ -76,7 +68,16 @@ impl backend::Connector for Connector {
         &self,
         conn: &mut Self::Connection,
     ) -> Result<(), QorbError> {
-        conn.cancel().await.map_err(QorbError::from)
+        // We try to cancel an outstanding query. But if there is _no_
+        // outstanding query, we sill want to run the validation check of
+        // pinging the server. That notifies `qorb` if the server is alive in
+        // the case that there was no query to cancel
+        if conn.cancel().await.map_err(QorbError::from)? {
+            Ok(())
+        } else {
+            // No query, so let's run the validation check.
+            self.is_valid(conn).await
+        }
     }
 }
 
@@ -173,18 +174,25 @@ impl Connection {
                 Err(Error::UnexpectedPacket(packet.kind()))
             }
             Some(Err(e)) => Err(e),
-            None => Err(Error::Disconnected),
+            None => {
+                probes::disconnected!(|| ());
+                Err(Error::Disconnected)
+            }
         }
     }
 
     // Cancel a running query, if one exists.
-    async fn cancel(&mut self) -> Result<(), Error> {
+    //
+    // This returns an error if there is a query and we could not cancel it for
+    // some reason. It returns `Ok(true)` if we successfully canceled the query,
+    // or `Ok(false)` if there was no query to cancel at all.
+    async fn cancel(&mut self) -> Result<bool, Error> {
         if self.outstanding_query {
             self.writer.send(ClientPacket::Cancel).await?;
             // Await EOS, throwing everything else away except errors.
             let res = loop {
                 match self.reader.next().await {
-                    Some(Ok(ServerPacket::EndOfStream)) => break Ok(()),
+                    Some(Ok(ServerPacket::EndOfStream)) => break Ok(true),
                     Some(Ok(other_packet)) => {
                         probes::unexpected__server__packet!(
                             || other_packet.kind()
@@ -197,7 +205,7 @@ impl Connection {
             self.outstanding_query = false;
             return res;
         }
-        Ok(())
+        Ok(false)
     }
 
     /// Send a SQL query, possibly with data.
