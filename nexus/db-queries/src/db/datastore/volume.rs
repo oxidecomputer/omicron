@@ -1365,6 +1365,30 @@ impl DataStore {
                         .await?;
 
                     if region_usage_left == 0 {
+                        // There are several factors that mean Nexus does _not_
+                        // have to check here for region snapshots taken of
+                        // read-only regions:
+                        //
+                        // - When a Crucible Volume receives a flush, it is only
+                        //   propagated to the subvolumes of that Volume, not
+                        //   the read-only parent. There's a few reasons for
+                        //   this, but the main one is that a Crucible flush
+                        //   changes the on-disk data, and the directory that
+                        //   the downstairs of a read-only parent is serving out
+                        //   of may be on read-only storage, as is the case when
+                        //   serving out of a .zfs/snapshot/ directory.
+                        //
+                        // - Even if a Crucible flush _did_ propagate to the
+                        //   read-only parent, Nexus should never directly send
+                        //   the snapshot volume to a place where it will be
+                        //   constructed, meaning the read-only regions of the
+                        //   snapshot volume's subvolumes will never themselves
+                        //   receive a flush.
+                        //
+                        // If either of these factors change, then that check is
+                        // required here. The `validate_volume_invariants`
+                        // function will return an error if a read-only region
+                        // has an associated region snapshot during testing.
                         regions.push(region_id);
                     }
                 }
@@ -3608,10 +3632,29 @@ impl DataStore {
                     .await
                     .unwrap();
 
-            paginator = p.found_batch(&haystack, &|r| r.id());
+            paginator = p.found_batch(&haystack, &|v| v.id());
 
             for volume in haystack {
                 Self::validate_volume_has_all_resources(&conn, volume).await?;
+            }
+        }
+
+        let mut paginator = Paginator::new(SQL_BATCH_SIZE);
+
+        while let Some(p) = paginator.next() {
+            use db::schema::region::dsl;
+            let haystack =
+                paginated(dsl::region, dsl::id, &p.current_pagparams())
+                    .select(Region::as_select())
+                    .get_results_async::<Region>(conn)
+                    .await
+                    .unwrap();
+
+            paginator = p.found_batch(&haystack, &|r| r.id());
+
+            for region in haystack {
+                Self::validate_read_only_region_has_no_snapshots(&conn, region)
+                    .await?;
             }
         }
 
@@ -3688,6 +3731,42 @@ impl DataStore {
                     "could not find resource for {read_only_target}"
                 )));
             };
+        }
+
+        Ok(())
+    }
+
+    /// Assert that read-only regions do not have any associated region
+    /// snapshots (see associated comment in `soft_delete_volume_txn`)
+    async fn validate_read_only_region_has_no_snapshots(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        region: Region,
+    ) -> Result<(), diesel::result::Error> {
+        if !region.read_only() {
+            return Ok(());
+        }
+
+        use db::schema::volume_resource_usage::dsl;
+
+        let matching_usage_records: Vec<VolumeResourceUsage> =
+            dsl::volume_resource_usage
+                .filter(
+                    dsl::usage_type.eq(VolumeResourceUsageType::RegionSnapshot),
+                )
+                .filter(dsl::region_snapshot_region_id.eq(region.id()))
+                .select(VolumeResourceUsageRecord::as_select())
+                .get_results_async(conn)
+                .await?
+                .into_iter()
+                .map(|r| r.try_into().unwrap())
+                .collect();
+
+        if !matching_usage_records.is_empty() {
+            return Err(Self::volume_invariant_violated(format!(
+                "read-only region {} has matching usage records: {:?}",
+                region.id(),
+                matching_usage_records,
+            )));
         }
 
         Ok(())
