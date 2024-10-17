@@ -33,7 +33,7 @@ async fn main() -> anyhow::Result<()> {
         use omicron_common::FileKv;
         use slog::Drain;
         let decorator = slog_term::TermDecorator::new().build();
-        let drain = slog_term::FullFormat::new(decorator).build().fuse();
+        let drain = slog_term::CompactFormat::new(decorator).build().fuse();
         let drain = slog_async::Async::new(drain).build().fuse();
         // let drain = slog::LevelFilter::new(drain, log_level).fuse();
         slog::Logger::root(drain.fuse(), slog::o!(FileKv))
