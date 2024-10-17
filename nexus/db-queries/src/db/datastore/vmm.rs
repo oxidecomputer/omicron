@@ -441,12 +441,11 @@ impl DataStore {
 mod tests {
     use super::*;
     use crate::db;
-    use crate::db::datastore::test_utils::datastore_test;
+    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::model::Generation;
     use crate::db::model::Migration;
     use crate::db::model::VmmRuntimeState;
     use crate::db::model::VmmState;
-    use nexus_test_utils::db::test_setup_database;
     use omicron_common::api::internal::nexus;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::InstanceUuid;
@@ -456,8 +455,8 @@ mod tests {
         // Setup
         let logctx =
             dev::test_setup_log("test_vmm_and_migration_update_runtime");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let instance_id = InstanceUuid::from_untyped_uuid(Uuid::new_v4());
         let vmm1 = datastore
@@ -724,8 +723,7 @@ mod tests {
         );
 
         // Clean up.
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }

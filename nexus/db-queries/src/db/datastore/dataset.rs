@@ -235,21 +235,19 @@ impl DataStore {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::db::datastore::test_utils::datastore_test;
+    use crate::db::datastore::pub_test_utils::TestDatabase;
     use nexus_db_model::Generation;
     use nexus_db_model::SledBaseboard;
     use nexus_db_model::SledSystemHardware;
     use nexus_db_model::SledUpdate;
-    use nexus_test_utils::db::test_setup_database;
     use omicron_common::api::internal::shared::DatasetKind as ApiDatasetKind;
     use omicron_test_utils::dev;
 
     #[tokio::test]
     async fn test_insert_if_not_exists() {
         let logctx = dev::test_setup_log("inventory_insert");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
-        let opctx = &opctx;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // There should be no datasets initially.
         assert_eq!(
@@ -383,8 +381,7 @@ mod test {
             expected_datasets,
         );
 
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }

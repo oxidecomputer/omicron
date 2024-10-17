@@ -1059,16 +1059,15 @@ impl DataStore {
 mod test {
     use super::*;
 
-    use crate::db::datastore::test_utils::datastore_test;
+    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::model::RegionReplacement;
-    use nexus_test_utils::db::test_setup_database;
     use omicron_test_utils::dev;
 
     #[tokio::test]
     async fn test_one_replacement_per_volume() {
         let logctx = dev::test_setup_log("test_one_replacement_per_volume");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let dataset_1_id = Uuid::new_v4();
         let region_1_id = Uuid::new_v4();
@@ -1106,8 +1105,7 @@ mod test {
             .await
             .unwrap_err();
 
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -1116,8 +1114,8 @@ mod test {
         let logctx = dev::test_setup_log(
             "test_one_replacement_per_volume_conflict_with_region",
         );
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let dataset_1_id = Uuid::new_v4();
         let region_1_id = Uuid::new_v4();
@@ -1147,16 +1145,15 @@ mod test {
             .await
             .unwrap_err();
 
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
     #[tokio::test]
     async fn count_replacement_steps() {
         let logctx = dev::test_setup_log("count_replacement_steps");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let dataset_id = Uuid::new_v4();
         let region_id = Uuid::new_v4();
@@ -1302,8 +1299,7 @@ mod test {
             1,
         );
 
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -1312,8 +1308,8 @@ mod test {
         let logctx = dev::test_setup_log(
             "unique_region_snapshot_replacement_step_per_volume",
         );
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Ensure that only one non-complete replacement step can be inserted
         // per volume.
@@ -1404,16 +1400,15 @@ mod test {
             .await
             .unwrap();
 
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
     #[tokio::test]
     async fn region_snapshot_replacement_step_gc() {
         let logctx = dev::test_setup_log("region_snapshot_replacement_step_gc");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let mut request = RegionSnapshotReplacement::new(
             Uuid::new_v4(),
@@ -1474,8 +1469,7 @@ mod test {
                 .len(),
         );
 
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -1483,8 +1477,8 @@ mod test {
     async fn region_snapshot_replacement_step_conflict() {
         let logctx =
             dev::test_setup_log("region_snapshot_replacement_step_conflict");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Assert that a region snapshot replacement step cannot be created for
         // a volume that is the "old snapshot volume" for another snapshot
@@ -1525,8 +1519,7 @@ mod test {
             }
         );
 
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -1536,8 +1529,8 @@ mod test {
         let logctx = dev::test_setup_log(
             "region_snapshot_replacement_step_conflict_with_region_replacement",
         );
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Assert that a region snapshot replacement step cannot be performed on
         // a volume if region replacement is occurring for that volume.
@@ -1559,8 +1552,7 @@ mod test {
             .await
             .unwrap_err();
 
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }

@@ -343,11 +343,11 @@ mod test {
     use super::*;
 
     use crate::db;
+    use crate::db::datastore::pub_test_utils::TestDatabase;
     use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
     use diesel::JoinOnDsl;
     use diesel::SelectableHelper;
     use dropshot::PaginationOrder;
-    use nexus_test_utils::db::test_setup_database;
     use omicron_common::api::external::DataPageParams;
     use omicron_test_utils::dev;
     use std::num::NonZeroU32;
@@ -489,9 +489,8 @@ mod test {
     async fn test_paginated_single_column_ascending() {
         let logctx =
             dev::test_setup_log("test_paginated_single_column_ascending");
-        let mut db = test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new_single_host(&logctx.log, &cfg);
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
 
         use schema::test_users::dsl;
 
@@ -516,8 +515,7 @@ mod test {
         let observed = execute_query(&pool, query).await;
         assert_eq!(observed, vec![(2, 2), (3, 3)]);
 
-        pool.terminate().await;
-        let _ = db.cleanup().await;
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -525,9 +523,8 @@ mod test {
     async fn test_paginated_single_column_descending() {
         let logctx =
             dev::test_setup_log("test_paginated_single_column_descending");
-        let mut db = test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new_single_host(&logctx.log, &cfg);
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
 
         use schema::test_users::dsl;
 
@@ -552,8 +549,7 @@ mod test {
         let observed = execute_query(&pool, query).await;
         assert_eq!(observed, vec![(2, 2), (1, 1)]);
 
-        pool.terminate().await;
-        let _ = db.cleanup().await;
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -561,9 +557,8 @@ mod test {
     async fn test_paginated_multicolumn_ascending() {
         let logctx =
             dev::test_setup_log("test_paginated_multicolumn_ascending");
-        let mut db = test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new_single_host(&logctx.log, &cfg);
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
 
         use schema::test_users::dsl;
 
@@ -607,8 +602,7 @@ mod test {
         let observed = execute_query(&pool, query).await;
         assert_eq!(observed, vec![(1, 1), (2, 1), (3, 1), (1, 2), (2, 3)]);
 
-        pool.terminate().await;
-        let _ = db.cleanup().await;
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -616,9 +610,8 @@ mod test {
     async fn test_paginated_multicolumn_descending() {
         let logctx =
             dev::test_setup_log("test_paginated_multicolumn_descending");
-        let mut db = test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new_single_host(&logctx.log, &cfg);
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
 
         use schema::test_users::dsl;
 
@@ -662,8 +655,7 @@ mod test {
         let observed = execute_query(&pool, query).await;
         assert_eq!(observed, vec![(2, 3), (1, 2), (3, 1), (2, 1), (1, 1)]);
 
-        pool.terminate().await;
-        let _ = db.cleanup().await;
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -673,9 +665,8 @@ mod test {
 
         let logctx =
             dev::test_setup_log("test_paginated_multicolumn_works_with_joins");
-        let mut db = test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new_single_host(&logctx.log, &cfg);
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
 
         use schema::test_phone_numbers::dsl as phone_numbers_dsl;
         use schema::test_users::dsl;
@@ -764,8 +755,7 @@ mod test {
             &[((2, 3), 42), ((3, 1), 50), ((3, 1), 51), ((3, 1), 52)]
         );
 
-        pool.terminate().await;
-        let _ = db.cleanup().await;
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 

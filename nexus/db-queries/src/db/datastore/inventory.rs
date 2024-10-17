@@ -2444,7 +2444,7 @@ impl DataStoreInventoryTest for DataStore {
 #[cfg(test)]
 mod test {
     use crate::db::datastore::inventory::DataStoreInventoryTest;
-    use crate::db::datastore::test_utils::datastore_test;
+    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::datastore::DataStoreConnection;
     use crate::db::raw_query_builder::{QueryBuilder, TrustedStr};
     use crate::db::schema;
@@ -2457,7 +2457,6 @@ mod test {
     use gateway_client::types::SpType;
     use nexus_inventory::examples::representative;
     use nexus_inventory::examples::Representative;
-    use nexus_test_utils::db::test_setup_database;
     use nexus_test_utils::db::ALLOW_FULL_TABLE_SCAN_SQL;
     use nexus_types::inventory::BaseboardId;
     use nexus_types::inventory::CabooseWhich;
@@ -2511,8 +2510,8 @@ mod test {
     #[tokio::test]
     async fn test_find_hw_baseboard_id_missing_returns_not_found() {
         let logctx = dev::test_setup_log("inventory_insert");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
         let baseboard_id = BaseboardId {
             serial_number: "some-serial".into(),
             part_number: "some-part".into(),
@@ -2522,8 +2521,7 @@ mod test {
             .await
             .unwrap_err();
         assert!(matches!(err, Error::ObjectNotFound { .. }));
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -2533,8 +2531,8 @@ mod test {
     async fn test_inventory_insert() {
         // Setup
         let logctx = dev::test_setup_log("inventory_insert");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Create an empty collection and write it to the database.
         let builder = nexus_inventory::CollectionBuilder::new("test");
@@ -3016,8 +3014,7 @@ mod test {
         assert_ne!(coll_counts.rot_pages, 0);
 
         // Clean up.
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -3100,8 +3097,8 @@ mod test {
     async fn test_inventory_deletion() {
         // Setup
         let logctx = dev::test_setup_log("inventory_deletion");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Create a representative collection and write it to the database.
         let Representative { builder, .. } = representative();
@@ -3138,8 +3135,7 @@ mod test {
         );
 
         // Clean up.
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -3147,8 +3143,8 @@ mod test {
     async fn test_representative_collection_populates_database() {
         // Setup
         let logctx = dev::test_setup_log("inventory_deletion");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Create a representative collection and write it to the database.
         let Representative { builder, .. } = representative();
@@ -3164,8 +3160,7 @@ mod test {
             .expect("All inv_... tables should be populated by representative collection");
 
         // Clean up.
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }

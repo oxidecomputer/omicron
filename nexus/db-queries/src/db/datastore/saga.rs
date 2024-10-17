@@ -259,12 +259,11 @@ impl DataStore {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::db::datastore::test_utils::datastore_test;
+    use crate::db::datastore::pub_test_utils::TestDatabase;
     use async_bb8_diesel::AsyncConnection;
     use async_bb8_diesel::AsyncSimpleConnection;
     use db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
     use nexus_db_model::{SagaNodeEvent, SecId};
-    use nexus_test_utils::db::test_setup_database;
     use omicron_common::api::external::Generation;
     use omicron_test_utils::dev;
     use rand::seq::SliceRandom;
@@ -276,8 +275,8 @@ mod test {
     async fn test_list_candidate_sagas() {
         // Test setup
         let logctx = dev::test_setup_log("test_list_candidate_sagas");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
         let sec_id = db::SecId(uuid::Uuid::new_v4());
         let mut inserted_sagas = (0..SQL_BATCH_SIZE.get() * 2)
             .map(|_| SagaTestContext::new(sec_id).new_running_db_saga())
@@ -324,8 +323,7 @@ mod test {
         );
 
         // Test cleanup
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -334,8 +332,8 @@ mod test {
     async fn test_list_unfinished_nodes() {
         // Test setup
         let logctx = dev::test_setup_log("test_list_unfinished_nodes");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
         let node_cx = SagaTestContext::new(SecId(Uuid::new_v4()));
 
         // Create a couple batches of saga events
@@ -400,8 +398,7 @@ mod test {
         }
 
         // Test cleanup
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -410,8 +407,8 @@ mod test {
     async fn test_list_no_unfinished_nodes() {
         // Test setup
         let logctx = dev::test_setup_log("test_list_no_unfinished_nodes");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
         let saga_id = steno::SagaId(Uuid::new_v4());
 
         // Test that this returns "no nodes" rather than throwing some "not
@@ -426,8 +423,7 @@ mod test {
         assert_eq!(observed_nodes.len(), 0);
 
         // Test cleanup
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -435,8 +431,8 @@ mod test {
     async fn test_create_event_idempotent() {
         // Test setup
         let logctx = dev::test_setup_log("test_create_event_idempotent");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (_, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let datastore = db.datastore();
         let node_cx = SagaTestContext::new(SecId(Uuid::new_v4()));
 
         // Generate a bunch of events.
@@ -469,8 +465,7 @@ mod test {
         }
 
         // Test cleanup
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -478,8 +473,8 @@ mod test {
     async fn test_update_state_idempotent() {
         // Test setup
         let logctx = dev::test_setup_log("test_create_event_idempotent");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (_, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let datastore = db.datastore();
         let node_cx = SagaTestContext::new(SecId(Uuid::new_v4()));
 
         // Create a saga in the running state.
@@ -522,8 +517,7 @@ mod test {
             .expect("updating state to Done again");
 
         // Test cleanup
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -568,9 +562,8 @@ mod test {
     async fn test_saga_reassignment() {
         // Test setup
         let logctx = dev::test_setup_log("test_saga_reassignment");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (_, datastore) = datastore_test(&logctx, &db).await;
-        let opctx = OpContext::for_tests(logctx.log.clone(), datastore.clone());
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Populate the database with a few different sagas:
         //
@@ -712,8 +705,7 @@ mod test {
         assert_eq!(nreassigned, 0);
 
         // Test cleanup
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }

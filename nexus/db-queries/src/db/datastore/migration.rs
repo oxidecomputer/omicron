@@ -178,11 +178,10 @@ impl DataStore {
 mod tests {
     use super::*;
     use crate::authz;
-    use crate::db::datastore::test_utils::datastore_test;
+    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::lookup::LookupPath;
     use crate::db::model::Instance;
     use nexus_db_model::Project;
-    use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::params;
     use nexus_types::silo::DEFAULT_SILO_ID;
     use omicron_common::api::external::ByteCount;
@@ -277,8 +276,8 @@ mod tests {
     async fn test_migration_query_by_instance() {
         // Setup
         let logctx = dev::test_setup_log("test_migration_query_by_instance");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
         let authz_instance = create_test_instance(&datastore, &opctx).await;
         let instance_id = InstanceUuid::from_untyped_uuid(authz_instance.id());
 
@@ -356,8 +355,7 @@ mod tests {
         );
 
         // Clean up.
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 

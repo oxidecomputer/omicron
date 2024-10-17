@@ -1943,15 +1943,14 @@ impl DataStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::datastore::sled;
-    use crate::db::datastore::test_utils::datastore_test;
     use crate::db::lookup::LookupPath;
     use crate::db::pagination::Paginator;
     use nexus_db_model::InstanceState;
     use nexus_db_model::Project;
     use nexus_db_model::VmmRuntimeState;
     use nexus_db_model::VmmState;
-    use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::params;
     use nexus_types::identity::Asset;
     use nexus_types::silo::DEFAULT_SILO_ID;
@@ -2034,8 +2033,8 @@ mod tests {
     async fn test_instance_updater_acquires_lock() {
         // Setup
         let logctx = dev::test_setup_log("test_instance_updater_acquires_lock");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
         let saga1 = Uuid::new_v4();
         let saga2 = Uuid::new_v4();
         let (authz_project, _) = create_test_project(&datastore, &opctx).await;
@@ -2108,8 +2107,7 @@ mod tests {
         assert!(unlocked, "instance must actually be unlocked");
 
         // Clean up.
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -2118,8 +2116,8 @@ mod tests {
         // Setup
         let logctx =
             dev::test_setup_log("test_instance_updater_lock_is_idempotent");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _) = create_test_project(&datastore, &opctx).await;
         let authz_instance = create_test_instance(
             &datastore,
@@ -2173,8 +2171,7 @@ mod tests {
         assert!(!unlocked, "instance should already have been unlocked");
 
         // Clean up.
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -2184,8 +2181,8 @@ mod tests {
         let logctx = dev::test_setup_log(
             "test_instance_updater_cant_unlock_someone_elses_instance_",
         );
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _) = create_test_project(&datastore, &opctx).await;
         let authz_instance = create_test_instance(
             &datastore,
@@ -2267,8 +2264,7 @@ mod tests {
         assert!(!unlocked);
 
         // Clean up.
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -2277,8 +2273,8 @@ mod tests {
         // Setup
         let logctx =
             dev::test_setup_log("test_unlocking_a_deleted_instance_is_okay");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _) = create_test_project(&datastore, &opctx).await;
         let authz_instance = create_test_instance(
             &datastore,
@@ -2327,8 +2323,7 @@ mod tests {
         .expect("instance should unlock");
 
         // Clean up.
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -2337,8 +2332,8 @@ mod tests {
         // Setup
         let logctx =
             dev::test_setup_log("test_instance_commit_update_is_idempotent");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _) = create_test_project(&datastore, &opctx).await;
         let authz_instance = create_test_instance(
             &datastore,
@@ -2426,8 +2421,7 @@ mod tests {
         assert_eq!(instance.runtime().r#gen, new_runtime.r#gen);
 
         // Clean up.
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -2437,8 +2431,8 @@ mod tests {
         let logctx = dev::test_setup_log(
             "test_instance_update_invalidated_while_locked",
         );
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _) = create_test_project(&datastore, &opctx).await;
         let authz_instance = create_test_instance(
             &datastore,
@@ -2517,8 +2511,7 @@ mod tests {
         assert_eq!(instance.runtime().nexus_state, new_runtime.nexus_state);
 
         // Clean up.
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -2526,8 +2519,8 @@ mod tests {
     async fn test_instance_fetch_all() {
         // Setup
         let logctx = dev::test_setup_log("test_instance_fetch_all");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _) = create_test_project(&datastore, &opctx).await;
         let authz_instance = create_test_instance(
             &datastore,
@@ -2698,8 +2691,7 @@ mod tests {
         );
 
         // Clean up.
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -2707,8 +2699,8 @@ mod tests {
     async fn test_instance_set_migration_ids() {
         // Setup
         let logctx = dev::test_setup_log("test_instance_set_migration_ids");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _) = create_test_project(&datastore, &opctx).await;
         let authz_instance = create_test_instance(
             &datastore,
@@ -2966,8 +2958,7 @@ mod tests {
         assert_eq!(instance.runtime().dst_propolis_id, Some(vmm3.id));
 
         // Clean up.
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -2977,8 +2968,8 @@ mod tests {
         // Setup
         let logctx =
             dev::test_setup_log("test_instance_and_vmm_list_by_sled_agent");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
         let (authz_project, _) = create_test_project(&datastore, &opctx).await;
 
         let mut expected_instances = BTreeSet::new();
@@ -3104,8 +3095,7 @@ mod tests {
         assert_eq!(expected_instances, found_instances);
 
         // Clean up.
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }

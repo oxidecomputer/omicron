@@ -321,10 +321,10 @@ impl DataStore {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::datastore::test::{
         sled_baseboard_for_test, sled_system_hardware_for_test,
     };
-    use crate::db::datastore::test_utils::datastore_test;
     use crate::db::lookup::LookupPath;
     use crate::db::model::{PhysicalDiskKind, Sled, SledUpdate};
     use dropshot::PaginationOrder;
@@ -332,7 +332,6 @@ mod test {
     use nexus_sled_agent_shared::inventory::{
         Baseboard, Inventory, InventoryDisk, OmicronZonesConfig, SledRole,
     };
-    use nexus_test_utils::db::test_setup_database;
     use nexus_types::identity::Asset;
     use omicron_common::api::external::ByteCount;
     use omicron_common::disk::{DiskIdentity, DiskVariant};
@@ -372,8 +371,8 @@ mod test {
     async fn physical_disk_insert_same_uuid_collides() {
         let logctx =
             dev::test_setup_log("physical_disk_insert_same_uuid_collides");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let sled = create_test_sled(&datastore).await;
         let sled_id = sled.id();
@@ -405,8 +404,7 @@ mod test {
             "{err}"
         );
 
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -414,8 +412,8 @@ mod test {
     async fn physical_disk_insert_different_disks() {
         let logctx =
             dev::test_setup_log("physical_disk_insert_different_disks");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let sled = create_test_sled(&datastore).await;
         let sled_id = sled.id();
@@ -455,16 +453,15 @@ mod test {
             .expect("Failed to list physical disks");
         assert_eq!(disks.len(), 2);
 
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
     #[tokio::test]
     async fn physical_disk_deletion_idempotency() {
         let logctx = dev::test_setup_log("physical_disk_deletion_idempotency");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let sled = create_test_sled(&datastore).await;
 
@@ -506,8 +503,7 @@ mod test {
             .await
             .expect("Failed to delete disk");
 
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -521,8 +517,8 @@ mod test {
         let logctx = dev::test_setup_log(
             "physical_disk_insert_delete_reupsert_new_sled",
         );
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let sled_a = create_test_sled(&datastore).await;
         let sled_b = create_test_sled(&datastore).await;
@@ -595,8 +591,7 @@ mod test {
             .expect("Failed to list physical disks");
         assert_eq!(disks.len(), 1);
 
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -611,8 +606,8 @@ mod test {
     async fn physical_disk_insert_reupsert_new_sled() {
         let logctx =
             dev::test_setup_log("physical_disk_insert_reupsert_new_sled");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let sled_a = create_test_sled(&datastore).await;
         let sled_b = create_test_sled(&datastore).await;
@@ -674,8 +669,7 @@ mod test {
             .expect("Failed to list physical disks");
         assert_eq!(disks.len(), 1);
 
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -781,8 +775,8 @@ mod test {
     async fn physical_disk_cannot_insert_to_expunged_sled() {
         let logctx =
             dev::test_setup_log("physical_disk_cannot_insert_to_expunged_sled");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let sled = create_test_sled(&datastore).await;
 
@@ -819,16 +813,15 @@ mod test {
             "Expected string: {expected} within actual error: {actual}",
         );
 
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
     #[tokio::test]
     async fn physical_disk_uninitialized_list() {
         let logctx = dev::test_setup_log("physical_disk_uninitialized_list");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let sled_a = create_test_sled(&datastore).await;
         let sled_b = create_test_sled(&datastore).await;
@@ -1006,8 +999,7 @@ mod test {
             .expect("Failed to list uninitialized disks");
         assert_eq!(uninitialized_disks.len(), 0);
 
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }

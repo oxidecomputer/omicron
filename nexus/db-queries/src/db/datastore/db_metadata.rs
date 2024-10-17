@@ -496,32 +496,26 @@ impl DataStore {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::db::datastore::pub_test_utils::TestDatabase;
     use camino::Utf8Path;
     use camino_tempfile::Utf8TempDir;
     use nexus_db_model::SCHEMA_VERSION;
-    use nexus_test_utils::db as test_db;
     use omicron_test_utils::dev;
-    use std::sync::Arc;
 
     // Confirms that calling the internal "ensure_schema" function can succeed
     // when the database is already at that version.
     #[tokio::test]
     async fn ensure_schema_is_current_version() {
         let logctx = dev::test_setup_log("ensure_schema_is_current_version");
-        let mut crdb = test_db::test_setup_database(&logctx.log).await;
-
-        let cfg = db::Config { url: crdb.pg_config().clone() };
-        let pool = Arc::new(db::Pool::new_single_host(&logctx.log, &cfg));
-        let datastore =
-            Arc::new(DataStore::new(&logctx.log, pool, None).await.unwrap());
+        let db = TestDatabase::new_with_raw_datastore(&logctx.log).await;
+        let datastore = db.datastore();
 
         datastore
             .ensure_schema(&logctx.log, SCHEMA_VERSION, None)
             .await
             .expect("Failed to ensure schema");
 
-        datastore.terminate().await;
-        crdb.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -557,10 +551,8 @@ mod test {
         let logctx =
             dev::test_setup_log("concurrent_nexus_instances_only_move_forward");
         let log = &logctx.log;
-        let mut crdb = test_db::test_setup_database(&logctx.log).await;
-
-        let cfg = db::Config { url: crdb.pg_config().clone() };
-        let pool = Arc::new(db::Pool::new_single_host(&logctx.log, &cfg));
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
         let conn = pool.claim().await.unwrap();
 
         // Mimic the layout of "schema/crdb".
@@ -660,8 +652,7 @@ mod test {
         .collect::<Result<Vec<DataStore>, _>>()
         .expect("Failed to create datastore");
 
-        pool.terminate().await;
-        crdb.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -670,10 +661,8 @@ mod test {
         let logctx =
             dev::test_setup_log("schema_version_subcomponents_save_progress");
         let log = &logctx.log;
-        let mut crdb = test_db::test_setup_database(&logctx.log).await;
-
-        let cfg = db::Config { url: crdb.pg_config().clone() };
-        let pool = Arc::new(db::Pool::new_single_host(&logctx.log, &cfg));
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
         let conn = pool.claim().await.unwrap();
 
         // Mimic the layout of "schema/crdb".
@@ -781,8 +770,7 @@ mod test {
             .expect("Failed to get data");
         assert_eq!(data, "abcd");
 
-        datastore.terminate().await;
-        crdb.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }

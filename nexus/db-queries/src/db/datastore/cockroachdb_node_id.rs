@@ -82,16 +82,15 @@ impl DataStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::datastore::test_utils::datastore_test;
-    use nexus_test_utils::db::test_setup_database;
+    use crate::db::datastore::pub_test_utils::TestDatabase;
     use omicron_test_utils::dev;
 
     #[tokio::test]
     async fn test_cockroachdb_node_id() {
         let logctx =
             dev::test_setup_log("test_service_network_interfaces_list");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Make up a CRDB zone id.
         let crdb_zone_id = OmicronZoneUuid::new_v4();
@@ -160,8 +159,7 @@ mod tests {
             .expect("looked up node ID");
         assert_eq!(node_id.as_deref(), Some(fake_node_id));
 
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }

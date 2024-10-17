@@ -1000,8 +1000,7 @@ impl DataStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::datastore::test_utils::datastore_test;
-    use nexus_test_utils::db::test_setup_database;
+    use crate::db::datastore::pub_test_utils::TestDatabase;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::api::external::Name;
     use omicron_test_utils::dev;
@@ -1011,8 +1010,8 @@ mod tests {
         let logctx = dev::test_setup_log(
             "test_delete_bgp_config_and_announce_set_by_name",
         );
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let config_name: Name = "testconfig47".parse().unwrap();
         let announce_name: Name = "testannounce47".parse().unwrap();
@@ -1069,8 +1068,7 @@ mod tests {
             .await
             .expect("delete announce set by name");
 
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }

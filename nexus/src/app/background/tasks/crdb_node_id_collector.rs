@@ -349,7 +349,7 @@ mod tests {
         let logctx = dev::test_setup_log("test_activate_fails_if_no_blueprint");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) =
-            datastore_test(&logctx, &db, Uuid::new_v4()).await;
+            datastore_test(&logctx.log, &db, Uuid::new_v4()).await;
 
         let (_tx_blueprint, rx_blueprint) = watch::channel(None);
         let mut collector =
@@ -381,7 +381,7 @@ mod tests {
             dev::test_setup_log("test_activate_with_no_unknown_node_ids");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) =
-            datastore_test(&logctx, &db, Uuid::new_v4()).await;
+            datastore_test(&logctx.log, &db, Uuid::new_v4()).await;
 
         let blueprint = BlueprintBuilder::build_empty_with_sleds(
             iter::once(SledUuid::new_v4()),
@@ -446,7 +446,7 @@ mod tests {
         let logctx = dev::test_setup_log("test_activate_with_unknown_node_ids");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) =
-            datastore_test(&logctx, &db, Uuid::new_v4()).await;
+            datastore_test(&logctx.log, &db, Uuid::new_v4()).await;
 
         let blueprint = BlueprintBuilder::build_empty_with_sleds(
             iter::once(SledUuid::new_v4()),

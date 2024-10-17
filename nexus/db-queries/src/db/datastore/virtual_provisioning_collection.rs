@@ -326,12 +326,11 @@ impl DataStore {
 mod test {
     use super::*;
 
-    use crate::db::datastore::test_utils::datastore_test;
+    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::lookup::LookupPath;
     use nexus_db_model::Instance;
     use nexus_db_model::Project;
     use nexus_db_model::SiloQuotasUpdate;
-    use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::params;
     use nexus_types::silo::DEFAULT_SILO_ID;
     use omicron_common::api::external::IdentityMetadataCreateParams;
@@ -469,8 +468,8 @@ mod test {
     #[tokio::test]
     async fn test_instance_create_and_delete() {
         let logctx = dev::test_setup_log("test_instance_create_and_delete");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let test_data = setup_collections(&datastore, &opctx).await;
         let ids = test_data.ids();
@@ -531,8 +530,7 @@ mod test {
             verify_collection_usage(&datastore, &opctx, id, 0, 0, 0).await;
         }
 
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -540,8 +538,8 @@ mod test {
     async fn test_instance_create_and_delete_twice() {
         let logctx =
             dev::test_setup_log("test_instance_create_and_delete_twice");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let test_data = setup_collections(&datastore, &opctx).await;
         let ids = test_data.ids();
@@ -645,16 +643,15 @@ mod test {
             verify_collection_usage(&datastore, &opctx, id, 0, 0, 0).await;
         }
 
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
     #[tokio::test]
     async fn test_storage_create_and_delete() {
         let logctx = dev::test_setup_log("test_storage_create_and_delete");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let test_data = setup_collections(&datastore, &opctx).await;
         let ids = test_data.ids();
@@ -701,8 +698,7 @@ mod test {
             verify_collection_usage(&datastore, &opctx, id, 0, 0, 0).await;
         }
 
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -710,8 +706,8 @@ mod test {
     async fn test_storage_create_and_delete_twice() {
         let logctx =
             dev::test_setup_log("test_storage_create_and_delete_twice");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let test_data = setup_collections(&datastore, &opctx).await;
         let ids = test_data.ids();
@@ -800,8 +796,7 @@ mod test {
             verify_collection_usage(&datastore, &opctx, id, 0, 0, 0).await;
         }
 
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }

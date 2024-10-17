@@ -924,6 +924,7 @@ mod tests {
     use super::NextItem;
     use super::ShiftIndices;
     use crate::db;
+    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::explain::ExplainableAsync as _;
     use crate::db::queries::next_item::NextItemSelfJoined;
     use async_bb8_diesel::AsyncRunQueryDsl;
@@ -937,9 +938,7 @@ mod tests {
     use diesel::Column;
     use diesel::Insertable;
     use diesel::SelectableHelper;
-    use nexus_test_utils::db::test_setup_database;
     use omicron_test_utils::dev;
-    use std::sync::Arc;
     use uuid::Uuid;
 
     table! {
@@ -1102,11 +1101,8 @@ mod tests {
     async fn test_wrapping_next_item_query() {
         // Setup the test database
         let logctx = dev::test_setup_log("test_wrapping_next_item_query");
-        let log = logctx.log.new(o!());
-        let mut db = test_setup_database(&log).await;
-        let cfg = crate::db::Config { url: db.pg_config().clone() };
-        let pool =
-            Arc::new(crate::db::Pool::new_single_host(&logctx.log, &cfg));
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
         let conn = pool.claim().await.unwrap();
 
         // We're going to operate on a separate table, for simplicity.
@@ -1156,8 +1152,7 @@ mod tests {
             .unwrap();
         assert_eq!(it.value, 2);
 
-        pool.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -1166,11 +1161,8 @@ mod tests {
         // Setup the test database
         let logctx =
             dev::test_setup_log("test_next_item_query_is_ordered_by_indices");
-        let log = logctx.log.new(o!());
-        let mut db = test_setup_database(&log).await;
-        let cfg = crate::db::Config { url: db.pg_config().clone() };
-        let pool =
-            Arc::new(crate::db::Pool::new_single_host(&logctx.log, &cfg));
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
         let conn = pool.claim().await.unwrap();
 
         // We're going to operate on a separate table, for simplicity.
@@ -1213,8 +1205,7 @@ mod tests {
                 "The next item query should not have further items to generate",
             );
 
-        pool.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -1257,11 +1248,8 @@ mod tests {
     async fn test_explain_next_item_self_joined() {
         // Setup the test database
         let logctx = dev::test_setup_log("test_explain_next_item_self_joined");
-        let log = logctx.log.new(o!());
-        let mut db = test_setup_database(&log).await;
-        let cfg = crate::db::Config { url: db.pg_config().clone() };
-        let pool =
-            Arc::new(crate::db::Pool::new_single_host(&logctx.log, &cfg));
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
         let conn = pool.claim().await.unwrap();
 
         // We're going to operate on a separate table, for simplicity.
@@ -1276,8 +1264,7 @@ mod tests {
         >::new_scoped(Uuid::nil(), i32::MIN, i32::MAX);
         let out = query.explain_async(&conn).await.unwrap();
         println!("{out}");
-        pool.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -1285,11 +1272,8 @@ mod tests {
     async fn test_next_item_self_joined() {
         // Setup the test database
         let logctx = dev::test_setup_log("test_next_item_self_joined");
-        let log = logctx.log.new(o!());
-        let mut db = test_setup_database(&log).await;
-        let cfg = crate::db::Config { url: db.pg_config().clone() };
-        let pool =
-            Arc::new(crate::db::Pool::new_single_host(&logctx.log, &cfg));
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
         let conn = pool.claim().await.unwrap();
 
         // We're going to operate on a separate table, for simplicity.
@@ -1313,8 +1297,7 @@ mod tests {
             .get_result_async(&*conn)
             .await
             .expect_err("should not be able to insert after the query range is exhausted");
-        pool.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -1323,11 +1306,8 @@ mod tests {
         // Setup the test database
         let logctx =
             dev::test_setup_log("test_next_item_self_joined_with_gaps");
-        let log = logctx.log.new(o!());
-        let mut db = test_setup_database(&log).await;
-        let cfg = crate::db::Config { url: db.pg_config().clone() };
-        let pool =
-            Arc::new(crate::db::Pool::new_single_host(&logctx.log, &cfg));
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
         let conn = pool.claim().await.unwrap();
 
         // We're going to operate on a separate table, for simplicity.
@@ -1368,8 +1348,7 @@ mod tests {
                 "Should have inserted the next skipped value"
             );
         }
-        pool.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -1378,11 +1357,8 @@ mod tests {
     async fn print_next_item_query_forms() {
         // Setup the test database
         let logctx = dev::test_setup_log("print_next_item_query_forms");
-        let log = logctx.log.new(o!());
-        let db = test_setup_database(&log).await;
-        let cfg = crate::db::Config { url: db.pg_config().clone() };
-        let pool =
-            Arc::new(crate::db::Pool::new_single_host(&logctx.log, &cfg));
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
         let conn = pool.claim().await.unwrap();
 
         // We're going to operate on a separate table, for simplicity.

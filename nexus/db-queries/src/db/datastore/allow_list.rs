@@ -83,19 +83,16 @@ impl super::DataStore {
 
 #[cfg(test)]
 mod tests {
-    use crate::db::{
-        datastore::test_utils::datastore_test,
-        fixed_data::allow_list::USER_FACING_SERVICES_ALLOW_LIST_ID,
-    };
-    use nexus_test_utils::db::test_setup_database;
+    use crate::db::datastore::pub_test_utils::TestDatabase;
+    use crate::db::fixed_data::allow_list::USER_FACING_SERVICES_ALLOW_LIST_ID;
     use omicron_common::api::external;
     use omicron_test_utils::dev;
 
     #[tokio::test]
     async fn test_allowed_source_ip_database_ops() {
         let logctx = dev::test_setup_log("test_allowed_source_ip_database_ops");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Should have the default to start with.
         let record = datastore
@@ -203,8 +200,7 @@ mod tests {
             "Updated allowed IPs are incorrect"
         );
 
-        datastore.terminate().await;
-        db.cleanup().await.expect("failed to cleanup database");
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }

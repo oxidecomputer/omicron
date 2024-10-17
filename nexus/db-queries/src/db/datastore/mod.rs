@@ -445,7 +445,7 @@ mod test {
     use crate::authn;
     use crate::authn::SiloAuthnPolicy;
     use crate::authz;
-    use crate::db::datastore::test_utils::datastore_test;
+    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::datastore::test_utils::{
         IneligibleSledKind, IneligibleSleds,
     };
@@ -466,7 +466,6 @@ mod test {
     use nexus_db_fixed_data::silo::DEFAULT_SILO;
     use nexus_db_model::IpAttachState;
     use nexus_db_model::{to_db_typed_uuid, Generation};
-    use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::params;
     use nexus_types::silo::DEFAULT_SILO_ID;
     use omicron_common::api::external::{
@@ -508,8 +507,8 @@ mod test {
     #[tokio::test]
     async fn test_project_creation() {
         let logctx = dev::test_setup_log("test_project_creation");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let authz_silo = opctx.authn.silo_required().unwrap();
 
@@ -538,16 +537,15 @@ mod test {
                 .unwrap();
         assert!(silo_after_project_create.rcgen > silo.rcgen);
 
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
     #[tokio::test]
     async fn test_session_methods() {
         let logctx = dev::test_setup_log("test_session_methods");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
         let authn_opctx = OpContext::for_background(
             logctx.log.new(o!("component" => "TestExternalAuthn")),
             Arc::new(authz::Authz::new(&logctx.log)),
@@ -674,8 +672,7 @@ mod test {
             datastore.session_hard_delete(&opctx, &authz_session).await;
         assert_eq!(delete_again, Ok(()));
 
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -1005,8 +1002,8 @@ mod test {
     /// pool IDs should not matter.
     async fn test_region_allocation_strat_random() {
         let logctx = dev::test_setup_log("test_region_allocation_strat_random");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
         let test_datasets = TestDatasets::create(
             &opctx,
             datastore.clone(),
@@ -1083,8 +1080,7 @@ mod test {
             }
         }
 
-        datastore.terminate().await;
-        let _ = db.cleanup().await;
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -1096,8 +1092,8 @@ mod test {
         let logctx = dev::test_setup_log(
             "test_region_allocation_strat_random_with_distinct_sleds",
         );
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Create a rack with enough sleds for a successful allocation when we
         // require 3 distinct eligible sleds.
@@ -1173,8 +1169,7 @@ mod test {
             }
         }
 
-        datastore.terminate().await;
-        let _ = db.cleanup().await;
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -1185,8 +1180,8 @@ mod test {
         let logctx = dev::test_setup_log(
             "test_region_allocation_strat_random_with_distinct_sleds_fails",
         );
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Create a rack without enough sleds for a successful allocation when
         // we require 3 distinct provisionable sleds.
@@ -1230,8 +1225,7 @@ mod test {
             assert!(matches!(err, Error::InsufficientCapacity { .. }));
         }
 
-        datastore.terminate().await;
-        let _ = db.cleanup().await;
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -1239,8 +1233,8 @@ mod test {
     async fn test_region_allocation_is_idempotent() {
         let logctx =
             dev::test_setup_log("test_region_allocation_is_idempotent");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
         TestDatasets::create(
             &opctx,
             datastore.clone(),
@@ -1297,8 +1291,7 @@ mod test {
             assert_eq!(dataset_and_regions1[i], dataset_and_regions2[i],);
         }
 
-        datastore.terminate().await;
-        let _ = db.cleanup().await;
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -1307,8 +1300,8 @@ mod test {
         let logctx = dev::test_setup_log(
             "test_region_allocation_only_operates_on_zpools_in_inventory",
         );
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Create a sled...
         let sled_id = create_test_sled(&datastore).await;
@@ -1398,8 +1391,7 @@ mod test {
             .await
             .expect("Allocation should have worked after adding zpools to inventory");
 
-        datastore.terminate().await;
-        let _ = db.cleanup().await;
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -1407,8 +1399,8 @@ mod test {
     async fn test_region_allocation_not_enough_zpools() {
         let logctx =
             dev::test_setup_log("test_region_allocation_not_enough_zpools");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Create a sled...
         let sled_id = create_test_sled(&datastore).await;
@@ -1484,8 +1476,7 @@ mod test {
 
         assert!(matches!(err, Error::InsufficientCapacity { .. }));
 
-        datastore.terminate().await;
-        let _ = db.cleanup().await;
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -1494,8 +1485,8 @@ mod test {
         let logctx = dev::test_setup_log(
             "test_region_allocation_only_considers_disks_in_service",
         );
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Create a sled...
         let sled_id = create_test_sled(&datastore).await;
@@ -1603,8 +1594,7 @@ mod test {
             }
         }
 
-        datastore.terminate().await;
-        let _ = db.cleanup().await;
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -1612,8 +1602,8 @@ mod test {
     async fn test_region_allocation_out_of_space_fails() {
         let logctx =
             dev::test_setup_log("test_region_allocation_out_of_space_fails");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         TestDatasets::create(
             &opctx,
@@ -1638,8 +1628,7 @@ mod test {
             .await
             .is_err());
 
-        datastore.terminate().await;
-        let _ = db.cleanup().await;
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -1650,11 +1639,8 @@ mod test {
         use omicron_common::api::external;
         let logctx =
             dev::test_setup_log("test_queries_do_not_require_full_table_scan");
-        let mut db = test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new_single_host(&logctx.log, &cfg);
-        let datastore =
-            DataStore::new(&logctx.log, Arc::new(pool), None).await.unwrap();
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let datastore = db.datastore();
         let conn = datastore.pool_connection_for_tests().await.unwrap();
         let explanation = DataStore::get_allocated_regions_query(Uuid::nil())
             .explain_async(&conn)
@@ -1685,8 +1671,7 @@ mod test {
             explanation,
         );
 
-        datastore.terminate().await;
-        let _ = db.cleanup().await;
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -1696,15 +1681,8 @@ mod test {
         use std::net::Ipv6Addr;
 
         let logctx = dev::test_setup_log("test_sled_ipv6_address_allocation");
-        let mut db = test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = Arc::new(db::Pool::new_single_host(&logctx.log, &cfg));
-        let datastore =
-            Arc::new(DataStore::new(&logctx.log, pool, None).await.unwrap());
-        let opctx = OpContext::for_tests(
-            logctx.log.new(o!()),
-            Arc::clone(&datastore) as Arc<dyn nexus_auth::storage::Storage>,
-        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let rack_id = Uuid::new_v4();
         let addr1 = "[fd00:1de::1]:12345".parse().unwrap();
@@ -1744,16 +1722,15 @@ mod test {
         let expected_ip = Ipv6Addr::new(0xfd00, 0x1df, 0, 0, 0, 0, 1, 0);
         assert_eq!(ip, expected_ip);
 
-        datastore.terminate().await;
-        let _ = db.cleanup().await;
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
     #[tokio::test]
     async fn test_ssh_keys() {
         let logctx = dev::test_setup_log("test_ssh_keys");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Create a new Silo user so that we can lookup their keys.
         let authz_silo = authz::Silo::new(
@@ -1829,16 +1806,15 @@ mod test {
         datastore.ssh_key_delete(&opctx, &authz_ssh_key).await.unwrap();
 
         // Clean up.
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
     #[tokio::test]
     async fn test_rack_initialize_is_idempotent() {
         let logctx = dev::test_setup_log("test_rack_initialize_is_idempotent");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Create a Rack, insert it into the DB.
         let rack = Rack::new(Uuid::new_v4());
@@ -1871,16 +1847,15 @@ mod test {
             .unwrap();
         assert!(result.initialized);
 
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
     #[tokio::test]
     async fn test_table_scan() {
         let logctx = dev::test_setup_log("test_table_scan");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let error = datastore.test_try_table_scan(&opctx).await;
         println!("error from attempted table scan: {:#}", error);
@@ -1898,8 +1873,7 @@ mod test {
         }
 
         // Clean up.
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -1911,8 +1885,8 @@ mod test {
         let logctx = dev::test_setup_log(
             "test_deallocate_external_ip_by_instance_id_is_idempotent",
         );
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
         let conn = datastore.pool_connection_for_tests().await.unwrap();
 
         // Create a few records.
@@ -1966,8 +1940,7 @@ mod test {
             .expect("Failed to delete instance external IPs");
         assert_eq!(count, 0, "Expected to delete zero IPs for the instance");
 
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -1978,8 +1951,8 @@ mod test {
 
         let logctx =
             dev::test_setup_log("test_deallocate_external_ip_is_idempotent");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
         let conn = datastore.pool_connection_for_tests().await.unwrap();
 
         // Create a record.
@@ -2033,8 +2006,7 @@ mod test {
             .await
             .is_err());
 
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -2047,8 +2019,8 @@ mod test {
         use diesel::result::Error::DatabaseError;
 
         let logctx = dev::test_setup_log("test_external_ip_check_constraints");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (_opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let datastore = db.datastore();
         let conn = datastore.pool_connection_for_tests().await.unwrap();
         let now = Utc::now();
 
@@ -2282,8 +2254,7 @@ mod test {
             }
         }
 
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }

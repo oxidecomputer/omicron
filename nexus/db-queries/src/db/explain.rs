@@ -94,10 +94,10 @@ mod test {
     use super::*;
 
     use crate::db;
+    use crate::db::datastore::pub_test_utils::TestDatabase;
     use async_bb8_diesel::AsyncSimpleConnection;
     use diesel::SelectableHelper;
     use expectorate::assert_contents;
-    use nexus_test_utils::db::test_setup_database;
     use omicron_test_utils::dev;
     use uuid::Uuid;
 
@@ -142,9 +142,8 @@ mod test {
     #[tokio::test]
     async fn test_explain_async() {
         let logctx = dev::test_setup_log("test_explain_async");
-        let mut db = test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new_single_host(&logctx.log, &cfg);
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
         let conn = pool.claim().await.unwrap();
 
         create_schema(&pool).await;
@@ -158,8 +157,7 @@ mod test {
             .unwrap();
 
         assert_contents("tests/output/test-explain-output", &explanation);
-        pool.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -168,9 +166,8 @@ mod test {
     #[tokio::test]
     async fn test_explain_full_table_scan() {
         let logctx = dev::test_setup_log("test_explain_full_table_scan");
-        let mut db = test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new_single_host(&logctx.log, &cfg);
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
         let conn = pool.claim().await.unwrap();
 
         create_schema(&pool).await;
@@ -188,8 +185,7 @@ mod test {
             "Expected [{}] to contain 'FULL SCAN'",
             explanation
         );
-        pool.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }

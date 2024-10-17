@@ -729,7 +729,7 @@ impl DataStoreDnsTest for DataStore {
 
 #[cfg(test)]
 mod test {
-    use crate::db::datastore::test_utils::datastore_test;
+    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::datastore::DnsVersionUpdateBuilder;
     use crate::db::DataStore;
     use crate::db::TransactionError;
@@ -744,7 +744,6 @@ mod test {
     use nexus_db_model::DnsZone;
     use nexus_db_model::Generation;
     use nexus_db_model::InitialDnsGroup;
-    use nexus_test_utils::db::test_setup_database;
     use nexus_types::internal_api::params::DnsRecord;
     use nexus_types::internal_api::params::Srv;
     use omicron_common::api::external::Error;
@@ -758,8 +757,8 @@ mod test {
     #[tokio::test]
     async fn test_read_dns_config_uninitialized() {
         let logctx = dev::test_setup_log("test_read_dns_config_uninitialized");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // If we attempt to load the config when literally nothing related to
         // DNS has been initialized, we will get an InternalError because we
@@ -834,8 +833,7 @@ mod test {
                     version for DNS group External, found 0"
         );
 
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -843,8 +841,8 @@ mod test {
     #[tokio::test]
     async fn test_read_dns_config_basic() {
         let logctx = dev::test_setup_log("test_read_dns_config_basic");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Create exactly one zone with no names in it.
         // This will not show up in the read config.
@@ -941,8 +939,7 @@ mod test {
             .expect("failed to read DNS config with batch size 1");
         assert_eq!(dns_config_batch_1, dns_config);
 
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -950,8 +947,8 @@ mod test {
     #[tokio::test]
     async fn test_read_dns_config_complex() {
         let logctx = dev::test_setup_log("test_read_dns_config_complex");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
         let batch_size = NonZeroU32::new(10).unwrap();
         let now = Utc::now();
         let log = &logctx.log;
@@ -1312,8 +1309,7 @@ mod test {
             HashMap::from([("n1".to_string(), records_r2.clone())])
         );
 
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -1321,8 +1317,8 @@ mod test {
     #[tokio::test]
     async fn test_dns_uniqueness() {
         let logctx = dev::test_setup_log("test_dns_uniqueness");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (_opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let datastore = db.datastore();
         let now = Utc::now();
 
         // There cannot be two DNS zones in the same group with the same name.
@@ -1418,8 +1414,7 @@ mod test {
                 .contains("duplicate key value violates unique constraint"));
         }
 
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -1495,8 +1490,8 @@ mod test {
     #[tokio::test]
     async fn test_dns_update_incremental() {
         let logctx = dev::test_setup_log("test_dns_update_incremental");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
         let now = Utc::now();
 
         // Create three DNS zones for testing:
@@ -1866,16 +1861,15 @@ mod test {
         assert_eq!(dns_config.zones[1].zone_name, "oxide2.test");
         assert_eq!(dns_config.zones[0].records, dns_config.zones[1].records,);
 
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
     #[tokio::test]
     async fn test_dns_update_from_version() {
         let logctx = dev::test_setup_log("test_dns_update_from_version");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // The guts of `dns_update_from_version()` are shared with
         // `dns_update_incremental()`.  The main cases worth testing here are
@@ -1980,8 +1974,7 @@ mod test {
         assert!(!records.contains_key("krabappel"));
         assert!(records.contains_key("hoover"));
 
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }
