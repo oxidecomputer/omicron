@@ -363,8 +363,7 @@ pub async fn run_standalone_server(
     let dns_config =
         dns_config_builder.build_full_config_for_initial_generation();
     dns.initialize_with_config(&log, &dns_config).await?;
-    let internal_dns_version = Generation::try_from(dns_config.generation)
-        .expect("invalid internal dns version");
+    let internal_dns_version = dns_config.generation;
 
     let all_u2_zpools = server.sled_agent.get_zpools().await;
     let get_random_zpool = || {

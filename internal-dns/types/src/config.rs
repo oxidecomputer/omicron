@@ -569,7 +569,7 @@ impl DnsConfigBuilder {
     pub fn build_full_config_for_initial_generation(self) -> DnsConfigParams {
         let zone = self.build_zone();
         DnsConfigParams {
-            generation: u64::from(Generation::new()),
+            generation: Generation::new(),
             time_created: chrono::Utc::now(),
             zones: vec![zone],
         }
@@ -578,7 +578,7 @@ impl DnsConfigBuilder {
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct DnsConfigParams {
-    pub generation: u64,
+    pub generation: Generation,
     pub time_created: chrono::DateTime<chrono::Utc>,
     pub zones: Vec<DnsConfigZone>,
 }
@@ -603,7 +603,7 @@ impl DnsConfigParams {
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct DnsConfig {
-    pub generation: u64,
+    pub generation: Generation,
     pub time_created: chrono::DateTime<chrono::Utc>,
     pub time_applied: chrono::DateTime<chrono::Utc>,
     pub zones: Vec<DnsConfigZone>,
@@ -685,6 +685,7 @@ pub struct Srv {
 mod test {
     use super::{DnsConfigBuilder, Host, ServiceName};
     use crate::{config::Zone, names::DNS_ZONE};
+    use omicron_common::api::external::Generation;
     use omicron_uuid_kinds::{OmicronZoneUuid, SledUuid};
     use std::{collections::BTreeMap, io::Write, net::Ipv6Addr};
 
@@ -835,7 +836,7 @@ mod test {
             ("non_trivial", builder_non_trivial),
         ] {
             let config = builder.build_full_config_for_initial_generation();
-            assert_eq!(config.generation, 1);
+            assert_eq!(config.generation, Generation::from(1));
             assert_eq!(config.zones.len(), 1);
             assert_eq!(config.zones[0].zone_name, DNS_ZONE);
             write!(&mut output, "builder: {:?}\n", label).unwrap();

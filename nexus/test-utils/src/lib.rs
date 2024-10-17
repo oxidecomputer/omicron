@@ -824,10 +824,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
                 blueprint_disks: BTreeMap::new(),
                 sled_state,
                 parent_blueprint_id: None,
-                internal_dns_version: dns_config
-                    .generation
-                    .try_into()
-                    .expect("bad internal DNS generation"),
+                internal_dns_version: dns_config.generation,
                 external_dns_version: Generation::new(),
                 cockroachdb_fingerprint: String::new(),
                 cockroachdb_setting_preserve_downgrade:
