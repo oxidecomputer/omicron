@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS omicron.public.volume_resource_usage (
     OR
      (
       (usage_type = 'region_snapshot') AND
-      (region_id IS NOT NULL) AND
+      (region_id IS NULL) AND
       (
        region_snapshot_dataset_id IS NOT NULL AND
        region_snapshot_region_id IS NOT NULL AND
