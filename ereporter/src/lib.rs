@@ -11,6 +11,7 @@ mod buffer;
 pub mod proxy;
 pub mod registry;
 pub mod server;
+pub use self::registry::ReporterRegistry;
 
 #[must_use = "an `EreportBuilder` does nothing unless `submit()` is called"]
 pub struct EreportBuilder {
@@ -61,7 +62,7 @@ pub struct Reporter(pub(crate) mpsc::Sender<EreportData>);
 impl Reporter {
     /// Begin constructing a new ereport, returning an [`EreportBuilder`].
     pub async fn report(
-        &mut self,
+        &self,
         class: impl ToString,
     ) -> Result<EreportBuilder, ()> {
         let time_created = Utc::now();

@@ -19,6 +19,10 @@ progenitor::generate_api!(
     post_hook = (|log: &slog::Logger, result: &Result<_, _>| {
         slog::debug!(log, "client response"; "result" => ?result);
     }),
+
+    replace = {
+        Generation = omicron_common::api::external::Generation,
+    },
 );
 
 impl omicron_common::api::external::ClientError for types::Error {

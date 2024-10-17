@@ -133,8 +133,11 @@ impl Ingester {
 
     async fn collect(&mut self) -> anyhow::Result<()> {
         slog::debug!(self.log, "collecting ereports...");
+        // TODO(eliza): perhaps we should try to do every reporter in parallel
+        // at some point?
         for (id, reporter) in &self.reporters {
             slog::debug!(self.log, "collecting ereports from {id}");
+            let mut saw_reports = false;
             for (addr, client) in &reporter.clients {
                 let reports = match client.ereports_list(id, None, None).await {
                     Ok(e) => e.into_inner(),
@@ -154,40 +157,41 @@ impl Ingester {
                     reporter_id,
                 } in reports.items
                 {
+                    saw_reports = true;
                     match value {
                         ereporter_client::types::EntryKind::Ereport(report) => {
+                            let path =
+                                reporter.path.join(&format!("{seq}.json"));
+                            if path.exists() {
+                                slog::info!(
+                                    self.log,
+                                    "we are already familiar with ereport \
+                                     {seq} from {reporter_id}, ignoring it";
+                                    "reporter_id" => %reporter_id,
+                                    "seq" => %seq,
+                                );
+                                continue;
+                            }
+
                             slog::info!(
                                 &self.log,
-                                "ereport from {reporter_id}";
+                                "ereport {seq} from {reporter_id}: {report:#?}";
                                 "reporter_id" => %reporter_id,
                                 "seq" => %seq,
-                                "report" => ?report,
                             );
-                            match tokio::fs::File::create_new(
-                                reporter.path.join(&format!("{seq}.json")),
-                            )
-                            .await
-                            {
-                                Err(error) => {
-                                    slog::error!(self.log,
-                                        "couldn't create new file for ereport, may already have been ingested!";
-                                        "reporter_id" => %reporter_id,
-                                        "seq" => %seq,
-                                        "error" => %error,
-                                    );
-                                    continue;
-                                }
-                                Ok(mut f) => {
-                                    let bytes = serde_json::to_vec_pretty(&report)
-                                    .with_context(|| format!("failed to serialize ereport {seq} from {reporter_id}"))?;
+                            let mut f = tokio::fs::File::create_new(&path)
+                                .await
+                                .with_context(|| {
+                                    format!("failed to create file {path}")
+                                })?;
 
-                                    f
-                                    .write_all(&bytes
-                                    )
-                                    .await
-                                    .with_context(|| format!("failed to write ereport {seq} from {reporter_id}"))?;
-                                }
-                            }
+                            let bytes = serde_json::to_vec_pretty(&report)
+                                .with_context(|| format!("failed to serialize ereport {seq} from {reporter_id}"))?;
+
+                            f
+                                .write_all(&bytes)
+                                .await
+                                .with_context(|| format!("failed to write ereport {seq} from {reporter_id}"))?;
                         }
 
                         ereporter_client::types::EntryKind::DataLoss {
@@ -198,6 +202,40 @@ impl Ingester {
                                 "reporter_id" => %reporter_id,
                                 "seq" => %seq,
                                 "dropped" => ?dropped,
+                            );
+                        }
+                    }
+                }
+            }
+
+            if saw_reports {
+                // All ereports ingested for this reporter ID. Now, ack them up to the
+                // latest seq.
+                let seq = latest_seq(&reporter.path)
+                    .await
+                    .with_context(|| {
+                        format!("couldn't determine latest seq for {id}")
+                    })?
+                    .unwrap_or_else(|| Generation::new());
+                for (addr, client) in &reporter.clients {
+                    match client.ereports_acknowledge(id, &seq).await {
+                        Ok(_) => {
+                            slog::info!(
+                                &self.log,
+                                "acked reports";
+                                "reporter_id" => %id,
+                                "reporter_addr" => ?addr,
+                                "seq" => %seq,
+                            );
+                        }
+                        Err(e) => {
+                            slog::warn!(
+                                &self.log,
+                                "failed to ack reports";
+                                "reporter_id" => %id,
+                                "reporter_addr" => ?addr,
+                                "seq" => %seq,
+                                "error" => %e,
                             );
                         }
                     }
@@ -222,7 +260,12 @@ impl Ingester {
                 reporter.path
             )
         })?;
-        let seq = recover_seq(&reporter.path).await?;
+        let seq = latest_seq(&reporter.path)
+            .await?
+            // If there is an existing sequence number for this reporter, return
+            // the next one; otherwise, start at sequence 0.
+            .map(|seq| seq.next())
+            .unwrap_or_else(|| Generation::new());
         match reporter.clients.entry(addr) {
             Entry::Occupied(_) => {
                 slog::info!(
@@ -263,11 +306,11 @@ impl Ingester {
     }
 }
 
-async fn recover_seq(path: &Utf8PathBuf) -> anyhow::Result<Generation> {
+async fn latest_seq(path: &Utf8PathBuf) -> anyhow::Result<Option<Generation>> {
     let mut dir = tokio::fs::read_dir(path)
         .await
         .with_context(|| format!("failed to read {path}"))?;
-    let mut max = 0;
+    let mut max = None;
     while let Some(entry) = dir
         .next_entry()
         .await
@@ -281,7 +324,7 @@ async fn recover_seq(path: &Utf8PathBuf) -> anyhow::Result<Generation> {
         }
         if let Some(file) = path.file_stem() {
             match file.parse::<u32>() {
-                Ok(seq) => max = std::cmp::max(seq, max),
+                Ok(seq) => max = std::cmp::max(Some(seq), max),
                 Err(_) => {
                     continue;
                 }
@@ -289,7 +332,7 @@ async fn recover_seq(path: &Utf8PathBuf) -> anyhow::Result<Generation> {
         }
     }
 
-    Ok(Generation::from_u32(max))
+    Ok(max.map(Generation::from_u32))
 }
 
 #[derive(Clone)]

@@ -10,7 +10,7 @@ struct Args {
     log_level: slog::Level,
 
     #[clap(flatten)]
-    ingester: ereport_tester_ingester::IngesterConfig,
+    ingester: ereport_test_utils::IngesterConfig,
 }
 
 #[tokio::main]

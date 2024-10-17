@@ -2718,13 +2718,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5443807d6dff69373d433ab9ef5378ad8df50ca6298caf15de6e52e24aaf54d5"
 
 [[package]]
-name = "ereport-tester-ingester"
+name = "ereport-test-utils"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "camino",
  "clap",
  "dropshot",
+ "ereporter",
  "ereporter-client",
  "nexus-types",
  "omicron-common",
@@ -2745,6 +2746,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "clap",
  "dropshot",
  "ereporter-api",
  "internal-dns",
@@ -2753,8 +2755,10 @@ dependencies = [
  "omicron-workspace-hack",
  "serde",
  "slog",
+ "slog-async",
  "slog-dtrace",
  "slog-error-chain",
+ "slog-term",
  "thiserror",
  "tokio",
  "uuid",

@@ -20,5 +20,12 @@ slog-dtrace.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 
+[dev-dependencies]
+clap.workspace = true
+slog.workspace = true
+slog-async.workspace = true
+slog-term.workspace = true
+tokio = { workspace = true, features = ["sync", "macros", "full"] }
+
 [lints]
 workspace = true

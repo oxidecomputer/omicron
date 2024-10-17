@@ -1,5 +1,5 @@
 [package]
-name = "ereport-tester-ingester"
+name = "ereport-test-utils"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,6 +8,7 @@ anyhow.workspace = true
 camino.workspace = true
 clap.workspace = true
 dropshot.workspace = true
+ereporter.workspace = true
 ereporter-client.workspace = true
 nexus-types.workspace = true
 omicron-common.workspace = true
@@ -19,7 +20,7 @@ serde_json.workspace = true
 slog.workspace = true
 slog-async.workspace = true
 slog-term.workspace = true
-tokio = { workspace = true, features = ["sync"] }
+tokio = { workspace = true, features = ["sync", "macros", "full"] }
 
 [lints]
 workspace = true
