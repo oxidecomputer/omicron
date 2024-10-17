@@ -30,6 +30,8 @@ progenitor::generate_api!(
         // (e.g., diff'ing) that's implemented on our local type.
         Blueprint = nexus_types::deployment::Blueprint,
         Certificate = omicron_common::api::internal::nexus::Certificate,
+        ClickhouseMode = nexus_types::deployment::ClickhouseMode,
+        ClickhousePolicy = nexus_types::deployment::ClickhousePolicy,
         DatasetKind = omicron_common::api::internal::shared::DatasetKind,
         DnsConfigParams = nexus_types::internal_api::params::DnsConfigParams,
         DnsConfigZone = nexus_types::internal_api::params::DnsConfigZone,

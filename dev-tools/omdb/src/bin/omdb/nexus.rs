@@ -22,6 +22,7 @@ use clap::Subcommand;
 use clap::ValueEnum;
 use futures::future::try_join;
 use futures::TryStreamExt;
+use http::StatusCode;
 use internal_dns_types::names::ServiceName;
 use itertools::Itertools;
 use nexus_client::types::ActivationReason;
@@ -101,6 +102,8 @@ enum NexusCommands {
     BackgroundTasks(BackgroundTasksArgs),
     /// interact with blueprints
     Blueprints(BlueprintsArgs),
+    /// Interact with clickhouse policy
+    ClickhousePolicy(ClickhousePolicyArgs),
     /// view sagas, create and complete demo sagas
     Sagas(SagasArgs),
     /// interact with sleds
@@ -300,6 +303,42 @@ struct BlueprintImportArgs {
 }
 
 #[derive(Debug, Args)]
+struct ClickhousePolicyArgs {
+    #[command(subcommand)]
+    command: ClickhousePolicyCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum ClickhousePolicyCommands {
+    /// Get the current policy
+    Get,
+    /// Set the new policy
+    Set(ClickhousePolicySetArgs),
+}
+
+#[derive(Debug, Args)]
+struct ClickhousePolicySetArgs {
+    mode: ClickhousePolicyMode,
+
+    /// The number of servers in a clickhouse cluster
+    #[arg(default_value_t = 3)]
+    target_servers: usize,
+    /// The number of keepers in a clickhouse cluster
+    #[arg(default_value_t = 5)]
+    target_keepers: usize,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum ClickhousePolicyMode {
+    /// Run only a single node clickhouse instance
+    SingleNodeOnly,
+    // Run only a clickhouse cluster
+    ClusterOnly,
+    // Run both single-node and clustered clickhouse deployments
+    Both,
+}
+
+#[derive(Debug, Args)]
 struct SagasArgs {
     #[command(subcommand)]
     command: SagasCommands,
@@ -493,6 +532,18 @@ impl NexusArgs {
                 let token = omdb.check_allow_destructive()?;
                 cmd_nexus_blueprints_import(&client, token, args).await
             }
+
+            NexusCommands::ClickhousePolicy(ClickhousePolicyArgs {
+                command,
+            }) => match command {
+                ClickhousePolicyCommands::Get => {
+                    cmd_nexus_clickhouse_policy_get(&client).await
+                }
+                ClickhousePolicyCommands::Set(args) => {
+                    let token = omdb.check_allow_destructive()?;
+                    cmd_nexus_clickhouse_policy_set(&client, args, token).await
+                }
+            },
 
             NexusCommands::Sagas(SagasArgs { command }) => {
                 if self.nexus_internal_url.is_none() {
@@ -2374,6 +2425,38 @@ async fn cmd_nexus_blueprints_import(
         .with_context(|| format!("upload {:?}", input_path))?;
     eprintln!("uploaded new blueprint {}", blueprint.id);
     Ok(())
+}
+
+async fn cmd_nexus_clickhouse_policy_get(
+    client: &nexus_client::Client,
+) -> Result<(), anyhow::Error> {
+    let res = client.clickhouse_policy_get().await;
+
+    match res {
+        Err(err) => {
+            if err.status() == Some(StatusCode::NOT_FOUND) {
+                println!(
+                    "No clickhouse policy: \
+                    Defaulting to single-node deployment"
+                );
+            } else {
+                eprintln!("error: {:#}", err);
+            }
+        }
+        Ok(policy) => {
+            println!("{policy:#?}");
+        }
+    }
+
+    Ok(())
+}
+
+async fn cmd_nexus_clickhouse_policy_set(
+    client: &nexus_client::Client,
+    args: &ClickhousePolicySetArgs,
+    _destruction_token: DestructiveOperationToken,
+) -> Result<(), anyhow::Error> {
+    todo!()
 }
 
 /// Runs `omdb nexus sagas list`

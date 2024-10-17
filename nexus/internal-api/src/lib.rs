@@ -539,7 +539,7 @@ pub trait NexusInternalApi {
      }]
     async fn clickhouse_policy_get(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Option<ClickhousePolicy>>, HttpError>;
+    ) -> Result<HttpResponseOk<ClickhousePolicy>, HttpError>;
 
     /// Set the new clickhouse policy
     #[endpoint {

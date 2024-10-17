@@ -943,15 +943,20 @@ impl NexusInternalApi for NexusInternalApiImpl {
 
     async fn clickhouse_policy_get(
         rqctx: RequestContext<Self::Context>,
-    ) -> Result<HttpResponseOk<Option<ClickhousePolicy>>, HttpError> {
+    ) -> Result<HttpResponseOk<ClickhousePolicy>, HttpError> {
         let apictx = &rqctx.context().context;
         let handler = async {
             let nexus = &apictx.nexus;
             let opctx =
                 crate::context::op_context_for_internal_api(&rqctx).await;
-            Ok(HttpResponseOk(
-                nexus.datastore().clickhouse_policy_get_latest(&opctx).await?,
-            ))
+            match nexus.datastore().clickhouse_policy_get_latest(&opctx).await?
+            {
+                Some(policy) => Ok(HttpResponseOk(policy)),
+                None => Err(HttpError::for_not_found(
+                    None,
+                    "No clickhouse policy in database".into(),
+                )),
+            }
         };
         apictx
             .internal_latencies
