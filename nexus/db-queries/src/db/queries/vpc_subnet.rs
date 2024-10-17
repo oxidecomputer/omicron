@@ -419,10 +419,10 @@ mod test {
             overlapping_ipv4_block_longer,
             other_ipv6_block,
         );
-        let err = db_datastore
-            .vpc_create_subnet_raw(new_row)
-            .await
-            .expect_err("Should not be able to insert VPC Subnet with overlapping IPv4 range {overlapping_ipv4_block_longer}");
+        let err = db_datastore.vpc_create_subnet_raw(new_row).await.expect_err(
+            "Should not be able to insert VPC Subnet with \
+                overlapping IPv4 range {overlapping_ipv4_block_longer}",
+        );
         assert_eq!(
             err,
             InsertVpcSubnetError::OverlappingIpRange(
@@ -437,10 +437,10 @@ mod test {
             overlapping_ipv4_block_shorter,
             other_ipv6_block,
         );
-        let err = db_datastore
-            .vpc_create_subnet_raw(new_row)
-            .await
-            .expect_err("Should not be able to insert VPC Subnet with overlapping IPv4 range {overlapping_ipv4_block_shorter}");
+        let err = db_datastore.vpc_create_subnet_raw(new_row).await.expect_err(
+            "Should not be able to insert VPC Subnet with \
+                overlapping IPv4 range {overlapping_ipv4_block_shorter}",
+        );
         assert_eq!(
             err,
             InsertVpcSubnetError::OverlappingIpRange(
@@ -455,10 +455,10 @@ mod test {
             other_ipv4_block,
             overlapping_ipv6_block_longer,
         );
-        let err = db_datastore
-            .vpc_create_subnet_raw(new_row)
-            .await
-            .expect_err("Should not be able to insert VPC Subnet with overlapping IPv6 range {overlapping_ipv6_block_longer}");
+        let err = db_datastore.vpc_create_subnet_raw(new_row).await.expect_err(
+            "Should not be able to insert VPC Subnet with \
+                overlapping IPv6 range {overlapping_ipv6_block_longer}",
+        );
         assert_eq!(
             err,
             InsertVpcSubnetError::OverlappingIpRange(
@@ -473,10 +473,10 @@ mod test {
             other_ipv4_block,
             overlapping_ipv6_block_shorter,
         );
-        let err = db_datastore
-            .vpc_create_subnet_raw(new_row)
-            .await
-            .expect_err("Should not be able to insert VPC Subnet with overlapping IPv6 range {overlapping_ipv6_block_shorter}");
+        let err = db_datastore.vpc_create_subnet_raw(new_row).await.expect_err(
+            "Should not be able to insert VPC Subnet with \
+                overlapping IPv6 range {overlapping_ipv6_block_shorter}",
+        );
         assert_eq!(
             err,
             InsertVpcSubnetError::OverlappingIpRange(
@@ -494,10 +494,10 @@ mod test {
             other_ipv4_block,
             ipv6_block,
         );
-        let err = db_datastore
-            .vpc_create_subnet_raw(new_row)
-            .await
-            .expect_err("Should not be able to insert VPC Subnet with overlapping IPv6 range");
+        let err = db_datastore.vpc_create_subnet_raw(new_row).await.expect_err(
+            "Should not be able to insert VPC Subnet with \
+                overlapping IPv6 range",
+        );
         assert_eq!(
             err,
             InsertVpcSubnetError::OverlappingIpRange(ipv6_block.into()),
