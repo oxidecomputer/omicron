@@ -30,6 +30,7 @@ use omicron_common::update::ArtifactKind;
 use slog::info;
 use slog::Logger;
 use std::collections::btree_map;
+use std::collections::hash_map;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::io;
@@ -80,11 +81,19 @@ pub struct UpdatePlan {
 // Used to represent the information extracted from signed RoT images. This
 // is used when going from `UpdatePlanBuilder` -> `UpdatePlan` to check
 // the versions on the RoT images and also to generate the map of
-// ArtifactId -> Sign hashes for checking artifacts
+// ArtifactId -> Sign hashes for checking artifacts.
 #[derive(Debug, Eq, Hash, PartialEq)]
 struct RotSignData {
     kind: KnownArtifactKind,
     sign: Vec<u8>,
+}
+
+// Represents the map end used with `RotSignData`. The `bord` is extracted
+// from the associated artifact ID and is used to perform future checks
+#[derive(Debug, Eq, Hash, PartialEq)]
+struct RotSignTarget {
+    id: ArtifactId,
+    bord: String,
 }
 
 /// `UpdatePlanBuilder` mirrors all the fields of `UpdatePlan`, but they're all
@@ -133,7 +142,7 @@ pub struct UpdatePlanBuilder<'a> {
 
     // map for RoT signing information, used in `ArtifactsWithPlan`
     // Note this covers the RoT bootloader which are also signed
-    rot_by_sign: HashMap<RotSignData, Vec<ArtifactId>>,
+    rot_by_sign: HashMap<RotSignData, Vec<RotSignTarget>>,
 
     // extra fields we use to build the plan
     extracted_artifacts: ExtractedArtifacts,
@@ -276,8 +285,19 @@ impl<'a> UpdatePlanBuilder<'a> {
             data.extend_from_slice(&chunk);
         }
 
-        let (artifact_id, board) =
-            read_hubris_board_from_archive(artifact_id, data.clone())?;
+        let (artifact_id, caboose) =
+            read_hubris_caboose_from_archive_without_sign(
+                artifact_id,
+                data.clone(),
+            )?;
+
+        // We may include some hubris images in the TUF repo not intended
+        // to be consumed by wicket. Just skip those.
+        if caboose.name != caboose.board {
+            return Ok(());
+        }
+
+        let board = Board(caboose.board);
 
         let slot = match sp_map.entry(board) {
             btree_map::Entry::Vacant(slot) => slot,
@@ -357,13 +377,25 @@ impl<'a> UpdatePlanBuilder<'a> {
             data.extend_from_slice(&chunk);
         }
 
-        let (artifact_id, bootloader_sign) =
-            read_hubris_sign_from_archive(artifact_id, data.clone())?;
+        let (artifact_id, bootloader_caboose) =
+            read_hubris_caboose_from_archive(artifact_id, data.clone())?;
 
-        self.rot_by_sign
-            .entry(RotSignData { kind: artifact_kind, sign: bootloader_sign })
-            .or_default()
-            .push(artifact_id.clone());
+        // We restrict the bootloader to exactly one entry per (kind, signature)
+        match self.rot_by_sign.entry(RotSignData {
+            kind: artifact_kind,
+            sign: bootloader_caboose.sign.expect("required SIGN in caboose"),
+        }) {
+            hash_map::Entry::Occupied(_) => {
+                return Err(RepositoryError::DuplicateBoardEntry {
+                    board: bootloader_caboose.board,
+                    kind: artifact_kind,
+                });
+            }
+            hash_map::Entry::Vacant(slot) => slot.insert(vec![RotSignTarget {
+                id: artifact_id.clone(),
+                bord: bootloader_caboose.board,
+            }]),
+        };
 
         let artifact_hash_id =
             ArtifactHashId { kind: artifact_kind.into(), hash: artifact_hash };
@@ -453,13 +485,8 @@ impl<'a> UpdatePlanBuilder<'a> {
                 error,
             })?;
 
-        let (artifact_id, image_a_sign) =
-            read_hubris_sign_from_archive(artifact_id, image_a)?;
-
-        self.rot_by_sign
-            .entry(RotSignData { kind: artifact_kind, sign: image_a_sign })
-            .or_default()
-            .push(artifact_id.clone());
+        let (artifact_id, image_a_caboose) =
+            read_hubris_caboose_from_archive(artifact_id, image_a)?;
 
         let image_b_stream = rot_b_data
             .reader_stream()
@@ -477,13 +504,56 @@ impl<'a> UpdatePlanBuilder<'a> {
                 error,
             })?;
 
-        let (artifact_id, image_b_sign) =
-            read_hubris_sign_from_archive(artifact_id, image_b)?;
+        let (artifact_id, image_b_caboose) =
+            read_hubris_caboose_from_archive(artifact_id, image_b)?;
 
-        self.rot_by_sign
-            .entry(RotSignData { kind: artifact_kind, sign: image_b_sign })
-            .or_default()
-            .push(artifact_id.clone());
+        if image_a_caboose.board != image_b_caboose.board {
+            return Err(RepositoryError::CabooseMismatch {
+                a: image_a_caboose.board,
+                b: image_b_caboose.board,
+            });
+        }
+
+        let entry_a = RotSignData {
+            kind: artifact_kind,
+            sign: image_a_caboose.sign.expect("required SIGN in caboose"),
+        };
+
+        let target_a = RotSignTarget {
+            id: artifact_id.clone(),
+            bord: image_a_caboose.board,
+        };
+
+        match self.rot_by_sign.entry(entry_a) {
+            hash_map::Entry::Occupied(mut e) => {
+                for v in e.get() {
+                    if v.bord == target_a.bord {
+                        return Err(RepositoryError::MultipleBoardsPresent {
+                            kind: artifact_kind,
+                            b1: v.bord.clone(),
+                            b2: target_a.bord.clone(),
+                        });
+                    }
+                }
+                e.get_mut().push(target_a);
+            }
+            hash_map::Entry::Vacant(e) => {
+                e.insert(vec![target_a]);
+            }
+        };
+
+        let entry_b = RotSignData {
+            kind: artifact_kind,
+            sign: image_b_caboose.sign.expect("required SIGN in caboose"),
+        };
+
+        let target_b = RotSignTarget {
+            id: artifact_id.clone(),
+            bord: image_b_caboose.board,
+        };
+
+        // We already checked for duplicate boards, no need to check again
+        self.rot_by_sign.entry(entry_b).or_default().push(target_b);
 
         // Technically we've done all we _need_ to do with the RoT images. We
         // send them directly to MGS ourself, so don't expect anyone to ask for
@@ -888,14 +958,14 @@ impl<'a> UpdatePlanBuilder<'a> {
             let kind = entry.kind;
             // This unwrap is safe because we check above that each of the types
             // has at least one entry
-            let version = &versions.first().unwrap().version;
-            match versions.iter().find(|x| x.version != *version) {
-                None => continue,
+            let version = &versions.first().unwrap().id.version;
+            match versions.iter().find(|x| x.id.version != *version) {
+                None => (),
                 Some(v) => {
                     return Err(RepositoryError::MultipleVersionsPresent {
                         kind,
                         v1: version.clone(),
-                        v2: v.version.clone(),
+                        v2: v.id.version.clone(),
                     })
                 }
             }
@@ -903,8 +973,8 @@ impl<'a> UpdatePlanBuilder<'a> {
 
         let mut rot_by_sign = HashMap::new();
         for (k, v) in self.rot_by_sign {
-            for id in v {
-                rot_by_sign.insert(id, k.sign.clone());
+            for val in v {
+                rot_by_sign.insert(val.id, k.sign.clone());
             }
         }
 
@@ -984,38 +1054,18 @@ pub struct UpdatePlanBuildOutput {
     pub artifacts_meta: Vec<TufArtifactMeta>,
 }
 
-// We take id solely to be able to output error messages
-fn read_hubris_sign_from_archive(
-    id: ArtifactId,
-    data: Vec<u8>,
-) -> Result<(ArtifactId, Vec<u8>), RepositoryError> {
-    let archive = match RawHubrisArchive::from_vec(data).map_err(Box::new) {
-        Ok(archive) => archive,
-        Err(error) => {
-            return Err(RepositoryError::ParsingHubrisArchive { id, error });
-        }
-    };
-    let caboose = match archive.read_caboose().map_err(Box::new) {
-        Ok(caboose) => caboose,
-        Err(error) => {
-            return Err(RepositoryError::ReadHubrisCaboose { id, error });
-        }
-    };
-    let sign = match caboose.sign() {
-        Ok(sign) => sign,
-        Err(error) => {
-            return Err(RepositoryError::ReadHubrisCabooseSign { id, error });
-        }
-    };
-    Ok((id, sign.to_vec()))
+// We could also add `vers` and `epoch` here
+pub struct HubrisCaboose {
+    name: String,
+    board: String,
+    sign: Option<Vec<u8>>,
 }
 
-// This function takes and returns `id` to avoid an unnecessary clone; `id` will
-// be present in either the Ok tuple or the error.
-fn read_hubris_board_from_archive(
+// Does not read the sign value
+fn read_hubris_caboose_from_archive_without_sign(
     id: ArtifactId,
     data: Vec<u8>,
-) -> Result<(ArtifactId, Board), RepositoryError> {
+) -> Result<(ArtifactId, HubrisCaboose), RepositoryError> {
     let archive = match RawHubrisArchive::from_vec(data).map_err(Box::new) {
         Ok(archive) => archive,
         Err(error) => {
@@ -1028,6 +1078,20 @@ fn read_hubris_board_from_archive(
             return Err(RepositoryError::ReadHubrisCaboose { id, error });
         }
     };
+
+    let name = match caboose.name() {
+        Ok(name) => name,
+        Err(error) => {
+            return Err(RepositoryError::ReadHubrisCabooseName { id, error });
+        }
+    };
+    let name = match std::str::from_utf8(name) {
+        Ok(s) => s,
+        Err(_) => {
+            return Err(RepositoryError::ReadHubrisCabooseNameUtf8(id));
+        }
+    };
+
     let board = match caboose.board() {
         Ok(board) => board,
         Err(error) => {
@@ -1040,7 +1104,74 @@ fn read_hubris_board_from_archive(
             return Err(RepositoryError::ReadHubrisCabooseBoardUtf8(id));
         }
     };
-    Ok((id, Board(board.to_string())))
+    Ok((
+        id,
+        HubrisCaboose {
+            name: name.to_string(),
+            board: board.to_string(),
+            sign: None,
+        },
+    ))
+}
+
+// This takes an id to avoid an unnecessary clone
+fn read_hubris_caboose_from_archive(
+    id: ArtifactId,
+    data: Vec<u8>,
+) -> Result<(ArtifactId, HubrisCaboose), RepositoryError> {
+    let archive = match RawHubrisArchive::from_vec(data).map_err(Box::new) {
+        Ok(archive) => archive,
+        Err(error) => {
+            return Err(RepositoryError::ParsingHubrisArchive { id, error });
+        }
+    };
+    let caboose = match archive.read_caboose().map_err(Box::new) {
+        Ok(caboose) => caboose,
+        Err(error) => {
+            return Err(RepositoryError::ReadHubrisCaboose { id, error });
+        }
+    };
+
+    let name = match caboose.name() {
+        Ok(name) => name,
+        Err(error) => {
+            return Err(RepositoryError::ReadHubrisCabooseName { id, error });
+        }
+    };
+    let name = match std::str::from_utf8(name) {
+        Ok(s) => s,
+        Err(_) => {
+            return Err(RepositoryError::ReadHubrisCabooseNameUtf8(id));
+        }
+    };
+
+    let board = match caboose.board() {
+        Ok(board) => board,
+        Err(error) => {
+            return Err(RepositoryError::ReadHubrisCabooseBoard { id, error });
+        }
+    };
+    let board = match std::str::from_utf8(board) {
+        Ok(s) => s,
+        Err(_) => {
+            return Err(RepositoryError::ReadHubrisCabooseBoardUtf8(id));
+        }
+    };
+
+    let sign = match caboose.sign() {
+        Ok(sign) => Some(sign.to_vec()),
+        Err(error) => {
+            return Err(RepositoryError::ReadHubrisCabooseSign { id, error });
+        }
+    };
+    Ok((
+        id,
+        HubrisCaboose {
+            name: name.to_string(),
+            board: board.to_string(),
+            sign,
+        },
+    ))
 }
 
 #[cfg(test)]
@@ -1133,11 +1264,15 @@ mod tests {
         }
     }
 
-    fn make_random_rot_image(sign: &str, board: &str) -> RandomRotImage {
+    fn make_random_rot_image(
+        sign: &str,
+        board: &str,
+        gitc: &str,
+    ) -> RandomRotImage {
         use tufaceous_lib::CompositeRotArchiveBuilder;
 
-        let archive_a = make_fake_rot_image(sign, board);
-        let archive_b = make_fake_rot_image(sign, board);
+        let archive_a = make_fake_rot_image(sign, board, gitc);
+        let archive_b = make_fake_rot_image(sign, board, gitc);
 
         let mut builder =
             CompositeRotArchiveBuilder::new(Vec::new(), MtimeSource::Zero)
@@ -1196,11 +1331,11 @@ mod tests {
         builder.build_to_vec().unwrap()
     }
 
-    fn make_fake_rot_image(sign: &str, board: &str) -> Vec<u8> {
+    fn make_fake_rot_image(sign: &str, board: &str, gitc: &str) -> Vec<u8> {
         use hubtools::{CabooseBuilder, HubrisArchiveBuilder};
 
         let caboose = CabooseBuilder::default()
-            .git_commit("this-is-fake-data")
+            .git_commit(gitc)
             .board(board)
             .version("0.0.0")
             .name("rot-bord")
@@ -1312,11 +1447,12 @@ mod tests {
                 .unwrap();
         }
 
-        let gimlet_rot = make_random_rot_image("gimlet", "gimlet");
-        let psc_rot = make_random_rot_image("psc", "psc");
-        let sidecar_rot = make_random_rot_image("sidecar", "sidecar");
+        let gimlet_rot = make_random_rot_image("gimlet", "gimlet", "gitc");
+        let psc_rot = make_random_rot_image("psc", "psc", "gitc");
+        let sidecar_rot = make_random_rot_image("sidecar", "sidecar", " gitc");
 
-        let gimlet_rot_2 = make_random_rot_image("gimlet", "gimlet-the second");
+        let gimlet_rot_2 =
+            make_random_rot_image("gimlet", "gimlet-the second", "gitc");
 
         for (kind, artifact) in [
             (KnownArtifactKind::GimletRot, &gimlet_rot),
@@ -1480,13 +1616,14 @@ mod tests {
                 .unwrap();
         }
 
-        let gimlet_rot = make_random_rot_image("gimlet", "gimlet");
-        let psc_rot = make_random_rot_image("psc", "psc");
-        let sidecar_rot = make_random_rot_image("sidecar", "sidecar");
+        let gimlet_rot = make_random_rot_image("gimlet", "gimlet", "gitc");
+        let psc_rot = make_random_rot_image("psc", "psc", "gitc");
+        let sidecar_rot = make_random_rot_image("sidecar", "sidecar", "gitc");
 
-        let gimlet_rot_2 = make_random_rot_image("gimlet2", "gimlet");
-        let psc_rot_2 = make_random_rot_image("psc2", "psc");
-        let sidecar_rot_2 = make_random_rot_image("sidecar2", "sidecar");
+        let gimlet_rot_2 = make_random_rot_image("gimlet2", "gimlet", "gitc");
+        let psc_rot_2 = make_random_rot_image("psc2", "psc", "gitc");
+        let sidecar_rot_2 =
+            make_random_rot_image("sidecar2", "sidecar", "gitc");
 
         for (kind, artifact) in [
             (KnownArtifactKind::GimletRot, &gimlet_rot),
@@ -1687,9 +1824,9 @@ mod tests {
                 .unwrap();
         }
 
-        let gimlet_rot = make_random_rot_image("gimlet", "gimlet");
-        let psc_rot = make_random_rot_image("psc", "psc");
-        let sidecar_rot = make_random_rot_image("sidecar", "sidecar");
+        let gimlet_rot = make_random_rot_image("gimlet", "gimlet", "gitc");
+        let psc_rot = make_random_rot_image("psc", "psc", "gitc");
+        let sidecar_rot = make_random_rot_image("sidecar", "sidecar", "gitc");
 
         for (kind, artifact) in [
             (KnownArtifactKind::GimletRot, &gimlet_rot),
@@ -1946,6 +2083,278 @@ mod tests {
                 Err(_) => (),
             }
         }
+
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_too_many_rot_bootloaders() {
+        const VERSION_0: SemverVersion = SemverVersion::new(0, 0, 0);
+        const VERSION_1: SemverVersion = SemverVersion::new(0, 0, 1);
+
+        // The regular RoT can have multiple versions but _not_ the
+        // bootloader
+        let logctx = test_setup_log("test_too_many_rot_bootloader");
+
+        let mut plan_builder =
+            UpdatePlanBuilder::new("0.0.0".parse().unwrap(), &logctx.log)
+                .unwrap();
+
+        let gimlet_rot_bootloader =
+            make_fake_rot_bootloader_image("test-gimlet-a", "test-gimlet-a");
+        let gimlet2_rot_bootloader =
+            make_fake_rot_bootloader_image("test-gimlet-a", "test-gimlet-a");
+
+        let kind = KnownArtifactKind::GimletRotBootloader;
+
+        let hash = ArtifactHash(Sha256::digest(&gimlet_rot_bootloader).into());
+        let id = ArtifactId {
+            name: format!("{kind:?}"),
+            version: VERSION_0,
+            kind: kind.into(),
+        };
+        plan_builder
+            .add_artifact(
+                id,
+                hash,
+                futures::stream::iter([Ok(Bytes::from(gimlet_rot_bootloader))]),
+            )
+            .await
+            .expect("Expected to add bootloader");
+
+        let hash = ArtifactHash(Sha256::digest(&gimlet2_rot_bootloader).into());
+        let id = ArtifactId {
+            name: format!("{kind:?}"),
+            version: VERSION_1,
+            kind: kind.into(),
+        };
+        match plan_builder
+            .add_artifact(
+                id,
+                hash,
+                futures::stream::iter([Ok(Bytes::from(
+                    gimlet2_rot_bootloader,
+                ))]),
+            )
+            .await
+        {
+            Ok(_) => panic!("succeeded unexpectedly"),
+            Err(_) => (),
+        };
+
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_multi_rot_bord() {
+        // allowed
+        // SIGN     BORD     VERS
+        // ----     ----     ----
+        // ZZZZ     BBBB     1.0.0
+        // ZZZZ     CCCC     1.0.0
+        // YYYY     BBBB     2.0.0
+        // YYYY     CCCC     2.0.0
+
+        const VERSION_0: SemverVersion = SemverVersion::new(0, 0, 0);
+
+        let logctx = test_setup_log("test_update_plan_from_artifacts");
+
+        let mut plan_builder =
+            UpdatePlanBuilder::new("0.0.0".parse().unwrap(), &logctx.log)
+                .unwrap();
+
+        // The control plane artifact can be arbitrary bytes; just populate it
+        // with random data.
+        {
+            let kind = KnownArtifactKind::ControlPlane;
+            let data = make_random_bytes();
+            let hash = ArtifactHash(Sha256::digest(&data).into());
+            let id = ArtifactId {
+                name: format!("{kind:?}"),
+                version: VERSION_0,
+                kind: kind.into(),
+            };
+            plan_builder
+                .add_artifact(
+                    id,
+                    hash,
+                    futures::stream::iter([Ok(Bytes::from(data))]),
+                )
+                .await
+                .unwrap();
+        }
+
+        // For each SP image, we'll insert two artifacts: these should end up in
+        // the update plan's SP image maps keyed by their "board". Normally the
+        // board is read from the archive itself via hubtools; we'll inject a
+        // test function that returns the artifact ID name as the board instead.
+        for (kind, boards) in [
+            (KnownArtifactKind::GimletSp, ["test-gimlet-a", "test-gimlet-b"]),
+            (KnownArtifactKind::PscSp, ["test-psc-a", "test-psc-b"]),
+            (KnownArtifactKind::SwitchSp, ["test-switch-a", "test-switch-b"]),
+        ] {
+            for board in boards {
+                let data = make_fake_sp_image(board);
+                let hash = ArtifactHash(Sha256::digest(&data).into());
+                let id = ArtifactId {
+                    name: board.to_string(),
+                    version: VERSION_0,
+                    kind: kind.into(),
+                };
+                plan_builder
+                    .add_artifact(
+                        id,
+                        hash,
+                        futures::stream::iter([Ok(Bytes::from(data))]),
+                    )
+                    .await
+                    .unwrap();
+            }
+        }
+
+        // The Host, Trampoline, and RoT artifacts must be structed the way we
+        // expect (i.e., .tar.gz's containing multiple inner artifacts).
+        let host = make_random_host_os_image();
+        let trampoline = make_random_host_os_image();
+
+        for (kind, image) in [
+            (KnownArtifactKind::Host, &host),
+            (KnownArtifactKind::Trampoline, &trampoline),
+        ] {
+            let data = &image.tarball;
+            let hash = ArtifactHash(Sha256::digest(data).into());
+            let id = ArtifactId {
+                name: format!("{kind:?}"),
+                version: VERSION_0,
+                kind: kind.into(),
+            };
+            plan_builder
+                .add_artifact(
+                    id,
+                    hash,
+                    futures::stream::iter([Ok(data.clone())]),
+                )
+                .await
+                .unwrap();
+        }
+
+        let gimlet_rot = make_random_rot_image("gimlet", "gimlet", "gitc1");
+        let gimlet2_rot =
+            make_random_rot_image("gimlet", "gimlet-alt", "gitc2");
+        let psc_rot = make_random_rot_image("psc", "psc", "gitc");
+        let sidecar_rot = make_random_rot_image("sidecar", "sidecar", "gitc");
+
+        for (kind, artifact) in [
+            (KnownArtifactKind::GimletRot, &gimlet_rot),
+            (KnownArtifactKind::GimletRot, &gimlet2_rot),
+            (KnownArtifactKind::PscRot, &psc_rot),
+            (KnownArtifactKind::SwitchRot, &sidecar_rot),
+        ] {
+            let data = &artifact.tarball;
+            let hash = ArtifactHash(Sha256::digest(data).into());
+            let id = ArtifactId {
+                name: format!("{kind:?}"),
+                version: VERSION_0,
+                kind: kind.into(),
+            };
+            plan_builder
+                .add_artifact(
+                    id,
+                    hash,
+                    futures::stream::iter([Ok(data.clone())]),
+                )
+                .await
+                .unwrap();
+        }
+
+        let gimlet_rot_bootloader =
+            make_fake_rot_bootloader_image("test-gimlet-a", "test-gimlet-a");
+        let psc_rot_bootloader =
+            make_fake_rot_bootloader_image("test-psc-a", "test-psc-a");
+        let switch_rot_bootloader =
+            make_fake_rot_bootloader_image("test-sidecar-a", "test-sidecar-a");
+
+        for (kind, artifact) in [
+            (
+                KnownArtifactKind::GimletRotBootloader,
+                gimlet_rot_bootloader.clone(),
+            ),
+            (KnownArtifactKind::PscRotBootloader, psc_rot_bootloader.clone()),
+            (
+                KnownArtifactKind::SwitchRotBootloader,
+                switch_rot_bootloader.clone(),
+            ),
+        ] {
+            let hash = ArtifactHash(Sha256::digest(&artifact).into());
+            let id = ArtifactId {
+                name: format!("{kind:?}"),
+                version: VERSION_0,
+                kind: kind.into(),
+            };
+            plan_builder
+                .add_artifact(
+                    id,
+                    hash,
+                    futures::stream::iter([Ok(Bytes::from(artifact))]),
+                )
+                .await
+                .unwrap();
+        }
+
+        plan_builder.build().unwrap();
+
+        logctx.cleanup_successful();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_too_many_rot_bord() {
+        // NOT ALLOWED
+        // SIGN     BORD
+        // ----     ----
+        // ZZZZ     BBBB
+        // ZZZZ     BBBB <--- duplicate BORD, can't select exactly one
+        // YYYY     BBBB
+        // YYYY     CCCC
+
+        const VERSION_0: SemverVersion = SemverVersion::new(0, 0, 0);
+
+        let logctx = test_setup_log("test_update_plan_from_artifacts");
+
+        let mut plan_builder =
+            UpdatePlanBuilder::new("0.0.0".parse().unwrap(), &logctx.log)
+                .unwrap();
+
+        let gimlet_rot = make_random_rot_image("gimlet", "gimlet", "gitc1");
+        let gimlet2_rot = make_random_rot_image("gimlet", "gimlet", "gitc2");
+
+        let kind = KnownArtifactKind::GimletRot;
+
+        let data = &gimlet_rot.tarball;
+        let hash = ArtifactHash(Sha256::digest(data).into());
+        let id = ArtifactId {
+            name: format!("{kind:?}"),
+            version: VERSION_0,
+            kind: kind.into(),
+        };
+        plan_builder
+            .add_artifact(id, hash, futures::stream::iter([Ok(data.clone())]))
+            .await
+            .unwrap();
+
+        let data = &gimlet2_rot.tarball;
+        let hash = ArtifactHash(Sha256::digest(data).into());
+        let id = ArtifactId {
+            name: format!("{kind:?}"),
+            version: VERSION_0,
+            kind: kind.into(),
+        };
+        match plan_builder
+            .add_artifact(id, hash, futures::stream::iter([Ok(data.clone())]))
+            .await
+        {
+            Ok(_) => panic!("unexpected success"),
+            Err(_) => (),
+        };
 
         logctx.cleanup_successful();
     }
