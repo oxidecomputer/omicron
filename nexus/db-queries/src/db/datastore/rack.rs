@@ -997,7 +997,6 @@ impl DataStore {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::datastore::test::{
         sled_baseboard_for_test, sled_system_hardware_for_test,
     };
@@ -1006,6 +1005,7 @@ mod test {
     use crate::db::model::IpKind;
     use crate::db::model::IpPoolRange;
     use crate::db::model::Sled;
+    use crate::db::pub_test_utils::TestDatabase;
     use async_bb8_diesel::AsyncSimpleConnection;
     use internal_dns_types::names::DNS_ZONE;
     use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;

@@ -441,11 +441,11 @@ impl DataStore {
 mod tests {
     use super::*;
     use crate::db;
-    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::model::Generation;
     use crate::db::model::Migration;
     use crate::db::model::VmmRuntimeState;
     use crate::db::model::VmmState;
+    use crate::db::pub_test_utils::TestDatabase;
     use omicron_common::api::internal::nexus;
     use omicron_test_utils::dev;
     use omicron_uuid_kinds::InstanceUuid;

@@ -77,8 +77,6 @@ mod oximeter;
 mod physical_disk;
 mod probe;
 mod project;
-#[cfg(any(test, feature = "testing"))]
-pub mod pub_test_utils;
 mod quota;
 mod rack;
 mod region;
@@ -445,7 +443,6 @@ mod test {
     use crate::authn;
     use crate::authn::SiloAuthnPolicy;
     use crate::authz;
-    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::datastore::test_utils::{
         IneligibleSledKind, IneligibleSleds,
     };
@@ -458,6 +455,7 @@ mod test {
         Region, SiloUser, SledBaseboard, SledSystemHardware, SledUpdate,
         SshKey, Zpool,
     };
+    use crate::db::pub_test_utils::TestDatabase;
     use crate::db::queries::vpc_subnet::InsertVpcSubnetQuery;
     use chrono::{Duration, Utc};
     use futures::stream;

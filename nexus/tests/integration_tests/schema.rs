@@ -11,8 +11,9 @@ use nexus_config::SchemaConfig;
 use nexus_db_model::EARLIEST_SUPPORTED_VERSION;
 use nexus_db_model::SCHEMA_VERSION as LATEST_SCHEMA_VERSION;
 use nexus_db_model::{AllSchemaVersions, SchemaVersion};
+use nexus_db_queries::db::pub_test_utils::TestDatabase;
 use nexus_db_queries::db::DISALLOW_FULL_TABLE_SCAN_SQL;
-use nexus_test_utils::{db, load_test_config, ControlPlaneTestContextBuilder};
+use nexus_test_utils::{load_test_config, ControlPlaneTestContextBuilder};
 use omicron_common::api::external::SemverVersion;
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_test_utils::dev::db::{Client, CockroachInstance};
@@ -27,19 +28,6 @@ use uuid::Uuid;
 
 const SCHEMA_DIR: &'static str =
     concat!(env!("CARGO_MANIFEST_DIR"), "/../schema/crdb");
-
-async fn test_setup_just_crdb<'a>(
-    log: &Logger,
-    populate: bool,
-) -> CockroachInstance {
-    // Start up CockroachDB.
-    let database = if populate {
-        db::test_setup_database(log).await
-    } else {
-        db::test_setup_database_empty(log).await
-    };
-    database
-}
 
 // Helper to ensure we perform the same setup for the positive and negative test
 // cases.
@@ -538,15 +526,15 @@ async fn dbinit_version_matches_version_known_to_nexus() {
         &config.pkg.log,
     );
     let log = &logctx.log;
-    let populate = true;
-    let mut crdb = test_setup_just_crdb(&log, populate).await;
+    let db = TestDatabase::new_with_schema_only(&log).await;
+    let crdb = db.crdb();
 
     assert_eq!(
         LATEST_SCHEMA_VERSION.to_string(),
-        query_crdb_schema_version(&crdb).await
+        query_crdb_schema_version(crdb).await
     );
 
-    crdb.cleanup().await.unwrap();
+    db.terminate().await;
     logctx.cleanup_successful();
 }
 
@@ -611,8 +599,8 @@ async fn versions_have_idempotent_up() {
     let logctx =
         LogContext::new("versions_have_idempotent_up", &config.pkg.log);
     let log = &logctx.log;
-    let populate = false;
-    let mut crdb = test_setup_just_crdb(&logctx.log, populate).await;
+    let db = TestDatabase::new_without_schema(&logctx.log).await;
+    let crdb = db.crdb();
 
     let all_versions = read_all_schema_versions();
     for version in all_versions.iter_versions() {
@@ -627,7 +615,7 @@ async fn versions_have_idempotent_up() {
         query_crdb_schema_version(&crdb).await
     );
 
-    crdb.cleanup().await.unwrap();
+    db.terminate().await;
     logctx.cleanup_successful();
 }
 
@@ -940,8 +928,8 @@ async fn dbinit_equals_sum_of_all_up() {
         LogContext::new("dbinit_equals_sum_of_all_up", &config.pkg.log);
     let log = &logctx.log;
 
-    let populate = false;
-    let mut crdb = test_setup_just_crdb(&logctx.log, populate).await;
+    let db = TestDatabase::new_without_schema(&logctx.log).await;
+    let crdb = db.crdb();
 
     let all_versions = read_all_schema_versions();
 
@@ -1012,13 +1000,12 @@ async fn dbinit_equals_sum_of_all_up() {
             .expect("failed to insert - did we poison the OID cache?");
     }
     std::mem::drop(conn_from_pool);
-    pool.terminate().await;
     std::mem::drop(pool);
-    crdb.cleanup().await.unwrap();
+    db.terminate().await;
 
     // Create a new DB with data populated from dbinit.sql for comparison
-    let populate = true;
-    let mut crdb = test_setup_just_crdb(&logctx.log, populate).await;
+    let db = TestDatabase::new_with_schema_only(&logctx.log).await;
+    let crdb = db.crdb();
     let expected_schema = InformationSchema::new(&crdb).await;
     let expected_data = expected_schema.query_all_tables(log, &crdb).await;
 
@@ -1026,7 +1013,7 @@ async fn dbinit_equals_sum_of_all_up() {
     observed_schema.pretty_assert_eq(&expected_schema);
 
     assert_eq!(observed_data, expected_data);
-    crdb.cleanup().await.unwrap();
+    db.terminate().await;
     logctx.cleanup_successful();
 }
 
@@ -1635,8 +1622,8 @@ async fn validate_data_migration() {
     let logctx = LogContext::new("validate_data_migration", &config.pkg.log);
     let log = &logctx.log;
 
-    let populate = false;
-    let mut crdb = test_setup_just_crdb(&logctx.log, populate).await;
+    let db = TestDatabase::new_without_schema(&logctx.log).await;
+    let crdb = db.crdb();
     let client = crdb.connect().await.expect("Failed to access CRDB client");
 
     let all_versions = read_all_schema_versions();
@@ -1666,20 +1653,20 @@ async fn validate_data_migration() {
         query_crdb_schema_version(&crdb).await
     );
 
-    crdb.cleanup().await.unwrap();
+    db.terminate().await;
     logctx.cleanup_successful();
 }
 
 // Returns the InformationSchema object for a database populated via `sql`.
 async fn get_information_schema(log: &Logger, sql: &str) -> InformationSchema {
-    let populate = false;
-    let mut crdb = test_setup_just_crdb(&log, populate).await;
+    let db = TestDatabase::new_without_schema(&log).await;
+    let crdb = db.crdb();
 
     let client = crdb.connect().await.expect("failed to connect");
     client.batch_execute(sql).await.expect("failed to apply SQL");
 
     let observed_schema = InformationSchema::new(&crdb).await;
-    crdb.cleanup().await.unwrap();
+    db.terminate().await;
     observed_schema
 }
 

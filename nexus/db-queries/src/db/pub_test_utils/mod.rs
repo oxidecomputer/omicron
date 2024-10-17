@@ -1,0 +1,318 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! Test support code that can be enabled by dependencies via this crate's
+//! `testing` feature.
+//!
+//! This feature should only be enabled under `dev-dependencies` to avoid this
+//! test support code leaking into release binaries.
+
+use crate::authz;
+use crate::context::OpContext;
+use crate::db;
+use crate::db::DataStore;
+use omicron_test_utils::dev::db::CockroachInstance;
+use slog::Logger;
+use std::sync::Arc;
+use uuid::Uuid;
+
+pub mod crdb;
+
+enum Populate {
+    Nothing,
+    Schema,
+    SchemaAndData,
+}
+
+enum Interface {
+    Nothing,
+    Pool,
+    Datastore,
+}
+
+fn new_pool(log: &Logger, db: &CockroachInstance) -> Arc<db::Pool> {
+    let cfg = db::Config { url: db.pg_config().clone() };
+    Arc::new(db::Pool::new_single_host(log, &cfg))
+}
+
+pub struct TestDatabaseBuilder {
+    populate: Populate,
+    interface: Interface,
+}
+
+impl TestDatabaseBuilder {
+    /// Creates a new database buidler.
+    pub fn new() -> Self {
+        Self { populate: Populate::Nothing, interface: Interface::Nothing }
+    }
+
+    /// Populates the database without a schema
+    pub fn without_schema(self) -> Self {
+        self.populate(Populate::Nothing)
+    }
+
+    /// Populates the database with a schema
+    pub fn with_schema(self) -> Self {
+        self.populate(Populate::Schema)
+    }
+
+    /// Populates the database with a schema and loads it with data
+    pub fn with_schema_and_builtin_data(self) -> Self {
+        self.populate(Populate::SchemaAndData)
+    }
+
+    /// Builds no interface on top of the database (neither pool nor datastore)
+    pub fn no_interface(self) -> Self {
+        self.interface(Interface::Nothing)
+    }
+
+    /// Builds a pool interface on top of the database
+    pub fn with_pool(self) -> Self {
+        self.interface(Interface::Pool)
+    }
+
+    /// Builds a datatore interface on top of the database
+    pub fn with_datastore(self) -> Self {
+        self.interface(Interface::Datastore)
+    }
+
+    fn populate(self, populate: Populate) -> Self {
+        Self { populate, ..self }
+    }
+
+    fn interface(self, interface: Interface) -> Self {
+        Self { interface, ..self }
+    }
+
+    pub async fn build(self, log: &Logger) -> TestDatabase {
+        match (self.populate, self.interface) {
+            (Populate::Nothing, interface) => {
+                let db = crdb::test_setup_database_empty(log).await;
+                match interface {
+                    Interface::Nothing => {
+                        TestDatabase { db, state: TestState::NoPool }
+                    }
+                    Interface::Pool => {
+                        let pool = new_pool(log, &db);
+                        TestDatabase { db, state: TestState::Pool { pool } }
+                    }
+                    Interface::Datastore => {
+                        panic!("Cannot create datastore without schema")
+                    }
+                }
+            }
+            (Populate::Schema, interface) => {
+                let db = crdb::test_setup_database(log).await;
+                match interface {
+                    Interface::Nothing => {
+                        TestDatabase { db, state: TestState::NoPool }
+                    }
+                    Interface::Pool => {
+                        let pool = new_pool(log, &db);
+                        TestDatabase { db, state: TestState::Pool { pool } }
+                    }
+                    Interface::Datastore => {
+                        let pool = new_pool(log, &db);
+                        let datastore = Arc::new(
+                            DataStore::new(&log, pool, None).await.unwrap(),
+                        );
+                        TestDatabase {
+                            db,
+                            state: TestState::RawDatastore { datastore },
+                        }
+                    }
+                }
+            }
+            (Populate::SchemaAndData, Interface::Datastore) => {
+                let db = crdb::test_setup_database(log).await;
+                let (opctx, datastore) =
+                    datastore_test_on_default_rack(log, &db).await;
+                TestDatabase {
+                    db,
+                    state: TestState::Datastore { opctx, datastore },
+                }
+            }
+            (Populate::SchemaAndData, Interface::Nothing)
+            | (Populate::SchemaAndData, Interface::Pool) => {
+                // This configuration isn't wrong, it's just weird - we need to
+                // build a datastore to load the built-in data, so it's odd to
+                // discard it immediately afterwards.
+                panic!("If you're fully populating a datastore, you probably want a connection to it");
+            }
+        }
+    }
+}
+
+enum TestState {
+    NoPool,
+    Pool { pool: Arc<db::Pool> },
+    RawDatastore { datastore: Arc<DataStore> },
+    Datastore { opctx: OpContext, datastore: Arc<DataStore> },
+}
+
+/// A test database, possibly with a pool or full datastore on top
+pub struct TestDatabase {
+    db: CockroachInstance,
+    state: TestState,
+}
+
+impl TestDatabase {
+    /// Creates a new database for test usage, without any schema nor interface
+    ///
+    /// [Self::terminate] should be called before the test finishes.
+    pub async fn new_without_schema(log: &Logger) -> Self {
+        TestDatabaseBuilder::new()
+            .without_schema()
+            .no_interface()
+            .build(log)
+            .await
+    }
+
+    /// Creates a new database for test usage, with a schema but no interface
+    ///
+    /// [Self::terminate] should be called before the test finishes.
+    pub async fn new_with_schema_only(log: &Logger) -> Self {
+        TestDatabaseBuilder::new().with_schema().no_interface().build(log).await
+    }
+
+    /// Creates a new database for test usage, with a pool.
+    ///
+    /// [Self::terminate] should be called before the test finishes.
+    pub async fn new_with_pool(log: &Logger) -> Self {
+        TestDatabaseBuilder::new().with_schema().with_pool().build(log).await
+    }
+
+    /// Creates a new database for test usage, with a pre-loaded datastore.
+    ///
+    /// [Self::terminate] should be called before the test finishes.
+    pub async fn new_with_datastore(log: &Logger) -> Self {
+        TestDatabaseBuilder::new()
+            .with_schema_and_builtin_data()
+            .with_datastore()
+            .build(log)
+            .await
+    }
+
+    /// Creates a new database for test usage, with a schema but no builtin data
+    ///
+    /// [Self::terminate] should be called before the test finishes.
+    pub async fn new_with_raw_datastore(log: &Logger) -> Self {
+        TestDatabaseBuilder::new()
+            .with_schema()
+            .with_datastore()
+            .build(log)
+            .await
+    }
+
+    pub fn crdb(&self) -> &CockroachInstance {
+        &self.db
+    }
+
+    pub fn pool(&self) -> &Arc<db::Pool> {
+        match &self.state {
+            TestState::Pool { pool } => pool,
+            TestState::NoPool
+            | TestState::RawDatastore { .. }
+            | TestState::Datastore { .. } => {
+                panic!(
+                    "Wrong test type; try using `TestDatabase::new_with_pool`"
+                );
+            }
+        }
+    }
+
+    pub fn opctx(&self) -> &OpContext {
+        match &self.state {
+            TestState::NoPool
+            | TestState::Pool { .. }
+            | TestState::RawDatastore { .. } => {
+                panic!("Wrong test type; try using `TestDatabase::new_with_datastore`");
+            }
+            TestState::Datastore { opctx, .. } => opctx,
+        }
+    }
+
+    pub fn datastore(&self) -> &Arc<DataStore> {
+        match &self.state {
+            TestState::NoPool | TestState::Pool { .. } => {
+                panic!("Wrong test type; try using `TestDatabase::new_with_datastore`");
+            }
+            TestState::RawDatastore { datastore } => datastore,
+            TestState::Datastore { datastore, .. } => datastore,
+        }
+    }
+
+    /// Shuts down both the database and the pool
+    pub async fn terminate(mut self) {
+        match self.state {
+            TestState::NoPool => (),
+            TestState::Pool { pool } => pool.terminate().await,
+            TestState::RawDatastore { datastore } => {
+                datastore.terminate().await
+            }
+            TestState::Datastore { datastore, .. } => {
+                datastore.terminate().await
+            }
+        }
+        self.db.cleanup().await.unwrap();
+    }
+}
+
+pub const RACK_UUID: &str = "c19a698f-c6f9-4a17-ae30-20d711b8f7dc";
+
+async fn datastore_test_on_default_rack(
+    log: &Logger,
+    db: &CockroachInstance,
+) -> (OpContext, Arc<DataStore>) {
+    let rack_id = Uuid::parse_str(RACK_UUID).unwrap();
+    datastore_test(log, db, rack_id).await
+}
+
+// Constructs a DataStore for use in test suites that has preloaded the
+// built-in users, roles, and role assignments that are needed for basic
+// operation
+async fn datastore_test(
+    log: &Logger,
+    db: &CockroachInstance,
+    rack_id: Uuid,
+) -> (OpContext, Arc<DataStore>) {
+    use crate::authn;
+
+    let cfg = db::Config { url: db.pg_config().clone() };
+    let pool = Arc::new(db::Pool::new_single_host(&log, &cfg));
+    let datastore = Arc::new(DataStore::new(&log, pool, None).await.unwrap());
+
+    // Create an OpContext with the credentials of "db-init" just for the
+    // purpose of loading the built-in users, roles, and assignments.
+    let opctx = OpContext::for_background(
+        log.new(o!()),
+        Arc::new(authz::Authz::new(&log)),
+        authn::Context::internal_db_init(),
+        Arc::clone(&datastore) as Arc<dyn nexus_auth::storage::Storage>,
+    );
+
+    // TODO: Can we just call "Populate" instead of doing this?
+    datastore.load_builtin_users(&opctx).await.unwrap();
+    datastore.load_builtin_roles(&opctx).await.unwrap();
+    datastore.load_builtin_role_asgns(&opctx).await.unwrap();
+    datastore.load_builtin_silos(&opctx).await.unwrap();
+    datastore.load_builtin_projects(&opctx).await.unwrap();
+    datastore.load_builtin_vpcs(&opctx).await.unwrap();
+    datastore.load_silo_users(&opctx).await.unwrap();
+    datastore.load_silo_user_role_assignments(&opctx).await.unwrap();
+    datastore
+        .load_builtin_fleet_virtual_provisioning_collection(&opctx)
+        .await
+        .unwrap();
+    datastore.load_builtin_rack_data(&opctx, rack_id).await.unwrap();
+
+    // Create an OpContext with the credentials of "test-privileged" for general
+    // testing.
+    let opctx = OpContext::for_tests(
+        log.new(o!()),
+        Arc::clone(&datastore) as Arc<dyn nexus_auth::storage::Storage>,
+    );
+
+    (opctx, datastore)
+}
