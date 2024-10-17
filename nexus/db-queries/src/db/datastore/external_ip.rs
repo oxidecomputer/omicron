@@ -87,7 +87,7 @@ impl DataStore {
         probe_id: Uuid,
         pool: Option<authz::IpPool>,
     ) -> CreateResult<ExternalIp> {
-        let authz_pool = self.resolve_pool_for_allocation(&opctx, pool).await?;
+        let authz_pool = self.resolve_pool_for_allocation(opctx, pool).await?;
         let data = IncompleteExternalIp::for_ephemeral_probe(
             ip_id,
             probe_id,
@@ -123,7 +123,7 @@ impl DataStore {
         // Naturally, we now *need* to destroy the ephemeral IP if the newly alloc'd
         // IP was not attached, including on idempotent success.
 
-        let authz_pool = self.resolve_pool_for_allocation(&opctx, pool).await?;
+        let authz_pool = self.resolve_pool_for_allocation(opctx, pool).await?;
         let data = IncompleteExternalIp::for_ephemeral(ip_id, authz_pool.id());
 
         // We might not be able to acquire a new IP, but in the event of an
@@ -205,7 +205,7 @@ impl DataStore {
             // If no pool specified, use the default logic
             None => {
                 let (authz_pool, ..) =
-                    self.ip_pools_fetch_default(&opctx).await?;
+                    self.ip_pools_fetch_default(opctx).await?;
                 authz_pool
             }
         };
@@ -224,7 +224,7 @@ impl DataStore {
     ) -> CreateResult<ExternalIp> {
         let ip_id = Uuid::new_v4();
 
-        let authz_pool = self.resolve_pool_for_allocation(&opctx, pool).await?;
+        let authz_pool = self.resolve_pool_for_allocation(opctx, pool).await?;
 
         let data = if let Some(ip) = ip {
             IncompleteExternalIp::for_floating_explicit(
@@ -695,7 +695,7 @@ impl DataStore {
         ip_id: Uuid,
         instance_id: InstanceUuid,
     ) -> Result<Option<ExternalIp>, Error> {
-        let _ = LookupPath::new(&opctx, self)
+        let _ = LookupPath::new(opctx, self)
             .instance_id(instance_id.into_untyped_uuid())
             .lookup_for(authz::Action::Modify)
             .await?;
@@ -951,7 +951,7 @@ impl DataStore {
         instance_id: InstanceUuid,
         creating_instance: bool,
     ) -> UpdateResult<(ExternalIp, bool)> {
-        let (.., authz_instance) = LookupPath::new(&opctx, self)
+        let (.., authz_instance) = LookupPath::new(opctx, self)
             .instance_id(instance_id.into_untyped_uuid())
             .lookup_for(authz::Action::Modify)
             .await?;
@@ -993,7 +993,7 @@ impl DataStore {
         instance_id: InstanceUuid,
         creating_instance: bool,
     ) -> UpdateResult<(ExternalIp, bool)> {
-        let (.., authz_instance) = LookupPath::new(&opctx, self)
+        let (.., authz_instance) = LookupPath::new(opctx, self)
             .instance_id(instance_id.into_untyped_uuid())
             .lookup_for(authz::Action::Modify)
             .await?;
@@ -1167,7 +1167,7 @@ mod tests {
         let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // No IPs, to start
-        let ips = read_all_service_ips(&datastore, &opctx).await;
+        let ips = read_all_service_ips(&datastore, opctx).await;
         assert_eq!(ips, vec![]);
 
         // Set up service IP pool range
@@ -1177,11 +1177,11 @@ mod tests {
         ))
         .unwrap();
         let (service_ip_pool, _) = datastore
-            .ip_pools_service_lookup(&opctx)
+            .ip_pools_service_lookup(opctx)
             .await
             .expect("lookup service ip pool");
         datastore
-            .ip_pool_add_range(&opctx, &service_ip_pool, &ip_range)
+            .ip_pool_add_range(opctx, &service_ip_pool, &ip_range)
             .await
             .expect("add range to service ip pool");
 
@@ -1207,7 +1207,7 @@ mod tests {
             };
             let external_ip = datastore
                 .external_ip_allocate_omicron_zone(
-                    &opctx,
+                    opctx,
                     OmicronZoneUuid::new_v4(),
                     ZoneKind::Nexus,
                     external_ip,
@@ -1220,7 +1220,7 @@ mod tests {
         external_ips.sort_by_key(|ip| ip.id);
 
         // Ensure we see them all.
-        let ips = read_all_service_ips(&datastore, &opctx).await;
+        let ips = read_all_service_ips(&datastore, opctx).await;
         assert_eq!(ips, external_ips);
 
         // Deallocate a few, and ensure we don't see them anymore.
@@ -1229,7 +1229,7 @@ mod tests {
             if i % 3 == 0 {
                 let id = external_ip.id;
                 datastore
-                    .deallocate_external_ip(&opctx, id)
+                    .deallocate_external_ip(opctx, id)
                     .await
                     .expect("failed to deallocate IP");
                 removed_ip_ids.insert(id);
@@ -1242,7 +1242,7 @@ mod tests {
         external_ips.retain(|ip| !removed_ip_ids.contains(&ip.id));
 
         // Ensure we see them all remaining IPs.
-        let ips = read_all_service_ips(&datastore, &opctx).await;
+        let ips = read_all_service_ips(&datastore, opctx).await;
         assert_eq!(ips, external_ips);
 
         db.terminate().await;

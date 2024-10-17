@@ -709,7 +709,7 @@ impl Nexus {
     /// Awaits termination without triggering it.
     ///
     /// To trigger termination, see:
-    /// - [Self::close_servers] or [Self::terminate]
+    /// - [`Self::close_servers`] or [`Self::terminate`]
     pub(crate) async fn wait_for_shutdown(&self) -> Result<(), String> {
         // The internal server is the last server to be closed.
         //

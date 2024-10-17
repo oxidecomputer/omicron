@@ -38,7 +38,8 @@ mod test {
     impl TestDatabase {
         /// Creates a new database for test usage, with a pool.
         ///
-        /// [Self::terminate] should be called before the test finishes.
+        /// [`Self::terminate`] should be called before the test finishes,
+        /// or dropping the [`TestDatabase`] will panic.
         pub async fn new_with_pool(log: &Logger) -> Self {
             let db = test_setup_database(log).await;
             let cfg = db::Config { url: db.pg_config().clone() };
@@ -48,7 +49,8 @@ mod test {
 
         /// Creates a new database for test usage, with a pre-loaded datastore.
         ///
-        /// [Self::terminate] should be called before the test finishes.
+        /// [`Self::terminate`] should be called before the test finishes,
+        /// or dropping the [`TestDatabase`] will panic.
         pub async fn new_with_datastore(log: &Logger) -> Self {
             let db = test_setup_database(log).await;
             let (opctx, datastore) =
@@ -60,7 +62,8 @@ mod test {
 
         /// Creates a new database for test usage, with a raw datastore.
         ///
-        /// [Self::terminate] should be called before the test finishes.
+        /// [`Self::terminate`] should be called before the test finishes,
+        /// or dropping the [`TestDatabase`] will panic.
         pub async fn new_with_raw_datastore(log: &Logger) -> Self {
             let db = test_setup_database(log).await;
             let cfg = db::Config { url: db.pg_config().clone() };
