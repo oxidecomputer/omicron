@@ -671,4 +671,8 @@ pub struct EreporterRegistered {
     /// reporter. If the reporter has not been seen by Nexus previously, this
     /// may be 0.
     pub seq: Generation,
+
+    /// The reporter's current generation. This is incremented every time a
+    /// reporter restarts and re-registers itself.
+    pub generation: Generation,
 }

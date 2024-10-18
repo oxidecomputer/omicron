@@ -96,12 +96,13 @@ struct Ingester {
 struct Reporter {
     path: Utf8PathBuf,
     clients: HashMap<SocketAddr, ereporter_client::Client>,
+    generation: Generation,
 }
 
 struct Registration {
     uuid: Uuid,
     addr: SocketAddr,
-    tx: oneshot::Sender<Generation>,
+    tx: oneshot::Sender,
 }
 
 impl Ingester {
@@ -211,7 +212,7 @@ impl Ingester {
             if saw_reports {
                 // All ereports ingested for this reporter ID. Now, ack them up to the
                 // latest seq.
-                let seq = latest_seq(&reporter.path)
+                let seq = latest_seq(&reporter.path, "")
                     .await
                     .with_context(|| {
                         format!("couldn't determine latest seq for {id}")
@@ -252,7 +253,7 @@ impl Ingester {
     ) -> anyhow::Result<()> {
         let reporter = self.reporters.entry(uuid).or_insert_with(|| {
             let path = self.path.join(uuid.to_string());
-            Reporter { path, clients: HashMap::new() }
+            Reporter { path, clients: HashMap::new(), generation: Generation::new(), }
         });
         std::fs::create_dir_all(&reporter.path).with_context(|| {
             format!(
@@ -260,22 +261,19 @@ impl Ingester {
                 reporter.path
             )
         })?;
-        let seq = latest_seq(&reporter.path)
-            .await?
-            // If there is an existing sequence number for this reporter, return
-            // the next one; otherwise, start at sequence 0.
-            .map(|seq| seq.next())
-            .unwrap_or_else(|| Generation::new());
-        match reporter.clients.entry(addr) {
-            Entry::Occupied(_) => {
+        let registered = match reporter.clients.entry(addr) {
+            Entry::Occupied(mut e) => {
+                let (_, ref mut generation) = e.get_mut();
+                *generation = generation.next();
                 slog::info!(
                     self.log,
                     "recovering sequence for reporter";
                     "reporter_id" => %uuid,
                     "address" => %addr,
                     "seq" => %seq,
+                    "next_gen" => %generation,
                 );
-            }
+            };
             Entry::Vacant(e) => {
                 slog::info!(
                     self.log,
@@ -306,7 +304,10 @@ impl Ingester {
     }
 }
 
-async fn latest_seq(path: &Utf8PathBuf) -> anyhow::Result<Option<Generation>> {
+async fn latest_seq(
+    path: &Utf8PathBuf,
+    generation: Generation,
+) -> anyhow::Result<Option<Generation>> {
     let mut dir = tokio::fs::read_dir(path)
         .await
         .with_context(|| format!("failed to read {path}"))?;
@@ -319,11 +320,12 @@ async fn latest_seq(path: &Utf8PathBuf) -> anyhow::Result<Option<Generation>> {
         let path = entry.path();
         let path = Utf8Path::from_path(path.as_ref())
             .with_context(|| format!("path {} was not utf8", path.display()))?;
-        if path.is_dir() {
-            continue;
-        }
-        if let Some(file) = path.file_stem() {
-            match file.parse::<u32>() {
+        if let Some((file_gen , seq)) = path.file_stem().and_then(|s| s.split_once("s")) {
+            let file_gen = file_gen.trim_start_matches('g').parse::<u32>().context("malformed generation")?;
+            if Generation::from_u32(file_gen) != generation {
+                continue;
+            }
+            match seq.parse::<u32>() {
                 Ok(seq) => max = std::cmp::max(Some(seq), max),
                 Err(_) => {
                     continue;
@@ -364,6 +366,7 @@ async fn cpapi_ereporters_post(
 /// Response to error reporter registration requests.
 #[derive(Clone, Debug, Serialize, JsonSchema)]
 pub struct EreporterRegistered {
+    pub generation: Generation,
     /// The starting sequence number of the next error report from this
     /// reporter. If the reporter has not been seen by Nexus previously, this
     /// may be 0.

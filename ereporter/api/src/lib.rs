@@ -20,11 +20,11 @@ pub trait EreporterApi {
     /// Get a list of ereports from `reporter_id`, paginated by sequence number.
     #[endpoint {
         method = GET,
-        path = "/ereports/{reporter_id}"
+        path = "/ereports/{id}/{generation}"
     }]
     async fn ereports_list(
         request_context: RequestContext<Self::Context>,
-        path: dropshot::Path<ListPathParams>,
+        path: dropshot::Path<ReporterId>,
         query: Query<PaginationParams<EmptyScanParams, Generation>>,
     ) -> Result<HttpResponseOk<ResultsPage<Entry>>, HttpError>;
 
@@ -36,7 +36,7 @@ pub trait EreporterApi {
     /// than or equal to `seq`.
     #[endpoint {
         method = DELETE,
-        path = "/ereports/{reporter_id}/{seq}"
+        path = "/ereports/{id}/{generation}/{seq}"
     }]
     async fn ereports_acknowledge(
         request_context: RequestContext<Self::Context>,
@@ -44,29 +44,39 @@ pub trait EreporterApi {
     ) -> Result<HttpResponseDeleted, HttpError>;
 }
 
-/// Path parameters to the [`EreporterApi::ereports_list`] endpoint.
-#[derive(Clone, Copy, Debug, Deserialize, JsonSchema, Serialize)]
-pub struct ListPathParams {
-    pub reporter_id: Uuid,
-}
-
 /// Path parameters to  the [`EreporterApi::ereports_acknowledge`] endpoint.
 #[derive(Clone, Copy, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct AcknowledgePathParams {
-    pub reporter_id: Uuid,
+    #[serde(flatten)]
+    pub reporter: ReporterId,
+
     pub seq: Generation,
 }
 
 /// An entry in the ereport batch returned by a reporter.
 #[derive(Clone, Debug, Deserialize, JsonSchema, Serialize)]
 pub struct Entry {
-    /// UUID of the entity that generated this ereport.
-    pub reporter_id: Uuid,
+    /// The identifier of the entity that generated this ereport.
+    pub reporter: ReporterId,
+
     /// The ereport's sequence number, unique with regards to ereports generated
     /// by the entity with the `reporter_id`.
     pub seq: Generation,
 
     pub value: EntryKind,
+}
+
+/// A reporter is uniquely identified by its UUID (preserved across restarts)
+/// and its generation number (incremented when the reporter re-registers itself
+/// after a restart).
+#[derive(
+    Copy, Clone, Debug, Deserialize, JsonSchema, Serialize, Eq, PartialEq,
+)]
+pub struct ReporterId {
+    /// The reporter's UUID.
+    pub id: Uuid,
+    /// The reporter's generation.
+    pub generation: Generation,
 }
 
 /// Kinds of entry in a batch.

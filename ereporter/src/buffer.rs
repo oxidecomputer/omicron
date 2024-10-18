@@ -12,21 +12,23 @@ use uuid::Uuid;
 
 pub(crate) enum ServerReq {
     TruncateTo {
+        generation: Generation,
         seq: Generation,
         tx: oneshot::Sender<Result<(), Error>>,
     },
     List {
+        generation: Generation,
         start_seq: Option<Generation>,
         limit: usize,
-        tx: oneshot::Sender<Vec<ereporter_api::Entry>>,
+        tx: oneshot::Sender<Result<Vec<ereporter_api::Entry>, Error>>,
     },
 }
 
 pub(crate) struct BufferWorker {
     seq: Generation,
+    id: ereporter_api::ReporterId,
     buf: VecDeque<ereporter_api::Entry>,
     log: slog::Logger,
-    id: Uuid,
     ereports: mpsc::Receiver<EreportData>,
     requests: mpsc::Receiver<ServerReq>,
 }
@@ -50,7 +52,7 @@ impl BufferWorker {
         let log = log.new(slog::o!("reporter_id" => id.to_string()));
         let task = tokio::task::spawn(async move {
             // Wait for the server to come up, and then register the reporter.
-            let seq = loop {
+            let nexus_client::types::EreporterRegistered { seq, generation } = loop {
                 let state = server.borrow_and_update().as_ref().cloned();
                 if let Some(server) = state {
                     break server.register_reporter(&log, id).await;
@@ -63,9 +65,9 @@ impl BufferWorker {
             // Start running the buffer worker.
             let worker = Self {
                 seq,
+                id: ereporter_api::ReporterId { id, generation },
                 buf: VecDeque::with_capacity(buffer_capacity),
-                log,
-                id,
+                log: log.new(slog::o!("reporter_gen" => u64::from(generation))),
                 ereports,
                 requests,
             };
@@ -77,8 +79,20 @@ impl BufferWorker {
     pub(crate) async fn run(mut self) {
         while let Some(req) = self.requests.recv().await {
             match req {
+                // Asked to list ereports at a previous generation --- we must
+                // have been restarted since then. Indicate that that previous
+                // version of ourself is lost and gone forever.
+                ServerReq::List { generation, tx, .. }
+                    if generation < self.id.generation =>
+                {
+                    slog::info!(self.log, "requested generation has been lost to the sands of time"; "requested_gen" => %generation);
+
+                    if tx.send(Err(Error::Gone)).is_err() {
+                        slog::warn!(self.log, "client canceled list request");
+                    }
+                }
                 // Asked to list ereports!
-                ServerReq::List { start_seq, limit, tx } => {
+                ServerReq::List { start_seq, limit, tx, .. } => {
                     // First, grab any new ereports and stick them in our cache.
                     while let Ok(ereport) = self.ereports.try_recv() {
                         self.push_ereport(ereport);
@@ -109,21 +123,40 @@ impl BufferWorker {
                         "len" => list.len(),
                         "limit" => limit
                     );
-                    if tx.send(list).is_err() {
+                    if tx.send(Ok(list)).is_err() {
                         slog::warn!(self.log, "client canceled list request");
                     }
                 }
-                ServerReq::TruncateTo { seq, tx } if seq > self.seq => {
+                // They asked for our previous generation, but we have been restarted!
+                ServerReq::TruncateTo { generation, tx, .. }
+                    if generation < self.id.generation =>
+                {
+                    slog::info!(
+                        self.log,
+                        "asked to discard ereports from a previous version of
+                         ourself";
+                        "requested_generation" => %generation,
+                    );
+                    if tx.send(Err(Error::Gone)).is_err() {
+                        // If the receiver no longer cares about the response to
+                        // this request, no biggie.
+                        slog::warn!(
+                            self.log,
+                            "client canceled truncate request"
+                        );
+                    }
+                }
+                ServerReq::TruncateTo { seq, tx, .. } if seq > self.seq => {
                     if tx.send(Err(Error::invalid_value(
-                    "seq",
-                    "cannot truncate to a sequence number greater than the current maximum"
-                ))).is_err() {
-                    // If the receiver no longer cares about the response to
-                    // this request, no biggie.
-                    slog::warn!(self.log, "client canceled truncate request");
+                        "seq",
+                        "cannot truncate to a sequence number greater than the current maximum"
+                    ))).is_err() {
+                        // If the receiver no longer cares about the response to
+                        // this request, no biggie.
+                        slog::warn!(self.log, "client canceled truncate request");
+                    }
                 }
-                }
-                ServerReq::TruncateTo { seq, tx } => {
+                ServerReq::TruncateTo { seq, tx, .. } => {
                     let prev_len = self.buf.len();
                     self.buf.retain(|ereport| ereport.seq > seq);
 
@@ -155,7 +188,7 @@ impl BufferWorker {
         let seq = self.seq;
         self.buf.push_back(ereporter_api::Entry {
             seq,
-            reporter_id: self.id,
+            reporter: self.id,
             value: ereporter_api::EntryKind::Ereport(ereporter_api::Ereport {
                 facts,
                 class,

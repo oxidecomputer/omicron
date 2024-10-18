@@ -3322,6 +3322,14 @@
         "description": "Response to error reporter registration requests.",
         "type": "object",
         "properties": {
+          "generation": {
+            "description": "The reporter's current generation. This is incremented every time a reporter restarts and re-registers itself.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Generation"
+              }
+            ]
+          },
           "seq": {
             "description": "The starting sequence number of the next error report from this reporter. If the reporter has not been seen by Nexus previously, this may be 0.",
             "allOf": [
@@ -3332,6 +3340,7 @@
           }
         },
         "required": [
+          "generation",
           "seq"
         ]
       },

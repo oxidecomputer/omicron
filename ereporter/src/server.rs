@@ -5,15 +5,13 @@ use dropshot::{
     HttpResponseOk, PaginationParams, Path, Query, RequestContext, ResultsPage,
     WhichPage,
 };
-use ereporter_api::ListPathParams;
 use internal_dns::resolver::Resolver;
 use internal_dns::ServiceName;
 use omicron_common::api::external::Error;
 use omicron_common::api::external::Generation;
 use omicron_common::backoff;
 use omicron_common::backoff::BackoffError;
-use slog::debug;
-use slog::warn;
+use slog::{debug, info, warn};
 use slog_error_chain::SlogInlineError;
 use std::net::IpAddr;
 use std::net::SocketAddr;
@@ -135,14 +133,14 @@ impl ereporter_api::EreporterApi for EreporterApiImpl {
 
     async fn ereports_list(
         reqctx: RequestContext<Self::Context>,
-        path: Path<ListPathParams>,
+        path: Path<ereporter_api::ReporterId>,
         query: Query<PaginationParams<EmptyScanParams, Generation>>,
     ) -> Result<HttpResponseOk<ResultsPage<ereporter_api::Entry>>, HttpError>
     {
         let registry = reqctx.context();
         let pagination = query.into_inner();
         let limit = reqctx.page_limit(&pagination)?.get() as usize;
-        let ereporter_api::ListPathParams { reporter_id } = path.into_inner();
+        let ereporter_api::ReporterId { id, generation } = path.into_inner();
 
         let start_seq = match pagination.page {
             WhichPage::First(..) => None,
@@ -152,25 +150,25 @@ impl ereporter_api::EreporterApi for EreporterApiImpl {
         slog::debug!(
             reqctx.log,
             "received ereport list request";
-            "reporter_id" => %reporter_id,
+            "reporter_id" => %id,
+            "reporter_gen" => %generation,
             "start_seq" => ?start_seq,
             "limit" => limit,
         );
-        let worker = registry.get_worker(&reporter_id).ok_or(
-            HttpError::for_not_found(
+        let worker =
+            registry.get_worker(&id).ok_or(HttpError::for_not_found(
                 Some("NO_REPORTER".to_string()),
-                format!("no reporter with ID {reporter_id}"),
-            ),
-        )?;
+                format!("no reporter with ID {id}"),
+            ))?;
         let (tx, rx) = oneshot::channel();
         worker
-            .send(buffer::ServerReq::List { start_seq, limit, tx })
+            .send(buffer::ServerReq::List { generation, start_seq, limit, tx })
             .await
             .map_err(|_| Error::internal_error("server shutting down"))?;
         let list = rx.await.map_err(|_| {
             // This shouldn't happen!
             Error::internal_error("buffer canceled request rudely!")
-        })?;
+        })??;
         let page = ResultsPage::new(
             list,
             &EmptyScanParams {},
@@ -184,24 +182,26 @@ impl ereporter_api::EreporterApi for EreporterApiImpl {
         path: Path<ereporter_api::AcknowledgePathParams>,
     ) -> Result<HttpResponseDeleted, HttpError> {
         let registry = reqctx.context();
-        let ereporter_api::AcknowledgePathParams { reporter_id, seq } =
-            path.into_inner();
+        let ereporter_api::AcknowledgePathParams {
+            reporter: ereporter_api::ReporterId { id, generation },
+            seq,
+        } = path.into_inner();
         slog::debug!(
             reqctx.log,
             "received ereport acknowledge request";
-            "reporter_id" => %reporter_id,
+            "reporter_id" => %id,
+            "reporter_generation" => %generation,
             "seq" => ?seq,
         );
 
-        let worker = registry.get_worker(&reporter_id).ok_or(
-            HttpError::for_not_found(
+        let worker =
+            registry.get_worker(&id).ok_or(HttpError::for_not_found(
                 Some("NO_REPORTER".to_string()),
-                format!("no reporter with ID {reporter_id}"),
-            ),
-        )?;
+                format!("no reporter with ID {id}"),
+            ))?;
         let (tx, rx) = oneshot::channel();
         worker
-            .send(buffer::ServerReq::TruncateTo { seq, tx })
+            .send(buffer::ServerReq::TruncateTo { seq, generation, tx })
             .await
             .map_err(|_| Error::internal_error("server shutting down"))?;
         rx.await.map_err(|_| {
@@ -224,7 +224,7 @@ impl State {
         &self,
         log: &slog::Logger,
         reporter_id: Uuid,
-    ) -> Generation {
+    ) -> nexus_client::types::EreporterRegistered {
         #[derive(Debug, thiserror::Error, SlogInlineError)]
         enum RegistrationError {
             #[error(transparent)]
@@ -245,14 +245,21 @@ impl State {
                 &format!("http://{nexus_addr}"),
                 log.clone(),
             );
-            let nexus_client::types::EreporterRegistered { seq } = nexus_client
+            let registration = nexus_client
                 .cpapi_ereporters_post(&info)
                 .await
                 .map_err(|e| {
                     BackoffError::transient(RegistrationError::from(e))
                 })?
                 .into_inner();
-            Ok(seq)
+            info!(
+                log,
+                "ereporter registered";
+                "reporter_id" => %reporter_id,
+                "reporter_gen" => %registration.reporter_gen,
+                "seq" => %registration.seq,
+            );
+            Ok(registration)
         };
         let log_failure = |error: RegistrationError, delay| {
             warn!(
