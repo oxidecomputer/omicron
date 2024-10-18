@@ -15,7 +15,8 @@
 //! iterating over the values (especially since ClickHouse does not append a
 //! fixed-size length header to its messages).
 
-use bytes::{Buf, BufMut};
+use bytes::Buf;
+use bytes::BufMut;
 
 /// Encode a u64 as a variable-length integer, returning the number of bytes
 /// written.
