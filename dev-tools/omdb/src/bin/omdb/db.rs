@@ -45,6 +45,7 @@ use gateway_client::types::SpType;
 use indicatif::ProgressBar;
 use indicatif::ProgressDrawTarget;
 use indicatif::ProgressStyle;
+use internal_dns_types::names::ServiceName;
 use ipnetwork::IpNetwork;
 use nexus_config::PostgresConfigWithUrl;
 use nexus_db_model::Dataset;
@@ -221,10 +222,7 @@ impl DbUrlOptions {
                 );
                 eprintln!("note: (override with --db-url or OMDB_DB_URL)");
                 let addrs = omdb
-                    .dns_lookup_all(
-                        log.clone(),
-                        internal_dns::ServiceName::Cockroach,
-                    )
+                    .dns_lookup_all(log.clone(), ServiceName::Cockroach)
                     .await?;
 
                 format!(
@@ -2941,6 +2939,7 @@ async fn cmd_db_instance_info(
     const VCPUS: &'static str = "vCPUs";
     const MEMORY: &'static str = "memory";
     const HOSTNAME: &'static str = "hostname";
+    const BOOT_DISK: &'static str = "boot disk";
     const AUTO_RESTART: &'static str = "auto-restart";
     const STATE: &'static str = "nexus state";
     const LAST_MODIFIED: &'static str = "last modified at";
@@ -2963,6 +2962,7 @@ async fn cmd_db_instance_info(
         DELETED,
         VCPUS,
         MEMORY,
+        BOOT_DISK,
         HOSTNAME,
         AUTO_RESTART,
         STATE,
@@ -3006,6 +3006,7 @@ async fn cmd_db_instance_info(
     println!("    {VCPUS:>WIDTH$}: {}", instance.ncpus.0 .0);
     println!("    {MEMORY:>WIDTH$}: {}", instance.memory.0);
     println!("    {HOSTNAME:>WIDTH$}: {}", instance.hostname);
+    println!("    {BOOT_DISK:>WIDTH$}: {:?}", instance.boot_disk_id);
     print_multiline_debug(AUTO_RESTART, &instance.auto_restart);
     println!("\n{:=<80}", "== RUNTIME STATE ");
     let InstanceRuntimeState {
@@ -5179,31 +5180,23 @@ fn inv_collection_print_sleds(collection: &Collection) {
             println!("        reservation: {reservation:?}, quota: {quota:?}");
         }
 
-        if let Some(zones) = collection.omicron_zones.get(&sled.sled_id) {
-            println!(
-                "    zones collected from {} at {}",
-                zones.source, zones.time_collected,
-            );
-            println!(
-                "    zones generation: {} (count: {})",
-                zones.zones.generation,
-                zones.zones.zones.len()
-            );
+        println!(
+            "    zones generation: {} (count: {})",
+            sled.omicron_zones.generation,
+            sled.omicron_zones.zones.len(),
+        );
 
-            if zones.zones.zones.is_empty() {
-                continue;
-            }
+        if sled.omicron_zones.zones.is_empty() {
+            continue;
+        }
 
-            println!("    ZONES FOUND");
-            for z in &zones.zones.zones {
-                println!(
-                    "      zone {} (type {})",
-                    z.id,
-                    z.zone_type.kind().report_str()
-                );
-            }
-        } else {
-            println!("  warning: no zone information found");
+        println!("    ZONES FOUND");
+        for z in &sled.omicron_zones.zones {
+            println!(
+                "      zone {} (type {})",
+                z.id,
+                z.zone_type.kind().report_str()
+            );
         }
     }
 }

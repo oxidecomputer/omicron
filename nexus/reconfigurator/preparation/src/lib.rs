@@ -16,6 +16,7 @@ use nexus_db_queries::db::pagination::Paginator;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::Blueprint;
 use nexus_types::deployment::BlueprintMetadata;
+use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::deployment::CockroachDbClusterVersion;
 use nexus_types::deployment::CockroachDbSettings;
 use nexus_types::deployment::OmicronZoneExternalIp;
@@ -40,8 +41,10 @@ use omicron_common::api::external::LookupType;
 use omicron_common::disk::DiskIdentity;
 use omicron_common::policy::BOUNDARY_NTP_REDUNDANCY;
 use omicron_common::policy::COCKROACHDB_REDUNDANCY;
+use omicron_common::policy::CRUCIBLE_PANTRY_REDUNDANCY;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_common::policy::NEXUS_REDUNDANCY;
+use omicron_common::policy::OXIMETER_REDUNDANCY;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
@@ -66,11 +69,14 @@ pub struct PlanningInputFromDb<'a> {
     pub target_boundary_ntp_zone_count: usize,
     pub target_nexus_zone_count: usize,
     pub target_internal_dns_zone_count: usize,
+    pub target_oximeter_zone_count: usize,
     pub target_cockroachdb_zone_count: usize,
     pub target_cockroachdb_cluster_version: CockroachDbClusterVersion,
+    pub target_crucible_pantry_zone_count: usize,
     pub internal_dns_version: nexus_db_model::Generation,
     pub external_dns_version: nexus_db_model::Generation,
     pub cockroachdb_settings: &'a CockroachDbSettings,
+    pub clickhouse_policy: Option<ClickhousePolicy>,
     pub log: &'a Logger,
 }
 
@@ -134,6 +140,11 @@ impl PlanningInputFromDb<'_> {
             .await
             .internal_context("fetching cockroachdb settings")?;
 
+        let clickhouse_policy = datastore
+            .clickhouse_policy_get_latest(opctx)
+            .await
+            .internal_context("fetching clickhouse policy")?;
+
         let planning_input = PlanningInputFromDb {
             sled_rows: &sled_rows,
             zpool_rows: &zpool_rows,
@@ -141,15 +152,18 @@ impl PlanningInputFromDb<'_> {
             target_boundary_ntp_zone_count: BOUNDARY_NTP_REDUNDANCY,
             target_nexus_zone_count: NEXUS_REDUNDANCY,
             target_internal_dns_zone_count: INTERNAL_DNS_REDUNDANCY,
+            target_oximeter_zone_count: OXIMETER_REDUNDANCY,
             target_cockroachdb_zone_count: COCKROACHDB_REDUNDANCY,
             target_cockroachdb_cluster_version:
                 CockroachDbClusterVersion::POLICY,
+            target_crucible_pantry_zone_count: CRUCIBLE_PANTRY_REDUNDANCY,
             external_ip_rows: &external_ip_rows,
             service_nic_rows: &service_nic_rows,
             log: &opctx.log,
             internal_dns_version,
             external_dns_version,
             cockroachdb_settings: &cockroachdb_settings,
+            clickhouse_policy,
         }
         .build()
         .internal_context("assembling planning_input")?;
@@ -165,10 +179,13 @@ impl PlanningInputFromDb<'_> {
             target_boundary_ntp_zone_count: self.target_boundary_ntp_zone_count,
             target_nexus_zone_count: self.target_nexus_zone_count,
             target_internal_dns_zone_count: self.target_internal_dns_zone_count,
+            target_oximeter_zone_count: self.target_oximeter_zone_count,
             target_cockroachdb_zone_count: self.target_cockroachdb_zone_count,
             target_cockroachdb_cluster_version: self
                 .target_cockroachdb_cluster_version,
-            clickhouse_policy: None,
+            target_crucible_pantry_zone_count: self
+                .target_crucible_pantry_zone_count,
+            clickhouse_policy: self.clickhouse_policy.clone(),
         };
         let mut builder = PlanningInputBuilder::new(
             policy,

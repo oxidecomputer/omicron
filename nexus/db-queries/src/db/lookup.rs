@@ -227,9 +227,30 @@ impl<'a> LookupPath<'a> {
         VpcRouter::PrimaryKey(Root { lookup_root: self }, id)
     }
 
+    /// Select a resource of type InternetGateway, identified by its id
+    pub fn internet_gateway_id(self, id: Uuid) -> InternetGateway<'a> {
+        InternetGateway::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
     /// Select a resource of type RouterRoute, identified by its id
     pub fn router_route_id(self, id: Uuid) -> RouterRoute<'a> {
         RouterRoute::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    /// Select a resource of type InternetGatewayIpPool, identified by its id
+    pub fn internet_gateway_ip_pool_id(
+        self,
+        id: Uuid,
+    ) -> InternetGatewayIpPool<'a> {
+        InternetGatewayIpPool::PrimaryKey(Root { lookup_root: self }, id)
+    }
+
+    /// Select a resource of type InternetGatewayIpAddress, identified by its id
+    pub fn internet_gateway_ip_address_id(
+        self,
+        id: Uuid,
+    ) -> InternetGatewayIpAddress<'a> {
+        InternetGatewayIpAddress::PrimaryKey(Root { lookup_root: self }, id)
     }
 
     /// Select a resource of type FloatingIp, identified by its id
@@ -686,7 +707,7 @@ lookup_resource! {
 lookup_resource! {
     name = "Vpc",
     ancestors = [ "Silo", "Project" ],
-    children = [ "VpcRouter", "VpcSubnet" ],
+    children = [ "VpcRouter", "VpcSubnet", "InternetGateway" ],
     lookup_by_name = true,
     soft_deletes = true,
     primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
@@ -713,6 +734,33 @@ lookup_resource! {
 lookup_resource! {
     name = "VpcSubnet",
     ancestors = [ "Silo", "Project", "Vpc" ],
+    children = [ ],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "InternetGateway",
+    ancestors = [ "Silo", "Project", "Vpc" ],
+    children = [ "InternetGatewayIpPool", "InternetGatewayIpAddress" ],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "InternetGatewayIpPool",
+    ancestors = [ "Silo", "Project", "Vpc", "InternetGateway" ],
+    children = [ ],
+    lookup_by_name = true,
+    soft_deletes = true,
+    primary_key_columns = [ { column_name = "id", rust_type = Uuid } ]
+}
+
+lookup_resource! {
+    name = "InternetGatewayIpAddress",
+    ancestors = [ "Silo", "Project", "Vpc", "InternetGateway" ],
     children = [ ],
     lookup_by_name = true,
     soft_deletes = true,

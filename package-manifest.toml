@@ -178,6 +178,7 @@ source.paths = [
   { from = "out/clickhouse", to = "/opt/oxide/clickhouse" },
   { from = "smf/clickhouse/manifest.xml", to = "/var/svc/manifest/site/clickhouse/manifest.xml" },
   { from = "smf/clickhouse/method_script.sh", to = "/opt/oxide/lib/svc/manifest/clickhouse.sh" },
+  { from = "smf/clickhouse/config.xml", to = "/opt/oxide/clickhouse/config.xml" },
 ]
 output.type = "zone"
 output.intermediate_only = true
@@ -242,13 +243,14 @@ output.intermediate_only = true
 setup_hint = "Run `cargo xtask download clickhouse` to download the necessary binaries"
 
 [package.omicron-clickhouse-admin]
-service_name = "clickhouse-admin"
+service_name = "omicron-clickhouse-admin"
 only_for_targets.image = "standard"
 source.type = "local"
-source.rust.binary_names = ["clickhouse-admin"]
+source.rust.binary_names = ["clickhouse-admin-keeper", "clickhouse-admin-server"]
 source.rust.release = true
 source.paths = [
-  { from = "smf/clickhouse-admin", to = "/var/svc/manifest/site/clickhouse-admin" },
+  { from = "smf/clickhouse-admin-keeper", to = "/var/svc/manifest/site/clickhouse-admin-keeper" },
+  { from = "smf/clickhouse-admin-server", to = "/var/svc/manifest/site/clickhouse-admin-server" },
 ]
 output.type = "zone"
 output.intermediate_only = true
@@ -617,10 +619,10 @@ service_name = "propolis-server"
 only_for_targets.image = "standard"
 source.type = "prebuilt"
 source.repo = "propolis"
-source.commit = "fae5334bcad5e864794332c6fed5e6bb9ec88831"
+source.commit = "11371b0f3743f8df5b047dc0edc2699f4bdf3927"
 # The SHA256 digest is automatically posted to:
 # https://buildomat.eng.oxide.computer/public/file/oxidecomputer/propolis/image/<commit>/propolis-server.sha256.txt
-source.sha256 = "9701c9ef35950b13d69e7b6309c98b0c92f57b4262c7a536f046c909b2bedbd5"
+source.sha256 = "07383cbad45bc032de1b65d3553839751fde96342cc76249ca4a45b89872aae9"
 output.type = "zone"
 
 [package.mg-ddm-gz]
@@ -715,8 +717,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "8dab641b522375a4b403ae4bd0c9a22d905fae5d"
-source.sha256 = "f848e54d5ea7ddcbc91b50d986dd7ee6617809690fb7ed6463a51fc2235786a8"
+source.commit = "f3810e7bc1f0d746b5e95b3aaff32e52b02dfdfa"
+source.sha256 = "c1506f6f818327523e6ff3102432a2038d319338b883235664b34f9132ff676a"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -742,8 +744,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "8dab641b522375a4b403ae4bd0c9a22d905fae5d"
-source.sha256 = "d41d8f026da7db7044d1fb8aa2b7a5b64be9e3b606f72f23dd8169c859caa58f"
+source.commit = "f3810e7bc1f0d746b5e95b3aaff32e52b02dfdfa"
+source.sha256 = "061d40085e733e60d7c53ebfd2a4cf64f54a856e7eb5fd4b82ac65ec6a5b847b"
 output.type = "zone"
 output.intermediate_only = true
 
@@ -762,8 +764,8 @@ only_for_targets.image = "standard"
 # the other `source.*` keys.
 source.type = "prebuilt"
 source.repo = "dendrite"
-source.commit = "8dab641b522375a4b403ae4bd0c9a22d905fae5d"
-source.sha256 = "3b42df3c28a2aefb052bd0bd5b64a595295b5900f97112d8502eaa1edea7e390"
+source.commit = "f3810e7bc1f0d746b5e95b3aaff32e52b02dfdfa"
+source.sha256 = "c6cb4c077f0ddfc78ab06e07316d1312657f95526ced60c2b8e7baf1c73ae24a"
 output.type = "zone"
 output.intermediate_only = true
 

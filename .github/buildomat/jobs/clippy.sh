@@ -16,13 +16,17 @@ set -o errexit
 set -o pipefail
 set -o xtrace
 
-cargo --version
-rustc --version
-
 #
 # Set up our PATH for use with this workspace.
 #
+
+# shellcheck source=/dev/null
 source ./env.sh
+# shellcheck source=/dev/null
+source .github/buildomat/ci-env.sh
+
+cargo --version
+rustc --version
 
 banner prerequisites
 ptime -m bash ./tools/install_builder_prerequisites.sh -y

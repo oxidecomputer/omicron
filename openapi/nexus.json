@@ -7,7 +7,7 @@
       "url": "https://oxide.computer",
       "email": "api@oxide.computer"
     },
-    "version": "20241009.0"
+    "version": "20241204.0"
   },
   "paths": {
     "/device/auth": {
@@ -1913,6 +1913,60 @@
           }
         }
       },
+      "put": {
+        "tags": [
+          "instances"
+        ],
+        "summary": "Update instance",
+        "operationId": "instance_update",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "path",
+            "name": "instance",
+            "description": "Name or ID of the instance",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InstanceUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Instance"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
       "delete": {
         "tags": [
           "instances"
@@ -2612,6 +2666,664 @@
                 }
               }
             }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/internet-gateway-ip-addresses": {
+      "get": {
+        "tags": [
+          "vpcs"
+        ],
+        "summary": "List IP addresses attached to internet gateway",
+        "operationId": "internet_gateway_ip_address_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "gateway",
+            "description": "Name or ID of the internet gateway",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vpc",
+            "description": "Name or ID of the VPC, only required if `gateway` is provided as a `Name`",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternetGatewayIpAddressResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": [
+            "gateway"
+          ]
+        }
+      },
+      "post": {
+        "tags": [
+          "vpcs"
+        ],
+        "summary": "Attach IP address to internet gateway",
+        "operationId": "internet_gateway_ip_address_create",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "gateway",
+            "description": "Name or ID of the internet gateway",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vpc",
+            "description": "Name or ID of the VPC, only required if `gateway` is provided as a `Name`",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InternetGatewayIpAddressCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternetGatewayIpAddress"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/internet-gateway-ip-addresses/{address}": {
+      "delete": {
+        "tags": [
+          "vpcs"
+        ],
+        "summary": "Detach IP address from internet gateway",
+        "operationId": "internet_gateway_ip_address_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "address",
+            "description": "Name or ID of the IP address",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cascade",
+            "description": "Also delete routes targeting this gateway element.",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "gateway",
+            "description": "Name or ID of the internet gateway",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vpc",
+            "description": "Name or ID of the VPC, only required if `gateway` is provided as a `Name`",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/internet-gateway-ip-pools": {
+      "get": {
+        "tags": [
+          "vpcs"
+        ],
+        "summary": "List IP pools attached to internet gateway",
+        "operationId": "internet_gateway_ip_pool_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "gateway",
+            "description": "Name or ID of the internet gateway",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vpc",
+            "description": "Name or ID of the VPC, only required if `gateway` is provided as a `Name`",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternetGatewayIpPoolResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": [
+            "gateway"
+          ]
+        }
+      },
+      "post": {
+        "tags": [
+          "vpcs"
+        ],
+        "summary": "Attach IP pool to internet gateway",
+        "operationId": "internet_gateway_ip_pool_create",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "gateway",
+            "description": "Name or ID of the internet gateway",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vpc",
+            "description": "Name or ID of the VPC, only required if `gateway` is provided as a `Name`",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InternetGatewayIpPoolCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternetGatewayIpPool"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/internet-gateway-ip-pools/{pool}": {
+      "delete": {
+        "tags": [
+          "vpcs"
+        ],
+        "summary": "Detach IP pool from internet gateway",
+        "operationId": "internet_gateway_ip_pool_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "description": "Name or ID of the IP pool",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cascade",
+            "description": "Also delete routes targeting this gateway element.",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "gateway",
+            "description": "Name or ID of the internet gateway",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vpc",
+            "description": "Name or ID of the VPC, only required if `gateway` is provided as a `Name`",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/internet-gateways": {
+      "get": {
+        "tags": [
+          "vpcs"
+        ],
+        "summary": "List internet gateways",
+        "operationId": "internet_gateway_list",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "description": "Maximum number of items returned by a single call",
+            "schema": {
+              "nullable": true,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 1
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_token",
+            "description": "Token returned by previous call to retrieve the subsequent page",
+            "schema": {
+              "nullable": true,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_by",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrIdSortMode"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vpc",
+            "description": "Name or ID of the VPC",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternetGatewayResultsPage"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-dropshot-pagination": {
+          "required": [
+            "vpc"
+          ]
+        }
+      },
+      "post": {
+        "tags": [
+          "vpcs"
+        ],
+        "summary": "Create VPC internet gateway",
+        "operationId": "internet_gateway_create",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vpc",
+            "description": "Name or ID of the VPC",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InternetGatewayCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "successful creation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternetGateway"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/v1/internet-gateways/{gateway}": {
+      "get": {
+        "tags": [
+          "vpcs"
+        ],
+        "summary": "Fetch internet gateway",
+        "operationId": "internet_gateway_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "gateway",
+            "description": "Name or ID of the gateway",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vpc",
+            "description": "Name or ID of the VPC",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InternetGateway"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "vpcs"
+        ],
+        "summary": "Delete internet gateway",
+        "operationId": "internet_gateway_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "gateway",
+            "description": "Name or ID of the gateway",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cascade",
+            "description": "Also delete routes targeting this gateway.",
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "description": "Name or ID of the project, only required if `vpc` is provided as a `Name`",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "vpc",
+            "description": "Name or ID of the VPC",
+            "schema": {
+              "$ref": "#/components/schemas/NameOrId"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
           },
           "4XX": {
             "$ref": "#/components/responses/Error"
@@ -12664,7 +13376,7 @@
             "type": "string"
           },
           "disk_source": {
-            "description": "initial source for this disk",
+            "description": "The initial source for this disk",
             "allOf": [
               {
                 "$ref": "#/components/schemas/DiskSource"
@@ -12675,7 +13387,7 @@
             "$ref": "#/components/schemas/Name"
           },
           "size": {
-            "description": "total size of the Disk in bytes",
+            "description": "The total size of the Disk (in bytes)",
             "allOf": [
               {
                 "$ref": "#/components/schemas/ByteCount"
@@ -15102,6 +15814,21 @@
             "description": "`true` if this instance's auto-restart policy will permit the control plane to automatically restart it if it enters the `Failed` state.",
             "type": "boolean"
           },
+          "auto_restart_policy": {
+            "nullable": true,
+            "description": "The auto-restart policy configured for this instance, or `None` if no explicit policy is configured.\n\nIf this is not present, then this instance uses the default auto-restart policy, which may or may not allow it to be restarted. The `auto_restart_enabled` field indicates whether the instance will be automatically restarted.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceAutoRestartPolicy"
+              }
+            ]
+          },
+          "boot_disk_id": {
+            "nullable": true,
+            "description": "the ID of the disk used to boot this Instance, if a specific one is assigned.",
+            "type": "string",
+            "format": "uuid"
+          },
           "description": {
             "description": "human-readable free-form text about a resource",
             "type": "string"
@@ -15222,6 +15949,16 @@
               }
             ]
           },
+          "boot_disk": {
+            "nullable": true,
+            "description": "The disk this instance should boot into. This disk can either be attached if it already exists, or created, if it should be a new disk.\n\nIt is strongly recommended to either provide a boot disk at instance creation, or update the instance after creation to set a boot disk.\n\nAn instance without an explicit boot disk can be booted: the options are as managed by UEFI, and as controlled by the guest OS, but with some risk.  If this instance later has a disk attached or detached, it is possible that boot options can end up reordered, with the intended boot disk moved after the EFI shell in boot priority. This may result in an instance that only boots to the EFI shell until the desired disk is set as an explicit boot disk and the instance rebooted.",
+            "default": null,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceDiskAttachment"
+              }
+            ]
+          },
           "description": {
             "type": "string"
           },
@@ -15242,16 +15979,31 @@
             }
           },
           "hostname": {
-            "$ref": "#/components/schemas/Hostname"
+            "description": "The hostname to be assigned to the instance",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Hostname"
+              }
+            ]
           },
           "memory": {
-            "$ref": "#/components/schemas/ByteCount"
+            "description": "The amount of RAM (in bytes) to be allocated to the instance",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ByteCount"
+              }
+            ]
           },
           "name": {
             "$ref": "#/components/schemas/Name"
           },
           "ncpus": {
-            "$ref": "#/components/schemas/InstanceCpuCount"
+            "description": "The number of vCPUs to be allocated to the instance",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceCpuCount"
+              }
+            ]
           },
           "network_interfaces": {
             "description": "The network interfaces to be created for this instance.",
@@ -15303,7 +16055,7 @@
                 "type": "string"
               },
               "disk_source": {
-                "description": "initial source for this disk",
+                "description": "The initial source for this disk",
                 "allOf": [
                   {
                     "$ref": "#/components/schemas/DiskSource"
@@ -15314,7 +16066,7 @@
                 "$ref": "#/components/schemas/Name"
               },
               "size": {
-                "description": "total size of the Disk in bytes",
+                "description": "The total size of the Disk (in bytes)",
                 "allOf": [
                   {
                     "$ref": "#/components/schemas/ByteCount"
@@ -15716,6 +16468,300 @@
               "destroyed"
             ]
           }
+        ]
+      },
+      "InstanceUpdate": {
+        "description": "Parameters of an `Instance` that can be reconfigured after creation.",
+        "type": "object",
+        "properties": {
+          "auto_restart_policy": {
+            "nullable": true,
+            "description": "The auto-restart policy for this instance.\n\nIf not provided, unset the instance's auto-restart policy.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/InstanceAutoRestartPolicy"
+              }
+            ]
+          },
+          "boot_disk": {
+            "nullable": true,
+            "description": "Name or ID of the disk the instance should be instructed to boot from.\n\nIf not provided, unset the instance's boot disk.",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/NameOrId"
+              }
+            ]
+          }
+        }
+      },
+      "InternetGateway": {
+        "description": "An internet gateway provides a path between VPC networks and external networks.",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          },
+          "vpc_id": {
+            "description": "The VPC to which the gateway belongs.",
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "description",
+          "id",
+          "name",
+          "time_created",
+          "time_modified",
+          "vpc_id"
+        ]
+      },
+      "InternetGatewayCreate": {
+        "description": "Create-time parameters for an `InternetGateway`",
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          }
+        },
+        "required": [
+          "description",
+          "name"
+        ]
+      },
+      "InternetGatewayIpAddress": {
+        "description": "An IP address that is attached to an internet gateway",
+        "type": "object",
+        "properties": {
+          "address": {
+            "description": "The associated IP address,",
+            "type": "string",
+            "format": "ip"
+          },
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "internet_gateway_id": {
+            "description": "The associated internet gateway.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "address",
+          "description",
+          "id",
+          "internet_gateway_id",
+          "name",
+          "time_created",
+          "time_modified"
+        ]
+      },
+      "InternetGatewayIpAddressCreate": {
+        "description": "Create-time identity-related parameters",
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string",
+            "format": "ip"
+          },
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          }
+        },
+        "required": [
+          "address",
+          "description",
+          "name"
+        ]
+      },
+      "InternetGatewayIpAddressResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InternetGatewayIpAddress"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "InternetGatewayIpPool": {
+        "description": "An IP pool that is attached to an internet gateway",
+        "type": "object",
+        "properties": {
+          "description": {
+            "description": "human-readable free-form text about a resource",
+            "type": "string"
+          },
+          "id": {
+            "description": "unique, immutable, system-controlled identifier for each resource",
+            "type": "string",
+            "format": "uuid"
+          },
+          "internet_gateway_id": {
+            "description": "The associated internet gateway.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "ip_pool_id": {
+            "description": "The associated IP pool.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "description": "unique, mutable, user-controlled identifier for each resource",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Name"
+              }
+            ]
+          },
+          "time_created": {
+            "description": "timestamp when this resource was created",
+            "type": "string",
+            "format": "date-time"
+          },
+          "time_modified": {
+            "description": "timestamp when this resource was last modified",
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "description",
+          "id",
+          "internet_gateway_id",
+          "ip_pool_id",
+          "name",
+          "time_created",
+          "time_modified"
+        ]
+      },
+      "InternetGatewayIpPoolCreate": {
+        "description": "Create-time identity-related parameters",
+        "type": "object",
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "ip_pool": {
+            "$ref": "#/components/schemas/NameOrId"
+          },
+          "name": {
+            "$ref": "#/components/schemas/Name"
+          }
+        },
+        "required": [
+          "description",
+          "ip_pool",
+          "name"
+        ]
+      },
+      "InternetGatewayIpPoolResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InternetGatewayIpPool"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "InternetGatewayResultsPage": {
+        "description": "A single page of results",
+        "type": "object",
+        "properties": {
+          "items": {
+            "description": "list of items on this page of results",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/InternetGateway"
+            }
+          },
+          "next_page": {
+            "nullable": true,
+            "description": "token used to fetch the next page of results (if any)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
         ]
       },
       "IpNet": {
@@ -17381,11 +18427,11 @@
             "type": "string",
             "format": "ip"
           },
-          "local_pref": {
+          "rib_priority": {
             "nullable": true,
             "description": "Local preference for route. Higher preference indictes precedence within and across protocols.",
             "type": "integer",
-            "format": "uint32",
+            "format": "uint8",
             "minimum": 0
           },
           "vid": {
@@ -17624,7 +18670,7 @@
             "type": "string"
           },
           "destination": {
-            "description": "Selects which traffic this routing rule will apply to.",
+            "description": "Selects which traffic this routing rule will apply to",
             "allOf": [
               {
                 "$ref": "#/components/schemas/RouteDestination"
@@ -17653,7 +18699,7 @@
             ]
           },
           "target": {
-            "description": "The location that matched packets should be forwarded to.",
+            "description": "The location that matched packets should be forwarded to",
             "allOf": [
               {
                 "$ref": "#/components/schemas/RouteTarget"
@@ -19446,17 +20492,17 @@
             "description": "The interface name this route configuration is assigned to.",
             "type": "string"
           },
-          "local_pref": {
-            "nullable": true,
-            "description": "Local preference indicating priority within and across protocols.",
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          },
           "port_settings_id": {
             "description": "The port settings object this route configuration belongs to.",
             "type": "string",
             "format": "uuid"
+          },
+          "rib_priority": {
+            "nullable": true,
+            "description": "RIB Priority indicating priority within and across protocols.",
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
           },
           "vlan_id": {
             "nullable": true,

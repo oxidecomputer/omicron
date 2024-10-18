@@ -276,6 +276,33 @@
         }
       }
     },
+    "/eip-gateways": {
+      "put": {
+        "summary": "Update per-NIC IP address <-> internet gateway mappings.",
+        "operationId": "set_eip_gateways",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExternalIpGatewayMap"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/inventory": {
       "get": {
         "summary": "Fetch basic information about this sled",
@@ -404,27 +431,6 @@
       }
     },
     "/omicron-zones": {
-      "get": {
-        "operationId": "omicron_zones_get",
-        "responses": {
-          "200": {
-            "description": "successful operation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OmicronZonesConfig"
-                }
-              }
-            }
-          },
-          "4XX": {
-            "$ref": "#/components/responses/Error"
-          },
-          "5XX": {
-            "$ref": "#/components/responses/Error"
-          }
-        }
-      },
       "put": {
         "operationId": "omicron_zones_put",
         "requestBody": {
@@ -1876,6 +1882,34 @@
           }
         ]
       },
+      "BootOrderEntry": {
+        "description": "An entry in a list of boot options.\n\n<details><summary>JSON schema</summary>\n\n```json { \"description\": \"An entry in a list of boot options.\", \"type\": \"object\", \"required\": [ \"name\" ], \"properties\": { \"name\": { \"description\": \"The name of the device to attempt booting from.\", \"type\": \"string\" } } } ``` </details>",
+        "type": "object",
+        "properties": {
+          "name": {
+            "description": "The name of the device to attempt booting from.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "BootSettings": {
+        "description": "BootSettings\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"order\" ], \"properties\": { \"order\": { \"type\": \"array\", \"items\": { \"$ref\": \"#/components/schemas/BootOrderEntry\" } } } } ``` </details>",
+        "type": "object",
+        "properties": {
+          "order": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BootOrderEntry"
+            }
+          }
+        },
+        "required": [
+          "order"
+        ]
+      },
       "BootstoreStatus": {
         "type": "object",
         "properties": {
@@ -2982,6 +3016,29 @@
           "baseboard"
         ]
       },
+      "ExternalIpGatewayMap": {
+        "description": "Per-NIC mappings from external IP addresses to the Internet Gateways which can choose them as a source.",
+        "type": "object",
+        "properties": {
+          "mappings": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "uniqueItems": true
+              }
+            }
+          }
+        },
+        "required": [
+          "mappings"
+        ]
+      },
       "Generation": {
         "description": "Generation numbers stored in the database, used for optimistic concurrency control",
         "type": "integer",
@@ -3219,6 +3276,14 @@
         "description": "Describes the instance hardware.",
         "type": "object",
         "properties": {
+          "boot_settings": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/BootSettings"
+              }
+            ]
+          },
           "cloud_init_bytes": {
             "nullable": true,
             "type": "string"
@@ -3355,6 +3420,9 @@
               "$ref": "#/components/schemas/InventoryDisk"
             }
           },
+          "omicron_zones": {
+            "$ref": "#/components/schemas/OmicronZonesConfig"
+          },
           "reservoir_size": {
             "$ref": "#/components/schemas/ByteCount"
           },
@@ -3386,6 +3454,7 @@
           "baseboard",
           "datasets",
           "disks",
+          "omicron_zones",
           "reservoir_size",
           "sled_agent_address",
           "sled_id",
@@ -4638,18 +4707,18 @@
               }
             ]
           },
-          "local_pref": {
-            "nullable": true,
-            "description": "The local preference associated with this route.",
-            "default": null,
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          },
           "nexthop": {
             "description": "The nexthop/gateway address.",
             "type": "string",
             "format": "ip"
+          },
+          "rib_priority": {
+            "nullable": true,
+            "description": "The RIB priority (i.e. Admin Distance) associated with this route.",
+            "default": null,
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
           },
           "vlan_id": {
             "nullable": true,
@@ -4743,10 +4812,16 @@
                 "enum": [
                   "internet_gateway"
                 ]
+              },
+              "value": {
+                "nullable": true,
+                "type": "string",
+                "format": "uuid"
               }
             },
             "required": [
-              "type"
+              "type",
+              "value"
             ]
           },
           {

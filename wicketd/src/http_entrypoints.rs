@@ -20,7 +20,7 @@ use dropshot::RequestContext;
 use dropshot::StreamingBody;
 use dropshot::TypedBody;
 use http::StatusCode;
-use internal_dns::resolver::Resolver;
+use internal_dns_resolver::Resolver;
 use omicron_common::api::internal::shared::SwitchLocation;
 use omicron_uuid_kinds::RackInitUuid;
 use omicron_uuid_kinds::RackResetUuid;

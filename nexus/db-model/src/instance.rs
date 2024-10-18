@@ -62,6 +62,10 @@ pub struct Instance {
     #[diesel(embed)]
     pub auto_restart: InstanceAutoRestart,
 
+    /// The primary boot disk for this instance.
+    #[diesel(column_name = boot_disk_id)]
+    pub boot_disk_id: Option<Uuid>,
+
     #[diesel(embed)]
     pub runtime_state: InstanceRuntimeState,
 
@@ -115,6 +119,9 @@ impl Instance {
             memory: params.memory.into(),
             hostname: params.hostname.to_string(),
             auto_restart,
+            // Intentionally ignore `params.boot_disk_id` here: we can't set
+            // `boot_disk_id` until the referenced disk is attached.
+            boot_disk_id: None,
 
             runtime_state,
 
@@ -410,35 +417,38 @@ impl InstanceAutoRestart {
         // N.B. that this may become more complex in the future if we grow
         // additional auto-restart policies that require additional logic
         // (such as restart limits...)
-        dsl::auto_restart_policy
+        (dsl::auto_restart_policy
             .eq(InstanceAutoRestartPolicy::BestEffort)
-            // An instance whose last reincarnation was within the cooldown
-            // interval from now must remain in _bardo_ --- the liminal
-            // state between death and rebirth --- before its next
-            // reincarnation.
-            .and(
-                // If the instance has never previously been reincarnated, then
-                // it's allowed to reincarnate.
-                dsl::time_last_auto_restarted
-                    .is_null()
-                    // Or, if it has an overridden cooldown period, has that elapsed?
-                    .or(dsl::auto_restart_cooldown.is_not_null().and(
-                        dsl::time_last_auto_restarted
-                            .le(now.nullable() - dsl::auto_restart_cooldown),
-                    ))
-                    // Or, finally, if it does not have an overridden cooldown
-                    // period, has the default cooldown period elapsed?
-                    .or(dsl::auto_restart_cooldown.is_null().and(
-                        dsl::time_last_auto_restarted
-                            .le((now - Self::DEFAULT_COOLDOWN).nullable()),
-                    )),
-            )
-            // Deleted instances may not be reincarnated.
-            .and(dsl::time_deleted.is_null())
-            // If the instance is currently in the process of being updated,
-            // let's not mess with it for now and try to restart it on another
-            // pass.
-            .and(dsl::updater_id.is_null())
+            // If the auto-restart policy is null, then it should
+            // default to "best effort".
+            .or(dsl::auto_restart_policy.is_null()))
+        // An instance whose last reincarnation was within the cooldown
+        // interval from now must remain in _bardo_ --- the liminal
+        // state between death and rebirth --- before its next
+        // reincarnation.
+        .and(
+            // If the instance has never previously been reincarnated, then
+            // it's allowed to reincarnate.
+            dsl::time_last_auto_restarted
+                .is_null()
+                // Or, if it has an overridden cooldown period, has that elapsed?
+                .or(dsl::auto_restart_cooldown.is_not_null().and(
+                    dsl::time_last_auto_restarted
+                        .le(now.nullable() - dsl::auto_restart_cooldown),
+                ))
+                // Or, finally, if it does not have an overridden cooldown
+                // period, has the default cooldown period elapsed?
+                .or(dsl::auto_restart_cooldown.is_null().and(
+                    dsl::time_last_auto_restarted
+                        .le((now - Self::DEFAULT_COOLDOWN).nullable()),
+                )),
+        )
+        // Deleted instances may not be reincarnated.
+        .and(dsl::time_deleted.is_null())
+        // If the instance is currently in the process of being updated,
+        // let's not mess with it for now and try to restart it on another
+        // pass.
+        .and(dsl::updater_id.is_null())
     }
 }
 
@@ -519,4 +529,17 @@ mod optional_time_delta {
             .map(|&delta| SerdeTimeDelta::from(delta))
             .serialize(serializer)
     }
+}
+
+/// The parts of an Instance that can be directly updated after creation.
+#[derive(Clone, Debug, AsChangeset, Serialize, Deserialize)]
+#[diesel(table_name = instance, treat_none_as_null = true)]
+pub struct InstanceUpdate {
+    #[diesel(column_name = boot_disk_id)]
+    pub boot_disk_id: Option<Uuid>,
+
+    /// The auto-restart policy for this instance. If this is `None`, it will
+    /// set the instance's auto-restart policy to `NULL`.
+    #[diesel(column_name = auto_restart_policy)]
+    pub auto_restart_policy: Option<InstanceAutoRestartPolicy>,
 }

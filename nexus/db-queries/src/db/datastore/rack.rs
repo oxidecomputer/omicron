@@ -33,7 +33,6 @@ use diesel::prelude::*;
 use diesel::result::Error as DieselError;
 use diesel::upsert::excluded;
 use ipnetwork::IpNetwork;
-use nexus_db_fixed_data::silo::INTERNAL_SILO_ID;
 use nexus_db_fixed_data::vpc_subnet::DNS_VPC_SUBNET;
 use nexus_db_fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;
 use nexus_db_fixed_data::vpc_subnet::NTP_VPC_SUBNET;
@@ -57,6 +56,7 @@ use nexus_types::external_api::shared::IdentityType;
 use nexus_types::external_api::shared::IpRange;
 use nexus_types::external_api::shared::SiloRole;
 use nexus_types::identity::Resource;
+use nexus_types::silo::INTERNAL_SILO_ID;
 use omicron_common::api::external::AllowedSourceIps;
 use omicron_common::api::external::DataPageParams;
 use omicron_common::api::external::Error;
@@ -983,7 +983,7 @@ impl DataStore {
                 db::model::IpPoolResource {
                     ip_pool_id: internal_pool_id,
                     resource_type: db::model::IpPoolResourceType::Silo,
-                    resource_id: *INTERNAL_SILO_ID,
+                    resource_id: INTERNAL_SILO_ID,
                     is_default: true,
                 },
             )
@@ -1007,6 +1007,7 @@ mod test {
     use crate::db::model::IpPoolRange;
     use crate::db::model::Sled;
     use async_bb8_diesel::AsyncSimpleConnection;
+    use internal_dns_types::names::DNS_ZONE;
     use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
     use nexus_db_model::{DnsGroup, Generation, InitialDnsGroup, SledUpdate};
     use nexus_inventory::now_db_precision;
@@ -1066,6 +1067,7 @@ mod test {
                     internal_dns_version: *Generation::new(),
                     external_dns_version: *Generation::new(),
                     cockroachdb_fingerprint: String::new(),
+                    clickhouse_cluster_config: None,
                     time_created: Utc::now(),
                     creator: "test suite".to_string(),
                     comment: "test suite".to_string(),
@@ -1076,14 +1078,14 @@ mod test {
                 service_ip_pool_ranges: vec![],
                 internal_dns: InitialDnsGroup::new(
                     DnsGroup::Internal,
-                    internal_dns::DNS_ZONE,
+                    DNS_ZONE,
                     "test suite",
                     "test suite",
                     HashMap::new(),
                 ),
                 external_dns: InitialDnsGroup::new(
                     DnsGroup::External,
-                    internal_dns::DNS_ZONE,
+                    DNS_ZONE,
                     "test suite",
                     "test suite",
                     HashMap::new(),
@@ -1103,7 +1105,7 @@ mod test {
                 },
                 recovery_silo_fq_dns_name: format!(
                     "test-silo.sys.{}",
-                    internal_dns::DNS_ZONE
+                    DNS_ZONE
                 ),
                 recovery_user_id: "test-user".parse().unwrap(),
                 // empty string password
@@ -1149,7 +1151,7 @@ mod test {
             .dns_config_read(&opctx, DnsGroup::Internal)
             .await
             .unwrap();
-        assert_eq!(dns_internal.generation, 1);
+        assert_eq!(u64::from(dns_internal.generation), 1);
         assert!(dns_internal.time_created >= before);
         assert!(dns_internal.time_created <= after);
         assert_eq!(dns_internal.zones.len(), 0);
@@ -1160,7 +1162,7 @@ mod test {
             .unwrap();
         // The external DNS zone has an extra update due to the initial Silo
         // creation.
-        assert_eq!(dns_internal.generation + 1, dns_external.generation);
+        assert_eq!(dns_internal.generation.next(), dns_external.generation);
         assert_eq!(dns_internal.zones, dns_external.zones);
 
         // Verify the details about the initial Silo.
@@ -1549,6 +1551,7 @@ mod test {
             internal_dns_version: *Generation::new(),
             external_dns_version: *Generation::new(),
             cockroachdb_fingerprint: String::new(),
+            clickhouse_cluster_config: None,
             time_created: now_db_precision(),
             creator: "test suite".to_string(),
             comment: "test blueprint".to_string(),
@@ -1780,7 +1783,7 @@ mod test {
         ];
         let internal_dns = InitialDnsGroup::new(
             DnsGroup::Internal,
-            internal_dns::DNS_ZONE,
+            DNS_ZONE,
             "test suite",
             "initial test suite internal rev",
             HashMap::from([("nexus".to_string(), internal_records.clone())]),
@@ -1810,6 +1813,7 @@ mod test {
             internal_dns_version: *Generation::new(),
             external_dns_version: *Generation::new(),
             cockroachdb_fingerprint: String::new(),
+            clickhouse_cluster_config: None,
             time_created: now_db_precision(),
             creator: "test suite".to_string(),
             comment: "test blueprint".to_string(),
@@ -1919,12 +1923,9 @@ mod test {
             .dns_config_read(&opctx, DnsGroup::Internal)
             .await
             .unwrap();
-        assert_eq!(dns_config_internal.generation, 1);
+        assert_eq!(u64::from(dns_config_internal.generation), 1);
         assert_eq!(dns_config_internal.zones.len(), 1);
-        assert_eq!(
-            dns_config_internal.zones[0].zone_name,
-            internal_dns::DNS_ZONE
-        );
+        assert_eq!(dns_config_internal.zones[0].zone_name, DNS_ZONE);
         assert_eq!(
             dns_config_internal.zones[0].records,
             HashMap::from([("nexus".to_string(), internal_records)]),
@@ -1934,7 +1935,7 @@ mod test {
             .dns_config_read(&opctx, DnsGroup::External)
             .await
             .unwrap();
-        assert_eq!(dns_config_external.generation, 2);
+        assert_eq!(u64::from(dns_config_external.generation), 2);
         assert_eq!(dns_config_external.zones.len(), 1);
         assert_eq!(
             dns_config_external.zones[0].zone_name,
@@ -2024,6 +2025,7 @@ mod test {
             internal_dns_version: *Generation::new(),
             external_dns_version: *Generation::new(),
             cockroachdb_fingerprint: String::new(),
+            clickhouse_cluster_config: None,
             time_created: now_db_precision(),
             creator: "test suite".to_string(),
             comment: "test blueprint".to_string(),
@@ -2167,6 +2169,7 @@ mod test {
             internal_dns_version: *Generation::new(),
             external_dns_version: *Generation::new(),
             cockroachdb_fingerprint: String::new(),
+            clickhouse_cluster_config: None,
             time_created: now_db_precision(),
             creator: "test suite".to_string(),
             comment: "test blueprint".to_string(),

@@ -23,7 +23,7 @@ use omicron_common::api::external::{
 use openapi_manager_types::ValidationContext;
 use openapiv3::OpenAPI;
 
-pub const API_VERSION: &str = "20241009.0";
+pub const API_VERSION: &str = "20241204.0";
 
 // API ENDPOINT FUNCTION NAMING CONVENTIONS
 //
@@ -1117,6 +1117,19 @@ pub trait NexusExternalApi {
         path_params: Path<params::InstancePath>,
     ) -> Result<HttpResponseDeleted, HttpError>;
 
+    /// Update instance
+    #[endpoint {
+        method = PUT,
+        path = "/v1/instances/{instance}",
+        tags = ["instances"],
+    }]
+    async fn instance_update(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::OptionalProjectSelector>,
+        path_params: Path<params::InstancePath>,
+        instance_config: TypedBody<params::InstanceUpdate>,
+    ) -> Result<HttpResponseOk<Instance>, HttpError>;
+
     /// Reboot an instance
     #[endpoint {
         method = POST,
@@ -2195,6 +2208,135 @@ pub trait NexusExternalApi {
         router_params: TypedBody<params::RouterRouteUpdate>,
     ) -> Result<HttpResponseOk<RouterRoute>, HttpError>;
 
+    // Internet gateways
+
+    /// List internet gateways
+    #[endpoint {
+        method = GET,
+        path = "/v1/internet-gateways",
+        tags = ["vpcs"],
+    }]
+    async fn internet_gateway_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<PaginatedByNameOrId<params::VpcSelector>>,
+    ) -> Result<HttpResponseOk<ResultsPage<views::InternetGateway>>, HttpError>;
+
+    /// Fetch internet gateway
+    #[endpoint {
+        method = GET,
+        path = "/v1/internet-gateways/{gateway}",
+        tags = ["vpcs"],
+    }]
+    async fn internet_gateway_view(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::InternetGatewayPath>,
+        query_params: Query<params::OptionalVpcSelector>,
+    ) -> Result<HttpResponseOk<views::InternetGateway>, HttpError>;
+
+    /// Create VPC internet gateway
+    #[endpoint {
+        method = POST,
+        path = "/v1/internet-gateways",
+        tags = ["vpcs"],
+    }]
+    async fn internet_gateway_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::VpcSelector>,
+        create_params: TypedBody<params::InternetGatewayCreate>,
+    ) -> Result<HttpResponseCreated<views::InternetGateway>, HttpError>;
+
+    /// Delete internet gateway
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/internet-gateways/{gateway}",
+        tags = ["vpcs"],
+    }]
+    async fn internet_gateway_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::InternetGatewayPath>,
+        query_params: Query<params::InternetGatewayDeleteSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// List IP pools attached to internet gateway
+    #[endpoint {
+        method = GET,
+        path = "/v1/internet-gateway-ip-pools",
+        tags = ["vpcs"],
+    }]
+    async fn internet_gateway_ip_pool_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<params::InternetGatewaySelector>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<views::InternetGatewayIpPool>>,
+        HttpError,
+    >;
+
+    /// Attach IP pool to internet gateway
+    #[endpoint {
+        method = POST,
+        path = "/v1/internet-gateway-ip-pools",
+        tags = ["vpcs"],
+    }]
+    async fn internet_gateway_ip_pool_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::InternetGatewaySelector>,
+        create_params: TypedBody<params::InternetGatewayIpPoolCreate>,
+    ) -> Result<HttpResponseCreated<views::InternetGatewayIpPool>, HttpError>;
+
+    /// Detach IP pool from internet gateway
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/internet-gateway-ip-pools/{pool}",
+        tags = ["vpcs"],
+    }]
+    async fn internet_gateway_ip_pool_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::IpPoolPath>,
+        query_params: Query<params::DeleteInternetGatewayElementSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
+    /// List IP addresses attached to internet gateway
+    #[endpoint {
+        method = GET,
+        path = "/v1/internet-gateway-ip-addresses",
+        tags = ["vpcs"],
+    }]
+    async fn internet_gateway_ip_address_list(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<
+            PaginatedByNameOrId<params::InternetGatewaySelector>,
+        >,
+    ) -> Result<
+        HttpResponseOk<ResultsPage<views::InternetGatewayIpAddress>>,
+        HttpError,
+    >;
+
+    /// Attach IP address to internet gateway
+    #[endpoint {
+        method = POST,
+        path = "/v1/internet-gateway-ip-addresses",
+        tags = ["vpcs"],
+    }]
+    async fn internet_gateway_ip_address_create(
+        rqctx: RequestContext<Self::Context>,
+        query_params: Query<params::InternetGatewaySelector>,
+        create_params: TypedBody<params::InternetGatewayIpAddressCreate>,
+    ) -> Result<HttpResponseCreated<views::InternetGatewayIpAddress>, HttpError>;
+
+    /// Detach IP address from internet gateway
+    #[endpoint {
+        method = DELETE,
+        path = "/v1/internet-gateway-ip-addresses/{address}",
+        tags = ["vpcs"],
+    }]
+    async fn internet_gateway_ip_address_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<params::IpAddressPath>,
+        query_params: Query<params::DeleteInternetGatewayElementSelector>,
+    ) -> Result<HttpResponseDeleted, HttpError>;
+
     // Racks
 
     /// List racks
@@ -3031,6 +3173,6 @@ pub fn validate_api(spec: &OpenAPI, mut cx: ValidationContext<'_>) {
 pub type IpPoolRangePaginationParams =
     PaginationParams<EmptyScanParams, IpNetwork>;
 
-/// Type used to paginate request to list timeseries schema.
+/// Type used to paginate request to list timeseries schema
 pub type TimeseriesSchemaPaginationParams =
     PaginationParams<EmptyScanParams, oximeter_types::TimeseriesName>;

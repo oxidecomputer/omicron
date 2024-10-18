@@ -40,7 +40,8 @@ hyper-staticfile.workspace = true
 gateway-client.workspace = true
 illumos-utils.workspace = true
 installinator-common.workspace = true
-internal-dns.workspace = true
+internal-dns-resolver.workspace = true
+internal-dns-types.workspace = true
 ipnetwork.workspace = true
 itertools.workspace = true
 key-manager.workspace = true
@@ -59,6 +60,7 @@ oximeter.workspace = true
 oximeter-instruments.workspace = true
 oximeter-producer.workspace = true
 oxnet.workspace = true
+propolis_api_types.workspace = true
 propolis-client.workspace = true
 propolis-mock-server.workspace = true # Only used by the simulated sled agent
 rand = { workspace = true, features = ["getrandom"] }
