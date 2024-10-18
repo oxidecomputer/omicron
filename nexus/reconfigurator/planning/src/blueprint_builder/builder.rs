@@ -182,6 +182,9 @@ impl fmt::Display for Operation {
                     ZoneExpungeReason::ClickhouseClusterDisabled => {
                         "clickhouse cluster disabled via policy"
                     }
+                    ZoneExpungeReason::ClickhouseSingleNodeDisabled => {
+                        "clickhouse single-node disabled via policy"
+                    }
                 };
                 write!(
                     f,
@@ -560,13 +563,6 @@ impl<'a> BlueprintBuilder<'a> {
             "sled_id" => sled_id.to_string(),
         ));
 
-        // If there are any `ClickhouseServer` or `ClickhouseKeeper` zones that
-        // are not expunged and we no longer have a `ClickhousePolicy` which
-        // indicates replicated clickhouse clusters should be running, we need
-        // to expunge all such zones.
-        let clickhouse_cluster_enabled =
-            self.input.clickhouse_cluster_enabled();
-
         // Do any zones need to be marked expunged?
         let mut zones_to_expunge = BTreeMap::new();
 
@@ -578,11 +574,9 @@ impl<'a> BlueprintBuilder<'a> {
                 "zone_id" => zone_id.to_string()
             ));
 
-            let Some(reason) = zone_needs_expungement(
-                sled_details,
-                zone_config,
-                clickhouse_cluster_enabled,
-            ) else {
+            let Some(reason) =
+                zone_needs_expungement(sled_details, zone_config, &self.input)
+            else {
                 continue;
             };
 
@@ -628,6 +622,13 @@ impl<'a> BlueprintBuilder<'a> {
                             expunging related zone"
                         );
                     }
+                    ZoneExpungeReason::ClickhouseSingleNodeDisabled => {
+                        info!(
+                            &log,
+                            "clickhouse single-node disabled via policy, \
+                            expunging related zone"
+                        );
+                    }
                 }
 
                 zones_to_expunge.insert(zone_id, reason);
@@ -659,6 +660,7 @@ impl<'a> BlueprintBuilder<'a> {
         let mut count_sled_decommissioned = 0;
         let mut count_sled_expunged = 0;
         let mut count_clickhouse_cluster_disabled = 0;
+        let mut count_clickhouse_single_node_disabled = 0;
         for reason in zones_to_expunge.values() {
             match reason {
                 ZoneExpungeReason::DiskExpunged => count_disk_expunged += 1,
@@ -669,6 +671,9 @@ impl<'a> BlueprintBuilder<'a> {
                 ZoneExpungeReason::ClickhouseClusterDisabled => {
                     count_clickhouse_cluster_disabled += 1
                 }
+                ZoneExpungeReason::ClickhouseSingleNodeDisabled => {
+                    count_clickhouse_single_node_disabled += 1
+                }
             };
         }
         let count_and_reason = [
@@ -678,6 +683,10 @@ impl<'a> BlueprintBuilder<'a> {
             (
                 count_clickhouse_cluster_disabled,
                 ZoneExpungeReason::ClickhouseClusterDisabled,
+            ),
+            (
+                count_clickhouse_single_node_disabled,
+                ZoneExpungeReason::ClickhouseSingleNodeDisabled,
             ),
         ];
         for (count, reason) in count_and_reason {
@@ -1189,6 +1198,51 @@ impl<'a> BlueprintBuilder<'a> {
         }
 
         Ok(EnsureMultiple::Changed { added: num_oximeter_to_add, removed: 0 })
+    }
+
+    pub fn sled_ensure_zone_multiple_crucible_pantry(
+        &mut self,
+        sled_id: SledUuid,
+        desired_zone_count: usize,
+    ) -> Result<EnsureMultiple, Error> {
+        // How many zones do we need to add?
+        let pantry_count = self
+            .sled_num_running_zones_of_kind(sled_id, ZoneKind::CruciblePantry);
+        let num_pantry_to_add =
+            match desired_zone_count.checked_sub(pantry_count) {
+                Some(0) => return Ok(EnsureMultiple::NotNeeded),
+                Some(n) => n,
+                None => {
+                    return Err(Error::Planner(anyhow!(
+                        "removing a Crucible pantry zone not yet supported \
+                         (sled {sled_id} has {pantry_count}; \
+                         planner wants {desired_zone_count})"
+                    )));
+                }
+            };
+
+        for _ in 0..num_pantry_to_add {
+            let pantry_id = self.rng.zone_rng.next();
+            let ip = self.sled_alloc_ip(sled_id)?;
+            let port = omicron_common::address::CRUCIBLE_PANTRY_PORT;
+            let address = SocketAddrV6::new(ip, port, 0, 0);
+            let zone_type = BlueprintZoneType::CruciblePantry(
+                blueprint_zone_type::CruciblePantry { address },
+            );
+            let filesystem_pool =
+                self.sled_select_zpool(sled_id, zone_type.kind())?;
+
+            let zone = BlueprintZoneConfig {
+                disposition: BlueprintZoneDisposition::InService,
+                id: pantry_id,
+                underlay_address: ip,
+                filesystem_pool: Some(filesystem_pool),
+                zone_type,
+            };
+            self.sled_add_zone(sled_id, zone)?;
+        }
+
+        Ok(EnsureMultiple::Changed { added: num_pantry_to_add, removed: 0 })
     }
 
     pub fn cockroachdb_preserve_downgrade(

@@ -12,7 +12,8 @@
 
 use super::varuint;
 use crate::native::Error;
-use bytes::{Buf, BufMut};
+use bytes::Buf;
+use bytes::BufMut;
 
 /// Encode a string into the ClickHouse format.
 pub fn encode(s: impl AsRef<str>, mut buf: impl BufMut) {

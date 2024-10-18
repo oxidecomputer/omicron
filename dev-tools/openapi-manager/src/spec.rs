@@ -93,7 +93,7 @@ pub fn all_apis() -> Vec<ApiSpec> {
         },
         ApiSpec {
             title: "Oxide Region API",
-            version: "20241009.0",
+            version: "20241204.0",
             description: "API for interacting with the Oxide control plane",
             boundary: ApiBoundary::External,
             api_description:

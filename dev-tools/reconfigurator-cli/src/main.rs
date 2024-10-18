@@ -29,7 +29,6 @@ use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
-use nexus_types::deployment::SledLookupErrorKind;
 use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
 use nexus_types::internal_api::params::DnsConfigParams;
 use nexus_types::inventory::Collection;
@@ -150,18 +149,6 @@ impl ReconfiguratorSim {
     fn blueprint_insert_new(&mut self, blueprint: Blueprint) {
         let previous = self.blueprints.insert(blueprint.id, blueprint);
         assert!(previous.is_none());
-    }
-
-    fn blueprint_insert_loaded(
-        &mut self,
-        blueprint: Blueprint,
-    ) -> Result<(), anyhow::Error> {
-        let entry = self.blueprints.entry(blueprint.id);
-        if let indexmap::map::Entry::Occupied(_) = &entry {
-            return Err(anyhow!("blueprint already exists: {}", blueprint.id));
-        }
-        let _ = entry.or_insert(blueprint);
-        Ok(())
     }
 
     fn planning_input(
@@ -1162,6 +1149,10 @@ fn cmd_load(
     sim: &mut ReconfiguratorSim,
     args: LoadArgs,
 ) -> anyhow::Result<Option<String>> {
+    if sim.user_made_system_changes() {
+        bail!("changes made to simulated system: run `wipe` before loading");
+    }
+
     let input_path = args.filename;
     let collection_id = args.collection_id;
     let loaded = read_file(&input_path)?;
@@ -1205,44 +1196,9 @@ fn cmd_load(
             },
         )?;
 
-    let current_planning_input = sim
-        .system
-        .to_planning_input_builder()
-        .context("generating planning input")?
-        .build();
     for (sled_id, sled_details) in
         loaded.planning_input.all_sleds(SledFilter::Commissioned)
     {
-        match current_planning_input
-            .sled_lookup(SledFilter::Commissioned, sled_id)
-        {
-            Ok(_) => {
-                swriteln!(
-                    s,
-                    "sled {}: skipped (one with \
-                     the same id is already loaded)",
-                    sled_id
-                );
-                continue;
-            }
-            Err(error) => match error.kind() {
-                SledLookupErrorKind::Filtered { .. } => {
-                    swriteln!(
-                        s,
-                        "error: load sled {}: turning a decommissioned sled \
-                         into a commissioned one is not supported",
-                        sled_id
-                    );
-                    continue;
-                }
-                SledLookupErrorKind::Missing => {
-                    // A sled being missing from the input is the only case in
-                    // which we decide to load new sleds. The logic to do that
-                    // is below.
-                }
-            },
-        }
-
         let Some(inventory_sled_agent) =
             primary_collection.sled_agents.get(&sled_id)
         else {
@@ -1290,32 +1246,38 @@ fn cmd_load(
     }
 
     for collection in loaded.collections {
-        if sim.collections.contains_key(&collection.id) {
-            swriteln!(
-                s,
-                "collection {}: skipped (one with the \
-                same id is already loaded)",
-                collection.id
-            );
-        } else {
-            swriteln!(s, "collection {} loaded", collection.id);
-            sim.collections.insert(collection.id, collection);
+        match sim.collections.entry(collection.id) {
+            indexmap::map::Entry::Occupied(_) => {
+                // We started with an empty system, so the only way we can hit
+                // this is if the serialized state contains a duplicate
+                // collection ID.
+                swriteln!(
+                    s,
+                    "error: collection {} skipped (duplicate found)",
+                    collection.id
+                )
+            }
+            indexmap::map::Entry::Vacant(entry) => {
+                swriteln!(s, "collection {} loaded", collection.id);
+                entry.insert(collection);
+            }
         }
     }
 
     for blueprint in loaded.blueprints {
-        let blueprint_id = blueprint.id;
-        match sim.blueprint_insert_loaded(blueprint) {
-            Ok(_) => {
-                swriteln!(s, "blueprint {} loaded", blueprint_id);
-            }
-            Err(error) => {
+        match sim.blueprints.entry(blueprint.id) {
+            // We started with an empty system, so the only way we can hit this
+            // is if the serialized state contains a duplicate blueprint ID.
+            indexmap::map::Entry::Occupied(_) => {
                 swriteln!(
                     s,
-                    "blueprint {}: skipped ({:#})",
-                    blueprint_id,
-                    error
-                );
+                    "error: blueprint {} skipped (duplicate found)",
+                    blueprint.id
+                )
+            }
+            indexmap::map::Entry::Vacant(entry) => {
+                swriteln!(s, "blueprint {} loaded", blueprint.id);
+                entry.insert(blueprint);
             }
         }
     }
@@ -1356,10 +1318,7 @@ fn cmd_load_example(
     args: LoadExampleArgs,
 ) -> anyhow::Result<Option<String>> {
     if sim.user_made_system_changes() {
-        bail!(
-            "changes made to simulated system: run `wipe system` before \
-             loading an example system"
-        );
+        bail!("changes made to simulated system: run `wipe` before loading");
     }
 
     // Generate the example system.
@@ -1392,7 +1351,7 @@ fn cmd_load_example(
     sim.internal_dns.insert(
         blueprint.internal_dns_version,
         DnsConfigParams {
-            generation: blueprint.internal_dns_version.into(),
+            generation: blueprint.internal_dns_version,
             time_created: Utc::now(),
             zones: vec![internal_dns],
         },
@@ -1400,7 +1359,7 @@ fn cmd_load_example(
     sim.external_dns.insert(
         blueprint.external_dns_version,
         DnsConfigParams {
-            generation: blueprint.external_dns_version.into(),
+            generation: blueprint.external_dns_version,
             time_created: Utc::now(),
             zones: vec![external_dns],
         },
