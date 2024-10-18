@@ -10,14 +10,14 @@ use crate::native::{self, block::ValueArray, QueryResult};
 use anyhow::Context as _;
 use crossterm::style::Stylize;
 use display_error_chain::DisplayErrorChain;
-use omicron_common::address::CLICKHOUSE_TCP_PORT;
 use reedline::{DefaultPrompt, DefaultPromptSegment, Reedline, Signal};
-use std::net::{Ipv6Addr, SocketAddr};
+use std::net::{IpAddr, SocketAddr};
 use tabled::{builder::Builder, settings::Style};
 
 /// Run the native SQL shell.
-pub async fn shell() -> anyhow::Result<()> {
-    let addr = SocketAddr::new(Ipv6Addr::LOCALHOST.into(), CLICKHOUSE_TCP_PORT);
+pub async fn shell(addr: IpAddr, port: u16) -> anyhow::Result<()> {
+    usdt::register_probes()?;
+    let addr = SocketAddr::new(addr, port);
     let mut conn = native::Connection::new(addr)
         .await
         .context("Trying to connect to ClickHouse server")?;
@@ -162,8 +162,11 @@ fn values_to_string<'a>(
         ValueArray::Ipv6(vals) => {
             Box::new(vals.iter().map(ToString::to_string))
         }
-        ValueArray::DateTime(vals) => {
+        ValueArray::Date(vals) => {
             Box::new(vals.iter().map(ToString::to_string))
+        }
+        ValueArray::DateTime { values, .. } => {
+            Box::new(values.iter().map(ToString::to_string))
         }
         ValueArray::DateTime64 { values, .. } => {
             Box::new(values.iter().map(ToString::to_string))

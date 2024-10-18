@@ -87,6 +87,7 @@ pub struct SystemDescription {
     target_oximeter_zone_count: usize,
     target_cockroachdb_zone_count: usize,
     target_cockroachdb_cluster_version: CockroachDbClusterVersion,
+    target_crucible_pantry_zone_count: usize,
     service_ip_pool_ranges: Vec<IpRange>,
     internal_dns_version: Generation,
     external_dns_version: Generation,
@@ -138,6 +139,7 @@ impl SystemDescription {
         let target_boundary_ntp_zone_count = 0;
         let target_cockroachdb_zone_count = 0;
         let target_oximeter_zone_count = 0;
+        let target_crucible_pantry_zone_count = 0;
 
         let target_cockroachdb_cluster_version =
             CockroachDbClusterVersion::POLICY;
@@ -161,6 +163,7 @@ impl SystemDescription {
             target_oximeter_zone_count,
             target_cockroachdb_zone_count,
             target_cockroachdb_cluster_version,
+            target_crucible_pantry_zone_count,
             service_ip_pool_ranges,
             internal_dns_version: Generation::new(),
             external_dns_version: Generation::new(),
@@ -204,6 +207,18 @@ impl SystemDescription {
 
     pub fn get_target_nexus_zone_count(&self) -> usize {
         self.target_nexus_zone_count
+    }
+
+    pub fn target_crucible_pantry_zone_count(
+        &mut self,
+        count: usize,
+    ) -> &mut Self {
+        self.target_crucible_pantry_zone_count = count;
+        self
+    }
+
+    pub fn get_target_crucible_pantry_zone_count(&self) -> usize {
+        self.target_crucible_pantry_zone_count
     }
 
     pub fn target_internal_dns_zone_count(
@@ -391,6 +406,8 @@ impl SystemDescription {
             target_cockroachdb_zone_count: self.target_cockroachdb_zone_count,
             target_cockroachdb_cluster_version: self
                 .target_cockroachdb_cluster_version,
+            target_crucible_pantry_zone_count: self
+                .target_crucible_pantry_zone_count,
             clickhouse_policy: self.clickhouse_policy.clone(),
         };
         let mut builder = PlanningInputBuilder::new(

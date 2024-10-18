@@ -2,119 +2,105 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::sync::Arc;
-
-use nexus_types::{
-    deployment::Blueprint, internal_api::params::DnsConfigParams,
-    inventory::Collection,
-};
-use omicron_common::api::external::Name;
+use omicron_common::api::external::{Generation, Name};
 use omicron_uuid_kinds::CollectionUuid;
 use thiserror::Error;
 use uuid::Uuid;
 
 /// The caller attempted to insert a duplicate key.
 #[derive(Clone, Debug, Error)]
-#[error("attempted to insert duplicate value: {}", self.kind.to_error_string())]
+#[error("attempted to insert duplicate value: {}", self.id.to_error_string())]
 pub struct DuplicateError {
-    kind: DuplicateErrorKind,
+    id: ObjectId,
 }
 
 impl DuplicateError {
-    pub fn collection(collection: Arc<Collection>) -> Self {
-        Self { kind: DuplicateErrorKind::Collection(collection) }
+    pub fn id(&self) -> &ObjectId {
+        &self.id
     }
 
-    pub fn blueprint(blueprint: Arc<Blueprint>) -> Self {
-        Self { kind: DuplicateErrorKind::Blueprint(blueprint) }
+    pub(crate) fn collection(id: CollectionUuid) -> Self {
+        Self { id: ObjectId::Collection(id) }
     }
 
-    pub fn internal_dns(dns: Arc<DnsConfigParams>) -> Self {
-        Self { kind: DuplicateErrorKind::InternalDns(dns) }
+    pub(crate) fn blueprint(id: Uuid) -> Self {
+        Self { id: ObjectId::Blueprint(id) }
     }
 
-    pub fn external_dns(dns: Arc<DnsConfigParams>) -> Self {
-        Self { kind: DuplicateErrorKind::ExternalDns(dns) }
+    pub(crate) fn internal_dns(generation: Generation) -> Self {
+        Self { id: ObjectId::InternalDns(generation) }
     }
 
-    pub fn silo_name(name: Name) -> Self {
-        Self { kind: DuplicateErrorKind::SiloName(name) }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub enum DuplicateErrorKind {
-    // TODO(rain): just store IDs here
-    Collection(Arc<Collection>),
-    Blueprint(Arc<Blueprint>),
-    InternalDns(Arc<DnsConfigParams>),
-    ExternalDns(Arc<DnsConfigParams>),
-    SiloName(Name),
-}
-
-impl DuplicateErrorKind {
-    fn to_error_string(&self) -> String {
-        match self {
-            DuplicateErrorKind::Collection(c) => {
-                format!("collection ID {}", c.id)
-            }
-            DuplicateErrorKind::Blueprint(b) => {
-                format!("blueprint ID {}", b.id)
-            }
-            DuplicateErrorKind::InternalDns(params) => {
-                format!("internal DNS at generation {}", params.generation)
-            }
-            DuplicateErrorKind::ExternalDns(params) => {
-                format!("external DNS at generation {}", params.generation)
-            }
-            DuplicateErrorKind::SiloName(name) => {
-                format!("silo name {}", name)
-            }
-        }
-    }
-}
-
-/// The caller attempted to remove a key that does not exist.
-#[derive(Clone, Debug, Error)]
-#[error("no such value: {}", self.kind.to_error_string())]
-pub struct MissingError {
-    kind: MissingErrorKind,
-}
-
-impl MissingError {
-    pub fn collection(id: CollectionUuid) -> Self {
-        Self { kind: MissingErrorKind::Collection(id) }
+    pub(crate) fn external_dns(generation: Generation) -> Self {
+        Self { id: ObjectId::ExternalDns(generation) }
     }
 
-    pub fn blueprint(id: Uuid) -> Self {
-        Self { kind: MissingErrorKind::Blueprint(id) }
-    }
-
-    pub fn silo_name(name: Name) -> Self {
-        Self { kind: MissingErrorKind::SiloName(name) }
+    pub(crate) fn silo_name(name: Name) -> Self {
+        Self { id: ObjectId::SiloName(name) }
     }
 }
 
 #[derive(Clone, Debug)]
-pub enum MissingErrorKind {
+pub enum ObjectId {
     Collection(CollectionUuid),
     Blueprint(Uuid),
+    InternalDns(Generation),
+    ExternalDns(Generation),
     SiloName(Name),
 }
 
-impl MissingErrorKind {
+impl ObjectId {
     fn to_error_string(&self) -> String {
         match self {
-            MissingErrorKind::Collection(id) => {
-                format!("collection ID {}", id)
+            ObjectId::Collection(id) => {
+                format!("collection ID {id}")
             }
-            MissingErrorKind::Blueprint(id) => {
-                format!("blueprint ID {}", id)
+            ObjectId::Blueprint(id) => {
+                format!("blueprint ID {id}")
             }
-            MissingErrorKind::SiloName(name) => {
-                format!("silo name {}", name)
+            ObjectId::InternalDns(generation) => {
+                format!("internal DNS at generation {generation}")
+            }
+            ObjectId::ExternalDns(generation) => {
+                format!("external DNS at generation {generation}")
+            }
+            ObjectId::SiloName(name) => {
+                format!("silo name {name}")
             }
         }
+    }
+}
+
+/// The caller attempted to access a key that does not exist.
+#[derive(Clone, Debug, Error)]
+#[error("no such key: {}", self.id.to_error_string())]
+pub struct KeyError {
+    id: ObjectId,
+}
+
+impl KeyError {
+    pub fn id(&self) -> &ObjectId {
+        &self.id
+    }
+
+    pub(crate) fn collection(id: CollectionUuid) -> Self {
+        Self { id: ObjectId::Collection(id) }
+    }
+
+    pub(crate) fn blueprint(id: Uuid) -> Self {
+        Self { id: ObjectId::Blueprint(id) }
+    }
+
+    pub(crate) fn internal_dns(generation: Generation) -> Self {
+        Self { id: ObjectId::InternalDns(generation) }
+    }
+
+    pub(crate) fn external_dns(generation: Generation) -> Self {
+        Self { id: ObjectId::ExternalDns(generation) }
+    }
+
+    pub(crate) fn silo_name(name: Name) -> Self {
+        Self { id: ObjectId::SiloName(name) }
     }
 }
 

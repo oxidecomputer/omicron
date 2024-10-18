@@ -120,6 +120,7 @@
 //! actually sent if we believe we have an outstanding query.
 
 pub use connection::Connection;
+pub use connection::Pool;
 pub use packets::client::QueryResult;
 pub use packets::server::Exception;
 
@@ -135,6 +136,18 @@ mod probes {
 
     /// Emitted when we receive a packet from the server, with its kind.
     fn packet__received(kind: &str) {}
+
+    /// Emitted when we learn we've been disconnected from the server.
+    fn disconnected() {}
+
+    /// Emitted when we receive a data packet, with details about the size and
+    /// data types for each column.
+    fn data__packet__received(
+        n_cols: u64,
+        n_rows: u64,
+        columns: Vec<(String, String)>,
+    ) {
+    }
 
     /// Emitted when we receive an unrecognized packet, with the kind and the
     /// length of the discarded buffer.
@@ -194,4 +207,7 @@ pub enum Error {
 
     #[error("Cannot concatenate blocks with mismatched structure")]
     MismatchedBlockStructure,
+
+    #[error("Value out of range for corresponding ClickHouse type")]
+    OutOfRange { type_name: String, min: String, max: String, value: String },
 }

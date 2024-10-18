@@ -2,12 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::ops::Deref;
-
 use indexmap::IndexSet;
 use omicron_common::api::external::Name;
 
-use crate::errors::{DuplicateError, MissingError};
+use crate::errors::{DuplicateError, KeyError};
 
 /// Versioned simulator configuration.
 ///
@@ -27,7 +25,7 @@ pub struct SimConfig {
     /// TODO: This doesn't quite fit in here because it's more of a policy
     /// setting than a config option. But we can't set it in the
     /// `SystemDescription` because need to persist policy across system wipes.
-    /// So users have to remember to set num_nexus twice: once in the config
+    /// So callers have to remember to set num_nexus twice: once in the config
     /// and once in the policy.
     ///
     /// We can likely make this better after addressing
@@ -62,18 +60,38 @@ impl SimConfig {
         self.num_nexus
     }
 
-    pub(crate) fn to_mut(&self) -> MutableSimConfig {
-        MutableSimConfig { config: self.clone(), log: Vec::new() }
+    pub(crate) fn to_mut(&self) -> SimConfigBuilder {
+        SimConfigBuilder { config: self.clone(), log: Vec::new() }
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct MutableSimConfig {
+pub struct SimConfigBuilder {
     config: SimConfig,
     log: Vec<SimConfigLogEntry>,
 }
 
-impl MutableSimConfig {
+impl SimConfigBuilder {
+    // These methods are duplicated from `SimConfig`. The forwarding is all
+    // valid because we don't cache pending changes in this struct, instead
+    // making them directly to the underlying config. If we did cache changes,
+    // we'd need to be more careful about how we forward these methods.
+
+    #[inline]
+    pub fn silo_names(&self) -> impl ExactSizeIterator<Item = &Name> {
+        self.config.silo_names()
+    }
+
+    #[inline]
+    pub fn external_dns_zone_name(&self) -> &str {
+        self.config.external_dns_zone_name()
+    }
+
+    #[inline]
+    pub fn num_nexus(&self) -> Option<u16> {
+        self.config.num_nexus()
+    }
+
     pub fn set_silo_names(&mut self, names: impl IntoIterator<Item = Name>) {
         self.config.silo_names = names.into_iter().collect();
         self.log.push(SimConfigLogEntry::SetSiloNames(
@@ -90,9 +108,9 @@ impl MutableSimConfig {
         Ok(())
     }
 
-    pub fn remove_silo(&mut self, name: Name) -> Result<(), MissingError> {
+    pub fn remove_silo(&mut self, name: Name) -> Result<(), KeyError> {
         if !self.config.silo_names.shift_remove(&name) {
-            return Err(MissingError::silo_name(name));
+            return Err(KeyError::silo_name(name));
         }
         self.log.push(SimConfigLogEntry::RemoveSilo(name));
         Ok(())
@@ -114,14 +132,6 @@ impl MutableSimConfig {
 
     pub(crate) fn into_parts(self) -> (SimConfig, Vec<SimConfigLogEntry>) {
         (self.config, self.log)
-    }
-}
-
-impl Deref for MutableSimConfig {
-    type Target = SimConfig;
-
-    fn deref(&self) -> &Self::Target {
-        &self.config
     }
 }
 

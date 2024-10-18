@@ -6,28 +6,80 @@
 
 //! A connection and pool for talking to the ClickHouse server.
 
+use super::io::packet::client::Encoder;
+use super::io::packet::server::Decoder;
+use super::packets::client::Packet as ClientPacket;
+use super::packets::client::Query;
+use super::packets::client::QueryResult;
+use super::packets::client::OXIMETER_HELLO;
+use super::packets::client::VERSION_MAJOR;
+use super::packets::client::VERSION_MINOR;
+use super::packets::client::VERSION_PATCH;
+use super::packets::server::Hello as ServerHello;
 use super::packets::server::Packet as ServerPacket;
-use super::packets::{
-    client::{Packet as ClientPacket, Query, QueryResult},
-    server::Progress,
-};
-use super::{
-    io::packet::{client::Encoder, server::Decoder},
-    packets::{
-        client::{OXIMETER_HELLO, VERSION_MAJOR, VERSION_MINOR, VERSION_PATCH},
-        server::{Hello as ServerHello, REVISION},
-    },
-    Error,
-};
+use super::packets::server::Progress;
+use super::packets::server::REVISION;
+use super::Error;
 use crate::native::probes;
-use futures::{SinkExt as _, StreamExt as _};
+use futures::SinkExt as _;
+use futures::StreamExt as _;
+use qorb::backend;
+use qorb::backend::Error as QorbError;
 use std::net::SocketAddr;
-use tokio::net::{
-    tcp::{OwnedReadHalf, OwnedWriteHalf},
-    TcpStream,
-};
-use tokio_util::codec::{FramedRead, FramedWrite};
+use tokio::net::tcp::OwnedReadHalf;
+use tokio::net::tcp::OwnedWriteHalf;
+use tokio::net::TcpStream;
+use tokio_util::codec::FramedRead;
+use tokio_util::codec::FramedWrite;
 use uuid::Uuid;
+
+/// A pool of connections to a ClickHouse server over the native protocol.
+pub type Pool = qorb::pool::Pool<Connection>;
+
+/// A type for making connections to a ClickHouse server.
+#[derive(Clone, Copy, Debug)]
+pub struct Connector;
+
+impl From<Error> for QorbError {
+    fn from(e: Error) -> Self {
+        QorbError::Other(anyhow::anyhow!(e))
+    }
+}
+
+#[async_trait::async_trait]
+impl backend::Connector for Connector {
+    type Connection = Connection;
+
+    async fn connect(
+        &self,
+        backend: &backend::Backend,
+    ) -> Result<Self::Connection, QorbError> {
+        Connection::new(backend.address).await.map_err(QorbError::from)
+    }
+
+    async fn is_valid(
+        &self,
+        conn: &mut Self::Connection,
+    ) -> Result<(), QorbError> {
+        conn.ping().await.map_err(QorbError::from)
+    }
+
+    async fn on_recycle(
+        &self,
+        conn: &mut Self::Connection,
+    ) -> Result<(), QorbError> {
+        // We try to cancel an outstanding query. But if there is _no_
+        // outstanding query, we sill want to run the validation check of
+        // pinging the server. That notifies `qorb` if the server is alive in
+        // the case that there was no query to cancel
+        if conn.cancel().await.map_err(QorbError::from)? {
+            Ok(())
+        } else {
+            // No query, so let's run the validation check.
+            self.is_valid(conn).await
+        }
+    }
+}
 
 /// A connection to a ClickHouse server.
 ///
@@ -122,18 +174,25 @@ impl Connection {
                 Err(Error::UnexpectedPacket(packet.kind()))
             }
             Some(Err(e)) => Err(e),
-            None => Err(Error::Disconnected),
+            None => {
+                probes::disconnected!(|| ());
+                Err(Error::Disconnected)
+            }
         }
     }
 
     // Cancel a running query, if one exists.
-    async fn cancel(&mut self) -> Result<(), Error> {
+    //
+    // This returns an error if there is a query and we could not cancel it for
+    // some reason. It returns `Ok(true)` if we successfully canceled the query,
+    // or `Ok(false)` if there was no query to cancel at all.
+    async fn cancel(&mut self) -> Result<bool, Error> {
         if self.outstanding_query {
             self.writer.send(ClientPacket::Cancel).await?;
             // Await EOS, throwing everything else away except errors.
             let res = loop {
                 match self.reader.next().await {
-                    Some(Ok(ServerPacket::EndOfStream)) => break Ok(()),
+                    Some(Ok(ServerPacket::EndOfStream)) => break Ok(true),
                     Some(Ok(other_packet)) => {
                         probes::unexpected__server__packet!(
                             || other_packet.kind()
@@ -146,7 +205,7 @@ impl Connection {
             self.outstanding_query = false;
             return res;
         }
-        Ok(())
+        Ok(false)
     }
 
     /// Send a SQL query, possibly with data.
@@ -170,6 +229,22 @@ impl Connection {
                         break Err(Error::UnexpectedPacket("Hello"));
                     }
                     ServerPacket::Data(block) => {
+                        probes::data__packet__received!(|| {
+                            (
+                                block.n_columns,
+                                block.n_rows,
+                                block
+                                    .columns
+                                    .iter()
+                                    .map(|(name, col)| {
+                                        (
+                                            name.clone(),
+                                            col.data_type.to_string(),
+                                        )
+                                    })
+                                    .collect::<Vec<_>>(),
+                            )
+                        });
                         // Empty blocks are sent twice: the beginning of the
                         // query so that the client knows the table structure,
                         // and then the end to signal the last data transfer.
@@ -211,16 +286,14 @@ impl Connection {
 
 #[cfg(test)]
 mod tests {
+    use crate::native::block::DataType;
+    use crate::native::block::ValueArray;
+    use crate::native::connection::Connection;
+    use omicron_test_utils::dev::clickhouse::ClickHouseDeployment;
+    use omicron_test_utils::dev::test_setup_log;
     use std::sync::Arc;
-
-    use crate::native::{
-        block::{DataType, ValueArray},
-        connection::Connection,
-    };
-    use omicron_test_utils::dev::{
-        clickhouse::ClickHouseDeployment, test_setup_log,
-    };
-    use tokio::sync::{oneshot, Mutex};
+    use tokio::sync::oneshot;
+    use tokio::sync::Mutex;
 
     #[tokio::test]
     async fn test_exchange_hello() {
@@ -466,7 +539,7 @@ mod tests {
         assert_eq!(block.n_rows, 1);
         let (name, col) = block.columns.first().unwrap();
         assert_eq!(name, "timestamp");
-        assert_eq!(col.data_type, DataType::DateTime);
+        assert!(matches!(col.data_type, DataType::DateTime(_)));
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

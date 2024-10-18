@@ -11,12 +11,18 @@ use dropshot::ConfigLogging;
 use dropshot::HttpError;
 use dropshot::HttpServer;
 use dropshot::HttpServerStarter;
-use internal_dns_resolver::ResolveError;
-use internal_dns_resolver::Resolver;
 use internal_dns_types::names::ServiceName;
+use omicron_common::address::get_internal_dns_server_addresses;
+use omicron_common::address::DNS_PORT;
 use omicron_common::api::internal::nexus::ProducerEndpoint;
 use omicron_common::backoff;
 use omicron_common::FileKv;
+use qorb::backend;
+use qorb::resolver::BoxedResolver;
+use qorb::resolvers::dns::DnsResolver;
+use qorb::resolvers::dns::DnsResolverConfig;
+use qorb::resolvers::single_host::SingleHostResolver;
+use qorb::service;
 use serde::Deserialize;
 use serde::Serialize;
 use slog::debug;
@@ -56,9 +62,6 @@ pub enum Error {
     #[error(transparent)]
     Database(#[from] oximeter_db::Error),
 
-    #[error(transparent)]
-    ResolveError(#[from] ResolveError),
-
     #[error("Error running standalone")]
     Standalone(#[from] anyhow::Error),
 }
@@ -72,11 +75,17 @@ impl From<Error> for HttpError {
 /// Configuration for interacting with the metric database.
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 pub struct DbConfig {
-    /// Optional address of the ClickHouse server.
+    /// Optional address of the ClickHouse server's HTTP interface.
     ///
     /// If "None", will be inferred from DNS.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub address: Option<SocketAddr>,
+
+    /// Optional address of the ClickHouse server's native TCP interface.
+    ///
+    /// If None, will be inferred from DNS.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_address: Option<SocketAddr>,
 
     /// Batch size of samples at which to insert.
     pub batch_size: usize,
@@ -108,6 +117,7 @@ impl DbConfig {
     fn with_address(address: SocketAddr) -> Self {
         Self {
             address: Some(address),
+            native_address: None,
             batch_size: Self::DEFAULT_BATCH_SIZE,
             batch_interval: Self::DEFAULT_BATCH_INTERVAL,
             replicated: Self::DEFAULT_REPLICATED,
@@ -157,6 +167,26 @@ pub struct OximeterArguments {
     pub address: SocketAddrV6,
 }
 
+// A "qorb connector" which converts a SocketAddr into a nexus_client::Client.
+struct NexusConnector {
+    log: Logger,
+}
+
+#[async_trait::async_trait]
+impl backend::Connector for NexusConnector {
+    type Connection = nexus_client::Client;
+
+    async fn connect(
+        &self,
+        backend: &backend::Backend,
+    ) -> Result<Self::Connection, backend::Error> {
+        Ok(nexus_client::Client::new(
+            &format!("http://{}", backend.address),
+            self.log.clone(),
+        ))
+    }
+}
+
 /// A server used to collect metrics from components in the control plane.
 pub struct Oximeter {
     agent: Arc<OximeterAgent>,
@@ -202,20 +232,62 @@ impl Oximeter {
         }
         info!(log, "starting oximeter server");
 
-        let resolver = Resolver::new_from_ip(
-            log.new(o!("component" => "DnsResolver")),
-            *args.address.ip(),
-        )?;
+        // Use the address for Oximeter to infer the bootstrap DNS address
+        let bootstrap_dns: Vec<SocketAddr> =
+            get_internal_dns_server_addresses(*args.address.ip())
+                .into_iter()
+                .map(|ip| SocketAddr::new(ip, DNS_PORT))
+                .collect();
+
+        // Closure to create a single resolver.
+        let make_resolver =
+            |maybe_address, srv_name: ServiceName| -> BoxedResolver {
+                if let Some(address) = maybe_address {
+                    Box::new(SingleHostResolver::new(address))
+                } else {
+                    Box::new(DnsResolver::new(
+                        service::Name(srv_name.srv_name()),
+                        bootstrap_dns.clone(),
+                        DnsResolverConfig {
+                            hardcoded_ttl: Some(tokio::time::Duration::MAX),
+                            ..Default::default()
+                        },
+                    ))
+                }
+            };
+
+        // Closure to create _two_ resolvers, one to resolve the ClickHouse HTTP
+        // SRV record, and one for the native TCP record.
+        //
+        // TODO(cleanup): This should be removed if / when we entirely switch to
+        // the native protocol.
+        let make_clickhouse_resolvers = || -> (BoxedResolver, BoxedResolver) {
+            let http_resolver = make_resolver(
+                config.db.address,
+                if config.db.replicated {
+                    ServiceName::ClickhouseServer
+                } else {
+                    ServiceName::Clickhouse
+                },
+            );
+            let native_resolver = make_resolver(
+                config.db.native_address,
+                ServiceName::ClickhouseNative,
+            );
+            (http_resolver, native_resolver)
+        };
 
         let make_agent = || async {
             debug!(log, "creating ClickHouse client");
+            let (http_resolver, native_resolver) = make_clickhouse_resolvers();
             Ok(Arc::new(
                 OximeterAgent::with_id(
                     args.id,
                     args.address,
                     config.refresh_interval,
                     config.db,
-                    &resolver,
+                    http_resolver,
+                    native_resolver,
                     &log,
                     config.db.replicated,
                 )
@@ -256,24 +328,32 @@ impl Oximeter {
             address: server.local_addr().to_string(),
             collector_id: agent.id,
         };
+
+        let nexus_pool = {
+            let nexus_resolver: BoxedResolver =
+                if let Some(address) = config.nexus_address {
+                    Box::new(SingleHostResolver::new(address))
+                } else {
+                    Box::new(DnsResolver::new(
+                        service::Name(ServiceName::Nexus.srv_name()),
+                        bootstrap_dns,
+                        DnsResolverConfig {
+                            hardcoded_ttl: Some(tokio::time::Duration::MAX),
+                            ..Default::default()
+                        },
+                    ))
+                };
+
+            qorb::pool::Pool::new(
+                nexus_resolver,
+                Arc::new(NexusConnector { log: log.clone() }),
+                qorb::policy::Policy::default(),
+            )
+        };
+
         let notify_nexus = || async {
             debug!(log, "contacting nexus");
-            let nexus_address = if let Some(address) = config.nexus_address {
-                address
-            } else {
-                SocketAddr::V6(
-                    resolver
-                        .lookup_socket_v6(ServiceName::Nexus)
-                        .await
-                        .map_err(|e| {
-                            backoff::BackoffError::transient(e.to_string())
-                        })?,
-                )
-            };
-            let client = nexus_client::Client::new(
-                &format!("http://{nexus_address}"),
-                log.clone(),
-            );
+            let client = nexus_pool.claim().await.map_err(|e| e.to_string())?;
             client.cpapi_collectors_post(&our_info).await.map_err(|e| {
                 match &e {
                     // Failures to reach nexus, or server errors on its side
@@ -307,7 +387,7 @@ impl Oximeter {
 
         // Now that we've successfully registered, we'll start periodically
         // polling for our list of producers from Nexus.
-        agent.ensure_producer_refresh_task(resolver);
+        agent.ensure_producer_refresh_task(nexus_pool);
 
         info!(log, "oximeter registered with nexus"; "id" => ?agent.id);
         Ok(Self { agent, server })

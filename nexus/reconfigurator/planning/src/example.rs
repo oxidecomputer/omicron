@@ -20,6 +20,7 @@ use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
 use nexus_types::inventory::Collection;
+use omicron_common::policy::CRUCIBLE_PANTRY_REDUNDANCY;
 use omicron_common::policy::INTERNAL_DNS_REDUNDANCY;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::SledKind;
@@ -153,10 +154,12 @@ impl ExampleSystemRng {
 /// The components of this struct are generated together and match each other.
 /// The planning input and collection represent database input and inventory
 /// that would be collected from a system matching the system description.
+/// The initial blueprint is one with no zones.
 pub struct ExampleSystem {
     pub system: SystemDescription,
     pub input: PlanningInput,
     pub collection: Collection,
+    pub initial_blueprint: Blueprint,
 }
 
 /// Returns a collection, planning input, and blueprint describing a pretty
@@ -185,6 +188,7 @@ pub struct ExampleSystemBuilder {
     nexus_count: Option<ZoneCount>,
     internal_dns_count: ZoneCount,
     external_dns_count: ZoneCount,
+    crucible_pantry_count: ZoneCount,
     create_zones: bool,
     create_disks_in_blueprint: bool,
 }
@@ -216,6 +220,7 @@ impl ExampleSystemBuilder {
             nexus_count: None,
             internal_dns_count: ZoneCount(INTERNAL_DNS_REDUNDANCY),
             external_dns_count: ZoneCount(Self::DEFAULT_EXTERNAL_DNS_COUNT),
+            crucible_pantry_count: ZoneCount(CRUCIBLE_PANTRY_REDUNDANCY),
             create_zones: true,
             create_disks_in_blueprint: true,
         }
@@ -294,6 +299,17 @@ impl ExampleSystemBuilder {
         Ok(self)
     }
 
+    /// Set the number of Crucible pantry instances in the example system.
+    ///
+    /// If [`Self::create_zones`] is set to `false`, this is ignored.
+    pub fn crucible_pantry_count(
+        mut self,
+        crucible_pantry_count: usize,
+    ) -> Self {
+        self.crucible_pantry_count = ZoneCount(crucible_pantry_count);
+        self
+    }
+
     /// Create zones in the example system.
     ///
     /// The default is `true`.
@@ -331,6 +347,7 @@ impl ExampleSystemBuilder {
             "nexus_count" => nexus_count.0,
             "internal_dns_count" => self.internal_dns_count.0,
             "external_dns_count" => self.external_dns_count.0,
+            "crucible_pantry_count" => self.crucible_pantry_count.0,
             "create_zones" => self.create_zones,
             "create_disks_in_blueprint" => self.create_disks_in_blueprint,
         );
@@ -342,7 +359,8 @@ impl ExampleSystemBuilder {
         // there's no external DNS count.)
         system
             .target_nexus_zone_count(nexus_count.0)
-            .target_internal_dns_zone_count(self.internal_dns_count.0);
+            .target_internal_dns_zone_count(self.internal_dns_count.0)
+            .target_crucible_pantry_zone_count(self.crucible_pantry_count.0);
         let sled_ids: Vec<_> =
             (0..self.nsleds).map(|_| rng.sled_rng.next()).collect();
 
@@ -432,6 +450,12 @@ impl ExampleSystemBuilder {
                         self.external_dns_count.on(i, self.nsleds),
                     )
                     .unwrap();
+                let _ = builder
+                    .sled_ensure_zone_multiple_crucible_pantry(
+                        sled_id,
+                        self.crucible_pantry_count.on(i, self.nsleds),
+                    )
+                    .unwrap();
             }
             if self.create_disks_in_blueprint {
                 let _ =
@@ -497,6 +521,7 @@ impl ExampleSystemBuilder {
             system,
             input: input_builder.build(),
             collection: builder.build(),
+            initial_blueprint,
         };
         (example, blueprint)
     }
@@ -556,6 +581,7 @@ mod tests {
             ExampleSystemBuilder::new(&logctx.log, TEST_NAME)
                 .nsleds(5)
                 .nexus_count(6)
+                .crucible_pantry_count(5)
                 .internal_dns_count(2)
                 .unwrap()
                 .external_dns_count(10)
@@ -574,9 +600,10 @@ mod tests {
         // Check that the system's target counts are set correctly.
         assert_eq!(example.system.get_target_nexus_zone_count(), 6);
         assert_eq!(example.system.get_target_internal_dns_zone_count(), 2);
+        assert_eq!(example.system.get_target_crucible_pantry_zone_count(), 5);
 
-        // Check that the right number of internal and external DNS zones are
-        // present in both the blueprint and in the collection.
+        // Check that the right number of zones are present in both the
+        // blueprint and in the collection.
         let nexus_zones = blueprint_zones_of_kind(&blueprint, ZoneKind::Nexus);
         assert_eq!(
             nexus_zones.len(),
@@ -635,6 +662,27 @@ mod tests {
             "expected 10 external DNS zones in collection, got {}: {:#?}",
             external_dns_zones.len(),
             external_dns_zones,
+        );
+
+        let crucible_pantry_zones =
+            blueprint_zones_of_kind(&blueprint, ZoneKind::CruciblePantry);
+        assert_eq!(
+            crucible_pantry_zones.len(),
+            5,
+            "expected 5 Crucible pantry zones in blueprint, got {}: {:#?}",
+            crucible_pantry_zones.len(),
+            crucible_pantry_zones,
+        );
+        let crucible_pantry_zones = collection_zones_of_kind(
+            &example.collection,
+            ZoneKind::CruciblePantry,
+        );
+        assert_eq!(
+            crucible_pantry_zones.len(),
+            5,
+            "expected 5 Crucible pantry zones in collection, got {}: {:#?}",
+            crucible_pantry_zones.len(),
+            crucible_pantry_zones,
         );
 
         logctx.cleanup_successful();

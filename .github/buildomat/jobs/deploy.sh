@@ -418,7 +418,11 @@ done
 
 /usr/oxide/oxide --resolve "$OXIDE_RESOLVE" --cacert "$E2E_TLS_CERT" \
 	project create --name images --description "some images"
-/usr/oxide/oxide --resolve "$OXIDE_RESOLVE" --cacert "$E2E_TLS_CERT" \
+# NOTE: Use a relatively large timeout on this call, to avoid #6771
+/usr/oxide/oxide \
+    --resolve "$OXIDE_RESOLVE" \
+    --cacert "$E2E_TLS_CERT" \
+    --timeout 60 \
 	disk import \
 	--path debian-11-genericcloud-amd64.raw \
 	--disk debian11-boot \

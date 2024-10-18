@@ -17,8 +17,8 @@ use nexus_reconfigurator_planning::blueprint_builder::EnsureMultiple;
 use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::system::{SledBuilder, SystemDescription};
-use nexus_reconfigurator_simulation::MutableSimState;
 use nexus_reconfigurator_simulation::SimState;
+use nexus_reconfigurator_simulation::SimStateBuilder;
 use nexus_reconfigurator_simulation::Simulator;
 use nexus_sled_agent_shared::inventory::ZoneKind;
 use nexus_types::deployment::execution;
@@ -72,7 +72,7 @@ impl ReconfiguratorSim {
             .expect("current state should always exist")
     }
 
-    fn commit_and_bump(&mut self, description: String, state: MutableSimState) {
+    fn commit_and_bump(&mut self, description: String, state: SimStateBuilder) {
         let new_id = state.commit(description, &mut self.sim);
         self.current = new_id;
     }
@@ -627,8 +627,7 @@ fn cmd_sled_add(
         state,
     );
 
-    // TODO: we should show the sled ID here
-    Ok(Some("added sled".to_owned()))
+    Ok(Some(format!("added sled {}", sled_id)))
 }
 
 fn cmd_sled_show(
@@ -792,8 +791,7 @@ fn cmd_blueprint_edit(
     let planning_input = sim.planning_input(blueprint)?;
 
     // TODO: We may want to do something other than just using the latest
-    // collection? Using timestamps like this is somewhat dubious, especially
-    // in the presence of merged data from cmd_load.
+    // collection -- add a way to specify which collection to use.
     let latest_collection = system
         .all_collections()
         .max_by_key(|c| c.time_started)
@@ -964,12 +962,13 @@ fn cmd_blueprint_diff_dns(
     let blueprint = state.system().get_blueprint(blueprint_id)?;
 
     let existing_dns_config = match dns_group {
-        CliDnsGroup::Internal => state.system().get_internal_dns(dns_version),
-        CliDnsGroup::External => state.system().get_external_dns(dns_version),
-    }
-    .ok_or_else(|| {
-        anyhow!("no such {:?} DNS version: {}", dns_group, dns_version)
-    })?;
+        CliDnsGroup::Internal => {
+            state.system().get_internal_dns(dns_version)?
+        }
+        CliDnsGroup::External => {
+            state.system().get_external_dns(dns_version)?
+        }
+    };
 
     let blueprint_dns_zone = match dns_group {
         CliDnsGroup::Internal => {
@@ -1190,12 +1189,19 @@ fn cmd_load(
     sim: &mut ReconfiguratorSim,
     args: LoadArgs,
 ) -> anyhow::Result<Option<String>> {
+    let mut state = sim.current_state().to_mut();
+    if !state.system_mut().is_empty() {
+        bail!(
+            "changes made to simulated system: run `wipe system` before \
+              loading"
+        );
+    }
+
     let input_path = args.filename;
     let collection_id = args.collection_id;
     let loaded = read_file(&input_path)?;
 
-    let mut state = sim.current_state().to_mut();
-    let result = state.merge_serializable(loaded, collection_id)?;
+    let result = state.load_serialized(loaded, collection_id)?;
 
     sim.commit_and_bump(
         format!("reconfigurator-sim: load {:?}", input_path),
@@ -1203,6 +1209,7 @@ fn cmd_load(
     );
 
     let mut s = String::new();
+
     swriteln!(s, "loaded data from {:?}", input_path);
 
     if !result.warnings.is_empty() {
@@ -1232,7 +1239,7 @@ fn cmd_load_example(
     if !state.system_mut().is_empty() {
         bail!(
             "changes made to simulated system: run `wipe system` before \
-             loading an example system"
+             loading"
         );
     }
 
@@ -1240,7 +1247,7 @@ fn cmd_load_example(
     match args.seed {
         Some(seed) => {
             // In this case, reset the RNG state to the provided seed.
-            swriteln!(s, "setting new RNG seed: {}", seed,);
+            swriteln!(s, "setting new RNG seed: {}", seed);
             state.rng_mut().set_seed(seed);
         }
         None => {

@@ -20,7 +20,7 @@ use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::CollectionUuid;
 use uuid::Uuid;
 
-use crate::errors::{DuplicateError, MissingError, NonEmptySystemError};
+use crate::errors::{DuplicateError, KeyError, NonEmptySystemError};
 
 /// A versioned, simulated reconfigurator system.
 #[derive(Clone, Debug)]
@@ -109,10 +109,10 @@ impl SimSystem {
     pub fn get_collection(
         &self,
         id: CollectionUuid,
-    ) -> Result<&Collection, MissingError> {
+    ) -> Result<&Collection, KeyError> {
         match self.collections.get(&id) {
             Some(c) => Ok(&**c),
-            None => Err(MissingError::collection(id)),
+            None => Err(KeyError::collection(id)),
         }
     }
 
@@ -122,10 +122,10 @@ impl SimSystem {
         self.collections.values().map(|c| &**c)
     }
 
-    pub fn get_blueprint(&self, id: Uuid) -> Result<&Blueprint, MissingError> {
+    pub fn get_blueprint(&self, id: Uuid) -> Result<&Blueprint, KeyError> {
         match self.blueprints.get(&id) {
             Some(b) => Ok(&**b),
-            None => Err(MissingError::blueprint(id)),
+            None => Err(KeyError::blueprint(id)),
         }
     }
 
@@ -136,8 +136,11 @@ impl SimSystem {
     pub fn get_internal_dns(
         &self,
         generation: Generation,
-    ) -> Option<&DnsConfigParams> {
-        self.internal_dns.get(&generation).map(|d| &**d)
+    ) -> Result<&DnsConfigParams, KeyError> {
+        self.internal_dns
+            .get(&generation)
+            .map(|d| &**d)
+            .ok_or_else(|| KeyError::internal_dns(generation))
     }
 
     pub fn all_internal_dns(
@@ -149,8 +152,11 @@ impl SimSystem {
     pub fn get_external_dns(
         &self,
         generation: Generation,
-    ) -> Option<&DnsConfigParams> {
-        self.external_dns.get(&generation).map(|d| &**d)
+    ) -> Result<&DnsConfigParams, KeyError> {
+        self.external_dns
+            .get(&generation)
+            .map(|d| &**d)
+            .ok_or_else(|| KeyError::external_dns(generation))
     }
 
     pub fn all_external_dns(
@@ -178,11 +184,10 @@ pub struct MutableSimSystem {
 }
 
 impl MutableSimSystem {
-    // These methods are duplicated from `SimSystem`. We don't use `Deref`
-    // because it isn't the right tool.
-    //
-    // The forwarding is all valid because we don't cache any changes in this
-    // struct, instead making them directly to the underlying system.
+    // These methods are duplicated from `SimSystem`. The forwarding is all
+    // valid because we don't cache pending changes in this struct, instead
+    // making them directly to the underlying system. If we did cache changes,
+    // we'd need to be more careful about how we forward these methods.
 
     #[inline]
     pub fn is_empty(&self) -> bool {
@@ -198,7 +203,7 @@ impl MutableSimSystem {
     pub fn get_collection(
         &self,
         id: CollectionUuid,
-    ) -> Result<&Collection, MissingError> {
+    ) -> Result<&Collection, KeyError> {
         self.system.get_collection(id)
     }
 
@@ -210,7 +215,7 @@ impl MutableSimSystem {
     }
 
     #[inline]
-    pub fn get_blueprint(&self, id: Uuid) -> Result<&Blueprint, MissingError> {
+    pub fn get_blueprint(&self, id: Uuid) -> Result<&Blueprint, KeyError> {
         self.system.get_blueprint(id)
     }
 
@@ -219,12 +224,11 @@ impl MutableSimSystem {
         self.system.all_blueprints()
     }
 
-    // XXX return errors
     #[inline]
     pub fn get_internal_dns(
         &self,
         generation: Generation,
-    ) -> Option<&DnsConfigParams> {
+    ) -> Result<&DnsConfigParams, KeyError> {
         self.system.get_internal_dns(generation)
     }
 
@@ -239,7 +243,7 @@ impl MutableSimSystem {
     pub fn get_external_dns(
         &self,
         generation: Generation,
-    ) -> Option<&DnsConfigParams> {
+    ) -> Result<&DnsConfigParams, KeyError> {
         self.system.get_external_dns(generation)
     }
 
@@ -335,8 +339,8 @@ impl MutableSimSystem {
                 self.log.push(SimSystemLogEntry::AddCollection(collection_id));
                 Ok(())
             }
-            indexmap::map::Entry::Occupied(entry) => {
-                Err(DuplicateError::collection(entry.get().clone()))
+            indexmap::map::Entry::Occupied(_) => {
+                Err(DuplicateError::collection(collection_id))
             }
         }
     }
@@ -360,8 +364,56 @@ impl MutableSimSystem {
                 self.log.push(SimSystemLogEntry::AddBlueprint(blueprint_id));
                 Ok(())
             }
-            indexmap::map::Entry::Occupied(entry) => {
-                Err(DuplicateError::blueprint(entry.get().clone()))
+            indexmap::map::Entry::Occupied(_) => {
+                Err(DuplicateError::blueprint(blueprint_id))
+            }
+        }
+    }
+
+    pub fn add_internal_dns(
+        &mut self,
+        params: impl Into<Arc<DnsConfigParams>>,
+    ) -> Result<(), DuplicateError> {
+        let params = params.into();
+        self.add_internal_dns_inner(params)
+    }
+
+    fn add_internal_dns_inner(
+        &mut self,
+        params: Arc<DnsConfigParams>,
+    ) -> Result<(), DuplicateError> {
+        let generation = params.generation;
+        match self.system.internal_dns.entry(generation) {
+            std::collections::btree_map::Entry::Vacant(entry) => {
+                entry.insert(params);
+                Ok(())
+            }
+            std::collections::btree_map::Entry::Occupied(_) => {
+                Err(DuplicateError::internal_dns(generation))
+            }
+        }
+    }
+
+    pub fn add_external_dns(
+        &mut self,
+        params: impl Into<Arc<DnsConfigParams>>,
+    ) -> Result<(), DuplicateError> {
+        let params = params.into();
+        self.add_external_dns_inner(params)
+    }
+
+    fn add_external_dns_inner(
+        &mut self,
+        params: Arc<DnsConfigParams>,
+    ) -> Result<(), DuplicateError> {
+        let generation = params.generation;
+        match self.system.external_dns.entry(generation) {
+            std::collections::btree_map::Entry::Vacant(entry) => {
+                entry.insert(params);
+                Ok(())
+            }
+            std::collections::btree_map::Entry::Occupied(_) => {
+                Err(DuplicateError::external_dns(generation))
             }
         }
     }
@@ -373,9 +425,6 @@ impl MutableSimSystem {
 
     // Not public: the only users that want to replace DNS wholesale are
     // internal to this crate.
-    //
-    // TODO: We probably don't want to replace DNS wholesale at all. See
-    // comment at the top of merge_serializable for more.
     pub(crate) fn set_internal_dns(
         &mut self,
         dns: impl IntoIterator<Item = (Generation, DnsConfigParams)>,
@@ -389,9 +438,6 @@ impl MutableSimSystem {
 
     // Not public: the only users that want to replace DNS wholesale are
     // internal to this crate.
-    //
-    // TODO: We probably don't want to replace DNS wholesale at all. See
-    // comment at the top of merge_serializable for more.
     pub(crate) fn set_external_dns(
         &mut self,
         dns: impl IntoIterator<Item = (Generation, DnsConfigParams)>,

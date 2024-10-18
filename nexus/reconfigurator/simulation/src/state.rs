@@ -2,18 +2,17 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use anyhow::{bail, Context};
+use anyhow::{anyhow, bail, Context};
 use nexus_inventory::CollectionBuilder;
 use nexus_reconfigurator_planning::system::SledHwInventory;
-use nexus_types::deployment::{
-    PlanningInput, SledFilter, SledLookupErrorKind, UnstableReconfiguratorState,
-};
+use nexus_types::deployment::{SledFilter, UnstableReconfiguratorState};
 use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::{CollectionUuid, ReconfiguratorSimUuid};
 
 use crate::{
-    config::SimConfig, MutableSimConfig, MutableSimSystem, SimConfigLogEntry,
-    SimRng, SimSystem, SimSystemLogEntry, Simulator,
+    config::SimConfig, errors::NonEmptySystemError, MutableSimSystem,
+    SimConfigBuilder, SimConfigLogEntry, SimRng, SimSystem, SimSystemLogEntry,
+    Simulator,
 };
 
 /// A point-in-time snapshot of reconfigurator state.
@@ -117,24 +116,12 @@ impl SimState {
             internal_dns: self
                 .system
                 .all_internal_dns()
-                .map(|params| {
-                    (
-                        // XXX remove unwrap once DNS generations are fixed
-                        Generation::try_from(params.generation).unwrap(),
-                        params.clone(),
-                    )
-                })
+                .map(|params| (params.generation, params.clone()))
                 .collect(),
             external_dns: self
                 .system
                 .all_external_dns()
-                .map(|params| {
-                    (
-                        // XXX remove unwrap once DNS generations are fixed
-                        Generation::try_from(params.generation).unwrap(),
-                        params.clone(),
-                    )
-                })
+                .map(|params| (params.generation, params.clone()))
                 .collect(),
             silo_names: self.config.silo_names().cloned().collect(),
             external_dns_zone_names: vec![self
@@ -144,8 +131,8 @@ impl SimState {
         })
     }
 
-    pub fn to_mut(&self) -> MutableSimState {
-        MutableSimState {
+    pub fn to_mut(&self) -> SimStateBuilder {
+        SimStateBuilder {
             parent: self.id,
             parent_gen: self.generation,
             system: self.system.to_mut(),
@@ -155,20 +142,21 @@ impl SimState {
     }
 }
 
-/// Reconfigurator state that can be mutated.
+/// Reconfigurator state that can be changed.
 ///
-/// This is ephemeral and must be committed to a `SimStore` to be stored. This
-/// means that this can be freely mutated without introducing errors.
+/// `SimStateBuilder` is ephemeral, so it can be freely mutated without
+/// affecting anything else about the system. To store it into a system, commit
+/// it to a `SimStore`.
 #[derive(Clone, Debug)]
-pub struct MutableSimState {
+pub struct SimStateBuilder {
     parent: ReconfiguratorSimUuid,
     parent_gen: Generation,
     system: MutableSimSystem,
-    config: MutableSimConfig,
+    config: SimConfigBuilder,
     rng: SimRng,
 }
 
-impl MutableSimState {
+impl SimStateBuilder {
     #[inline]
     #[must_use]
     pub fn parent(&self) -> ReconfiguratorSimUuid {
@@ -183,7 +171,7 @@ impl MutableSimState {
 
     #[inline]
     #[must_use]
-    pub fn config_mut(&mut self) -> &mut MutableSimConfig {
+    pub fn config_mut(&mut self) -> &mut SimConfigBuilder {
         &mut self.config
     }
 
@@ -193,49 +181,29 @@ impl MutableSimState {
         &mut self.rng
     }
 
-    /// Merge a serializable state into self.
+    /// Load a serialized state into an empty system.
     ///
-    /// Missing sleds, blueprints, and collections are added. Existing sleds,
-    /// blueprints, and collections are not modified.
-    ///
-    /// The following data is overwritten:
-    ///
-    /// * Internal and external DNS.
-    /// * Silo names.
-    /// * The external DNS zone name.
-    pub fn merge_serializable(
+    /// If the primary collection ID is not provided, the serialized state must
+    /// only contain one collection.
+    pub fn load_serialized(
         &mut self,
         state: UnstableReconfiguratorState,
         primary_collection_id: Option<CollectionUuid>,
-    ) -> anyhow::Result<MergeResult> {
-        // TODO: Is merging even useful? Should we only allow loading
-        // serializable state on an empty system?
-        //
-        // Some of the logic here (particularly DNS) is dubious -- overwriting
-        // DNS means that blueprints in this state may refer to DNS generations
-        // that are different or even missing.
+    ) -> anyhow::Result<LoadResult> {
+        if !self.system.is_empty() {
+            return Err(anyhow!(NonEmptySystemError::new()));
+        }
 
         let collection_id =
             get_primary_collection_id(&state, primary_collection_id)?;
-        let current_planning_input = self
-            .system
-            .description()
-            .to_planning_input_builder()
-            .context("generating planning input")?
-            .build();
 
         // NOTE: If more error cases are added, ensure that they're checked
-        // before merge_serializable_inner is called. This ensures that the
-        // system is not modified if there are errors.
-        let mut res = MergeResultBuilder::default();
-        self.merge_serializable_inner(
-            state,
-            collection_id,
-            current_planning_input,
-            &mut res,
-        );
+        // before load_serialized_inner is called. This ensures that the system
+        // is not modified if there are errors.
+        let mut res = LoadResultBuilder::default();
+        self.load_serialized_inner(state, collection_id, &mut res);
 
-        Ok(MergeResult {
+        Ok(LoadResult {
             primary_collection_id: collection_id,
             notices: res.notices,
             warnings: res.warnings,
@@ -244,12 +212,11 @@ impl MutableSimState {
 
     // This method MUST be infallible. It should only be called after checking
     // the invariant: the primary collection ID is valid.
-    fn merge_serializable_inner(
+    fn load_serialized_inner(
         &mut self,
         state: UnstableReconfiguratorState,
         primary_collection_id: CollectionUuid,
-        current_planning_input: PlanningInput,
-        res: &mut MergeResultBuilder,
+        res: &mut LoadResultBuilder,
     ) {
         res.notices.push(format!(
             "using collection {} as source of sled inventory data",
@@ -264,38 +231,6 @@ impl MutableSimState {
         for (sled_id, sled_details) in
             state.planning_input.all_sleds(SledFilter::Commissioned)
         {
-            match current_planning_input
-                .sled_lookup(SledFilter::Commissioned, sled_id)
-            {
-                Ok(_) => {
-                    res.notices.push(format!(
-                        "sled {}: skipped (one with the same id is already loaded)",
-                        sled_id
-                    ));
-                    continue;
-                }
-                Err(error) => match error.kind() {
-                    SledLookupErrorKind::Filtered { .. } => {
-                        // We tried to load a sled which has been marked
-                        // decommissioned. We disallow this (it's a special
-                        // case of skipping already loaded sleds), but it's a
-                        // little more surprising to the user so treat it as a
-                        // warning.
-                        res.warnings.push(format!(
-                            "sled {}: skipped (turning a decommissioned \
-                             sled into a commissioned one is not supported",
-                            sled_id
-                        ));
-                        continue;
-                    }
-                    SledLookupErrorKind::Missing => {
-                        // A sled being missing from the input is the only case
-                        // in which we decide to load new sleds. The logic to
-                        // do that is below.
-                    }
-                },
-            }
-
             let Some(inventory_sled_agent) =
                 primary_collection.sled_agents.get(&sled_id)
             else {
@@ -325,8 +260,9 @@ impl MutableSimState {
                 });
 
             // XXX: Should this error ever happen? The only case where it
-            // errors is if the sled ID is already loaded, but didn't we
-            // already check it above via the current planning input?
+            // errors is if the sled ID is already present, but we know that
+            // the system is empty, and the state's planning input is keyed by
+            // sled ID, so there should be no duplicates.
             let result = self.system.description_mut().sled_full(
                 sled_id,
                 sled_details.policy,
@@ -356,9 +292,8 @@ impl MutableSimState {
                         .push(format!("collection {}: loaded", collection_id));
                 }
                 Err(_) => {
-                    res.notices.push(format!(
-                        "collection {}: skipped (one with the \
-                         same id is already loaded)",
+                    res.warnings.push(format!(
+                        "collection {}: skipped (duplicate found)",
                         collection_id,
                     ));
                 }
@@ -374,8 +309,7 @@ impl MutableSimState {
                 }
                 Err(_) => {
                     res.notices.push(format!(
-                        "blueprint {}: skipped (one with the \
-                         same id is already loaded)",
+                        "blueprint {}: skipped (duplicate found)",
                         blueprint_id,
                     ));
                 }
@@ -391,8 +325,6 @@ impl MutableSimState {
             state.planning_input.service_ip_pool_ranges()
         ));
 
-        // TODO: This doesn't seem right. See the comment at the top of
-        // merge_serializable.
         self.system.set_internal_dns(state.internal_dns);
         self.system.set_external_dns(state.external_dns);
 
@@ -472,7 +404,7 @@ pub struct SimStateLog {
 /// The output of merging a serializable state into a mutable state.
 #[derive(Clone, Debug)]
 #[must_use]
-pub struct MergeResult {
+pub struct LoadResult {
     // TODO: Storing notices and warnings as strings is a carryover from
     // reconfigurator-cli. We may wish to store data in a more structured form.
     // For example, store a map of sled IDs to their statuses, etc.
@@ -521,7 +453,7 @@ fn get_primary_collection_id(
 }
 
 #[derive(Debug, Default)]
-struct MergeResultBuilder {
+struct LoadResultBuilder {
     notices: Vec<String>,
     warnings: Vec<String>,
 }

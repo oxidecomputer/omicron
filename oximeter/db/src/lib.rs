@@ -34,12 +34,16 @@ use thiserror::Error;
 
 mod client;
 pub mod model;
-#[cfg(feature = "native-sql")]
 pub mod native;
 #[cfg(any(feature = "oxql", test))]
 pub mod oxql;
 pub mod query;
-#[cfg(any(feature = "oxql", feature = "sql", feature = "native-sql", test))]
+#[cfg(any(
+    feature = "oxql",
+    feature = "sql",
+    feature = "native-sql-shell",
+    test
+))]
 pub mod shells;
 #[cfg(any(feature = "sql", test))]
 pub mod sql;
@@ -54,6 +58,12 @@ pub use model::OXIMETER_VERSION;
 
 #[derive(Debug, Error)]
 pub enum Error {
+    #[error("Failed to create reqwest client")]
+    Reqwest(#[from] reqwest::Error),
+
+    #[error("Failed to check out connection to database")]
+    Connection(#[from] qorb::pool::Error),
+
     #[error("Oximeter core error: {0}")]
     Oximeter(#[from] oximeter::MetricsError),
 
@@ -157,6 +167,9 @@ pub enum Error {
     #[cfg(any(feature = "oxql", test))]
     #[error(transparent)]
     Oxql(oxql::Error),
+
+    #[error("Native protocol error")]
+    Native(#[source] crate::native::Error),
 }
 
 #[cfg(any(feature = "oxql", test))]
@@ -252,11 +265,13 @@ pub struct TimeseriesPageSelector {
 /// Create a client to the timeseries database, and ensure the database exists.
 pub async fn make_client(
     address: IpAddr,
-    port: u16,
+    http_port: u16,
+    native_port: u16,
     log: &Logger,
 ) -> Result<Client, anyhow::Error> {
-    let address = SocketAddr::new(address, port);
-    let client = Client::new(address, &log);
+    let http_address = SocketAddr::new(address, http_port);
+    let native_address = SocketAddr::new(address, native_port);
+    let client = Client::new(http_address, native_address, &log);
     client
         .init_single_node_db()
         .await

@@ -96,8 +96,6 @@ impl SimRng {
 }
 
 pub(crate) fn seed_from_entropy() -> String {
-    // Using underscores as the separator makes the seed easier to double-click
-    // copy than alternatives like hyphens or colons.
-    petname::petname(3, "_")
+    petname::petname(3, "-")
         .expect("non-zero length requested => cannot be empty")
 }
