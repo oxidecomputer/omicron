@@ -69,7 +69,7 @@ use omicron_uuid_kinds::{OmicronZoneUuid, SledUuid};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
-use std::net::{Ipv4Addr, Ipv6Addr};
+use std::net::{Ipv4Addr, Ipv6Addr, SocketAddrV6};
 
 /// Used to construct the DNS name for a control plane host
 #[derive(Clone, Debug, PartialEq, PartialOrd)]
@@ -367,12 +367,11 @@ impl DnsConfigBuilder {
     pub fn host_zone_with_one_backend(
         &mut self,
         zone_id: OmicronZoneUuid,
-        addr: Ipv6Addr,
         service: ServiceName,
-        port: u16,
+        addr: SocketAddrV6,
     ) -> anyhow::Result<()> {
-        let zone = self.host_zone(zone_id, addr)?;
-        self.service_backend_zone(service, &zone, port)
+        let zone = self.host_zone(zone_id, *addr.ip())?;
+        self.service_backend_zone(service, &zone, addr.port())
     }
 
     /// Higher-level shorthand for adding a "switch" zone with its usual set of
@@ -423,9 +422,8 @@ impl DnsConfigBuilder {
     pub fn host_zone_clickhouse(
         &mut self,
         zone_id: OmicronZoneUuid,
-        underlay_address: Ipv6Addr,
         http_service: ServiceName,
-        http_port: u16,
+        http_address: SocketAddrV6,
     ) -> anyhow::Result<()> {
         anyhow::ensure!(
             http_service == ServiceName::Clickhouse
@@ -433,8 +431,8 @@ impl DnsConfigBuilder {
             "This method is only valid for ClickHouse replica servers, \
             but we were provided the service '{http_service:?}'",
         );
-        let zone = self.host_zone(zone_id, underlay_address)?;
-        self.service_backend_zone(http_service, &zone, http_port)?;
+        let zone = self.host_zone(zone_id, *http_address.ip())?;
+        self.service_backend_zone(http_service, &zone, http_address.port())?;
         self.service_backend_zone(
             ServiceName::ClickhouseNative,
             &zone,
@@ -457,23 +455,22 @@ impl DnsConfigBuilder {
     ///
     /// # Errors
     ///
-    /// This fails if the provided `http_service` is not for a ClickhouseKeeper
+    /// This fails if the provided `service` is not for a ClickhouseKeeper
     /// replica server. It also fails if the given zone has already been added
     /// to the configuration.
     pub fn host_zone_clickhouse_keeper(
         &mut self,
         zone_id: OmicronZoneUuid,
-        underlay_address: Ipv6Addr,
         service: ServiceName,
-        port: u16,
+        address: SocketAddrV6,
     ) -> anyhow::Result<()> {
         anyhow::ensure!(
             service == ServiceName::ClickhouseKeeper,
             "This method is only valid for ClickHouse keeper servers, \
             but we were provided the service '{service:?}'",
         );
-        let zone = self.host_zone(zone_id, underlay_address)?;
-        self.service_backend_zone(service, &zone, port)?;
+        let zone = self.host_zone(zone_id, *address.ip())?;
+        self.service_backend_zone(service, &zone, address.port())?;
         self.service_backend_zone(
             ServiceName::ClickhouseAdminKeeper,
             &zone,
