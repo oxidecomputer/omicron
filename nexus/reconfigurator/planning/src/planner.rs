@@ -3266,7 +3266,7 @@ mod test {
             &collection,
         )
         .expect("created planner")
-        .with_rng_seed((TEST_NAME, "bp4"))
+        .with_rng(BlueprintBuilderRng::from_seed((TEST_NAME, "bp4")))
         .plan()
         .expect("plan");
 
