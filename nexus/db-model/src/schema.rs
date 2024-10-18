@@ -842,6 +842,16 @@ table! {
 }
 
 table! {
+    clickhouse_policy (version) {
+        version -> Int8,
+        clickhouse_mode -> crate::clickhouse_policy::ClickhouseModeEnum,
+        clickhouse_cluster_target_servers -> Int2,
+        clickhouse_cluster_target_keepers -> Int2,
+        time_created -> Timestamptz,
+    }
+}
+
+table! {
     rack (id) {
         id -> Uuid,
         time_created -> Timestamptz,

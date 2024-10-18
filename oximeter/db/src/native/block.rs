@@ -7,21 +7,25 @@
 //! Types for working with actual blocks and columns of data.
 
 use super::Error;
-use chrono::{DateTime, NaiveDate};
+use chrono::DateTime;
+use chrono::NaiveDate;
 use chrono_tz::Tz;
 use indexmap::IndexMap;
-use nom::{
-    bytes::complete::{tag, take_while1},
-    character::complete::u8 as nom_u8,
-    combinator::{eof, map, map_opt, opt},
-    sequence::{delimited, preceded, tuple},
-    IResult,
-};
-use std::{
-    fmt,
-    net::{Ipv4Addr, Ipv6Addr},
-    sync::LazyLock,
-};
+use nom::bytes::complete::tag;
+use nom::bytes::complete::take_while1;
+use nom::character::complete::u8 as nom_u8;
+use nom::combinator::eof;
+use nom::combinator::map;
+use nom::combinator::map_opt;
+use nom::combinator::opt;
+use nom::sequence::delimited;
+use nom::sequence::preceded;
+use nom::sequence::tuple;
+use nom::IResult;
+use std::fmt;
+use std::net::Ipv4Addr;
+use std::net::Ipv6Addr;
+use std::sync::LazyLock;
 use uuid::Uuid;
 
 /// A set of rows and columns.
@@ -740,12 +744,17 @@ impl std::str::FromStr for DataType {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        Block, BlockInfo, Column, DataType, Precision, ValueArray,
-        DEFAULT_TIMEZONE,
-    };
-    use crate::native::block::{datetime, datetime64};
-    use chrono::{SubsecRound as _, Utc};
+    use super::Block;
+    use super::BlockInfo;
+    use super::Column;
+    use super::DataType;
+    use super::Precision;
+    use super::ValueArray;
+    use super::DEFAULT_TIMEZONE;
+    use crate::native::block::datetime;
+    use crate::native::block::datetime64;
+    use chrono::SubsecRound as _;
+    use chrono::Utc;
     use chrono_tz::Tz;
     use indexmap::IndexMap;
 
