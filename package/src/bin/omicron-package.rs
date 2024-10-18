@@ -1069,22 +1069,20 @@ async fn main() -> Result<()> {
     let get_config = || -> Result<Config> {
         let target_path = args.artifact_dir.join("target").join(&args.target);
         let raw_target =
-            std::fs::read_to_string(&target_path).map_err(|e| {
+            std::fs::read_to_string(&target_path).inspect_err(|_| {
                 eprintln!(
                     "Failed to read build target: {}\n{}",
                     target_path,
                     target_help_str()
                 );
-                e
             })?;
         let target: Target = KnownTarget::from_str(&raw_target)
-            .map_err(|e| {
+            .inspect_err(|_| {
                 eprintln!(
                     "Failed to parse {} as target\n{}",
                     target_path,
                     target_help_str()
                 );
-                e
             })?
             .into();
         debug!(log, "target[{}]: {:?}", args.target, target);
