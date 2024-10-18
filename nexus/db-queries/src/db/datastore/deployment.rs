@@ -1730,7 +1730,7 @@ impl RunQueryDsl<DbConnection> for InsertTargetQuery {}
 mod tests {
     use super::*;
 
-    use crate::db::datastore::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::TestDatabase;
     use crate::db::raw_query_builder::QueryBuilder;
     use nexus_inventory::now_db_precision;
     use nexus_inventory::CollectionBuilder;

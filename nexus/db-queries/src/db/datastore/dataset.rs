@@ -235,7 +235,7 @@ impl DataStore {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::db::datastore::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::TestDatabase;
     use nexus_db_model::Generation;
     use nexus_db_model::SledBaseboard;
     use nexus_db_model::SledSystemHardware;

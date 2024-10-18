@@ -924,8 +924,8 @@ mod tests {
     use super::NextItem;
     use super::ShiftIndices;
     use crate::db;
-    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::explain::ExplainableAsync as _;
+    use crate::db::pub_test_utils::TestDatabase;
     use crate::db::queries::next_item::NextItemSelfJoined;
     use async_bb8_diesel::AsyncRunQueryDsl;
     use async_bb8_diesel::AsyncSimpleConnection;

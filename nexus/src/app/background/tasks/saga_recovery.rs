@@ -484,10 +484,9 @@ mod test {
     use super::*;
     use nexus_auth::authn;
     use nexus_db_queries::context::OpContext;
+    use nexus_db_queries::db::pub_test_utils::TestDatabase;
     use nexus_db_queries::db::test_utils::UnpluggableCockroachDbSecStore;
-    use nexus_test_utils::{
-        db::test_setup_database, resource_helpers::create_project,
-    };
+    use nexus_test_utils::resource_helpers::create_project;
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::internal_api::views::LastResult;
     use omicron_test_utils::dev::{
@@ -505,24 +504,6 @@ mod test {
     use uuid::Uuid;
     type ControlPlaneTestContext =
         nexus_test_utils::ControlPlaneTestContext<crate::Server>;
-
-    // Returns a Cockroach DB, as well as a "datastore" interface (which is the
-    // one more frequently used by Nexus).
-    //
-    // The caller is responsible for calling "cleanup().await" on the returned
-    // CockroachInstance - we would normally wrap this in a drop method, but it
-    // is async.
-    async fn new_db(
-        log: &slog::Logger,
-    ) -> (dev::db::CockroachInstance, Arc<db::DataStore>) {
-        let db = test_setup_database(&log).await;
-        let cfg = nexus_db_queries::db::Config { url: db.pg_config().clone() };
-        let pool = Arc::new(db::Pool::new_single_host(log, &cfg));
-        let db_datastore = Arc::new(
-            db::DataStore::new(&log, Arc::clone(&pool), None).await.unwrap(),
-        );
-        (db, db_datastore)
-    }
 
     // The following is our "saga-under-test". It's a simple two-node operation
     // that tracks how many times it has been called, and provides a mechanism
@@ -670,7 +651,8 @@ mod test {
         let logctx =
             dev::test_setup_log("test_failure_during_saga_can_be_recovered");
         let log = logctx.log.new(o!());
-        let (mut db, db_datastore) = new_db(&log).await;
+        let db = TestDatabase::new_with_raw_datastore(&log).await;
+        let db_datastore = db.datastore();
         let sec_id = db::SecId(uuid::Uuid::new_v4());
         let (storage, sec_client, uctx) =
             create_storage_sec_and_context(&log, db_datastore.clone(), sec_id);
@@ -743,8 +725,7 @@ mod test {
         drop(task);
         let sec_client = Arc::try_unwrap(sec_client).unwrap();
         sec_client.shutdown().await;
-        db_datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -757,7 +738,8 @@ mod test {
             "test_successful_saga_does_not_replay_during_recovery",
         );
         let log = logctx.log.new(o!());
-        let (mut db, db_datastore) = new_db(&log).await;
+        let db = TestDatabase::new_with_raw_datastore(&log).await;
+        let db_datastore = db.datastore();
         let sec_id = db::SecId(uuid::Uuid::new_v4());
         let (storage, sec_client, uctx) =
             create_storage_sec_and_context(&log, db_datastore.clone(), sec_id);
@@ -814,8 +796,7 @@ mod test {
         drop(task);
         let sec_client = Arc::try_unwrap(sec_client).unwrap();
         sec_client.shutdown().await;
-        db_datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 

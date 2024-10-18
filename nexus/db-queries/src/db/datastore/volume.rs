@@ -2780,7 +2780,7 @@ impl DataStore {
 mod tests {
     use super::*;
 
-    use crate::db::datastore::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::TestDatabase;
     use omicron_test_utils::dev;
     use sled_agent_client::types::CrucibleOpts;
 
