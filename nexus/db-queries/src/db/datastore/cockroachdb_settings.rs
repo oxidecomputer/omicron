@@ -133,24 +133,17 @@ impl DataStore {
 
 #[cfg(test)]
 mod test {
-    use super::{CockroachDbSettings, OpContext};
-    use nexus_test_utils::db::test_setup_database;
+    use super::CockroachDbSettings;
+    use crate::db::datastore::pub_test_utils::TestDatabase;
     use nexus_types::deployment::CockroachDbClusterVersion;
     use omicron_common::api::external::Error;
     use omicron_test_utils::dev;
-    use std::sync::Arc;
 
     #[tokio::test]
     async fn test_preserve_downgrade() {
         let logctx = dev::test_setup_log("test_preserve_downgrade");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (_, datastore) =
-            crate::db::datastore::test_utils::datastore_test(&logctx, &db)
-                .await;
-        let opctx = OpContext::for_tests(
-            logctx.log.new(o!()),
-            Arc::clone(&datastore) as Arc<dyn nexus_auth::storage::Storage>,
-        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let settings = datastore.cockroachdb_settings(&opctx).await.unwrap();
         let version: CockroachDbClusterVersion =
@@ -247,7 +240,7 @@ mod test {
             }
         }
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }

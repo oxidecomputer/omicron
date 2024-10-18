@@ -958,24 +958,16 @@ mod test {
     use super::Instance;
     use super::LookupPath;
     use super::Project;
-    use crate::context::OpContext;
+    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::model::Name;
-    use nexus_test_utils::db::test_setup_database;
     use omicron_test_utils::dev;
-    use std::sync::Arc;
 
     /* This is a smoke test that things basically appear to work. */
     #[tokio::test]
     async fn test_lookup() {
         let logctx = dev::test_setup_log("test_lookup");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (_, datastore) =
-            crate::db::datastore::test_utils::datastore_test(&logctx, &db)
-                .await;
-        let opctx = OpContext::for_tests(
-            logctx.log.new(o!()),
-            Arc::clone(&datastore) as Arc<dyn nexus_auth::storage::Storage>,
-        );
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
         let project_name: Name = Name("my-project".parse().unwrap());
         let instance_name: Name = Name("my-instance".parse().unwrap());
 
@@ -999,7 +991,7 @@ mod test {
             Project::PrimaryKey(_, p)
             if *p == project_id));
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }

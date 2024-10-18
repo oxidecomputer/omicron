@@ -68,7 +68,7 @@ pub fn live_test(_attrs: TokenStream, input: TokenStream) -> TokenStream {
                 #func_ident_string
             ).await.expect("setting up LiveTestContext");
             #func_ident(&ctx).await;
-            ctx.cleanup_successful();
+            ctx.cleanup_successful().await;
         }
     };
     let mut sig = input_func.sig.clone();

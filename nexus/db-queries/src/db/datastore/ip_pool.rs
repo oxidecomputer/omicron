@@ -1121,12 +1121,11 @@ mod test {
     use std::num::NonZeroU32;
 
     use crate::authz;
-    use crate::db::datastore::test_utils::datastore_test;
+    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::model::{
         IpPool, IpPoolResource, IpPoolResourceType, Project,
     };
     use assert_matches::assert_matches;
-    use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::params;
     use nexus_types::identity::Resource;
     use omicron_common::address::{IpRange, Ipv4Range, Ipv6Range};
@@ -1139,8 +1138,8 @@ mod test {
     #[tokio::test]
     async fn test_default_ip_pools() {
         let logctx = dev::test_setup_log("test_default_ip_pools");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // we start out with no default pool, so we expect not found
         let error = datastore.ip_pools_fetch_default(&opctx).await.unwrap_err();
@@ -1298,15 +1297,15 @@ mod test {
             .expect("Should list silo IP pools");
         assert_eq!(silo_pools.len(), 0);
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
     #[tokio::test]
     async fn test_internal_ip_pool() {
         let logctx = dev::test_setup_log("test_internal_ip_pool");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // confirm internal pool appears as internal
         let (authz_pool, _pool) =
@@ -1352,15 +1351,15 @@ mod test {
             datastore.ip_pool_is_internal(&opctx, &authz_other_pool).await;
         assert_eq!(is_internal, Ok(false));
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
     #[tokio::test]
     async fn test_ip_pool_utilization() {
         let logctx = dev::test_setup_log("test_ip_utilization");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let authz_silo = opctx.authn.silo_required().unwrap();
         let project = Project::new(
@@ -1503,7 +1502,7 @@ mod test {
         assert_eq!(max_ips.ipv4, 5);
         assert_eq!(max_ips.ipv6, 1208925819614629174706166);
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }

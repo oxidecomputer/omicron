@@ -221,9 +221,9 @@ pub fn reassign_producers_query(oximeter_id: Uuid) -> TypedSqlQuery<()> {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::explain::ExplainableAsync;
     use crate::db::raw_query_builder::expectorate_query_contents;
-    use nexus_test_utils::db::test_setup_database;
     use omicron_test_utils::dev;
     use std::time::Duration;
     use uuid::Uuid;
@@ -266,10 +266,8 @@ mod test {
     #[tokio::test]
     async fn explainable_upsert_producer() {
         let logctx = dev::test_setup_log("explainable_upsert_producer");
-        let log = logctx.log.new(o!());
-        let mut db = test_setup_database(&log).await;
-        let cfg = crate::db::Config { url: db.pg_config().clone() };
-        let pool = crate::db::Pool::new_single_host(&logctx.log, &cfg);
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
         let conn = pool.claim().await.unwrap();
 
         let producer = internal::nexus::ProducerEndpoint {
@@ -285,17 +283,15 @@ mod test {
             .await
             .expect("Failed to explain query - is it valid SQL?");
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
     #[tokio::test]
     async fn explainable_reassign_producers() {
         let logctx = dev::test_setup_log("explainable_reassign_producers");
-        let log = logctx.log.new(o!());
-        let mut db = test_setup_database(&log).await;
-        let cfg = crate::db::Config { url: db.pg_config().clone() };
-        let pool = crate::db::Pool::new_single_host(&logctx.log, &cfg);
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
         let conn = pool.claim().await.unwrap();
 
         let oximeter_id = Uuid::nil();
@@ -306,7 +302,7 @@ mod test {
             .await
             .expect("Failed to explain query - is it valid SQL?");
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }

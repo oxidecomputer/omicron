@@ -1619,9 +1619,8 @@ async fn do_switch_port_settings_delete(
 
 #[cfg(test)]
 mod test {
-    use crate::db::datastore::test_utils::datastore_test;
+    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::datastore::UpdatePrecondition;
-    use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::params::{
         BgpAnnounceSetCreate, BgpConfigCreate, BgpPeerConfig,
         SwitchPortConfigCreate, SwitchPortGeometry, SwitchPortSettingsCreate,
@@ -1637,8 +1636,8 @@ mod test {
     #[tokio::test]
     async fn test_bgp_boundary_switches() {
         let logctx = dev::test_setup_log("test_bgp_boundary_switches");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let rack_id: Uuid =
             nexus_test_utils::RACK_UUID.parse().expect("parse uuid");
@@ -1738,7 +1737,7 @@ mod test {
 
         assert_eq!(uplink_ports.len(), 1);
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }

@@ -843,8 +843,7 @@ impl DataStore {
 mod tests {
     use super::*;
 
-    use crate::db::datastore::test_utils::datastore_test;
-    use nexus_test_utils::db::test_setup_database;
+    use crate::db::datastore::pub_test_utils::TestDatabase;
     use nexus_types::external_api::params;
     use omicron_common::api::external;
     use omicron_test_utils::dev;
@@ -854,8 +853,8 @@ mod tests {
         let logctx =
             dev::test_setup_log("test_undelete_disk_set_faulted_idempotent");
         let log = logctx.log.new(o!());
-        let mut db = test_setup_database(&log).await;
-        let (opctx, db_datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&log).await;
+        let (opctx, db_datastore) = (db.opctx(), db.datastore());
 
         let silo_id = opctx.authn.actor().unwrap().silo_id().unwrap();
 
@@ -979,7 +978,7 @@ mod tests {
             );
         }
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }

@@ -379,10 +379,9 @@ fn ipv4_nat_next_version() -> diesel::expression::SqlLiteral<BigInt> {
 mod test {
     use std::{net::Ipv4Addr, str::FromStr};
 
-    use crate::db::datastore::test_utils::datastore_test;
+    use crate::db::datastore::pub_test_utils::TestDatabase;
     use chrono::Utc;
     use nexus_db_model::{Ipv4NatEntry, Ipv4NatValues, MacAddr, Vni};
-    use nexus_test_utils::db::test_setup_database;
     use omicron_common::api::external;
     use omicron_test_utils::dev;
     use rand::seq::IteratorRandom;
@@ -391,8 +390,8 @@ mod test {
     #[tokio::test]
     async fn nat_version_tracking() {
         let logctx = dev::test_setup_log("test_nat_version_tracking");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // We should not have any NAT entries at this moment
         let initial_state =
@@ -538,7 +537,7 @@ mod test {
             3
         );
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -548,8 +547,8 @@ mod test {
     /// of properties.
     async fn table_allows_unique_active_multiple_deleted() {
         let logctx = dev::test_setup_log("test_nat_version_tracking");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // We should not have any NAT entries at this moment
         let initial_state =
@@ -682,7 +681,7 @@ mod test {
             4
         );
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -690,8 +689,8 @@ mod test {
     #[tokio::test]
     async fn ipv4_nat_sync_service_zones() {
         let logctx = dev::test_setup_log("ipv4_nat_sync_service_zones");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // We should not have any NAT entries at this moment
         let initial_state =
@@ -804,7 +803,7 @@ mod test {
                 && entry.version_removed.is_none()
         }));
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -812,8 +811,8 @@ mod test {
     #[tokio::test]
     async fn ipv4_nat_changeset() {
         let logctx = dev::test_setup_log("test_nat_version_tracking");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // We should not have any NAT entries at this moment
         let initial_state =
@@ -953,7 +952,7 @@ mod test {
         // did we see everything?
         assert_eq!(total_changes, db_records.len());
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }

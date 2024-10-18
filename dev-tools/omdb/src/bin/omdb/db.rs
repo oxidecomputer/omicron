@@ -19,7 +19,6 @@ use crate::check_allow_destructive::DestructiveOperationToken;
 use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::helpers::DATABASE_OPTIONS_HEADING;
 use crate::Omdb;
-use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Context;
 use async_bb8_diesel::AsyncConnection;
@@ -255,10 +254,7 @@ impl DbUrlOptions {
         // doesn't match what we expect.  So we use `DataStore::new_unchecked()`
         // here.  We will then check the schema version explicitly and warn the
         // user if it doesn't match.
-        let datastore = Arc::new(
-            DataStore::new_unchecked(log.clone(), pool)
-                .map_err(|e| anyhow!(e).context("creating datastore"))?,
-        );
+        let datastore = Arc::new(DataStore::new_unchecked(log.clone(), pool));
         check_schema_version(&datastore).await;
         Ok(datastore)
     }
@@ -785,7 +781,7 @@ impl DbArgs {
     ) -> Result<(), anyhow::Error> {
         let datastore = self.db_url_opts.connect(omdb, log).await?;
         let opctx = OpContext::for_tests(log.clone(), datastore.clone());
-        match &self.command {
+        let res = match &self.command {
             DbCommands::Rack(RackArgs { command: RackCommands::List }) => {
                 cmd_db_rack_list(&opctx, &datastore, &self.fetch_opts).await
             }
@@ -1013,7 +1009,9 @@ impl DbArgs {
             DbCommands::Volumes(VolumeArgs {
                 command: VolumeCommands::List,
             }) => cmd_db_volume_list(&datastore, &self.fetch_opts).await,
-        }
+        };
+        datastore.terminate().await;
+        res
     }
 }
 

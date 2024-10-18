@@ -218,7 +218,7 @@ mod tests {
         let logctx = dev::test_setup_log("test_prune_expired_producers");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) =
-            datastore_test(&logctx, &db, Uuid::new_v4()).await;
+            datastore_test(&logctx.log, &db, Uuid::new_v4()).await;
 
         // Insert an Oximeter collector
         let collector_info = OximeterInfo::new(&params::OximeterInfo {
@@ -291,6 +291,7 @@ mod tests {
         assert!(pruned.successes.is_empty());
         assert!(pruned.failures.is_empty());
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -303,7 +304,7 @@ mod tests {
         );
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) =
-            datastore_test(&logctx, &db, Uuid::new_v4()).await;
+            datastore_test(&logctx.log, &db, Uuid::new_v4()).await;
 
         let mut collector = httptest::Server::run();
 
@@ -357,6 +358,7 @@ mod tests {
 
         collector.verify_and_clear();
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

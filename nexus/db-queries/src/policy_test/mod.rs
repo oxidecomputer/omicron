@@ -14,7 +14,7 @@ mod coverage;
 mod resource_builder;
 mod resources;
 
-use crate::db;
+use crate::db::datastore::pub_test_utils::TestDatabase;
 use coverage::Coverage;
 use futures::StreamExt;
 use nexus_auth::authn;
@@ -22,7 +22,6 @@ use nexus_auth::authn::SiloAuthnPolicy;
 use nexus_auth::authn::USER_TEST_PRIVILEGED;
 use nexus_auth::authz;
 use nexus_auth::context::OpContext;
-use nexus_test_utils::db::test_setup_database;
 use nexus_types::external_api::shared;
 use nexus_types::external_api::shared::FleetRole;
 use nexus_types::external_api::shared::SiloRole;
@@ -62,9 +61,8 @@ use uuid::Uuid;
 #[tokio::test(flavor = "multi_thread")]
 async fn test_iam_roles_behavior() {
     let logctx = dev::test_setup_log("test_iam_roles");
-    let mut db = test_setup_database(&logctx.log).await;
-    let (opctx, datastore) =
-        db::datastore::test_utils::datastore_test(&logctx, &db).await;
+    let db = TestDatabase::new_with_datastore(&logctx.log).await;
+    let (opctx, datastore) = (db.opctx(), db.datastore());
 
     // Before we can create the resources, users, and role assignments that we
     // need, we must grant the "test-privileged" user privileges to fetch and
@@ -173,7 +171,7 @@ async fn test_iam_roles_behavior() {
         &std::str::from_utf8(buffer.as_ref()).expect("non-UTF8 output"),
     );
 
-    db.cleanup().await.unwrap();
+    db.terminate().await;
     logctx.cleanup_successful();
 }
 
@@ -329,9 +327,8 @@ impl<W: Write> Write for StdoutTee<W> {
 async fn test_conferred_roles() {
     // To start, this test looks a lot like the test above.
     let logctx = dev::test_setup_log("test_conferred_roles");
-    let mut db = test_setup_database(&logctx.log).await;
-    let (opctx, datastore) =
-        db::datastore::test_utils::datastore_test(&logctx, &db).await;
+    let db = TestDatabase::new_with_datastore(&logctx.log).await;
+    let (opctx, datastore) = (db.opctx(), db.datastore());
 
     // Before we can create the resources, users, and role assignments that we
     // need, we must grant the "test-privileged" user privileges to fetch and
@@ -464,6 +461,6 @@ async fn test_conferred_roles() {
         &std::str::from_utf8(buffer.as_ref()).expect("non-UTF8 output"),
     );
 
-    db.cleanup().await.unwrap();
+    db.terminate().await;
     logctx.cleanup_successful();
 }

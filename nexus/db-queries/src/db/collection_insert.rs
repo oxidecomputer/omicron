@@ -405,14 +405,14 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::db::{self, identity::Resource as IdentityResource};
+    use crate::db::datastore::pub_test_utils::TestDatabase;
+    use crate::db::identity::Resource as IdentityResource;
     use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
     use chrono::{DateTime, Utc};
     use db_macros::Resource;
     use diesel::expression_methods::ExpressionMethods;
     use diesel::pg::Pg;
     use diesel::QueryDsl;
-    use nexus_test_utils::db::test_setup_database;
     use omicron_test_utils::dev;
 
     table! {
@@ -556,11 +556,9 @@ mod test {
     #[tokio::test]
     async fn test_collection_not_present() {
         let logctx = dev::test_setup_log("test_collection_not_present");
-        let mut db = test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new_single_host(&logctx.log, &cfg);
-
-        let conn = setup_db(&pool).await;
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = setup_db(pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
         let resource_id = uuid::Uuid::new_v4();
@@ -579,18 +577,16 @@ mod test {
         .await;
         assert!(matches!(insert, Err(AsyncInsertError::CollectionNotFound)));
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
     #[tokio::test]
     async fn test_collection_present() {
         let logctx = dev::test_setup_log("test_collection_present");
-        let mut db = test_setup_database(&logctx.log).await;
-        let cfg = db::Config { url: db.pg_config().clone() };
-        let pool = db::Pool::new_single_host(&logctx.log, &cfg);
-
-        let conn = setup_db(&pool).await;
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let pool = db.pool();
+        let conn = setup_db(pool).await;
 
         let collection_id = uuid::Uuid::new_v4();
         let resource_id = uuid::Uuid::new_v4();
@@ -642,7 +638,7 @@ mod test {
         // Make sure rcgen got incremented
         assert_eq!(collection_rcgen, 2);
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }

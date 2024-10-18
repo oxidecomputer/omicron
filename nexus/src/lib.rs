@@ -83,13 +83,20 @@ impl InternalServer {
         .await?;
 
         // Launch the internal server.
-        let server_starter_internal = dropshot::HttpServerStarter::new(
+        let server_starter_internal = match dropshot::HttpServerStarter::new(
             &config.deployment.dropshot_internal,
             internal_api(),
             context.clone(),
             &log.new(o!("component" => "dropshot_internal")),
         )
-        .map_err(|error| format!("initializing internal server: {}", error))?;
+        .map_err(|error| format!("initializing internal server: {}", error))
+        {
+            Ok(server) => server,
+            Err(err) => {
+                context.context.nexus.datastore().terminate().await;
+                return Err(err);
+            }
+        };
         let http_server_internal = server_starter_internal.start();
 
         Ok(Self {
@@ -204,12 +211,12 @@ impl Server {
         &self.apictx.context
     }
 
-    /// Wait for the given server to shut down
-    ///
-    /// Note that this doesn't initiate a graceful shutdown, so if you call this
-    /// immediately after calling `start()`, the program will block indefinitely
-    /// or until something else initiates a graceful shutdown.
-    pub(crate) async fn wait_for_finish(self) -> Result<(), String> {
+    // Wait for the given server to shut down
+    //
+    // Note that this doesn't initiate a graceful shutdown, so if you call this
+    // immediately after calling `start()`, the program will block indefinitely
+    // or until something else initiates a graceful shutdown.
+    async fn wait_for_finish(self) -> Result<(), String> {
         self.server_context().nexus.wait_for_shutdown().await
     }
 }
@@ -221,12 +228,21 @@ impl nexus_test_interface::NexusServer for Server {
     async fn start_internal(
         config: &NexusConfig,
         log: &Logger,
-    ) -> (InternalServer, SocketAddr) {
-        let internal_server =
-            InternalServer::start(config, &log).await.unwrap();
+    ) -> Result<(InternalServer, SocketAddr), String> {
+        let internal_server = InternalServer::start(config, &log).await?;
         internal_server.apictx.context.nexus.wait_for_populate().await.unwrap();
         let addr = internal_server.http_server_internal.local_addr();
-        (internal_server, addr)
+        Ok((internal_server, addr))
+    }
+
+    async fn stop_internal(internal_server: InternalServer) {
+        internal_server
+            .apictx
+            .context
+            .nexus
+            .terminate()
+            .await
+            .expect("Failed to terminate Nexus");
     }
 
     async fn start(
@@ -392,10 +408,9 @@ impl nexus_test_interface::NexusServer for Server {
         self.apictx
             .context
             .nexus
-            .close_servers()
+            .terminate()
             .await
-            .expect("failed to close servers during test cleanup");
-        self.wait_for_finish().await.unwrap()
+            .expect("Failed to terminate Nexus");
     }
 }
 
