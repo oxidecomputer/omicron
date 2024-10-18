@@ -1,0 +1,31 @@
+[package]
+name = "ereporter"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+dropshot.workspace = true
+ereporter-api.workspace = true
+internal-dns.workspace = true
+nexus-client.workspace = true
+omicron-common.workspace = true
+omicron-workspace-hack.workspace = true
+uuid.workspace = true
+serde.workspace = true
+slog.workspace = true
+slog-error-chain.workspace = true
+slog-dtrace.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+
+[dev-dependencies]
+clap.workspace = true
+slog.workspace = true
+slog-async.workspace = true
+slog-term.workspace = true
+tokio = { workspace = true, features = ["sync", "macros", "full"] }
+
+[lints]
+workspace = true

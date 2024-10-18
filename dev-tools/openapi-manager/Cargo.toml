@@ -17,6 +17,7 @@ cockroach-admin-api.workspace = true
 clap.workspace = true
 dns-server-api.workspace = true
 dropshot.workspace = true
+ereporter-api.workspace = true
 fs-err.workspace = true
 gateway-api.workspace = true
 indent_write.workspace = true

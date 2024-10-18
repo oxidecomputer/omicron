@@ -1,0 +1,26 @@
+[package]
+name = "ereport-test-utils"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow.workspace = true
+camino.workspace = true
+clap.workspace = true
+dropshot.workspace = true
+ereporter.workspace = true
+ereporter-client.workspace = true
+nexus-types.workspace = true
+omicron-common.workspace = true
+omicron-workspace-hack.workspace = true
+uuid.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+slog.workspace = true
+slog-async.workspace = true
+slog-term.workspace = true
+tokio = { workspace = true, features = ["sync", "macros", "full"] }
+
+[lints]
+workspace = true
