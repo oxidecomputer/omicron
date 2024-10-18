@@ -91,11 +91,11 @@ impl TestDatabaseBuilder {
                 let db = crdb::test_setup_database_empty(log).await;
                 match interface {
                     Interface::Nothing => {
-                        TestDatabase { db, state: TestState::NoPool }
+                        TestDatabase { db, kind: TestKind::NoPool }
                     }
                     Interface::Pool => {
                         let pool = new_pool(log, &db);
-                        TestDatabase { db, state: TestState::Pool { pool } }
+                        TestDatabase { db, kind: TestKind::Pool { pool } }
                     }
                     Interface::Datastore => {
                         panic!("Cannot create datastore without schema")
@@ -106,11 +106,11 @@ impl TestDatabaseBuilder {
                 let db = crdb::test_setup_database(log).await;
                 match interface {
                     Interface::Nothing => {
-                        TestDatabase { db, state: TestState::NoPool }
+                        TestDatabase { db, kind: TestKind::NoPool }
                     }
                     Interface::Pool => {
                         let pool = new_pool(log, &db);
-                        TestDatabase { db, state: TestState::Pool { pool } }
+                        TestDatabase { db, kind: TestKind::Pool { pool } }
                     }
                     Interface::Datastore => {
                         let pool = new_pool(log, &db);
@@ -119,7 +119,7 @@ impl TestDatabaseBuilder {
                         );
                         TestDatabase {
                             db,
-                            state: TestState::RawDatastore { datastore },
+                            kind: TestKind::RawDatastore { datastore },
                         }
                     }
                 }
@@ -130,7 +130,7 @@ impl TestDatabaseBuilder {
                     datastore_test_on_default_rack(log, &db).await;
                 TestDatabase {
                     db,
-                    state: TestState::Datastore { opctx, datastore },
+                    kind: TestKind::Datastore { opctx, datastore },
                 }
             }
             (Populate::SchemaAndData, Interface::Nothing)
@@ -144,7 +144,7 @@ impl TestDatabaseBuilder {
     }
 }
 
-enum TestState {
+enum TestKind {
     NoPool,
     Pool { pool: Arc<db::Pool> },
     RawDatastore { datastore: Arc<DataStore> },
@@ -154,13 +154,13 @@ enum TestState {
 /// A test database, possibly with a pool or full datastore on top
 pub struct TestDatabase {
     db: CockroachInstance,
-    state: TestState,
+    kind: TestKind,
 }
 
 impl TestDatabase {
     /// Creates a new database for test usage, without any schema nor interface
     ///
-    /// [Self::terminate] should be called before the test finishes.
+    /// [`Self::terminate`] should be called before the test finishes.
     pub async fn new_without_schema(log: &Logger) -> Self {
         TestDatabaseBuilder::new()
             .without_schema()
@@ -171,21 +171,21 @@ impl TestDatabase {
 
     /// Creates a new database for test usage, with a schema but no interface
     ///
-    /// [Self::terminate] should be called before the test finishes.
+    /// [`Self::terminate`] should be called before the test finishes.
     pub async fn new_with_schema_only(log: &Logger) -> Self {
         TestDatabaseBuilder::new().with_schema().no_interface().build(log).await
     }
 
     /// Creates a new database for test usage, with a pool.
     ///
-    /// [Self::terminate] should be called before the test finishes.
+    /// [`Self::terminate`] should be called before the test finishes.
     pub async fn new_with_pool(log: &Logger) -> Self {
         TestDatabaseBuilder::new().with_schema().with_pool().build(log).await
     }
 
     /// Creates a new database for test usage, with a pre-loaded datastore.
     ///
-    /// [Self::terminate] should be called before the test finishes.
+    /// [`Self::terminate`] should be called before the test finishes.
     pub async fn new_with_datastore(log: &Logger) -> Self {
         TestDatabaseBuilder::new()
             .with_schema_and_builtin_data()
@@ -196,7 +196,7 @@ impl TestDatabase {
 
     /// Creates a new database for test usage, with a schema but no builtin data
     ///
-    /// [Self::terminate] should be called before the test finishes.
+    /// [`Self::terminate`] should be called before the test finishes.
     pub async fn new_with_raw_datastore(log: &Logger) -> Self {
         TestDatabaseBuilder::new()
             .with_schema()
@@ -210,11 +210,11 @@ impl TestDatabase {
     }
 
     pub fn pool(&self) -> &Arc<db::Pool> {
-        match &self.state {
-            TestState::Pool { pool } => pool,
-            TestState::NoPool
-            | TestState::RawDatastore { .. }
-            | TestState::Datastore { .. } => {
+        match &self.kind {
+            TestKind::Pool { pool } => pool,
+            TestKind::NoPool
+            | TestKind::RawDatastore { .. }
+            | TestKind::Datastore { .. } => {
                 panic!(
                     "Wrong test type; try using `TestDatabase::new_with_pool`"
                 );
@@ -223,35 +223,33 @@ impl TestDatabase {
     }
 
     pub fn opctx(&self) -> &OpContext {
-        match &self.state {
-            TestState::NoPool
-            | TestState::Pool { .. }
-            | TestState::RawDatastore { .. } => {
+        match &self.kind {
+            TestKind::NoPool
+            | TestKind::Pool { .. }
+            | TestKind::RawDatastore { .. } => {
                 panic!("Wrong test type; try using `TestDatabase::new_with_datastore`");
             }
-            TestState::Datastore { opctx, .. } => opctx,
+            TestKind::Datastore { opctx, .. } => opctx,
         }
     }
 
     pub fn datastore(&self) -> &Arc<DataStore> {
-        match &self.state {
-            TestState::NoPool | TestState::Pool { .. } => {
+        match &self.kind {
+            TestKind::NoPool | TestKind::Pool { .. } => {
                 panic!("Wrong test type; try using `TestDatabase::new_with_datastore`");
             }
-            TestState::RawDatastore { datastore } => datastore,
-            TestState::Datastore { datastore, .. } => datastore,
+            TestKind::RawDatastore { datastore } => datastore,
+            TestKind::Datastore { datastore, .. } => datastore,
         }
     }
 
     /// Shuts down both the database and the pool
     pub async fn terminate(mut self) {
-        match self.state {
-            TestState::NoPool => (),
-            TestState::Pool { pool } => pool.terminate().await,
-            TestState::RawDatastore { datastore } => {
-                datastore.terminate().await
-            }
-            TestState::Datastore { datastore, .. } => {
+        match self.kind {
+            TestKind::NoPool => (),
+            TestKind::Pool { pool } => pool.terminate().await,
+            TestKind::RawDatastore { datastore } => datastore.terminate().await,
+            TestKind::Datastore { datastore, .. } => {
                 datastore.terminate().await
             }
         }

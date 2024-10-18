@@ -46,9 +46,8 @@ impl LiveTestContext {
 
     /// Clean up this `LiveTestContext`
     ///
-    /// This mainly removes log files created by the test.  We do this in this
-    /// explicit cleanup function rather than on `Drop` because we want the log
-    /// files preserved on test failure.
+    /// This removes log files and cleans up the [`DataStore`], which
+    /// but be terminated asynchronously.
     pub async fn cleanup_successful(self) {
         self.datastore.terminate().await;
         self.logctx.cleanup_successful();

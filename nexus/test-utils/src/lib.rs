@@ -625,6 +625,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             log.new(o!("component" => "oximeter")),
             nexus_internal_addr,
             clickhouse.http_address().port(),
+            clickhouse.native_address().port(),
             collector_id,
         )
         .await
@@ -1460,11 +1461,16 @@ pub async fn start_sled_agent(
 pub async fn start_oximeter(
     log: Logger,
     nexus_address: SocketAddr,
-    db_port: u16,
+    http_port: u16,
+    native_port: u16,
     id: Uuid,
 ) -> Result<Oximeter, String> {
     let db = oximeter_collector::DbConfig {
-        address: Some(SocketAddr::new(Ipv6Addr::LOCALHOST.into(), db_port)),
+        address: Some(SocketAddr::new(Ipv6Addr::LOCALHOST.into(), http_port)),
+        native_address: Some(SocketAddr::new(
+            Ipv6Addr::LOCALHOST.into(),
+            native_port,
+        )),
         batch_size: 10,
         batch_interval: 1,
         replicated: false,

@@ -1059,7 +1059,7 @@ mod tests {
                 .db
                 .datastore()
                 .allocate_instance_snat_ip(
-                    &context.db.opctx(),
+                    context.db.opctx(),
                     id,
                     instance_id,
                     context.default_pool_id().await,
@@ -1077,7 +1077,7 @@ mod tests {
             .db
             .datastore()
             .allocate_instance_snat_ip(
-                &context.db.opctx(),
+                context.db.opctx(),
                 Uuid::new_v4(),
                 instance_id,
                 context.default_pool_id().await,
@@ -1115,7 +1115,7 @@ mod tests {
             .db
             .datastore()
             .allocate_instance_ephemeral_ip(
-                &context.db.opctx(),
+                context.db.opctx(),
                 Uuid::new_v4(),
                 instance_id,
                 /* pool_name = */ None,
@@ -1135,7 +1135,7 @@ mod tests {
             .db
             .datastore()
             .allocate_instance_snat_ip(
-                &context.db.opctx(),
+                context.db.opctx(),
                 Uuid::new_v4(),
                 instance_id,
                 context.default_pool_id().await,
@@ -1159,7 +1159,7 @@ mod tests {
             .db
             .datastore()
             .allocate_instance_ephemeral_ip(
-                &context.db.opctx(),
+                context.db.opctx(),
                 Uuid::new_v4(),
                 instance_id,
                 /* pool_name = */ None,
@@ -1214,7 +1214,7 @@ mod tests {
                 .db
                 .datastore()
                 .allocate_instance_snat_ip(
-                    &context.db.opctx(),
+                    context.db.opctx(),
                     Uuid::new_v4(),
                     instance_id,
                     context.default_pool_id().await,
@@ -1233,7 +1233,7 @@ mod tests {
         context
             .db
             .datastore()
-            .deallocate_external_ip(&context.db.opctx(), ips[0].id)
+            .deallocate_external_ip(context.db.opctx(), ips[0].id)
             .await
             .expect("Failed to release the first external IP address");
 
@@ -1244,7 +1244,7 @@ mod tests {
             .db
             .datastore()
             .allocate_instance_snat_ip(
-                &context.db.opctx(),
+                context.db.opctx(),
                 Uuid::new_v4(),
                 instance_id,
                 context.default_pool_id().await,
@@ -1272,7 +1272,7 @@ mod tests {
             .db
             .datastore()
             .allocate_instance_snat_ip(
-                &context.db.opctx(),
+                context.db.opctx(),
                 Uuid::new_v4(),
                 instance_id,
                 context.default_pool_id().await,
@@ -1310,7 +1310,7 @@ mod tests {
             .db
             .datastore()
             .allocate_instance_ephemeral_ip(
-                &context.db.opctx(),
+                context.db.opctx(),
                 id,
                 instance_id,
                 pool_name,
@@ -1359,7 +1359,7 @@ mod tests {
             .db
             .datastore()
             .external_ip_allocate_omicron_zone(
-                &context.db.opctx(),
+                context.db.opctx(),
                 service_id,
                 ZoneKind::Nexus,
                 ip_10_0_0_3,
@@ -1377,7 +1377,7 @@ mod tests {
             .db
             .datastore()
             .external_ip_allocate_omicron_zone(
-                &context.db.opctx(),
+                context.db.opctx(),
                 service_id,
                 ZoneKind::Nexus,
                 ip_10_0_0_3,
@@ -1393,7 +1393,7 @@ mod tests {
         let err = context
             .db.datastore()
             .external_ip_allocate_omicron_zone(
-                &context.db.opctx(),
+                context.db.opctx(),
                 service_id,
                 ZoneKind::Nexus,
                 OmicronZoneExternalIp::Floating(OmicronZoneExternalFloatingIp {
@@ -1413,7 +1413,7 @@ mod tests {
         let err = context
             .db.datastore()
             .external_ip_allocate_omicron_zone(
-                &context.db.opctx(),
+                context.db.opctx(),
                 service_id,
                 ZoneKind::Nexus,
                 OmicronZoneExternalIp::Floating(OmicronZoneExternalFloatingIp {
@@ -1439,7 +1439,7 @@ mod tests {
         let err = context
             .db.datastore()
             .external_ip_allocate_omicron_zone(
-                &context.db.opctx(),
+                context.db.opctx(),
                 service_id,
                 ZoneKind::BoundaryNtp,
                 ip_10_0_0_3_snat_0,
@@ -1467,7 +1467,7 @@ mod tests {
             .db
             .datastore()
             .external_ip_allocate_omicron_zone(
-                &context.db.opctx(),
+                context.db.opctx(),
                 snat_service_id,
                 ZoneKind::BoundaryNtp,
                 ip_10_0_0_1_snat_32768,
@@ -1489,7 +1489,7 @@ mod tests {
             .db
             .datastore()
             .external_ip_allocate_omicron_zone(
-                &context.db.opctx(),
+                context.db.opctx(),
                 snat_service_id,
                 ZoneKind::BoundaryNtp,
                 ip_10_0_0_1_snat_32768,
@@ -1517,7 +1517,7 @@ mod tests {
         let err = context
             .db.datastore()
             .external_ip_allocate_omicron_zone(
-                &context.db.opctx(),
+                context.db.opctx(),
                 snat_service_id,
                 ZoneKind::BoundaryNtp,
                 ip_10_0_0_1_snat_49152,
@@ -1557,7 +1557,7 @@ mod tests {
             .db
             .datastore()
             .external_ip_allocate_omicron_zone(
-                &context.db.opctx(),
+                context.db.opctx(),
                 service_id,
                 ZoneKind::Nexus,
                 ip_10_0_0_5,
@@ -1592,7 +1592,7 @@ mod tests {
             .db
             .datastore()
             .allocate_instance_snat_ip(
-                &context.db.opctx(),
+                context.db.opctx(),
                 id,
                 instance_id,
                 context.default_pool_id().await,
@@ -1610,7 +1610,7 @@ mod tests {
             .db
             .datastore()
             .allocate_instance_snat_ip(
-                &context.db.opctx(),
+                context.db.opctx(),
                 id,
                 instance_id,
                 context.default_pool_id().await,
@@ -1664,7 +1664,7 @@ mod tests {
             .db
             .datastore()
             .allocate_instance_ephemeral_ip(
-                &context.db.opctx(),
+                context.db.opctx(),
                 id,
                 instance_id,
                 Some(p1),
@@ -1710,7 +1710,7 @@ mod tests {
                 .db
                 .datastore()
                 .allocate_instance_ephemeral_ip(
-                    &context.db.opctx(),
+                    context.db.opctx(),
                     Uuid::new_v4(),
                     instance_id,
                     Some(p1.clone()),
@@ -1733,7 +1733,7 @@ mod tests {
             .db
             .datastore()
             .allocate_instance_ephemeral_ip(
-                &context.db.opctx(),
+                context.db.opctx(),
                 Uuid::new_v4(),
                 instance_id,
                 Some(p1),

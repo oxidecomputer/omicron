@@ -1366,6 +1366,7 @@ mod test {
                 target_cockroachdb_cluster_version:
                     CockroachDbClusterVersion::POLICY,
                 target_crucible_pantry_zone_count: CRUCIBLE_PANTRY_REDUNDANCY,
+                clickhouse_policy: None,
                 log,
             }
             .build()
