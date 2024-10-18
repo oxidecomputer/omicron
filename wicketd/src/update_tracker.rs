@@ -67,6 +67,7 @@ use update_engine::events::ProgressUnits;
 use update_engine::AbortHandle;
 use update_engine::StepSpec;
 use uuid::Uuid;
+use wicket_common::inventory::SpComponentCaboose;
 use wicket_common::inventory::SpIdentifier;
 use wicket_common::inventory::SpType;
 use wicket_common::rack_update::ClearUpdateStateResponse;
@@ -1874,9 +1875,6 @@ impl UpdateContext {
         };
 
         let available_artifacts = rot_bootloader.to_vec();
-        let artifact_to_apply =
-            self.choose_rot_artifact_to_apply(&available_artifacts).await?;
-
         // Read the caboose of the currently running version (always 0)
         // When updating from older stage0 we may not have a caboose so an error here
         // need not be fatal
@@ -1892,6 +1890,13 @@ impl UpdateContext {
             .await
             .map(|v| v.into_inner())
             .ok();
+
+        let artifact_to_apply = self
+            .choose_rot_artifact_to_apply(
+                &available_artifacts,
+                caboose.as_ref(),
+            )
+            .await?;
 
         let make_result = |active_version| {
             Some(RotInterrogation {
@@ -1972,10 +1977,6 @@ impl UpdateContext {
                 }
             };
 
-        let available_artifacts = available_artifacts.to_vec();
-        let artifact_to_apply =
-            self.choose_rot_artifact_to_apply(&available_artifacts).await?;
-
         // Read the caboose of the currently-active slot.
         let caboose = self
             .mgs_client
@@ -1990,6 +1991,11 @@ impl UpdateContext {
                 error,
             })?
             .into_inner();
+
+        let available_artifacts = available_artifacts.to_vec();
+        let artifact_to_apply = self
+            .choose_rot_artifact_to_apply(&available_artifacts, Some(&caboose))
+            .await?;
 
         let message = format!(
             "RoT slot {active_slot_name} version {} (git commit {})",
@@ -2028,6 +2034,7 @@ impl UpdateContext {
     async fn choose_rot_artifact_to_apply<'a>(
         &'a self,
         available_artifacts: &'a Vec<ArtifactIdData>,
+        caboose: Option<&SpComponentCaboose>,
     ) -> Result<&ArtifactIdData, UpdateTerminalError> {
         let cmpa = match self
             .mgs_client
@@ -2129,6 +2136,50 @@ impl UpdateContext {
                     )),
                 }
             })?;
+            if let Some(c) = caboose {
+                // If we get errors on any part of reading the caboose
+                // something has gone wrong and it's probably safer to
+                // bail out on updating than potentially install an
+                // incorrect image
+                let archive_caboose =
+                    archive.read_caboose().map_err(|error| {
+                        UpdateTerminalError::FailedFindingSignedRotImage {
+                            error: anyhow::Error::new(error).context(format!(
+                        "failed to read hubris archive caboose for {:?}",
+                        artifact.id
+                        )),
+                        }
+                    })?;
+
+                let archive_board = archive_caboose.board().map_err(|error| {
+                    UpdateTerminalError::FailedFindingSignedRotImage {
+                        error: anyhow::Error::new(error).context(format!(
+                        "failed to read hubris archive BORD from caboose for {:?}",
+                        artifact.id
+                        ))
+                    }
+
+                })?;
+                let archive_board = String::from_utf8(archive_board.into())
+                    .map_err(|error| {
+                        UpdateTerminalError::FailedFindingSignedRotImage {
+                            error: anyhow::Error::new(error).context(format!(
+                                "utf8 error on archive board from {:?}",
+                                artifact.id
+                            )),
+                        }
+                    })?;
+
+                if archive_board != c.board {
+                    info!(
+                        self.log, "RoT archive did not match caboose board";
+                        "artifact" => ?artifact.id,
+                        "archive_board" => ?archive_board,
+                        "expected" => ?c.board,
+                    );
+                    continue;
+                }
+            }
             match archive.verify(&cmpa, &cfpa) {
                 Ok(()) => {
                     info!(
