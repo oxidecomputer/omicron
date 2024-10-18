@@ -39,7 +39,7 @@ use typed_rng::TypedUuidRng;
 /// RNG instances. The old-style seeds have been kept around for backwards
 /// compatibility. Newer tests should use this struct to generate their RNGs
 /// instead, since it conveniently tracks generation numbers for each seed.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ExampleRngState {
     seed: String,
     // Generation numbers for each RNG type.
@@ -64,6 +64,10 @@ impl ExampleRngState {
         }
     }
 
+    pub fn seed(&self) -> &str {
+        &self.seed
+    }
+
     pub fn next_system_rng(&mut self) -> ExampleSystemRng {
         // Different behavior for the first system_rng_gen is a bit weird, but
         // it retains backwards compatibility with existing tests -- it means
@@ -83,10 +87,8 @@ impl ExampleRngState {
         self.collection_rng_gen += 1;
         // We don't need to pass in extra bits unique to collections, because
         // `CollectionBuilderRng` adds its own.
-        CollectionBuilderRng::from_seed((
-            self.seed.as_str(),
-            self.collection_rng_gen,
-        ))
+        let seed = (self.seed.as_str(), self.collection_rng_gen);
+        CollectionBuilderRng::from_seed(seed)
     }
 
     pub fn next_blueprint_rng(&mut self) -> BlueprintBuilderRng {
@@ -152,10 +154,12 @@ impl ExampleSystemRng {
 /// The components of this struct are generated together and match each other.
 /// The planning input and collection represent database input and inventory
 /// that would be collected from a system matching the system description.
+/// The initial blueprint is one with no zones.
 pub struct ExampleSystem {
     pub system: SystemDescription,
     pub input: PlanningInput,
     pub collection: Collection,
+    pub initial_blueprint: Blueprint,
 }
 
 /// Returns a collection, planning input, and blueprint describing a pretty
@@ -517,6 +521,7 @@ impl ExampleSystemBuilder {
             system,
             input: input_builder.build(),
             collection: builder.build(),
+            initial_blueprint,
         };
         (example, blueprint)
     }

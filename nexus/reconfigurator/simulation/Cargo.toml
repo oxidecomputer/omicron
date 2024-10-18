@@ -1,0 +1,23 @@
+[package]
+name = "nexus-reconfigurator-simulation"
+version = "0.1.0"
+edition = "2021"
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+indexmap.workspace = true
+nexus-inventory.workspace = true
+nexus-reconfigurator-planning.workspace = true
+nexus-types.workspace = true
+omicron-common.workspace = true
+omicron-uuid-kinds.workspace = true
+omicron-workspace-hack.workspace = true
+petname = { workspace = true, default-features = false }
+slog.workspace = true
+thiserror.workspace = true
+typed-rng.workspace = true
+uuid.workspace = true

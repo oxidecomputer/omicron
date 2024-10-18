@@ -38,7 +38,10 @@ fn path_to_cli() -> PathBuf {
     path_to_executable(env!("CARGO_BIN_EXE_reconfigurator-cli"))
 }
 
-fn run_cli(file: impl AsRef<Utf8Path>) -> (ExitStatus, String, String) {
+fn run_cli(
+    file: impl AsRef<Utf8Path>,
+    args: &[&str],
+) -> (ExitStatus, String, String) {
     let file = file.as_ref();
 
     // Turn the path into an absolute one, because we're going to set a custom
@@ -49,7 +52,7 @@ fn run_cli(file: impl AsRef<Utf8Path>) -> (ExitStatus, String, String) {
     // Create a temporary directory for the CLI to use -- that will let it
     // read and write files in its own sandbox.
     let tmpdir = camino_tempfile::tempdir().expect("failed to create tmpdir");
-    let exec = Exec::cmd(path_to_cli()).arg(file).cwd(tmpdir.path());
+    let exec = Exec::cmd(path_to_cli()).arg(file).args(args).cwd(tmpdir.path());
     run_command(exec)
 }
 
@@ -57,9 +60,11 @@ fn run_cli(file: impl AsRef<Utf8Path>) -> (ExitStatus, String, String) {
 #[test]
 fn test_basic() {
     let (exit_status, stdout_text, stderr_text) =
-        run_cli("tests/input/cmds.txt");
+        run_cli("tests/input/cmds.txt", &["--seed", "test_basic"]);
     assert_exit_code(exit_status, EXIT_SUCCESS, &stderr_text);
-    let stdout_text = Redactor::default().do_redact(&stdout_text);
+
+    // Everything is deterministic, so we don't need to redact UUIDs.
+    let stdout_text = Redactor::default().uuids(false).do_redact(&stdout_text);
     assert_contents("tests/output/cmd-stdout", &stdout_text);
     assert_contents("tests/output/cmd-stderr", &stderr_text);
 }
@@ -68,7 +73,7 @@ fn test_basic() {
 #[test]
 fn test_example() {
     let (exit_status, stdout_text, stderr_text) =
-        run_cli("tests/input/cmds-example.txt");
+        run_cli("tests/input/cmds-example.txt", &["--seed", "test_example"]);
     assert_exit_code(exit_status, EXIT_SUCCESS, &stderr_text);
 
     // The example system uses a fixed seed, which means that UUIDs are
