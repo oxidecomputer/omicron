@@ -47,7 +47,7 @@ use uuid::Uuid;
 ///         -- we're trying to cacth.
 ///         CAST(
 ///             IF(
-///                 inet_contains_or_equals(ipv4_block, <ipv4_block>),
+///                (<ipv4_block> && ipv4_block),
 ///                'ipv4',
 ///                'ipv6'
 ///             )
@@ -60,8 +60,8 @@ use uuid::Uuid;
 ///         time_deleted IS NULL AND
 ///         id != <id> AND
 ///         (
-///             inet_contains_or_equals(ipv4_block, <ipv4_block>) OR
-///             inet_contains_or_equals(ipv6_block, <ipv6_block>)
+///             (ipv4_block && <ipv4_block>) OR
+///             (ipv6_block && <ipv6_block>)
 ///         )
 /// )
 /// INSERT INTO
@@ -104,9 +104,9 @@ impl QueryFragment<Pg> for InsertVpcSubnetQuery {
         &'a self,
         mut out: AstPass<'_, 'a, Pg>,
     ) -> diesel::QueryResult<()> {
-        out.push_sql("WITH overlap AS MATERIALIZED (SELECT CAST(IF(inet_contains_or_equals(");
+        out.push_sql("WITH overlap AS MATERIALIZED (SELECT CAST(IF((");
         out.push_identifier(dsl::ipv4_block::NAME)?;
-        out.push_sql(", ");
+        out.push_sql(" && ");
         out.push_bind_param::<sql_types::Inet, _>(&self.ipv4_block)?;
         out.push_sql("), ");
         out.push_bind_param::<sql_types::Text, _>(
@@ -128,13 +128,13 @@ impl QueryFragment<Pg> for InsertVpcSubnetQuery {
         out.push_identifier(dsl::id::NAME)?;
         out.push_sql(" != ");
         out.push_bind_param::<sql_types::Uuid, Uuid>(&self.subnet.identity.id)?;
-        out.push_sql(" AND (inet_contains_or_equals(");
+        out.push_sql(" AND ((");
         out.push_identifier(dsl::ipv4_block::NAME)?;
-        out.push_sql(", ");
+        out.push_sql(" && ");
         out.push_bind_param::<sql_types::Inet, IpNetwork>(&self.ipv4_block)?;
-        out.push_sql(") OR inet_contains_or_equals(");
+        out.push_sql(") OR (");
         out.push_identifier(dsl::ipv6_block::NAME)?;
-        out.push_sql(", ");
+        out.push_sql(" && ");
         out.push_bind_param::<sql_types::Inet, IpNetwork>(&self.ipv6_block)?;
 
         out.push_sql("))) INSERT INTO ");
@@ -326,8 +326,14 @@ mod test {
             };
         let ipv4_block = "172.30.0.0/22".parse().unwrap();
         let other_ipv4_block = "172.31.0.0/22".parse().unwrap();
+        let overlapping_ipv4_block_longer = "172.30.0.0/21".parse().unwrap();
+        let overlapping_ipv4_block_shorter = "172.30.0.0/23".parse().unwrap();
         let ipv6_block = "fd12:3456:7890::/64".parse().unwrap();
         let other_ipv6_block = "fd00::/64".parse().unwrap();
+        let overlapping_ipv6_block_longer =
+            "fd12:3456:7890::/60".parse().unwrap();
+        let overlapping_ipv6_block_shorter =
+            "fd12:3456:7890::/68".parse().unwrap();
         let name = "a-name".to_string().try_into().unwrap();
         let other_name = "b-name".to_string().try_into().unwrap();
         let description = "some description".to_string();
@@ -391,6 +397,81 @@ mod test {
             "Should be able to insert a VPC Subnet with the same ranges in a different VPC",
         );
 
+        // We shouldn't be able to insert a subnet if the IPv4 or IPv6 blocks overlap.
+        // Explicitly test for different CIDR masks with the same network address
+        let new_row = VpcSubnet::new(
+            other_other_subnet_id,
+            vpc_id,
+            make_id(&other_name, &description),
+            overlapping_ipv4_block_longer,
+            other_ipv6_block,
+        );
+        let err = db_datastore.vpc_create_subnet_raw(new_row).await.expect_err(
+            "Should not be able to insert VPC Subnet with \
+                overlapping IPv4 range {overlapping_ipv4_block_longer}",
+        );
+        assert_eq!(
+            err,
+            InsertVpcSubnetError::OverlappingIpRange(
+                overlapping_ipv4_block_longer.into()
+            ),
+            "InsertError variant should indicate an IP block overlaps"
+        );
+        let new_row = VpcSubnet::new(
+            other_other_subnet_id,
+            vpc_id,
+            make_id(&other_name, &description),
+            overlapping_ipv4_block_shorter,
+            other_ipv6_block,
+        );
+        let err = db_datastore.vpc_create_subnet_raw(new_row).await.expect_err(
+            "Should not be able to insert VPC Subnet with \
+                overlapping IPv4 range {overlapping_ipv4_block_shorter}",
+        );
+        assert_eq!(
+            err,
+            InsertVpcSubnetError::OverlappingIpRange(
+                overlapping_ipv4_block_shorter.into()
+            ),
+            "InsertError variant should indicate an IP block overlaps"
+        );
+        let new_row = VpcSubnet::new(
+            other_other_subnet_id,
+            vpc_id,
+            make_id(&other_name, &description),
+            other_ipv4_block,
+            overlapping_ipv6_block_longer,
+        );
+        let err = db_datastore.vpc_create_subnet_raw(new_row).await.expect_err(
+            "Should not be able to insert VPC Subnet with \
+                overlapping IPv6 range {overlapping_ipv6_block_longer}",
+        );
+        assert_eq!(
+            err,
+            InsertVpcSubnetError::OverlappingIpRange(
+                overlapping_ipv6_block_longer.into()
+            ),
+            "InsertError variant should indicate an IP block overlaps"
+        );
+        let new_row = VpcSubnet::new(
+            other_other_subnet_id,
+            vpc_id,
+            make_id(&other_name, &description),
+            other_ipv4_block,
+            overlapping_ipv6_block_shorter,
+        );
+        let err = db_datastore.vpc_create_subnet_raw(new_row).await.expect_err(
+            "Should not be able to insert VPC Subnet with \
+                overlapping IPv6 range {overlapping_ipv6_block_shorter}",
+        );
+        assert_eq!(
+            err,
+            InsertVpcSubnetError::OverlappingIpRange(
+                overlapping_ipv6_block_shorter.into()
+            ),
+            "InsertError variant should indicate an IP block overlaps"
+        );
+
         // We shouldn't be able to insert a subnet if we change only the
         // IPv4 or IPv6 block. They must _both_ be non-overlapping.
         let new_row = VpcSubnet::new(
@@ -400,10 +481,10 @@ mod test {
             other_ipv4_block,
             ipv6_block,
         );
-        let err = db_datastore
-            .vpc_create_subnet_raw(new_row)
-            .await
-            .expect_err("Should not be able to insert VPC Subnet with overlapping IPv6 range");
+        let err = db_datastore.vpc_create_subnet_raw(new_row).await.expect_err(
+            "Should not be able to insert VPC Subnet with \
+                overlapping IPv6 range",
+        );
         assert_eq!(
             err,
             InsertVpcSubnetError::OverlappingIpRange(ipv6_block.into()),
