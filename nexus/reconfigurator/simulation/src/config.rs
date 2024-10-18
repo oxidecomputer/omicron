@@ -65,6 +65,10 @@ impl SimConfig {
     }
 }
 
+/// A [`SimConfig`] that can be changed to create new states.
+///
+/// Returned by
+/// [`SimStateBuilder::config_mut`](crate::SimStateBuilder::config_mut).
 #[derive(Clone, Debug)]
 pub struct SimConfigBuilder {
     config: SimConfig,

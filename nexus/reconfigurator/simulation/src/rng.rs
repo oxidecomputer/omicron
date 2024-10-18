@@ -41,61 +41,108 @@ impl SimRng {
         self.state.seed()
     }
 
+    pub(crate) fn to_mut(&self) -> SimRngBuilder {
+        SimRngBuilder { rng: self.clone(), log: Vec::new() }
+    }
+}
+
+/// A [`SimRng`] that can be changed to create new states.
+///
+/// Returned by [`SimStateBuilder::rng_mut`](crate::SimStateBuilder::rng_mut).
+#[derive(Clone, Debug)]
+pub struct SimRngBuilder {
+    rng: SimRng,
+    log: Vec<SimRngLogEntry>,
+}
+
+impl SimRngBuilder {
+    /// Obtain the current seed.
+    pub fn seed(&self) -> &str {
+        self.rng.seed()
+    }
+
     /// Set a new seed for the RNG, resetting internal state.
     pub fn set_seed(&mut self, seed: String) {
-        self.state = ExampleRngState::from_seed(&seed);
-    }
-
-    /// Get the next example system RNG.
-    #[inline]
-    pub fn next_example_rng(&mut self) -> ExampleSystemRng {
-        self.state.next_system_rng()
-    }
-
-    /// Get the next collection RNG.
-    #[inline]
-    pub fn next_collection_rng(&mut self) -> CollectionBuilderRng {
-        self.state.next_collection_rng()
-    }
-
-    /// Get the next blueprint RNG.
-    #[inline]
-    pub fn next_blueprint_rng(&mut self) -> BlueprintBuilderRng {
-        self.state.next_blueprint_rng()
-    }
-
-    /// Get the next sled ID.
-    #[inline]
-    #[must_use]
-    pub fn next_sled_id(&mut self) -> SledUuid {
-        self.state.next_sled_id_rng().next()
+        self.rng = SimRng::from_seed(seed.clone());
+        self.log.push(SimRngLogEntry::SetSeed(seed));
     }
 
     /// Reset internal state while keeping the same seed.
     ///
-    /// The RNGs are stateful, so it can be useful to reset them back to their
+    /// RNGs are stateful, so it can be useful to reset them back to their
     /// initial state.
     ///
     /// In general, it only makes sense to call this as part of a system wipe.
     /// If it is called outside of a system wipe, then duplicate IDs might be
     /// generated.
     pub fn reset_state(&mut self) {
-        self.state = ExampleRngState::from_seed(self.state.seed());
+        let existing_seed = self.rng.seed().to_owned();
+        self.rng = SimRng::from_seed(existing_seed.clone());
     }
 
-    /// Regenerate a new seed for the RNG, resetting internal state.
+    /// Regenerate a new seed for the RNG from entropy (not from the existing
+    /// seed!), resetting internal state.
     ///
-    /// The seed is returned, and the caller is expected to display it to the
-    /// user.
-    #[must_use]
-    pub fn regenerate_seed(&mut self) -> String {
+    /// The seed is returned, and the caller may wish to log it.
+    ///
+    /// TODO: We may wish to use the existing seed to generate a new seed in
+    /// the future.
+    #[must_use = "consider logging or displaying the new seed"]
+    pub fn regenerate_seed_from_entropy(&mut self) -> String {
         let seed = seed_from_entropy();
-        self.set_seed(seed.clone());
+        self.rng = SimRng::from_seed(seed.clone());
+        self.log.push(SimRngLogEntry::RegenerateSeedFromEntropy(seed.clone()));
         seed
+    }
+
+    /// Get the next example system RNG.
+    pub fn next_example_rng(&mut self) -> ExampleSystemRng {
+        self.log.push(SimRngLogEntry::NextExampleRng);
+        self.rng.state.next_system_rng()
+    }
+
+    /// Get the next collection RNG.
+    pub fn next_collection_rng(&mut self) -> CollectionBuilderRng {
+        self.log.push(SimRngLogEntry::NextCollectionRng);
+        self.rng.state.next_collection_rng()
+    }
+
+    /// Get the next blueprint RNG.
+    pub fn next_blueprint_rng(&mut self) -> BlueprintBuilderRng {
+        self.log.push(SimRngLogEntry::NextBlueprintRng);
+        self.rng.state.next_blueprint_rng()
+    }
+
+    /// Get the next sled ID.
+    #[must_use]
+    pub fn next_sled_id(&mut self) -> SledUuid {
+        let id = self.rng.state.next_sled_id_rng().next();
+        self.log.push(SimRngLogEntry::NextSledId(id));
+        id
+    }
+
+    pub(crate) fn into_parts(self) -> (SimRng, Vec<SimRngLogEntry>) {
+        (self.rng, self.log)
     }
 }
 
+#[derive(Clone, Debug)]
+pub enum SimRngLogEntry {
+    SetSeed(String),
+    ResetState { existing_seed: String },
+    RegenerateSeedFromEntropy(String),
+    NextExampleRng,
+    NextCollectionRng,
+    NextBlueprintRng,
+    NextSledId(SledUuid),
+}
+
 pub(crate) fn seed_from_entropy() -> String {
+    // Each of the word lists petname uses are drawn from a pool of roughly
+    // 1000 words, so 3 words gives us around 30 bits of entropy. That should
+    // hopefully be enough to explore the entire state space. But if necessary
+    // we could also increase the length or expand the word lists (petname has
+    // much bigger ones too).
     petname::petname(3, "-")
         .expect("non-zero length requested => cannot be empty")
 }

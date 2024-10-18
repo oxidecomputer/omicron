@@ -2,6 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::sync::Arc;
+
 use anyhow::{anyhow, bail, Context};
 use nexus_inventory::CollectionBuilder;
 use nexus_reconfigurator_planning::system::SledHwInventory;
@@ -10,23 +12,28 @@ use omicron_common::api::external::Generation;
 use omicron_uuid_kinds::{CollectionUuid, ReconfiguratorSimUuid};
 
 use crate::{
-    config::SimConfig, errors::NonEmptySystemError, MutableSimSystem,
-    SimConfigBuilder, SimConfigLogEntry, SimRng, SimSystem, SimSystemLogEntry,
-    Simulator,
+    config::SimConfig, errors::NonEmptySystemError, SimConfigBuilder,
+    SimConfigLogEntry, SimRng, SimRngBuilder, SimRngLogEntry, SimSystem,
+    SimSystemBuilder, SimSystemLogEntry, Simulator,
 };
 
-/// A point-in-time snapshot of reconfigurator state.
+/// A top-level, versioned snapshot of reconfigurator state.
 ///
 /// This snapshot consists of a system, along with a policy and a stateful RNG.
 #[derive(Clone, Debug)]
 pub struct SimState {
+    // A pointer to the root state (self if the current state *is* the root
+    // state). This is used to check in `SimStateBuilder` that the simulator is
+    // the same as the one that created this state.
+    root_state: *const SimState,
     id: ReconfiguratorSimUuid,
     // The parent state that this state was derived from.
     parent: Option<ReconfiguratorSimUuid>,
     // The state's generation, starting from 0.
     //
-    // XXX should this be its own type to avoid confusion with other Generation
-    // instances?
+    // TODO: Should this be its own type to avoid confusion with other
+    // Generation instances? Generation numbers start from 1, but in our case 0
+    // provides a better user experience.
     generation: Generation,
     description: String,
     system: SimSystem,
@@ -37,20 +44,29 @@ pub struct SimState {
 }
 
 impl SimState {
-    pub(crate) fn new_root(seed: String) -> Self {
-        Self {
-            id: Simulator::ROOT_ID,
-            parent: None,
-            // We don't normally use generation 0 in the production system, but
-            // having it here means that we can present a better user
-            // experience (first change is generation 1).
-            generation: Generation::from_u32(0),
-            description: "root state".to_string(),
-            system: SimSystem::new(),
-            config: SimConfig::new(),
-            rng: SimRng::from_seed(seed),
-            log: SimStateLog { system: Vec::new(), config: Vec::new() },
-        }
+    pub(crate) fn new_root(seed: String) -> Arc<Self> {
+        Arc::new_cyclic(|state| {
+            Self {
+                // Store a pointer to the root state's allocation. This is safe
+                // because we only care about pointer equality.
+                root_state: state.as_ptr(),
+                id: Simulator::ROOT_ID,
+                parent: None,
+                // We don't normally use generation 0 in the production system, but
+                // having it here means that we can present a better user
+                // experience (first change is generation 1).
+                generation: Generation::from_u32(0),
+                description: "root state".to_string(),
+                system: SimSystem::new(),
+                config: SimConfig::new(),
+                rng: SimRng::from_seed(seed),
+                log: SimStateLog {
+                    system: Vec::new(),
+                    config: Vec::new(),
+                    rng: Vec::new(),
+                },
+            }
+        })
     }
 
     #[inline]
@@ -133,27 +149,35 @@ impl SimState {
 
     pub fn to_mut(&self) -> SimStateBuilder {
         SimStateBuilder {
+            root_state: self.root_state,
             parent: self.id,
             parent_gen: self.generation,
             system: self.system.to_mut(),
             config: self.config.to_mut(),
-            rng: self.rng.clone(),
+            rng: self.rng.to_mut(),
         }
     }
 }
 
-/// Reconfigurator state that can be changed.
+/// A [`SimState`] that can be changed to create new states.
+///
+/// Created by [`SimState::to_mut`].
 ///
 /// `SimStateBuilder` is ephemeral, so it can be freely mutated without
-/// affecting anything else about the system. To store it into a system, commit
-/// it to a `SimStore`.
+/// affecting anything else about the system. To store it into a system, call
+/// [`Self::commit`].
 #[derive(Clone, Debug)]
 pub struct SimStateBuilder {
+    // Used to check that the simulator is the same as the one that created
+    // this state. We store the root state, not the simulator itself, because
+    // it's stored behind an `Arc` and so the address stays stable even if the
+    // `Simulator` struct is cloned or moved in memory.
+    root_state: *const SimState,
     parent: ReconfiguratorSimUuid,
     parent_gen: Generation,
-    system: MutableSimSystem,
+    system: SimSystemBuilder,
     config: SimConfigBuilder,
-    rng: SimRng,
+    rng: SimRngBuilder,
 }
 
 impl SimStateBuilder {
@@ -165,7 +189,7 @@ impl SimStateBuilder {
 
     #[inline]
     #[must_use]
-    pub fn system_mut(&mut self) -> &mut MutableSimSystem {
+    pub fn system_mut(&mut self) -> &mut SimSystemBuilder {
         &mut self.system
     }
 
@@ -177,7 +201,7 @@ impl SimStateBuilder {
 
     #[inline]
     #[must_use]
-    pub fn rng_mut(&mut self) -> &mut SimRng {
+    pub fn rng_mut(&mut self) -> &mut SimRngBuilder {
         &mut self.rng
     }
 
@@ -352,27 +376,46 @@ impl SimStateBuilder {
     }
 
     /// Commit the current state to the store, returning the new state's UUID.
-    #[must_use = "you should update your state with the new UUID"]
+    ///
+    /// # Panics
+    ///
+    /// Panics if `sim` is not the same simulator that created this state. This
+    /// should ordinarily never happen and always indicates a programming
+    /// error.
+    #[must_use = "callers should update their pointers with the returned UUID"]
     pub fn commit(
         self,
         description: String,
         sim: &mut Simulator,
     ) -> ReconfiguratorSimUuid {
+        if !std::ptr::eq(sim.root_state(), self.root_state) {
+            panic!(
+                "this state was created by a different simulator than the one \
+                 it is being committed to"
+            );
+        }
+
         let id = sim.next_sim_uuid();
         let (system, system_log) = self.system.into_parts();
         let (config, config_log) = self.config.into_parts();
-        let log = SimStateLog { system: system_log, config: config_log };
+        let (rng, rng_log) = self.rng.into_parts();
+        let log = SimStateLog {
+            system: system_log,
+            config: config_log,
+            rng: rng_log,
+        };
         let state = SimState {
+            root_state: self.root_state,
             id,
             description,
             parent: Some(self.parent),
             generation: self.parent_gen.next(),
             system,
             config,
-            rng: self.rng,
+            rng,
             log,
         };
-        sim.add_state(state);
+        sim.add_state(Arc::new(state));
         id
     }
 
@@ -399,6 +442,7 @@ impl SimStateBuilder {
 pub struct SimStateLog {
     pub system: Vec<SimSystemLogEntry>,
     pub config: Vec<SimConfigLogEntry>,
+    pub rng: Vec<SimRngLogEntry>,
 }
 
 /// The output of merging a serializable state into a mutable state.

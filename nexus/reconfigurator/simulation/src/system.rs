@@ -165,25 +165,24 @@ impl SimSystem {
         self.external_dns.values().map(|d| &**d)
     }
 
-    pub(crate) fn to_mut(&self) -> MutableSimSystem {
-        MutableSimSystem { system: self.clone(), log: Vec::new() }
+    pub(crate) fn to_mut(&self) -> SimSystemBuilder {
+        SimSystemBuilder { system: self.clone(), log: Vec::new() }
     }
 }
 
-/// A mutable version of [`SimSystem`].
+/// A [`SimSystem`] that can be changed to create new states.
 ///
-/// This is exposed by [`MutableSimState`].
-///
-/// [`MutableSimState`]: crate::MutableSimState
+/// Returned by
+/// [`SimStateBuilder::system_mut`](crate::SimStateBuilder::system_mut).
 #[derive(Clone, Debug)]
-pub struct MutableSimSystem {
+pub struct SimSystemBuilder {
     // The underlying `SimSystem`.
     system: SimSystem,
     // Operation log on the system.
     log: Vec<SimSystemLogEntry>,
 }
 
-impl MutableSimSystem {
+impl SimSystemBuilder {
     // These methods are duplicated from `SimSystem`. The forwarding is all
     // valid because we don't cache pending changes in this struct, instead
     // making them directly to the underlying system. If we did cache changes,
