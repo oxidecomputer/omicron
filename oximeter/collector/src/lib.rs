@@ -289,7 +289,6 @@ impl Oximeter {
                     http_resolver,
                     native_resolver,
                     &log,
-                    config.db.replicated,
                 )
                 .await?,
             ))
