@@ -186,7 +186,7 @@ mod tests {
         // Setup
         let logctx = dev::test_setup_log("test_clickhouse_policy_basic");
         let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let (opctx, datastore) = datastore_test(&logctx.log, &db).await;
 
         // Listing an empty table should return an empty vec
 
