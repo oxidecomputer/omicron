@@ -1362,12 +1362,13 @@ dependencies = [
 [[package]]
 name = "clickward"
 version = "0.1.0"
-source = "git+https://github.com/oxidecomputer/clickward?rev=ceec762e6a87d2a22bf56792a3025e145caa095e#ceec762e6a87d2a22bf56792a3025e145caa095e"
+source = "git+https://github.com/oxidecomputer/clickward?rev=a1b342c2558e835d09e6e39a40d3de798a29c2f#a1b342c2558e835d09e6e39a40d3de798a29c2f5"
 dependencies = [
  "anyhow",
  "camino",
  "clap",
  "derive_more",
+ "schemars",
  "serde",
  "serde_json",
  "thiserror",
@@ -4713,9 +4714,9 @@ checksum = "830d08ce1d1d941e6b30645f1a0eb5643013d835ce3779a5fc208261dbe10f55"
 
 [[package]]
 name = "libc"
-version = "0.2.159"
+version = "0.2.161"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "561d97a539a36e26a9a5fad1ea11a3039a67714694aaa379433e580854bc3dc5"
+checksum = "8e9489c2807c139ffd9c1794f4af0ebe86a828db53ecdc7fea2111d0fed085d1"
 
 [[package]]
 name = "libdlpi-sys"
@@ -8718,9 +8719,9 @@ dependencies = [
 
 [[package]]
 name = "qorb"
-version = "0.0.2"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "104066c20d7277d0af40a7333c579a2a71cc6b68c14982d1da2e5747a381a3ed"
+checksum = "675f442a5904b8b5dc9f5d298be36676b29e2e852eace78a3d3d00822469c88e"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -8736,7 +8737,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-stream",
- "tokio-tungstenite 0.23.1",
+ "tokio-tungstenite 0.24.0",
  "tracing",
 ]
 
@@ -11557,6 +11558,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "tokio-tungstenite"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "edc5f74e248dc973e0dbb7b74c7e0d6fcc301c694ff50049504004ef4d0cdcd9"
+dependencies = [
+ "futures-util",
+ "log",
+ "tokio",
+ "tungstenite 0.24.0",
+]
+
+[[package]]
 name = "tokio-util"
 version = "0.7.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11860,6 +11873,24 @@ name = "tungstenite"
 version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6e2e2ce1e47ed2994fd43b04c8f618008d4cabdd5ee34027cf14f9d918edd9c8"
+dependencies = [
+ "byteorder",
+ "bytes",
+ "data-encoding",
+ "http 1.1.0",
+ "httparse",
+ "log",
+ "rand",
+ "sha1",
+ "thiserror",
+ "utf-8",
+]
+
+[[package]]
+name = "tungstenite"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "18e5b8366ee7a95b16d32197d0b2604b43a0be89dc5fac9f8e96ccafbaedda8a"
 dependencies = [
  "byteorder",
  "bytes",
@@ -12240,9 +12271,9 @@ dependencies = [
 
 [[package]]
 name = "uzers"
-version = "0.11.3"
+version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "76d283dc7e8c901e79e32d077866eaf599156cbf427fffa8289aecc52c5c3f63"
+checksum = "4df81ff504e7d82ad53e95ed1ad5b72103c11253f39238bcc0235b90768a97dd"
 dependencies = [
  "libc",
  "log",

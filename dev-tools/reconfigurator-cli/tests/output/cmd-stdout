@@ -72,7 +72,7 @@ ID                                   NERRORS TIME_DONE
 saved planning input, collections, and blueprints to "state.json"
 
 > load state.json
-error: changes made to simulated system: run `wipe system` before loading
+error: changes made to simulated system: run `wipe` before loading
 
 > 
 

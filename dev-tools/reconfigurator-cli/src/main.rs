@@ -1150,10 +1150,7 @@ fn cmd_load(
     args: LoadArgs,
 ) -> anyhow::Result<Option<String>> {
     if sim.user_made_system_changes() {
-        bail!(
-            "changes made to simulated system: run `wipe system` before \
-             loading"
-        );
+        bail!("changes made to simulated system: run `wipe` before loading");
     }
 
     let input_path = args.filename;
@@ -1321,10 +1318,7 @@ fn cmd_load_example(
     args: LoadExampleArgs,
 ) -> anyhow::Result<Option<String>> {
     if sim.user_made_system_changes() {
-        bail!(
-            "changes made to simulated system: run `wipe system` before \
-             loading an example system"
-        );
+        bail!("changes made to simulated system: run `wipe` before loading");
     }
 
     // Generate the example system.
