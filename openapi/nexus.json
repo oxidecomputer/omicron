@@ -11840,7 +11840,7 @@
         "type": "object",
         "properties": {
           "addr": {
-            "description": "The address of th e host to peer with.",
+            "description": "The address of the host to peer with.",
             "allOf": [
               {
                 "$ref": "#/components/schemas/IpNet"

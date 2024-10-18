@@ -1859,17 +1859,7 @@ pub struct SwitchPortSettingsInfoSelector {
     pub configuration: NameOrId,
 }
 
-/// Select a port settings info object by name or id and peer by address.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-pub struct SwitchPortSettingsBgpPeerInfoSelector {
-    /// A name or id to use when selecting a switch port configuration.
-    pub configuration: NameOrId,
-
-    /// An address identifying a configured bgp peer.
-    pub peer_address: IpAddr,
-}
-
-/// Select a Bgp Peer by address.
+/// Select a bgp peer by address.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
 pub struct BgpPeerQuerySelector {
     /// An address identifying a configured bgp peer.
@@ -1884,16 +1874,6 @@ pub struct SwitchPortSettingsLinkInfoSelector {
 
     /// Link name
     pub link: Name,
-}
-
-/// Select an interface settings info object by port settings name / id and interface name.
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
-pub struct SwitchPortSettingsInterfaceInfoSelector {
-    /// A name or id to use when selecting a switch port configuration.
-    pub configuration: NameOrId,
-
-    /// Interface name
-    pub interface: Name,
 }
 
 /// Select a switch port by name.

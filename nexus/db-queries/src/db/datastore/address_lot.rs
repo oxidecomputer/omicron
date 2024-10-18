@@ -204,14 +204,43 @@ impl DataStore {
         address_lot_id: Uuid,
         params: params::AddressLotBlockAddRemove,
     ) -> CreateResult<AddressLotBlock> {
+        use db::schema::address_lot;
         use db::schema::address_lot_block::dsl;
 
         let conn = self.pool_connection_authorized(opctx).await?;
+        let err = OptionalError::new();
 
         self.transaction_retry_wrapper("address_lot_create")
-            .transaction(&conn, |conn| async move {
-                let found_block: Option<AddressLotBlock> =
-                    dsl::address_lot_block
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+
+                async move {
+
+                    // Verify parent address lot exists
+                    address_lot::table
+                        .filter(address_lot::id.eq(address_lot_id))
+                        .select(AddressLot::as_select())
+                        .get_result_async(&conn)
+                        .await
+                        .map_err(|e: diesel::result::Error| {
+                            match e {
+                                diesel::result::Error::NotFound => {
+                                    err.bail(
+                                        Error::non_resourcetype_not_found(
+                                            format!("unable to find address lot with identifier {address_lot_id}")
+                                        )
+                                    )
+                                },
+                                _ => {
+                                    err.bail(Error::internal_error(
+                                        "error while looking up address lot for address lot block"
+                                    ))
+                                },
+                            }
+                        })?;
+
+                    let found_block: Option<AddressLotBlock> =
+                        dsl::address_lot_block
                         .filter(dsl::address_lot_id.eq(address_lot_id))
                         .filter(
                             dsl::first_address
@@ -227,37 +256,39 @@ impl DataStore {
                         .await
                         .ok();
 
-                let new_block = AddressLotBlock::new(
-                    address_lot_id,
-                    IpNetwork::from(params.first_address),
-                    IpNetwork::from(params.last_address),
-                );
+                    let new_block = AddressLotBlock::new(
+                        address_lot_id,
+                        IpNetwork::from(params.first_address),
+                        IpNetwork::from(params.last_address),
+                    );
 
-                let db_block = match found_block {
-                    Some(v) => v,
-                    None => {
-                        diesel::insert_into(dsl::address_lot_block)
-                            .values(new_block)
-                            .returning(AddressLotBlock::as_returning())
-                            .get_result_async(&conn)
-                            .await?
-                    }
-                };
+                    let db_block = match found_block {
+                        Some(v) => v,
+                        None => {
+                            diesel::insert_into(dsl::address_lot_block)
+                                .values(new_block)
+                                .returning(AddressLotBlock::as_returning())
+                                .get_result_async(&conn)
+                                .await?
+                        }
+                    };
 
-                Ok(db_block)
+                    Ok(db_block)
+                }
             })
             .await
             .map_err(|e| {
-                public_error_from_diesel(
-                    e,
-                    ErrorHandler::Conflict(
-                        ResourceType::AddressLotBlock,
-                        &format!(
-                            "block covering range {} - {}",
-                            params.first_address, params.last_address
-                        ),
-                    ),
-                )
+                let message = "address_lot_block_create failed";
+                match err.take() {
+                    Some(external_error) => {
+                        error!(opctx.log, "{message}"; "error" => ?external_error);
+                        external_error
+                    },
+                    None => {
+                        error!(opctx.log, "{message}"; "error" => ?e);
+                        Error::internal_error("error while adding address block to address lot")
+                    },
+                }
             })
     }
 

@@ -4067,7 +4067,7 @@ async fn networking_switch_port_configuration_link_delete(
 /// List addresses assigned to a provided interface configuration
 #[endpoint {
     method = GET,
-    path ="/v1/system/networking/switch-port-configuration/{configuration}/address",
+    path = "/v1/system/networking/switch-port-configuration/{configuration}/address",
     tags = ["system/networking"],
 }]
 async fn networking_switch_port_configuration_address_list(
@@ -4095,7 +4095,7 @@ async fn networking_switch_port_configuration_address_list(
 /// Add address to an interface configuration
 #[endpoint {
     method = POST,
-    path ="/v1/system/networking/switch-port-configuration/{configuration}/address/add",
+    path = "/v1/system/networking/switch-port-configuration/{configuration}/address/add",
     tags = ["system/networking"],
 }]
 async fn networking_switch_port_configuration_address_add(
@@ -4129,7 +4129,7 @@ async fn networking_switch_port_configuration_address_add(
 /// Remove address from an interface configuration
 #[endpoint {
     method = POST,
-    path ="/v1/system/networking/switch-port-configuration/{configuration}/address/remove",
+    path = "/v1/system/networking/switch-port-configuration/{configuration}/address/remove",
     tags = ["system/networking"],
 }]
 async fn networking_switch_port_configuration_address_remove(
@@ -4163,7 +4163,7 @@ async fn networking_switch_port_configuration_address_remove(
 /// List routes assigned to a provided interface configuration
 #[endpoint {
     method = GET,
-    path ="/v1/system/networking/switch-port-configuration/{configuration}/route",
+    path = "/v1/system/networking/switch-port-configuration/{configuration}/route",
     tags = ["system/networking"],
 }]
 async fn networking_switch_port_configuration_route_list(
@@ -4191,7 +4191,7 @@ async fn networking_switch_port_configuration_route_list(
 /// Add route to an interface configuration
 #[endpoint {
     method = POST,
-    path ="/v1/system/networking/switch-port-configuration/{configuration}/route/add",
+    path = "/v1/system/networking/switch-port-configuration/{configuration}/route/add",
     tags = ["system/networking"],
 }]
 async fn networking_switch_port_configuration_route_add(
@@ -4221,7 +4221,7 @@ async fn networking_switch_port_configuration_route_add(
 /// Remove route from an interface configuration
 #[endpoint {
     method = POST,
-    path ="/v1/system/networking/switch-port-configuration/{configuration}/route/remove",
+    path = "/v1/system/networking/switch-port-configuration/{configuration}/route/remove",
     tags = ["system/networking"],
 }]
 async fn networking_switch_port_configuration_route_remove(
@@ -4255,7 +4255,7 @@ async fn networking_switch_port_configuration_route_remove(
 /// List bgp peers assigned to a provided interface configuration
 #[endpoint {
     method = GET,
-    path ="/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer",
+    path = "/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer",
     tags = ["system/networking"],
 }]
 async fn networking_switch_port_configuration_bgp_peer_list(
@@ -4284,7 +4284,7 @@ async fn networking_switch_port_configuration_bgp_peer_list(
 /// Add bgp peer to an interface configuration
 #[endpoint {
     method = POST,
-    path ="/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/add",
+    path = "/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/add",
     tags = ["system/networking"],
 }]
 async fn networking_switch_port_configuration_bgp_peer_add(
@@ -4318,7 +4318,7 @@ async fn networking_switch_port_configuration_bgp_peer_add(
 /// Remove bgp peer from an interface configuration
 #[endpoint {
     method = POST,
-    path ="/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/remove",
+    path = "/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/remove",
     tags = ["system/networking"],
 }]
 async fn networking_switch_port_configuration_bgp_peer_remove(
@@ -4352,7 +4352,7 @@ async fn networking_switch_port_configuration_bgp_peer_remove(
 /// List prefixes allowed to be imported by a given bgp peer
 #[endpoint {
     method = GET,
-    path ="/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/allow-import",
+    path = "/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/allow-import",
     tags = ["system/networking"],
 }]
 async fn networking_switch_port_configuration_bgp_peer_allow_import_list(
@@ -4385,7 +4385,7 @@ async fn networking_switch_port_configuration_bgp_peer_allow_import_list(
 /// Add prefix to bgp peer allowed import list
 #[endpoint {
     method = POST,
-    path ="/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/allow-import/add",
+    path = "/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/allow-import/add",
     tags = ["system/networking"],
 }]
 async fn networking_switch_port_configuration_bgp_peer_allow_import_add(
@@ -4419,7 +4419,7 @@ async fn networking_switch_port_configuration_bgp_peer_allow_import_add(
 /// Remove prefix from bgp peer allowed import list
 #[endpoint {
     method = POST,
-    path ="/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/allow-import/remove",
+    path = "/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/allow-import/remove",
     tags = ["system/networking"],
 }]
 async fn networking_switch_port_configuration_bgp_peer_allow_import_remove(
@@ -4453,7 +4453,7 @@ async fn networking_switch_port_configuration_bgp_peer_allow_import_remove(
 /// List prefixes allowed to be exported by a given bgp peer
 #[endpoint {
     method = GET,
-    path ="/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/allow-export",
+    path = "/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/allow-export",
     tags = ["system/networking"],
 }]
 async fn networking_switch_port_configuration_bgp_peer_allow_export_list(
@@ -4486,7 +4486,7 @@ async fn networking_switch_port_configuration_bgp_peer_allow_export_list(
 /// Add prefix to bgp peer allowed export list
 #[endpoint {
     method = POST,
-    path ="/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/allow-export/add",
+    path = "/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/allow-export/add",
     tags = ["system/networking"],
 }]
 async fn networking_switch_port_configuration_bgp_peer_allow_export_add(
@@ -4520,7 +4520,7 @@ async fn networking_switch_port_configuration_bgp_peer_allow_export_add(
 /// Remove prefix from bgp peer allowed export list
 #[endpoint {
     method = POST,
-    path ="/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/allow-export/remove",
+    path = "/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/allow-export/remove",
     tags = ["system/networking"],
 }]
 async fn networking_switch_port_configuration_bgp_peer_allow_export_remove(
@@ -4554,7 +4554,7 @@ async fn networking_switch_port_configuration_bgp_peer_allow_export_remove(
 /// List communities assigned to a bgp peer
 #[endpoint {
     method = GET,
-    path ="/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/community",
+    path = "/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/community",
     tags = ["system/networking"],
 }]
 async fn networking_switch_port_configuration_bgp_peer_community_list(
@@ -4586,7 +4586,7 @@ async fn networking_switch_port_configuration_bgp_peer_community_list(
 /// Add community to bgp peer
 #[endpoint {
     method = POST,
-    path ="/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/community/add",
+    path = "/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/community/add",
     tags = ["system/networking"],
 }]
 async fn networking_switch_port_configuration_bgp_peer_community_add(
@@ -4620,7 +4620,7 @@ async fn networking_switch_port_configuration_bgp_peer_community_add(
 /// Remove community from bgp peer
 #[endpoint {
     method = POST,
-    path ="/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/community/remove",
+    path = "/v1/system/networking/switch-port-configuration/{configuration}/bgp-peer/community/remove",
     tags = ["system/networking"],
 }]
 async fn networking_switch_port_configuration_bgp_peer_community_remove(

@@ -1535,7 +1535,7 @@ impl DataStore {
                             }
                         })?;
 
-                    // resolve id of referenced bgp configuratino
+                    // resolve id of referenced bgp configuration
                     let bgp_config_id = match new_settings.bgp_config {
 
                         NameOrId::Id(id) => {

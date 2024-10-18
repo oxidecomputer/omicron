@@ -2592,7 +2592,7 @@ pub struct BgpPeer {
     /// could be vlan47 to refer to a VLAN interface.
     pub interface_name: String,
 
-    /// The address of th e host to peer with.
+    /// The address of the host to peer with.
     pub addr: oxnet::IpNet,
 
     /// How long to hold peer connections between keepalives (seconds).
