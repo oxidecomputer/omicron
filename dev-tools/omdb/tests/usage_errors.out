@@ -467,11 +467,12 @@ Debug a specific Nexus instance
 Usage: omdb nexus [OPTIONS] <COMMAND>
 
 Commands:
-  background-tasks  print information about background tasks
-  blueprints        interact with blueprints
-  sagas             view sagas, create and complete demo sagas
-  sleds             interact with sleds
-  help              Print this message or the help of the given subcommand(s)
+  background-tasks   print information about background tasks
+  blueprints         interact with blueprints
+  clickhouse-policy  Interact with clickhouse policy
+  sagas              view sagas, create and complete demo sagas
+  sleds              interact with sleds
+  help               Print this message or the help of the given subcommand(s)
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
