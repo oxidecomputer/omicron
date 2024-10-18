@@ -270,6 +270,7 @@ pub struct MgdConfig {
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 struct UnvalidatedTunables {
     max_vpc_ipv4_subnet_prefix: u8,
+    load_timeout: Option<std::time::Duration>,
 }
 
 /// Tunable configuration parameters, intended for use in test environments or
@@ -282,6 +283,11 @@ pub struct Tunables {
     /// Note that this is the maximum _prefix_ size, which sets the minimum size
     /// of the subnet.
     pub max_vpc_ipv4_subnet_prefix: u8,
+
+    /// How long should we attempt to loop until the schema matches?
+    ///
+    /// If "None", nexus loops forever during initialization.
+    pub load_timeout: Option<std::time::Duration>,
 }
 
 // Convert from the unvalidated tunables, verifying each parameter as needed.
@@ -292,6 +298,7 @@ impl TryFrom<UnvalidatedTunables> for Tunables {
         Tunables::validate_ipv4_prefix(unvalidated.max_vpc_ipv4_subnet_prefix)?;
         Ok(Tunables {
             max_vpc_ipv4_subnet_prefix: unvalidated.max_vpc_ipv4_subnet_prefix,
+            load_timeout: unvalidated.load_timeout,
         })
     }
 }
@@ -341,7 +348,10 @@ pub const MAX_VPC_IPV4_SUBNET_PREFIX: u8 = 26;
 
 impl Default for Tunables {
     fn default() -> Self {
-        Tunables { max_vpc_ipv4_subnet_prefix: MAX_VPC_IPV4_SUBNET_PREFIX }
+        Tunables {
+            max_vpc_ipv4_subnet_prefix: MAX_VPC_IPV4_SUBNET_PREFIX,
+            load_timeout: None,
+        }
     }
 }
 
@@ -1003,7 +1013,10 @@ mod test {
                         trusted_root: Utf8PathBuf::from("/path/to/root.json"),
                     }),
                     schema: None,
-                    tunables: Tunables { max_vpc_ipv4_subnet_prefix: 27 },
+                    tunables: Tunables {
+                        max_vpc_ipv4_subnet_prefix: 27,
+                        load_timeout: None
+                    },
                     dendrite: HashMap::from([(
                         SwitchLocation::Switch0,
                         DpdConfig {

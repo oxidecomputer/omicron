@@ -288,14 +288,13 @@ impl InsertVpcSubnetError {
 mod test {
     use super::InsertVpcSubnetError;
     use super::InsertVpcSubnetQuery;
+    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::explain::ExplainableAsync as _;
     use crate::db::model::VpcSubnet;
-    use nexus_test_utils::db::test_setup_database;
     use omicron_common::api::external::IdentityMetadataCreateParams;
     use omicron_common::api::external::Name;
     use omicron_test_utils::dev;
     use std::convert::TryInto;
-    use std::sync::Arc;
 
     #[tokio::test]
     async fn explain_insert_query() {
@@ -310,15 +309,11 @@ mod test {
             VpcSubnet::new(subnet_id, vpc_id, identity, ipv4_block, ipv6_block);
         let query = InsertVpcSubnetQuery::new(row);
         let logctx = dev::test_setup_log("explain_insert_query");
-        let log = logctx.log.new(o!());
-        let mut db = test_setup_database(&log).await;
-        let cfg = crate::db::Config { url: db.pg_config().clone() };
-        let pool =
-            Arc::new(crate::db::Pool::new_single_host(&logctx.log, &cfg));
-        let conn = pool.claim().await.unwrap();
+        let db = TestDatabase::new_with_pool(&logctx.log).await;
+        let conn = db.pool().claim().await.unwrap();
         let explain = query.explain_async(&conn).await.unwrap();
         println!("{explain}");
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -356,16 +351,8 @@ mod test {
 
         // Setup the test database
         let logctx = dev::test_setup_log("test_insert_vpc_subnet_query");
-        let log = logctx.log.new(o!());
-        let mut db = test_setup_database(&log).await;
-        let cfg = crate::db::Config { url: db.pg_config().clone() };
-        let pool =
-            Arc::new(crate::db::Pool::new_single_host(&logctx.log, &cfg));
-        let db_datastore = Arc::new(
-            crate::db::DataStore::new(&log, Arc::clone(&pool), None)
-                .await
-                .unwrap(),
-        );
+        let db = TestDatabase::new_with_raw_datastore(&logctx.log).await;
+        let db_datastore = db.datastore();
 
         // We should be able to insert anything into an empty table.
         assert!(
@@ -551,7 +538,7 @@ mod test {
             "Should be able to insert new VPC Subnet with non-overlapping IP ranges"
         );
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -624,16 +611,8 @@ mod test {
         // Setup the test database
         let logctx =
             dev::test_setup_log("test_insert_vpc_subnet_query_is_idempotent");
-        let log = logctx.log.new(o!());
-        let mut db = test_setup_database(&log).await;
-        let cfg = crate::db::Config { url: db.pg_config().clone() };
-        let pool =
-            Arc::new(crate::db::Pool::new_single_host(&logctx.log, &cfg));
-        let db_datastore = Arc::new(
-            crate::db::DataStore::new(&log, Arc::clone(&pool), None)
-                .await
-                .unwrap(),
-        );
+        let db = TestDatabase::new_with_raw_datastore(&logctx.log).await;
+        let db_datastore = db.datastore();
 
         // We should be able to insert anything into an empty table.
         let inserted = db_datastore
@@ -652,7 +631,7 @@ mod test {
             "Must be able to insert the exact same VPC subnet more than once",
         );
         assert_rows_eq(&inserted, &row);
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }
