@@ -16,9 +16,9 @@
   <service_fmri value='svc:/oxide/zone-network-setup:default' />
   </dependency>
 
-  <dependency name='clickhouse-admin' grouping='require_all' restart_on='none'
+  <dependency name='clickhouse-admin-keeper' grouping='require_all' restart_on='none'
     type='service'>
-  <service_fmri value='svc:/oxide/clickhouse-admin:default' />
+  <service_fmri value='svc:/oxide/clickhouse-admin-keeper:default' />
   </dependency>
 
   <exec_method type='method' name='start'

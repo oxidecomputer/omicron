@@ -11,3 +11,4 @@ set -o pipefail
 # it append them when necessary
 cd /opt/oxide/clickhouse_server/
 exec ./clickhouse server &
+exec /opt/oxide/clickhouse_server/clickhouse server --config /opt/oxide/clickhouse_server/config.d/replica-server-config.xml &
