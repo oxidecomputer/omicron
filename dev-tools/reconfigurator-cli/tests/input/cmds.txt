@@ -12,3 +12,10 @@ sled-list
 
 inventory-generate
 inventory-list
+
+save state.json
+load state.json
+
+wipe
+load state.json
+sled-show dde1c0e2-b10d-4621-b420-f179f7a7a00a
