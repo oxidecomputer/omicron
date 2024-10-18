@@ -22,7 +22,7 @@ mod test {
     use super::*;
     use nexus_test_utils::db::test_setup_database;
 
-    enum TestState {
+    enum TestKind {
         Pool { pool: Arc<db::Pool> },
         RawDatastore { datastore: Arc<DataStore> },
         Datastore { opctx: OpContext, datastore: Arc<DataStore> },
@@ -32,7 +32,7 @@ mod test {
     pub struct TestDatabase {
         db: CockroachInstance,
 
-        state: TestState,
+        kind: TestKind,
     }
 
     impl TestDatabase {
@@ -44,7 +44,7 @@ mod test {
             let db = test_setup_database(log).await;
             let cfg = db::Config { url: db.pg_config().clone() };
             let pool = Arc::new(db::Pool::new_single_host(log, &cfg));
-            Self { db, state: TestState::Pool { pool } }
+            Self { db, kind: TestKind::Pool { pool } }
         }
 
         /// Creates a new database for test usage, with a pre-loaded datastore.
@@ -57,7 +57,7 @@ mod test {
                 crate::db::datastore::test_utils::datastore_test(log, &db)
                     .await;
 
-            Self { db, state: TestState::Datastore { opctx, datastore } }
+            Self { db, kind: TestKind::Datastore { opctx, datastore } }
         }
 
         /// Creates a new database for test usage, with a raw datastore.
@@ -70,46 +70,45 @@ mod test {
             let pool = Arc::new(db::Pool::new_single_host(log, &cfg));
             let datastore =
                 Arc::new(DataStore::new(&log, pool, None).await.unwrap());
-            Self { db, state: TestState::RawDatastore { datastore } }
+            Self { db, kind: TestKind::RawDatastore { datastore } }
         }
 
         pub fn pool(&self) -> &Arc<db::Pool> {
-            match &self.state {
-                TestState::Pool { pool } => pool,
-                TestState::RawDatastore { .. }
-                | TestState::Datastore { .. } => {
+            match &self.kind {
+                TestKind::Pool { pool } => pool,
+                TestKind::RawDatastore { .. } | TestKind::Datastore { .. } => {
                     panic!("Wrong test type; try using `TestDatabase::new_with_pool`");
                 }
             }
         }
 
         pub fn opctx(&self) -> &OpContext {
-            match &self.state {
-                TestState::Pool { .. } | TestState::RawDatastore { .. } => {
+            match &self.kind {
+                TestKind::Pool { .. } | TestKind::RawDatastore { .. } => {
                     panic!("Wrong test type; try using `TestDatabase::new_with_datastore`");
                 }
-                TestState::Datastore { opctx, .. } => opctx,
+                TestKind::Datastore { opctx, .. } => opctx,
             }
         }
 
         pub fn datastore(&self) -> &Arc<DataStore> {
-            match &self.state {
-                TestState::Pool { .. } => {
+            match &self.kind {
+                TestKind::Pool { .. } => {
                     panic!("Wrong test type; try using `TestDatabase::new_with_datastore`");
                 }
-                TestState::RawDatastore { datastore } => datastore,
-                TestState::Datastore { datastore, .. } => datastore,
+                TestKind::RawDatastore { datastore } => datastore,
+                TestKind::Datastore { datastore, .. } => datastore,
             }
         }
 
         /// Shuts down both the database and the pool
         pub async fn terminate(mut self) {
-            match self.state {
-                TestState::Pool { pool } => pool.terminate().await,
-                TestState::RawDatastore { datastore } => {
+            match self.kind {
+                TestKind::Pool { pool } => pool.terminate().await,
+                TestKind::RawDatastore { datastore } => {
                     datastore.terminate().await
                 }
-                TestState::Datastore { datastore, .. } => {
+                TestKind::Datastore { datastore, .. } => {
                     datastore.terminate().await
                 }
             }
