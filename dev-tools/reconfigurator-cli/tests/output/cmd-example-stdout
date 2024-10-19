@@ -4,7 +4,7 @@ loaded example system with:
 - blueprint: ade5749d-bdf3-4fab-a8ae-00bea01b3a5a
 
 > load-example --seed test-basic
-error: changes made to simulated system: run `wipe system` before loading an example system
+error: changes made to simulated system: run `wipe` before loading
 
 > 
 
