@@ -3588,7 +3588,7 @@ async fn networking_address_lot_block_remove(
             nexus.address_lot_lookup(&opctx, path.address_lot)?;
 
         let (.., authz_address_lot) =
-            address_lot_lookup.lookup_for(authz::Action::CreateChild).await?;
+            address_lot_lookup.lookup_for(authz::Action::Delete).await?;
 
         nexus
             .address_lot_block_delete(

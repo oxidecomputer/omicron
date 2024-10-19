@@ -181,7 +181,7 @@ impl super::Nexus {
         name_or_id: NameOrId,
         new_settings: params::NamedLinkConfigCreate,
     ) -> CreateResult<SwitchPortLinkConfig> {
-        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        opctx.authorize(authz::Action::CreateChild, &authz::FLEET).await?;
         self.db_datastore
             .switch_port_configuration_link_create(
                 opctx,

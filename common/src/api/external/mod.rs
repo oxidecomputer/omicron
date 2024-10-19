@@ -2522,7 +2522,7 @@ pub struct BgpPeerCombined {
     /// peer.
     pub bgp_config: NameOrId,
 
-    /// The name of interface to peer on. This is relative to the port
+    /// The name of the interface to peer on. This is relative to the port
     /// configuration this BGP peer configuration is a part of. For example this
     /// value could be phy0 to refer to a primary physical interface. Or it
     /// could be vlan47 to refer to a VLAN interface.
@@ -2548,19 +2548,19 @@ pub struct BgpPeerCombined {
     /// How often to send keepalive requests (seconds).
     pub keepalive: u32,
 
-    /// Require that a peer has a specified ASN.
+    /// Require that this peer has a specified ASN.
     pub remote_asn: Option<u32>,
 
-    /// Require messages from a peer have a minimum IP time to live field.
+    /// Require messages from this peer have a minimum IP time to live field.
     pub min_ttl: Option<u8>,
 
-    /// Use the given key for TCP-MD5 authentication with the peer.
+    /// Use the given key for TCP-MD5 authentication with this peer.
     pub md5_auth_key: Option<String>,
 
-    /// Apply the provided multi-exit discriminator (MED) updates sent to the peer.
+    /// Apply a multi-exit discriminator (MED) in updates sent to this peer.
     pub multi_exit_discriminator: Option<u32>,
 
-    /// Include the provided communities in updates sent to the peer.
+    /// Include the provided communities in updates sent to this peer.
     pub communities: Vec<u32>,
 
     /// Apply a local preference to routes received from this peer.
@@ -2569,13 +2569,13 @@ pub struct BgpPeerCombined {
     /// Enforce that the first AS in paths received from this peer is the peer's AS.
     pub enforce_first_as: bool,
 
-    /// Define import policy for a peer.
+    /// Define import policy for this peer.
     pub allowed_import: ImportExportPolicy,
 
-    /// Define export policy for a peer.
+    /// Define export policy for this peer.
     pub allowed_export: ImportExportPolicy,
 
-    /// Associate a VLAN ID with a peer.
+    /// Associate a VLAN ID with this peer.
     pub vlan_id: Option<u16>,
 }
 
@@ -2586,7 +2586,7 @@ pub struct BgpPeer {
     /// peer.
     pub bgp_config: NameOrId,
 
-    /// The name of interface to peer on. This is relative to the port
+    /// The name of the interface to peer on. This is relative to the port
     /// configuration this BGP peer configuration is a part of. For example this
     /// value could be phy0 to refer to a primary physical interface. Or it
     /// could be vlan47 to refer to a VLAN interface.
@@ -2598,7 +2598,7 @@ pub struct BgpPeer {
     /// How long to hold peer connections between keepalives (seconds).
     pub hold_time: u32,
 
-    /// How long to hold a peer in idle before attempting a new session
+    /// How long to hold this peer in idle before attempting a new session
     /// (seconds).
     pub idle_hold_time: u32,
 
@@ -2612,16 +2612,16 @@ pub struct BgpPeer {
     /// How often to send keepalive requests (seconds).
     pub keepalive: u32,
 
-    /// Require that a peer has a specified ASN.
+    /// Require that this peer have a specified ASN.
     pub remote_asn: Option<u32>,
 
-    /// Require messages from a peer have a minimum IP time to live field.
+    /// Require messages from this peer to have a minimum IP time to live field.
     pub min_ttl: Option<u8>,
 
-    /// Use the given key for TCP-MD5 authentication with the peer.
+    /// Use the given key for TCP-MD5 authentication with this peer.
     pub md5_auth_key: Option<String>,
 
-    /// Apply the provided multi-exit discriminator (MED) updates sent to the peer.
+    /// Apply a multi-exit discriminator (MED) in updates sent to this peer.
     pub multi_exit_discriminator: Option<u32>,
 
     /// Apply a local preference to routes received from this peer.
@@ -2636,7 +2636,7 @@ pub struct BgpPeer {
     /// Enable export policies
     pub allow_export_list_active: bool,
 
-    /// Associate a VLAN ID with a peer.
+    /// Associate a VLAN ID with this peer.
     pub vlan_id: Option<u16>,
 }
 
@@ -2647,7 +2647,7 @@ pub struct BgpPeerRemove {
     /// peer.
     pub bgp_config: NameOrId,
 
-    /// The name of interface to peer on. This is relative to the port
+    /// The name of the interface to peer on. This is relative to the port
     /// configuration this BGP peer configuration is a part of. For example this
     /// value could be phy0 to refer to a primary physical interface. Or it
     /// could be vlan47 to refer to a VLAN interface.

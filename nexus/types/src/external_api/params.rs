@@ -1615,13 +1615,12 @@ pub struct Route {
     /// VLAN id the gateway is reachable over.
     pub vid: Option<u16>,
 
-    /// Local preference for route. Higher preference indictes precedence
+    /// Local preference for route. Higher preference indicates precedence
     /// within and across protocols.
     pub local_pref: Option<u32>,
 }
 
-/// A route to a destination network through a gateway address to add or
-/// remove to an interface.
+/// A network route to to add to or remove from an interface.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct RouteAddRemove {
     /// The interface to configure the route on
@@ -1636,7 +1635,7 @@ pub struct RouteAddRemove {
     /// VLAN id the gateway is reachable over.
     pub vid: Option<u16>,
 
-    /// Local preference for route. Higher preference indictes precedence
+    /// Local preference for route. Higher preference indicates precedence
     /// within and across protocols.
     pub local_pref: Option<u32>,
 }
@@ -1822,14 +1821,14 @@ pub struct Address {
     /// The address lot this address is drawn from.
     pub address_lot: NameOrId,
 
-    /// The address and prefix length of this address.
+    /// The address and subnet mask
     pub address: IpNet,
 
     /// Optional VLAN ID for this address
     pub vlan_id: Option<u16>,
 }
 
-/// An address to be added or removed from an interface
+/// An address to be added to or removed from an interface
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 pub struct AddressAddRemove {
     /// The name of the interface
@@ -1838,7 +1837,7 @@ pub struct AddressAddRemove {
     /// The address lot this address is drawn from.
     pub address_lot: NameOrId,
 
-    /// The address and prefix length of this address.
+    /// The address and subnet mask
     pub address: IpNet,
 
     /// Optional VLAN ID for this address

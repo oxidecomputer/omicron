@@ -1060,8 +1060,8 @@ impl DataStore {
                         .map_err(|e| match e {
                             ReserveBlockTxnError::CustomError(e) => {
                                 let message = match e {
-                                    ReserveBlockError::AddressUnavailable => "address is unavailable",
-                                    ReserveBlockError::AddressNotInLot => "address is not in lot",
+                                    ReserveBlockError::AddressUnavailable => "address unavailable",
+                                    ReserveBlockError::AddressNotInLot => "address not in lot",
                                 };
                                 err.bail(Error::conflict(message))
                             }
@@ -1890,7 +1890,7 @@ impl DataStore {
                     },
                     None => {
                         error!(opctx.log, "{message}"; "error" => ?e);
-                        Error::internal_error("error while adding prefix to allowed import list")
+                        Error::internal_error("error while adding entry to allowed import list")
                     },
                 }
             })
@@ -2094,7 +2094,7 @@ impl DataStore {
                     },
                     None => {
                         error!(opctx.log, "{message}"; "error" => ?e);
-                        Error::internal_error("error while adding prefix to allowed export list")
+                        Error::internal_error("error while adding entry to allowed export list")
                     },
                 }
             })
@@ -2210,7 +2210,7 @@ impl DataStore {
             .load_async(&*self.pool_connection_authorized(opctx).await?)
             .await
             .map_err(|e: diesel::result::Error| {
-                let msg = "error while looking up bgp peer allowed export list";
+                let msg = "error while looking up bgp peer community list";
                 error!(opctx.log, "{msg}"; "error" => ?e);
                 Error::internal_error(msg)
             })
