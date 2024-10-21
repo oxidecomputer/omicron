@@ -16,9 +16,10 @@ switch_data_link:pcs_high_ber
 switch_data_link:pcs_valid_errors
 switch_data_link:pcs_invalid_errors
 switch_data_link:pcs_unknown_errors
-switch_data_link::pcs_sync_loss
+switch_data_link:pcs_sync_loss
 switch_data_link:fec_high_symbol_errors
 switch_data_link:fec_sync_aligned
 switch_data_link:fec_corrected_blocks
 switch_data_link:fec_uncorrected_blocks
 switch_data_link:fec_symbol_errors
+dendrite:sample_collection_duration
