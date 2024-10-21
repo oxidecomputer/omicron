@@ -648,7 +648,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
     }
 
     // Begin starting Nexus.
-    pub async fn start_nexus_internal(&mut self) {
+    pub async fn start_nexus_internal(&mut self) -> Result<(), String> {
         let log = &self.logctx.log;
         debug!(log, "Starting Nexus (internal API)");
 
@@ -670,7 +670,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         };
 
         let (nexus_internal, nexus_internal_addr) =
-            N::start_internal(&self.config, &log).await;
+            N::start_internal(&self.config, &log).await?;
 
         let address = SocketAddrV6::new(
             match nexus_internal_addr.ip() {
@@ -734,6 +734,8 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
 
         self.nexus_internal = Some(nexus_internal);
         self.nexus_internal_addr = Some(nexus_internal_addr);
+
+        Ok(())
     }
 
     pub async fn populate_internal_dns(&mut self) {
@@ -1170,6 +1172,9 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         if let Some(server) = self.server {
             server.close().await;
         }
+        if let Some(nexus_internal) = self.nexus_internal {
+            N::stop_internal(nexus_internal).await;
+        }
         if let Some(mut database) = self.database {
             database.cleanup().await.unwrap();
         }
@@ -1352,7 +1357,12 @@ async fn setup_with_config_impl<N: NexusServer>(
                 ),
                 (
                     "start_nexus_internal",
-                    Box::new(|builder| builder.start_nexus_internal().boxed()),
+                    Box::new(|builder| {
+                        builder
+                            .start_nexus_internal()
+                            .map(|r| r.unwrap())
+                            .boxed()
+                    }),
                 ),
                 (
                     "start_sled1",

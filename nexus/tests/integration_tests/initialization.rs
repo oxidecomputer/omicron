@@ -50,7 +50,9 @@ async fn test_nexus_boots_before_cockroach() {
     let nexus_log = log.clone();
     let nexus_handle = tokio::task::spawn(async move {
         info!(nexus_log, "Test: Trying to start Nexus (internal)");
-        omicron_nexus::Server::start_internal(&nexus_config, &nexus_log).await;
+        omicron_nexus::Server::start_internal(&nexus_config, &nexus_log)
+            .await
+            .unwrap();
         info!(nexus_log, "Test: Started Nexus (internal)");
     });
 
@@ -123,7 +125,9 @@ async fn test_nexus_boots_before_dendrite() {
     let nexus_log = log.clone();
     let nexus_handle = tokio::task::spawn(async move {
         info!(nexus_log, "Test: Trying to start Nexus (internal)");
-        omicron_nexus::Server::start_internal(&nexus_config, &nexus_log).await;
+        omicron_nexus::Server::start_internal(&nexus_config, &nexus_log)
+            .await
+            .unwrap();
         info!(nexus_log, "Test: Started Nexus (internal)");
     });
 
@@ -202,6 +206,9 @@ async fn test_nexus_does_not_boot_without_valid_schema() {
     for schema in schemas_to_test {
         let mut config = load_test_config();
 
+        config.pkg.tunables.load_timeout =
+            Some(std::time::Duration::from_secs(5));
+
         let mut builder =
             ControlPlaneTestContextBuilder::<omicron_nexus::Server>::new(
                 "test_nexus_does_not_boot_without_valid_schema",
@@ -224,14 +231,14 @@ async fn test_nexus_does_not_boot_without_valid_schema() {
             .await
             .expect("Failed to update schema");
 
-        assert!(
-            timeout(
-                std::time::Duration::from_secs(5),
-                builder.start_nexus_internal(),
-            )
+        let err = builder
+            .start_nexus_internal()
             .await
-            .is_err(),
-            "Nexus should have failed to start"
+            .expect_err("Nexus should have failed to start");
+
+        assert!(
+            err.contains("Failed to read valid DB schema"),
+            "Saw error: {err}"
         );
 
         builder.teardown().await;

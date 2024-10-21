@@ -6713,6 +6713,7 @@ dependencies = [
  "nexus-config",
  "nexus-db-model",
  "nexus-db-queries",
+ "nexus-inventory",
  "nexus-reconfigurator-preparation",
  "nexus-saga-recovery",
  "nexus-test-utils",
@@ -8719,9 +8720,9 @@ dependencies = [
 
 [[package]]
 name = "qorb"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "675f442a5904b8b5dc9f5d298be36676b29e2e852eace78a3d3d00822469c88e"
+checksum = "d25f71eb7c5ba56a99f0721fd771b2503aa6de4ec73f0891f9b7ac115ca34723"
 dependencies = [
  "anyhow",
  "async-trait",

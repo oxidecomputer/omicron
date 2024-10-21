@@ -743,6 +743,7 @@ mod test {
         drop(task);
         let sec_client = Arc::try_unwrap(sec_client).unwrap();
         sec_client.shutdown().await;
+        db_datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -813,6 +814,7 @@ mod test {
         drop(task);
         let sec_client = Arc::try_unwrap(sec_client).unwrap();
         sec_client.shutdown().await;
+        db_datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }

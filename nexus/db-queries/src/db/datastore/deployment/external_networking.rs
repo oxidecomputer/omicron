@@ -408,7 +408,7 @@ impl DataStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::datastore::test_utils::datastore_test;
+    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::queries::ALLOW_FULL_TABLE_SCAN_SQL;
     use anyhow::Context as _;
     use async_bb8_diesel::AsyncSimpleConnection;
@@ -417,7 +417,6 @@ mod tests {
     use nexus_config::NUM_INITIAL_RESERVED_IP_ADDRESSES;
     use nexus_db_model::SqlU16;
     use nexus_sled_agent_shared::inventory::OmicronZoneDataset;
-    use nexus_test_utils::db::test_setup_database;
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
@@ -872,8 +871,8 @@ mod tests {
         // Set up.
         usdt::register_probes().unwrap();
         let logctx = dev::test_setup_log("test_service_ip_list");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Generate the test values we care about.
         let mut harness = Harness::new();
@@ -1124,7 +1123,7 @@ mod tests {
         }
 
         // Clean up.
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -1133,8 +1132,8 @@ mod tests {
         // Set up.
         usdt::register_probes().unwrap();
         let logctx = dev::test_setup_log("test_service_ip_list");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Generate the test values we care about.
         let harness = Harness::new();
@@ -1191,7 +1190,7 @@ mod tests {
         harness.assert_nics_are_deleted_in_datastore(&datastore).await;
 
         // Clean up.
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }

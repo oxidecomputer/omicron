@@ -347,7 +347,7 @@ mod tests {
         let logctx = dev::test_setup_log("test_activate_fails_if_no_blueprint");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) =
-            datastore_test(&logctx, &db, Uuid::new_v4()).await;
+            datastore_test(&logctx.log, &db, Uuid::new_v4()).await;
 
         let (_tx_blueprint, rx_blueprint) = watch::channel(None);
         let mut collector =
@@ -356,6 +356,7 @@ mod tests {
 
         assert_eq!(result, json!({"error": "no blueprint"}));
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -378,7 +379,7 @@ mod tests {
             dev::test_setup_log("test_activate_with_no_unknown_node_ids");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) =
-            datastore_test(&logctx, &db, Uuid::new_v4()).await;
+            datastore_test(&logctx.log, &db, Uuid::new_v4()).await;
 
         let blueprint = BlueprintBuilder::build_empty_with_sleds(
             iter::once(SledUuid::new_v4()),
@@ -432,6 +433,7 @@ mod tests {
             .await;
         assert_eq!(result, json!({"nsuccess": crdb_zones.len()}));
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
@@ -442,7 +444,7 @@ mod tests {
         let logctx = dev::test_setup_log("test_activate_with_unknown_node_ids");
         let mut db = test_setup_database(&logctx.log).await;
         let (opctx, datastore) =
-            datastore_test(&logctx, &db, Uuid::new_v4()).await;
+            datastore_test(&logctx.log, &db, Uuid::new_v4()).await;
 
         let blueprint = BlueprintBuilder::build_empty_with_sleds(
             iter::once(SledUuid::new_v4()),
@@ -571,6 +573,7 @@ mod tests {
         assert!(crdb_err3.contains(&crdb_zone_id3));
         assert!(crdb_err3.contains(&crdb_zone_id4));
 
+        datastore.terminate().await;
         db.cleanup().await.unwrap();
         logctx.cleanup_successful();
     }
