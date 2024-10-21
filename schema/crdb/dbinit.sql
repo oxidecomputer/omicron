@@ -4477,6 +4477,61 @@ CREATE INDEX IF NOT EXISTS lookup_bgp_config_by_bgp_announce_set_id ON omicron.p
 
 
 /*
+ * Error reporters
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.ereporter (
+    /* The error reporter's identity */
+    id UUID PRIMARY KEY,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ
+    /* The error reporter's restart count */
+    gen INT8 NOT NULL,
+    /* An optional nonce provided by the reporter to distinguish between
+     * restarts and duplicate registrations.
+    */
+    nonce INT8,
+);
+
+/*
+ * Error reporter endpoint registrations.
+ *
+ * Multiple endpoints may be registered for the same ereporter. This is
+ * necessary to allow both management gateways to proxy to the same SPs, so that
+ * the SP's ereports can still be ingested if one MGS is unreachable. Therefore,
+ * we need a separate table for endpoint addresses, rather than storing them in
+ * the ereporter table.
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.ereporter_endpoint (
+    /* The ID of the ereporter this endpoint belongs to.
+     *
+     * This ID references a corresponding entry in the ereporter table.
+     */
+    reporter_id UUID NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    /* The error reporter's generation at which this endpoint was registered.
+     *
+     * This corresponds to the generation column in the ereporter table.
+     */
+    reporter_gen INT8 NOT NULL,
+    /* The IP address of this endpoint. */
+    ip INET NOT NULL,
+    /* The port of the endpoint. */
+    port INT4 CHECK (port BETWEEN 0 AND 65535) NOT NULL,
+
+
+    -- This ought to be unique :)
+    PRIMARY KEY (ip, port)
+);
+
+/* Lookup ereporter endpoint registrations by the reporter ID and generation */
+CREATE INDEX IF NOT EXISTS lookup_ereporter_endpoint_by_ereporter ON omicron.public.ereporter_endpoint (
+    reporter_id, reporter_gen
+) WHERE
+    time_deleted IS NULL;
+
+/*
  * Keep this at the end of file so that the database does not contain a version
  * until it is fully populated.
  */
