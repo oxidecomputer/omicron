@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use crate::context::ServerContext;
+use crate::context::{ServerContext, SingleServerContext};
 use clickhouse_admin_api::*;
 use clickhouse_admin_types::{
     ClickhouseKeeperClusterMembership, KeeperConf, KeeperConfig,
@@ -10,20 +10,27 @@ use clickhouse_admin_types::{
     ServerConfigurableSettings,
 };
 use dropshot::{
-    HttpError, HttpResponseCreated, HttpResponseOk, RequestContext, TypedBody,
+    ApiDescription, HttpError, HttpResponseCreated, HttpResponseOk,
+    HttpResponseUpdatedNoContent, RequestContext, TypedBody,
 };
 use illumos_utils::svcadm::Svcadm;
+use oximeter_db::{Client as OximeterClient, OXIMETER_VERSION};
+use slog::debug;
 use std::sync::Arc;
 
-type ClickhouseApiDescription = dropshot::ApiDescription<Arc<ServerContext>>;
-
-pub fn clickhouse_admin_server_api() -> ClickhouseApiDescription {
+pub fn clickhouse_admin_server_api() -> ApiDescription<Arc<ServerContext>> {
     clickhouse_admin_server_api_mod::api_description::<ClickhouseAdminServerImpl>()
         .expect("registered entrypoints")
 }
 
-pub fn clickhouse_admin_keeper_api() -> ClickhouseApiDescription {
+pub fn clickhouse_admin_keeper_api() -> ApiDescription<Arc<ServerContext>> {
     clickhouse_admin_keeper_api_mod::api_description::<ClickhouseAdminKeeperImpl>()
+        .expect("registered entrypoints")
+}
+
+pub fn clickhouse_admin_single_api() -> ApiDescription<Arc<SingleServerContext>>
+{
+    clickhouse_admin_single_api_mod::api_description::<ClickhouseAdminSingleImpl>()
         .expect("registered entrypoints")
 }
 
@@ -100,5 +107,40 @@ impl ClickhouseAdminKeeperApi for ClickhouseAdminKeeperImpl {
         let ctx = rqctx.context();
         let output = ctx.clickhouse_cli().keeper_cluster_membership().await?;
         Ok(HttpResponseOk(output))
+    }
+}
+
+enum ClickhouseAdminSingleImpl {}
+
+impl ClickhouseAdminSingleApi for ClickhouseAdminSingleImpl {
+    type Context = Arc<SingleServerContext>;
+
+    async fn init_db(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+        let log = &rqctx.log;
+        let ctx = rqctx.context();
+        let initialized = ctx.db_initialized();
+        let mut initialized = initialized.lock().await;
+        if !*initialized {
+            let address = ctx.clickhouse_cli().listen_address;
+            let client = OximeterClient::new(address.into(), log);
+            debug!(
+                log,
+                "initializing single-node ClickHouse \
+                 at {address} to version {OXIMETER_VERSION}"
+            );
+            client
+                .initialize_db_with_version(false, OXIMETER_VERSION)
+                .await
+                .map_err(|e| {
+                    HttpError::for_internal_error(format!(
+                        "can't initialize single-node ClickHouse \
+                         at {address} to version {OXIMETER_VERSION}: {e}",
+                    ))
+                })?;
+            *initialized = true;
+        }
+        Ok(HttpResponseUpdatedNoContent())
     }
 }

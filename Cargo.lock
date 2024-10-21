@@ -1339,6 +1339,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "clickhouse-admin-single-client"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "clickhouse-admin-types",
+ "omicron-uuid-kinds",
+ "omicron-workspace-hack",
+ "progenitor",
+ "reqwest 0.12.8",
+ "schemars",
+ "serde",
+ "slog",
+]
+
+[[package]]
 name = "clickhouse-admin-types"
 version = "0.1.0"
 dependencies = [
@@ -5702,6 +5717,7 @@ dependencies = [
  "chrono",
  "clickhouse-admin-keeper-client",
  "clickhouse-admin-server-client",
+ "clickhouse-admin-single-client",
  "clickhouse-admin-types",
  "cockroach-admin-client",
  "diesel",
@@ -6556,6 +6572,7 @@ dependencies = [
  "clap",
  "clickhouse-admin-keeper-client",
  "clickhouse-admin-server-client",
+ "clickhouse-admin-single-client",
  "cockroach-admin-client",
  "criterion",
  "crucible-agent-client",
