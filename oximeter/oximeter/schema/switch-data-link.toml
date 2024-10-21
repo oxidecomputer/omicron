@@ -254,7 +254,7 @@ description = "ID of the switch the link is on"
 
 [fields.switch_fab]
 type = "string"
-description = "Fabric the switch the link is on"
+description = "Fabrication plant identifier of the switch the link is on"
 
 [fields.switch_lot]
 type = "string"
@@ -285,7 +285,7 @@ type = "string"
 description = "Serial number of the switch the link is on"
 
 [fields.switch_slot]
-type = "u32"
+type = "u16"
 description = "Slot number of the switch the link is on"
 
 [fields.port_id]
