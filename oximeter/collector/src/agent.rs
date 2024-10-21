@@ -13,6 +13,7 @@ use crate::ProducerEndpoint;
 use anyhow::anyhow;
 use chrono::DateTime;
 use chrono::Utc;
+use futures::Future;
 use futures::TryStreamExt;
 use nexus_client::types::IdSortMode;
 use nexus_client::Client as NexusClient;
@@ -374,15 +375,54 @@ async fn results_sink(
 }
 
 // A mapping of all the producers we've been assigned.
-#[derive(Debug)]
-struct ProducerMap {
+#[derive(Debug, Default)]
+struct ProducerMapInner {
     pub generation: u64,
     pub tasks: BTreeMap<Uuid, CollectionTask>,
 }
 
+// `LockedProducerMap` is a light wrapper around a `MutexGuard` to ensure that
+// mutations of the tasks list always bump the map's generation (via
+// `LockedProducerMap::tasks_mut()`).
+#[derive(Debug)]
+struct LockedProducerMap<'a> {
+    guard: MutexGuard<'a, ProducerMapInner>,
+}
+
+impl LockedProducerMap<'_> {
+    fn generation(&self) -> u64 {
+        self.guard.generation
+    }
+
+    fn tasks(&self) -> &BTreeMap<Uuid, CollectionTask> {
+        &self.guard.tasks
+    }
+
+    // Mutate the tasks held by this map, bumping the map's generation by
+    // one. The provided closure is given the new generation number and a
+    // mutable refresh to the tasks map.
+    //
+    // See the comments on `refresh_producer_list` and `ensure_producers` below
+    // for more details on the use of the map's generation.
+    async fn tasks_mut<'a, F, Fut, T>(&'a mut self, f: F) -> T
+    where
+        F: FnOnce(u64, &'a mut BTreeMap<Uuid, CollectionTask>) -> Fut,
+        Fut: Future<Output = T> + 'a,
+    {
+        self.guard.generation += 1;
+        f(self.guard.generation, &mut self.guard.tasks).await
+    }
+}
+
+#[derive(Debug, Default)]
+struct ProducerMap {
+    inner: Mutex<ProducerMapInner>,
+}
+
 impl ProducerMap {
-    fn new() -> Self {
-        Self { generation: 0, tasks: BTreeMap::new() }
+    async fn lock(&self) -> LockedProducerMap<'_> {
+        let guard = self.inner.lock().await;
+        LockedProducerMap { guard }
     }
 }
 
@@ -397,7 +437,7 @@ pub struct OximeterAgent {
     // Handle to the TX-side of a channel for collecting results from the collection tasks
     result_sender: mpsc::Sender<(Option<CollectionToken>, ProducerResults)>,
     // The producers we are responsible for collecting from.
-    producers: Arc<Mutex<ProducerMap>>,
+    producers: Arc<ProducerMap>,
     // The interval on which we refresh our list of producers from Nexus
     refresh_interval: Duration,
     // Handle to the task used to periodically refresh the list of producers.
@@ -491,7 +531,7 @@ impl OximeterAgent {
             log,
             collection_target,
             result_sender,
-            producers: Arc::new(Mutex::new(ProducerMap::new())),
+            producers: Arc::new(ProducerMap::default()),
             refresh_interval,
             refresh_task: Arc::new(StdMutex::new(None)),
             last_refresh_time: Arc::new(StdMutex::new(None)),
@@ -592,7 +632,7 @@ impl OximeterAgent {
             log,
             collection_target,
             result_sender,
-            producers: Arc::new(Mutex::new(ProducerMap::new())),
+            producers: Arc::new(ProducerMap::default()),
             refresh_interval,
             refresh_task: Arc::new(StdMutex::new(None)),
             last_refresh_time,
@@ -604,28 +644,27 @@ impl OximeterAgent {
         &self,
         info: ProducerEndpoint,
     ) -> Result<(), Error> {
-        let mut producers = self.producers.lock().await;
-
-        // First increment the generation number of the entire collection, since
-        // we're modifying it by adding in this new producer.
-        producers.generation += 1;
-        self.register_producer_locked(&mut producers, info).await;
-        Ok(())
+        self.producers
+            .lock()
+            .await
+            .tasks_mut(|new_generation, tasks| async move {
+                self.register_producer_locked(new_generation, tasks, info)
+                    .await;
+                Ok(())
+            })
+            .await
     }
 
     // Internal implementation that registers a producer, assuming the lock on
     // the map is held.
-    //
-    // NOTE: The caller is required to increment the generation number before
-    // calling this, if needed.
     async fn register_producer_locked(
         &self,
-        producers: &mut MutexGuard<'_, ProducerMap>,
+        generation: u64,
+        producer_tasks: &mut BTreeMap<Uuid, CollectionTask>,
         info: ProducerEndpoint,
     ) {
         let id = info.id;
-        let generation = producers.generation;
-        match producers.tasks.entry(id) {
+        match producer_tasks.entry(id) {
             Entry::Vacant(value) => {
                 debug!(
                     self.log,
@@ -679,7 +718,7 @@ impl OximeterAgent {
     pub async fn force_collection(&self) {
         let mut collection_oneshots = vec![];
         let producers = self.producers.lock().await;
-        for task in producers.tasks.values() {
+        for task in producers.tasks().values() {
             let (tx, rx) = oneshot::channel();
             // Scrape from each producer, into oximeter...
             task.inbox.send(CollectionMessage::Collect(tx)).await.unwrap();
@@ -711,7 +750,7 @@ impl OximeterAgent {
         self.producers
             .lock()
             .await
-            .tasks
+            .tasks()
             .range((start, Bound::Unbounded))
             .take(limit)
             .map(|(_id, task)| task.producer.clone())
@@ -720,19 +759,23 @@ impl OximeterAgent {
 
     /// Delete a producer by ID, stopping its collection task.
     pub async fn delete_producer(&self, id: Uuid) -> Result<(), Error> {
-        let mut producers = self.producers.lock().await;
-        producers.generation += 1;
-        self.delete_producer_locked(&mut producers, id).await
+        self.producers
+            .lock()
+            .await
+            .tasks_mut(|_generation, tasks| async {
+                self.delete_producer_locked(tasks, id).await
+            })
+            .await
     }
 
     // Internal implementation that deletes a producer, assuming the lock on
     // the map is held.
     async fn delete_producer_locked(
         &self,
-        producers: &mut MutexGuard<'_, ProducerMap>,
+        producer_tasks: &mut BTreeMap<Uuid, CollectionTask>,
         id: Uuid,
     ) -> Result<(), Error> {
-        let Some(task) = producers.tasks.remove(&id) else {
+        let Some(task) = producer_tasks.remove(&id) else {
             // We have no such producer, so good news, we've removed it!
             return Ok(());
         };
@@ -771,86 +814,94 @@ impl OximeterAgent {
         desired_producers: BTreeMap<Uuid, ProducerEndpoint>,
         generation_at_refresh: u64,
     ) -> (u64, usize) {
-        let mut producers = self.producers.lock().await;
-        producers.generation += 1;
+        self.producers
+            .lock()
+            .await
+            .tasks_mut(|new_generation, tasks| async move {
+                // Next, prune unwanted collection tasks.
+                //
+                // This is set of all producers that we currently have, which
+                // are not in the new list from Nexus. Note that we cannot prune
+                // any with a newer generation number, since these were by
+                // definition added while we started to refresh our list of
+                // producers from Nexus -- we didn't get them in the list, but
+                // they were registered concurrently.
+                let ids_to_prune: Vec<_> = tasks
+                    .iter()
+                    .filter_map(|(id, task)| {
+                        if desired_producers.contains_key(id) {
+                            trace!(
+                                self.log,
+                                "keeping producer in both current \
+                                 and desired set";
+                                "id" => %id,
+                            );
+                            return None;
+                        }
+                        if task.generation > generation_at_refresh {
+                            trace!(
+                                self.log,
+                                "keeping producer not in desired set, \
+                                 but with newer generation number";
+                                "id" => %id,
+                                "generation_at_refresh" =>
+                                    generation_at_refresh,
+                                "producer_generation" => task.generation,
+                            );
+                            return None;
+                        }
+                        trace!(
+                            self.log,
+                            "pruning old producer not in map and with \
+                             stale generation number";
+                            "id" => %id,
+                            "generation_at_refresh" => generation_at_refresh,
+                            "producer_generation" => task.generation,
+                        );
+                        Some(id)
+                    })
+                    .copied()
+                    .collect();
+                let n_pruned = ids_to_prune.len();
+                for id in ids_to_prune.into_iter() {
+                    // This method only returns an error if the provided ID does
+                    // not exist in the current tasks. That is impossible,
+                    // because we hold the lock, and we've just computed this as
+                    // the set that _is_ in the map, and not in the new set from
+                    // Nexus.
+                    self.delete_producer_locked(tasks, id).await.unwrap();
+                }
 
-        // Next, prune unwanted collection tasks.
-        //
-        // This is set of all producers that we currently have, which are not in
-        // the new list from Nexus. Note that we cannot prune any with a newer
-        // generation number, since these were by definition added while we
-        // started to refresh our list of producers from Nexus -- we didn't get
-        // them in the list, but they were registered concurrently.
-        let ids_to_prune: Vec<_> = producers
-            .tasks
-            .iter()
-            .filter_map(|(id, task)| {
-                if desired_producers.contains_key(id) {
-                    trace!(
-                        self.log,
-                        "keeping producer in both current and desired set";
-                        "id" => %id,
-                    );
-                    return None;
+                // And then ensure everything in the list.
+                //
+                // This will insert new tasks, and update any that we already
+                // know about.
+                //
+                // NOTE: It's technically possible for the following to happen:
+                //
+                // - we start the refresh list, which fetches the first page
+                // - a producer on that list deletes itself
+                // - we complete the list and enter this method, with that
+                //   now-deleted producer
+                //
+                // This is fine, if not ideal. We have no way of knowing at this
+                // point that we've removed the producer previously, so we
+                // really can't tell the difference between brand new producers
+                // and this case. Second, we'll try to collect from them, which
+                // will fail, but we'll remove them from the list on the next
+                // pass through the refresh operation.
+                for info in desired_producers.into_values() {
+                    self.register_producer_locked(new_generation, tasks, info)
+                        .await;
                 }
-                if task.generation > generation_at_refresh {
-                    trace!(
-                        self.log,
-                        "keeping producer not in desired set, \
-                        but with newer generation number";
-                        "id" => %id,
-                        "generation_at_refresh" => generation_at_refresh,
-                        "producer_generation" => task.generation,
-                    );
-                    return None;
-                }
-                trace!(
-                    self.log,
-                    "pruning old producer not in map and with \
-                    stale generation number";
-                    "id" => %id,
-                    "generation_at_refresh" => generation_at_refresh,
-                    "producer_generation" => task.generation,
-                );
-                Some(id)
+                (new_generation, n_pruned)
             })
-            .copied()
-            .collect();
-        let n_pruned = ids_to_prune.len();
-        for id in ids_to_prune.into_iter() {
-            // This method only returns an error if the provided ID does not
-            // exist in the current tasks. That is impossible, because we hold
-            // the lock, and we've just computed this as the set that _is_ in
-            // the map, and not in the new set from Nexus.
-            self.delete_producer_locked(&mut producers, id).await.unwrap();
-        }
-
-        // And then ensure everything in the list.
-        //
-        // This will insert new tasks, and update any that we already know
-        // about.
-        //
-        // NOTE: It's technically possible for the following to happen:
-        //
-        // - we start the refresh list, which fetches the first page
-        // - a producer on that list deletes itself
-        // - we complete the list and enter this method, with that now-deleted
-        // producer
-        //
-        // This is fine, if not ideal. We have no way of knowing at this point
-        // that we've removed the producer previously, so we really can't tell
-        // the difference between brand new producers and this case. Second,
-        // we'll try to collect from them, which will fail, but we'll remove
-        // them from the list on the next pass through the refresh operation.
-        for info in desired_producers.into_values() {
-            self.register_producer_locked(&mut producers, info).await;
-        }
-        (producers.generation, n_pruned)
+            .await
     }
 
     // Return the current generation number of the collection of producers.
     async fn collection_generation(&self) -> u64 {
-        self.producers.lock().await.generation
+        self.producers.lock().await.generation()
     }
 }
 
@@ -1068,7 +1119,7 @@ mod tests {
             .producers
             .lock()
             .await
-            .tasks
+            .tasks()
             .values()
             .next()
             .unwrap()
@@ -1133,7 +1184,7 @@ mod tests {
             .producers
             .lock()
             .await
-            .tasks
+            .tasks()
             .values()
             .next()
             .unwrap()
@@ -1208,7 +1259,7 @@ mod tests {
             .producers
             .lock()
             .await
-            .tasks
+            .tasks()
             .values()
             .next()
             .unwrap()

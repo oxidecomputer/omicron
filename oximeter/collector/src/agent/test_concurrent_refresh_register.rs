@@ -55,8 +55,8 @@ async fn test_register_during_refresh() {
     // It should have no registered producers.
     {
         let producers = collector.producers.lock().await;
-        assert!(producers.tasks.is_empty());
-        assert_eq!(producers.generation, 0);
+        assert!(producers.tasks().is_empty());
+        assert_eq!(producers.generation(), 0);
     }
 
     // Create three dummy producers. We'll return the first two from the
@@ -125,9 +125,9 @@ async fn test_register_during_refresh() {
         .expect("registered producer");
     {
         let producers = collector.producers.lock().await;
-        assert_eq!(producers.tasks.len(), 1);
-        assert!(producers.tasks.contains_key(&endpoints[0].id));
-        assert_eq!(producers.generation, 1);
+        assert_eq!(producers.tasks().len(), 1);
+        assert!(producers.tasks().contains_key(&endpoints[0].id));
+        assert_eq!(producers.generation(), 1);
     }
 
     // Send two pages to the collector's refresh operation via our channel to
@@ -162,11 +162,11 @@ async fn test_register_during_refresh() {
     // running.
     {
         let producers = collector.producers.lock().await;
-        assert_eq!(producers.generation, 2);
-        assert_eq!(producers.tasks.len(), 3);
+        assert_eq!(producers.generation(), 2);
+        assert_eq!(producers.tasks().len(), 3);
         for (i, endpoint) in endpoints.iter().enumerate() {
             assert!(
-                producers.tasks.contains_key(&endpoint.id),
+                producers.tasks().contains_key(&endpoint.id),
                 "missing producer {i}"
             );
         }
