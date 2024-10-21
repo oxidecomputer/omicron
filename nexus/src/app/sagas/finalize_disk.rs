@@ -286,7 +286,13 @@ async fn sfd_call_pantry_detach_for_disk(
     let params = sagactx.saga_params::<Params>()?;
     let pantry_address = sagactx.lookup::<SocketAddrV6>("pantry_address")?;
 
-    call_pantry_detach_for_disk(&log, params.disk_id, pantry_address).await
+    call_pantry_detach_for_disk(
+        sagactx.user_data().nexus(),
+        &log,
+        params.disk_id,
+        pantry_address,
+    )
+    .await
 }
 
 async fn sfd_clear_pantry_address(
