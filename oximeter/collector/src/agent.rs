@@ -978,6 +978,9 @@ async fn claim_nexus_with_backoff(
 }
 
 #[cfg(test)]
+mod test_concurrent_refresh_register;
+
+#[cfg(test)]
 mod tests {
     use super::CollectionMessage;
     use super::OximeterAgent;
