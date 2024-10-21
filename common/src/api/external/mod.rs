@@ -1156,7 +1156,9 @@ impl InstanceState {
 }
 
 /// The number of CPUs in an Instance
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(
+    Copy, Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq, Eq,
+)]
 pub struct InstanceCpuCount(pub u16);
 
 impl TryFrom<i64> for InstanceCpuCount {
