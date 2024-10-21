@@ -59,27 +59,21 @@ async fn test_register_during_refresh() {
         assert_eq!(producers.generation(), 0);
     }
 
-    // Create three dummy producers. We'll return the first two from the
-    // "refresh from Nexus" path, and concurrently register the third.
-    let dummy_producer_servers = (0..3)
-        .map(|_| {
-            let server = httpmock::MockServer::start();
-            server.mock(|when, then| {
-                when.any_request();
-                then.status(reqwest::StatusCode::OK).body("[]");
-            });
-            server
-        })
-        .collect::<Vec<_>>();
-    let endpoints = dummy_producer_servers
-        .iter()
-        .map(|server| ProducerEndpoint {
+    // Helper to create a dummy producer.
+    let make_dummy_producer = || {
+        let server = httpmock::MockServer::start();
+        server.mock(|when, then| {
+            when.any_request();
+            then.status(reqwest::StatusCode::OK).body("[]");
+        });
+        let endpoint = ProducerEndpoint {
             id: Uuid::new_v4(),
             kind: ProducerKind::Service,
             address: *server.address(),
             interval: Duration::from_secs(3600),
-        })
-        .collect::<Vec<_>>();
+        };
+        (server, endpoint)
+    };
 
     // Start our mock Nexus server. It will only respond from the producer list
     // endpoint when we send it producers over this channel.
@@ -119,24 +113,29 @@ async fn test_register_during_refresh() {
     // We know `collector` has started its refresh operation, but it's blocked
     // because our mock Nexus won't respond until we tell it to (which we'll do
     // below). In the meantime, explicitly register one producer.
+    let (_server, endpoint0) = make_dummy_producer();
     collector
-        .register_producer(endpoints[0].clone())
+        .register_producer(endpoint0.clone())
         .await
         .expect("registered producer");
     {
         let producers = collector.producers.lock().await;
         assert_eq!(producers.tasks().len(), 1);
-        assert!(producers.tasks().contains_key(&endpoints[0].id));
+        assert!(producers.tasks().contains_key(&endpoint0.id));
         assert_eq!(producers.generation(), 1);
     }
 
-    // Send two pages to the collector's refresh operation via our channel to
-    // our mock Nexus; this will finish the refresh operation, but we explicitly
-    // omit endpoint[0].
+    // Send a page to the collector's refresh operation via our channel to
+    // our mock Nexus; we explicitly omit endpoint0.
+    let (_server, endpoint1) = make_dummy_producer();
+    let (_server, endpoint2) = make_dummy_producer();
     producers_to_list_tx
-        .send(endpoints[1..].to_vec())
+        .send(vec![endpoint1.clone(), endpoint2.clone()])
         .await
         .expect("send page to mock nexus");
+
+    // Send an empty page to the collector's refresh operation; this signals
+    // that pagination is complete.
     producers_to_list_tx.send(vec![]).await.expect("send page to mock nexus");
 
     // Wait until the collector's generation has been bumped, signaling its
@@ -164,12 +163,18 @@ async fn test_register_during_refresh() {
         let producers = collector.producers.lock().await;
         assert_eq!(producers.generation(), 2);
         assert_eq!(producers.tasks().len(), 3);
-        for (i, endpoint) in endpoints.iter().enumerate() {
-            assert!(
-                producers.tasks().contains_key(&endpoint.id),
-                "missing producer {i}"
-            );
-        }
+        assert!(
+            producers.tasks().contains_key(&endpoint0.id),
+            "missing producer 0"
+        );
+        assert!(
+            producers.tasks().contains_key(&endpoint1.id),
+            "missing producer 1"
+        );
+        assert!(
+            producers.tasks().contains_key(&endpoint2.id),
+            "missing producer 2"
+        );
     }
 
     logctx.cleanup_successful();
