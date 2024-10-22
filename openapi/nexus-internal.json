@@ -153,6 +153,55 @@
         }
       }
     },
+    "/clickhouse/policy": {
+      "get": {
+        "summary": "Get the current clickhouse policy",
+        "operationId": "clickhouse_policy_get",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClickhousePolicy"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "post": {
+        "summary": "Set the new clickhouse policy",
+        "operationId": "clickhouse_policy_set",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClickhousePolicy"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/crucible/0/upstairs/{upstairs_id}/downstairs/{downstairs_id}/stop-request": {
       "post": {
         "summary": "An Upstairs will update this endpoint if a Downstairs client task is",
@@ -2616,6 +2665,115 @@
           "servers"
         ]
       },
+      "ClickhouseMode": {
+        "description": "How to deploy clickhouse nodes",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "single_node_only"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "cluster_only"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "target_keepers": {
+                    "type": "integer",
+                    "format": "uint8",
+                    "minimum": 0
+                  },
+                  "target_servers": {
+                    "type": "integer",
+                    "format": "uint8",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "target_keepers",
+                  "target_servers"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "both"
+                ]
+              },
+              "value": {
+                "type": "object",
+                "properties": {
+                  "target_keepers": {
+                    "type": "integer",
+                    "format": "uint8",
+                    "minimum": 0
+                  },
+                  "target_servers": {
+                    "type": "integer",
+                    "format": "uint8",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "target_keepers",
+                  "target_servers"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "value"
+            ]
+          }
+        ]
+      },
+      "ClickhousePolicy": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/ClickhouseMode"
+          },
+          "time_created": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "version": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "mode",
+          "time_created",
+          "version"
+        ]
+      },
       "CockroachDbClusterVersion": {
         "description": "CockroachDB cluster versions we are aware of.\n\nCockroachDB can be upgraded from one major version to the next, e.g. v22.1 -> v22.2. Each major version introduces changes in how it stores data on disk to support new features, and each major version has support for reading the previous version's data so that it can perform an upgrade. The version of the data format is called the \"cluster version\", which is distinct from but related to the software version that's being run.\n\nWhile software version v22.2 is using cluster version v22.1, it's possible to downgrade back to v22.1. Once the cluster version is upgraded, there's no going back.\n\nTo give us some time to evaluate new versions of the software while retaining a downgrade path, we currently deploy new versions of CockroachDB across two releases of the Oxide software, in a \"tick-tock\" model:\n\n- In \"tick\" releases, we upgrade the version of the CockroachDB software to a new major version, and update `CockroachDbClusterVersion::NEWLY_INITIALIZED`. On upgraded racks, the new version is running with the previous cluster version; on newly-initialized racks, the new version is running with the new cluser version. - In \"tock\" releases, we change `CockroachDbClusterVersion::POLICY` to the major version we upgraded to in the last \"tick\" release. This results in a new blueprint that upgrades the cluster version, destroying the downgrade path but allowing us to eventually upgrade to the next release.\n\nThese presently describe major versions of CockroachDB. The order of these must be maintained in the correct order (the first variant must be the earliest version).",
         "type": "string",
@@ -3062,13 +3220,10 @@
         ]
       },
       "DnsConfigParams": {
-        "description": "DnsConfigParams\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"generation\", \"time_created\", \"zones\" ], \"properties\": { \"generation\": { \"type\": \"integer\", \"format\": \"uint64\", \"minimum\": 0.0 }, \"time_created\": { \"type\": \"string\", \"format\": \"date-time\" }, \"zones\": { \"type\": \"array\", \"items\": { \"$ref\": \"#/components/schemas/DnsConfigZone\" } } } } ``` </details>",
         "type": "object",
         "properties": {
           "generation": {
-            "type": "integer",
-            "format": "uint64",
-            "minimum": 0
+            "$ref": "#/components/schemas/Generation"
           },
           "time_created": {
             "type": "string",
@@ -3088,7 +3243,6 @@
         ]
       },
       "DnsConfigZone": {
-        "description": "DnsConfigZone\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"records\", \"zone_name\" ], \"properties\": { \"records\": { \"type\": \"object\", \"additionalProperties\": { \"type\": \"array\", \"items\": { \"$ref\": \"#/components/schemas/DnsRecord\" } } }, \"zone_name\": { \"type\": \"string\" } } } ``` </details>",
         "type": "object",
         "properties": {
           "records": {
@@ -3110,7 +3264,6 @@
         ]
       },
       "DnsRecord": {
-        "description": "DnsRecord\n\n<details><summary>JSON schema</summary>\n\n```json { \"oneOf\": [ { \"type\": \"object\", \"required\": [ \"data\", \"type\" ], \"properties\": { \"data\": { \"type\": \"string\", \"format\": \"ipv4\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"A\" ] } } }, { \"type\": \"object\", \"required\": [ \"data\", \"type\" ], \"properties\": { \"data\": { \"type\": \"string\", \"format\": \"ipv6\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"AAAA\" ] } } }, { \"type\": \"object\", \"required\": [ \"data\", \"type\" ], \"properties\": { \"data\": { \"$ref\": \"#/components/schemas/Srv\" }, \"type\": { \"type\": \"string\", \"enum\": [ \"SRV\" ] } } } ] } ``` </details>",
         "oneOf": [
           {
             "type": "object",
@@ -4823,18 +4976,18 @@
               }
             ]
           },
-          "local_pref": {
-            "nullable": true,
-            "description": "The local preference associated with this route.",
-            "default": null,
-            "type": "integer",
-            "format": "uint32",
-            "minimum": 0
-          },
           "nexthop": {
             "description": "The nexthop/gateway address.",
             "type": "string",
             "format": "ip"
+          },
+          "rib_priority": {
+            "nullable": true,
+            "description": "The RIB priority (i.e. Admin Distance) associated with this route.",
+            "default": null,
+            "type": "integer",
+            "format": "uint8",
+            "minimum": 0
           },
           "vlan_id": {
             "nullable": true,
@@ -5327,7 +5480,6 @@
         ]
       },
       "Srv": {
-        "description": "Srv\n\n<details><summary>JSON schema</summary>\n\n```json { \"type\": \"object\", \"required\": [ \"port\", \"prio\", \"target\", \"weight\" ], \"properties\": { \"port\": { \"type\": \"integer\", \"format\": \"uint16\", \"minimum\": 0.0 }, \"prio\": { \"type\": \"integer\", \"format\": \"uint16\", \"minimum\": 0.0 }, \"target\": { \"type\": \"string\" }, \"weight\": { \"type\": \"integer\", \"format\": \"uint16\", \"minimum\": 0.0 } } } ``` </details>",
         "type": "object",
         "properties": {
           "port": {

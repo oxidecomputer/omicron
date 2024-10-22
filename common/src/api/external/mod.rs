@@ -727,8 +727,15 @@ impl From<ByteCount> for i64 {
 
 /// Generation numbers stored in the database, used for optimistic concurrency
 /// control
-// Because generation numbers are stored in the database, we represent them as
-// i64.
+//
+// A generation is a value between 0 and 2**63-1, i.e. equivalent to a u63.
+// The reason is that we store it as an i64 in the database, and we want to
+// disallow negative values. (We could potentially use two's complement to
+// store values greater than that as negative values, but surely 2**63 is
+// enough.)
+//
+// TODO: This allows deserialization into a value that's out of range. That's
+// not correct. See <https://github.com/oxidecomputer/omicron/issues/6865>.
 #[derive(
     Copy,
     Clone,
@@ -971,6 +978,9 @@ pub enum ResourceType {
     IpPool,
     IpPoolResource,
     InstanceNetworkInterface,
+    InternetGateway,
+    InternetGatewayIpPool,
+    InternetGatewayIpAddress,
     PhysicalDisk,
     Rack,
     Service,
@@ -1567,10 +1577,32 @@ pub struct RouterRoute {
     pub vpc_router_id: Uuid,
     /// Describes the kind of router. Set at creation. `read-only`
     pub kind: RouterRouteKind,
-    /// The location that matched packets should be forwarded to.
+    /// The location that matched packets should be forwarded to
     pub target: RouteTarget,
-    /// Selects which traffic this routing rule will apply to.
+    /// Selects which traffic this routing rule will apply to
     pub destination: RouteDestination,
+}
+
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InternetGatewayIpPool {
+    /// Common identifying metadata
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    /// The ID of the internet gateway to which the IP pool entry belongs
+    pub internet_gateway_id: Uuid,
+    /// The ID of the referenced IP pool
+    pub ip_pool_id: Uuid,
+}
+
+#[derive(ObjectIdentity, Clone, Debug, Deserialize, Serialize, JsonSchema)]
+pub struct InternetGatewayIp {
+    /// Common identifying metadata
+    #[serde(flatten)]
+    pub identity: IdentityMetadata,
+    /// The ID of the internet gateway to which the IP belongs
+    pub internet_gateway_id: Uuid,
+    /// The IP address
+    pub address: IpAddr,
 }
 
 /// A single rule in a VPC firewall
@@ -2582,8 +2614,8 @@ pub struct SwitchPortRouteConfig {
     /// over an 802.1Q tagged L2 segment.
     pub vlan_id: Option<u16>,
 
-    /// Local preference indicating priority within and across protocols.
-    pub local_pref: Option<u32>,
+    /// RIB Priority indicating priority within and across protocols.
+    pub rib_priority: Option<u8>,
 }
 
 /*

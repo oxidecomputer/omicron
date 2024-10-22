@@ -59,6 +59,7 @@ pub use network_resources::OmicronZoneExternalSnatIp;
 pub use network_resources::OmicronZoneNetworkResources;
 pub use network_resources::OmicronZoneNic;
 pub use network_resources::OmicronZoneNicEntry;
+pub use planning_input::ClickhouseMode;
 pub use planning_input::ClickhousePolicy;
 pub use planning_input::CockroachDbClusterVersion;
 pub use planning_input::CockroachDbPreserveDowngrade;
@@ -291,11 +292,9 @@ impl Blueprint {
             .collect();
 
         let before_zones = before
-            .omicron_zones
+            .sled_agents
             .iter()
-            .map(|(sled_id, zones_found)| {
-                (*sled_id, zones_found.zones.clone().into())
-            })
+            .map(|(sled_id, sa)| (*sled_id, sa.omicron_zones.clone().into()))
             .collect();
 
         let before_disks = before

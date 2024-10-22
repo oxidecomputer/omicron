@@ -41,9 +41,9 @@ use omicron_common::address::{
 use omicron_common::api::external::{ByteCount, ByteCountRangeError, Vni};
 use omicron_common::api::internal::nexus::SledVmmState;
 use omicron_common::api::internal::shared::{
-    HostPortConfig, RackNetworkConfig, ResolvedVpcFirewallRule,
-    ResolvedVpcRouteSet, ResolvedVpcRouteState, SledIdentifiers,
-    VirtualNetworkInterfaceHost,
+    ExternalIpGatewayMap, HostPortConfig, RackNetworkConfig,
+    ResolvedVpcFirewallRule, ResolvedVpcRouteSet, ResolvedVpcRouteState,
+    SledIdentifiers, VirtualNetworkInterfaceHost,
 };
 use omicron_common::api::{
     internal::nexus::DiskRuntimeState, internal::nexus::UpdateArtifactId,
@@ -145,7 +145,7 @@ pub enum Error {
     Hardware(String),
 
     #[error("Error resolving DNS name: {0}")]
-    ResolveError(#[from] internal_dns::resolver::ResolveError),
+    ResolveError(#[from] internal_dns_resolver::ResolveError),
 
     #[error(transparent)]
     ZpoolList(#[from] illumos_utils::zpool::ListError),
@@ -923,11 +923,6 @@ impl SledAgent {
         Ok(disk_result)
     }
 
-    /// List the Omicron zone configuration that's currently running
-    pub async fn omicron_zones_list(&self) -> OmicronZonesConfig {
-        self.inner.services.omicron_zones_list().await
-    }
-
     /// Ensures that the specific set of Omicron zones are running as configured
     /// (and that no other zones are running)
     pub async fn omicron_zones_ensure(
@@ -1183,6 +1178,42 @@ impl SledAgent {
         self.inner.port_manager.vpc_routes_ensure(routes).map_err(Error::from)
     }
 
+    pub async fn set_eip_gateways(
+        &self,
+        mappings: ExternalIpGatewayMap,
+    ) -> Result<(), Error> {
+        info!(
+            self.log,
+            "IGW mapping received";
+            "values" => ?mappings
+        );
+        let changed = self.inner.port_manager.set_eip_gateways(mappings);
+
+        // TODO(kyle)
+        // There is a substantial downside to this approach, which is that
+        // we can currently only do correct Internet Gateway association for
+        // *Instances* -- sled agent does not remember the ExtIPs associated
+        // with Services or with Probes.
+        //
+        // In practice, services should not have more than one IGW. Not having
+        // identical source IP selection for Probes is a little sad, though.
+        // OPTE will follow the old (single-IGW) behaviour when no mappings
+        // are installed.
+        //
+        // My gut feeling is that the correct place for External IPs to
+        // live is on each NetworkInterface, which makes it far simpler for
+        // nexus to administer and add/remove IPs on *all* classes of port
+        // via RPW. This is how we would make this correct in general.
+        // My understanding is that NetworkInterface's schema makes its way into
+        // the ledger, and I'm not comfortable redoing that this close to a release.
+        if changed {
+            self.inner.instances.refresh_external_ips().await?;
+            info!(self.log, "IGW mapping changed; external IPs refreshed");
+        }
+
+        Ok(())
+    }
+
     pub(crate) fn storage(&self) -> &StorageHandle {
         &self.inner.storage
     }
@@ -1231,7 +1262,10 @@ impl SledAgent {
         let mut disks = vec![];
         let mut zpools = vec![];
         let mut datasets = vec![];
-        let all_disks = self.storage().get_latest_disks().await;
+        let (all_disks, omicron_zones) = tokio::join!(
+            self.storage().get_latest_disks(),
+            self.inner.services.omicron_zones_list()
+        );
         for (identity, variant, slot, firmware) in all_disks.iter_all() {
             disks.push(InventoryDisk {
                 identity: identity.clone(),
@@ -1315,6 +1349,7 @@ impl SledAgent {
             usable_hardware_threads,
             usable_physical_ram: ByteCount::try_from(usable_physical_ram)?,
             reservoir_size,
+            omicron_zones,
             disks,
             zpools,
             datasets,

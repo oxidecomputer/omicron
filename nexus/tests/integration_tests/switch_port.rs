@@ -148,7 +148,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
                 dst: "1.2.3.0/24".parse().unwrap(),
                 gw: "1.2.3.4".parse().unwrap(),
                 vid: None,
-                local_pref: None,
+                rib_priority: None,
             }],
         },
     );

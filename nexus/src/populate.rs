@@ -421,6 +421,7 @@ mod test {
                 )
             })
             .unwrap();
+        datastore.terminate().await;
 
         // Test again with the database offline. In principle we could do this
         // immediately without creating a new pool and datastore.
@@ -460,6 +461,7 @@ mod test {
             ),
         };
         info!(&log, "populator {:?} done", p);
+        datastore.terminate().await;
         logctx.cleanup_successful();
     }
 }

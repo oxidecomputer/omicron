@@ -12,6 +12,7 @@ use dropshot::{
 use nexus_types::{
     deployment::{
         Blueprint, BlueprintMetadata, BlueprintTarget, BlueprintTargetSet,
+        ClickhousePolicy,
     },
     external_api::{
         params::{PhysicalDiskPath, SledSelector, UninitializedSledId},
@@ -530,6 +531,25 @@ pub trait NexusInternalApi {
         path_params: Path<ProbePathParam>,
         query_params: Query<PaginatedById>,
     ) -> Result<HttpResponseOk<Vec<ProbeInfo>>, HttpError>;
+
+    /// Get the current clickhouse policy
+    #[endpoint {
+     method = GET,
+     path = "/clickhouse/policy"
+     }]
+    async fn clickhouse_policy_get(
+        rqctx: RequestContext<Self::Context>,
+    ) -> Result<HttpResponseOk<ClickhousePolicy>, HttpError>;
+
+    /// Set the new clickhouse policy
+    #[endpoint {
+        method = POST,
+        path = "/clickhouse/policy"
+    }]
+    async fn clickhouse_policy_set(
+        rqctx: RequestContext<Self::Context>,
+        policy: TypedBody<ClickhousePolicy>,
+    ) -> Result<HttpResponseUpdatedNoContent, HttpError>;
 }
 
 /// Path parameters for Sled Agent requests (internal API)

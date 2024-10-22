@@ -19,7 +19,6 @@ use crate::check_allow_destructive::DestructiveOperationToken;
 use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::helpers::DATABASE_OPTIONS_HEADING;
 use crate::Omdb;
-use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::Context;
 use async_bb8_diesel::AsyncConnection;
@@ -45,6 +44,7 @@ use gateway_client::types::SpType;
 use indicatif::ProgressBar;
 use indicatif::ProgressDrawTarget;
 use indicatif::ProgressStyle;
+use internal_dns_types::names::ServiceName;
 use ipnetwork::IpNetwork;
 use nexus_config::PostgresConfigWithUrl;
 use nexus_db_model::Dataset;
@@ -221,10 +221,7 @@ impl DbUrlOptions {
                 );
                 eprintln!("note: (override with --db-url or OMDB_DB_URL)");
                 let addrs = omdb
-                    .dns_lookup_all(
-                        log.clone(),
-                        internal_dns::ServiceName::Cockroach,
-                    )
+                    .dns_lookup_all(log.clone(), ServiceName::Cockroach)
                     .await?;
 
                 format!(
@@ -257,10 +254,7 @@ impl DbUrlOptions {
         // doesn't match what we expect.  So we use `DataStore::new_unchecked()`
         // here.  We will then check the schema version explicitly and warn the
         // user if it doesn't match.
-        let datastore = Arc::new(
-            DataStore::new_unchecked(log.clone(), pool)
-                .map_err(|e| anyhow!(e).context("creating datastore"))?,
-        );
+        let datastore = Arc::new(DataStore::new_unchecked(log.clone(), pool));
         check_schema_version(&datastore).await;
         Ok(datastore)
     }
@@ -787,7 +781,7 @@ impl DbArgs {
     ) -> Result<(), anyhow::Error> {
         let datastore = self.db_url_opts.connect(omdb, log).await?;
         let opctx = OpContext::for_tests(log.clone(), datastore.clone());
-        match &self.command {
+        let res = match &self.command {
             DbCommands::Rack(RackArgs { command: RackCommands::List }) => {
                 cmd_db_rack_list(&opctx, &datastore, &self.fetch_opts).await
             }
@@ -1015,7 +1009,9 @@ impl DbArgs {
             DbCommands::Volumes(VolumeArgs {
                 command: VolumeCommands::List,
             }) => cmd_db_volume_list(&datastore, &self.fetch_opts).await,
-        }
+        };
+        datastore.terminate().await;
+        res
     }
 }
 
@@ -5182,31 +5178,23 @@ fn inv_collection_print_sleds(collection: &Collection) {
             println!("        reservation: {reservation:?}, quota: {quota:?}");
         }
 
-        if let Some(zones) = collection.omicron_zones.get(&sled.sled_id) {
-            println!(
-                "    zones collected from {} at {}",
-                zones.source, zones.time_collected,
-            );
-            println!(
-                "    zones generation: {} (count: {})",
-                zones.zones.generation,
-                zones.zones.zones.len()
-            );
+        println!(
+            "    zones generation: {} (count: {})",
+            sled.omicron_zones.generation,
+            sled.omicron_zones.zones.len(),
+        );
 
-            if zones.zones.zones.is_empty() {
-                continue;
-            }
+        if sled.omicron_zones.zones.is_empty() {
+            continue;
+        }
 
-            println!("    ZONES FOUND");
-            for z in &zones.zones.zones {
-                println!(
-                    "      zone {} (type {})",
-                    z.id,
-                    z.zone_type.kind().report_str()
-                );
-            }
-        } else {
-            println!("  warning: no zone information found");
+        println!("    ZONES FOUND");
+        for z in &sled.omicron_zones.zones {
+            println!(
+                "      zone {} (type {})",
+                z.id,
+                z.zone_type.kind().report_str()
+            );
         }
     }
 }

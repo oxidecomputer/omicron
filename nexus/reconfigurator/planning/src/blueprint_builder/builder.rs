@@ -39,6 +39,7 @@ use nexus_types::inventory::Collection;
 use omicron_common::address::get_sled_address;
 use omicron_common::address::get_switch_zone_address;
 use omicron_common::address::ReservedRackSubnet;
+use omicron_common::address::CLICKHOUSE_HTTP_PORT;
 use omicron_common::address::CP_SERVICES_RESERVED_ADDRESSES;
 use omicron_common::address::DNS_HTTP_PORT;
 use omicron_common::address::DNS_PORT;
@@ -180,6 +181,9 @@ impl fmt::Display for Operation {
                     }
                     ZoneExpungeReason::ClickhouseClusterDisabled => {
                         "clickhouse cluster disabled via policy"
+                    }
+                    ZoneExpungeReason::ClickhouseSingleNodeDisabled => {
+                        "clickhouse single-node disabled via policy"
                     }
                 };
                 write!(
@@ -561,13 +565,6 @@ impl<'a> BlueprintBuilder<'a> {
             "sled_id" => sled_id.to_string(),
         ));
 
-        // If there are any `ClickhouseServer` or `ClickhouseKeeper` zones that
-        // are not expunged and we no longer have a `ClickhousePolicy` which
-        // indicates replicated clickhouse clusters should be running, we need
-        // to expunge all such zones.
-        let clickhouse_cluster_enabled =
-            self.input.clickhouse_cluster_enabled();
-
         // Do any zones need to be marked expunged?
         let mut zones_to_expunge = BTreeMap::new();
 
@@ -579,11 +576,9 @@ impl<'a> BlueprintBuilder<'a> {
                 "zone_id" => zone_id.to_string()
             ));
 
-            let Some(reason) = zone_needs_expungement(
-                sled_details,
-                zone_config,
-                clickhouse_cluster_enabled,
-            ) else {
+            let Some(reason) =
+                zone_needs_expungement(sled_details, zone_config, &self.input)
+            else {
                 continue;
             };
 
@@ -629,6 +624,13 @@ impl<'a> BlueprintBuilder<'a> {
                             expunging related zone"
                         );
                     }
+                    ZoneExpungeReason::ClickhouseSingleNodeDisabled => {
+                        info!(
+                            &log,
+                            "clickhouse single-node disabled via policy, \
+                            expunging related zone"
+                        );
+                    }
                 }
 
                 zones_to_expunge.insert(zone_id, reason);
@@ -660,6 +662,7 @@ impl<'a> BlueprintBuilder<'a> {
         let mut count_sled_decommissioned = 0;
         let mut count_sled_expunged = 0;
         let mut count_clickhouse_cluster_disabled = 0;
+        let mut count_clickhouse_single_node_disabled = 0;
         for reason in zones_to_expunge.values() {
             match reason {
                 ZoneExpungeReason::DiskExpunged => count_disk_expunged += 1,
@@ -670,6 +673,9 @@ impl<'a> BlueprintBuilder<'a> {
                 ZoneExpungeReason::ClickhouseClusterDisabled => {
                     count_clickhouse_cluster_disabled += 1
                 }
+                ZoneExpungeReason::ClickhouseSingleNodeDisabled => {
+                    count_clickhouse_single_node_disabled += 1
+                }
             };
         }
         let count_and_reason = [
@@ -679,6 +685,10 @@ impl<'a> BlueprintBuilder<'a> {
             (
                 count_clickhouse_cluster_disabled,
                 ZoneExpungeReason::ClickhouseClusterDisabled,
+            ),
+            (
+                count_clickhouse_single_node_disabled,
+                ZoneExpungeReason::ClickhouseSingleNodeDisabled,
             ),
         ];
         for (count, reason) in count_and_reason {
@@ -1192,6 +1202,51 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(EnsureMultiple::Changed { added: num_oximeter_to_add, removed: 0 })
     }
 
+    pub fn sled_ensure_zone_multiple_crucible_pantry(
+        &mut self,
+        sled_id: SledUuid,
+        desired_zone_count: usize,
+    ) -> Result<EnsureMultiple, Error> {
+        // How many zones do we need to add?
+        let pantry_count = self
+            .sled_num_running_zones_of_kind(sled_id, ZoneKind::CruciblePantry);
+        let num_pantry_to_add =
+            match desired_zone_count.checked_sub(pantry_count) {
+                Some(0) => return Ok(EnsureMultiple::NotNeeded),
+                Some(n) => n,
+                None => {
+                    return Err(Error::Planner(anyhow!(
+                        "removing a Crucible pantry zone not yet supported \
+                         (sled {sled_id} has {pantry_count}; \
+                         planner wants {desired_zone_count})"
+                    )));
+                }
+            };
+
+        for _ in 0..num_pantry_to_add {
+            let pantry_id = self.rng.zone_rng.next();
+            let ip = self.sled_alloc_ip(sled_id)?;
+            let port = omicron_common::address::CRUCIBLE_PANTRY_PORT;
+            let address = SocketAddrV6::new(ip, port, 0, 0);
+            let zone_type = BlueprintZoneType::CruciblePantry(
+                blueprint_zone_type::CruciblePantry { address },
+            );
+            let filesystem_pool =
+                self.sled_select_zpool(sled_id, zone_type.kind())?;
+
+            let zone = BlueprintZoneConfig {
+                disposition: BlueprintZoneDisposition::InService,
+                id: pantry_id,
+                underlay_address: ip,
+                filesystem_pool: Some(filesystem_pool),
+                zone_type,
+            };
+            self.sled_add_zone(sled_id, zone)?;
+        }
+
+        Ok(EnsureMultiple::Changed { added: num_pantry_to_add, removed: 0 })
+    }
+
     pub fn cockroachdb_preserve_downgrade(
         &mut self,
         version: CockroachDbPreserveDowngrade,
@@ -1248,6 +1303,58 @@ impl<'a> BlueprintBuilder<'a> {
         Ok(EnsureMultiple::Changed { added: num_crdb_to_add, removed: 0 })
     }
 
+    fn sled_add_zone_clickhouse(
+        &mut self,
+        sled_id: SledUuid,
+    ) -> Result<Ensure, Error> {
+        let id = self.rng.zone_rng.next();
+        let underlay_address = self.sled_alloc_ip(sled_id)?;
+        let address =
+            SocketAddrV6::new(underlay_address, CLICKHOUSE_HTTP_PORT, 0, 0);
+        let pool_name =
+            self.sled_select_zpool(sled_id, ZoneKind::Clickhouse)?;
+        let zone_type =
+            BlueprintZoneType::Clickhouse(blueprint_zone_type::Clickhouse {
+                address,
+                dataset: OmicronZoneDataset { pool_name: pool_name.clone() },
+            });
+
+        let zone = BlueprintZoneConfig {
+            disposition: BlueprintZoneDisposition::InService,
+            id,
+            underlay_address,
+            filesystem_pool: Some(pool_name),
+            zone_type,
+        };
+        self.sled_add_zone(sled_id, zone)?;
+        Ok(Ensure::Added)
+    }
+
+    pub fn sled_ensure_zone_multiple_clickhouse(
+        &mut self,
+        sled_id: SledUuid,
+        desired_zone_count: usize,
+    ) -> Result<EnsureMultiple, Error> {
+        // How many single-node ClickHouse zones do we want to add?
+        let count =
+            self.sled_num_running_zones_of_kind(sled_id, ZoneKind::Clickhouse);
+        let to_add = match desired_zone_count.checked_sub(count) {
+            Some(0) => return Ok(EnsureMultiple::NotNeeded),
+            Some(n) => n,
+            None => {
+                return Err(Error::Planner(anyhow!(
+                    "removing a single-node ClickHouse zone not yet supported \
+                     (sled {sled_id} has {count}; \
+                     planner wants {desired_zone_count})"
+                )));
+            }
+        };
+        for _ in 0..to_add {
+            self.sled_add_zone_clickhouse(sled_id)?;
+        }
+        Ok(EnsureMultiple::Changed { added: to_add, removed: 0 })
+    }
+
     pub fn sled_ensure_zone_multiple_clickhouse_server(
         &mut self,
         sled_id: SledUuid,
@@ -1275,8 +1382,8 @@ impl<'a> BlueprintBuilder<'a> {
             let underlay_ip = self.sled_alloc_ip(sled_id)?;
             let pool_name =
                 self.sled_select_zpool(sled_id, ZoneKind::ClickhouseServer)?;
-            let port = omicron_common::address::CLICKHOUSE_HTTP_PORT;
-            let address = SocketAddrV6::new(underlay_ip, port, 0, 0);
+            let address =
+                SocketAddrV6::new(underlay_ip, CLICKHOUSE_HTTP_PORT, 0, 0);
             let zone_type = BlueprintZoneType::ClickhouseServer(
                 blueprint_zone_type::ClickhouseServer {
                     address,
@@ -1646,12 +1753,11 @@ impl<'a> BlueprintBuilder<'a> {
     /// ordinarily only come from RSS.
     ///
     /// TODO-cleanup: Remove when external DNS addresses are in the policy.
-    #[cfg(test)]
-    #[track_caller]
-    pub fn add_external_dns_ip(&mut self, addr: IpAddr) {
-        self.external_networking()
-            .expect("failed to initialize external networking allocator")
-            .add_external_dns_ip(addr);
+    pub(crate) fn add_external_dns_ip(
+        &mut self,
+        addr: IpAddr,
+    ) -> Result<(), Error> {
+        self.external_networking()?.add_external_dns_ip(addr)
     }
 }
 
@@ -2428,7 +2534,7 @@ pub mod test {
         let err = builder
             .sled_ensure_zone_multiple_nexus(
                 collection
-                    .omicron_zones
+                    .sled_agents
                     .keys()
                     .next()
                     .copied()
@@ -2457,10 +2563,10 @@ pub mod test {
         // `sled_id`.
         let sled_id = {
             let mut selected_sled_id = None;
-            for (sled_id, zones) in &mut collection.omicron_zones {
-                let nzones_before_retain = zones.zones.zones.len();
-                zones.zones.zones.retain(|z| !z.zone_type.is_nexus());
-                if zones.zones.zones.len() < nzones_before_retain {
+            for (sled_id, sa) in &mut collection.sled_agents {
+                let nzones_before_retain = sa.omicron_zones.zones.len();
+                sa.omicron_zones.zones.retain(|z| !z.zone_type.is_nexus());
+                if sa.omicron_zones.zones.len() < nzones_before_retain {
                     selected_sled_id = Some(*sled_id);
                     // Also remove this zone from the blueprint.
                     let mut removed_nexus = None;

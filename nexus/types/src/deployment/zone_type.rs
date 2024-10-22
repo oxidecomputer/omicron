@@ -100,6 +100,11 @@ impl BlueprintZoneType {
         matches!(self, BlueprintZoneType::Crucible(_))
     }
 
+    /// Identifies whether this is a Crucible pantry zone
+    pub fn is_crucible_pantry(&self) -> bool {
+        matches!(self, BlueprintZoneType::CruciblePantry(_))
+    }
+
     /// Identifies whether this is a clickhouse keeper zone
     pub fn is_clickhouse_keeper(&self) -> bool {
         matches!(self, BlueprintZoneType::ClickhouseKeeper(_))

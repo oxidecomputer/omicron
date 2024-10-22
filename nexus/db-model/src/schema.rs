@@ -188,7 +188,7 @@ table! {
         dst -> Inet,
         gw -> Inet,
         vid -> Nullable<Int4>,
-        local_pref -> Nullable<Int8>,
+        local_pref -> Nullable<Int2>,
     }
 }
 
@@ -842,6 +842,16 @@ table! {
 }
 
 table! {
+    clickhouse_policy (version) {
+        version -> Int8,
+        clickhouse_mode -> crate::clickhouse_policy::ClickhouseModeEnum,
+        clickhouse_cluster_target_servers -> Int2,
+        clickhouse_cluster_target_keepers -> Int2,
+        time_created -> Timestamptz,
+    }
+}
+
+table! {
     rack (id) {
         id -> Uuid,
         time_created -> Timestamptz,
@@ -1144,6 +1154,46 @@ table! {
         vpc_router_id -> Uuid,
         target -> Text,
         destination -> Text,
+    }
+}
+
+table! {
+    internet_gateway(id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        vpc_id -> Uuid,
+        rcgen -> Int8,
+        resolved_version -> Int8,
+    }
+}
+
+table! {
+    internet_gateway_ip_pool(id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        internet_gateway_id -> Uuid,
+        ip_pool_id -> Uuid,
+    }
+}
+
+table! {
+    internet_gateway_ip_address(id) {
+        id -> Uuid,
+        name -> Text,
+        description -> Text,
+        time_created -> Timestamptz,
+        time_modified -> Timestamptz,
+        time_deleted -> Nullable<Timestamptz>,
+        internet_gateway_id -> Uuid,
+        address -> Inet,
     }
 }
 
@@ -1525,6 +1575,15 @@ table! {
         vni -> Int8,
         is_primary -> Bool,
         slot -> Int2,
+    }
+}
+
+table! {
+    inv_clickhouse_keeper_membership (inv_collection_id, queried_keeper_id) {
+        inv_collection_id -> Uuid,
+        queried_keeper_id -> Int8,
+        leader_committed_log_index -> Int8,
+        raft_config -> Array<Int8>,
     }
 }
 
@@ -1936,6 +1995,9 @@ allow_tables_to_appear_in_same_query!(
     role_builtin,
     role_assignment,
     probe,
+    internet_gateway,
+    internet_gateway_ip_pool,
+    internet_gateway_ip_address,
 );
 
 allow_tables_to_appear_in_same_query!(dns_zone, dns_version, dns_name);
@@ -1944,6 +2006,20 @@ allow_tables_to_appear_in_same_query!(dns_zone, dns_version, dns_name);
 allow_tables_to_appear_in_same_query!(external_ip, instance);
 allow_tables_to_appear_in_same_query!(external_ip, project);
 allow_tables_to_appear_in_same_query!(external_ip, ip_pool_resource);
+allow_tables_to_appear_in_same_query!(external_ip, vmm);
+allow_tables_to_appear_in_same_query!(external_ip, network_interface);
+allow_tables_to_appear_in_same_query!(external_ip, inv_omicron_zone);
+allow_tables_to_appear_in_same_query!(external_ip, inv_omicron_zone_nic);
+allow_tables_to_appear_in_same_query!(inv_omicron_zone, inv_omicron_zone_nic);
+allow_tables_to_appear_in_same_query!(network_interface, inv_omicron_zone);
+allow_tables_to_appear_in_same_query!(network_interface, inv_omicron_zone_nic);
+allow_tables_to_appear_in_same_query!(network_interface, inv_collection);
+allow_tables_to_appear_in_same_query!(inv_omicron_zone, inv_collection);
+allow_tables_to_appear_in_same_query!(inv_omicron_zone_nic, inv_collection);
+allow_tables_to_appear_in_same_query!(external_ip, inv_collection);
+allow_tables_to_appear_in_same_query!(external_ip, internet_gateway);
+allow_tables_to_appear_in_same_query!(external_ip, internet_gateway_ip_pool);
+allow_tables_to_appear_in_same_query!(external_ip, internet_gateway_ip_address);
 
 allow_tables_to_appear_in_same_query!(
     switch_port,

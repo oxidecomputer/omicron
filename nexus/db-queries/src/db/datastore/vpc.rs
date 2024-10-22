@@ -50,7 +50,16 @@ use diesel::result::DatabaseErrorKind;
 use diesel::result::Error as DieselError;
 use futures::stream::{self, StreamExt};
 use ipnetwork::IpNetwork;
+use nexus_db_fixed_data::vpc::SERVICES_INTERNET_GATEWAY_DEFAULT_ROUTE_V4;
+use nexus_db_fixed_data::vpc::SERVICES_INTERNET_GATEWAY_DEFAULT_ROUTE_V6;
+use nexus_db_fixed_data::vpc::SERVICES_INTERNET_GATEWAY_ID;
 use nexus_db_fixed_data::vpc::SERVICES_VPC_ID;
+use nexus_db_model::ExternalIp;
+use nexus_db_model::InternetGateway;
+use nexus_db_model::InternetGatewayIpAddress;
+use nexus_db_model::InternetGatewayIpPool;
+use nexus_db_model::IpPoolRange;
+use nexus_db_model::NetworkInterfaceKind;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::SledFilter;
 use omicron_common::api::external::http_pagination::PaginatedBy;
@@ -68,6 +77,7 @@ use omicron_common::api::external::RouteTarget;
 use omicron_common::api::external::RouterRouteKind as ExternalRouteKind;
 use omicron_common::api::external::UpdateResult;
 use omicron_common::api::external::Vni as ExternalVni;
+use omicron_common::api::internal::shared::ResolvedVpcRoute;
 use omicron_common::api::internal::shared::RouterTarget;
 use oxnet::IpNet;
 use ref_cast::RefCast;
@@ -85,8 +95,6 @@ impl DataStore {
     ) -> Result<(), Error> {
         use nexus_db_fixed_data::project::SERVICES_PROJECT_ID;
         use nexus_db_fixed_data::vpc::SERVICES_VPC;
-        use nexus_db_fixed_data::vpc::SERVICES_VPC_DEFAULT_V4_ROUTE_ID;
-        use nexus_db_fixed_data::vpc::SERVICES_VPC_DEFAULT_V6_ROUTE_ID;
 
         opctx.authorize(authz::Action::Modify, &authz::DATABASE).await?;
 
@@ -121,6 +129,25 @@ impl DataStore {
             Err(e) => Err(e),
         }?;
 
+        let igw = db::model::InternetGateway::new(
+            *SERVICES_INTERNET_GATEWAY_ID,
+            authz_vpc.id(),
+            nexus_types::external_api::params::InternetGatewayCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "default".parse().unwrap(),
+                    description: String::from("Default VPC gateway"),
+                },
+            },
+        );
+
+        match self.vpc_create_internet_gateway(&opctx, &authz_vpc, igw).await {
+            Ok(_) => Ok(()),
+            Err(e) => match e {
+                Error::ObjectAlreadyExists { .. } => Ok(()),
+                _ => Err(e),
+            },
+        }?;
+
         // Also add the system router and internet gateway route
 
         let system_router = db::lookup::LookupPath::new(opctx, self)
@@ -147,38 +174,41 @@ impl DataStore {
                 .map(|(authz_router, _)| authz_router)?
         };
 
-        // Unwrap safety: these are known valid CIDR blocks.
-        let default_ips = [
-            (
-                "default-v4",
-                "0.0.0.0/0".parse().unwrap(),
-                *SERVICES_VPC_DEFAULT_V4_ROUTE_ID,
-            ),
-            (
-                "default-v6",
-                "::/0".parse().unwrap(),
-                *SERVICES_VPC_DEFAULT_V6_ROUTE_ID,
-            ),
-        ];
-
-        for (name, default, uuid) in default_ips {
-            let route = RouterRoute::new(
-                uuid,
-                SERVICES_VPC.system_router_id,
-                ExternalRouteKind::Default,
-                nexus_types::external_api::params::RouterRouteCreate {
-                    identity: IdentityMetadataCreateParams {
-                        name: name.parse().unwrap(),
-                        description:
-                            "Default internet gateway route for Oxide Services"
-                                .to_string(),
-                    },
-                    target: RouteTarget::InternetGateway(
-                        "outbound".parse().unwrap(),
-                    ),
-                    destination: RouteDestination::IpNet(default),
+        let default_v4 = RouterRoute::new(
+            *SERVICES_INTERNET_GATEWAY_DEFAULT_ROUTE_V4,
+            SERVICES_VPC.system_router_id,
+            ExternalRouteKind::Default,
+            nexus_types::external_api::params::RouterRouteCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "default-v4".parse().unwrap(),
+                    description: String::from("Default IPv4 route"),
                 },
-            );
+                target: RouteTarget::InternetGateway(
+                    "default".parse().unwrap(),
+                ),
+                destination: RouteDestination::IpNet(
+                    "0.0.0.0/0".parse().unwrap(),
+                ),
+            },
+        );
+
+        let default_v6 = RouterRoute::new(
+            *SERVICES_INTERNET_GATEWAY_DEFAULT_ROUTE_V6,
+            SERVICES_VPC.system_router_id,
+            ExternalRouteKind::Default,
+            nexus_types::external_api::params::RouterRouteCreate {
+                identity: IdentityMetadataCreateParams {
+                    name: "default-v6".parse().unwrap(),
+                    description: String::from("Default IPv6 route"),
+                },
+                target: RouteTarget::InternetGateway(
+                    "default".parse().unwrap(),
+                ),
+                destination: RouteDestination::IpNet("::/0".parse().unwrap()),
+            },
+        );
+
+        for route in [default_v4, default_v6] {
             self.router_create_route(opctx, &authz_router, route)
                 .await
                 .map(|_| ())
@@ -1082,6 +1112,137 @@ impl DataStore {
         .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
+    pub async fn internet_gateway_list(
+        &self,
+        opctx: &OpContext,
+        authz_vpc: &authz::Vpc,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<InternetGateway> {
+        opctx.authorize(authz::Action::ListChildren, authz_vpc).await?;
+
+        use db::schema::internet_gateway::dsl;
+        match pagparams {
+            PaginatedBy::Id(pagparams) => {
+                paginated(dsl::internet_gateway, dsl::id, pagparams)
+            }
+            PaginatedBy::Name(pagparams) => paginated(
+                dsl::internet_gateway,
+                dsl::name,
+                &pagparams.map_name(|n| Name::ref_cast(n)),
+            ),
+        }
+        .filter(dsl::time_deleted.is_null())
+        .filter(dsl::vpc_id.eq(authz_vpc.id()))
+        .select(InternetGateway::as_select())
+        .load_async::<db::model::InternetGateway>(
+            &*self.pool_connection_authorized(opctx).await?,
+        )
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    pub async fn internet_gateway_has_ip_pools(
+        &self,
+        opctx: &OpContext,
+        authz_igw: &authz::InternetGateway,
+    ) -> LookupResult<bool> {
+        opctx.authorize(authz::Action::ListChildren, authz_igw).await?;
+
+        use db::schema::internet_gateway_ip_pool::dsl;
+        let result = dsl::internet_gateway_ip_pool
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::internet_gateway_id.eq(authz_igw.id()))
+            .select(InternetGatewayIpPool::as_select())
+            .limit(1)
+            .load_async::<db::model::InternetGatewayIpPool>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(!result.is_empty())
+    }
+
+    pub async fn internet_gateway_has_ip_addresses(
+        &self,
+        opctx: &OpContext,
+        authz_igw: &authz::InternetGateway,
+    ) -> LookupResult<bool> {
+        opctx.authorize(authz::Action::ListChildren, authz_igw).await?;
+
+        use db::schema::internet_gateway_ip_address::dsl;
+        let result = dsl::internet_gateway_ip_address
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::internet_gateway_id.eq(authz_igw.id()))
+            .select(InternetGatewayIpAddress::as_select())
+            .limit(1)
+            .load_async::<db::model::InternetGatewayIpAddress>(
+                &*self.pool_connection_authorized(opctx).await?,
+            )
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(!result.is_empty())
+    }
+
+    pub async fn internet_gateway_list_ip_pools(
+        &self,
+        opctx: &OpContext,
+        authz_igw: &authz::InternetGateway,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<InternetGatewayIpPool> {
+        opctx.authorize(authz::Action::ListChildren, authz_igw).await?;
+
+        use db::schema::internet_gateway_ip_pool::dsl;
+        match pagparams {
+            PaginatedBy::Id(pagparams) => {
+                paginated(dsl::internet_gateway_ip_pool, dsl::id, pagparams)
+            }
+            PaginatedBy::Name(pagparams) => paginated(
+                dsl::internet_gateway_ip_pool,
+                dsl::name,
+                &pagparams.map_name(|n| Name::ref_cast(n)),
+            ),
+        }
+        .filter(dsl::time_deleted.is_null())
+        .filter(dsl::internet_gateway_id.eq(authz_igw.id()))
+        .select(InternetGatewayIpPool::as_select())
+        .load_async::<db::model::InternetGatewayIpPool>(
+            &*self.pool_connection_authorized(opctx).await?,
+        )
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
+    pub async fn internet_gateway_list_ip_addresses(
+        &self,
+        opctx: &OpContext,
+        authz_igw: &authz::InternetGateway,
+        pagparams: &PaginatedBy<'_>,
+    ) -> ListResultVec<InternetGatewayIpAddress> {
+        opctx.authorize(authz::Action::ListChildren, authz_igw).await?;
+
+        use db::schema::internet_gateway_ip_address::dsl;
+        match pagparams {
+            PaginatedBy::Id(pagparams) => {
+                paginated(dsl::internet_gateway_ip_address, dsl::id, pagparams)
+            }
+            PaginatedBy::Name(pagparams) => paginated(
+                dsl::internet_gateway_ip_address,
+                dsl::name,
+                &pagparams.map_name(|n| Name::ref_cast(n)),
+            ),
+        }
+        .filter(dsl::time_deleted.is_null())
+        .filter(dsl::internet_gateway_id.eq(authz_igw.id()))
+        .select(InternetGatewayIpAddress::as_select())
+        .load_async::<db::model::InternetGatewayIpAddress>(
+            &*self.pool_connection_authorized(opctx).await?,
+        )
+        .await
+        .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
+    }
+
     pub async fn vpc_create_router(
         &self,
         opctx: &OpContext,
@@ -1115,6 +1276,45 @@ impl DataStore {
                 LookupType::ById(router.id()),
             ),
             router,
+        ))
+    }
+
+    pub async fn vpc_create_internet_gateway(
+        &self,
+        opctx: &OpContext,
+        authz_vpc: &authz::Vpc,
+        igw: InternetGateway,
+    ) -> CreateResult<(authz::InternetGateway, InternetGateway)> {
+        opctx.authorize(authz::Action::CreateChild, authz_vpc).await?;
+
+        use db::schema::internet_gateway::dsl;
+        let name = igw.name().clone();
+        let igw = diesel::insert_into(dsl::internet_gateway)
+            .values(igw)
+            .returning(InternetGateway::as_returning())
+            .get_result_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::Conflict(
+                        ResourceType::InternetGateway,
+                        name.as_str(),
+                    ),
+                )
+            })?;
+
+        // This is a named resource in router rules, so router resolution
+        // will change on add/delete.
+        self.vpc_increment_rpw_version(opctx, authz_vpc.id()).await?;
+
+        Ok((
+            authz::InternetGateway::new(
+                authz_vpc.clone(),
+                igw.id(),
+                LookupType::ById(igw.id()),
+            ),
+            igw,
         ))
     }
 
@@ -1166,6 +1366,176 @@ impl DataStore {
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
 
         Ok(())
+    }
+
+    pub async fn vpc_delete_internet_gateway(
+        &self,
+        opctx: &OpContext,
+        authz_igw: &authz::InternetGateway,
+        vpc_id: Uuid,
+        cascade: bool,
+    ) -> DeleteResult {
+        let res = if cascade {
+            self.vpc_delete_internet_gateway_cascade(opctx, authz_igw).await
+        } else {
+            self.vpc_delete_internet_gateway_no_cascade(opctx, authz_igw).await
+        };
+
+        if res.is_ok() {
+            // This is a named resource in router rules, so router resolution
+            // will change on add/delete.
+            self.vpc_increment_rpw_version(opctx, vpc_id).await?;
+        }
+
+        res
+    }
+
+    pub async fn vpc_delete_internet_gateway_no_cascade(
+        &self,
+        opctx: &OpContext,
+        authz_igw: &authz::InternetGateway,
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Delete, authz_igw).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let err = OptionalError::new();
+
+        #[derive(Debug)]
+        enum DeleteError {
+            IpPoolsExist,
+            IpAddressesExist,
+        }
+
+        self.transaction_retry_wrapper("vpc_delete_internet_gateway_no_cascade")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                async move {
+                    // Delete ip pool associations
+                    use db::schema::internet_gateway_ip_pool::dsl as pool;
+                    let count = pool::internet_gateway_ip_pool
+                        .filter(pool::time_deleted.is_null())
+                        .filter(pool::internet_gateway_id.eq(authz_igw.id()))
+                        .count()
+                        .first_async::<i64>(&conn)
+                        .await?;
+                    if count > 0 {
+                        return Err(err.bail(DeleteError::IpPoolsExist));
+                    }
+
+                    // Delete ip address associations
+                    use db::schema::internet_gateway_ip_address::dsl as addr;
+                    let count = addr::internet_gateway_ip_address
+                        .filter(addr::time_deleted.is_null())
+                        .filter(addr::internet_gateway_id.eq(authz_igw.id()))
+                        .count()
+                        .first_async::<i64>(&conn)
+                        .await?;
+                    if count > 0 {
+                        return Err(err.bail(DeleteError::IpAddressesExist));
+                    }
+
+                    use db::schema::internet_gateway::dsl;
+                    let now = Utc::now();
+                    diesel::update(dsl::internet_gateway)
+                        .filter(dsl::time_deleted.is_null())
+                        .filter(dsl::id.eq(authz_igw.id()))
+                        .set(dsl::time_deleted.eq(now))
+                        .execute_async(&conn)
+                        .await?;
+
+                    Ok(())
+                }
+            })
+            .await
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    match err {
+                        DeleteError::IpPoolsExist => Error::invalid_request("Ip pools referencing this gateway exist. To perform a cascading delete set the cascade option"),
+                        DeleteError::IpAddressesExist => Error::invalid_request("Ip addresses referencing this gateway exist. To perform a cascading delete set the cascade option"),
+                    }
+                } else {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
+            })
+    }
+
+    pub async fn vpc_delete_internet_gateway_cascade(
+        &self,
+        opctx: &OpContext,
+        authz_igw: &authz::InternetGateway,
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Delete, authz_igw).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        self.transaction_retry_wrapper("vpc_delete_internet_gateway_cascade")
+            .transaction(&conn, |conn| {
+                async move {
+                    use db::schema::internet_gateway::dsl as igw;
+                    let igw_info = igw::internet_gateway
+                        .filter(igw::time_deleted.is_null())
+                        .filter(igw::id.eq(authz_igw.id()))
+                        .select(InternetGateway::as_select())
+                        .first_async(&conn)
+                        .await?;
+
+                    use db::schema::internet_gateway::dsl;
+                    let now = Utc::now();
+                    diesel::update(dsl::internet_gateway)
+                        .filter(dsl::time_deleted.is_null())
+                        .filter(dsl::id.eq(authz_igw.id()))
+                        .set(dsl::time_deleted.eq(now))
+                        .execute_async(&conn)
+                        .await?;
+
+                    // Delete ip pool associations
+                    use db::schema::internet_gateway_ip_pool::dsl as pool;
+                    let now = Utc::now();
+                    diesel::update(pool::internet_gateway_ip_pool)
+                        .filter(pool::time_deleted.is_null())
+                        .filter(pool::internet_gateway_id.eq(authz_igw.id()))
+                        .set(pool::time_deleted.eq(now))
+                        .execute_async(&conn)
+                        .await?;
+
+                    // Delete ip address associations
+                    use db::schema::internet_gateway_ip_address::dsl as addr;
+                    let now = Utc::now();
+                    diesel::update(addr::internet_gateway_ip_address)
+                        .filter(addr::time_deleted.is_null())
+                        .filter(addr::internet_gateway_id.eq(authz_igw.id()))
+                        .set(addr::time_deleted.eq(now))
+                        .execute_async(&conn)
+                        .await?;
+
+                    // Delete routes targeting this igw
+                    use db::schema::vpc_router::dsl as vr;
+                    let vpc_routers = vr::vpc_router
+                        .filter(vr::time_deleted.is_null())
+                        .filter(vr::vpc_id.eq(igw_info.vpc_id))
+                        .select(VpcRouter::as_select())
+                        .load_async(&conn)
+                        .await?
+                        .into_iter()
+                        .map(|x| x.id())
+                        .collect::<Vec<_>>();
+
+                    use db::schema::router_route::dsl as rr;
+                    let now = Utc::now();
+                    diesel::update(rr::router_route)
+                        .filter(rr::time_deleted.is_null())
+                        .filter(rr::vpc_router_id.eq_any(vpc_routers))
+                        .filter(
+                            rr::target
+                                .eq(format!("inetgw:{}", igw_info.name())),
+                        )
+                        .set(rr::time_deleted.eq(now))
+                        .execute_async(&conn)
+                        .await?;
+
+                    Ok(())
+                }
+            })
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
     pub async fn vpc_update_router(
@@ -1266,6 +1636,76 @@ impl DataStore {
         })
     }
 
+    pub async fn internet_gateway_attach_ip_pool(
+        &self,
+        opctx: &OpContext,
+        authz_igw: &authz::InternetGateway,
+        igwip: InternetGatewayIpPool,
+    ) -> CreateResult<InternetGatewayIpPool> {
+        use db::schema::internet_gateway_ip_pool::dsl;
+        opctx.authorize(authz::Action::CreateChild, authz_igw).await?;
+
+        let igw_id = igwip.internet_gateway_id;
+        let name = igwip.name().clone();
+
+        InternetGateway::insert_resource(
+            igw_id,
+            diesel::insert_into(dsl::internet_gateway_ip_pool).values(igwip),
+        )
+        .insert_and_get_result_async(
+            &*self.pool_connection_authorized(opctx).await?,
+        )
+        .await
+        .map_err(|e| match e {
+            AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
+                type_name: ResourceType::InternetGateway,
+                lookup_type: LookupType::ById(igw_id),
+            },
+            AsyncInsertError::DatabaseError(e) => public_error_from_diesel(
+                e,
+                ErrorHandler::Conflict(
+                    ResourceType::InternetGatewayIpPool,
+                    name.as_str(),
+                ),
+            ),
+        })
+    }
+
+    pub async fn internet_gateway_attach_ip_address(
+        &self,
+        opctx: &OpContext,
+        authz_igw: &authz::InternetGateway,
+        igwip: InternetGatewayIpAddress,
+    ) -> CreateResult<InternetGatewayIpAddress> {
+        use db::schema::internet_gateway_ip_address::dsl;
+        opctx.authorize(authz::Action::CreateChild, authz_igw).await?;
+
+        let igw_id = igwip.internet_gateway_id;
+        let name = igwip.name().clone();
+
+        InternetGateway::insert_resource(
+            igw_id,
+            diesel::insert_into(dsl::internet_gateway_ip_address).values(igwip),
+        )
+        .insert_and_get_result_async(
+            &*self.pool_connection_authorized(opctx).await?,
+        )
+        .await
+        .map_err(|e| match e {
+            AsyncInsertError::CollectionNotFound => Error::ObjectNotFound {
+                type_name: ResourceType::InternetGateway,
+                lookup_type: LookupType::ById(igw_id),
+            },
+            AsyncInsertError::DatabaseError(e) => public_error_from_diesel(
+                e,
+                ErrorHandler::Conflict(
+                    ResourceType::InternetGatewayIpAddress,
+                    name.as_str(),
+                ),
+            ),
+        })
+    }
+
     pub async fn router_delete_route(
         &self,
         opctx: &OpContext,
@@ -1288,6 +1728,276 @@ impl DataStore {
                 )
             })?;
         Ok(())
+    }
+
+    pub async fn internet_gateway_detach_ip_pool(
+        &self,
+        opctx: &OpContext,
+        igw_name: String,
+        authz_igw_pool: &authz::InternetGatewayIpPool,
+        ip_pool_id: Uuid,
+        vpc_id: Uuid,
+        cascade: bool,
+    ) -> DeleteResult {
+        if cascade {
+            self.internet_gateway_detach_ip_pool_cascade(opctx, authz_igw_pool)
+                .await
+        } else {
+            self.internet_gateway_detach_ip_pool_no_cascade(
+                opctx,
+                igw_name,
+                authz_igw_pool,
+                ip_pool_id,
+                vpc_id,
+            )
+            .await
+        }
+    }
+
+    pub async fn internet_gateway_detach_ip_pool_no_cascade(
+        &self,
+        opctx: &OpContext,
+        igw_name: String,
+        authz_igw_pool: &authz::InternetGatewayIpPool,
+        ip_pool_id: Uuid,
+        vpc_id: Uuid,
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Delete, authz_igw_pool).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let err = OptionalError::new();
+        #[derive(Debug)]
+        enum DeleteError {
+            DependentInstances,
+        }
+
+        self.transaction_retry_wrapper("internet_gateway_detach_ip_pool_no_cascade")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                let igw_name = igw_name.clone();
+                async move {
+                    // determine if there are routes that target this igw
+                    let this_target = format!("inetgw:{}", igw_name);
+                    use  db::schema::router_route::dsl as rr;
+                    let count = rr::router_route
+                        .filter(rr::time_deleted.is_null())
+                        .filter(rr::target.eq(this_target))
+                        .count()
+                        .first_async::<i64>(&conn)
+                        .await?;
+
+                    info!(self.log, "detach ip pool: applies to {} routes", count);
+
+                    if count > 0 {
+                        // determine if there are instances that have IP
+                        // addresses in the IP pool being removed.
+
+                        use db::schema::ip_pool_range::dsl as ipr;
+                        let pr = ipr::ip_pool_range
+                            .filter(ipr::time_deleted.is_null())
+                            .filter(ipr::ip_pool_id.eq(ip_pool_id))
+                            .select(IpPoolRange::as_select())
+                            .first_async::<IpPoolRange>(&conn)
+                            .await?;
+                        info!(self.log, "POOL {pr:#?}");
+
+                        use db::schema::instance_network_interface::dsl as ini;
+                        let vpc_interfaces = ini::instance_network_interface
+                            .filter(ini::time_deleted.is_null())
+                            .filter(ini::vpc_id.eq(vpc_id))
+                            .select(InstanceNetworkInterface::as_select())
+                            .load_async::<InstanceNetworkInterface>(&conn)
+                            .await?;
+
+                        info!(self.log, "detach ip pool: applies to {} interfaces", vpc_interfaces.len());
+
+                        for ifx in &vpc_interfaces {
+                            info!(self.log, "IFX {ifx:#?}");
+
+                            use db::schema::external_ip::dsl as xip;
+                            let ext_ips = xip::external_ip
+                                .filter(xip::time_deleted.is_null())
+                                .filter(xip::parent_id.eq(ifx.instance_id))
+                                .select(ExternalIp::as_select())
+                                .load_async::<ExternalIp>(&conn)
+                                .await?;
+
+                            info!(self.log, "EXT IP {ext_ips:#?}");
+
+                            for ext_ip in &ext_ips {
+                                if ext_ip.ip.ip() >= pr.first_address.ip() &&
+                                    ext_ip.ip.ip() <= pr.last_address.ip() {
+                                    return Err(err.bail(DeleteError::DependentInstances));
+                                }
+                            }
+                        }
+                    }
+
+                    use db::schema::internet_gateway_ip_pool::dsl;
+                    let now = Utc::now();
+                    diesel::update(dsl::internet_gateway_ip_pool)
+                        .filter(dsl::time_deleted.is_null())
+                        .filter(dsl::id.eq(authz_igw_pool.id()))
+                        .set(dsl::time_deleted.eq(now))
+                        .execute_async(&conn)
+                        .await?;
+
+                    Ok(())
+                }
+            })
+            .await
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    match err {
+                        DeleteError::DependentInstances => Error::invalid_request("VPC routes dependent on this IP pool. To perform a cascading delete set the cascade option"),
+                    }
+                } else {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
+            })
+    }
+
+    pub async fn internet_gateway_detach_ip_pool_cascade(
+        &self,
+        opctx: &OpContext,
+        authz_pool: &authz::InternetGatewayIpPool,
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Delete, authz_pool).await?;
+        use db::schema::internet_gateway_ip_pool::dsl;
+        let now = Utc::now();
+        diesel::update(dsl::internet_gateway_ip_pool)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(authz_pool.id()))
+            .set(dsl::time_deleted.eq(now))
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(())
+    }
+
+    pub async fn internet_gateway_detach_ip_address(
+        &self,
+        opctx: &OpContext,
+        igw_name: String,
+        authz_addr: &authz::InternetGatewayIpAddress,
+        addr: IpAddr,
+        vpc_id: Uuid,
+        cascade: bool,
+    ) -> DeleteResult {
+        if cascade {
+            self.internet_gateway_detach_ip_address_cascade(opctx, authz_addr)
+                .await
+        } else {
+            self.internet_gateway_detach_ip_address_no_cascade(
+                opctx, igw_name, authz_addr, addr, vpc_id,
+            )
+            .await
+        }
+    }
+
+    pub async fn internet_gateway_detach_ip_address_cascade(
+        &self,
+        opctx: &OpContext,
+        authz_addr: &authz::InternetGatewayIpAddress,
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Delete, authz_addr).await?;
+
+        use db::schema::internet_gateway_ip_address::dsl;
+        let now = Utc::now();
+        diesel::update(dsl::internet_gateway_ip_address)
+            .filter(dsl::time_deleted.is_null())
+            .filter(dsl::id.eq(authz_addr.id()))
+            .set(dsl::time_deleted.eq(now))
+            .execute_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByResource(authz_addr),
+                )
+            })?;
+        Ok(())
+    }
+
+    pub async fn internet_gateway_detach_ip_address_no_cascade(
+        &self,
+        opctx: &OpContext,
+        igw_name: String,
+        authz_addr: &authz::InternetGatewayIpAddress,
+        addr: IpAddr,
+        vpc_id: Uuid,
+    ) -> DeleteResult {
+        opctx.authorize(authz::Action::Delete, authz_addr).await?;
+        let conn = self.pool_connection_authorized(opctx).await?;
+        let err = OptionalError::new();
+        #[derive(Debug)]
+        enum DeleteError {
+            DependentInstances,
+        }
+        self.transaction_retry_wrapper("internet_gateway_detach_ip_address_no_cascade")
+            .transaction(&conn, |conn| {
+                let err = err.clone();
+                let igw_name = igw_name.clone();
+                async move {
+                    // determine if there are routes that target this igw
+                    let this_target = format!("inetgw:{}", igw_name);
+                    use  db::schema::router_route::dsl as rr;
+                    let count = rr::router_route
+                        .filter(rr::time_deleted.is_null())
+                        .filter(rr::target.eq(this_target))
+                        .count()
+                        .first_async::<i64>(&conn)
+                        .await?;
+
+                    if count > 0 {
+                        use db::schema::instance_network_interface::dsl as ini;
+                        let vpc_interfaces = ini::instance_network_interface
+                            .filter(ini::time_deleted.is_null())
+                            .filter(ini::vpc_id.eq(vpc_id))
+                            .select(InstanceNetworkInterface::as_select())
+                            .load_async::<InstanceNetworkInterface>(&conn)
+                            .await?;
+
+                        for ifx in &vpc_interfaces {
+
+                            use db::schema::external_ip::dsl as xip;
+                            let ext_ips = xip::external_ip
+                                .filter(xip::time_deleted.is_null())
+                                .filter(xip::parent_id.eq(ifx.instance_id))
+                                .select(ExternalIp::as_select())
+                                .load_async::<ExternalIp>(&conn)
+                                .await?;
+
+                            for ext_ip in &ext_ips {
+                                if ext_ip.ip.ip() == addr {
+                                    return Err(err.bail(DeleteError::DependentInstances));
+                                }
+                            }
+                        }
+                    }
+
+                    use db::schema::internet_gateway_ip_address::dsl;
+                    let now = Utc::now();
+                    diesel::update(dsl::internet_gateway_ip_address)
+                        .filter(dsl::time_deleted.is_null())
+                        .filter(dsl::id.eq(authz_addr.id()))
+                        .set(dsl::time_deleted.eq(now))
+                        .execute_async(&conn)
+                        .await?;
+
+                    Ok(())
+                }
+            })
+            .await
+            .map_err(|e| {
+                if let Some(err) = err.take() {
+                    match err {
+                        DeleteError::DependentInstances => Error::invalid_request("VPC routes dependent on this IP pool. To perform a cascading delete set the cascade option"),
+                    }
+                } else {
+                    public_error_from_diesel(e, ErrorHandler::Server)
+                }
+            })
     }
 
     pub async fn router_update_route(
@@ -1582,9 +2292,9 @@ impl DataStore {
             })
     }
 
-    /// Fetch all active custom routers (and their parent subnets)
+    /// Fetch all active custom routers (and their associated subnets)
     /// in a VPC.
-    pub async fn vpc_get_active_custom_routers(
+    pub async fn vpc_get_active_custom_routers_with_associated_subnets(
         &self,
         opctx: &OpContext,
         vpc_id: Uuid,
@@ -1616,12 +2326,157 @@ impl DataStore {
             })
     }
 
+    /// Fetch all custom routers in a VPC.
+    pub async fn vpc_get_custom_routers(
+        &self,
+        opctx: &OpContext,
+        vpc_id: Uuid,
+    ) -> ListResultVec<VpcRouter> {
+        use db::schema::vpc_router::dsl as router_dsl;
+
+        router_dsl::vpc_router
+            .filter(router_dsl::time_deleted.is_null())
+            .filter(router_dsl::vpc_id.eq(vpc_id))
+            .select(VpcRouter::as_select())
+            .load_async(&*self.pool_connection_authorized(opctx).await?)
+            .await
+            .map_err(|e| {
+                public_error_from_diesel(
+                    e,
+                    ErrorHandler::NotFoundByLookup(
+                        ResourceType::Vpc,
+                        LookupType::ById(vpc_id),
+                    ),
+                )
+            })
+    }
+
+    // XXX: maybe wants to live in external IP?
+    /// Returns a (Ip, NicId) -> InetGwId map which identifies, for a given sled:
+    /// * a) which external IPs belong to any of its services/instances/probe NICs.
+    /// * b) whether each IP is linked to an Internet Gateway via its parent pool.
+    pub async fn vpc_resolve_sled_external_ips_to_gateways(
+        &self,
+        opctx: &OpContext,
+        sled_id: Uuid,
+    ) -> Result<HashMap<Uuid, HashMap<IpAddr, HashSet<Uuid>>>, Error> {
+        // TODO: give GW-bound addresses preferential treatment.
+        use db::schema::external_ip as eip;
+        use db::schema::external_ip::dsl as eip_dsl;
+        use db::schema::internet_gateway as igw;
+        use db::schema::internet_gateway::dsl as igw_dsl;
+        use db::schema::internet_gateway_ip_address as igw_ip;
+        use db::schema::internet_gateway_ip_address::dsl as igw_ip_dsl;
+        use db::schema::internet_gateway_ip_pool as igw_pool;
+        use db::schema::internet_gateway_ip_pool::dsl as igw_pool_dsl;
+        use db::schema::network_interface as ni;
+        use db::schema::vmm;
+
+        // We don't know at first glance which VPC ID each IP addr has.
+        // VPC info is necessary to map back to the intended gateway.
+        // Goal is to join sled-specific
+        //  (IP, IP pool ID, VPC ID) X (IGW, IP pool ID)
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let mut out = HashMap::new();
+
+        let instance_mappings = eip_dsl::external_ip
+            .inner_join(
+                vmm::table.on(vmm::instance_id
+                    .nullable()
+                    .eq(eip::parent_id)
+                    .and(vmm::sled_id.eq(sled_id))),
+            )
+            .inner_join(
+                ni::table.on(ni::parent_id.nullable().eq(eip::parent_id)),
+            )
+            .inner_join(
+                igw_pool::table
+                    .on(eip_dsl::ip_pool_id.eq(igw_pool_dsl::ip_pool_id)),
+            )
+            .inner_join(
+                igw::table.on(igw_dsl::id
+                    .eq(igw_pool_dsl::internet_gateway_id)
+                    .and(igw_dsl::vpc_id.eq(ni::vpc_id))),
+            )
+            .filter(eip::time_deleted.is_null())
+            .filter(ni::time_deleted.is_null())
+            .filter(ni::is_primary.eq(true))
+            .filter(vmm::time_deleted.is_null())
+            .filter(igw_dsl::time_deleted.is_null())
+            .filter(igw_pool_dsl::time_deleted.is_null())
+            .select((eip_dsl::ip, ni::id, igw_dsl::id))
+            .load_async::<(IpNetwork, Uuid, Uuid)>(&*conn)
+            .await;
+
+        match instance_mappings {
+            Ok(map) => {
+                for (ip, nic_id, inet_gw_id) in map {
+                    let per_nic: &mut HashMap<_, _> =
+                        out.entry(nic_id).or_default();
+                    let igw_list: &mut HashSet<_> =
+                        per_nic.entry(ip.ip()).or_default();
+
+                    igw_list.insert(inet_gw_id);
+                }
+            }
+            Err(e) => {
+                return Err(Error::non_resourcetype_not_found(&format!(
+                    "unable to find IGW mappings for sled {sled_id}: {e}"
+                )))
+            }
+        }
+
+        // Map all individual IPs bound to IGWs to NICs in their VPC.
+        let indiv_ip_mappings = ni::table
+            .inner_join(igw::table.on(igw_dsl::vpc_id.eq(ni::vpc_id)))
+            .inner_join(
+                igw_ip::table
+                    .on(igw_ip_dsl::internet_gateway_id.eq(igw_dsl::id)),
+            )
+            .filter(ni::time_deleted.is_null())
+            .filter(ni::kind.eq(NetworkInterfaceKind::Instance))
+            .filter(igw_dsl::time_deleted.is_null())
+            .filter(igw_ip_dsl::time_deleted.is_null())
+            .select((igw_ip_dsl::address, ni::id, igw_dsl::id))
+            .load_async::<(IpNetwork, Uuid, Uuid)>(&*conn)
+            .await;
+
+        match indiv_ip_mappings {
+            Ok(map) => {
+                for (ip, nic_id, inet_gw_id) in map {
+                    let per_nic: &mut HashMap<_, _> =
+                        out.entry(nic_id).or_default();
+                    let igw_list: &mut HashSet<_> =
+                        per_nic.entry(ip.ip()).or_default();
+
+                    igw_list.insert(inet_gw_id);
+                }
+            }
+            Err(e) => {
+                return Err(Error::non_resourcetype_not_found(&format!(
+                    "unable to find IGW mappings for sled {sled_id}: {e}"
+                )))
+            }
+        }
+
+        // TODO: service & probe EIP mappings.
+        //       note that the current sled-agent design
+        //       does not yet allow us to re-ensure the set of
+        //       external IPs for non-instance entities.
+        //       if we insert those here, we need to be sure that
+        //       the mappings are ignored by sled-agent for new
+        //       services/probes/etc.
+
+        Ok(out)
+    }
+
     /// Resolve all targets in a router into concrete details.
     pub async fn vpc_resolve_router_rules(
         &self,
         opctx: &OpContext,
         vpc_router_id: Uuid,
-    ) -> Result<HashMap<IpNet, RouterTarget>, Error> {
+    ) -> Result<HashSet<ResolvedVpcRoute>, Error> {
         // Get all rules in target router.
         opctx.check_complex_operations_allowed()?;
 
@@ -1712,6 +2567,19 @@ impl DataStore {
             .collect::<HashMap<_, _>>()
             .await;
 
+        let inetgws = stream::iter(inetgw_names)
+            .filter_map(|name| async {
+                db::lookup::LookupPath::new(opctx, self)
+                    .vpc_id(authz_vpc.id())
+                    .internet_gateway_name(Name::ref_cast(&name))
+                    .fetch()
+                    .await
+                    .ok()
+                    .map(|(.., igw)| (name, igw))
+            })
+            .collect::<HashMap<_, _>>()
+            .await;
+
         let instances = stream::iter(instance_names)
             .filter_map(|name| async {
                 db::lookup::LookupPath::new(opctx, self)
@@ -1737,13 +2605,11 @@ impl DataStore {
             .collect::<HashMap<_, _>>()
             .await;
 
-        // TODO: validate names of Internet Gateways.
-
         // See the discussion in `resolve_firewall_rules_for_sled_agent` on
         // how we should resolve name misses in route resolution.
         // This method adopts the same strategy: a lookup failure corresponds
         // to a NO-OP rule.
-        let mut out = HashMap::new();
+        let mut out = HashSet::new();
         for rule in all_rules {
             // Some dests/targets (e.g., subnet) resolve to *several* specifiers
             // to handle both v4 and v6. The user-facing API will prevent severe
@@ -1772,12 +2638,12 @@ impl DataStore {
                 RouteDestination::Vpc(_) => (None, None),
             };
 
-            let (v4_target, v6_target) = match rule.target.0 {
+            let (v4_target, v6_target) = match &rule.target.0 {
                 RouteTarget::Ip(ip @ IpAddr::V4(_)) => {
-                    (Some(RouterTarget::Ip(ip)), None)
+                    (Some(RouterTarget::Ip(*ip)), None)
                 }
                 RouteTarget::Ip(ip @ IpAddr::V6(_)) => {
-                    (None, Some(RouterTarget::Ip(ip)))
+                    (None, Some(RouterTarget::Ip(*ip)))
                 }
                 RouteTarget::Subnet(n) => subnets
                     .get(&n)
@@ -1808,15 +2674,17 @@ impl DataStore {
                     (Some(RouterTarget::Drop), Some(RouterTarget::Drop))
                 }
 
-                // TODO: Internet Gateways.
-                //       The semantic here is 'name match => allow',
-                //       as the other aspect they will control is SNAT
-                //       IP allocation. Today, presence of this rule
-                //       allows upstream regardless of name.
-                RouteTarget::InternetGateway(_n) => (
-                    Some(RouterTarget::InternetGateway),
-                    Some(RouterTarget::InternetGateway),
-                ),
+                // Internet gateways tag matching packets with their ID, for
+                // NAT IP selection.
+                RouteTarget::InternetGateway(n) => inetgws
+                    .get(&n)
+                    .map(|igw| {
+                        (
+                            Some(RouterTarget::InternetGateway(Some(igw.id()))),
+                            Some(RouterTarget::InternetGateway(Some(igw.id()))),
+                        )
+                    })
+                    .unwrap_or_default(),
 
                 // TODO: VPC Peering.
                 RouteTarget::Vpc(_) => (None, None),
@@ -1829,11 +2697,11 @@ impl DataStore {
             //      It would be really useful to raise collisions and
             //      misses to users, somehow.
             if let (Some(dest), Some(target)) = (v4_dest, v4_target) {
-                out.insert(dest, target);
+                out.insert(ResolvedVpcRoute { dest, target });
             }
 
             if let (Some(dest), Some(target)) = (v6_dest, v6_target) {
-                out.insert(dest, target);
+                out.insert(ResolvedVpcRoute { dest, target });
             }
         }
 
@@ -1887,9 +2755,9 @@ impl DataStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::datastore::test::sled_baseboard_for_test;
     use crate::db::datastore::test::sled_system_hardware_for_test;
-    use crate::db::datastore::test_utils::datastore_test;
     use crate::db::datastore::test_utils::IneligibleSleds;
     use crate::db::model::Project;
     use crate::db::queries::vpc::MAX_VNI_SEARCH_RANGE_SIZE;
@@ -1900,7 +2768,6 @@ mod tests {
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_reconfigurator_planning::system::SledBuilder;
     use nexus_reconfigurator_planning::system::SystemDescription;
-    use nexus_test_utils::db::test_setup_database;
     use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::BlueprintTarget;
     use nexus_types::deployment::BlueprintZoneConfig;
@@ -1930,8 +2797,8 @@ mod tests {
             "test_project_create_vpc_raw_returns_none_on_vni_exhaustion",
         );
         let log = &logctx.log;
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Create a project.
         let project_params = params::ProjectCreate {
@@ -2021,7 +2888,7 @@ mod tests {
         else {
             panic!("Expected Ok(None) when creating a VPC without any available VNIs");
         };
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -2034,8 +2901,8 @@ mod tests {
         usdt::register_probes().unwrap();
         let logctx = dev::test_setup_log("test_project_create_vpc_retries");
         let log = &logctx.log;
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Create a project.
         let project_params = params::ProjectCreate {
@@ -2131,7 +2998,7 @@ mod tests {
             }
             Err(e) => panic!("Unexpected error when inserting VPC: {e}"),
         };
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -2179,8 +3046,8 @@ mod tests {
         let logctx = dev::test_setup_log(
             "test_vpc_resolve_to_sleds_uses_current_target_blueprint",
         );
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Set up our fake system with 5 sleds.
         let rack_id = Uuid::new_v4();
@@ -2416,7 +3283,7 @@ mod tests {
         )
         .await;
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -2541,8 +3408,8 @@ mod tests {
         let logctx =
             dev::test_setup_log("test_vpc_system_router_sync_to_subnets");
         let log = &logctx.log;
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let (_, authz_vpc, db_vpc, _, db_router) =
             create_initial_vpc(log, &opctx, &datastore).await;
@@ -2676,7 +3543,7 @@ mod tests {
         )
         .await;
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -2733,7 +3600,9 @@ mod tests {
 
         // And each subnet generates a v4->v4 and v6->v6.
         for subnet in subnets {
-            assert!(resolved.iter().any(|(k, v)| {
+            assert!(resolved.iter().any(|x| {
+                let k = &x.dest;
+                let v = &x.target;
                 *k == subnet.ipv4_block.0.into()
                     && match v {
                         RouterTarget::VpcSubnet(ip) => {
@@ -2742,7 +3611,9 @@ mod tests {
                         _ => false,
                     }
             }));
-            assert!(resolved.iter().any(|(k, v)| {
+            assert!(resolved.iter().any(|x| {
+                let k = &x.dest;
+                let v = &x.target;
                 *k == subnet.ipv6_block.0.into()
                     && match v {
                         RouterTarget::VpcSubnet(ip) => {
@@ -2764,8 +3635,8 @@ mod tests {
         let logctx =
             dev::test_setup_log("test_vpc_router_rule_instance_resolve");
         let log = &logctx.log;
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let (authz_project, authz_vpc, db_vpc, authz_router, _) =
             create_initial_vpc(log, &opctx, &datastore).await;
@@ -2894,14 +3765,14 @@ mod tests {
 
         // Verify we now have a route pointing at this instance.
         assert_eq!(routes.len(), 3);
-        assert!(routes.iter().any(|(k, v)| (*k
+        assert!(routes.iter().any(|x| (x.dest
             == "192.168.0.0/16".parse::<IpNet>().unwrap())
-            && match v {
-                RouterTarget::Ip(ip) => *ip == nic.ip.ip(),
+            && match x.target {
+                RouterTarget::Ip(ip) => ip == nic.ip.ip(),
                 _ => false,
             }));
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }

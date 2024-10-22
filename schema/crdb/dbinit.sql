@@ -42,6 +42,46 @@ ALTER DEFAULT PRIVILEGES GRANT INSERT, SELECT, UPDATE, DELETE ON TABLES to omicr
  */
 ALTER RANGE default CONFIGURE ZONE USING num_replicas = 5;
 
+
+/*
+ * The deployment strategy for clickhouse 
+ */
+CREATE TYPE IF NOT EXISTS omicron.public.clickhouse_mode AS ENUM (
+   -- Only deploy a single node clickhouse 
+   'single_node_only',
+
+   -- Only deploy a clickhouse cluster without any single node deployments 
+   'cluster_only',
+
+   -- Deploy both a single node and cluster deployment.
+   -- This is the strategy for stage 1 described in RFD 468
+   'both'
+);
+
+/*
+ * A planning policy for clickhouse for a single multirack setup
+ *
+ * We currently implicitly tie this policy to a rack, as we don't yet support
+ * multirack. Multiple parts of this database schema are going to have to change
+ * to support multirack, so we add one more for now.
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.clickhouse_policy (
+    -- Monotonically increasing version for all policies
+    --
+    -- This is similar to `bp_target` which will also require being changed for
+    -- multirack to associate with some sort of rack group ID.
+    version INT8 PRIMARY KEY,
+
+    clickhouse_mode omicron.public.clickhouse_mode NOT NULL,
+
+    -- Only greater than 0 when clickhouse cluster is enabled
+    clickhouse_cluster_target_servers INT2 NOT NULL,
+    -- Only greater than 0 when clickhouse cluster is enabled
+    clickhouse_cluster_target_keepers INT2 NOT NULL,
+
+    time_created TIMESTAMPTZ NOT NULL
+);
+
 /*
  * Racks
  */
@@ -1586,6 +1626,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.network_interface (
     transit_ips INET[] NOT NULL DEFAULT ARRAY[]
 );
 
+CREATE INDEX IF NOT EXISTS instance_network_interface_mac
+    ON omicron.public.network_interface (mac) STORING (time_deleted);
+
 /* A view of the network_interface table for just instance-kind records. */
 CREATE VIEW IF NOT EXISTS omicron.public.instance_network_interface AS
 SELECT
@@ -1764,6 +1807,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_router_by_vpc ON omicron.public.vpc_rou
 ) WHERE
     time_deleted IS NULL;
 
+/* Index used to accelerate vpc_increment_rpw_version and list. */
+CREATE INDEX IF NOT EXISTS lookup_routers_in_vpc ON omicron.public.vpc_router (
+    vpc_id
+) WHERE
+    time_deleted IS NULL;
+
 CREATE TYPE IF NOT EXISTS omicron.public.router_route_kind AS ENUM (
     'default',
     'vpc_subnet',
@@ -1793,6 +1842,57 @@ CREATE UNIQUE INDEX IF NOT EXISTS lookup_route_by_router ON omicron.public.route
     name
 ) WHERE
     time_deleted IS NULL;
+
+CREATE TABLE IF NOT EXISTS omicron.public.internet_gateway (
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    vpc_id UUID NOT NULL,
+    rcgen INT NOT NULL,
+    resolved_version INT NOT NULL DEFAULT 0
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_internet_gateway_by_vpc ON omicron.public.internet_gateway (
+    vpc_id,
+    name
+) WHERE
+    time_deleted IS NULL;
+
+CREATE TABLE IF NOT EXISTS omicron.public.internet_gateway_ip_pool (
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    internet_gateway_id UUID,
+    ip_pool_id UUID
+);
+
+CREATE INDEX IF NOT EXISTS lookup_internet_gateway_ip_pool_by_igw_id ON omicron.public.internet_gateway_ip_pool (
+    internet_gateway_id
+) WHERE
+    time_deleted IS NULL;
+
+CREATE TABLE IF NOT EXISTS omicron.public.internet_gateway_ip_address (
+    id UUID PRIMARY KEY,
+    name STRING(63) NOT NULL,
+    description STRING(512) NOT NULL,
+    time_created TIMESTAMPTZ NOT NULL,
+    time_modified TIMESTAMPTZ NOT NULL,
+    time_deleted TIMESTAMPTZ,
+    internet_gateway_id UUID,
+    address INET
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS lookup_internet_gateway_ip_address_by_igw_id ON omicron.public.internet_gateway_ip_address (
+    internet_gateway_id
+) WHERE
+    time_deleted IS NULL;
+
 
 /*
  * An IP Pool, a collection of zero or more IP ranges for external IPs.
@@ -3044,6 +3144,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_collection (
 CREATE INDEX IF NOT EXISTS inv_collection_by_time_started
     ON omicron.public.inv_collection (time_started);
 
+CREATE INDEX IF NOT EXISTS inv_collectionby_time_done
+    ON omicron.public.inv_collection (time_done DESC);
+
 -- list of errors generated during a collection
 CREATE TABLE IF NOT EXISTS omicron.public.inv_collection_error (
     inv_collection_id UUID NOT NULL,
@@ -3328,6 +3431,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_dataset (
     PRIMARY KEY (inv_collection_id, sled_id, name)
 );
 
+-- TODO: This table is vestigial and can be combined with `inv_sled_agent`. See
+-- https://github.com/oxidecomputer/omicron/issues/6770.
 CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_omicron_zones (
     -- where this observation came from
     -- (foreign key into `inv_collection` table)
@@ -3435,6 +3540,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone (
     PRIMARY KEY (inv_collection_id, id)
 );
 
+CREATE INDEX IF NOT EXISTS inv_omicron_zone_nic_id ON omicron.public.inv_omicron_zone
+    (nic_id) STORING (sled_id, primary_service_ip, second_service_ip, snat_ip);
+
 CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone_nic (
     inv_collection_id UUID NOT NULL,
     id UUID NOT NULL,
@@ -3447,6 +3555,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone_nic (
     slot INT2 NOT NULL,
 
     PRIMARY KEY (inv_collection_id, id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_clickhouse_keeper_membership (
+    inv_collection_id UUID NOT NULL,
+    queried_keeper_id INT8 NOT NULL,
+    leader_committed_log_index INT8 NOT NULL,
+    raft_config INT8[] NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, queried_keeper_id)
 );
 
 /*
@@ -4421,7 +4538,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '107.0.0', NULL)
+    (TRUE, NOW(), NOW(), '110.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

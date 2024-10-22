@@ -5,7 +5,7 @@
 
 use super::role_builtin;
 use nexus_db_model as model;
-use nexus_types::identity::Asset;
+use nexus_types::{identity::Asset, silo::DEFAULT_SILO_ID};
 use once_cell::sync::Lazy;
 
 /// Test user that's granted all privileges, used for automated testing and
@@ -15,7 +15,7 @@ use once_cell::sync::Lazy;
 // not automatically at Nexus startup.  See omicron#2305.
 pub static USER_TEST_PRIVILEGED: Lazy<model::SiloUser> = Lazy::new(|| {
     model::SiloUser::new(
-        *crate::silo::DEFAULT_SILO_ID,
+        DEFAULT_SILO_ID,
         // "4007" looks a bit like "root".
         "001de000-05e4-4000-8000-000000004007".parse().unwrap(),
         "privileged".into(),
@@ -39,7 +39,7 @@ pub static ROLE_ASSIGNMENTS_PRIVILEGED: Lazy<Vec<model::RoleAssignment>> =
                 model::IdentityType::SiloUser,
                 USER_TEST_PRIVILEGED.id(),
                 role_builtin::SILO_ADMIN.resource_type,
-                *crate::silo::DEFAULT_SILO_ID,
+                DEFAULT_SILO_ID,
                 role_builtin::SILO_ADMIN.role_name,
             ),
         ]
@@ -51,7 +51,7 @@ pub static ROLE_ASSIGNMENTS_PRIVILEGED: Lazy<Vec<model::RoleAssignment>> =
 // not automatically at Nexus startup.  See omicron#2305.
 pub static USER_TEST_UNPRIVILEGED: Lazy<model::SiloUser> = Lazy::new(|| {
     model::SiloUser::new(
-        *crate::silo::DEFAULT_SILO_ID,
+        DEFAULT_SILO_ID,
         // 60001 is the decimal uid for "nobody" on Helios.
         "001de000-05e4-4000-8000-000000060001".parse().unwrap(),
         "unprivileged".into(),

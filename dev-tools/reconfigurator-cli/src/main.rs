@@ -6,34 +6,36 @@
 
 use anyhow::{anyhow, bail, Context};
 use camino::Utf8PathBuf;
+use chrono::Utc;
 use clap::CommandFactory;
 use clap::FromArgMatches;
 use clap::ValueEnum;
 use clap::{Args, Parser, Subcommand};
-use dns_service_client::DnsDiff;
 use indexmap::IndexMap;
+use internal_dns_types::diff::DnsDiff;
 use nexus_inventory::CollectionBuilder;
-use nexus_reconfigurator_execution::blueprint_external_dns_config;
-use nexus_reconfigurator_execution::blueprint_internal_dns_config;
 use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
 use nexus_reconfigurator_planning::blueprint_builder::EnsureMultiple;
+use nexus_reconfigurator_planning::example::ExampleSystemBuilder;
 use nexus_reconfigurator_planning::planner::Planner;
 use nexus_reconfigurator_planning::system::{
     SledBuilder, SledHwInventory, SystemDescription,
 };
-use nexus_sled_agent_shared::inventory::OmicronZonesConfig;
-use nexus_sled_agent_shared::inventory::SledRole;
 use nexus_sled_agent_shared::inventory::ZoneKind;
+use nexus_types::deployment::execution;
+use nexus_types::deployment::execution::blueprint_external_dns_config;
+use nexus_types::deployment::execution::blueprint_internal_dns_config;
 use nexus_types::deployment::BlueprintZoneFilter;
 use nexus_types::deployment::OmicronZoneNic;
 use nexus_types::deployment::PlanningInput;
 use nexus_types::deployment::SledFilter;
-use nexus_types::deployment::SledLookupErrorKind;
 use nexus_types::deployment::{Blueprint, UnstableReconfiguratorState};
 use nexus_types::internal_api::params::DnsConfigParams;
 use nexus_types::inventory::Collection;
 use omicron_common::api::external::Generation;
 use omicron_common::api::external::Name;
+use omicron_common::policy::NEXUS_REDUNDANCY;
+use omicron_uuid_kinds::CollectionKind;
 use omicron_uuid_kinds::CollectionUuid;
 use omicron_uuid_kinds::GenericUuid;
 use omicron_uuid_kinds::OmicronZoneUuid;
@@ -45,6 +47,7 @@ use std::collections::BTreeMap;
 use std::io::BufRead;
 use swrite::{swriteln, SWrite};
 use tabled::Tabled;
+use typed_rng::TypedUuidRng;
 use uuid::Uuid;
 
 /// REPL state
@@ -76,6 +79,9 @@ struct ReconfiguratorSim {
     /// External DNS zone name configured
     external_dns_zone_name: String,
 
+    /// RNG for collection IDs
+    collection_id_rng: TypedUuidRng<CollectionKind>,
+
     /// Policy overrides
     num_nexus: Option<u16>,
 
@@ -83,6 +89,57 @@ struct ReconfiguratorSim {
 }
 
 impl ReconfiguratorSim {
+    fn new(log: slog::Logger) -> Self {
+        Self {
+            system: SystemDescription::new(),
+            collections: IndexMap::new(),
+            blueprints: IndexMap::new(),
+            internal_dns: BTreeMap::new(),
+            external_dns: BTreeMap::new(),
+            silo_names: vec!["example-silo".parse().unwrap()],
+            external_dns_zone_name: String::from("oxide.example"),
+            collection_id_rng: TypedUuidRng::from_entropy(),
+            num_nexus: None,
+            log,
+        }
+    }
+
+    /// Returns true if the user has made local changes to the simulated
+    /// system.
+    ///
+    /// This is used when the user asks to load an example system. Doing that
+    /// basically requires a clean slate.
+    fn user_made_system_changes(&self) -> bool {
+        // Use this pattern to ensure that if a new field is added to
+        // ReconfiguratorSim, it will fail to compile until it's added here.
+        let Self {
+            system,
+            collections,
+            blueprints,
+            internal_dns,
+            external_dns,
+            // For purposes of this method, we let these policy parameters be
+            // set to any arbitrary value. This lets example systems be
+            // generated using these values.
+            silo_names: _,
+            external_dns_zone_name: _,
+            collection_id_rng: _,
+            num_nexus: _,
+            log: _,
+        } = self;
+
+        system.has_sleds()
+            || !collections.is_empty()
+            || !blueprints.is_empty()
+            || !internal_dns.is_empty()
+            || !external_dns.is_empty()
+    }
+
+    // Reset the state of the REPL.
+    fn wipe(&mut self) {
+        *self = Self::new(self.log.clone());
+    }
+
     fn blueprint_lookup(&self, id: Uuid) -> Result<&Blueprint, anyhow::Error> {
         self.blueprints
             .get(&id)
@@ -92,18 +149,6 @@ impl ReconfiguratorSim {
     fn blueprint_insert_new(&mut self, blueprint: Blueprint) {
         let previous = self.blueprints.insert(blueprint.id, blueprint);
         assert!(previous.is_none());
-    }
-
-    fn blueprint_insert_loaded(
-        &mut self,
-        blueprint: Blueprint,
-    ) -> Result<(), anyhow::Error> {
-        let entry = self.blueprints.entry(blueprint.id);
-        if let indexmap::map::Entry::Occupied(_) = &entry {
-            return Err(anyhow!("blueprint already exists: {}", blueprint.id));
-        }
-        let _ = entry.or_insert(blueprint);
-        Ok(())
     }
 
     fn planning_input(
@@ -181,22 +226,12 @@ fn main() -> anyhow::Result<()> {
     let cmd = CmdReconfiguratorSim::parse();
 
     let log = dropshot::ConfigLogging::StderrTerminal {
-        level: dropshot::ConfigLoggingLevel::Debug,
+        level: dropshot::ConfigLoggingLevel::Info,
     }
     .to_logger("reconfigurator-sim")
     .context("creating logger")?;
 
-    let mut sim = ReconfiguratorSim {
-        system: SystemDescription::new(),
-        collections: IndexMap::new(),
-        blueprints: IndexMap::new(),
-        internal_dns: BTreeMap::new(),
-        external_dns: BTreeMap::new(),
-        log,
-        silo_names: vec!["example-silo".parse().unwrap()],
-        external_dns_zone_name: String::from("oxide.example"),
-        num_nexus: None,
-    };
+    let mut sim = ReconfiguratorSim::new(log);
 
     if let Some(input_file) = cmd.input_file {
         let file = std::fs::File::open(&input_file)
@@ -310,8 +345,10 @@ fn process_entry(sim: &mut ReconfiguratorSim, entry: String) -> LoopResult {
         Commands::Show => cmd_show(sim),
         Commands::Set(args) => cmd_set(sim, args),
         Commands::Load(args) => cmd_load(sim, args),
+        Commands::LoadExample(args) => cmd_load_example(sim, args),
         Commands::FileContents(args) => cmd_file_contents(args),
         Commands::Save(args) => cmd_save(sim, args),
+        Commands::Wipe => cmd_wipe(sim),
     };
 
     match cmd_result {
@@ -380,8 +417,12 @@ enum Commands {
     Save(SaveArgs),
     /// load state from a file
     Load(LoadArgs),
+    /// generate and load an example system
+    LoadExample(LoadExampleArgs),
     /// show information about what's in a saved file
     FileContents(FileContentsArgs),
+    /// reset the state of the REPL
+    Wipe,
 }
 
 #[derive(Debug, Args)]
@@ -509,6 +550,33 @@ struct LoadArgs {
     /// id of inventory collection to use for sled details
     /// (may be omitted only if the file contains only one collection)
     collection_id: Option<CollectionUuid>,
+}
+
+#[derive(Debug, Args)]
+struct LoadExampleArgs {
+    /// Seed for the RNG that's used to generate the example system.
+    ///
+    /// Setting this makes it possible for callers to get deterministic
+    /// results. In automated tests, the seed is typically the name of the
+    /// test.
+    #[clap(long, default_value = "reconfigurator_cli_example")]
+    seed: String,
+
+    /// The number of sleds in the example system.
+    #[clap(short = 's', long, default_value_t = ExampleSystemBuilder::DEFAULT_N_SLEDS)]
+    nsleds: usize,
+
+    /// The number of disks per sled in the example system.
+    #[clap(short = 'd', long, default_value_t = SledBuilder::DEFAULT_NPOOLS)]
+    ndisks_per_sled: u8,
+
+    /// Do not create zones in the example system.
+    #[clap(short = 'Z', long)]
+    no_zones: bool,
+
+    /// Do not create entries for disks in the blueprint.
+    #[clap(long)]
+    no_disks_in_blueprint: bool,
 }
 
 #[derive(Debug, Args)]
@@ -657,25 +725,16 @@ fn cmd_inventory_list(
 fn cmd_inventory_generate(
     sim: &mut ReconfiguratorSim,
 ) -> anyhow::Result<Option<String>> {
-    let mut builder =
+    let builder =
         sim.system.to_collection_builder().context("generating inventory")?;
-    // For an inventory we just generated from thin air, pretend like each sled
-    // has no zones on it.
-    let planning_input =
-        sim.system.to_planning_input_builder().unwrap().build();
-    for sled_id in planning_input.all_sled_ids(SledFilter::Commissioned) {
-        builder
-            .found_sled_omicron_zones(
-                "fake sled agent",
-                sled_id,
-                OmicronZonesConfig {
-                    generation: Generation::new(),
-                    zones: vec![],
-                },
-            )
-            .context("recording Omicron zones")?;
-    }
-    let inventory = builder.build();
+
+    // sim.system carries around Omicron zones, which will make their way into
+    // the inventory.
+    let mut inventory = builder.build();
+    // Assign collection IDs from the RNG. This enables consistent results when
+    // callers have explicitly seeded the RNG (e.g., in tests).
+    inventory.id = sim.collection_id_rng.next();
+
     let rv = format!(
         "generated inventory collection {} from configured sleds",
         inventory.id
@@ -848,7 +907,7 @@ fn cmd_blueprint_diff(
     // Diff'ing DNS is a little trickier.  First, compute what DNS should be for
     // each blueprint.  To do that we need to construct a list of sleds suitable
     // for the executor.
-    let sleds_by_id = make_sleds_by_id(&sim)?;
+    let sleds_by_id = make_sleds_by_id(&sim.system)?;
     let internal_dns_config1 = blueprint_internal_dns_config(
         &blueprint1,
         &sleds_by_id,
@@ -881,13 +940,9 @@ fn cmd_blueprint_diff(
 }
 
 fn make_sleds_by_id(
-    sim: &ReconfiguratorSim,
-) -> Result<
-    BTreeMap<SledUuid, nexus_reconfigurator_execution::Sled>,
-    anyhow::Error,
-> {
-    let collection = sim
-        .system
+    system: &SystemDescription,
+) -> Result<BTreeMap<SledUuid, execution::Sled>, anyhow::Error> {
+    let collection = system
         .to_collection_builder()
         .context(
             "unexpectedly failed to create collection for current set of sleds",
@@ -897,10 +952,10 @@ fn make_sleds_by_id(
         .sled_agents
         .iter()
         .map(|(sled_id, sled_agent_info)| {
-            let sled = nexus_reconfigurator_execution::Sled::new(
+            let sled = execution::Sled::new(
                 *sled_id,
                 sled_agent_info.sled_agent_address,
-                sled_agent_info.sled_role == SledRole::Scrimlet,
+                sled_agent_info.sled_role,
             );
             (*sled_id, sled)
         })
@@ -927,7 +982,7 @@ fn cmd_blueprint_diff_dns(
 
     let blueprint_dns_zone = match dns_group {
         CliDnsGroup::Internal => {
-            let sleds_by_id = make_sleds_by_id(sim)?;
+            let sleds_by_id = make_sleds_by_id(&sim.system)?;
             blueprint_internal_dns_config(
                 blueprint,
                 &sleds_by_id,
@@ -1004,6 +1059,11 @@ fn cmd_save(
         "saved planning input, collections, and blueprints to {:?}",
         output_path
     )))
+}
+
+fn cmd_wipe(sim: &mut ReconfiguratorSim) -> anyhow::Result<Option<String>> {
+    sim.wipe();
+    Ok(Some("wiped reconfigurator-sim state".to_string()))
 }
 
 fn cmd_show(sim: &mut ReconfiguratorSim) -> anyhow::Result<Option<String>> {
@@ -1089,6 +1149,10 @@ fn cmd_load(
     sim: &mut ReconfiguratorSim,
     args: LoadArgs,
 ) -> anyhow::Result<Option<String>> {
+    if sim.user_made_system_changes() {
+        bail!("changes made to simulated system: run `wipe` before loading");
+    }
+
     let input_path = args.filename;
     let collection_id = args.collection_id;
     let loaded = read_file(&input_path)?;
@@ -1132,44 +1196,9 @@ fn cmd_load(
             },
         )?;
 
-    let current_planning_input = sim
-        .system
-        .to_planning_input_builder()
-        .context("generating planning input")?
-        .build();
     for (sled_id, sled_details) in
         loaded.planning_input.all_sleds(SledFilter::Commissioned)
     {
-        match current_planning_input
-            .sled_lookup(SledFilter::Commissioned, sled_id)
-        {
-            Ok(_) => {
-                swriteln!(
-                    s,
-                    "sled {}: skipped (one with \
-                     the same id is already loaded)",
-                    sled_id
-                );
-                continue;
-            }
-            Err(error) => match error.kind() {
-                SledLookupErrorKind::Filtered { .. } => {
-                    swriteln!(
-                        s,
-                        "error: load sled {}: turning a decommissioned sled \
-                         into a commissioned one is not supported",
-                        sled_id
-                    );
-                    continue;
-                }
-                SledLookupErrorKind::Missing => {
-                    // A sled being missing from the input is the only case in
-                    // which we decide to load new sleds. The logic to do that
-                    // is below.
-                }
-            },
-        }
-
         let Some(inventory_sled_agent) =
             primary_collection.sled_agents.get(&sled_id)
         else {
@@ -1217,32 +1246,38 @@ fn cmd_load(
     }
 
     for collection in loaded.collections {
-        if sim.collections.contains_key(&collection.id) {
-            swriteln!(
-                s,
-                "collection {}: skipped (one with the \
-                same id is already loaded)",
-                collection.id
-            );
-        } else {
-            swriteln!(s, "collection {} loaded", collection.id);
-            sim.collections.insert(collection.id, collection);
+        match sim.collections.entry(collection.id) {
+            indexmap::map::Entry::Occupied(_) => {
+                // We started with an empty system, so the only way we can hit
+                // this is if the serialized state contains a duplicate
+                // collection ID.
+                swriteln!(
+                    s,
+                    "error: collection {} skipped (duplicate found)",
+                    collection.id
+                )
+            }
+            indexmap::map::Entry::Vacant(entry) => {
+                swriteln!(s, "collection {} loaded", collection.id);
+                entry.insert(collection);
+            }
         }
     }
 
     for blueprint in loaded.blueprints {
-        let blueprint_id = blueprint.id;
-        match sim.blueprint_insert_loaded(blueprint) {
-            Ok(_) => {
-                swriteln!(s, "blueprint {} loaded", blueprint_id);
-            }
-            Err(error) => {
+        match sim.blueprints.entry(blueprint.id) {
+            // We started with an empty system, so the only way we can hit this
+            // is if the serialized state contains a duplicate blueprint ID.
+            indexmap::map::Entry::Occupied(_) => {
                 swriteln!(
                     s,
-                    "blueprint {}: skipped ({:#})",
-                    blueprint_id,
-                    error
-                );
+                    "error: blueprint {} skipped (duplicate found)",
+                    blueprint.id
+                )
+            }
+            indexmap::map::Entry::Vacant(entry) => {
+                swriteln!(s, "blueprint {} loaded", blueprint.id);
+                entry.insert(blueprint);
             }
         }
     }
@@ -1276,6 +1311,68 @@ fn cmd_load(
 
     swriteln!(s, "loaded data from {:?}", input_path);
     Ok(Some(s))
+}
+
+fn cmd_load_example(
+    sim: &mut ReconfiguratorSim,
+    args: LoadExampleArgs,
+) -> anyhow::Result<Option<String>> {
+    if sim.user_made_system_changes() {
+        bail!("changes made to simulated system: run `wipe` before loading");
+    }
+
+    // Generate the example system.
+    let (example, blueprint) = ExampleSystemBuilder::new(&sim.log, &args.seed)
+        .nsleds(args.nsleds)
+        .ndisks_per_sled(args.ndisks_per_sled)
+        .nexus_count(sim.num_nexus.map_or(NEXUS_REDUNDANCY, |n| n.into()))
+        .create_zones(!args.no_zones)
+        .create_disks_in_blueprint(!args.no_disks_in_blueprint)
+        .build();
+
+    // Generate the internal and external DNS configs based on the blueprint.
+    let sleds_by_id = make_sleds_by_id(&example.system)?;
+    let internal_dns = blueprint_internal_dns_config(
+        &blueprint,
+        &sleds_by_id,
+        &Default::default(),
+    )?;
+    let external_dns = blueprint_external_dns_config(
+        &blueprint,
+        &sim.silo_names,
+        sim.external_dns_zone_name.clone(),
+    );
+
+    // No more fallible operations from here on out: set the system state.
+    let collection_id = example.collection.id;
+    let blueprint_id = blueprint.id;
+    sim.system = example.system;
+    sim.collections.insert(collection_id, example.collection);
+    sim.internal_dns.insert(
+        blueprint.internal_dns_version,
+        DnsConfigParams {
+            generation: blueprint.internal_dns_version,
+            time_created: Utc::now(),
+            zones: vec![internal_dns],
+        },
+    );
+    sim.external_dns.insert(
+        blueprint.external_dns_version,
+        DnsConfigParams {
+            generation: blueprint.external_dns_version,
+            time_created: Utc::now(),
+            zones: vec![external_dns],
+        },
+    );
+    sim.blueprints.insert(blueprint.id, blueprint);
+    sim.collection_id_rng =
+        TypedUuidRng::from_seed(&args.seed, "reconfigurator-cli");
+
+    Ok(Some(format!(
+        "loaded example system with:\n\
+         - collection: {collection_id}\n\
+         - blueprint: {blueprint_id}",
+    )))
 }
 
 fn cmd_file_contents(args: FileContentsArgs) -> anyhow::Result<Option<String>> {

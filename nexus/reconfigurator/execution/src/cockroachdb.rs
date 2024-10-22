@@ -33,7 +33,7 @@ pub(crate) async fn ensure_settings(
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::overridables::Overridables;
+    use crate::test_utils::overridables_for_test;
     use crate::test_utils::realize_blueprint_and_expect;
     use nexus_db_queries::authn;
     use nexus_db_queries::authz;
@@ -98,7 +98,7 @@ mod test {
         )
         .await;
         // Execute the initial blueprint.
-        let overrides = Overridables::for_test(cptestctx);
+        let overrides = overridables_for_test(cptestctx);
         _ = realize_blueprint_and_expect(
             &opctx, datastore, resolver, &blueprint, &overrides,
         )

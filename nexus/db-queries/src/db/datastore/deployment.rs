@@ -1730,7 +1730,7 @@ impl RunQueryDsl<DbConnection> for InsertTargetQuery {}
 mod tests {
     use super::*;
 
-    use crate::db::datastore::test_utils::datastore_test;
+    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::raw_query_builder::QueryBuilder;
     use nexus_inventory::now_db_precision;
     use nexus_inventory::CollectionBuilder;
@@ -1738,7 +1738,6 @@ mod tests {
     use nexus_reconfigurator_planning::blueprint_builder::Ensure;
     use nexus_reconfigurator_planning::blueprint_builder::EnsureMultiple;
     use nexus_reconfigurator_planning::example::example;
-    use nexus_test_utils::db::test_setup_database;
     use nexus_types::deployment::blueprint_zone_type;
     use nexus_types::deployment::BlueprintZoneConfig;
     use nexus_types::deployment::BlueprintZoneDisposition;
@@ -1882,10 +1881,6 @@ mod tests {
             &mut collection.sled_agents,
             &mut base_collection.sled_agents,
         );
-        mem::swap(
-            &mut collection.omicron_zones,
-            &mut base_collection.omicron_zones,
-        );
 
         // Treat this blueprint as the initial blueprint for the system.
         blueprint.parent_blueprint_id = None;
@@ -1910,8 +1905,8 @@ mod tests {
     async fn test_empty_blueprint() {
         // Setup
         let logctx = dev::test_setup_log("test_empty_blueprint");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Create an empty blueprint from it
         let blueprint1 = BlueprintBuilder::build_empty_with_sleds(
@@ -1960,7 +1955,7 @@ mod tests {
         // on other tests to check blueprint deletion.
 
         // Clean up.
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -1969,8 +1964,8 @@ mod tests {
         const TEST_NAME: &str = "test_representative_blueprint";
         // Setup
         let logctx = dev::test_setup_log(TEST_NAME);
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Create a cohesive representative collection/policy/blueprint
         let (collection, planning_input, blueprint1) =
@@ -1999,7 +1994,7 @@ mod tests {
         );
         assert_eq!(
             blueprint1.blueprint_zones.len(),
-            collection.omicron_zones.len()
+            collection.sled_agents.len()
         );
         assert_eq!(
             blueprint1.all_omicron_zones(BlueprintZoneFilter::All).count(),
@@ -2195,7 +2190,7 @@ mod tests {
         );
 
         // Clean up.
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -2203,8 +2198,8 @@ mod tests {
     async fn test_set_target() {
         // Setup
         let logctx = dev::test_setup_log("test_set_target");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Trying to insert a target that doesn't reference a blueprint should
         // fail with a relevant error message.
@@ -2381,7 +2376,7 @@ mod tests {
         );
 
         // Clean up.
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -2389,8 +2384,8 @@ mod tests {
     async fn test_set_target_enabled() {
         // Setup
         let logctx = dev::test_setup_log("test_set_target_enabled");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Create an initial empty collection
         let collection = CollectionBuilder::new("test").build();
@@ -2494,7 +2489,7 @@ mod tests {
         }
 
         // Clean up.
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -2584,8 +2579,8 @@ mod tests {
         let logctx = dev::test_setup_log(
             "test_ensure_external_networking_works_with_good_target",
         );
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let blueprint =
             create_blueprint_with_external_ip(&datastore, &opctx).await;
@@ -2611,7 +2606,7 @@ mod tests {
             .expect("Should be able to allocate external network resources");
 
         // Clean up.
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -2621,8 +2616,8 @@ mod tests {
         let logctx = dev::test_setup_log(
             "test_ensure_external_networking_bails_on_bad_target",
         );
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Create an initial empty collection
         let collection = CollectionBuilder::new("test").build();
@@ -2816,7 +2811,7 @@ mod tests {
         );
 
         // Clean up.
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
