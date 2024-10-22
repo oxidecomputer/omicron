@@ -313,7 +313,7 @@ impl DataStore {
                 let create_err = create_err.clone();
                 let selector = NameOrId::Id(id);
                 async move {
-                    do_switch_port_settings_delete( &conn, &selector, delete_err).await?;
+                    do_switch_port_settings_delete(&conn, &selector, delete_err).await?;
                     do_switch_port_settings_create(&conn, Some(id), params, create_err).await
                 }
             })

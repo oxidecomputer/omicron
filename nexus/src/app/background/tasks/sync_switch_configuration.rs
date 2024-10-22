@@ -935,19 +935,19 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         },
                     };
 
-		    let tx_eq = if let Some(Some(c)) = 
-			     info
-			    .tx_eq
-			    .get(0) //TODO https://github.com/oxidecomputer/omicron/issues/3062 
-				    {
-				    Some(TxEqConfig {
-				    pre1: c.pre1.map(Into::into),
-				    pre2: c.pre2.map(Into::into),
-				    main: c.main.map(Into::into),
-				    post2: c.post2.map(Into::into),
-				    post1: c.post1.map(Into::into),
-				    })} else { None
+		    // TODO https://github.com/oxidecomputer/omicron/issues/3062 
+		    let tx_eq = if let Some(Some(c)) = info.tx_eq.get(0) {
+			Some(TxEqConfig {
+			    pre1: c.pre1.map(Into::into),
+			    pre2: c.pre2.map(Into::into),
+			    main: c.main.map(Into::into),
+			    post2: c.post2.map(Into::into),
+			    post1: c.post1.map(Into::into),
+			})
+		    } else {
+			None
 		    };
+
                     let mut port_config = PortConfigV2 {
                         addresses: info.addresses.iter().map(|a|
 			    UplinkAddressConfig {
@@ -1470,19 +1470,17 @@ fn uplinks(
             })
         };
 
-        let tx_eq = if config.tx_eq.is_empty() {
-            None
-        } else if let Some(x) = &config.tx_eq[0] {
+        let tx_eq = if let Some(Some(c)) = config.tx_eq.get(0) {
             Some(TxEqConfig {
-		    pre1: x.pre1,
-		    pre2: x.pre2,
-		    main: x.main,
-		    post2: x.post2,
-		    post1: x.post1,
-	    })
-	} else {
-	    None
-	};
+                pre1: c.pre1,
+                pre2: c.pre2,
+                main: c.main,
+                post2: c.post2,
+                post1: c.post1,
+            })
+        } else {
+            None
+        };
 
         let config = HostPortConfig {
             port: port.port_name.clone(),
