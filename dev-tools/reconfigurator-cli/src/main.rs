@@ -1364,6 +1364,8 @@ fn cmd_load_example(
             zones: vec![external_dns],
         },
     );
+    sim.blueprints
+        .insert(example.initial_blueprint.id, example.initial_blueprint);
     sim.blueprints.insert(blueprint.id, blueprint);
     sim.collection_id_rng =
         TypedUuidRng::from_seed(&args.seed, "reconfigurator-cli");
