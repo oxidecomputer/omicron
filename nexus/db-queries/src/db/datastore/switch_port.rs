@@ -43,7 +43,7 @@ use omicron_common::api::external::http_pagination::PaginatedBy;
 use omicron_common::api::external::{
     self, BgpPeer, BgpPeerRemove, CreateResult, DataPageParams, DeleteResult,
     Error, ImportExportPolicy, ListResultVec, LookupResult, NameOrId,
-    ResourceType, UpdateResult,
+    ResourceType, SwitchLocation, UpdateResult,
 };
 use ref_cast::RefCast;
 use serde::{Deserialize, Serialize};
@@ -2740,11 +2740,43 @@ impl DataStore {
         Ok(())
     }
 
+    pub async fn switch_port_get_active_configuration(
+        &self,
+        opctx: &OpContext,
+        rack_id: Uuid,
+        switch_location: SwitchLocation,
+        port_name: Name,
+    ) -> LookupResult<Option<SwitchPortSettings>> {
+        use db::schema::switch_port;
+        use db::schema::switch_port_settings;
+
+        let conn = self.pool_connection_authorized(opctx).await?;
+
+        let active_configuration = switch_port::table
+            .inner_join(
+                switch_port_settings::table.on(switch_port_settings::id
+                    .nullable()
+                    .eq(switch_port::port_settings_id)),
+            )
+            .filter(switch_port::rack_id.eq(rack_id))
+            .filter(
+                switch_port::switch_location.eq(switch_location.to_string()),
+            )
+            .filter(switch_port::port_name.eq(port_name.to_string()))
+            .select(SwitchPortSettings::as_select())
+            .get_result_async::<SwitchPortSettings>(&*conn)
+            .await
+            .optional()
+            .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))?;
+
+        Ok(active_configuration)
+    }
+
     pub async fn switch_port_get_id(
         &self,
         opctx: &OpContext,
         rack_id: Uuid,
-        switch_location: Name,
+        switch_location: SwitchLocation,
         port_name: Name,
     ) -> LookupResult<Uuid> {
         use db::schema::switch_port;

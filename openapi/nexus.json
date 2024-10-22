@@ -4195,6 +4195,169 @@
         }
       }
     },
+    "/v1/system/hardware/racks/{rack_id}/switch/{switch}/switch-port/{port}/configuration": {
+      "get": {
+        "tags": [
+          "system/hardware"
+        ],
+        "summary": "View switch port configuration",
+        "operationId": "networking_switch_port_active_configuration_view",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "port",
+            "description": "A name to use when selecting switch ports.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            }
+          },
+          {
+            "in": "path",
+            "name": "rack_id",
+            "description": "A rack id to use when selecting switch ports.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "switch",
+            "description": "A switch location to use when selecting switch ports.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SwitchLocation"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SwitchPortSettings"
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "system/hardware"
+        ],
+        "summary": "Set switch port configuration",
+        "operationId": "networking_switch_port_active_configuration_set",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "port",
+            "description": "A name to use when selecting switch ports.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            }
+          },
+          {
+            "in": "path",
+            "name": "rack_id",
+            "description": "A rack id to use when selecting switch ports.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "switch",
+            "description": "A switch location to use when selecting switch ports.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SwitchLocation"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SwitchPortApplySettings"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "system/hardware"
+        ],
+        "summary": "Clear switch port configuration",
+        "operationId": "networking_switch_port_active_configuration_clear",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "port",
+            "description": "A name to use when selecting switch ports.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Name"
+            }
+          },
+          {
+            "in": "path",
+            "name": "rack_id",
+            "description": "A rack id to use when selecting switch ports.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "in": "path",
+            "name": "switch",
+            "description": "A switch location to use when selecting switch ports.",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/SwitchLocation"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/v1/system/hardware/sleds": {
       "get": {
         "tags": [
@@ -4669,7 +4832,7 @@
             "description": "A switch location to use when selecting switch ports.",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/Name"
+              "$ref": "#/components/schemas/SwitchLocation"
             }
           }
         ],
@@ -4693,7 +4856,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       },
       "delete": {
         "tags": [
@@ -4727,7 +4891,7 @@
             "description": "A switch location to use when selecting switch ports.",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/Name"
+              "$ref": "#/components/schemas/SwitchLocation"
             }
           }
         ],
@@ -4741,7 +4905,8 @@
           "5XX": {
             "$ref": "#/components/responses/Error"
           }
-        }
+        },
+        "deprecated": true
       }
     },
     "/v1/system/hardware/switch-port/{port}/status": {
@@ -4777,7 +4942,7 @@
             "description": "A switch location to use when selecting switch ports.",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/Name"
+              "$ref": "#/components/schemas/SwitchLocation"
             }
           }
         ],

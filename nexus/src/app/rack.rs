@@ -591,7 +591,7 @@ impl super::Nexus {
         for (idx, uplink_config) in rack_network_config.ports.iter().enumerate()
         {
             let switch = uplink_config.switch.to_string();
-            let switch_location = Name::from_str(&switch).map_err(|e| {
+            let switch_location = switch.parse().map_err(|e| {
                 Error::internal_error(&format!(
                     "unable to use {switch} as Name: {e}"
                 ))
@@ -730,7 +730,7 @@ impl super::Nexus {
                 .switch_port_get_id(
                     opctx,
                     rack_id,
-                    switch_location.into(),
+                    switch_location,
                     Name::from_str(&uplink_config.port).unwrap().into(),
                 )
                 .await?;

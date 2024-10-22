@@ -276,50 +276,32 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(networking_switch_port_configuration_create)?;
         api.register(networking_switch_port_configuration_delete)?;
 
-        // TODO:  Levon - add tests
         api.register(networking_switch_port_configuration_geometry_view)?;
-        // TODO:  Levon - add tests
         api.register(networking_switch_port_configuration_geometry_set)?;
 
-        // TODO:  Levon - add tests
         api.register(networking_switch_port_configuration_link_create)?;
-        // TODO:  Levon - add tests
         api.register(networking_switch_port_configuration_link_delete)?;
-        // TODO:  Levon - add tests
         api.register(networking_switch_port_configuration_link_view)?;
-        // TODO:  Levon - add tests
         api.register(networking_switch_port_configuration_link_list)?;
 
-        // TODO:  Levon - add tests
         api.register(networking_switch_port_configuration_address_add)?;
-        // TODO:  Levon - add tests
         api.register(networking_switch_port_configuration_address_remove)?;
-        // TODO:  Levon - add tests
         api.register(networking_switch_port_configuration_address_list)?;
 
-        // TODO:  Levon - add tests
         api.register(networking_switch_port_configuration_route_add)?;
-        // TODO:  Levon - add tests
         api.register(networking_switch_port_configuration_route_remove)?;
-        // TODO:  Levon - add tests
         api.register(networking_switch_port_configuration_route_list)?;
 
-        // TODO:  Levon - add tests
         api.register(networking_switch_port_configuration_bgp_peer_add)?;
-        // TODO:  Levon - add tests
         api.register(networking_switch_port_configuration_bgp_peer_remove)?;
-        // TODO:  Levon - add tests
         api.register(networking_switch_port_configuration_bgp_peer_list)?;
 
-        // TODO:  Levon - add tests
         api.register(
             networking_switch_port_configuration_bgp_peer_allow_import_add,
         )?;
-        // TODO:  Levon - add tests
         api.register(
             networking_switch_port_configuration_bgp_peer_allow_import_remove,
         )?;
-        // TODO:  Levon - add tests
         api.register(
             networking_switch_port_configuration_bgp_peer_allow_import_list,
         )?;
@@ -327,11 +309,9 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(
             networking_switch_port_configuration_bgp_peer_allow_export_add,
         )?;
-        // TODO:  Levon - add tests
         api.register(
             networking_switch_port_configuration_bgp_peer_allow_export_remove,
         )?;
-        // TODO:  Levon - add tests
         api.register(
             networking_switch_port_configuration_bgp_peer_allow_export_list,
         )?;
@@ -339,11 +319,9 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(
             networking_switch_port_configuration_bgp_peer_community_add,
         )?;
-        // TODO:  Levon - add tests
         api.register(
             networking_switch_port_configuration_bgp_peer_community_remove,
         )?;
-        // TODO:  Levon - add tests
         api.register(
             networking_switch_port_configuration_bgp_peer_community_list,
         )?;
@@ -352,6 +330,11 @@ pub(crate) fn external_api() -> NexusApiDescription {
         api.register(networking_switch_port_status)?;
         api.register(networking_switch_port_apply_settings)?;
         api.register(networking_switch_port_clear_settings)?;
+
+        // TODO:  Levon - add tests
+        api.register(networking_switch_port_active_configuration_view)?;
+        api.register(networking_switch_port_active_configuration_set)?;
+        api.register(networking_switch_port_active_configuration_clear)?;
 
         api.register(networking_bgp_config_create)?;
         api.register(networking_bgp_config_list)?;
@@ -4717,11 +4700,100 @@ async fn networking_switch_port_status(
         .await
 }
 
+/// View switch port configuration
+#[endpoint {
+    method = GET,
+    path = "/v1/system/hardware/racks/{rack_id}/switch/{switch}/switch-port/{port}/configuration",
+    tags = ["system/hardware"],
+}]
+async fn networking_switch_port_active_configuration_view(
+    rqctx: RequestContext<ApiContext>,
+    path_params: Path<params::SwitchPortConfigurationSelector>,
+) -> Result<HttpResponseOk<Option<SwitchPortSettings>>, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.context.nexus;
+        let params::SwitchPortConfigurationSelector { rack_id, switch, port } =
+            path_params.into_inner();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        let configuration = nexus
+            .switch_port_view_configuration(&opctx, &port, rack_id, switch)
+            .await?;
+        Ok(HttpResponseOk(configuration.map(Into::into)))
+    };
+    apictx
+        .context
+        .external_latencies
+        .instrument_dropshot_handler(&rqctx, handler)
+        .await
+}
+
+/// Set switch port configuration
+#[endpoint {
+    method = PUT,
+    path = "/v1/system/hardware/racks/{rack_id}/switch/{switch}/switch-port/{port}/configuration",
+    tags = ["system/hardware"],
+}]
+async fn networking_switch_port_active_configuration_set(
+    rqctx: RequestContext<ApiContext>,
+    path_params: Path<params::SwitchPortConfigurationSelector>,
+    settings_body: TypedBody<params::SwitchPortApplySettings>,
+) -> Result<HttpResponseUpdatedNoContent, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.context.nexus;
+        let params::SwitchPortConfigurationSelector { rack_id, switch, port } =
+            path_params.into_inner();
+        let settings = settings_body.into_inner();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        nexus
+            .switch_port_apply_settings(
+                &opctx, &port, rack_id, switch, &settings,
+            )
+            .await?;
+        Ok(HttpResponseUpdatedNoContent {})
+    };
+    apictx
+        .context
+        .external_latencies
+        .instrument_dropshot_handler(&rqctx, handler)
+        .await
+}
+
+/// Clear switch port configuration
+#[endpoint {
+    method = DELETE,
+    path = "/v1/system/hardware/racks/{rack_id}/switch/{switch}/switch-port/{port}/configuration",
+    tags = ["system/hardware"],
+}]
+async fn networking_switch_port_active_configuration_clear(
+    rqctx: RequestContext<ApiContext>,
+    path_params: Path<params::SwitchPortConfigurationSelector>,
+) -> Result<HttpResponseDeleted, HttpError> {
+    let apictx = rqctx.context();
+    let handler = async {
+        let nexus = &apictx.context.nexus;
+        let params::SwitchPortConfigurationSelector { rack_id, switch, port } =
+            path_params.into_inner();
+        let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
+        nexus
+            .switch_port_clear_settings(&opctx, &port, rack_id, switch)
+            .await?;
+        Ok(HttpResponseDeleted {})
+    };
+    apictx
+        .context
+        .external_latencies
+        .instrument_dropshot_handler(&rqctx, handler)
+        .await
+}
+
 /// Apply switch port settings
 #[endpoint {
     method = POST,
     path = "/v1/system/hardware/switch-port/{port}/settings",
     tags = ["system/hardware"],
+    deprecated = true,
 }]
 async fn networking_switch_port_apply_settings(
     rqctx: RequestContext<ApiContext>,
@@ -4733,11 +4805,18 @@ async fn networking_switch_port_apply_settings(
     let handler = async {
         let nexus = &apictx.context.nexus;
         let port = path_params.into_inner().port;
-        let query = query_params.into_inner();
+        let params::SwitchPortSelector { rack_id, switch_location } =
+            query_params.into_inner();
         let settings = settings_body.into_inner();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
         nexus
-            .switch_port_apply_settings(&opctx, &port, &query, &settings)
+            .switch_port_apply_settings(
+                &opctx,
+                &port,
+                rack_id,
+                switch_location,
+                &settings,
+            )
             .await?;
         Ok(HttpResponseUpdatedNoContent {})
     };
@@ -4753,6 +4832,7 @@ async fn networking_switch_port_apply_settings(
     method = DELETE,
     path = "/v1/system/hardware/switch-port/{port}/settings",
     tags = ["system/hardware"],
+    deprecated = true,
 }]
 async fn networking_switch_port_clear_settings(
     rqctx: RequestContext<ApiContext>,
@@ -4763,9 +4843,12 @@ async fn networking_switch_port_clear_settings(
     let handler = async {
         let nexus = &apictx.context.nexus;
         let port = path_params.into_inner().port;
-        let query = query_params.into_inner();
+        let params::SwitchPortSelector { rack_id, switch_location } =
+            query_params.into_inner();
         let opctx = crate::context::op_context_for_external_api(&rqctx).await?;
-        nexus.switch_port_clear_settings(&opctx, &port, &query).await?;
+        nexus
+            .switch_port_clear_settings(&opctx, &port, rack_id, switch_location)
+            .await?;
         Ok(HttpResponseUpdatedNoContent {})
     };
     apictx

@@ -1882,17 +1882,6 @@ allow_tables_to_appear_in_same_query!(external_ip, instance);
 allow_tables_to_appear_in_same_query!(external_ip, project);
 allow_tables_to_appear_in_same_query!(external_ip, ip_pool_resource);
 
-allow_tables_to_appear_in_same_query!(
-    switch_port,
-    switch_port_settings_route_config
-);
-
-allow_tables_to_appear_in_same_query!(
-    switch_port,
-    switch_port_settings_bgp_peer_config,
-    bgp_config
-);
-
 allow_tables_to_appear_in_same_query!(disk, virtual_provisioning_resource);
 
 allow_tables_to_appear_in_same_query!(volume, virtual_provisioning_resource);
@@ -1906,6 +1895,7 @@ allow_tables_to_appear_in_same_query!(sled, sled_instance);
 joinable!(network_interface -> probe (parent_id));
 
 allow_tables_to_appear_in_same_query!(
+    switch_port,
     switch_port_settings,
     switch_port_settings_port_config,
     switch_port_settings_link_config,
@@ -1915,4 +1905,5 @@ allow_tables_to_appear_in_same_query!(
     switch_port_settings_bgp_peer_config_allow_export,
     switch_port_settings_bgp_peer_config_allow_import,
     switch_port_settings_bgp_peer_config_communities,
+    bgp_config,
 );

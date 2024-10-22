@@ -540,11 +540,30 @@ impl super::Nexus {
             .await
     }
 
+    pub(crate) async fn switch_port_view_configuration(
+        self: &Arc<Self>,
+        opctx: &OpContext,
+        port: &Name,
+        rack_id: Uuid,
+        switch_location: SwitchLocation,
+    ) -> LookupResult<Option<SwitchPortSettings>> {
+        opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
+        self.db_datastore
+            .switch_port_get_active_configuration(
+                opctx,
+                rack_id,
+                switch_location,
+                port.clone().into(),
+            )
+            .await
+    }
+
     pub(crate) async fn switch_port_apply_settings(
         self: &Arc<Self>,
         opctx: &OpContext,
         port: &Name,
-        selector: &params::SwitchPortSelector,
+        rack_id: Uuid,
+        switch_location: SwitchLocation,
         settings: &params::SwitchPortApplySettings,
     ) -> UpdateResult<()> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
@@ -552,8 +571,8 @@ impl super::Nexus {
             .db_datastore
             .switch_port_get_id(
                 opctx,
-                selector.rack_id,
-                selector.switch_location.clone().into(),
+                rack_id,
+                switch_location,
                 port.clone().into(),
             )
             .await?;
@@ -586,15 +605,16 @@ impl super::Nexus {
         self: &Arc<Self>,
         opctx: &OpContext,
         port: &Name,
-        params: &params::SwitchPortSelector,
+        rack_id: Uuid,
+        switch_location: SwitchLocation,
     ) -> UpdateResult<()> {
         opctx.authorize(authz::Action::Modify, &authz::FLEET).await?;
         let switch_port_id = self
             .db_datastore
             .switch_port_get_id(
                 opctx,
-                params.rack_id,
-                params.switch_location.clone().into(),
+                rack_id,
+                switch_location,
                 port.clone().into(),
             )
             .await?;
@@ -644,16 +664,10 @@ impl super::Nexus {
     pub(crate) async fn switch_port_status(
         &self,
         opctx: &OpContext,
-        switch: Name,
+        switch: SwitchLocation,
         port: Name,
     ) -> Result<SwitchLinkState, Error> {
         opctx.authorize(authz::Action::Read, &authz::FLEET).await?;
-
-        let loc: SwitchLocation = switch.as_str().parse().map_err(|e| {
-            Error::invalid_request(&format!(
-                "invalid switch name {switch}: {e}"
-            ))
-        })?;
 
         let port_id = PortId::Qsfp(port.as_str().parse().map_err(|e| {
             Error::invalid_request(&format!("invalid port name: {port} {e}"))
@@ -666,7 +680,7 @@ impl super::Nexus {
             Error::internal_error(&format!("dpd clients get: {e}"))
         })?;
 
-        let dpd = dpd_clients.get(&loc).ok_or(Error::internal_error(
+        let dpd = dpd_clients.get(&switch).ok_or(Error::internal_error(
             &format!("no client for switch {switch}"),
         ))?;
 

@@ -12,7 +12,7 @@ use omicron_common::api::external::{
     AddressLotKind, AllowedSourceIps, BfdMode, BgpPeerCombined, ByteCount,
     Hostname, IdentityMetadataCreateParams, IdentityMetadataUpdateParams,
     InstanceCpuCount, LinkFec, LinkSpeed, Name, NameOrId, PaginationOrder,
-    RouteDestination, RouteTarget, SemverVersion, UserId,
+    RouteDestination, RouteTarget, SemverVersion, SwitchLocation, UserId,
 };
 use omicron_common::disk::DiskVariant;
 use oxnet::{IpNet, Ipv4Net, Ipv6Net};
@@ -1889,7 +1889,7 @@ pub struct SwitchPortSelector {
     pub rack_id: Uuid,
 
     /// A switch location to use when selecting switch ports.
-    pub switch_location: Name,
+    pub switch_location: SwitchLocation,
 }
 
 /// Select switch port interfaces by id.
@@ -1911,6 +1911,19 @@ pub struct SwitchPortInterfaceConfigPageSelector {
 pub struct SwitchPortApplySettings {
     /// A name or id to use when applying switch port settings.
     pub port_settings: NameOrId,
+}
+
+/// Select a switch port by name
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, PartialEq)]
+pub struct SwitchPortConfigurationSelector {
+    /// A rack id to use when selecting switch ports.
+    pub rack_id: Uuid,
+
+    /// A switch location to use when selecting switch ports.
+    pub switch: SwitchLocation,
+
+    /// A name to use when selecting switch ports.
+    pub port: Name,
 }
 
 // IMAGES

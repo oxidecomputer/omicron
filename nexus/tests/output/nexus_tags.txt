@@ -128,6 +128,9 @@ snapshot_view                            GET      /v1/snapshots/{snapshot}
 
 API operations found with tag "system/hardware"
 OPERATION ID                             METHOD   URL PATH
+networking_switch_port_active_configuration_clear DELETE   /v1/system/hardware/racks/{rack_id}/switch/{switch}/switch-port/{port}/configuration
+networking_switch_port_active_configuration_set PUT      /v1/system/hardware/racks/{rack_id}/switch/{switch}/switch-port/{port}/configuration
+networking_switch_port_active_configuration_view GET      /v1/system/hardware/racks/{rack_id}/switch/{switch}/switch-port/{port}/configuration
 networking_switch_port_apply_settings    POST     /v1/system/hardware/switch-port/{port}/settings
 networking_switch_port_clear_settings    DELETE   /v1/system/hardware/switch-port/{port}/settings
 networking_switch_port_list              GET      /v1/system/hardware/switch-port
