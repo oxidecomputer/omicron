@@ -232,10 +232,6 @@ enum InstanceRequest {
         state: VmmStateRequested,
         tx: oneshot::Sender<Result<VmmPutStateResponse, ManagerError>>,
     },
-    Terminate {
-        mark_failed: bool,
-        tx: oneshot::Sender<Result<VmmUnregisterResponse, ManagerError>>,
-    },
     IssueSnapshotRequest {
         disk_id: Uuid,
         snapshot_id: Uuid,
@@ -293,9 +289,6 @@ impl InstanceRequest {
             Self::PutState { tx, .. } => tx
                 .send(Err(error.into()))
                 .map_err(|_| Error::FailedSendClientClosed),
-            Self::Terminate { tx, .. } => tx
-                .send(Err(error.into()))
-                .map_err(|_| Error::FailedSendClientClosed),
             Self::IssueSnapshotRequest { tx, .. }
             | Self::AddExternalIp { tx, .. }
             | Self::DeleteExternalIp { tx, .. }
@@ -304,6 +297,11 @@ impl InstanceRequest {
                 .map_err(|_| Error::FailedSendClientClosed),
         }
     }
+}
+
+struct TerminateRequest {
+    mark_failed: bool,
+    tx: oneshot::Sender<Result<VmmUnregisterResponse, ManagerError>>,
 }
 
 // A small task which tracks the state of the instance, by constantly querying
@@ -410,6 +408,14 @@ struct InstanceRunner {
 
     // Request channel on which most instance requests are made.
     rx: mpsc::Receiver<InstanceRequest>,
+
+    // Request channel for terminating the instance.
+    //
+    // This is a separate channel from the main request channel (`self.rx`)
+    // because we would like to be able to prioritize requests to terminate, and
+    // handle them even when the instance's main request channel may have filled
+    // up.
+    terminate_rx: mpsc::Receiver<TerminateRequest>,
 
     // Request channel on which monitor requests are made.
     tx_monitor: mpsc::Sender<InstanceMonitorRequest>,
@@ -535,8 +541,32 @@ impl InstanceRunner {
                             self.terminate(mark_failed).await;
                         },
                     }
-
                 },
+                // Requests to terminate the instance take priority over any
+                // other request to the instance.
+                request = self.terminate_rx.recv() => {
+                    let Some(TerminateRequest { mark_failed, tx}) = request else {
+                        warn!(
+                            self.log,
+                            "Instance termination request channel closed; \
+                             shutting down",
+                        );
+                        self.terminate(false).await;
+                        break;
+                    };
+                     let result = tx.send(Ok(VmmUnregisterResponse {
+                        updated_runtime: Some(self.terminate(mark_failed).await)
+                    }))
+                    .map_err(|_| Error::FailedSendClientClosed);
+                    if let Err(err) = result {
+                        warn!(
+                            self.log,
+                            "Error handling request to terminate instance";
+                            "err" => ?err,
+                        );
+                    }
+                }
+
                 // Handle external requests to act upon the instance.
                 request = self.rx.recv() => {
                     let request_variant = request.as_ref().map(|r| r.to_string());
@@ -558,12 +588,6 @@ impl InstanceRunner {
                                 .map(|r| VmmPutStateResponse { updated_runtime: Some(r) })
                                 .map_err(|e| e.into()))
                                 .map_err(|_| Error::FailedSendClientClosed)
-                        },
-                        Some(Terminate { mark_failed, tx }) => {
-                            tx.send(Ok(VmmUnregisterResponse {
-                                updated_runtime: Some(self.terminate(mark_failed).await)
-                            }))
-                            .map_err(|_| Error::FailedSendClientClosed)
                         },
                         Some(IssueSnapshotRequest { disk_id, snapshot_id, tx }) => {
                             tx.send(
@@ -627,9 +651,6 @@ impl InstanceRunner {
                 PutState { tx, .. } => {
                     tx.send(Err(Error::Terminating.into())).map_err(|_| ())
                 }
-                Terminate { tx, .. } => {
-                    tx.send(Err(Error::Terminating.into())).map_err(|_| ())
-                }
                 IssueSnapshotRequest { tx, .. } => {
                     tx.send(Err(Error::Terminating.into())).map_err(|_| ())
                 }
@@ -643,6 +664,16 @@ impl InstanceRunner {
                     tx.send(Err(Error::Terminating.into())).map_err(|_| ())
                 }
             };
+        }
+
+        // Anyone else who was trying to ask us to go die will be happy to learn
+        // that we have now done so!
+        while let Some(TerminateRequest { tx, .. }) =
+            self.terminate_rx.recv().await
+        {
+            let _ = tx.send(Ok(VmmUnregisterResponse {
+                updated_runtime: Some(self.current_state()),
+            }));
         }
     }
 
@@ -1189,6 +1220,12 @@ pub struct Instance {
     /// loop.
     tx: mpsc::Sender<InstanceRequest>,
 
+    /// Sender for requests to terminate the instance.
+    ///
+    /// These are sent over a separate channel so that they can be prioritized
+    /// over all other requests to the instance.
+    terminate_tx: mpsc::Sender<TerminateRequest>,
+
     /// This is reference-counted so that the `Instance` struct may be cloned.
     #[allow(dead_code)]
     runner_handle: Arc<tokio::task::JoinHandle<()>>,
@@ -1286,6 +1323,7 @@ impl Instance {
 
         let (tx, rx) = mpsc::channel(QUEUE_SIZE);
         let (tx_monitor, rx_monitor) = mpsc::channel(1);
+        let (terminate_tx, terminate_rx) = mpsc::channel(QUEUE_SIZE);
 
         let metadata = propolis_client::types::InstanceMetadata {
             project_id: metadata.project_id,
@@ -1302,6 +1340,7 @@ impl Instance {
             rx,
             tx_monitor,
             rx_monitor,
+            terminate_rx,
             monitor_handle: None,
             // NOTE: Mostly lies.
             properties: propolis_client::types::InstanceProperties {
@@ -1343,7 +1382,12 @@ impl Instance {
         let runner_handle =
             tokio::task::spawn(async move { runner.run().await });
 
-        Ok(Instance { id, tx, runner_handle: Arc::new(runner_handle) })
+        Ok(Instance {
+            id,
+            tx,
+            runner_handle: Arc::new(runner_handle),
+            terminate_tx,
+        })
     }
 
     pub fn id(&self) -> InstanceUuid {
@@ -1406,9 +1450,19 @@ impl Instance {
         tx: oneshot::Sender<Result<VmmUnregisterResponse, ManagerError>>,
         mark_failed: bool,
     ) -> Result<(), Error> {
-        self.tx
-            .try_send(InstanceRequest::Terminate { mark_failed, tx })
-            .or_else(InstanceRequest::fail_try_send)
+        self.terminate_tx
+            .try_send(TerminateRequest { mark_failed, tx })
+            .or_else(|err| match err {
+                mpsc::error::TrySendError::Closed(TerminateRequest {
+                    tx,
+                    ..
+                }) => tx.send(Err(Error::FailedSendChannelClosed.into())),
+                mpsc::error::TrySendError::Full(TerminateRequest {
+                    tx,
+                    ..
+                }) => tx.send(Err(Error::FailedSendChannelFull.into())),
+            })
+            .map_err(|_| Error::FailedSendClientClosed)
     }
 
     pub fn issue_snapshot_request(
