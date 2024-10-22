@@ -793,6 +793,7 @@ pub(crate) mod test {
     use nexus_test_utils_macros::nexus_test;
     use nexus_types::identity::Asset;
     use omicron_common::api::internal::shared::DatasetKind;
+    use omicron_uuid_kinds::GenericUuid;
     use sled_agent_client::types::VolumeConstructionRequest;
     use uuid::Uuid;
 
@@ -1040,7 +1041,7 @@ pub(crate) mod test {
         for zpool in test.zpools() {
             for dataset in &zpool.datasets {
                 if datastore
-                    .regions_total_occupied_size(dataset.id)
+                    .regions_total_occupied_size(*dataset.id.as_untyped_uuid())
                     .await
                     .unwrap()
                     != 0

@@ -4,6 +4,7 @@
 
 //! HTTP entrypoint functions for the sled agent's exposed API
 
+use super::range::RequestContextEx;
 use super::sled_agent::SledAgent;
 use crate::sled_agent::Error as SledAgentError;
 use crate::zone_bundle::BundleError;
@@ -221,6 +222,81 @@ impl SledAgentApi for SledAgentImpl {
         .await
         .map(|_| HttpResponseUpdatedNoContent())
         .map_err(HttpError::from)
+    }
+
+    async fn support_bundle_list(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundleListPathParam>,
+    ) -> Result<HttpResponseOk<Vec<SupportBundleMetadata>>, HttpError> {
+        let sa = rqctx.context();
+
+        let SupportBundleListPathParam { zpool_id, dataset_id } =
+            path_params.into_inner();
+
+        let bundles = sa.support_bundle_list(zpool_id, dataset_id).await?;
+
+        Ok(HttpResponseOk(bundles))
+    }
+
+    async fn support_bundle_create(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+        query_params: Query<SupportBundleCreateQueryParams>,
+        body: StreamingBody,
+    ) -> Result<HttpResponseCreated<SupportBundleMetadata>, HttpError> {
+        let sa = rqctx.context();
+
+        let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
+            path_params.into_inner();
+        let SupportBundleCreateQueryParams { hash } = query_params.into_inner();
+
+        let metadata = sa
+            .support_bundle_create(
+                zpool_id,
+                dataset_id,
+                support_bundle_id,
+                hash,
+                body,
+            )
+            .await?;
+
+        Ok(HttpResponseCreated(metadata))
+    }
+
+    async fn support_bundle_get(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+        body: TypedBody<SupportBundleGetQueryParams>,
+    ) -> Result<http::Response<Body>, HttpError> {
+        let sa = rqctx.context();
+        let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
+            path_params.into_inner();
+
+        let range = rqctx.range();
+        let query = body.into_inner().query_type;
+        Ok(sa
+            .support_bundle_get(
+                zpool_id,
+                dataset_id,
+                support_bundle_id,
+                range,
+                query,
+            )
+            .await?)
+    }
+
+    async fn support_bundle_delete(
+        rqctx: RequestContext<Self::Context>,
+        path_params: Path<SupportBundlePathParam>,
+    ) -> Result<HttpResponseDeleted, HttpError> {
+        let sa = rqctx.context();
+
+        let SupportBundlePathParam { zpool_id, dataset_id, support_bundle_id } =
+            path_params.into_inner();
+
+        sa.support_bundle_delete(zpool_id, dataset_id, support_bundle_id)
+            .await?;
+        Ok(HttpResponseDeleted())
     }
 
     async fn datasets_put(

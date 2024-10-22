@@ -1563,7 +1563,7 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
         for dataset in &zpool.datasets {
             assert_eq!(
                 datastore
-                    .regions_total_occupied_size(dataset.id)
+                    .regions_total_occupied_size(*dataset.id.as_untyped_uuid())
                     .await
                     .unwrap(),
                 0
@@ -1602,7 +1602,7 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
         for dataset in &zpool.datasets {
             assert_eq!(
                 datastore
-                    .regions_total_occupied_size(dataset.id)
+                    .regions_total_occupied_size(*dataset.id.as_untyped_uuid())
                     .await
                     .unwrap(),
                 ByteCount::from_gibibytes_u32(7).to_bytes(),
@@ -1639,7 +1639,7 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
         for dataset in &zpool.datasets {
             assert_eq!(
                 datastore
-                    .regions_total_occupied_size(dataset.id)
+                    .regions_total_occupied_size(*dataset.id.as_untyped_uuid())
                     .await
                     .unwrap(),
                 ByteCount::from_gibibytes_u32(7).to_bytes(),
@@ -1663,7 +1663,7 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
         for dataset in &zpool.datasets {
             assert_eq!(
                 datastore
-                    .regions_total_occupied_size(dataset.id)
+                    .regions_total_occupied_size(*dataset.id.as_untyped_uuid())
                     .await
                     .unwrap(),
                 0,
@@ -1699,7 +1699,7 @@ async fn test_disk_size_accounting(cptestctx: &ControlPlaneTestContext) {
         for dataset in &zpool.datasets {
             assert_eq!(
                 datastore
-                    .regions_total_occupied_size(dataset.id)
+                    .regions_total_occupied_size(*dataset.id.as_untyped_uuid())
                     .await
                     .unwrap(),
                 ByteCount::from_gibibytes_u32(10).to_bytes(),
@@ -2101,7 +2101,7 @@ async fn test_single_region_allocate(cptestctx: &ControlPlaneTestContext) {
     for zpool in disk_test.zpools() {
         for dataset in &zpool.datasets {
             let total_size = datastore
-                .regions_total_occupied_size(dataset.id)
+                .regions_total_occupied_size(*dataset.id.as_untyped_uuid())
                 .await
                 .unwrap();
 

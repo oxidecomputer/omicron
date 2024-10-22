@@ -36,6 +36,9 @@ futures.workspace = true
 glob.workspace = true
 hex.workspace = true
 http.workspace = true
+http-body-util.workspace = true
+http-range.workspace = true
+hyper.workspace = true
 hyper-staticfile.workspace = true
 gateway-client.workspace = true
 illumos-utils.workspace = true
@@ -70,6 +73,7 @@ semver.workspace = true
 serde.workspace = true
 serde_human_bytes.workspace = true
 serde_json = { workspace = true, features = ["raw_value"] }
+sha2.workspace = true
 sha3.workspace = true
 sled-agent-api.workspace = true
 sled-agent-client.workspace = true
@@ -88,6 +92,8 @@ tar.workspace = true
 thiserror.workspace = true
 tofino.workspace = true
 tokio = { workspace = true, features = ["full"] }
+tokio-stream.workspace = true
+tokio-util.workspace = true
 toml.workspace = true
 usdt.workspace = true
 uuid.workspace = true
@@ -97,6 +103,7 @@ static_assertions.workspace = true
 omicron-workspace-hack.workspace = true
 slog-error-chain.workspace = true
 walkdir.workspace = true
+zip.workspace = true
 
 [target.'cfg(target_os = "illumos")'.dependencies]
 opte-ioctl.workspace = true

@@ -159,6 +159,9 @@ pub enum Error {
     #[error("Failed to deserialize early network config: {0}")]
     EarlyNetworkDeserialize(serde_json::Error),
 
+    #[error("Support bundle error: {0}")]
+    SupportBundle(String),
+
     #[error("Zone bundle error: {0}")]
     ZoneBundle(#[from] BundleError),
 
@@ -368,6 +371,9 @@ pub struct SledAgent {
     log: Logger,
     sprockets: SprocketsConfig,
 }
+
+// This extends the "impl SledAgent" for support bundle functionality.
+mod support_bundle;
 
 impl SledAgent {
     /// Initializes a new [`SledAgent`] object.

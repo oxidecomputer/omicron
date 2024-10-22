@@ -31,6 +31,7 @@ pub mod params;
 mod probe_manager;
 mod profile;
 pub mod rack_setup;
+mod range;
 pub mod server;
 pub mod services;
 mod sled_agent;
