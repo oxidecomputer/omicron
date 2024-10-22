@@ -100,15 +100,14 @@ impl DataStore {
 mod test {
     use super::*;
 
-    use crate::db::datastore::test_utils::datastore_test;
-    use nexus_test_utils::db::test_setup_database;
+    use crate::db::datastore::pub_test_utils::TestDatabase;
     use omicron_test_utils::dev;
 
     #[tokio::test]
     async fn volume_lock_conflict_error_returned() {
         let logctx = dev::test_setup_log("volume_lock_conflict_error_returned");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let lock_1 = Uuid::new_v4();
         let lock_2 = Uuid::new_v4();
@@ -123,7 +122,7 @@ mod test {
 
         assert!(matches!(err, Error::Conflict { .. }));
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }

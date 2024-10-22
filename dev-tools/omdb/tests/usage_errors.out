@@ -467,11 +467,12 @@ Debug a specific Nexus instance
 Usage: omdb nexus [OPTIONS] <COMMAND>
 
 Commands:
-  background-tasks  print information about background tasks
-  blueprints        interact with blueprints
-  sagas             view sagas, create and complete demo sagas
-  sleds             interact with sleds
-  help              Print this message or the help of the given subcommand(s)
+  background-tasks   print information about background tasks
+  blueprints         interact with blueprints
+  clickhouse-policy  Interact with clickhouse policy
+  sagas              view sagas, create and complete demo sagas
+  sleds              interact with sleds
+  help               Print this message or the help of the given subcommand(s)
 
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
@@ -783,13 +784,16 @@ Usage: omdb oxql [OPTIONS]
 Options:
       --log-level <LOG_LEVEL>  log level filter [env: LOG_LEVEL=] [default: warn]
       --summaries              Print summaries of each SQL query run against the database
-      --elapsed                Print the total elapsed query duration
       --color <COLOR>          Color output [default: auto] [possible values: auto, always, never]
+      --elapsed                Print the total elapsed query duration
   -h, --help                   Print help
 
 Connection Options:
       --clickhouse-url <CLICKHOUSE_URL>
           URL of the ClickHouse server to connect to [env: OMDB_CLICKHOUSE_URL=]
+      --clickhouse-native-url <CLICKHOUSE_NATIVE_URL>
+          URL of the ClickHouse server to connect to for the native protcol [env:
+          OMDB_CLICKHOUSE_NATIVE_URL=]
       --dns-server <DNS_SERVER>
           [env: OMDB_DNS_SERVER=]
 
@@ -808,7 +812,7 @@ error: unexpected argument '--summarizes' found
 
   tip: a similar argument exists: '--summaries'
 
-Usage: omdb oxql <--clickhouse-url <CLICKHOUSE_URL>|--summaries|--elapsed>
+Usage: omdb oxql <--clickhouse-url <CLICKHOUSE_URL>|--clickhouse-native-url <CLICKHOUSE_NATIVE_URL>|--summaries|--elapsed>
 
 For more information, try '--help'.
 =============================================

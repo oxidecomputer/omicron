@@ -258,8 +258,7 @@ impl<E: std::fmt::Debug> OptionalError<E> {
 mod test {
     use super::*;
 
-    use crate::db::datastore::test_utils::datastore_test;
-    use nexus_test_utils::db::test_setup_database;
+    use crate::db::datastore::pub_test_utils::TestDatabase;
     use omicron_test_utils::dev;
     use oximeter::types::FieldValue;
 
@@ -271,8 +270,8 @@ mod test {
         let logctx = dev::test_setup_log(
             "test_transaction_rollback_produces_no_samples",
         );
-        let mut db = test_setup_database(&logctx.log).await;
-        let (_opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let datastore = db.datastore();
 
         let conn = datastore.pool_connection_for_tests().await.unwrap();
 
@@ -294,7 +293,7 @@ mod test {
             .clone();
         assert_eq!(samples, vec![]);
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -304,8 +303,8 @@ mod test {
     async fn test_transaction_retry_produces_samples() {
         let logctx =
             dev::test_setup_log("test_transaction_retry_produces_samples");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (_opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let datastore = db.datastore();
 
         let conn = datastore.pool_connection_for_tests().await.unwrap();
         datastore
@@ -355,7 +354,7 @@ mod test {
             );
         }
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }

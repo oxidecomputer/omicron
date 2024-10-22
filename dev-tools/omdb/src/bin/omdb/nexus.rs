@@ -22,6 +22,7 @@ use clap::Subcommand;
 use clap::ValueEnum;
 use futures::future::try_join;
 use futures::TryStreamExt;
+use http::StatusCode;
 use internal_dns_types::names::ServiceName;
 use itertools::Itertools;
 use nexus_client::types::ActivationReason;
@@ -34,8 +35,11 @@ use nexus_client::types::SagaState;
 use nexus_client::types::SledSelector;
 use nexus_client::types::UninitializedSledId;
 use nexus_db_queries::db::lookup::LookupPath;
+use nexus_inventory::now_db_precision;
 use nexus_saga_recovery::LastPass;
 use nexus_types::deployment::Blueprint;
+use nexus_types::deployment::ClickhouseMode;
+use nexus_types::deployment::ClickhousePolicy;
 use nexus_types::internal_api::background::AbandonedVmmReaperStatus;
 use nexus_types::internal_api::background::InstanceReincarnationStatus;
 use nexus_types::internal_api::background::InstanceUpdaterStatus;
@@ -101,6 +105,8 @@ enum NexusCommands {
     BackgroundTasks(BackgroundTasksArgs),
     /// interact with blueprints
     Blueprints(BlueprintsArgs),
+    /// Interact with clickhouse policy
+    ClickhousePolicy(ClickhousePolicyArgs),
     /// view sagas, create and complete demo sagas
     Sagas(SagasArgs),
     /// interact with sleds
@@ -300,6 +306,42 @@ struct BlueprintImportArgs {
 }
 
 #[derive(Debug, Args)]
+struct ClickhousePolicyArgs {
+    #[command(subcommand)]
+    command: ClickhousePolicyCommands,
+}
+
+#[derive(Debug, Subcommand)]
+enum ClickhousePolicyCommands {
+    /// Get the current policy
+    Get,
+    /// Set the new policy
+    Set(ClickhousePolicySetArgs),
+}
+
+#[derive(Debug, Args)]
+struct ClickhousePolicySetArgs {
+    mode: ClickhousePolicyMode,
+
+    /// The number of servers in a clickhouse cluster
+    #[arg(long, default_value_t = 3)]
+    target_servers: u8,
+    /// The number of keepers in a clickhouse cluster
+    #[arg(long, default_value_t = 5)]
+    target_keepers: u8,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum ClickhousePolicyMode {
+    /// Run only a single node clickhouse instance
+    SingleNodeOnly,
+    // Run only a clickhouse cluster
+    ClusterOnly,
+    // Run both single-node and clustered clickhouse deployments
+    Both,
+}
+
+#[derive(Debug, Args)]
 struct SagasArgs {
     #[command(subcommand)]
     command: SagasCommands,
@@ -493,6 +535,18 @@ impl NexusArgs {
                 let token = omdb.check_allow_destructive()?;
                 cmd_nexus_blueprints_import(&client, token, args).await
             }
+
+            NexusCommands::ClickhousePolicy(ClickhousePolicyArgs {
+                command,
+            }) => match command {
+                ClickhousePolicyCommands::Get => {
+                    cmd_nexus_clickhouse_policy_get(&client).await
+                }
+                ClickhousePolicyCommands::Set(args) => {
+                    let token = omdb.check_allow_destructive()?;
+                    cmd_nexus_clickhouse_policy_set(&client, args, token).await
+                }
+            },
 
             NexusCommands::Sagas(SagasArgs { command }) => {
                 if self.nexus_internal_url.is_none() {
@@ -2373,6 +2427,100 @@ async fn cmd_nexus_blueprints_import(
         .await
         .with_context(|| format!("upload {:?}", input_path))?;
     eprintln!("uploaded new blueprint {}", blueprint.id);
+    Ok(())
+}
+
+async fn cmd_nexus_clickhouse_policy_get(
+    client: &nexus_client::Client,
+) -> Result<(), anyhow::Error> {
+    let res = client.clickhouse_policy_get().await;
+
+    match res {
+        Err(err) => {
+            if err.status() == Some(StatusCode::NOT_FOUND) {
+                println!(
+                    "No clickhouse policy: \
+                    Defaulting to single-node deployment"
+                );
+            } else {
+                eprintln!("error: {:#}", err);
+            }
+        }
+        Ok(policy) => {
+            println!("Clickhouse Policy: ");
+            println!("    version: {}", policy.version);
+            println!("    creation time: {}", policy.time_created);
+            match policy.mode {
+                ClickhouseMode::SingleNodeOnly => {
+                    println!("    mode: single-node-only");
+                }
+                ClickhouseMode::ClusterOnly {
+                    target_servers,
+                    target_keepers,
+                } => {
+                    println!("    mode: cluster-only");
+                    println!("    target-servers: {}", target_servers);
+                    println!("    target-keepers: {}", target_keepers);
+                }
+                ClickhouseMode::Both { target_servers, target_keepers } => {
+                    println!("    mode: both single-node and cluster");
+                    println!("    target-servers: {}", target_servers);
+                    println!("    target-keepers: {}", target_keepers);
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn cmd_nexus_clickhouse_policy_set(
+    client: &nexus_client::Client,
+    args: &ClickhousePolicySetArgs,
+    _destruction_token: DestructiveOperationToken,
+) -> Result<(), anyhow::Error> {
+    let mode = match args.mode {
+        ClickhousePolicyMode::SingleNodeOnly => ClickhouseMode::SingleNodeOnly,
+        ClickhousePolicyMode::ClusterOnly => ClickhouseMode::ClusterOnly {
+            target_servers: args.target_servers,
+            target_keepers: args.target_keepers,
+        },
+        ClickhousePolicyMode::Both => ClickhouseMode::Both {
+            target_servers: args.target_servers,
+            target_keepers: args.target_keepers,
+        },
+    };
+
+    let res = client.clickhouse_policy_get().await;
+    let new_policy = match res {
+        Err(err) => {
+            if err.status() == Some(StatusCode::NOT_FOUND) {
+                ClickhousePolicy {
+                    version: 1,
+                    mode,
+                    time_created: now_db_precision(),
+                }
+            } else {
+                eprintln!("error: {:#}", err);
+                return Err(err).context("retrieving clickhouse policy");
+            }
+        }
+        Ok(policy) => ClickhousePolicy {
+            version: policy.version + 1,
+            mode,
+            time_created: now_db_precision(),
+        },
+    };
+
+    client.clickhouse_policy_set(&new_policy).await.with_context(|| {
+        format!("inserting new context at version {}", new_policy.version)
+    })?;
+
+    println!(
+        "Successfully inserted new policy at version {}",
+        new_policy.version
+    );
+
     Ok(())
 }
 

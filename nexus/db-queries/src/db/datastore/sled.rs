@@ -824,12 +824,12 @@ impl TransitionError {
 #[cfg(test)]
 pub(in crate::db::datastore) mod test {
     use super::*;
+    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::datastore::test::{
         sled_baseboard_for_test, sled_system_hardware_for_test,
     };
     use crate::db::datastore::test_utils::{
-        datastore_test, sled_set_policy, sled_set_state, Expected,
-        IneligibleSleds,
+        sled_set_policy, sled_set_state, Expected, IneligibleSleds,
     };
     use crate::db::lookup::LookupPath;
     use crate::db::model::ByteCount;
@@ -841,7 +841,6 @@ pub(in crate::db::datastore) mod test {
     use nexus_db_model::PhysicalDiskKind;
     use nexus_db_model::PhysicalDiskPolicy;
     use nexus_db_model::PhysicalDiskState;
-    use nexus_test_utils::db::test_setup_database;
     use nexus_types::identity::Asset;
     use omicron_common::api::external;
     use omicron_test_utils::dev;
@@ -857,8 +856,8 @@ pub(in crate::db::datastore) mod test {
     #[tokio::test]
     async fn upsert_sled_updates_hardware() {
         let logctx = dev::test_setup_log("upsert_sled_updates_hardware");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (_opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let datastore = db.datastore();
 
         let mut sled_update = test_new_sled_update();
         let (observed_sled, _) =
@@ -908,7 +907,7 @@ pub(in crate::db::datastore) mod test {
         );
         assert_eq!(observed_sled.reservoir_size, sled_update.reservoir_size);
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -917,8 +916,8 @@ pub(in crate::db::datastore) mod test {
         let logctx = dev::test_setup_log(
             "upsert_sled_updates_fails_with_stale_sled_agent_gen",
         );
-        let mut db = test_setup_database(&logctx.log).await;
-        let (_opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let datastore = db.datastore();
 
         let mut sled_update = test_new_sled_update();
         let (observed_sled, _) =
@@ -972,7 +971,7 @@ pub(in crate::db::datastore) mod test {
         assert_eq!(observed_sled.reservoir_size, sled_update.reservoir_size);
         assert_eq!(observed_sled.sled_agent_gen, sled_update.sled_agent_gen);
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -980,8 +979,8 @@ pub(in crate::db::datastore) mod test {
     async fn upsert_sled_doesnt_update_decommissioned() {
         let logctx =
             dev::test_setup_log("upsert_sled_doesnt_update_decommissioned");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let mut sled_update = test_new_sled_update();
         let (observed_sled, _) =
@@ -1050,7 +1049,7 @@ pub(in crate::db::datastore) mod test {
             "reservoir_size should not have changed"
         );
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -1059,8 +1058,8 @@ pub(in crate::db::datastore) mod test {
     async fn sled_reservation_create_non_provisionable() {
         let logctx =
             dev::test_setup_log("sled_reservation_create_non_provisionable");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Define some sleds that resources cannot be provisioned on.
         let (non_provisionable_sled, _) =
@@ -1137,7 +1136,7 @@ pub(in crate::db::datastore) mod test {
                 .unwrap();
         }
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -1164,9 +1163,8 @@ pub(in crate::db::datastore) mod test {
     async fn test_sled_expungement_also_expunges_disks() {
         let logctx =
             dev::test_setup_log("test_sled_expungement_also_expunges_disks");
-        let mut db = test_setup_database(&logctx.log).await;
-
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Set up a sled to test against.
         let (sled, _) =
@@ -1262,7 +1260,7 @@ pub(in crate::db::datastore) mod test {
             lookup_physical_disk(&datastore, disk2.id()).await.disk_state
         );
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -1270,9 +1268,8 @@ pub(in crate::db::datastore) mod test {
     async fn test_sled_transitions() {
         // Test valid and invalid state and policy transitions.
         let logctx = dev::test_setup_log("test_sled_transitions");
-        let mut db = test_setup_database(&logctx.log).await;
-
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // This test generates all possible sets of transitions. Below, we list
         // the before and after predicates for valid transitions.
@@ -1386,7 +1383,7 @@ pub(in crate::db::datastore) mod test {
             .unwrap();
         }
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -1506,8 +1503,8 @@ pub(in crate::db::datastore) mod test {
     #[tokio::test]
     async fn sled_list_batch() {
         let logctx = dev::test_setup_log("sled_list_batch");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let size = usize::try_from(2 * SQL_BATCH_SIZE.get()).unwrap();
         let mut new_sleds = Vec::with_capacity(size);
@@ -1548,7 +1545,7 @@ pub(in crate::db::datastore) mod test {
         assert_eq!(expected_ids, found_ids);
         assert_eq!(found_ids.len(), size);
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }

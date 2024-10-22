@@ -292,8 +292,7 @@ impl DataStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use db::datastore::pub_test_utils::datastore_test;
-    use nexus_test_utils::db::test_setup_database;
+    use crate::db::datastore::pub_test_utils::TestDatabase;
     use nexus_types::internal_api::params;
     use omicron_common::api::internal::nexus;
     use omicron_test_utils::dev;
@@ -345,9 +344,8 @@ mod tests {
     async fn test_oximeter_expunge() {
         // Setup
         let logctx = dev::test_setup_log("test_oximeter_expunge");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) =
-            datastore_test(&logctx, &db, Uuid::new_v4()).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Insert a few Oximeter collectors.
         let mut collector_ids =
@@ -447,7 +445,7 @@ mod tests {
         assert_eq!(expunged1a, expunged1b);
 
         // Cleanup
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -457,9 +455,8 @@ mod tests {
         let logctx = dev::test_setup_log(
             "test_producer_endpoint_reassigns_if_oximeter_expunged",
         );
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) =
-            datastore_test(&logctx, &db, Uuid::new_v4()).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Insert an Oximeter collector.
         let oximeter1_id = Uuid::new_v4();
@@ -574,7 +571,7 @@ mod tests {
         }
 
         // Cleanup
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -584,9 +581,8 @@ mod tests {
         let logctx = dev::test_setup_log(
             "test_producer_endpoint_upsert_rejects_expunged_oximeters",
         );
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) =
-            datastore_test(&logctx, &db, Uuid::new_v4()).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Insert a few Oximeter collectors.
         let collector_ids = (0..4).map(|_| Uuid::new_v4()).collect::<Vec<_>>();
@@ -684,7 +680,7 @@ mod tests {
         );
 
         // Cleanup
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -692,9 +688,8 @@ mod tests {
     async fn test_oximeter_reassigns_randomly() {
         // Setup
         let logctx = dev::test_setup_log("test_oximeter_reassigns_randomly");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) =
-            datastore_test(&logctx, &db, Uuid::new_v4()).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Insert a few Oximeter collectors.
         let collector_ids = (0..4).map(|_| Uuid::new_v4()).collect::<Vec<_>>();
@@ -788,7 +783,7 @@ mod tests {
         assert_eq!(producer_counts[1..].iter().sum::<usize>(), 1000);
 
         // Cleanup
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -798,9 +793,8 @@ mod tests {
         let logctx = dev::test_setup_log(
             "test_oximeter_reassign_fails_if_no_collectors",
         );
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) =
-            datastore_test(&logctx, &db, Uuid::new_v4()).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Insert a few Oximeter collectors.
         let collector_ids = (0..4).map(|_| Uuid::new_v4()).collect::<Vec<_>>();
@@ -895,7 +889,7 @@ mod tests {
         assert_eq!(nproducers, 100);
 
         // Cleanup
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -903,9 +897,8 @@ mod tests {
     async fn test_producers_list_expired() {
         // Setup
         let logctx = dev::test_setup_log("test_producers_list_expired");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) =
-            datastore_test(&logctx, &db, Uuid::new_v4()).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Insert an Oximeter collector
         let collector_info = OximeterInfo::new(&params::OximeterInfo {
@@ -972,7 +965,7 @@ mod tests {
         .await;
         assert_eq!(expired_producers.as_slice(), &[]);
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }

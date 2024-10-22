@@ -50,11 +50,12 @@ impl Default for ShellOptions {
 /// Run/execute the SQL shell.
 pub async fn shell(
     address: IpAddr,
-    port: u16,
+    http_port: u16,
+    native_port: u16,
     log: Logger,
     opts: ShellOptions,
 ) -> anyhow::Result<()> {
-    let client = make_client(address, port, &log).await?;
+    let client = make_client(address, http_port, native_port, &log).await?;
 
     // A workaround to ensure the client has all available timeseries when the
     // shell starts.

@@ -624,6 +624,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
             log.new(o!("component" => "oximeter")),
             nexus_internal_addr,
             clickhouse.http_address().port(),
+            clickhouse.native_address().port(),
             collector_id,
         )
         .await
@@ -650,7 +651,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
     }
 
     // Begin starting Nexus.
-    pub async fn start_nexus_internal(&mut self) {
+    pub async fn start_nexus_internal(&mut self) -> Result<(), String> {
         let log = &self.logctx.log;
         debug!(log, "Starting Nexus (internal API)");
 
@@ -672,7 +673,7 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         };
 
         let (nexus_internal, nexus_internal_addr) =
-            N::start_internal(&self.config, &log).await;
+            N::start_internal(&self.config, &log).await?;
 
         let address = SocketAddrV6::new(
             match nexus_internal_addr.ip() {
@@ -737,6 +738,8 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
 
         self.nexus_internal = Some(nexus_internal);
         self.nexus_internal_addr = Some(nexus_internal_addr);
+
+        Ok(())
     }
 
     pub async fn populate_internal_dns(&mut self) {
@@ -1176,6 +1179,9 @@ impl<'a, N: NexusServer> ControlPlaneTestContextBuilder<'a, N> {
         if let Some(server) = self.server {
             server.close().await;
         }
+        if let Some(nexus_internal) = self.nexus_internal {
+            N::stop_internal(nexus_internal).await;
+        }
         if let Some(mut database) = self.database {
             database.cleanup().await.unwrap();
         }
@@ -1358,7 +1364,12 @@ async fn setup_with_config_impl<N: NexusServer>(
                 ),
                 (
                     "start_nexus_internal",
-                    Box::new(|builder| builder.start_nexus_internal().boxed()),
+                    Box::new(|builder| {
+                        builder
+                            .start_nexus_internal()
+                            .map(|r| r.unwrap())
+                            .boxed()
+                    }),
                 ),
                 (
                     "start_sled1",
@@ -1449,11 +1460,16 @@ pub async fn start_sled_agent(
 pub async fn start_oximeter(
     log: Logger,
     nexus_address: SocketAddr,
-    db_port: u16,
+    http_port: u16,
+    native_port: u16,
     id: Uuid,
 ) -> Result<Oximeter, String> {
     let db = oximeter_collector::DbConfig {
-        address: Some(SocketAddr::new(Ipv6Addr::LOCALHOST.into(), db_port)),
+        address: Some(SocketAddr::new(Ipv6Addr::LOCALHOST.into(), http_port)),
+        native_address: Some(SocketAddr::new(
+            Ipv6Addr::LOCALHOST.into(),
+            native_port,
+        )),
         batch_size: 10,
         batch_interval: 1,
         replicated: false,
