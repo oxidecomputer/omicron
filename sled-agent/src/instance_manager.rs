@@ -633,7 +633,7 @@ impl InstanceManagerRunner {
         };
         let (tx, rx) = oneshot::channel();
         instance.current_state(tx)?;
-        Ok(rx.await??)
+        rx.await?
     }
 
     /// Idempotently ensures this VM is not registered with this instance
