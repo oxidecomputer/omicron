@@ -23,6 +23,13 @@ use omicron_uuid_kinds::SledKind;
 use omicron_uuid_kinds::VnicUuid;
 use typed_rng::TypedUuidRng;
 
+/// An example generated system, along with a consistent planning input and
+/// collection.
+///
+/// The components of this struct are generated together and match each other.
+/// The planning input and collection represent database input and inventory
+/// that would be collected from a system matching the system description.
+#[derive(Clone, Debug)]
 pub struct ExampleSystem {
     pub system: SystemDescription,
     pub input: PlanningInput,
