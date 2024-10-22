@@ -729,8 +729,8 @@ impl DataStoreDnsTest for DataStore {
 
 #[cfg(test)]
 mod test {
-    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::datastore::DnsVersionUpdateBuilder;
+    use crate::db::pub_test_utils::TestDatabase;
     use crate::db::DataStore;
     use crate::db::TransactionError;
     use assert_matches::assert_matches;

@@ -178,9 +178,9 @@ impl DataStore {
 mod tests {
     use super::*;
     use crate::authz;
-    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::lookup::LookupPath;
     use crate::db::model::Instance;
+    use crate::db::pub_test_utils::TestDatabase;
     use nexus_db_model::Project;
     use nexus_types::external_api::params;
     use nexus_types::silo::DEFAULT_SILO_ID;

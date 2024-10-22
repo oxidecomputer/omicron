@@ -221,8 +221,8 @@ pub fn reassign_producers_query(oximeter_id: Uuid) -> TypedSqlQuery<()> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::explain::ExplainableAsync;
+    use crate::db::pub_test_utils::TestDatabase;
     use crate::db::raw_query_builder::expectorate_query_contents;
     use omicron_test_utils::dev;
     use std::time::Duration;

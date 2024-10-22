@@ -326,8 +326,8 @@ impl DataStore {
 mod test {
     use super::*;
 
-    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::lookup::LookupPath;
+    use crate::db::pub_test_utils::TestDatabase;
     use nexus_db_model::Instance;
     use nexus_db_model::Project;
     use nexus_db_model::SiloQuotasUpdate;

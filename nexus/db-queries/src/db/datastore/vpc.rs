@@ -2755,11 +2755,11 @@ impl DataStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::datastore::test::sled_baseboard_for_test;
     use crate::db::datastore::test::sled_system_hardware_for_test;
     use crate::db::datastore::test_utils::IneligibleSleds;
     use crate::db::model::Project;
+    use crate::db::pub_test_utils::TestDatabase;
     use crate::db::queries::vpc::MAX_VNI_SEARCH_RANGE_SIZE;
     use nexus_db_fixed_data::silo::DEFAULT_SILO;
     use nexus_db_fixed_data::vpc_subnet::NEXUS_VPC_SUBNET;

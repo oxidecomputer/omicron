@@ -343,7 +343,7 @@ mod test {
     use super::*;
 
     use crate::db;
-    use crate::db::datastore::pub_test_utils::TestDatabase;
+    use crate::db::pub_test_utils::TestDatabase;
     use async_bb8_diesel::{AsyncRunQueryDsl, AsyncSimpleConnection};
     use diesel::JoinOnDsl;
     use diesel::SelectableHelper;

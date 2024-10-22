@@ -184,8 +184,7 @@ mod tests {
     use httptest::responders::status_code;
     use httptest::Expectation;
     use nexus_db_model::OximeterInfo;
-    use nexus_db_queries::db::datastore::pub_test_utils::datastore_test;
-    use nexus_test_utils::db::test_setup_database;
+    use nexus_db_queries::db::pub_test_utils::TestDatabase;
     use nexus_types::internal_api::params;
     use omicron_common::api::internal::nexus;
     use omicron_test_utils::dev;
@@ -216,9 +215,8 @@ mod tests {
     async fn test_prune_expired_producers() {
         // Setup
         let logctx = dev::test_setup_log("test_prune_expired_producers");
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) =
-            datastore_test(&logctx.log, &db, Uuid::new_v4()).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Insert an Oximeter collector
         let collector_info = OximeterInfo::new(&params::OximeterInfo {
@@ -291,8 +289,7 @@ mod tests {
         assert!(pruned.successes.is_empty());
         assert!(pruned.failures.is_empty());
 
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -302,9 +299,8 @@ mod tests {
         let logctx = dev::test_setup_log(
             "test_prune_expired_producers_notifies_collector",
         );
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) =
-            datastore_test(&logctx.log, &db, Uuid::new_v4()).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let mut collector = httptest::Server::run();
 
@@ -358,8 +354,7 @@ mod tests {
 
         collector.verify_and_clear();
 
-        datastore.terminate().await;
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }
