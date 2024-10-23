@@ -38,6 +38,8 @@ use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use uuid::Uuid;
 
+mod insertable;
+
 /// Describes the version of the Oximeter database.
 ///
 /// For usage and details see:

@@ -115,6 +115,14 @@ impl Block {
         }
         true
     }
+
+    /// Return the values of the named column, if it exists.
+    pub fn column_values(&self, name: &str) -> Result<&ValueArray, Error> {
+        self.columns
+            .get(name)
+            .map(|col| &col.values)
+            .ok_or_else(|| Error::NoSuchColumn(name.to_string()))
+    }
 }
 
 /// Details about the block.
@@ -188,6 +196,16 @@ impl Column {
         }
         self.values.concat(rhs.values);
         Ok(())
+    }
+
+    /// Return true if the column is empty.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Return the number of elements in the column.
+    pub fn len(&self) -> usize {
+        self.values.len()
     }
 }
 

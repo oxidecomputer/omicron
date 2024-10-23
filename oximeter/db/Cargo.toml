@@ -25,6 +25,7 @@ gethostname.workspace = true
 highway.workspace = true
 iana-time-zone.workspace = true
 indexmap.workspace = true
+itertools.workspace = true
 libc.workspace = true
 nom.workspace = true
 num.workspace = true
@@ -97,7 +98,6 @@ features = [ "rt-multi-thread", "macros" ]
 camino-tempfile.workspace = true
 criterion = { workspace = true, features = [ "async_tokio" ] }
 expectorate.workspace = true
-itertools.workspace = true
 omicron-test-utils.workspace = true
 oximeter-test-utils.workspace = true
 slog-dtrace.workspace = true

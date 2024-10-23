@@ -18,6 +18,7 @@ pub use self::dbwrite::TestDbWrite;
 use crate::client::query_summary::QuerySummary;
 use crate::model;
 use crate::native;
+use crate::native::QueryResult;
 use crate::query;
 use crate::Error;
 use crate::Metric;
@@ -1034,6 +1035,40 @@ impl Client {
         Ok(timeseries_by_key.into_values().collect())
     }
 
+    // Execute a generic SQL statement, using the native TCP interface.
+    async fn execute_native<S>(&self, sql: S) -> Result<(), Error>
+    where
+        S: Into<String>,
+    {
+        self.execute_with_body_native(sql).await?;
+        Ok(())
+    }
+
+    // Execute a generic SQL statement, returning the query result as a data
+    //
+    // TODO-robustness This currently does no validation of the statement.
+    async fn execute_with_body_native<S>(
+        &self,
+        sql: S,
+    ) -> Result<QueryResult, Error>
+    where
+        S: Into<String>,
+    {
+        let sql = sql.into();
+        trace!(
+            self.log,
+            "executing SQL query";
+            "sql" => &sql,
+        );
+
+        let mut handle = self.native_pool.claim().await?;
+        let id = usdt::UniqueId::new();
+        probes::sql__query__start!(|| (&id, &sql));
+        let result = handle.query(sql.as_str()).await.map_err(Error::from);
+        probes::sql__query__done!(|| (&id));
+        result
+    }
+
     // Execute a generic SQL statement.
     //
     // TODO-robustness This currently does no validation of the statement.
@@ -1128,7 +1163,7 @@ impl Client {
         let sql = {
             if schema.is_empty() {
                 format!(
-                    "SELECT * FROM {db_name}.timeseries_schema FORMAT JSONEachRow;",
+                    "SELECT * FROM {db_name}.timeseries_schema;",
                     db_name = crate::DATABASE_NAME,
                 )
             } else {
@@ -1138,8 +1173,7 @@ impl Client {
                         "SELECT * ",
                         "FROM {db_name}.timeseries_schema ",
                         "WHERE timeseries_name NOT IN ",
-                        "({current_keys}) ",
-                        "FORMAT JSONEachRow;",
+                        "({current_keys});",
                     ),
                     db_name = crate::DATABASE_NAME,
                     current_keys = schema
@@ -1150,7 +1184,16 @@ impl Client {
                 )
             }
         };
-        let body = self.execute_with_body(sql).await?.1;
+        let body = self.execute_with_body_native(sql).await?;
+        let Some(data) = body.data.as_ref() else {
+            todo!();
+        };
+        if data.is_empty() {
+            trace!(self.log, "no new timeseries schema in database");
+            return Ok(());
+        }
+
+        /*
         if body.is_empty() {
             trace!(self.log, "no new timeseries schema in database");
         } else {
@@ -1166,6 +1209,7 @@ impl Client {
             });
             schema.extend(new);
         }
+        */
         Ok(())
     }
 

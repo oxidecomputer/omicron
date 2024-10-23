@@ -128,6 +128,7 @@ pub mod block;
 pub mod connection;
 mod io;
 mod packets;
+pub mod serde;
 
 #[usdt::provider(provider = "clickhouse_io")]
 mod probes {
@@ -210,4 +211,16 @@ pub enum Error {
 
     #[error("Value out of range for corresponding ClickHouse type")]
     OutOfRange { type_name: String, min: String, max: String, value: String },
+
+    #[error("Failed to serialize / deserialize value from the database")]
+    Serde(String),
+
+    #[error("No column with name '{0}'")]
+    NoSuchColumn(String),
+
+    #[error("Too many rows to create block")]
+    TooManyRows,
+
+    #[error("Column has unexpected type")]
+    UnexpectedColumnType,
 }
