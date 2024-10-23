@@ -2181,7 +2181,6 @@ mod tests {
         // pretending we're InstanceManager::ensure_state, start our "instance"
         // (backed by fakes and propolis_mock_server)
         inst.put_state(put_tx, VmmStateRequested::Running)
-            .await
             .expect("failed to send Instance::put_state");
 
         // even though we ignore this result at instance creation time in
@@ -2275,7 +2274,6 @@ mod tests {
         // pretending we're InstanceManager::ensure_state, try in vain to start
         // our "instance", but no propolis server is running
         inst.put_state(put_tx, VmmStateRequested::Running)
-            .await
             .expect("failed to send Instance::put_state");
 
         let timeout_fut = timeout(TIMEOUT_DURATION, put_rx);
@@ -2382,7 +2380,6 @@ mod tests {
         // pretending we're InstanceManager::ensure_state, try in vain to start
         // our "instance", but the zone never finishes installing
         inst.put_state(put_tx, VmmStateRequested::Running)
-            .await
             .expect("failed to send Instance::put_state");
 
         // Timeout our future waiting for the instance-state-change at 1s. This
