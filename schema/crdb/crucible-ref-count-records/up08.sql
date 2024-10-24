@@ -1,3 +1,5 @@
+/* Construct a UUIDv4 deterministically from the existing data in the region
+   snapshot records to populate the volume resource usage records */
 INSERT INTO volume_resource_usage (
   SELECT
     (
@@ -6,7 +8,7 @@ INSERT INTO volume_resource_usage (
         MD5(volume.id::TEXT || dataset_id::TEXT || region_id::TEXT || snapshot_id::TEXT || snapshot_addr || volume_references::TEXT)
         PLACING '4' from 13
        )
-       PLACING TO_HEX(volume_references) from 17
+       PLACING '8' from 17
       )::uuid
     ) as usage_id,
     volume.id AS volume_id,
