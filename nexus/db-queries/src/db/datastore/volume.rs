@@ -8,6 +8,7 @@ use super::DataStore;
 use crate::db;
 use crate::db::datastore::OpContext;
 use crate::db::datastore::RunnableQuery;
+use crate::db::datastore::REGION_REDUNDANCY_THRESHOLD;
 use crate::db::datastore::SQL_BATCH_SIZE;
 use crate::db::error::public_error_from_diesel;
 use crate::db::error::ErrorHandler;
@@ -1244,16 +1245,18 @@ impl DataStore {
 
         let num_read_write_subvolumes = count_read_write_sub_volumes(&vcr);
 
-        let mut regions: Vec<Uuid> =
-            Vec::with_capacity(3 * num_read_write_subvolumes);
+        let mut regions: Vec<Uuid> = Vec::with_capacity(
+            REGION_REDUNDANCY_THRESHOLD * num_read_write_subvolumes,
+        );
 
         let mut region_snapshots: Vec<RegionSnapshotV3> =
             Vec::with_capacity(crucible_targets.read_only_targets.len());
 
         // First, grab read-write regions - they're not shared, but they are
         // not candidates for deletion if there are region snapshots
-        let mut read_write_targets =
-            Vec::with_capacity(3 * num_read_write_subvolumes);
+        let mut read_write_targets = Vec::with_capacity(
+            REGION_REDUNDANCY_THRESHOLD * num_read_write_subvolumes,
+        );
 
         read_write_resources_associated_with_volume(
             &vcr,
@@ -3700,8 +3703,9 @@ impl DataStore {
 
         let num_read_write_subvolumes = count_read_write_sub_volumes(&vcr);
 
-        let mut read_write_targets =
-            Vec::with_capacity(3 * num_read_write_subvolumes);
+        let mut read_write_targets = Vec::with_capacity(
+            REGION_REDUNDANCY_THRESHOLD * num_read_write_subvolumes,
+        );
 
         read_write_resources_associated_with_volume(
             &vcr,
