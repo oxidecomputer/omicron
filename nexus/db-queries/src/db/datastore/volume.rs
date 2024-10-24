@@ -111,6 +111,11 @@ enum VolumeCreationError {
     CouldNotFindResource(String),
 }
 
+enum RegionType {
+    ReadWrite,
+    ReadOnly,
+}
+
 impl DataStore {
     async fn volume_create_txn(
         conn: &async_bb8_diesel::Connection<DbConnection>,
@@ -206,13 +211,18 @@ impl DataStore {
         conn: &async_bb8_diesel::Connection<DbConnection>,
         err: &OptionalError<AddrParseError>,
         target: &str,
-        read_only: bool,
+        region_type: RegionType,
     ) -> Result<Option<Region>, diesel::result::Error> {
         let address: SocketAddrV6 = target.parse().map_err(|e| err.bail(e))?;
         let ip: db::model::Ipv6Addr = address.ip().into();
 
         use db::schema::dataset::dsl as dataset_dsl;
         use db::schema::region::dsl as region_dsl;
+
+        let read_only = match region_type {
+            RegionType::ReadWrite => false,
+            RegionType::ReadOnly => true,
+        };
 
         dataset_dsl::dataset
             .inner_join(
@@ -266,7 +276,7 @@ impl DataStore {
             conn,
             err,
             read_only_target,
-            true, // read-only
+            RegionType::ReadOnly,
         )
         .await?;
 
@@ -1267,7 +1277,10 @@ impl DataStore {
             let sub_err = OptionalError::new();
 
             let maybe_region = Self::target_to_region(
-                conn, &sub_err, &target, false, // read-write
+                conn,
+                &sub_err,
+                &target,
+                RegionType::ReadWrite,
             )
             .await
             .map_err(|e| {
@@ -3716,7 +3729,10 @@ impl DataStore {
             let sub_err = OptionalError::new();
 
             let maybe_region = DataStore::target_to_region(
-                conn, &sub_err, &target, false, // read-write
+                conn,
+                &sub_err,
+                &target,
+                RegionType::ReadWrite,
             )
             .await?;
 
