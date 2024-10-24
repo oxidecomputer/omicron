@@ -19,7 +19,6 @@ use oximeter_client::Client as OximeterClient;
 use oximeter_db::query::Timestamp;
 use oximeter_db::Measurement;
 use slog::Logger;
-use std::convert::TryInto;
 use std::net::SocketAddr;
 use std::num::NonZeroU32;
 use std::time::Duration;
@@ -118,6 +117,9 @@ impl super::Nexus {
     }
 
     /// Assign a newly-registered metric producer to an oximeter collector server.
+    ///
+    /// Note that we don't send the registration to the collector, the collector
+    /// polls for its list of producers periodically.
     pub(crate) async fn assign_producer(
         &self,
         opctx: &OpContext,
@@ -127,20 +129,6 @@ impl super::Nexus {
             .db_datastore
             .producer_endpoint_upsert_and_assign(opctx, &producer_info)
             .await?;
-
-        let address = SocketAddr::from((
-            collector_info.ip.ip(),
-            collector_info.port.try_into().unwrap(),
-        ));
-        let collector =
-            build_oximeter_client(&self.log, &collector_info.id, address);
-
-        collector
-            .producers_post(&oximeter_client::types::ProducerEndpoint::from(
-                &producer_info,
-            ))
-            .await
-            .map_err(Error::from)?;
         info!(
             self.log,
             "assigned collector to new producer";

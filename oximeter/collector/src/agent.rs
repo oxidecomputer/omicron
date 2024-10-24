@@ -155,7 +155,6 @@ async fn collection_task(
     let mut log = orig_log.new(o!("address" => producer.address));
     let client = reqwest::Client::new();
     let mut collection_timer = interval(producer.interval);
-    collection_timer.tick().await; // completes immediately
     debug!(
         log,
         "starting oximeter collection task";
