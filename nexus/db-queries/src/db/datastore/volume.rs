@@ -905,7 +905,9 @@ impl DataStore {
                             // We don't support a pure Region VCR at the volume
                             // level in the database, so this choice should
                             // never be encountered, but I want to know if it is.
-                            panic!("Region not supported as a top level volume");
+                            return Err(err.bail(VolumeGetError::InvalidVolume(
+                                String::from("Region not supported as a top level volume")
+                            )));
                         }
                         VolumeConstructionRequest::File {
                             id: _,
@@ -1164,6 +1166,9 @@ enum SoftDeleteTransactionError {
 
     #[error("Address parsing error during Volume soft-delete: {0}")]
     AddressParseError(#[from] AddrParseError),
+
+    #[error("Invalid Volume: {0}")]
+    InvalidVolume(String),
 }
 
 impl DataStore {
@@ -1243,7 +1248,18 @@ impl DataStore {
         // references, collecting the regions and region snapshots that were
         // freed up for deletion.
 
-        let num_read_write_subvolumes = count_read_write_sub_volumes(&vcr);
+        let num_read_write_subvolumes = match count_read_write_sub_volumes(&vcr)
+        {
+            Ok(v) => v,
+            Err(e) => {
+                return Err(err.bail(
+                    SoftDeleteTransactionError::InvalidVolume(format!(
+                        "volume {} invalid: {e}",
+                        volume.id()
+                    )),
+                ));
+            }
+        };
 
         let mut regions: Vec<Uuid> = Vec::with_capacity(
             REGION_REDUNDANCY_THRESHOLD * num_read_write_subvolumes,
@@ -3305,8 +3321,10 @@ pub fn read_write_resources_associated_with_volume(
 }
 
 /// Return the number of read-write subvolumes in a VolumeConstructionRequest.
-pub fn count_read_write_sub_volumes(vcr: &VolumeConstructionRequest) -> usize {
-    match vcr {
+pub fn count_read_write_sub_volumes(
+    vcr: &VolumeConstructionRequest,
+) -> anyhow::Result<usize> {
+    Ok(match vcr {
         VolumeConstructionRequest::Volume { sub_volumes, .. } => {
             sub_volumes.len()
         }
@@ -3317,11 +3335,11 @@ pub fn count_read_write_sub_volumes(vcr: &VolumeConstructionRequest) -> usize {
             // We don't support a pure Region VCR at the volume
             // level in the database, so this choice should
             // never be encountered.
-            panic!("Region not supported as a top level volume");
+            bail!("Region not supported as a top level volume");
         }
 
         VolumeConstructionRequest::File { .. } => 0,
-    }
+    })
 }
 
 /// Returns true if the sub-volumes of a Volume are all read-only
@@ -3351,7 +3369,7 @@ pub fn volume_is_read_only(
             // We don't support a pure Region VCR at the volume
             // level in the database, so this choice should
             // never be encountered, but I want to know if it is.
-            panic!("Region not supported as a top level volume");
+            bail!("Region not supported as a top level volume");
         }
 
         VolumeConstructionRequest::File { .. } => {
@@ -3663,7 +3681,16 @@ impl DataStore {
 
         // validate all read/write resources still exist
 
-        let num_read_write_subvolumes = count_read_write_sub_volumes(&vcr);
+        let num_read_write_subvolumes = match count_read_write_sub_volumes(&vcr)
+        {
+            Ok(v) => v,
+            Err(e) => {
+                return Err(Self::volume_invariant_violated(format!(
+                    "volume {} had error: {e}",
+                    volume.id(),
+                )));
+            }
+        };
 
         let mut read_write_targets = Vec::with_capacity(
             REGION_REDUNDANCY_THRESHOLD * num_read_write_subvolumes,
