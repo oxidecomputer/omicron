@@ -788,11 +788,11 @@ fn build_port_config(
             PortSpeed::Speed200G => BaPortSpeed::Speed200G,
             PortSpeed::Speed400G => BaPortSpeed::Speed400G,
         },
-        uplink_port_fec: match config.uplink_port_fec {
+        uplink_port_fec: config.uplink_port_fec.map(|fec| match fec {
             PortFec::Firecode => BaPortFec::Firecode,
             PortFec::None => BaPortFec::None,
             PortFec::Rs => BaPortFec::Rs,
-        },
+        }),
         autoneg: config.autoneg,
         lldp: config.lldp.as_ref().map(|c| BaLldpPortConfig {
             status: match c.status {

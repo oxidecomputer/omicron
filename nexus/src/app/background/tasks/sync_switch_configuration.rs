@@ -19,7 +19,7 @@ use internal_dns_types::names::ServiceName;
 use ipnetwork::IpNetwork;
 use nexus_db_model::{
     AddressLotBlock, BgpConfig, BootstoreConfig, LoopbackAddress,
-    SwitchLinkFec, SwitchLinkSpeed, INFRA_LOT, NETWORK_KEY,
+    SwitchLinkSpeed, INFRA_LOT, NETWORK_KEY,
 };
 use uuid::Uuid;
 
@@ -1002,9 +1002,8 @@ impl BackgroundTask for SwitchPortSettingsManager {
                         uplink_port_fec: info
                             .links
                             .get(0) //TODO https://github.com/oxidecomputer/omicron/issues/3062
-                            .map(|l| l.fec)
-                            .unwrap_or(SwitchLinkFec::None)
-                            .into(),
+                            .map(|l| l.fec.map(|fec| fec.into()))
+                            .unwrap_or(None),
                         uplink_port_speed: info
                             .links
                             .get(0) //TODO https://github.com/oxidecomputer/omicron/issues/3062
