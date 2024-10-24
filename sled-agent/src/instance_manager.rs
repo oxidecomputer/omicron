@@ -465,25 +465,25 @@ impl InstanceManagerRunner {
                             tx.send(self.ensure_registered(propolis_id, instance, *sled_identifiers).await).map_err(|_| Error::FailedSendClientClosed)
                         },
                         Some(EnsureUnregistered { propolis_id, tx }) => {
-                            self.ensure_unregistered(tx, propolis_id).await
+                            self.ensure_unregistered(tx, propolis_id)
                         },
                         Some(EnsureState { propolis_id, target, tx }) => {
-                            self.ensure_state(tx, propolis_id, target).await
+                            self.ensure_state(tx, propolis_id, target)
                         },
                         Some(IssueDiskSnapshot { propolis_id, disk_id, snapshot_id, tx }) => {
-                            self.issue_disk_snapshot_request(tx, propolis_id, disk_id, snapshot_id).await
+                            self.issue_disk_snapshot_request(tx, propolis_id, disk_id, snapshot_id)
                         },
                         Some(CreateZoneBundle { name, tx }) => {
-                            self.create_zone_bundle(tx, &name).await.map_err(Error::from)
+                            self.create_zone_bundle(tx, &name).map_err(Error::from)
                         },
                         Some(AddExternalIp { propolis_id, ip, tx }) => {
-                            self.add_external_ip(tx, propolis_id, &ip).await
+                            self.add_external_ip(tx, propolis_id, &ip)
                         },
                         Some(DeleteExternalIp { propolis_id, ip, tx }) => {
-                            self.delete_external_ip(tx, propolis_id, &ip).await
+                            self.delete_external_ip(tx, propolis_id, &ip)
                         },
                         Some(RefreshExternalIps { tx }) => {
-                            self.refresh_external_ips(tx).await
+                            self.refresh_external_ips(tx)
                         }
                         Some(GetState { propolis_id, tx }) => {
                             // TODO(eliza): it could potentially be nice to
@@ -491,7 +491,7 @@ impl InstanceManagerRunner {
                             // than having to force `GetState` requests to
                             // serialize with the requests that actually update
                             // the state...
-                            self.get_instance_state(tx, propolis_id).await
+                            self.get_instance_state(tx, propolis_id)
                         },
                         Some(OnlyUseDisks { disks, tx } ) => {
                             self.use_only_these_disks(disks).await;
@@ -631,14 +631,15 @@ impl InstanceManagerRunner {
                 &self.jobs.get(&propolis_id).unwrap()
             }
         };
-
-        Ok(instance.current_state().await?)
+        let (tx, rx) = oneshot::channel();
+        instance.current_state(tx)?;
+        rx.await?
     }
 
     /// Idempotently ensures this VM is not registered with this instance
     /// manager. If this Propolis job is registered and has a running zone, the
     /// zone is rudely terminated.
-    async fn ensure_unregistered(
+    fn ensure_unregistered(
         &mut self,
         tx: oneshot::Sender<Result<VmmUnregisterResponse, Error>>,
         propolis_id: PropolisUuid,
@@ -653,13 +654,13 @@ impl InstanceManagerRunner {
         // Otherwise, we pipeline the request, and send it to the instance,
         // where it can receive an appropriate response.
         let mark_failed = false;
-        instance.terminate(tx, mark_failed).await?;
+        instance.terminate(tx, mark_failed)?;
         Ok(())
     }
 
     /// Idempotently attempts to drive the supplied Propolis into the supplied
     /// runtime state.
-    async fn ensure_state(
+    fn ensure_state(
         &mut self,
         tx: oneshot::Sender<Result<VmmPutStateResponse, Error>>,
         propolis_id: PropolisUuid,
@@ -670,11 +671,11 @@ impl InstanceManagerRunner {
                 .map_err(|_| Error::FailedSendClientClosed)?;
             return Ok(());
         };
-        instance.put_state(tx, target).await?;
+        instance.put_state(tx, target)?;
         Ok(())
     }
 
-    async fn issue_disk_snapshot_request(
+    fn issue_disk_snapshot_request(
         &self,
         tx: oneshot::Sender<Result<(), Error>>,
         propolis_id: PropolisUuid,
@@ -686,12 +687,11 @@ impl InstanceManagerRunner {
 
         instance
             .issue_snapshot_request(tx, disk_id, snapshot_id)
-            .await
             .map_err(Error::from)
     }
 
     /// Create a zone bundle from a named instance zone, if it exists.
-    async fn create_zone_bundle(
+    fn create_zone_bundle(
         &self,
         tx: oneshot::Sender<Result<ZoneBundleMetadata, BundleError>>,
         name: &str,
@@ -711,10 +711,13 @@ impl InstanceManagerRunner {
         let Some(instance) = self.jobs.get(&vmm_id) else {
             return Err(BundleError::NoSuchZone { name: name.to_string() });
         };
-        instance.request_zone_bundle(tx).await
+        instance
+            .request_zone_bundle(tx)
+            .map_err(|e| BundleError::FailedSend(anyhow!(e)))?;
+        Ok(())
     }
 
-    async fn add_external_ip(
+    fn add_external_ip(
         &self,
         tx: oneshot::Sender<Result<(), Error>>,
         propolis_id: PropolisUuid,
@@ -723,11 +726,11 @@ impl InstanceManagerRunner {
         let Some(instance) = self.get_propolis(propolis_id) else {
             return Err(Error::NoSuchVmm(propolis_id));
         };
-        instance.add_external_ip(tx, ip).await?;
+        instance.add_external_ip(tx, ip)?;
         Ok(())
     }
 
-    async fn delete_external_ip(
+    fn delete_external_ip(
         &self,
         tx: oneshot::Sender<Result<(), Error>>,
         propolis_id: PropolisUuid,
@@ -737,18 +740,18 @@ impl InstanceManagerRunner {
             return Err(Error::NoSuchVmm(propolis_id));
         };
 
-        instance.delete_external_ip(tx, ip).await?;
+        instance.delete_external_ip(tx, ip)?;
         Ok(())
     }
 
-    async fn refresh_external_ips(
+    fn refresh_external_ips(
         &self,
         tx: oneshot::Sender<Result<(), Error>>,
     ) -> Result<(), Error> {
         let mut channels = vec![];
         for (_, instance) in &self.jobs {
             let (tx, rx_new) = oneshot::channel();
-            instance.refresh_external_ips(tx).await?;
+            instance.refresh_external_ips(tx)?;
             channels.push(rx_new);
         }
 
@@ -766,7 +769,7 @@ impl InstanceManagerRunner {
         Ok(())
     }
 
-    async fn get_instance_state(
+    fn get_instance_state(
         &self,
         tx: oneshot::Sender<Result<SledVmmState, Error>>,
         propolis_id: PropolisUuid,
@@ -776,9 +779,7 @@ impl InstanceManagerRunner {
                 .send(Err(Error::NoSuchVmm(propolis_id)))
                 .map_err(|_| Error::FailedSendClientClosed);
         };
-
-        let state = instance.current_state().await?;
-        tx.send(Ok(state)).map_err(|_| Error::FailedSendClientClosed)?;
+        instance.current_state(tx)?;
         Ok(())
     }
 
@@ -804,9 +805,13 @@ impl InstanceManagerRunner {
         for (id, instance) in self.jobs.iter() {
             // If we can read the filesystem pool, consider it. Otherwise, move
             // on, to prevent blocking the cleanup of other instances.
-            let Ok(Some(filesystem_pool)) =
-                instance.get_filesystem_zpool().await
-            else {
+            // TODO(eliza): clone each instance and spawn a task to handle it,
+            // so that a single misbehaving instance cannot block the instance
+            // manager's run loop...
+            let (tx, rx) = oneshot::channel();
+            // This will fail if the tx has been dropped, which we just...don't do.
+            let _ = instance.get_filesystem_zpool(tx);
+            let Ok(Ok(Some(filesystem_pool))) = rx.await else {
                 info!(self.log, "use_only_these_disks: Cannot read filesystem pool"; "instance_id" => ?id);
                 continue;
             };
@@ -820,7 +825,7 @@ impl InstanceManagerRunner {
             if let Some(instance) = self.jobs.remove(&id) {
                 let (tx, rx) = oneshot::channel();
                 let mark_failed = true;
-                if let Err(e) = instance.terminate(tx, mark_failed).await {
+                if let Err(e) = instance.terminate(tx, mark_failed) {
                     warn!(self.log, "use_only_these_disks: Failed to request instance removal"; "err" => ?e);
                     continue;
                 }
