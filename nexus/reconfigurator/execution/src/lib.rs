@@ -7,7 +7,7 @@
 //! See `nexus_reconfigurator_planning` crate-level docs for background.
 
 use anyhow::{anyhow, Context};
-use internal_dns::resolver::Resolver;
+use internal_dns_resolver::Resolver;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db::DataStore;
 use nexus_types::deployment::execution::*;

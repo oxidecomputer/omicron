@@ -1044,7 +1044,7 @@ impl NexusExternalApi for NexusExternalApiImpl {
                 crate::context::op_context_for_external_api(&rqctx).await?;
             let nexus = &apictx.context.nexus;
             let pool_selector = path_params.into_inner().pool;
-            let (pool, silo_link) =
+            let (.., pool, silo_link) =
                 nexus.silo_ip_pool_fetch(&opctx, &pool_selector).await?;
             Ok(HttpResponseOk(views::SiloIpPool {
                 identity: pool.identity(),

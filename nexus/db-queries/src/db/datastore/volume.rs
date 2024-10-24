@@ -3829,12 +3829,11 @@ impl DataStore {
 mod tests {
     use super::*;
 
+    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::datastore::test::TestDatasets;
-    use crate::db::datastore::test_utils::datastore_test;
     use crate::db::datastore::REGION_REDUNDANCY_THRESHOLD;
     use nexus_config::RegionAllocationStrategy;
     use nexus_db_model::SqlU16;
-    use nexus_test_utils::db::test_setup_database;
     use nexus_types::external_api::params::DiskSource;
     use omicron_common::api::external::ByteCount;
     use omicron_test_utils::dev;
@@ -3847,13 +3846,13 @@ mod tests {
         let logctx =
             dev::test_setup_log("test_deserialize_old_crucible_resources");
         let log = logctx.log.new(o!());
-        let mut db = test_setup_database(&log).await;
-        let (_opctx, db_datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&log).await;
+        let datastore = db.datastore();
 
         // Start with a fake volume, doesn't matter if it's empty
 
         let volume_id = Uuid::new_v4();
-        let _volume = db_datastore
+        let _volume = datastore
             .volume_create(nexus_db_model::Volume::new(
                 volume_id,
                 serde_json::to_string(&VolumeConstructionRequest::Volume {
@@ -3874,8 +3873,7 @@ mod tests {
         {
             use db::schema::volume::dsl;
 
-            let conn =
-                db_datastore.pool_connection_unauthorized().await.unwrap();
+            let conn = datastore.pool_connection_unauthorized().await.unwrap();
 
             let resources_to_clean_up = r#"{
   "V1": {
@@ -3922,14 +3920,14 @@ mod tests {
 
         // Soft delete the volume
 
-        let cr = db_datastore.soft_delete_volume(volume_id).await.unwrap();
+        let cr = datastore.soft_delete_volume(volume_id).await.unwrap();
 
         // Assert the contents of the returned CrucibleResources
 
         let datasets_and_regions =
-            db_datastore.regions_to_delete(&cr).await.unwrap();
+            datastore.regions_to_delete(&cr).await.unwrap();
         let datasets_and_snapshots =
-            db_datastore.snapshots_to_delete(&cr).await.unwrap();
+            datastore.snapshots_to_delete(&cr).await.unwrap();
 
         assert!(datasets_and_regions.is_empty());
         assert_eq!(datasets_and_snapshots.len(), 1);
@@ -3942,7 +3940,7 @@ mod tests {
         );
         assert_eq!(region_snapshot.deleting, false);
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -3950,13 +3948,14 @@ mod tests {
     async fn test_volume_replace_region() {
         let logctx = dev::test_setup_log("test_volume_replace_region");
         let log = logctx.log.new(o!());
-        let mut db = test_setup_database(&log).await;
-        let (opctx, db_datastore) = datastore_test(&logctx, &db).await;
-        let conn = db_datastore.pool_connection_unauthorized().await.unwrap();
+        let db = TestDatabase::new_with_datastore(&log).await;
+        let opctx = db.opctx();
+        let datastore = db.datastore();
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
 
         let _test_datasets = TestDatasets::create(
             &opctx,
-            db_datastore.clone(),
+            datastore.clone(),
             REGION_REDUNDANCY_THRESHOLD,
         )
         .await;
@@ -3964,7 +3963,7 @@ mod tests {
         let volume_id = Uuid::new_v4();
         let volume_to_delete_id = Uuid::new_v4();
 
-        let datasets_and_regions = db_datastore
+        let datasets_and_regions = datastore
             .disk_region_allocate(
                 &opctx,
                 volume_id,
@@ -3992,7 +3991,7 @@ mod tests {
                 .unwrap();
 
             let address: SocketAddrV6 =
-                db_datastore.region_addr(region.id()).await.unwrap().unwrap();
+                datastore.region_addr(region.id()).await.unwrap().unwrap();
 
             region_addresses.push(address.to_string());
         }
@@ -4020,13 +4019,13 @@ mod tests {
             region
         };
 
-        let replacement_region_addr: SocketAddrV6 = db_datastore
+        let replacement_region_addr: SocketAddrV6 = datastore
             .region_addr(replacement_region.id())
             .await
             .unwrap()
             .unwrap();
 
-        let _volume = db_datastore
+        let _volume = datastore
             .volume_create(nexus_db_model::Volume::new(
                 volume_id,
                 serde_json::to_string(&VolumeConstructionRequest::Volume {
@@ -4064,7 +4063,7 @@ mod tests {
 
         // Replace one
 
-        let volume_replace_region_result = db_datastore
+        let volume_replace_region_result = datastore
             .volume_replace_region(
                 /* target */
                 db::datastore::VolumeReplacementParams {
@@ -4085,7 +4084,7 @@ mod tests {
         assert_eq!(volume_replace_region_result, VolumeReplaceResult::Done);
 
         let vcr: VolumeConstructionRequest = serde_json::from_str(
-            db_datastore.volume_get(volume_id).await.unwrap().unwrap().data(),
+            datastore.volume_get(volume_id).await.unwrap().unwrap().data(),
         )
         .unwrap();
 
@@ -4122,7 +4121,7 @@ mod tests {
         );
 
         // Now undo the replacement. Note volume ID is not swapped.
-        let volume_replace_region_result = db_datastore
+        let volume_replace_region_result = datastore
             .volume_replace_region(
                 /* target */
                 db::datastore::VolumeReplacementParams {
@@ -4143,7 +4142,7 @@ mod tests {
         assert_eq!(volume_replace_region_result, VolumeReplaceResult::Done);
 
         let vcr: VolumeConstructionRequest = serde_json::from_str(
-            db_datastore.volume_get(volume_id).await.unwrap().unwrap().data(),
+            datastore.volume_get(volume_id).await.unwrap().unwrap().data(),
         )
         .unwrap();
 
@@ -4179,7 +4178,7 @@ mod tests {
             },
         );
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -4187,13 +4186,14 @@ mod tests {
     async fn test_volume_replace_snapshot() {
         let logctx = dev::test_setup_log("test_volume_replace_snapshot");
         let log = logctx.log.new(o!());
-        let mut db = test_setup_database(&log).await;
-        let (opctx, db_datastore) = datastore_test(&logctx, &db).await;
-        let conn = db_datastore.pool_connection_for_tests().await.unwrap();
+        let db = TestDatabase::new_with_datastore(&log).await;
+        let opctx = db.opctx();
+        let datastore = db.datastore();
+        let conn = datastore.pool_connection_for_tests().await.unwrap();
 
         let _test_datasets = TestDatasets::create(
             &opctx,
-            db_datastore.clone(),
+            datastore.clone(),
             REGION_REDUNDANCY_THRESHOLD,
         )
         .await;
@@ -4201,7 +4201,7 @@ mod tests {
         let volume_id = Uuid::new_v4();
         let volume_to_delete_id = Uuid::new_v4();
 
-        let datasets_and_regions = db_datastore
+        let datasets_and_regions = datastore
             .disk_region_allocate(
                 &opctx,
                 volume_id,
@@ -4229,7 +4229,7 @@ mod tests {
                 .unwrap();
 
             let address: SocketAddrV6 =
-                db_datastore.region_addr(region.id()).await.unwrap().unwrap();
+                datastore.region_addr(region.id()).await.unwrap().unwrap();
 
             region_addresses.push(address.to_string());
         }
@@ -4257,7 +4257,7 @@ mod tests {
             region
         };
 
-        let replacement_region_addr: SocketAddrV6 = db_datastore
+        let replacement_region_addr: SocketAddrV6 = datastore
             .region_addr(replacement_region.id())
             .await
             .unwrap()
@@ -4291,15 +4291,15 @@ mod tests {
             ),
         ];
 
-        db_datastore
+        datastore
             .region_snapshot_create(region_snapshots[0].clone())
             .await
             .unwrap();
-        db_datastore
+        datastore
             .region_snapshot_create(region_snapshots[1].clone())
             .await
             .unwrap();
-        db_datastore
+        datastore
             .region_snapshot_create(region_snapshots[2].clone())
             .await
             .unwrap();
@@ -4310,7 +4310,7 @@ mod tests {
 
         let rop_id = Uuid::new_v4();
 
-        db_datastore
+        datastore
             .volume_create(nexus_db_model::Volume::new(
                 volume_id,
                 serde_json::to_string(&VolumeConstructionRequest::Volume {
@@ -4370,7 +4370,7 @@ mod tests {
             .unwrap();
 
         for region_snapshot in &region_snapshots {
-            let usage = db_datastore
+            let usage = datastore
                 .volume_usage_records_for_resource(
                     VolumeResourceUsage::RegionSnapshot {
                         dataset_id: region_snapshot.dataset_id,
@@ -4385,7 +4385,7 @@ mod tests {
             assert_eq!(usage[0].volume_id, volume_id);
         }
 
-        db_datastore
+        datastore
             .volume_create(nexus_db_model::Volume::new(
                 volume_to_delete_id,
                 serde_json::to_string(&VolumeConstructionRequest::Volume {
@@ -4402,7 +4402,7 @@ mod tests {
         // `volume_create` above was called with a blank volume, so no usage
         // record will have been created for the read-only region
 
-        let usage = db_datastore
+        let usage = datastore
             .volume_usage_records_for_resource(
                 VolumeResourceUsage::ReadOnlyRegion {
                     region_id: replacement_region.id(),
@@ -4415,7 +4415,7 @@ mod tests {
 
         // Do the replacement
 
-        let volume_replace_snapshot_result = db_datastore
+        let volume_replace_snapshot_result = datastore
             .volume_replace_snapshot(
                 VolumeWithTarget(volume_id),
                 ExistingTarget(address_1.parse().unwrap()),
@@ -4430,7 +4430,7 @@ mod tests {
         // Ensure the shape of the resulting VCRs
 
         let vcr: VolumeConstructionRequest = serde_json::from_str(
-            db_datastore.volume_get(volume_id).await.unwrap().unwrap().data(),
+            datastore.volume_get(volume_id).await.unwrap().unwrap().data(),
         )
         .unwrap();
 
@@ -4490,7 +4490,7 @@ mod tests {
         );
 
         let vcr: VolumeConstructionRequest = serde_json::from_str(
-            db_datastore
+            datastore
                 .volume_get(volume_to_delete_id)
                 .await
                 .unwrap()
@@ -4532,7 +4532,7 @@ mod tests {
         // Validate the post-replacement volume resource usage records
 
         for (i, region_snapshot) in region_snapshots.iter().enumerate() {
-            let usage = db_datastore
+            let usage = datastore
                 .volume_usage_records_for_resource(
                     VolumeResourceUsage::RegionSnapshot {
                         dataset_id: region_snapshot.dataset_id,
@@ -4558,7 +4558,7 @@ mod tests {
             }
         }
 
-        let usage = db_datastore
+        let usage = datastore
             .volume_usage_records_for_resource(
                 VolumeResourceUsage::ReadOnlyRegion {
                     region_id: replacement_region.id(),
@@ -4572,7 +4572,7 @@ mod tests {
 
         // Now undo the replacement. Note volume ID is not swapped.
 
-        let volume_replace_snapshot_result = db_datastore
+        let volume_replace_snapshot_result = datastore
             .volume_replace_snapshot(
                 VolumeWithTarget(volume_id),
                 ExistingTarget(replacement_region_addr),
@@ -4585,7 +4585,7 @@ mod tests {
         assert_eq!(volume_replace_snapshot_result, VolumeReplaceResult::Done,);
 
         let vcr: VolumeConstructionRequest = serde_json::from_str(
-            db_datastore.volume_get(volume_id).await.unwrap().unwrap().data(),
+            datastore.volume_get(volume_id).await.unwrap().unwrap().data(),
         )
         .unwrap();
 
@@ -4644,7 +4644,7 @@ mod tests {
         );
 
         let vcr: VolumeConstructionRequest = serde_json::from_str(
-            db_datastore
+            datastore
                 .volume_get(volume_to_delete_id)
                 .await
                 .unwrap()
@@ -4686,7 +4686,7 @@ mod tests {
         // Validate the post-post-replacement volume resource usage records
 
         for region_snapshot in &region_snapshots {
-            let usage = db_datastore
+            let usage = datastore
                 .volume_usage_records_for_resource(
                     VolumeResourceUsage::RegionSnapshot {
                         dataset_id: region_snapshot.dataset_id,
@@ -4701,7 +4701,7 @@ mod tests {
             assert_eq!(usage[0].volume_id, volume_id);
         }
 
-        let usage = db_datastore
+        let usage = datastore
             .volume_usage_records_for_resource(
                 VolumeResourceUsage::ReadOnlyRegion {
                     region_id: replacement_region.id(),
@@ -4713,7 +4713,7 @@ mod tests {
         assert_eq!(usage.len(), 1);
         assert_eq!(usage[0].volume_id, volume_to_delete_id);
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -4722,8 +4722,8 @@ mod tests {
         let logctx =
             dev::test_setup_log("test_find_volumes_referencing_socket_addr");
         let log = logctx.log.new(o!());
-        let mut db = test_setup_database(&log).await;
-        let (opctx, db_datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let volume_id = Uuid::new_v4();
 
@@ -4734,7 +4734,7 @@ mod tests {
         let address_2 = String::from("[fd00:1122:3344:105::1]:401");
         let address_3 = String::from("[fd00:1122:3344:106::1]:402");
 
-        db_datastore
+        datastore
             .region_snapshot_create(RegionSnapshot::new(
                 Uuid::new_v4(),
                 Uuid::new_v4(),
@@ -4743,7 +4743,7 @@ mod tests {
             ))
             .await
             .unwrap();
-        db_datastore
+        datastore
             .region_snapshot_create(RegionSnapshot::new(
                 Uuid::new_v4(),
                 Uuid::new_v4(),
@@ -4752,7 +4752,7 @@ mod tests {
             ))
             .await
             .unwrap();
-        db_datastore
+        datastore
             .region_snapshot_create(RegionSnapshot::new(
                 Uuid::new_v4(),
                 Uuid::new_v4(),
@@ -4764,7 +4764,7 @@ mod tests {
 
         // case where the needle is found
 
-        db_datastore
+        datastore
             .volume_create(nexus_db_model::Volume::new(
                 volume_id,
                 serde_json::to_string(&VolumeConstructionRequest::Volume {
@@ -4801,7 +4801,7 @@ mod tests {
             .await
             .unwrap();
 
-        let volumes = db_datastore
+        let volumes = datastore
             .find_volumes_referencing_socket_addr(
                 &opctx,
                 address_1.parse().unwrap(),
@@ -4814,7 +4814,7 @@ mod tests {
 
         // case where the needle is missing
 
-        let volumes = db_datastore
+        let volumes = datastore
             .find_volumes_referencing_socket_addr(
                 &opctx,
                 "[fd55:1122:3344:104::1]:400".parse().unwrap(),
@@ -4824,7 +4824,7 @@ mod tests {
 
         assert!(volumes.is_empty());
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 

@@ -26,7 +26,7 @@ pub(crate) use context::ServerContext;
 use display_error_chain::DisplayErrorChain;
 use dropshot::{ConfigDropshot, HandlerTaskMode, HttpServer};
 pub use installinator_progress::{IprUpdateTracker, RunningUpdateState};
-use internal_dns::resolver::Resolver;
+use internal_dns_resolver::Resolver;
 use mgs::make_mgs_client;
 pub(crate) use mgs::{MgsHandle, MgsManager};
 use nexus_proxy::NexusTcpProxy;

@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use dropshot::test_util::ClientTestContext;
+use dropshot::{test_util::ClientTestContext, ResultsPage};
 use http::{Method, StatusCode};
 use nexus_db_queries::db::fixed_data::silo::DEFAULT_SILO;
 use nexus_test_utils::{
@@ -10,17 +10,18 @@ use nexus_test_utils::{
     resource_helpers::{
         attach_ip_address_to_igw, attach_ip_pool_to_igw, create_floating_ip,
         create_instance_with, create_internet_gateway, create_ip_pool,
-        create_project, create_route, create_router, create_vpc,
-        delete_internet_gateway, detach_ip_address_from_igw,
+        create_local_user, create_project, create_route, create_router,
+        create_vpc, delete_internet_gateway, detach_ip_address_from_igw,
         detach_ip_pool_from_igw, link_ip_pool, objects_list_page_authz,
     },
 };
 use nexus_test_utils_macros::nexus_test;
 use nexus_types::external_api::{
     params::{
-        ExternalIpCreate, InstanceNetworkInterfaceAttachment,
+        self, ExternalIpCreate, InstanceNetworkInterfaceAttachment,
         InstanceNetworkInterfaceCreate,
     },
+    shared::SiloRole,
     views::{InternetGateway, InternetGatewayIpAddress, InternetGatewayIpPool},
 };
 use nexus_types::identity::Resource;
@@ -254,6 +255,90 @@ async fn test_internet_gateway_delete_cascade(ctx: &ControlPlaneTestContext) {
     expect_igw_pools_not_found(c, PROJECT_NAME, VPC_NAME, IGW_NAME).await;
     // looking for gateway addresses should return 404
     expect_igw_addresses_not_found(c, PROJECT_NAME, VPC_NAME, IGW_NAME).await;
+}
+
+#[nexus_test]
+async fn test_igw_ip_pool_attach_silo_user(ctx: &ControlPlaneTestContext) {
+    let c = &ctx.external_client;
+    test_setup(c).await;
+
+    // Create a non-admin user
+    let silo_url = format!("/v1/system/silos/{}", DEFAULT_SILO.name());
+    let silo: nexus_types::external_api::views::Silo =
+        nexus_test_utils::resource_helpers::object_get(c, &silo_url).await;
+
+    let user = create_local_user(
+        c,
+        &silo,
+        &"user".parse().unwrap(),
+        params::UserPassword::LoginDisallowed,
+    )
+    .await;
+
+    // Grant the user Collaborator role
+    nexus_test_utils::resource_helpers::grant_iam(
+        c,
+        &silo_url,
+        SiloRole::Collaborator,
+        user.id,
+        AuthnMode::PrivilegedUser,
+    )
+    .await;
+
+    // Create an internet gateway
+    create_internet_gateway(c, PROJECT_NAME, VPC_NAME, IGW_NAME).await;
+
+    // Verify the IP pool is not attached
+    let igw_pools =
+        list_internet_gateway_ip_pools(c, PROJECT_NAME, VPC_NAME, IGW_NAME)
+            .await;
+    assert_eq!(igw_pools.len(), 0, "IP pool should not be attached");
+
+    // Attach an IP pool as non-admin user
+    let url = format!(
+        "/v1/internet-gateway-ip-pools?project={}&vpc={}&gateway={}",
+        PROJECT_NAME, VPC_NAME, IGW_NAME
+    );
+    let params = params::InternetGatewayIpPoolCreate {
+        identity: IdentityMetadataCreateParams {
+            name: IP_POOL_ATTACHMENT_NAME.parse().unwrap(),
+            description: "Test attachment".to_string(),
+        },
+        ip_pool: NameOrId::Name(IP_POOL_NAME.parse().unwrap()),
+    };
+
+    let _result: InternetGatewayIpPool =
+        NexusRequest::objects_post(&c, &url, &params)
+            .authn_as(AuthnMode::SiloUser(user.id))
+            .execute_and_parse_unwrap()
+            .await;
+
+    // Verify the non-admin user can list the attached IP pool
+    let igw_pools: ResultsPage<InternetGatewayIpPool> =
+        NexusRequest::object_get(c, &url)
+            .authn_as(AuthnMode::SiloUser(user.id))
+            .execute_and_parse_unwrap()
+            .await;
+
+    assert_eq!(igw_pools.items.len(), 1);
+    assert_eq!(igw_pools.items[0].identity.name, IP_POOL_ATTACHMENT_NAME);
+
+    // detach doesn't have the authz complication that attach has, but test it anyway
+    let url = format!(
+        "/v1/internet-gateway-ip-pools/{}?project={}&vpc={}&gateway={}&cascade=true",
+        IP_POOL_ATTACHMENT_NAME, PROJECT_NAME, VPC_NAME, IGW_NAME,
+    );
+    NexusRequest::object_delete(&c, &url)
+        .authn_as(AuthnMode::SiloUser(user.id))
+        .execute()
+        .await
+        .unwrap();
+
+    // it's gone
+    let igw_pools =
+        list_internet_gateway_ip_pools(c, PROJECT_NAME, VPC_NAME, IGW_NAME)
+            .await;
+    assert_eq!(igw_pools.len(), 0, "IP pool should not be attached");
 }
 
 async fn test_setup(c: &ClientTestContext) {

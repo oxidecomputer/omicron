@@ -14,6 +14,8 @@ use crate::external_api::views::PhysicalDiskState;
 use crate::external_api::views::SledPolicy;
 use crate::external_api::views::SledProvisionPolicy;
 use crate::external_api::views::SledState;
+use chrono::DateTime;
+use chrono::Utc;
 use clap::ValueEnum;
 use ipnetwork::IpNetwork;
 use omicron_common::address::IpRange;
@@ -22,6 +24,7 @@ use omicron_common::address::SLED_PREFIX;
 use omicron_common::api::external::Generation;
 use omicron_common::api::internal::shared::SourceNatConfigError;
 use omicron_common::disk::DiskIdentity;
+use omicron_common::policy::SINGLE_NODE_CLICKHOUSE_REDUNDANCY;
 use omicron_uuid_kinds::OmicronZoneUuid;
 use omicron_uuid_kinds::PhysicalDiskUuid;
 use omicron_uuid_kinds::SledUuid;
@@ -117,11 +120,25 @@ impl PlanningInput {
         self.policy.target_cockroachdb_cluster_version
     }
 
+    pub fn target_crucible_pantry_zone_count(&self) -> usize {
+        self.policy.target_crucible_pantry_zone_count
+    }
+
+    pub fn target_clickhouse_zone_count(&self) -> usize {
+        match self.policy.clickhouse_policy.as_ref().map(|policy| &policy.mode)
+        {
+            Some(&ClickhouseMode::ClusterOnly { .. }) => 0,
+            Some(&ClickhouseMode::SingleNodeOnly)
+            | Some(&ClickhouseMode::Both { .. })
+            | None => SINGLE_NODE_CLICKHOUSE_REDUNDANCY,
+        }
+    }
+
     pub fn target_clickhouse_server_zone_count(&self) -> usize {
         self.policy
             .clickhouse_policy
             .as_ref()
-            .map(|policy| policy.target_servers)
+            .map(|policy| usize::from(policy.mode.target_servers()))
             .unwrap_or(0)
     }
 
@@ -129,7 +146,7 @@ impl PlanningInput {
         self.policy
             .clickhouse_policy
             .as_ref()
-            .map(|policy| policy.target_keepers)
+            .map(|policy| usize::from(policy.mode.target_keepers()))
             .unwrap_or(0)
     }
 
@@ -138,7 +155,18 @@ impl PlanningInput {
     }
 
     pub fn clickhouse_cluster_enabled(&self) -> bool {
-        self.policy.clickhouse_policy.is_some()
+        let Some(clickhouse_policy) = &self.policy.clickhouse_policy else {
+            return false;
+        };
+        clickhouse_policy.mode.cluster_enabled()
+    }
+
+    pub fn clickhouse_single_node_enabled(&self) -> bool {
+        let Some(clickhouse_policy) = &self.policy.clickhouse_policy else {
+            // If there is no policy we assume single-node is enabled.
+            return true;
+        };
+        clickhouse_policy.mode.single_node_enabled()
     }
 
     pub fn all_sleds(
@@ -843,6 +871,9 @@ pub struct Policy {
     /// desired total number of deployed CockroachDB zones
     pub target_cockroachdb_zone_count: usize,
 
+    /// desired total number of deployed CruciblePantry zones
+    pub target_crucible_pantry_zone_count: usize,
+
     /// desired CockroachDB `cluster.preserve_downgrade_option` setting.
     /// at present this is hardcoded based on the version of CockroachDB we
     /// presently ship and the tick-tock pattern described in RFD 469.
@@ -856,20 +887,59 @@ pub struct Policy {
     pub clickhouse_policy: Option<ClickhousePolicy>,
 }
 
-/// Policy for replicated clickhouse setups
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ClickhousePolicy {
-    /// Should we run the single-node cluster alongside the replicated cluster?
-    /// This is stage 1 of our deployment plan as laid out in RFD 468
-    ///
-    /// If this is set to false, then we will only deploy replicated clusters.
-    pub deploy_with_standalone: bool,
+    pub version: u32,
+    pub mode: ClickhouseMode,
+    pub time_created: DateTime<Utc>,
+}
 
-    /// Desired number of clickhouse servers
-    pub target_servers: usize,
+/// How to deploy clickhouse nodes
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", tag = "type", content = "value")]
+pub enum ClickhouseMode {
+    SingleNodeOnly,
+    ClusterOnly { target_servers: u8, target_keepers: u8 },
+    Both { target_servers: u8, target_keepers: u8 },
+}
 
-    /// Desired number of clickhouse keepers
-    pub target_keepers: usize,
+impl ClickhouseMode {
+    pub fn cluster_enabled(&self) -> bool {
+        match self {
+            ClickhouseMode::SingleNodeOnly => false,
+            ClickhouseMode::ClusterOnly { .. }
+            | ClickhouseMode::Both { .. } => true,
+        }
+    }
+
+    pub fn single_node_enabled(&self) -> bool {
+        match self {
+            ClickhouseMode::ClusterOnly { .. } => false,
+            ClickhouseMode::SingleNodeOnly | ClickhouseMode::Both { .. } => {
+                true
+            }
+        }
+    }
+
+    pub fn target_servers(&self) -> u8 {
+        match self {
+            ClickhouseMode::SingleNodeOnly => 0,
+            ClickhouseMode::ClusterOnly { target_servers, .. } => {
+                *target_servers
+            }
+            ClickhouseMode::Both { target_servers, .. } => *target_servers,
+        }
+    }
+
+    pub fn target_keepers(&self) -> u8 {
+        match self {
+            ClickhouseMode::SingleNodeOnly => 0,
+            ClickhouseMode::ClusterOnly { target_keepers, .. } => {
+                *target_keepers
+            }
+            ClickhouseMode::Both { target_keepers, .. } => *target_keepers,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -924,6 +994,7 @@ impl PlanningInputBuilder {
                 target_cockroachdb_zone_count: 0,
                 target_cockroachdb_cluster_version:
                     CockroachDbClusterVersion::POLICY,
+                target_crucible_pantry_zone_count: 0,
                 clickhouse_policy: None,
             },
             internal_dns_version: Generation::new(),

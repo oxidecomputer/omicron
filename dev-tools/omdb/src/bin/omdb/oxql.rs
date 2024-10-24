@@ -10,6 +10,7 @@ use crate::helpers::CONNECTION_OPTIONS_HEADING;
 use crate::Omdb;
 use anyhow::Context;
 use clap::Args;
+use internal_dns_types::names::ServiceName;
 use oximeter_db::{
     self,
     shells::oxql::{self, ShellOptions},
@@ -30,6 +31,15 @@ pub struct OxqlArgs {
     )]
     clickhouse_url: Option<String>,
 
+    /// URL of the ClickHouse server to connect to for the native protcol.
+    #[arg(
+        long,
+        env = "OMDB_CLICKHOUSE_NATIVE_URL",
+        global = true,
+        help_heading = CONNECTION_OPTIONS_HEADING,
+    )]
+    clickhouse_native_url: Option<String>,
+
     /// Print summaries of each SQL query run against the database.
     #[clap(long = "summaries")]
     print_summaries: bool,
@@ -46,7 +56,8 @@ impl OxqlArgs {
         omdb: &Omdb,
         log: &Logger,
     ) -> anyhow::Result<()> {
-        let addr = self.addr(omdb, log).await?;
+        let http_addr = self.resolve_http_addr(omdb, log).await?;
+        let native_addr = self.resolve_native_addr(omdb, log).await?;
 
         let opts = ShellOptions {
             print_summaries: self.print_summaries,
@@ -54,21 +65,53 @@ impl OxqlArgs {
         };
 
         oxql::shell(
-            addr.ip(),
-            addr.port(),
+            http_addr.ip(),
+            http_addr.port(),
+            native_addr.port(),
             log.new(slog::o!("component" => "clickhouse-client")),
             opts,
         )
         .await
     }
 
-    /// Resolve the ClickHouse URL to a socket address.
-    async fn addr(
+    /// Resolve the ClickHouse native TCP socket address.
+    async fn resolve_native_addr(
         &self,
         omdb: &Omdb,
         log: &Logger,
     ) -> anyhow::Result<SocketAddr> {
-        match &self.clickhouse_url {
+        self.resolve_addr(
+            omdb,
+            log,
+            self.clickhouse_native_url.as_deref(),
+            ServiceName::ClickhouseNative,
+        )
+        .await
+    }
+
+    /// Resolve the ClickHouse HTTP URL to a socket address.
+    async fn resolve_http_addr(
+        &self,
+        omdb: &Omdb,
+        log: &Logger,
+    ) -> anyhow::Result<SocketAddr> {
+        self.resolve_addr(
+            omdb,
+            log,
+            self.clickhouse_url.as_deref(),
+            ServiceName::Clickhouse,
+        )
+        .await
+    }
+
+    async fn resolve_addr(
+        &self,
+        omdb: &Omdb,
+        log: &Logger,
+        maybe_url: Option<&str>,
+        srv: ServiceName,
+    ) -> anyhow::Result<SocketAddr> {
+        match maybe_url {
             Some(cli_or_env_url) => Url::parse(&cli_or_env_url)
                 .context(
                     "failed parsing URL from command-line or environment variable",
@@ -86,7 +129,7 @@ impl OxqlArgs {
                 Ok(SocketAddr::V6(
                     omdb.dns_lookup_one(
                         log.clone(),
-                        internal_dns::ServiceName::Clickhouse,
+                        srv,
                     )
                     .await
                     .context("failed looking up ClickHouse internal DNS entry")?,

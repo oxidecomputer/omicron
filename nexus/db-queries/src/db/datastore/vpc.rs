@@ -2755,9 +2755,9 @@ impl DataStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::datastore::pub_test_utils::TestDatabase;
     use crate::db::datastore::test::sled_baseboard_for_test;
     use crate::db::datastore::test::sled_system_hardware_for_test;
-    use crate::db::datastore::test_utils::datastore_test;
     use crate::db::datastore::test_utils::IneligibleSleds;
     use crate::db::model::Project;
     use crate::db::queries::vpc::MAX_VNI_SEARCH_RANGE_SIZE;
@@ -2768,7 +2768,6 @@ mod tests {
     use nexus_reconfigurator_planning::blueprint_builder::BlueprintBuilder;
     use nexus_reconfigurator_planning::system::SledBuilder;
     use nexus_reconfigurator_planning::system::SystemDescription;
-    use nexus_test_utils::db::test_setup_database;
     use nexus_types::deployment::Blueprint;
     use nexus_types::deployment::BlueprintTarget;
     use nexus_types::deployment::BlueprintZoneConfig;
@@ -2798,8 +2797,8 @@ mod tests {
             "test_project_create_vpc_raw_returns_none_on_vni_exhaustion",
         );
         let log = &logctx.log;
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Create a project.
         let project_params = params::ProjectCreate {
@@ -2889,7 +2888,7 @@ mod tests {
         else {
             panic!("Expected Ok(None) when creating a VPC without any available VNIs");
         };
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -2902,8 +2901,8 @@ mod tests {
         usdt::register_probes().unwrap();
         let logctx = dev::test_setup_log("test_project_create_vpc_retries");
         let log = &logctx.log;
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Create a project.
         let project_params = params::ProjectCreate {
@@ -2999,7 +2998,7 @@ mod tests {
             }
             Err(e) => panic!("Unexpected error when inserting VPC: {e}"),
         };
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -3047,8 +3046,8 @@ mod tests {
         let logctx = dev::test_setup_log(
             "test_vpc_resolve_to_sleds_uses_current_target_blueprint",
         );
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(&logctx.log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         // Set up our fake system with 5 sleds.
         let rack_id = Uuid::new_v4();
@@ -3284,7 +3283,7 @@ mod tests {
         )
         .await;
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -3409,8 +3408,8 @@ mod tests {
         let logctx =
             dev::test_setup_log("test_vpc_system_router_sync_to_subnets");
         let log = &logctx.log;
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let (_, authz_vpc, db_vpc, _, db_router) =
             create_initial_vpc(log, &opctx, &datastore).await;
@@ -3544,7 +3543,7 @@ mod tests {
         )
         .await;
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 
@@ -3636,8 +3635,8 @@ mod tests {
         let logctx =
             dev::test_setup_log("test_vpc_router_rule_instance_resolve");
         let log = &logctx.log;
-        let mut db = test_setup_database(&logctx.log).await;
-        let (opctx, datastore) = datastore_test(&logctx, &db).await;
+        let db = TestDatabase::new_with_datastore(log).await;
+        let (opctx, datastore) = (db.opctx(), db.datastore());
 
         let (authz_project, authz_vpc, db_vpc, authz_router, _) =
             create_initial_vpc(log, &opctx, &datastore).await;
@@ -3773,7 +3772,7 @@ mod tests {
                 _ => false,
             }));
 
-        db.cleanup().await.unwrap();
+        db.terminate().await;
         logctx.cleanup_successful();
     }
 }

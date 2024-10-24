@@ -7,7 +7,7 @@ use std::{
     net::IpAddr,
 };
 
-use internal_dns::{DnsConfigBuilder, ServiceName};
+use internal_dns_types::{config::DnsConfigBuilder, names::ServiceName};
 use omicron_common::api::external::Name;
 use omicron_uuid_kinds::SledUuid;
 

@@ -42,6 +42,46 @@ ALTER DEFAULT PRIVILEGES GRANT INSERT, SELECT, UPDATE, DELETE ON TABLES to omicr
  */
 ALTER RANGE default CONFIGURE ZONE USING num_replicas = 5;
 
+
+/*
+ * The deployment strategy for clickhouse 
+ */
+CREATE TYPE IF NOT EXISTS omicron.public.clickhouse_mode AS ENUM (
+   -- Only deploy a single node clickhouse 
+   'single_node_only',
+
+   -- Only deploy a clickhouse cluster without any single node deployments 
+   'cluster_only',
+
+   -- Deploy both a single node and cluster deployment.
+   -- This is the strategy for stage 1 described in RFD 468
+   'both'
+);
+
+/*
+ * A planning policy for clickhouse for a single multirack setup
+ *
+ * We currently implicitly tie this policy to a rack, as we don't yet support
+ * multirack. Multiple parts of this database schema are going to have to change
+ * to support multirack, so we add one more for now.
+ */
+CREATE TABLE IF NOT EXISTS omicron.public.clickhouse_policy (
+    -- Monotonically increasing version for all policies
+    --
+    -- This is similar to `bp_target` which will also require being changed for
+    -- multirack to associate with some sort of rack group ID.
+    version INT8 PRIMARY KEY,
+
+    clickhouse_mode omicron.public.clickhouse_mode NOT NULL,
+
+    -- Only greater than 0 when clickhouse cluster is enabled
+    clickhouse_cluster_target_servers INT2 NOT NULL,
+    -- Only greater than 0 when clickhouse cluster is enabled
+    clickhouse_cluster_target_keepers INT2 NOT NULL,
+
+    time_created TIMESTAMPTZ NOT NULL
+);
+
 /*
  * Racks
  */
@@ -3402,6 +3442,8 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_dataset (
     PRIMARY KEY (inv_collection_id, sled_id, name)
 );
 
+-- TODO: This table is vestigial and can be combined with `inv_sled_agent`. See
+-- https://github.com/oxidecomputer/omicron/issues/6770.
 CREATE TABLE IF NOT EXISTS omicron.public.inv_sled_omicron_zones (
     -- where this observation came from
     -- (foreign key into `inv_collection` table)
@@ -3524,6 +3566,15 @@ CREATE TABLE IF NOT EXISTS omicron.public.inv_omicron_zone_nic (
     slot INT2 NOT NULL,
 
     PRIMARY KEY (inv_collection_id, id)
+);
+
+CREATE TABLE IF NOT EXISTS omicron.public.inv_clickhouse_keeper_membership (
+    inv_collection_id UUID NOT NULL,
+    queried_keeper_id INT8 NOT NULL,
+    leader_committed_log_index INT8 NOT NULL,
+    raft_config INT8[] NOT NULL,
+
+    PRIMARY KEY (inv_collection_id, queried_keeper_id)
 );
 
 /*
@@ -4570,7 +4621,7 @@ INSERT INTO omicron.public.db_metadata (
     version,
     target_version
 ) VALUES
-    (TRUE, NOW(), NOW(), '109.0.0', NULL)
+    (TRUE, NOW(), NOW(), '111.0.0', NULL)
 ON CONFLICT DO NOTHING;
 
 COMMIT;

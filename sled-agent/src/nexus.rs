@@ -7,8 +7,8 @@ use omicron_common::disk::DiskVariant;
 use omicron_uuid_kinds::SledUuid;
 
 use crate::vmm_reservoir::VmmReservoirManagerHandle;
-use internal_dns::resolver::Resolver;
-use internal_dns::ServiceName;
+use internal_dns_resolver::Resolver;
+use internal_dns_types::names::ServiceName;
 use nexus_client::types::SledAgentInfo;
 use omicron_common::address::NEXUS_INTERNAL_PORT;
 use sled_hardware::HardwareManager;
@@ -45,50 +45,6 @@ pub(crate) fn make_nexus_client_with_port(
         client,
         log.new(o!("component" => "NexusClient")),
     )
-}
-
-pub fn d2n_params(
-    params: &dns_service_client::types::DnsConfigParams,
-) -> nexus_client::types::DnsConfigParams {
-    nexus_client::types::DnsConfigParams {
-        generation: params.generation,
-        time_created: params.time_created,
-        zones: params.zones.iter().map(d2n_zone).collect(),
-    }
-}
-
-fn d2n_zone(
-    zone: &dns_service_client::types::DnsConfigZone,
-) -> nexus_client::types::DnsConfigZone {
-    nexus_client::types::DnsConfigZone {
-        zone_name: zone.zone_name.clone(),
-        records: zone
-            .records
-            .iter()
-            .map(|(n, r)| (n.clone(), r.iter().map(d2n_record).collect()))
-            .collect(),
-    }
-}
-
-fn d2n_record(
-    record: &dns_service_client::types::DnsRecord,
-) -> nexus_client::types::DnsRecord {
-    match record {
-        dns_service_client::types::DnsRecord::A(addr) => {
-            nexus_client::types::DnsRecord::A(*addr)
-        }
-        dns_service_client::types::DnsRecord::Aaaa(addr) => {
-            nexus_client::types::DnsRecord::Aaaa(*addr)
-        }
-        dns_service_client::types::DnsRecord::Srv(srv) => {
-            nexus_client::types::DnsRecord::Srv(nexus_client::types::Srv {
-                port: srv.port,
-                prio: srv.prio,
-                target: srv.target.clone(),
-                weight: srv.weight,
-            })
-        }
-    }
 }
 
 // Although it is a bit awkward to define these conversions here, it frees us
