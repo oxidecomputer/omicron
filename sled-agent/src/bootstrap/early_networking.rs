@@ -699,7 +699,7 @@ impl<'a> EarlyNetworkSetup<'a> {
             params: LinkCreate {
                 autoneg: port_config.autoneg,
                 kr: false, //NOTE: kr does not apply to user configurable links.
-                fec: convert_fec(&port_config.uplink_port_fec),
+                fec: port_config.uplink_port_fec.map(convert_fec),
                 speed: convert_speed(&port_config.uplink_port_speed),
                 lane: Some(LinkId(0)),
                 tx_eq: port_config.tx_eq.map(|x| TxEq {
@@ -783,7 +783,7 @@ fn convert_speed(speed: &PortSpeed) -> dpd_client::types::PortSpeed {
     }
 }
 
-fn convert_fec(fec: &PortFec) -> dpd_client::types::PortFec {
+fn convert_fec(fec: PortFec) -> dpd_client::types::PortFec {
     match fec {
         PortFec::Firecode => dpd_client::types::PortFec::Firecode,
         PortFec::None => dpd_client::types::PortFec::None,

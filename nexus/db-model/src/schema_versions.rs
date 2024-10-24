@@ -17,7 +17,7 @@ use std::collections::BTreeMap;
 ///
 /// This must be updated when you change the database schema.  Refer to
 /// schema/crdb/README.adoc in the root of this repository for details.
-pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(111, 0, 0);
+pub const SCHEMA_VERSION: SemverVersion = SemverVersion::new(112, 0, 0);
 /// List of all past database schema versions, in *reverse* order
 ///
 /// If you want to change the Omicron database schema, you must update this.
@@ -28,6 +28,7 @@ static KNOWN_VERSIONS: Lazy<Vec<KnownVersion>> = Lazy::new(|| {
         // |  leaving the first copy as an example for the next person.
         // v
         // KnownVersion::new(next_int, "unique-dirname-with-the-sql-files"),
+        KnownVersion::new(112, "make-link-settings-non-nullable"),
         KnownVersion::new(111, "add-tx-eq"),
         KnownVersion::new(110, "clickhouse-policy"),
         KnownVersion::new(109, "inv-clickhouse-keeper-membership"),

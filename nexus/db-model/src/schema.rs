@@ -141,7 +141,7 @@ table! {
         port_settings_id -> Uuid,
         link_name -> Text,
         mtu -> Int4,
-        fec -> crate::SwitchLinkFecEnum,
+        fec -> Nullable<crate::SwitchLinkFecEnum>,
         speed -> crate::SwitchLinkSpeedEnum,
         autoneg -> Bool,
         lldp_link_config_id -> Nullable<Uuid>,

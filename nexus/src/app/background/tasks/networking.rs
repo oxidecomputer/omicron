@@ -83,11 +83,11 @@ pub(crate) fn api_to_dpd_port_settings(
                     lane: Some(LinkId(0)),
                     kr: false,
                     tx_eq: tx_eq.clone(),
-                    fec: match l.fec {
+                    fec: l.fec.map(|fec| match fec {
                         SwitchLinkFec::Firecode => PortFec::Firecode,
                         SwitchLinkFec::Rs => PortFec::Rs,
                         SwitchLinkFec::None => PortFec::None,
-                    },
+                    }),
                     speed: match l.speed {
                         SwitchLinkSpeed::Speed0G => PortSpeed::Speed0G,
                         SwitchLinkSpeed::Speed1G => PortSpeed::Speed1G,

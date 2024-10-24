@@ -183,7 +183,7 @@ pub struct UserSpecifiedPortConfig {
     pub routes: Vec<RouteConfig>,
     pub addresses: Vec<UplinkAddressConfig>,
     pub uplink_port_speed: PortSpeed,
-    pub uplink_port_fec: PortFec,
+    pub uplink_port_fec: Option<PortFec>,
     pub autoneg: bool,
     #[serde(default)]
     pub bgp_peers: Vec<UserSpecifiedBgpPeerConfig>,

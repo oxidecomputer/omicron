@@ -747,11 +747,11 @@ fn build_port_settings(
     link_id: &LinkId,
 ) -> PortSettings {
     // Map from omicron_common types to dpd_client types
-    let fec = match uplink.uplink_port_fec {
+    let fec = uplink.uplink_port_fec.map(|fec| match fec {
         OmicronPortFec::Firecode => DpdPortFec::Firecode,
         OmicronPortFec::None => DpdPortFec::None,
         OmicronPortFec::Rs => DpdPortFec::Rs,
-    };
+    });
     let speed = match uplink.uplink_port_speed {
         OmicronPortSpeed::Speed0G => DpdPortSpeed::Speed0G,
         OmicronPortSpeed::Speed1G => DpdPortSpeed::Speed1G,

@@ -127,7 +127,7 @@ async fn test_port_settings_basic_crud(ctx: &ControlPlaneTestContext) {
                 system_description: Some("System description".into()),
                 management_ip: None,
             },
-            fec: LinkFec::None,
+            fec: Some(LinkFec::None),
             speed: LinkSpeed::Speed100G,
             autoneg: false,
             tx_eq: None,

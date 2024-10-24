@@ -358,11 +358,14 @@ fn populate_uplink_table(cfg: &UserSpecifiedPortConfig) -> Table {
     uplink.insert("addresses", Item::Value(Value::Array(addresses_out)));
 
     // General properties
-    for (property, value) in [
-        ("uplink_port_speed", enum_to_toml_string(&uplink_port_speed)),
-        ("uplink_port_fec", enum_to_toml_string(&uplink_port_fec)),
-    ] {
-        uplink.insert(property, string_item(value));
+    uplink.insert(
+        "uplink_port_speed",
+        string_item(enum_to_toml_string(&uplink_port_speed)),
+    );
+
+    if let Some(fec) = uplink_port_fec {
+        uplink
+            .insert("uplink_port_fec", string_item(enum_to_toml_string(&fec)));
     }
     uplink.insert("autoneg", bool_item(*autoneg));
 

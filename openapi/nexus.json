@@ -17166,6 +17166,7 @@
             "type": "boolean"
           },
           "fec": {
+            "nullable": true,
             "description": "The forward error correction mode of the link.",
             "allOf": [
               {
@@ -17207,7 +17208,6 @@
         },
         "required": [
           "autoneg",
-          "fec",
           "lldp",
           "mtu",
           "speed"
@@ -20410,6 +20410,7 @@
             "type": "boolean"
           },
           "fec": {
+            "nullable": true,
             "description": "The forward error correction mode of the link.",
             "allOf": [
               {
@@ -20455,7 +20456,6 @@
         },
         "required": [
           "autoneg",
-          "fec",
           "link_name",
           "mtu",
           "port_settings_id",

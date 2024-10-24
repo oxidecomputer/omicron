@@ -698,7 +698,6 @@
         "port",
         "routes",
         "switch",
-        "uplink_port_fec",
         "uplink_port_speed"
       ],
       "properties": {
@@ -764,9 +763,12 @@
         },
         "uplink_port_fec": {
           "description": "Port forward error correction type.",
-          "allOf": [
+          "anyOf": [
             {
               "$ref": "#/definitions/PortFec"
+            },
+            {
+              "type": "null"
             }
           ]
         },

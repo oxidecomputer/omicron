@@ -2511,7 +2511,7 @@ pub struct SwitchPortLinkConfig {
     pub mtu: u16,
 
     /// The forward error correction mode of the link.
-    pub fec: LinkFec,
+    pub fec: Option<LinkFec>,
 
     /// The configured speed of the link.
     pub speed: LinkSpeed,

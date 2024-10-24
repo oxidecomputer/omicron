@@ -130,7 +130,6 @@ post2 = 0
 routes = [{ nexthop = "172.33.0.10", destination = "0.0.0.0/0", vlan_id = 1 }]
 addresses = [{ address = "172.32.0.1/24" }]
 uplink_port_speed = "speed400_g"
-uplink_port_fec = "firecode"
 autoneg = true
 
 [[rack_network_config.switch1.port0.bgp_peers]]
