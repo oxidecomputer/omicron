@@ -15,7 +15,7 @@ use nexus_test_utils::background::activate_background_task;
 use nexus_test_utils::http_testing::{AuthnMode, NexusRequest, RequestBuilder};
 use nexus_test_utils::resource_helpers::{
     create_default_ip_pool, create_disk, create_instance, create_project,
-    objects_list_page_authz, DiskTest,
+    object_create_error, objects_list_page_authz, DiskTest,
 };
 use nexus_test_utils::ControlPlaneTestContext;
 use nexus_test_utils_macros::nexus_test;
@@ -578,6 +578,13 @@ async fn test_project_timeseries_query(
     assert_eq!(result.len(), 1);
     assert!(result[0].timeseries().len() > 0);
 
+    // also works with project ID
+    let result =
+        project_timeseries_query(&cptestctx, &p1.identity.id.to_string(), q1)
+            .await;
+    assert_eq!(result.len(), 1);
+    assert!(result[0].timeseries().len() > 0);
+
     let result = project_timeseries_query(&cptestctx, "project2", q1).await;
     assert_eq!(result.len(), 1);
     assert!(result[0].timeseries().len() > 0);
@@ -606,19 +613,32 @@ async fn test_project_timeseries_query(
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].timeseries().len(), 0);
 
-    // Query with nonexistent project
-    // Also test at least once with project ID in path instead of project name
+    // expect error when querying a metric that has no project_id on it
+    let q4 = "get integration_target:integration_metric";
+    let url = "/v1/timeseries/query/project/project1";
+    let body = nexus_types::external_api::params::TimeseriesQuery {
+        query: q4.to_string(),
+    };
+    let result =
+        object_create_error(client, url, &body, StatusCode::BAD_REQUEST).await;
+    assert_eq!(result.error_code.unwrap(), "InvalidRequest");
+    // Notable that the error confirms that the metric exists and says what the
+    // fields are. This is helpful generally, but here it would be better if
+    // we could say something more like "you can't query this timeseries from
+    // this endpoint"
+    assert_eq!(result.message, "The filter expression contains identifiers that are not valid for its input timeseries. Invalid identifiers: [\"project_id\", \"silo_id\"], timeseries fields: {\"datum\", \"metric_name\", \"target_name\", \"timestamp\"}");
+
+    // nonexistent project
+    let url = "/v1/timeseries/query/project/nonexistent";
+    let body = nexus_types::external_api::params::TimeseriesQuery {
+        query: q4.to_string(),
+    };
+    let result =
+        object_create_error(client, url, &body, StatusCode::NOT_FOUND).await;
+    assert_eq!(result.message, "not found: project with name \"nonexistent\"");
 
     // try a project in your silo that you can't read
     // try a project in another silo
-
-    // now try it adversarially — use a project you can read in the path, but
-    // try to access a fleet metric... if I can find one that will work
-
-    // let q4 = "get hardware_component:temperature";
-    // let result = dbg!(timeseries_query(&cptestctx, q4).await);
-    // let result =
-    //     dbg!(project_timeseries_query(&cptestctx, "project2", q4).await);
 }
 
 #[nexus_test]
