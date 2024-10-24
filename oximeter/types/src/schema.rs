@@ -19,6 +19,8 @@ use serde::Deserialize;
 use serde::Serialize;
 use std::collections::BTreeSet;
 use std::num::NonZeroU8;
+use parse_display::FromStr;
+use parse_display::Display;
 
 /// Full path to the directory containing all schema.
 ///
@@ -68,6 +70,8 @@ impl FieldSchema {
     Deserialize,
     Serialize,
     JsonSchema,
+    FromStr,
+    Display,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum FieldSource {

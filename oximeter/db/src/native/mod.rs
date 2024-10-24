@@ -128,7 +128,6 @@ pub mod block;
 pub mod connection;
 mod io;
 mod packets;
-pub mod serde;
 
 #[usdt::provider(provider = "clickhouse_io")]
 mod probes {
@@ -223,4 +222,7 @@ pub enum Error {
 
     #[error("Column has unexpected type")]
     UnexpectedColumnType,
+
+    #[error("Data block is too large")]
+    BlockTooLarge,
 }

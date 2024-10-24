@@ -33,6 +33,7 @@ omicron-common.workspace = true
 omicron-workspace-hack.workspace = true
 oximeter.workspace = true
 oxql-types.workspace = true
+parse-display.workspace = true
 qorb.workspace = true
 regex.workspace = true
 serde.workspace = true

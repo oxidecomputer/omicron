@@ -32,6 +32,8 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use thiserror::Error;
 use uuid::Uuid;
+use parse_display::FromStr;
+use parse_display::Display;
 
 /// The `FieldType` identifies the data type of a target or metric field.
 #[derive(
@@ -46,6 +48,8 @@ use uuid::Uuid;
     Serialize,
     Deserialize,
     strum::EnumIter,
+    FromStr,
+    Display,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum FieldType {
@@ -83,12 +87,6 @@ impl FieldType {
             | FieldType::Uuid
             | FieldType::Bool => true,
         }
-    }
-}
-
-impl std::fmt::Display for FieldType {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{:?}", self)
     }
 }
 
@@ -313,6 +311,8 @@ pub struct Field {
     Serialize,
     Deserialize,
     strum::EnumIter,
+    FromStr,
+    Display,
 )]
 #[serde(rename_all = "snake_case")]
 pub enum DatumType {
@@ -387,12 +387,6 @@ impl DatumType {
                 | DatumType::HistogramF32
                 | DatumType::HistogramF64
         )
-    }
-}
-
-impl std::fmt::Display for DatumType {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{:?}", self)
     }
 }
 
