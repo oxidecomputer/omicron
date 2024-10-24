@@ -8,7 +8,6 @@ use self::external_endpoints::NexusCertResolver;
 use self::saga::SagaExecutor;
 use crate::app::background::BackgroundTasksData;
 use crate::app::background::SagaRecoveryHelpers;
-use crate::app::oximeter::LazyTimeseriesClient;
 use crate::populate::populate_start;
 use crate::populate::PopulateArgs;
 use crate::populate::PopulateStatus;
@@ -25,6 +24,7 @@ use nexus_db_queries::authn;
 use nexus_db_queries::authz;
 use nexus_db_queries::context::OpContext;
 use nexus_db_queries::db;
+use omicron_common::address::CLICKHOUSE_TCP_PORT;
 use omicron_common::address::DENDRITE_PORT;
 use omicron_common::address::MGD_PORT;
 use omicron_common::address::MGS_PORT;
@@ -36,6 +36,7 @@ use sagas::common_storage::make_pantry_connection_pool;
 use sagas::common_storage::PooledPantryClient;
 use slog::Logger;
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::net::SocketAddrV6;
 use std::net::{IpAddr, Ipv6Addr};
 use std::sync::Arc;
@@ -165,7 +166,7 @@ pub struct Nexus {
     reqwest_client: reqwest::Client,
 
     /// Client to the timeseries database.
-    timeseries_client: LazyTimeseriesClient,
+    timeseries_client: oximeter_db::Client,
 
     /// Contents of the trusted root role for the TUF repository.
     #[allow(dead_code)]
@@ -409,16 +410,24 @@ impl Nexus {
             .build()
             .map_err(|e| e.to_string())?;
 
-        // Connect to clickhouse - but do so lazily.
-        // Clickhouse may not be executing when Nexus starts.
-        let timeseries_client = if let Some(address) =
-            &config.pkg.timeseries_db.address
-        {
-            // If an address was provided, use it instead of DNS.
-            LazyTimeseriesClient::new_from_address(log.clone(), *address)
-        } else {
-            LazyTimeseriesClient::new_from_dns(log.clone(), resolver.clone())
-        };
+        // Client to the ClickHouse database.
+        let timeseries_client =
+            if let Some(http_address) = &config.pkg.timeseries_db.address {
+                let native_address =
+                    SocketAddr::new(http_address.ip(), CLICKHOUSE_TCP_PORT);
+                oximeter_db::Client::new(*http_address, native_address, &log)
+            } else {
+                // TODO-cleanup: Remove this when we remove the HTTP client.
+                let http_resolver =
+                    qorb_resolver.for_service(ServiceName::Clickhouse);
+                let native_resolver =
+                    qorb_resolver.for_service(ServiceName::ClickhouseNative);
+                oximeter_db::Client::new_with_pool(
+                    http_resolver,
+                    native_resolver,
+                    &log,
+                )
+            };
 
         // TODO-cleanup We may want to make the populator a first-class
         // background task.
