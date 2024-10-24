@@ -3066,7 +3066,7 @@ impl ServiceManager {
                             if let Some(i) = info {
                                 mgd_config = mgd_config
                                     .add_property(
-                                        "sled_uuid",
+                                        "sled_id",
                                         "astring",
                                         &i.config
                                             .sled_identifiers
@@ -3074,9 +3074,33 @@ impl ServiceManager {
                                             .to_string(),
                                     )
                                     .add_property(
-                                        "rack_uuid",
+                                        "rack_id",
                                         "astring",
                                         &i.rack_id.to_string(),
+                                    )
+                                    .add_property(
+                                        "sled_model",
+                                        "astring",
+                                        &i.config
+                                            .sled_identifiers
+                                            .model
+                                            .to_string(),
+                                    )
+                                    .add_property(
+                                        "sled_serial",
+                                        "astring",
+                                        &i.config
+                                            .sled_identifiers
+                                            .serial
+                                            .to_string(),
+                                    )
+                                    .add_property(
+                                        "sled_revision",
+                                        "astring",
+                                        &i.config
+                                            .sled_identifiers
+                                            .revision
+                                            .to_string(),
                                     );
                             }
 
@@ -3115,7 +3139,7 @@ impl ServiceManager {
                             if let Some(i) = info {
                                 mg_ddm_config = mg_ddm_config
                                     .add_property(
-                                        "sled_uuid",
+                                        "sled_id",
                                         "astring",
                                         &i.config
                                             .sled_identifiers
@@ -3123,9 +3147,33 @@ impl ServiceManager {
                                             .to_string(),
                                     )
                                     .add_property(
-                                        "rack_uuid",
+                                        "rack_id",
                                         "astring",
                                         &i.rack_id.to_string(),
+                                    )
+                                    .add_property(
+                                        "sled_model",
+                                        "astring",
+                                        &i.config
+                                            .sled_identifiers
+                                            .model
+                                            .to_string(),
+                                    )
+                                    .add_property(
+                                        "sled_serial",
+                                        "astring",
+                                        &i.config
+                                            .sled_identifiers
+                                            .serial
+                                            .to_string(),
+                                    )
+                                    .add_property(
+                                        "sled_revision",
+                                        "astring",
+                                        &i.config
+                                            .sled_identifiers
+                                            .revision
+                                            .to_string(),
                                     );
                             }
 
@@ -4621,13 +4669,36 @@ impl ServiceManager {
                             )?;
                             if let Some(info) = self.inner.sled_info.get() {
                                 smfh.setprop_default_instance(
-                                    "config/rack_uuid",
+                                    "config/rack_id",
                                     info.rack_id,
                                 )?;
                                 smfh.setprop_default_instance(
-                                    "config/sled_uuid",
+                                    "config/sled_id",
                                     info.config.sled_identifiers.sled_id,
                                 )?;
+                                smfh.setprop_default_instance(
+                                    "config/sled_model",
+                                    info.config
+                                        .sled_identifiers
+                                        .model
+                                        .to_string(),
+                                )?;
+                                smfh.setprop_default_instance(
+                                    "config/sled_revision",
+                                    info.config.sled_identifiers.revision,
+                                )?;
+                                smfh.setprop_default_instance(
+                                    "config/sled_serial",
+                                    info.config
+                                        .sled_identifiers
+                                        .serial
+                                        .to_string(),
+                                )?;
+                            } else {
+                                info!(
+                                    self.inner.log,
+                                    "no sled info available yet"
+                                );
                             }
                             for address in &request.addresses {
                                 if *address != Ipv6Addr::LOCALHOST {
@@ -4664,13 +4735,36 @@ impl ServiceManager {
                             )?;
                             if let Some(info) = self.inner.sled_info.get() {
                                 smfh.setprop_default_instance(
-                                    "config/rack_uuid",
+                                    "config/rack_id",
                                     info.rack_id,
                                 )?;
                                 smfh.setprop_default_instance(
-                                    "config/sled_uuid",
+                                    "config/sled_id",
                                     info.config.sled_identifiers.sled_id,
                                 )?;
+                                smfh.setprop_default_instance(
+                                    "config/sled_model",
+                                    info.config
+                                        .sled_identifiers
+                                        .model
+                                        .to_string(),
+                                )?;
+                                smfh.setprop_default_instance(
+                                    "config/sled_revision",
+                                    info.config.sled_identifiers.revision,
+                                )?;
+                                smfh.setprop_default_instance(
+                                    "config/sled_serial",
+                                    info.config
+                                        .sled_identifiers
+                                        .serial
+                                        .to_string(),
+                                )?;
+                            } else {
+                                info!(
+                                    self.inner.log,
+                                    "no sled info available yet"
+                                );
                             }
                             smfh.delpropvalue_default_instance(
                                 "config/dns_servers",
