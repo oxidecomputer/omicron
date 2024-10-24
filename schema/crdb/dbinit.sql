@@ -599,7 +599,9 @@ CREATE TABLE IF NOT EXISTS omicron.public.region (
 
     port INT4,
 
-    read_only BOOL NOT NULL
+    read_only BOOL NOT NULL,
+
+    deleting BOOL NOT NULL
 );
 
 /*

@@ -14,6 +14,7 @@ use http::StatusCode;
 use nexus_config::RegionAllocationStrategy;
 use nexus_db_model::RegionSnapshotReplacement;
 use nexus_db_model::RegionSnapshotReplacementState;
+use nexus_db_model::Volume;
 use nexus_db_model::VolumeResourceUsage;
 use nexus_db_model::VolumeResourceUsageRecord;
 use nexus_db_queries::context::OpContext;
@@ -5827,4 +5828,493 @@ async fn test_double_layer_snapshot_with_read_only_region_delete_2(
     // Assert everything was cleaned up
 
     assert!(disk_test.crucible_resources_deleted().await);
+}
+
+#[nexus_test]
+async fn test_no_zombie_region_snapshots(cptestctx: &ControlPlaneTestContext) {
+    // 1) Create disk, then a snapshot
+    // 2) Delete the disk
+    // 3) Create a volume that uses the snapshot volume as a read-only parent
+    // 4) Test that a race of the following steps does not cause a region
+    //    snapshot to have volume usage records even though it is marked for
+    //    deletion:
+    //
+    //    a) delete the snapshot volume
+    //    b) delete the volume created in step 3
+    //    c) create another volume that uses the snapshot volume as a read-only
+    //       parent
+
+    let client = &cptestctx.external_client;
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    // Four zpools are required for region replacement or region snapshot
+    // replacement
+    DiskTestBuilder::new(&cptestctx)
+        .on_specific_sled(cptestctx.first_sled())
+        .with_zpool_count(4)
+        .build()
+        .await;
+
+    create_project_and_pool(client).await;
+
+    // Create disk, then a snapshot
+
+    let _disk = create_disk(&client, PROJECT_NAME, "disk").await;
+
+    let snapshot =
+        create_snapshot(&client, PROJECT_NAME, "disk", "snapshot").await;
+
+    // Delete the disk
+
+    NexusRequest::object_delete(client, &get_disk_url("disk"))
+        .authn_as(AuthnMode::PrivilegedUser)
+        .execute()
+        .await
+        .expect("failed to delete disk");
+
+    // Create a volume that uses the snapshot volume as a read-only parent
+
+    let (.., db_snapshot) = LookupPath::new(&opctx, &datastore)
+        .snapshot_id(snapshot.identity.id)
+        .fetch()
+        .await
+        .unwrap_or_else(|_| {
+            panic!("snapshot {:?} should exist", snapshot.identity.id)
+        });
+
+    let snapshot_volume: Volume = datastore
+        .volume_get(db_snapshot.volume_id)
+        .await
+        .expect("volume_get without error")
+        .expect("volume exists");
+
+    let snapshot_vcr: VolumeConstructionRequest =
+        serde_json::from_str(snapshot_volume.data()).unwrap();
+
+    let step_3_volume_id = Uuid::new_v4();
+    datastore
+        .volume_create(nexus_db_model::Volume::new(
+            step_3_volume_id,
+            serde_json::to_string(&VolumeConstructionRequest::Volume {
+                id: step_3_volume_id,
+                block_size: 512,
+                sub_volumes: vec![],
+                read_only_parent: Some(Box::new(snapshot_vcr.clone())),
+            })
+            .unwrap(),
+        ))
+        .await
+        .unwrap();
+
+    // Soft-delete the snapshot volume
+
+    let cr = datastore.soft_delete_volume(db_snapshot.volume_id).await.unwrap();
+
+    // Assert that no resources are returned for clean-up
+
+    assert!(datastore.regions_to_delete(&cr).await.unwrap().is_empty());
+    assert!(datastore.snapshots_to_delete(&cr).await.unwrap().is_empty());
+
+    // Soft-delete the volume created as part of step 3
+
+    let cr = datastore.soft_delete_volume(step_3_volume_id).await.unwrap();
+
+    // Assert that region snapshots _are_ returned for clean-up
+
+    assert!(datastore.regions_to_delete(&cr).await.unwrap().is_empty());
+    assert!(!datastore.snapshots_to_delete(&cr).await.unwrap().is_empty());
+
+    // Pretend that there's a racing call to volume_create that has a volume
+    // that uses the snapshot volume as a read-only parent. This call should
+    // fail!
+
+    let racing_volume_id = Uuid::new_v4();
+    let result = datastore
+        .volume_create(nexus_db_model::Volume::new(
+            racing_volume_id,
+            serde_json::to_string(&VolumeConstructionRequest::Volume {
+                id: racing_volume_id,
+                block_size: 512,
+                sub_volumes: vec![],
+                read_only_parent: Some(Box::new(snapshot_vcr.clone())),
+            })
+            .unwrap(),
+        ))
+        .await;
+
+    assert!(result.is_err());
+}
+
+#[nexus_test]
+async fn test_no_zombie_read_only_regions(cptestctx: &ControlPlaneTestContext) {
+    // 1) Create a volume with three read-only regions
+    // 2) Create another volume that uses the first step's volume as a read-only
+    //    parent
+    // 3) Test that a race of the following steps does not cause a region to
+    //    have volume usage records:
+    //
+    //    a) delete the step 1 volume
+    //    b) delete the step 2 volume
+    //    c) create another volume that uses the step 1 volume as a read-only
+    //       parent
+
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    DiskTestBuilder::new(&cptestctx)
+        .on_specific_sled(cptestctx.first_sled())
+        .with_zpool_count(4)
+        .build()
+        .await;
+
+    // Create a volume with three read-only regions
+
+    let step_1_volume_id = Uuid::new_v4();
+    let snapshot_id = Uuid::new_v4();
+
+    let datasets_and_regions = datastore
+        .arbitrary_region_allocate(
+            &opctx,
+            RegionAllocationFor::SnapshotVolume {
+                volume_id: step_1_volume_id,
+                snapshot_id,
+            },
+            RegionAllocationParameters::FromDiskSource {
+                disk_source: &params::DiskSource::Blank {
+                    block_size: params::BlockSize::try_from(512).unwrap(),
+                },
+                size: ByteCount::from_gibibytes_u32(1),
+            },
+            &RegionAllocationStrategy::Random { seed: None },
+            3,
+        )
+        .await
+        .unwrap();
+
+    // We're not sending allocation requests to any simulated crucible agent, so
+    // fill in a random port here.
+    for (i, (_, region)) in datasets_and_regions.iter().enumerate() {
+        datastore.region_set_port(region.id(), 20000 + i as u16).await.unwrap();
+    }
+
+    let region_addrs: Vec<SocketAddrV6> = vec![
+        datastore
+            .region_addr(datasets_and_regions[0].1.id())
+            .await
+            .unwrap()
+            .unwrap(),
+        datastore
+            .region_addr(datasets_and_regions[1].1.id())
+            .await
+            .unwrap()
+            .unwrap(),
+        datastore
+            .region_addr(datasets_and_regions[2].1.id())
+            .await
+            .unwrap()
+            .unwrap(),
+    ];
+
+    // Assert they're all unique
+
+    assert_ne!(region_addrs[0], region_addrs[1]);
+    assert_ne!(region_addrs[0], region_addrs[2]);
+    assert_ne!(region_addrs[1], region_addrs[2]);
+
+    // Mimic what a snapshot volume has: three read-only regions in a volume's
+    // subvolume, not the read-only parent
+
+    datastore
+        .volume_create(nexus_db_model::Volume::new(
+            step_1_volume_id,
+            serde_json::to_string(&VolumeConstructionRequest::Volume {
+                id: step_1_volume_id,
+                block_size: 512,
+                sub_volumes: vec![VolumeConstructionRequest::Region {
+                    block_size: 512,
+                    blocks_per_extent: 1,
+                    extent_count: 1,
+                    gen: 1,
+                    opts: CrucibleOpts {
+                        id: Uuid::new_v4(),
+                        target: vec![
+                            region_addrs[0].to_string(),
+                            region_addrs[1].to_string(),
+                            region_addrs[2].to_string(),
+                        ],
+                        lossy: false,
+                        flush_timeout: None,
+                        key: None,
+                        cert_pem: None,
+                        key_pem: None,
+                        root_cert_pem: None,
+                        control: None,
+                        read_only: true,
+                    },
+                }],
+                read_only_parent: None,
+            })
+            .unwrap(),
+        ))
+        .await
+        .unwrap();
+
+    // Create another volume that uses the first step's volume as a read-only
+    // parent
+
+    let step_1_volume: Volume = datastore
+        .volume_get(step_1_volume_id)
+        .await
+        .expect("volume_get without error")
+        .expect("volume exists");
+
+    let step_1_vcr: VolumeConstructionRequest =
+        serde_json::from_str(step_1_volume.data()).unwrap();
+
+    let step_2_volume_id = Uuid::new_v4();
+
+    datastore
+        .volume_create(nexus_db_model::Volume::new(
+            step_2_volume_id,
+            serde_json::to_string(&VolumeConstructionRequest::Volume {
+                id: step_2_volume_id,
+                block_size: 512,
+                sub_volumes: vec![],
+                read_only_parent: Some(Box::new(step_1_vcr.clone())),
+            })
+            .unwrap(),
+        ))
+        .await
+        .unwrap();
+
+    // Soft-delete the step 1 volume
+
+    let cr = datastore.soft_delete_volume(step_1_volume_id).await.unwrap();
+
+    // Assert that no resources are returned for clean-up
+
+    assert!(datastore.regions_to_delete(&cr).await.unwrap().is_empty());
+    assert!(datastore.snapshots_to_delete(&cr).await.unwrap().is_empty());
+
+    // Soft-delete the step 2 volume
+
+    let cr = datastore.soft_delete_volume(step_2_volume_id).await.unwrap();
+
+    // Assert that the read-only regions _are_ returned for clean-up
+
+    assert!(!datastore.regions_to_delete(&cr).await.unwrap().is_empty());
+    assert!(datastore.snapshots_to_delete(&cr).await.unwrap().is_empty());
+
+    // Pretend that there's a racing call to volume_create that has a volume
+    // that uses the step 1 volume as a read-only parent. This call should
+    // fail!
+
+    let racing_volume_id = Uuid::new_v4();
+    let result = datastore
+        .volume_create(nexus_db_model::Volume::new(
+            racing_volume_id,
+            serde_json::to_string(&VolumeConstructionRequest::Volume {
+                id: racing_volume_id,
+                block_size: 512,
+                sub_volumes: vec![],
+                read_only_parent: Some(Box::new(step_1_vcr)),
+            })
+            .unwrap(),
+        ))
+        .await;
+
+    assert!(result.is_err());
+}
+
+#[nexus_test]
+async fn test_no_zombie_read_write_regions(
+    cptestctx: &ControlPlaneTestContext,
+) {
+    // 1) Create a volume with three read-write regions
+    // 2) Create another volume that uses the first step's volume as a read-only
+    //    parent
+    // 3) Test that a race of the following steps does not cause a region to
+    //    have volume usage records:
+    //
+    //    a) delete the step 1 volume
+    //    b) delete the step 2 volume
+    //    c) create another volume that uses the step 1 volume as a read-only
+    //       parent
+
+    let apictx = &cptestctx.server.server_context();
+    let nexus = &apictx.nexus;
+    let datastore = nexus.datastore();
+    let opctx =
+        OpContext::for_tests(cptestctx.logctx.log.new(o!()), datastore.clone());
+
+    DiskTestBuilder::new(&cptestctx)
+        .on_specific_sled(cptestctx.first_sled())
+        .with_zpool_count(4)
+        .build()
+        .await;
+
+    // Create a volume with three read-only regions
+
+    let step_1_volume_id = Uuid::new_v4();
+    let snapshot_id = Uuid::new_v4();
+
+    let datasets_and_regions = datastore
+        .arbitrary_region_allocate(
+            &opctx,
+            RegionAllocationFor::SnapshotVolume {
+                volume_id: step_1_volume_id,
+                snapshot_id,
+            },
+            RegionAllocationParameters::FromDiskSource {
+                disk_source: &params::DiskSource::Blank {
+                    block_size: params::BlockSize::try_from(512).unwrap(),
+                },
+                size: ByteCount::from_gibibytes_u32(1),
+            },
+            &RegionAllocationStrategy::Random { seed: None },
+            3,
+        )
+        .await
+        .unwrap();
+
+    // We're not sending allocation requests to any simulated crucible agent, so
+    // fill in a random port here.
+    for (i, (_, region)) in datasets_and_regions.iter().enumerate() {
+        datastore.region_set_port(region.id(), 20000 + i as u16).await.unwrap();
+    }
+
+    let region_addrs: Vec<SocketAddrV6> = vec![
+        datastore
+            .region_addr(datasets_and_regions[0].1.id())
+            .await
+            .unwrap()
+            .unwrap(),
+        datastore
+            .region_addr(datasets_and_regions[1].1.id())
+            .await
+            .unwrap()
+            .unwrap(),
+        datastore
+            .region_addr(datasets_and_regions[2].1.id())
+            .await
+            .unwrap()
+            .unwrap(),
+    ];
+
+    // Assert they're all unique
+
+    assert_ne!(region_addrs[0], region_addrs[1]);
+    assert_ne!(region_addrs[0], region_addrs[2]);
+    assert_ne!(region_addrs[1], region_addrs[2]);
+
+    // Mimic what a snapshot volume has: three read-only regions in a volume's
+    // subvolume, not the read-only parent
+
+    datastore
+        .volume_create(nexus_db_model::Volume::new(
+            step_1_volume_id,
+            serde_json::to_string(&VolumeConstructionRequest::Volume {
+                id: step_1_volume_id,
+                block_size: 512,
+                sub_volumes: vec![VolumeConstructionRequest::Region {
+                    block_size: 512,
+                    blocks_per_extent: 1,
+                    extent_count: 1,
+                    gen: 1,
+                    opts: CrucibleOpts {
+                        id: Uuid::new_v4(),
+                        target: vec![
+                            region_addrs[0].to_string(),
+                            region_addrs[1].to_string(),
+                            region_addrs[2].to_string(),
+                        ],
+                        lossy: false,
+                        flush_timeout: None,
+                        key: None,
+                        cert_pem: None,
+                        key_pem: None,
+                        root_cert_pem: None,
+                        control: None,
+                        read_only: true,
+                    },
+                }],
+                read_only_parent: None,
+            })
+            .unwrap(),
+        ))
+        .await
+        .unwrap();
+
+    // Create another volume that uses the first step's volume as a read-only
+    // parent
+
+    let step_1_volume: Volume = datastore
+        .volume_get(step_1_volume_id)
+        .await
+        .expect("volume_get without error")
+        .expect("volume exists");
+
+    let step_1_vcr: VolumeConstructionRequest =
+        serde_json::from_str(step_1_volume.data()).unwrap();
+
+    let step_2_volume_id = Uuid::new_v4();
+
+    datastore
+        .volume_create(nexus_db_model::Volume::new(
+            step_2_volume_id,
+            serde_json::to_string(&VolumeConstructionRequest::Volume {
+                id: step_2_volume_id,
+                block_size: 512,
+                sub_volumes: vec![],
+                read_only_parent: Some(Box::new(step_1_vcr.clone())),
+            })
+            .unwrap(),
+        ))
+        .await
+        .unwrap();
+
+    // Soft-delete the step 1 volume
+
+    let cr = datastore.soft_delete_volume(step_1_volume_id).await.unwrap();
+
+    // Assert that no resources are returned for clean-up
+
+    assert!(datastore.regions_to_delete(&cr).await.unwrap().is_empty());
+    assert!(datastore.snapshots_to_delete(&cr).await.unwrap().is_empty());
+
+    // Soft-delete the step 2 volume
+
+    let cr = datastore.soft_delete_volume(step_2_volume_id).await.unwrap();
+
+    // Assert that the read-only regions _are_ returned for clean-up
+
+    assert!(!datastore.regions_to_delete(&cr).await.unwrap().is_empty());
+    assert!(datastore.snapshots_to_delete(&cr).await.unwrap().is_empty());
+
+    // Pretend that there's a racing call to volume_create that has a volume
+    // that uses the step 1 volume as a read-only parent. This call should
+    // fail!
+
+    let racing_volume_id = Uuid::new_v4();
+    let result = datastore
+        .volume_create(nexus_db_model::Volume::new(
+            racing_volume_id,
+            serde_json::to_string(&VolumeConstructionRequest::Volume {
+                id: racing_volume_id,
+                block_size: 512,
+                sub_volumes: vec![],
+                read_only_parent: Some(Box::new(step_1_vcr)),
+            })
+            .unwrap(),
+        ))
+        .await;
+
+    assert!(result.is_err());
 }

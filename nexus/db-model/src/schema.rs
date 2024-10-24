@@ -1049,6 +1049,8 @@ table! {
         port -> Nullable<Int4>,
 
         read_only -> Bool,
+
+        deleting -> Bool,
     }
 }
 

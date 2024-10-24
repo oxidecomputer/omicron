@@ -199,6 +199,8 @@ impl DataStore {
         Ok(volume)
     }
 
+    /// Return a region by matching against the dataset's address and region's
+    /// port
     async fn target_to_region(
         conn: &async_bb8_diesel::Connection<DbConnection>,
         err: &OptionalError<AddrParseError>,
@@ -207,8 +209,6 @@ impl DataStore {
     ) -> Result<Option<Region>, diesel::result::Error> {
         let address: SocketAddrV6 = target.parse().map_err(|e| err.bail(e))?;
         let ip: db::model::Ipv6Addr = address.ip().into();
-
-        // Match region by dataset id and target port
 
         use db::schema::dataset::dsl as dataset_dsl;
         use db::schema::region::dsl as region_dsl;
@@ -224,6 +224,7 @@ impl DataStore {
                     .eq(Some::<db::model::SqlU16>(address.port().into())),
             )
             .filter(region_dsl::read_only.eq(read_only))
+            .filter(region_dsl::deleting.eq(false))
             .select(Region::as_select())
             .get_result_async::<Region>(conn)
             .await
@@ -1389,6 +1390,28 @@ impl DataStore {
                         // required here. The `validate_volume_invariants`
                         // function will return an error if a read-only region
                         // has an associated region snapshot during testing.
+                        //
+                        // However, don't forget to set `deleting`! These
+                        // regions will be returned to the calling function for
+                        // garbage collection.
+                        use db::schema::region::dsl;
+                        let updated_rows = diesel::update(dsl::region)
+                            .filter(dsl::id.eq(region_id))
+                            .filter(dsl::read_only.eq(true))
+                            .filter(dsl::deleting.eq(false))
+                            .set(dsl::deleting.eq(true))
+                            .execute_async(conn)
+                            .await?;
+
+                        if updated_rows != 1 {
+                            return Err(err.bail(
+                                SoftDeleteTransactionError::UnexpectedDatabaseUpdate(
+                                    updated_rows,
+                                    "setting deleting (region)".into(),
+                                )
+                            ));
+                        }
+
                         regions.push(region_id);
                     }
                 }
@@ -1476,7 +1499,7 @@ impl DataStore {
                                 return Err(err.bail(
                                     SoftDeleteTransactionError::UnexpectedDatabaseUpdate(
                                         updated_rows,
-                                        "setting deleting".into(),
+                                        "setting deleting (region snapshot)".into(),
                                     )
                                 ));
                             }
