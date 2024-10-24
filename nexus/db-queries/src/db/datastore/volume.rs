@@ -116,8 +116,68 @@ enum RegionType {
     ReadOnly,
 }
 
+#[derive(Debug, thiserror::Error)]
+enum RemoveRopError {
+    #[error("Error removing read-only parent: {0}")]
+    Public(Error),
+
+    #[error("Serde error removing read-only parent: {0}")]
+    SerdeError(#[from] serde_json::Error),
+
+    #[error("Updated {0} database rows, expected {1}")]
+    UnexpectedDatabaseUpdate(usize, usize),
+
+    #[error("Address parsing error during ROP removal: {0}")]
+    AddressParseError(#[from] AddrParseError),
+
+    #[error("Could not match read-only resource to {0}")]
+    CouldNotFindResource(String),
+}
+
+#[derive(Debug, thiserror::Error)]
+enum ReplaceRegionError {
+    #[error("Error from Volume region replacement: {0}")]
+    Public(Error),
+
+    #[error("Serde error during Volume region replacement: {0}")]
+    SerdeError(#[from] serde_json::Error),
+
+    #[error("Region replacement error: {0}")]
+    RegionReplacementError(#[from] anyhow::Error),
+}
+
+#[derive(Debug, thiserror::Error)]
+enum ReplaceSnapshotError {
+    #[error("Error from Volume snapshot replacement: {0}")]
+    Public(Error),
+
+    #[error("Serde error during Volume snapshot replacement: {0}")]
+    SerdeError(#[from] serde_json::Error),
+
+    #[error("Snapshot replacement error: {0}")]
+    SnapshotReplacementError(#[from] anyhow::Error),
+
+    #[error("Replaced {0} targets, expected {1}")]
+    UnexpectedReplacedTargets(usize, usize),
+
+    #[error("Updated {0} database rows, expected {1}")]
+    UnexpectedDatabaseUpdate(usize, usize),
+
+    #[error(
+        "Address parsing error during Volume snapshot \
+    replacement: {0}"
+    )]
+    AddressParseError(#[from] AddrParseError),
+
+    #[error("Could not match read-only resource to {0}")]
+    CouldNotFindResource(String),
+
+    #[error("Multiple volume resource usage records for {0}")]
+    MultipleResourceUsageRecords(String),
+}
+
 impl DataStore {
-    async fn volume_create_txn(
+    async fn volume_create_in_txn(
         conn: &async_bb8_diesel::Connection<DbConnection>,
         err: OptionalError<VolumeCreationError>,
         volume: Volume,
@@ -310,7 +370,7 @@ impl DataStore {
                 let crucible_targets = crucible_targets.clone();
                 let volume = volume.clone();
                 async move {
-                    Self::volume_create_txn(
+                    Self::volume_create_in_txn(
                         &conn,
                         err,
                         volume,
@@ -503,9 +563,14 @@ impl DataStore {
                 match volume_is_read_only(&vcr) {
                     Ok(read_only) => {
                         if !read_only {
-                            return Err(VolumeGetError::CheckoutConditionFailed(
-                                String::from("Non-read-only Volume Checkout for use Copy!")
-                            ));
+                            return Err(
+                                VolumeGetError::CheckoutConditionFailed(
+                                    String::from(
+                                        "Non-read-only Volume Checkout \
+                                for use Copy!",
+                                    ),
+                                ),
+                            );
                         }
 
                         Ok(())
@@ -544,49 +609,49 @@ impl DataStore {
                 let runtime = instance.runtime();
                 match (runtime.propolis_id, runtime.dst_propolis_id) {
                     (Some(_), Some(_)) => {
-                        Err(VolumeGetError::CheckoutConditionFailed(
-                            format!(
-                                "InstanceStart {}: instance {} is undergoing migration",
-                                vmm_id,
-                                instance.id(),
-                            )
-                        ))
+                        Err(VolumeGetError::CheckoutConditionFailed(format!(
+                            "InstanceStart {}: instance {} is undergoing \
+                                migration",
+                            vmm_id,
+                            instance.id(),
+                        )))
                     }
 
                     (None, None) => {
-                        Err(VolumeGetError::CheckoutConditionFailed(
-                            format!(
-                                "InstanceStart {}: instance {} has no propolis ids",
-                                vmm_id,
-                                instance.id(),
-                            )
-                        ))
+                        Err(VolumeGetError::CheckoutConditionFailed(format!(
+                            "InstanceStart {}: instance {} has no \
+                                propolis ids",
+                            vmm_id,
+                            instance.id(),
+                        )))
                     }
 
                     (Some(propolis_id), None) => {
                         if propolis_id != vmm_id.into_untyped_uuid() {
-                            return Err(VolumeGetError::CheckoutConditionFailed(
-                                format!(
-                                    "InstanceStart {}: instance {} propolis id {} mismatch",
+                            return Err(
+                                VolumeGetError::CheckoutConditionFailed(
+                                    format!(
+                                    "InstanceStart {}: instance {} propolis \
+                                    id {} mismatch",
                                     vmm_id,
                                     instance.id(),
                                     propolis_id,
-                                )
-                            ));
+                                ),
+                                ),
+                            );
                         }
 
                         Ok(())
                     }
 
                     (None, Some(dst_propolis_id)) => {
-                        Err(VolumeGetError::CheckoutConditionFailed(
-                            format!(
-                                "InstanceStart {}: instance {} has no propolis id but dst propolis id {}",
-                                vmm_id,
-                                instance.id(),
-                                dst_propolis_id,
-                            )
-                        ))
+                        Err(VolumeGetError::CheckoutConditionFailed(format!(
+                            "InstanceStart {}: instance {} has no \
+                                propolis id but dst propolis id {}",
+                            vmm_id,
+                            instance.id(),
+                            dst_propolis_id,
+                        )))
                     }
                 }
             }
@@ -608,60 +673,67 @@ impl DataStore {
                 let runtime = instance.runtime();
                 match (runtime.propolis_id, runtime.dst_propolis_id) {
                     (Some(propolis_id), Some(dst_propolis_id)) => {
-                        if propolis_id != vmm_id.into_untyped_uuid() || dst_propolis_id != target_vmm_id.into_untyped_uuid() {
-                            return Err(VolumeGetError::CheckoutConditionFailed(
-                                format!(
-                                    "InstanceMigrate {} {}: instance {} propolis id mismatches {} {}",
-                                    vmm_id,
-                                    target_vmm_id,
-                                    instance.id(),
-                                    propolis_id,
-                                    dst_propolis_id,
-                                )
-                            ));
+                        if propolis_id != vmm_id.into_untyped_uuid()
+                            || dst_propolis_id
+                                != target_vmm_id.into_untyped_uuid()
+                        {
+                            return Err(
+                                VolumeGetError::CheckoutConditionFailed(
+                                    format!(
+                                        "InstanceMigrate {} {}: instance {} \
+                                    propolis id mismatches {} {}",
+                                        vmm_id,
+                                        target_vmm_id,
+                                        instance.id(),
+                                        propolis_id,
+                                        dst_propolis_id,
+                                    ),
+                                ),
+                            );
                         }
 
                         Ok(())
                     }
 
                     (None, None) => {
-                        Err(VolumeGetError::CheckoutConditionFailed(
-                            format!(
-                                "InstanceMigrate {} {}: instance {} has no propolis ids",
-                                vmm_id,
-                                target_vmm_id,
-                                instance.id(),
-                            )
-                        ))
+                        Err(VolumeGetError::CheckoutConditionFailed(format!(
+                            "InstanceMigrate {} {}: instance {} has no \
+                                propolis ids",
+                            vmm_id,
+                            target_vmm_id,
+                            instance.id(),
+                        )))
                     }
 
                     (Some(propolis_id), None) => {
                         // XXX is this right?
                         if propolis_id != vmm_id.into_untyped_uuid() {
-                            return Err(VolumeGetError::CheckoutConditionFailed(
-                                format!(
-                                    "InstanceMigrate {} {}: instance {} propolis id {} mismatch",
-                                    vmm_id,
-                                    target_vmm_id,
-                                    instance.id(),
-                                    propolis_id,
-                                )
-                            ));
+                            return Err(
+                                VolumeGetError::CheckoutConditionFailed(
+                                    format!(
+                                        "InstanceMigrate {} {}: instance {} \
+                                    propolis id {} mismatch",
+                                        vmm_id,
+                                        target_vmm_id,
+                                        instance.id(),
+                                        propolis_id,
+                                    ),
+                                ),
+                            );
                         }
 
                         Ok(())
                     }
 
                     (None, Some(dst_propolis_id)) => {
-                        Err(VolumeGetError::CheckoutConditionFailed(
-                            format!(
-                                "InstanceMigrate {} {}: instance {} has no propolis id but dst propolis id {}",
-                                vmm_id,
-                                target_vmm_id,
-                                instance.id(),
-                                dst_propolis_id,
-                            )
-                        ))
+                        Err(VolumeGetError::CheckoutConditionFailed(format!(
+                            "InstanceMigrate {} {}: instance {} has no \
+                                propolis id but dst propolis id {}",
+                            vmm_id,
+                            target_vmm_id,
+                            instance.id(),
+                            dst_propolis_id,
+                        )))
                     }
                 }
             }
@@ -697,10 +769,11 @@ impl DataStore {
                     // XXX this is a Nexus bug!
                     return Err(VolumeGetError::CheckoutConditionFailed(
                         format!(
-                            "Pantry: instance {} backing disk {} does not exist?",
+                            "Pantry: instance {} backing disk {} does not \
+                            exist?",
                             attach_instance_id,
                             disk.id(),
-                        )
+                        ),
                     ));
                 };
 
@@ -723,6 +796,181 @@ impl DataStore {
         }
     }
 
+    async fn volume_checkout_in_txn(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        err: OptionalError<VolumeGetError>,
+        volume_id: Uuid,
+        reason: VolumeCheckoutReason,
+    ) -> Result<Volume, diesel::result::Error> {
+        use db::schema::volume::dsl;
+
+        // Grab the volume in question.
+        let volume = dsl::volume
+            .filter(dsl::id.eq(volume_id))
+            .select(Volume::as_select())
+            .get_result_async(conn)
+            .await?;
+
+        // Turn the volume.data into the VolumeConstructionRequest
+        let vcr: VolumeConstructionRequest =
+            serde_json::from_str(volume.data())
+                .map_err(|e| err.bail(VolumeGetError::SerdeError(e)))?;
+
+        // The VolumeConstructionRequest resulting from this checkout will have
+        // its generation numbers bumped, and as result will (if it has
+        // non-read-only sub-volumes) take over from previous read/write
+        // activations when sent to a place that will `construct` a new Volume.
+        // Depending on the checkout reason, prevent creating multiple
+        // read/write Upstairs acting on the same Volume, except where the take
+        // over is intended.
+
+        let (maybe_disk, maybe_instance) = {
+            use db::schema::disk::dsl as disk_dsl;
+            use db::schema::instance::dsl as instance_dsl;
+
+            let maybe_disk: Option<Disk> = disk_dsl::disk
+                .filter(disk_dsl::time_deleted.is_null())
+                .filter(disk_dsl::volume_id.eq(volume_id))
+                .select(Disk::as_select())
+                .get_result_async(conn)
+                .await
+                .optional()?;
+
+            let maybe_instance: Option<Instance> =
+                if let Some(disk) = &maybe_disk {
+                    if let Some(attach_instance_id) =
+                        disk.runtime().attach_instance_id
+                    {
+                        instance_dsl::instance
+                            .filter(instance_dsl::time_deleted.is_null())
+                            .filter(instance_dsl::id.eq(attach_instance_id))
+                            .select(Instance::as_select())
+                            .get_result_async(conn)
+                            .await
+                            .optional()?
+                    } else {
+                        // Disk not attached to an instance
+                        None
+                    }
+                } else {
+                    // Volume not associated with disk
+                    None
+                };
+
+            (maybe_disk, maybe_instance)
+        };
+
+        if let Err(e) = Self::volume_checkout_allowed(
+            &reason,
+            &vcr,
+            maybe_disk,
+            maybe_instance,
+        )
+        .await
+        {
+            return Err(err.bail(e));
+        }
+
+        // Look to see if the VCR is a Volume type, and if so, look at its
+        // sub_volumes. If they are of type Region, then we need to update their
+        // generation numbers and record that update back to the database. We
+        // return to the caller whatever the original volume data was we pulled
+        // from the database.
+        match vcr {
+            VolumeConstructionRequest::Volume {
+                id,
+                block_size,
+                sub_volumes,
+                read_only_parent,
+            } => {
+                let mut update_needed = false;
+                let mut new_sv = Vec::new();
+                for sv in sub_volumes {
+                    match sv {
+                        VolumeConstructionRequest::Region {
+                            block_size,
+                            blocks_per_extent,
+                            extent_count,
+                            opts,
+                            gen,
+                        } => {
+                            update_needed = true;
+                            new_sv.push(VolumeConstructionRequest::Region {
+                                block_size,
+                                blocks_per_extent,
+                                extent_count,
+                                opts,
+                                gen: gen + 1,
+                            });
+                        }
+                        _ => {
+                            new_sv.push(sv);
+                        }
+                    }
+                }
+
+                // Only update the volume data if we found the type of volume
+                // that needed it.
+                if update_needed {
+                    // Create a new VCR and fill in the contents from what the
+                    // original volume had, but with our updated sub_volume
+                    // records.
+                    let new_vcr = VolumeConstructionRequest::Volume {
+                        id,
+                        block_size,
+                        sub_volumes: new_sv,
+                        read_only_parent,
+                    };
+
+                    let new_volume_data = serde_json::to_string(&new_vcr)
+                        .map_err(|e| err.bail(VolumeGetError::SerdeError(e)))?;
+
+                    // Update the original volume_id with the new volume.data.
+                    use db::schema::volume::dsl as volume_dsl;
+                    let num_updated = diesel::update(volume_dsl::volume)
+                        .filter(volume_dsl::id.eq(volume_id))
+                        .set(volume_dsl::data.eq(new_volume_data))
+                        .execute_async(conn)
+                        .await?;
+
+                    // This should update just one row.  If it does not, then
+                    // something is terribly wrong in the database.
+                    if num_updated != 1 {
+                        return Err(err.bail(
+                            VolumeGetError::UnexpectedDatabaseUpdate(
+                                num_updated,
+                                1,
+                            ),
+                        ));
+                    }
+                }
+            }
+            VolumeConstructionRequest::Region {
+                block_size: _,
+                blocks_per_extent: _,
+                extent_count: _,
+                opts: _,
+                gen: _,
+            } => {
+                // We don't support a pure Region VCR at the volume level in the
+                // database, so this choice should never be encountered, but I
+                // want to know if it is.
+                return Err(err.bail(VolumeGetError::InvalidVolume(
+                    String::from("Region not supported as a top level volume"),
+                )));
+            }
+            VolumeConstructionRequest::File {
+                id: _,
+                block_size: _,
+                path: _,
+            }
+            | VolumeConstructionRequest::Url { id: _, block_size: _, url: _ } =>
+                {}
+        }
+
+        Ok(volume)
+    }
+
     /// Checkout a copy of the Volume from the database.
     /// This action (getting a copy) will increase the generation number
     /// of Volumes of the VolumeConstructionRequest::Volume type that have
@@ -734,8 +982,6 @@ impl DataStore {
         volume_id: Uuid,
         reason: VolumeCheckoutReason,
     ) -> LookupResult<Volume> {
-        use db::schema::volume::dsl;
-
         // We perform a transaction here, to be sure that on completion
         // of this, the database contains an updated version of the
         // volume with the generation number incremented (for the volume
@@ -749,178 +995,8 @@ impl DataStore {
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 async move {
-                    // Grab the volume in question.
-                    let volume = dsl::volume
-                        .filter(dsl::id.eq(volume_id))
-                        .select(Volume::as_select())
-                        .get_result_async(&conn)
-                        .await?;
-
-                    // Turn the volume.data into the VolumeConstructionRequest
-                    let vcr: VolumeConstructionRequest =
-                        serde_json::from_str(volume.data()).map_err(|e| {
-                            err.bail(VolumeGetError::SerdeError(e))
-                        })?;
-
-                    // The VolumeConstructionRequest resulting from this checkout will have its
-                    // generation numbers bumped, and as result will (if it has non-read-only
-                    // sub-volumes) take over from previous read/write activations when sent to a
-                    // place that will `construct` a new Volume. Depending on the checkout reason,
-                    // prevent creating multiple read/write Upstairs acting on the same Volume,
-                    // except where the take over is intended.
-
-                    let (maybe_disk, maybe_instance) = {
-                        use db::schema::instance::dsl as instance_dsl;
-                        use db::schema::disk::dsl as disk_dsl;
-
-                        let maybe_disk: Option<Disk> = disk_dsl::disk
-                            .filter(disk_dsl::time_deleted.is_null())
-                            .filter(disk_dsl::volume_id.eq(volume_id))
-                            .select(Disk::as_select())
-                            .get_result_async(&conn)
-                            .await
-                            .optional()?;
-
-                        let maybe_instance: Option<Instance> = if let Some(disk) = &maybe_disk {
-                            if let Some(attach_instance_id) = disk.runtime().attach_instance_id {
-                                instance_dsl::instance
-                                    .filter(instance_dsl::time_deleted.is_null())
-                                    .filter(instance_dsl::id.eq(attach_instance_id))
-                                    .select(Instance::as_select())
-                                    .get_result_async(&conn)
-                                    .await
-                                    .optional()?
-                            } else {
-                                // Disk not attached to an instance
-                                None
-                            }
-                        } else {
-                            // Volume not associated with disk
-                            None
-                        };
-
-                        (maybe_disk, maybe_instance)
-                    };
-
-                    if let Err(e) = Self::volume_checkout_allowed(
-                        &reason,
-                        &vcr,
-                        maybe_disk,
-                        maybe_instance,
-                    )
-                    .await {
-                        return Err(err.bail(e));
-                    }
-
-                    // Look to see if the VCR is a Volume type, and if so, look at
-                    // its sub_volumes. If they are of type Region, then we need
-                    // to update their generation numbers and record that update
-                    // back to the database. We return to the caller whatever the
-                    // original volume data was we pulled from the database.
-                    match vcr {
-                        VolumeConstructionRequest::Volume {
-                            id,
-                            block_size,
-                            sub_volumes,
-                            read_only_parent,
-                        } => {
-                            let mut update_needed = false;
-                            let mut new_sv = Vec::new();
-                            for sv in sub_volumes {
-                                match sv {
-                                    VolumeConstructionRequest::Region {
-                                        block_size,
-                                        blocks_per_extent,
-                                        extent_count,
-                                        opts,
-                                        gen,
-                                    } => {
-                                        update_needed = true;
-                                        new_sv.push(
-                                            VolumeConstructionRequest::Region {
-                                                block_size,
-                                                blocks_per_extent,
-                                                extent_count,
-                                                opts,
-                                                gen: gen + 1,
-                                            },
-                                        );
-                                    }
-                                    _ => {
-                                        new_sv.push(sv);
-                                    }
-                                }
-                            }
-
-                            // Only update the volume data if we found the type
-                            // of volume that needed it.
-                            if update_needed {
-                                // Create a new VCR and fill in the contents
-                                // from what the original volume had, but with our
-                                // updated sub_volume records.
-                                let new_vcr = VolumeConstructionRequest::Volume {
-                                    id,
-                                    block_size,
-                                    sub_volumes: new_sv,
-                                    read_only_parent,
-                                };
-
-                                let new_volume_data = serde_json::to_string(
-                                    &new_vcr,
-                                )
-                                .map_err(|e| {
-                                    err.bail(VolumeGetError::SerdeError(e))
-                                })?;
-
-                                // Update the original volume_id with the new
-                                // volume.data.
-                                use db::schema::volume::dsl as volume_dsl;
-                                let num_updated =
-                                    diesel::update(volume_dsl::volume)
-                                        .filter(volume_dsl::id.eq(volume_id))
-                                        .set(volume_dsl::data.eq(new_volume_data))
-                                        .execute_async(&conn)
-                                        .await?;
-
-                                // This should update just one row.  If it does
-                                // not, then something is terribly wrong in the
-                                // database.
-                                if num_updated != 1 {
-                                    return Err(err.bail(
-                                        VolumeGetError::UnexpectedDatabaseUpdate(
-                                            num_updated,
-                                            1,
-                                        ),
-                                    ));
-                                }
-                            }
-                        }
-                        VolumeConstructionRequest::Region {
-                            block_size: _,
-                            blocks_per_extent: _,
-                            extent_count: _,
-                            opts: _,
-                            gen: _,
-                        } => {
-                            // We don't support a pure Region VCR at the volume
-                            // level in the database, so this choice should
-                            // never be encountered, but I want to know if it is.
-                            return Err(err.bail(VolumeGetError::InvalidVolume(
-                                String::from("Region not supported as a top level volume")
-                            )));
-                        }
-                        VolumeConstructionRequest::File {
-                            id: _,
-                            block_size: _,
-                            path: _,
-                        }
-                        | VolumeConstructionRequest::Url {
-                            id: _,
-                            block_size: _,
-                            url: _,
-                        } => {}
-                    }
-                    Ok(volume)
+                    Self::volume_checkout_in_txn(&conn, err, volume_id, reason)
+                        .await
                 }
             })
             .await
@@ -932,7 +1008,10 @@ impl DataStore {
                         }
 
                         _ => {
-                            return Error::internal_error(&format!("Transaction error: {}", err));
+                            return Error::internal_error(&format!(
+                                "Transaction error: {}",
+                                err
+                            ));
                         }
                     }
                 }
@@ -977,11 +1056,12 @@ impl DataStore {
                 VolumeConstructionRequest::Region { opts, .. } => {
                     if !opts.read_only {
                         // Only one volume can "own" a Region, and that volume's
-                        // UUID is recorded in the region table accordingly. It is
-                        // an error to make a copy of a volume construction request
-                        // that references non-read-only Regions.
+                        // UUID is recorded in the region table accordingly. It
+                        // is an error to make a copy of a volume construction
+                        // request that references non-read-only Regions.
                         bail!(
-                            "only one Volume can reference a Region non-read-only!"
+                            "only one Volume can reference a Region \
+                            non-read-only!"
                         );
                     }
 
@@ -1035,13 +1115,13 @@ impl DataStore {
         let conn = self.pool_connection_unauthorized().await?;
         self.transaction_retry_wrapper("find_deleted_volume_regions")
             .transaction(&conn, |conn| async move {
-                Self::find_deleted_volume_regions_txn(&conn).await
+                Self::find_deleted_volume_regions_in_txn(&conn).await
             })
             .await
             .map_err(|e| public_error_from_diesel(e, ErrorHandler::Server))
     }
 
-    async fn find_deleted_volume_regions_txn(
+    async fn find_deleted_volume_regions_in_txn(
         conn: &async_bb8_diesel::Connection<DbConnection>,
     ) -> Result<Vec<(Dataset, Region, Option<Volume>)>, diesel::result::Error>
     {
@@ -1051,7 +1131,7 @@ impl DataStore {
         use db::schema::volume::dsl as volume_dsl;
 
         // Find all read-write regions (read-only region cleanup is taken care
-        // of in soft_delete_volume_txn!) and their associated datasets
+        // of in soft_delete_volume_in_txn!) and their associated datasets
         let unfiltered_deleted_regions = region_dsl::region
             .filter(region_dsl::read_only.eq(false))
             // the volume may be hard deleted, so use a left join here
@@ -1153,7 +1233,7 @@ impl DataStore {
 }
 
 #[derive(Debug, thiserror::Error)]
-enum SoftDeleteTransactionError {
+enum SoftDeleteError {
     #[error("Serde error decreasing Crucible resources: {0}")]
     SerdeError(#[from] serde_json::Error),
 
@@ -1173,10 +1253,10 @@ enum SoftDeleteTransactionError {
 
 impl DataStore {
     // See comment for `soft_delete_volume`
-    async fn soft_delete_volume_txn(
+    async fn soft_delete_volume_in_txn(
         conn: &async_bb8_diesel::Connection<DbConnection>,
         volume_id: Uuid,
-        err: OptionalError<SoftDeleteTransactionError>,
+        err: OptionalError<SoftDeleteError>,
     ) -> Result<CrucibleResources, diesel::result::Error> {
         // Grab the volume, and check if the volume was already soft-deleted.
         // We have to guard against the case where this function is called
@@ -1248,18 +1328,15 @@ impl DataStore {
         // references, collecting the regions and region snapshots that were
         // freed up for deletion.
 
-        let num_read_write_subvolumes = match count_read_write_sub_volumes(&vcr)
-        {
-            Ok(v) => v,
-            Err(e) => {
-                return Err(err.bail(
-                    SoftDeleteTransactionError::InvalidVolume(format!(
-                        "volume {} invalid: {e}",
-                        volume.id()
-                    )),
-                ));
-            }
-        };
+        let num_read_write_subvolumes =
+            match count_read_write_sub_volumes(&vcr) {
+                Ok(v) => v,
+                Err(e) => {
+                    return Err(err.bail(SoftDeleteError::InvalidVolume(
+                        format!("volume {} invalid: {e}", volume.id()),
+                    )));
+                }
+            };
 
         let mut regions: Vec<Uuid> = Vec::with_capacity(
             REGION_REDUNDANCY_THRESHOLD * num_read_write_subvolumes,
@@ -1280,20 +1357,18 @@ impl DataStore {
         );
 
         for target in read_write_targets {
-            let target = target.parse().map_err(|e| {
-                err.bail(SoftDeleteTransactionError::AddressParseError(e))
-            })?;
+            let target = target
+                .parse()
+                .map_err(|e| err.bail(SoftDeleteError::AddressParseError(e)))?;
 
             let maybe_region =
                 Self::target_to_region(conn, &target, RegionType::ReadWrite)
                     .await?;
 
             let Some(region) = maybe_region else {
-                return Err(err.bail(
-                    SoftDeleteTransactionError::CouldNotFindResource(format!(
-                        "could not find resource for {target}"
-                    )),
-                ));
+                return Err(err.bail(SoftDeleteError::CouldNotFindResource(
+                    format!("could not find resource for {target}"),
+                )));
             };
 
             // Filter out regions that have any region-snapshots
@@ -1314,9 +1389,9 @@ impl DataStore {
         for read_only_target in &crucible_targets.read_only_targets {
             use db::schema::volume_resource_usage::dsl as ru_dsl;
 
-            let read_only_target = read_only_target.parse().map_err(|e| {
-                err.bail(SoftDeleteTransactionError::AddressParseError(e))
-            })?;
+            let read_only_target = read_only_target
+                .parse()
+                .map_err(|e| err.bail(SoftDeleteError::AddressParseError(e)))?;
 
             let maybe_usage = Self::read_only_target_to_volume_resource_usage(
                 conn,
@@ -1325,11 +1400,9 @@ impl DataStore {
             .await?;
 
             let Some(usage) = maybe_usage else {
-                return Err(err.bail(
-                    SoftDeleteTransactionError::CouldNotFindResource(format!(
-                        "could not find resource for {read_only_target}"
-                    )),
-                ));
+                return Err(err.bail(SoftDeleteError::CouldNotFindResource(
+                    format!("could not find resource for {read_only_target}"),
+                )));
             };
 
             // For each read-only resource, remove the associated volume
@@ -1351,10 +1424,10 @@ impl DataStore {
 
                     if updated_rows != 1 {
                         return Err(err.bail(
-                            SoftDeleteTransactionError::UnexpectedDatabaseUpdate(
+                            SoftDeleteError::UnexpectedDatabaseUpdate(
                                 updated_rows,
                                 "volume_resource_usage (region)".into(),
-                            )
+                            ),
                         ));
                     }
 
@@ -1408,10 +1481,10 @@ impl DataStore {
 
                         if updated_rows != 1 {
                             return Err(err.bail(
-                                SoftDeleteTransactionError::UnexpectedDatabaseUpdate(
+                                SoftDeleteError::UnexpectedDatabaseUpdate(
                                     updated_rows,
                                     "setting deleting (region)".into(),
-                                )
+                                ),
                             ));
                         }
 
@@ -1449,11 +1522,12 @@ impl DataStore {
 
                     if updated_rows != 1 {
                         return Err(err.bail(
-                            SoftDeleteTransactionError::UnexpectedDatabaseUpdate(
+                            SoftDeleteError::UnexpectedDatabaseUpdate(
                                 updated_rows,
                                 "volume_resource_usage \
-                                (region_snapshot)".into(),
-                            )
+                                (region_snapshot)"
+                                    .into(),
+                            ),
                         ));
                     }
 
@@ -1482,30 +1556,27 @@ impl DataStore {
 
                     if region_snapshot_usage_left == 0 {
                         // Don't forget to set `deleting`! see: omicron#4095
-                        {
-                            use db::schema::region_snapshot::dsl;
-                            let updated_rows =
-                                diesel::update(dsl::region_snapshot)
-                                    .filter(dsl::dataset_id.eq(dataset_id))
-                                    .filter(dsl::region_id.eq(region_id))
-                                    .filter(dsl::snapshot_id.eq(snapshot_id))
-                                    .filter(
-                                        dsl::snapshot_addr
-                                            .eq(read_only_target.to_string()),
-                                    )
-                                    .filter(dsl::deleting.eq(false))
-                                    .set(dsl::deleting.eq(true))
-                                    .execute_async(conn)
-                                    .await?;
+                        use db::schema::region_snapshot::dsl;
+                        let updated_rows = diesel::update(dsl::region_snapshot)
+                            .filter(dsl::dataset_id.eq(dataset_id))
+                            .filter(dsl::region_id.eq(region_id))
+                            .filter(dsl::snapshot_id.eq(snapshot_id))
+                            .filter(
+                                dsl::snapshot_addr
+                                    .eq(read_only_target.to_string()),
+                            )
+                            .filter(dsl::deleting.eq(false))
+                            .set(dsl::deleting.eq(true))
+                            .execute_async(conn)
+                            .await?;
 
-                            if updated_rows != 1 {
-                                return Err(err.bail(
-                                    SoftDeleteTransactionError::UnexpectedDatabaseUpdate(
-                                        updated_rows,
-                                        "setting deleting (region snapshot)".into(),
-                                    )
-                                ));
-                            }
+                        if updated_rows != 1 {
+                            return Err(err.bail(
+                                SoftDeleteError::UnexpectedDatabaseUpdate(
+                                    updated_rows,
+                                    "setting deleting (region snapshot)".into(),
+                                ),
+                            ));
                         }
 
                         region_snapshots.push(RegionSnapshotV3 {
@@ -1540,7 +1611,7 @@ impl DataStore {
 
             if updated_rows != 1 {
                 return Err(err.bail(
-                    SoftDeleteTransactionError::UnexpectedDatabaseUpdate(
+                    SoftDeleteError::UnexpectedDatabaseUpdate(
                         updated_rows,
                         "volume".into(),
                     ),
@@ -1569,7 +1640,7 @@ impl DataStore {
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 async move {
-                    Self::soft_delete_volume_txn(&conn, volume_id, err).await
+                    Self::soft_delete_volume_in_txn(&conn, volume_id, err).await
                 }
             })
             .await
@@ -1580,6 +1651,191 @@ impl DataStore {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 }
             })
+    }
+
+    async fn volume_remove_rop_in_txn(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        err: OptionalError<RemoveRopError>,
+        volume_id: Uuid,
+        temp_volume_id: Uuid,
+    ) -> Result<bool, diesel::result::Error> {
+        // Grab the volume in question. If the volume record was already deleted
+        // then we can just return.
+        let volume = {
+            use db::schema::volume::dsl;
+
+            let volume = dsl::volume
+                .filter(dsl::id.eq(volume_id))
+                .select(Volume::as_select())
+                .get_result_async(conn)
+                .await
+                .optional()?;
+
+            let volume = if let Some(v) = volume {
+                v
+            } else {
+                // the volume does not exist, nothing to do.
+                return Ok(false);
+            };
+
+            if volume.time_deleted.is_some() {
+                // this volume is deleted, so let whatever is deleting it clean
+                // it up.
+                return Ok(false);
+            } else {
+                // A volume record exists, and was not deleted, we can attempt
+                // to remove its read_only_parent.
+                volume
+            }
+        };
+
+        // If a read_only_parent exists, remove it from volume_id, and attach it
+        // to temp_volume_id.
+        let vcr: VolumeConstructionRequest =
+            serde_json::from_str(volume.data())
+                .map_err(|e| err.bail(RemoveRopError::SerdeError(e)))?;
+
+        match vcr {
+            VolumeConstructionRequest::Volume {
+                id,
+                block_size,
+                sub_volumes,
+                read_only_parent,
+            } => {
+                if read_only_parent.is_none() {
+                    // This volume has no read_only_parent
+                    Ok(false)
+                } else {
+                    // Create a new VCR and fill in the contents from what the
+                    // original volume had.
+                    let new_vcr = VolumeConstructionRequest::Volume {
+                        id,
+                        block_size,
+                        sub_volumes,
+                        read_only_parent: None,
+                    };
+
+                    let new_volume_data = serde_json::to_string(&new_vcr)
+                        .map_err(|e| err.bail(RemoveRopError::SerdeError(e)))?;
+
+                    // Update the original volume_id with the new volume.data.
+                    use db::schema::volume::dsl as volume_dsl;
+                    let num_updated = diesel::update(volume_dsl::volume)
+                        .filter(volume_dsl::id.eq(volume_id))
+                        .set(volume_dsl::data.eq(new_volume_data))
+                        .execute_async(conn)
+                        .await?;
+
+                    // This should update just one row.  If it does not, then
+                    // something is terribly wrong in the database.
+                    if num_updated != 1 {
+                        return Err(err.bail(
+                            RemoveRopError::UnexpectedDatabaseUpdate(
+                                num_updated,
+                                1,
+                            ),
+                        ));
+                    }
+
+                    // Make a new VCR, with the information from our
+                    // temp_volume_id, but the read_only_parent from the
+                    // original volume.
+                    let rop_vcr = VolumeConstructionRequest::Volume {
+                        id: temp_volume_id,
+                        block_size,
+                        sub_volumes: vec![],
+                        read_only_parent,
+                    };
+
+                    let rop_volume_data = serde_json::to_string(&rop_vcr)
+                        .map_err(|e| err.bail(RemoveRopError::SerdeError(e)))?;
+
+                    // Update the temp_volume_id with the volume data that
+                    // contains the read_only_parent.
+                    let num_updated = diesel::update(volume_dsl::volume)
+                        .filter(volume_dsl::id.eq(temp_volume_id))
+                        .filter(volume_dsl::time_deleted.is_null())
+                        .set(volume_dsl::data.eq(rop_volume_data))
+                        .execute_async(conn)
+                        .await?;
+
+                    if num_updated != 1 {
+                        return Err(err.bail(
+                            RemoveRopError::UnexpectedDatabaseUpdate(
+                                num_updated,
+                                1,
+                            ),
+                        ));
+                    }
+
+                    // Update the volume resource usage record for every
+                    // read-only resource in the ROP
+                    let crucible_targets = {
+                        let mut crucible_targets = CrucibleTargets::default();
+                        read_only_resources_associated_with_volume(
+                            &rop_vcr,
+                            &mut crucible_targets,
+                        );
+                        crucible_targets
+                    };
+
+                    for read_only_target in crucible_targets.read_only_targets {
+                        let read_only_target =
+                            read_only_target.parse().map_err(|e| {
+                                err.bail(RemoveRopError::AddressParseError(e))
+                            })?;
+
+                        let maybe_usage =
+                            Self::read_only_target_to_volume_resource_usage(
+                                conn,
+                                &read_only_target,
+                            )
+                            .await?;
+
+                        let Some(usage) = maybe_usage else {
+                            return Err(err.bail(
+                                RemoveRopError::CouldNotFindResource(format!(
+                                    "could not find resource for \
+                                    {read_only_target}"
+                                )),
+                            ));
+                        };
+
+                        Self::swap_volume_usage_records_for_resources(
+                            conn,
+                            usage,
+                            volume_id,
+                            temp_volume_id,
+                        )
+                        .await
+                        .map_err(|e| {
+                            err.bail_retryable_or_else(e, |e| {
+                                RemoveRopError::Public(
+                                    public_error_from_diesel(
+                                        e,
+                                        ErrorHandler::Server,
+                                    ),
+                                )
+                            })
+                        })?;
+                    }
+
+                    // After read-only parent removal, validate invariants for
+                    // all volumes
+                    #[cfg(any(test, feature = "testing"))]
+                    Self::validate_volume_invariants(conn).await?;
+
+                    Ok(true)
+                }
+            }
+
+            VolumeConstructionRequest::File { .. }
+            | VolumeConstructionRequest::Region { .. }
+            | VolumeConstructionRequest::Url { .. } => {
+                // Volume has a format that does not contain ROPs
+                Ok(false)
+            }
+        }
     }
 
     // Here we remove the read only parent from volume_id, and attach it
@@ -1593,24 +1849,6 @@ impl DataStore {
         volume_id: Uuid,
         temp_volume_id: Uuid,
     ) -> Result<bool, Error> {
-        #[derive(Debug, thiserror::Error)]
-        enum RemoveReadOnlyParentError {
-            #[error("Error removing read-only parent: {0}")]
-            Public(Error),
-
-            #[error("Serde error removing read-only parent: {0}")]
-            SerdeError(#[from] serde_json::Error),
-
-            #[error("Updated {0} database rows, expected {1}")]
-            UnexpectedDatabaseUpdate(usize, usize),
-
-            #[error("Address parsing error during ROP removal: {0}")]
-            AddressParseError(#[from] AddrParseError),
-
-            #[error("Could not match read-only resource to {0}")]
-            CouldNotFindResource(String),
-        }
-
         // In this single transaction:
         // - Get the given volume from the volume_id from the database
         // - Extract the volume.data into a VolumeConstructionRequest (VCR)
@@ -1631,208 +1869,22 @@ impl DataStore {
             .transaction(&conn, |conn| {
                 let err = err.clone();
                 async move {
-                    // Grab the volume in question. If the volume record was
-                    // already deleted then we can just return.
-                    let volume = {
-                        use db::schema::volume::dsl;
-
-                        let volume = dsl::volume
-                            .filter(dsl::id.eq(volume_id))
-                            .select(Volume::as_select())
-                            .get_result_async(&conn)
-                            .await
-                            .optional()?;
-
-                        let volume = if let Some(v) = volume {
-                            v
-                        } else {
-                            // the volume does not exist, nothing to do.
-                            return Ok(false);
-                        };
-
-                        if volume.time_deleted.is_some() {
-                            // this volume is deleted, so let whatever is
-                            // deleting it clean it up.
-                            return Ok(false);
-                        } else {
-                            // A volume record exists, and was not deleted, we
-                            // can attempt to remove its read_only_parent.
-                            volume
-                        }
-                    };
-
-                    // If a read_only_parent exists, remove it from volume_id,
-                    // and attach it to temp_volume_id.
-                    let vcr: VolumeConstructionRequest =
-                        serde_json::from_str(
-                            volume.data()
-                        )
-                        .map_err(|e| {
-                            err.bail(
-                                RemoveReadOnlyParentError::SerdeError(
-                                    e,
-                                )
-                            )
-                        })?;
-
-                    match vcr {
-                        VolumeConstructionRequest::Volume {
-                            id,
-                            block_size,
-                            sub_volumes,
-                            read_only_parent,
-                        } => {
-                            if read_only_parent.is_none() {
-                                // This volume has no read_only_parent
-                                Ok(false)
-                            } else {
-                                // Create a new VCR and fill in the contents
-                                // from what the original volume had.
-                                let new_vcr = VolumeConstructionRequest::Volume {
-                                    id,
-                                    block_size,
-                                    sub_volumes,
-                                    read_only_parent: None,
-                                };
-
-                                let new_volume_data =
-                                    serde_json::to_string(
-                                        &new_vcr
-                                    )
-                                    .map_err(|e| {
-                                        err.bail(RemoveReadOnlyParentError::SerdeError(
-                                            e,
-                                        ))
-                                    })?;
-
-                                // Update the original volume_id with the new
-                                // volume.data.
-                                use db::schema::volume::dsl as volume_dsl;
-                                let num_updated = diesel::update(volume_dsl::volume)
-                                    .filter(volume_dsl::id.eq(volume_id))
-                                    .set(volume_dsl::data.eq(new_volume_data))
-                                    .execute_async(&conn)
-                                    .await?;
-
-                                // This should update just one row.  If it does
-                                // not, then something is terribly wrong in the
-                                // database.
-                                if num_updated != 1 {
-                                    return Err(err.bail(RemoveReadOnlyParentError::UnexpectedDatabaseUpdate(num_updated, 1)));
-                                }
-
-                                // Make a new VCR, with the information from
-                                // our temp_volume_id, but the read_only_parent
-                                // from the original volume.
-                                let rop_vcr = VolumeConstructionRequest::Volume {
-                                    id: temp_volume_id,
-                                    block_size,
-                                    sub_volumes: vec![],
-                                    read_only_parent,
-                                };
-
-                                let rop_volume_data =
-                                    serde_json::to_string(
-                                        &rop_vcr
-                                    )
-                                    .map_err(|e| {
-                                        err.bail(RemoveReadOnlyParentError::SerdeError(
-                                            e,
-                                        ))
-                                    })?;
-
-                                // Update the temp_volume_id with the volume
-                                // data that contains the read_only_parent.
-                                let num_updated =
-                                    diesel::update(volume_dsl::volume)
-                                        .filter(volume_dsl::id.eq(temp_volume_id))
-                                        .filter(volume_dsl::time_deleted.is_null())
-                                        .set(volume_dsl::data.eq(rop_volume_data))
-                                        .execute_async(&conn)
-                                        .await?;
-
-                                if num_updated != 1 {
-                                    return Err(err.bail(
-                                        RemoveReadOnlyParentError::UnexpectedDatabaseUpdate(
-                                            num_updated,
-                                            1
-                                        )
-                                    ));
-                                }
-
-                                // Update the volume resource usage record for
-                                // every read-only resource in the ROP
-                                let crucible_targets = {
-                                    let mut crucible_targets = CrucibleTargets::default();
-                                    read_only_resources_associated_with_volume(
-                                        &rop_vcr,
-                                        &mut crucible_targets,
-                                    );
-                                    crucible_targets
-                                };
-
-                                for read_only_target in crucible_targets.read_only_targets {
-                                    let read_only_target = read_only_target
-                                        .parse()
-                                        .map_err(|e| err.bail(
-                                            RemoveReadOnlyParentError::AddressParseError(e)
-                                        ))?;
-
-                                    let maybe_usage = Self::read_only_target_to_volume_resource_usage(
-                                        &conn,
-                                        &read_only_target,
-                                    )
-                                    .await?;
-
-                                    let Some(usage) = maybe_usage else {
-                                        return Err(err.bail(
-                                            RemoveReadOnlyParentError::CouldNotFindResource(format!(
-                                                "could not find resource for {read_only_target}"
-                                            )),
-                                        ));
-                                    };
-
-                                    Self::swap_volume_usage_records_for_resources(
-                                        &conn,
-                                        usage,
-                                        volume_id,
-                                        temp_volume_id,
-                                    )
-                                    .await
-                                    .map_err(|e| {
-                                        err.bail_retryable_or_else(e, |e| {
-                                            RemoveReadOnlyParentError::Public(
-                                                public_error_from_diesel(
-                                                    e,
-                                                    ErrorHandler::Server,
-                                                )
-                                            )
-                                        })
-                                    })?;
-                                }
-
-                                // After read-only parent removal, validate
-                                // invariants for all volumes
-                                #[cfg(any(test, feature = "testing"))]
-                                Self::validate_volume_invariants(&conn).await?;
-
-                                Ok(true)
-                            }
-                        }
-
-                        VolumeConstructionRequest::File { .. }
-                        | VolumeConstructionRequest::Region { .. }
-                        | VolumeConstructionRequest::Url { .. } => {
-                            // Volume has a format that does not contain ROPs
-                            Ok(false)
-                        }
-                    }
+                    Self::volume_remove_rop_in_txn(
+                        &conn,
+                        err,
+                        volume_id,
+                        temp_volume_id,
+                    )
+                    .await
                 }
             })
             .await
             .map_err(|e| {
                 if let Some(err) = err.take() {
-                    return Error::internal_error(&format!("Transaction error: {}", err));
+                    return Error::internal_error(&format!(
+                        "Transaction error: {}",
+                        err
+                    ));
                 }
                 public_error_from_diesel(e, ErrorHandler::Server)
             })
@@ -1917,9 +1969,9 @@ impl DataStore {
 
                     if mismatched_record_type_count > 0 {
                         return Err(err.bail(Error::conflict(&format!(
-                            "existing repair type for id {} does not match {:?}!",
-                            record.repair_id,
-                            record.repair_type,
+                            "existing repair type for id {} does not \
+                            match {:?}!",
+                            record.repair_id, record.repair_type,
                         ))));
                     }
 
@@ -1993,6 +2045,54 @@ impl DataStore {
             })
     }
 
+    async fn upstairs_repair_progress_in_txn(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        err: OptionalError<Error>,
+        upstairs_id: TypedUuid<UpstairsKind>,
+        repair_id: TypedUuid<UpstairsRepairKind>,
+        repair_progress: RepairProgress,
+    ) -> Result<(), diesel::result::Error> {
+        use db::schema::upstairs_repair_notification::dsl as notification_dsl;
+        use db::schema::upstairs_repair_progress::dsl;
+
+        // Check that there is a repair id for the upstairs id
+        let matching_repair: Option<UpstairsRepairNotification> =
+            notification_dsl::upstairs_repair_notification
+                .filter(
+                    notification_dsl::repair_id
+                        .eq(nexus_db_model::to_db_typed_uuid(repair_id)),
+                )
+                .filter(
+                    notification_dsl::upstairs_id
+                        .eq(nexus_db_model::to_db_typed_uuid(upstairs_id)),
+                )
+                .filter(
+                    notification_dsl::notification_type
+                        .eq(UpstairsRepairNotificationType::Started),
+                )
+                .get_result_async(conn)
+                .await
+                .optional()?;
+
+        if matching_repair.is_none() {
+            return Err(err.bail(Error::non_resourcetype_not_found(&format!(
+                "upstairs {upstairs_id} repair {repair_id} not found"
+            ))));
+        }
+
+        diesel::insert_into(dsl::upstairs_repair_progress)
+            .values(UpstairsRepairProgress {
+                repair_id: repair_id.into(),
+                time: repair_progress.time,
+                current_item: repair_progress.current_item,
+                total_items: repair_progress.total_items,
+            })
+            .execute_async(conn)
+            .await?;
+
+        Ok(())
+    }
+
     /// Record Upstairs repair progress
     pub async fn upstairs_repair_progress(
         &self,
@@ -2001,9 +2101,6 @@ impl DataStore {
         repair_id: TypedUuid<UpstairsRepairKind>,
         repair_progress: RepairProgress,
     ) -> Result<(), Error> {
-        use db::schema::upstairs_repair_notification::dsl as notification_dsl;
-        use db::schema::upstairs_repair_progress::dsl;
-
         let conn = self.pool_connection_authorized(opctx).await?;
         let err = OptionalError::new();
 
@@ -2013,33 +2110,14 @@ impl DataStore {
                 let err = err.clone();
 
                 async move {
-                    // Check that there is a repair id for the upstairs id
-                    let matching_repair: Option<UpstairsRepairNotification> =
-                        notification_dsl::upstairs_repair_notification
-                            .filter(notification_dsl::repair_id.eq(nexus_db_model::to_db_typed_uuid(repair_id)))
-                            .filter(notification_dsl::upstairs_id.eq(nexus_db_model::to_db_typed_uuid(upstairs_id)))
-                            .filter(notification_dsl::notification_type.eq(UpstairsRepairNotificationType::Started))
-                            .get_result_async(&conn)
-                            .await
-                            .optional()?;
-
-                    if matching_repair.is_none() {
-                        return Err(err.bail(Error::non_resourcetype_not_found(&format!(
-                            "upstairs {upstairs_id} repair {repair_id} not found"
-                        ))));
-                    }
-
-                    diesel::insert_into(dsl::upstairs_repair_progress)
-                        .values(UpstairsRepairProgress {
-                            repair_id: repair_id.into(),
-                            time: repair_progress.time,
-                            current_item: repair_progress.current_item,
-                            total_items: repair_progress.total_items,
-                        })
-                        .execute_async(&conn)
-                        .await?;
-
-                    Ok(())
+                    Self::upstairs_repair_progress_in_txn(
+                        &conn,
+                        err,
+                        upstairs_id,
+                        repair_id,
+                        repair_progress,
+                    )
+                    .await
                 }
             })
             .await
@@ -2495,6 +2573,7 @@ fn read_only_target_in_vcr(
     Ok(false)
 }
 
+#[derive(Clone)]
 pub struct VolumeReplacementParams {
     pub volume_id: Uuid,
     pub region_id: Uuid,
@@ -2532,12 +2611,12 @@ pub enum VolumeReplaceResult {
 }
 
 impl DataStore {
-    /// Replace a read-write region in a Volume with a new region.
-    pub async fn volume_replace_region(
-        &self,
+    async fn volume_replace_region_in_txn(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        err: OptionalError<ReplaceRegionError>,
         existing: VolumeReplacementParams,
         replacement: VolumeReplacementParams,
-    ) -> Result<VolumeReplaceResult, Error> {
+    ) -> Result<VolumeReplaceResult, diesel::result::Error> {
         // In a single transaction:
         //
         // - set the existing region's volume id to the replacement's volume id
@@ -2628,189 +2707,184 @@ impl DataStore {
         // referenced (via its socket address) in NEW_VOL. For an example, this
         // is done as part of the region replacement start saga.
 
-        #[derive(Debug, thiserror::Error)]
-        enum VolumeReplaceRegionError {
-            #[error("Error from Volume region replacement: {0}")]
-            Public(Error),
+        // Grab the old volume first
+        let maybe_old_volume = {
+            volume_dsl::volume
+                .filter(volume_dsl::id.eq(existing.volume_id))
+                .select(Volume::as_select())
+                .first_async::<Volume>(conn)
+                .await
+                .optional()
+                .map_err(|e| {
+                    err.bail_retryable_or_else(e, |e| {
+                        ReplaceRegionError::Public(public_error_from_diesel(
+                            e,
+                            ErrorHandler::Server,
+                        ))
+                    })
+                })?
+        };
 
-            #[error("Serde error during Volume region replacement: {0}")]
-            SerdeError(#[from] serde_json::Error),
+        let old_volume = if let Some(old_volume) = maybe_old_volume {
+            old_volume
+        } else {
+            // Existing volume was hard-deleted, so return here. We can't
+            // perform the region replacement now, and this will short-circuit
+            // the rest of the process.
 
-            #[error("Region replacement error: {0}")]
-            RegionReplacementError(#[from] anyhow::Error),
+            return Ok(VolumeReplaceResult::ExistingVolumeDeleted);
+        };
+
+        if old_volume.time_deleted.is_some() {
+            // Existing volume was soft-deleted, so return here for the same
+            // reason: the region replacement process should be short-circuited
+            // now.
+            return Ok(VolumeReplaceResult::ExistingVolumeDeleted);
         }
+
+        let old_vcr: VolumeConstructionRequest =
+            match serde_json::from_str(&old_volume.data()) {
+                Ok(vcr) => vcr,
+                Err(e) => {
+                    return Err(err.bail(ReplaceRegionError::SerdeError(e)));
+                }
+            };
+
+        // Does it look like this replacement already happened?
+        let old_region_in_vcr =
+            match region_in_vcr(&old_vcr, &existing.region_addr) {
+                Ok(v) => v,
+                Err(e) => {
+                    return Err(
+                        err.bail(ReplaceRegionError::RegionReplacementError(e))
+                    );
+                }
+            };
+        let new_region_in_vcr =
+            match region_in_vcr(&old_vcr, &replacement.region_addr) {
+                Ok(v) => v,
+                Err(e) => {
+                    return Err(
+                        err.bail(ReplaceRegionError::RegionReplacementError(e))
+                    );
+                }
+            };
+
+        if !old_region_in_vcr && new_region_in_vcr {
+            // It does seem like the replacement happened
+            return Ok(VolumeReplaceResult::AlreadyHappened);
+        }
+
+        use db::schema::region::dsl as region_dsl;
+        use db::schema::volume::dsl as volume_dsl;
+
+        // Set the existing region's volume id to the replacement's volume id
+        diesel::update(region_dsl::region)
+            .filter(region_dsl::id.eq(existing.region_id))
+            .set(region_dsl::volume_id.eq(replacement.volume_id))
+            .execute_async(conn)
+            .await
+            .map_err(|e| {
+                err.bail_retryable_or_else(e, |e| {
+                    ReplaceRegionError::Public(public_error_from_diesel(
+                        e,
+                        ErrorHandler::Server,
+                    ))
+                })
+            })?;
+
+        // Set the replacement region's volume id to the existing's volume id
+        diesel::update(region_dsl::region)
+            .filter(region_dsl::id.eq(replacement.region_id))
+            .set(region_dsl::volume_id.eq(existing.volume_id))
+            .execute_async(conn)
+            .await
+            .map_err(|e| {
+                err.bail_retryable_or_else(e, |e| {
+                    ReplaceRegionError::Public(public_error_from_diesel(
+                        e,
+                        ErrorHandler::Server,
+                    ))
+                })
+            })?;
+
+        // Update the existing volume's construction request to replace the
+        // existing region's SocketAddrV6 with the replacement region's
+
+        // Copy the old volume's VCR, changing out the old region for the new.
+        let new_vcr = match replace_region_in_vcr(
+            &old_vcr,
+            existing.region_addr,
+            replacement.region_addr,
+        ) {
+            Ok(new_vcr) => new_vcr,
+            Err(e) => {
+                return Err(
+                    err.bail(ReplaceRegionError::RegionReplacementError(e))
+                );
+            }
+        };
+
+        let new_volume_data = serde_json::to_string(&new_vcr)
+            .map_err(|e| err.bail(ReplaceRegionError::SerdeError(e)))?;
+
+        // Update the existing volume's data
+        diesel::update(volume_dsl::volume)
+            .filter(volume_dsl::id.eq(existing.volume_id))
+            .set(volume_dsl::data.eq(new_volume_data))
+            .execute_async(conn)
+            .await
+            .map_err(|e| {
+                err.bail_retryable_or_else(e, |e| {
+                    ReplaceRegionError::Public(public_error_from_diesel(
+                        e,
+                        ErrorHandler::Server,
+                    ))
+                })
+            })?;
+
+        // After region replacement, validate invariants for all volumes
+        #[cfg(any(test, feature = "testing"))]
+        Self::validate_volume_invariants(conn).await?;
+
+        Ok(VolumeReplaceResult::Done)
+    }
+
+    /// Replace a read-write region in a Volume with a new region.
+    pub async fn volume_replace_region(
+        &self,
+        existing: VolumeReplacementParams,
+        replacement: VolumeReplacementParams,
+    ) -> Result<VolumeReplaceResult, Error> {
         let err = OptionalError::new();
 
         let conn = self.pool_connection_unauthorized().await?;
         self.transaction_retry_wrapper("volume_replace_region")
             .transaction(&conn, |conn| {
                 let err = err.clone();
+                let existing = existing.clone();
+                let replacement = replacement.clone();
                 async move {
-                    // Grab the old volume first
-                    let maybe_old_volume = {
-                        volume_dsl::volume
-                            .filter(volume_dsl::id.eq(existing.volume_id))
-                            .select(Volume::as_select())
-                            .first_async::<Volume>(&conn)
-                            .await
-                            .optional()
-                            .map_err(|e| {
-                                err.bail_retryable_or_else(e, |e| {
-                                    VolumeReplaceRegionError::Public(
-                                        public_error_from_diesel(
-                                            e,
-                                            ErrorHandler::Server,
-                                        )
-                                    )
-                                })
-                            })?
-                    };
-
-                    let old_volume = if let Some(old_volume) = maybe_old_volume {
-                        old_volume
-                    } else {
-                        // Existing volume was hard-deleted, so return here. We
-                        // can't perform the region replacement now, and this
-                        // will short-circuit the rest of the process.
-
-                        return Ok(VolumeReplaceResult::ExistingVolumeDeleted);
-                    };
-
-                    if old_volume.time_deleted.is_some() {
-                        // Existing volume was soft-deleted, so return here for
-                        // the same reason: the region replacement process
-                        // should be short-circuited now.
-                        return Ok(VolumeReplaceResult::ExistingVolumeDeleted);
-                    }
-
-                    let old_vcr: VolumeConstructionRequest =
-                        match serde_json::from_str(&old_volume.data()) {
-                            Ok(vcr) => vcr,
-                            Err(e) => {
-                                return Err(err.bail(VolumeReplaceRegionError::SerdeError(e)));
-                            },
-                        };
-
-                    // Does it look like this replacement already happened?
-                    let old_region_in_vcr = match region_in_vcr(&old_vcr, &existing.region_addr) {
-                        Ok(v) => v,
-                        Err(e) => {
-                            return Err(err.bail(VolumeReplaceRegionError::RegionReplacementError(e)));
-                        },
-                    };
-                    let new_region_in_vcr = match region_in_vcr(&old_vcr, &replacement.region_addr) {
-                        Ok(v) => v,
-                        Err(e) => {
-                            return Err(err.bail(VolumeReplaceRegionError::RegionReplacementError(e)));
-                        },
-                    };
-
-                    if !old_region_in_vcr && new_region_in_vcr {
-                        // It does seem like the replacement happened
-                        return Ok(VolumeReplaceResult::AlreadyHappened);
-                    }
-
-                    use db::schema::region::dsl as region_dsl;
-                    use db::schema::volume::dsl as volume_dsl;
-
-                    // Set the existing region's volume id to the replacement's
-                    // volume id
-                    diesel::update(region_dsl::region)
-                        .filter(region_dsl::id.eq(existing.region_id))
-                        .set(region_dsl::volume_id.eq(replacement.volume_id))
-                        .execute_async(&conn)
-                        .await
-                        .map_err(|e| {
-                            err.bail_retryable_or_else(e, |e| {
-                                VolumeReplaceRegionError::Public(
-                                    public_error_from_diesel(
-                                        e,
-                                        ErrorHandler::Server,
-                                    )
-                                )
-                            })
-                        })?;
-
-                    // Set the replacement region's volume id to the existing's
-                    // volume id
-                    diesel::update(region_dsl::region)
-                        .filter(region_dsl::id.eq(replacement.region_id))
-                        .set(region_dsl::volume_id.eq(existing.volume_id))
-                        .execute_async(&conn)
-                        .await
-                        .map_err(|e| {
-                            err.bail_retryable_or_else(e, |e| {
-                                VolumeReplaceRegionError::Public(
-                                    public_error_from_diesel(
-                                        e,
-                                        ErrorHandler::Server,
-                                    )
-                                )
-                            })
-                        })?;
-
-                    // Update the existing volume's construction request to
-                    // replace the existing region's SocketAddrV6 with the
-                    // replacement region's
-
-                    // Copy the old volume's VCR, changing out the old region
-                    // for the new.
-                    let new_vcr = match replace_region_in_vcr(
-                        &old_vcr,
-                        existing.region_addr,
-                        replacement.region_addr,
-                    ) {
-                        Ok(new_vcr) => new_vcr,
-                        Err(e) => {
-                            return Err(err.bail(
-                                VolumeReplaceRegionError::RegionReplacementError(e)
-                            ));
-                        }
-                    };
-
-                    let new_volume_data = serde_json::to_string(
-                        &new_vcr,
+                    Self::volume_replace_region_in_txn(
+                        &conn,
+                        err,
+                        existing,
+                        replacement,
                     )
-                    .map_err(|e| {
-                        err.bail(VolumeReplaceRegionError::SerdeError(e))
-                    })?;
-
-                    // Update the existing volume's data
-                    diesel::update(volume_dsl::volume)
-                        .filter(volume_dsl::id.eq(existing.volume_id))
-                        .set(volume_dsl::data.eq(new_volume_data))
-                        .execute_async(&conn)
-                        .await
-                        .map_err(|e| {
-                            err.bail_retryable_or_else(e, |e| {
-                                VolumeReplaceRegionError::Public(
-                                    public_error_from_diesel(
-                                        e,
-                                        ErrorHandler::Server,
-                                    )
-                                )
-                            })
-                        })?;
-
-                    // After region replacement, validate invariants for all
-                    // volumes
-                    #[cfg(any(test, feature = "testing"))]
-                    Self::validate_volume_invariants(&conn).await?;
-
-                    Ok(VolumeReplaceResult::Done)
+                    .await
                 }
             })
             .await
             .map_err(|e| {
                 if let Some(err) = err.take() {
                     match err {
-                        VolumeReplaceRegionError::Public(e) => e,
+                        ReplaceRegionError::Public(e) => e,
 
-                        VolumeReplaceRegionError::SerdeError(_) => {
+                        ReplaceRegionError::SerdeError(_) => {
                             Error::internal_error(&err.to_string())
                         }
 
-                        VolumeReplaceRegionError::RegionReplacementError(_) => {
+                        ReplaceRegionError::RegionReplacementError(_) => {
                             Error::internal_error(&err.to_string())
                         }
                     }
@@ -2818,6 +2892,305 @@ impl DataStore {
                     public_error_from_diesel(e, ErrorHandler::Server)
                 }
             })
+    }
+
+    async fn volume_replace_snapshot_in_txn(
+        conn: &async_bb8_diesel::Connection<DbConnection>,
+        err: OptionalError<ReplaceSnapshotError>,
+        volume_id: VolumeWithTarget,
+        existing: ExistingTarget,
+        replacement: ReplacementTarget,
+        volume_to_delete_id: VolumeToDelete,
+    ) -> Result<VolumeReplaceResult, diesel::result::Error> {
+        use db::schema::volume::dsl as volume_dsl;
+        use db::schema::volume_resource_usage::dsl as ru_dsl;
+
+        // Grab the old volume first
+        let maybe_old_volume = {
+            volume_dsl::volume
+                .filter(volume_dsl::id.eq(volume_id.0))
+                .select(Volume::as_select())
+                .first_async::<Volume>(conn)
+                .await
+                .optional()
+                .map_err(|e| {
+                    err.bail_retryable_or_else(e, |e| {
+                        ReplaceSnapshotError::Public(public_error_from_diesel(
+                            e,
+                            ErrorHandler::Server,
+                        ))
+                    })
+                })?
+        };
+
+        let old_volume = if let Some(old_volume) = maybe_old_volume {
+            old_volume
+        } else {
+            // Existing volume was hard-deleted, so return here. We can't
+            // perform the region replacement now, and this will short-circuit
+            // the rest of the process.
+
+            return Ok(VolumeReplaceResult::ExistingVolumeDeleted);
+        };
+
+        if old_volume.time_deleted.is_some() {
+            // Existing volume was soft-deleted, so return here for the same
+            // reason: the region replacement process should be short-circuited
+            // now.
+            return Ok(VolumeReplaceResult::ExistingVolumeDeleted);
+        }
+
+        let old_vcr: VolumeConstructionRequest =
+            match serde_json::from_str(&old_volume.data()) {
+                Ok(vcr) => vcr,
+                Err(e) => {
+                    return Err(err.bail(ReplaceSnapshotError::SerdeError(e)));
+                }
+            };
+
+        // Does it look like this replacement already happened?
+        let old_target_in_vcr =
+            match read_only_target_in_vcr(&old_vcr, &existing.0) {
+                Ok(v) => v,
+                Err(e) => {
+                    return Err(err.bail(
+                        ReplaceSnapshotError::SnapshotReplacementError(e),
+                    ));
+                }
+            };
+
+        let new_target_in_vcr =
+            match read_only_target_in_vcr(&old_vcr, &replacement.0) {
+                Ok(v) => v,
+                Err(e) => {
+                    return Err(err.bail(
+                        ReplaceSnapshotError::SnapshotReplacementError(e),
+                    ));
+                }
+            };
+
+        if !old_target_in_vcr && new_target_in_vcr {
+            // It does seem like the replacement happened
+            return Ok(VolumeReplaceResult::AlreadyHappened);
+        }
+
+        // Update the existing volume's construction request to replace the
+        // existing target's SocketAddrV6 with the replacement target's
+
+        // Copy the old volume's VCR, changing out the old target for the new.
+        let (new_vcr, replacements) = match replace_read_only_target_in_vcr(
+            &old_vcr,
+            existing,
+            replacement,
+        ) {
+            Ok(new_vcr) => new_vcr,
+            Err(e) => {
+                return Err(
+                    err.bail(ReplaceSnapshotError::SnapshotReplacementError(e))
+                );
+            }
+        };
+
+        // Expect that this only happened once. If it happened multiple times,
+        // question everything: how would a snapshot be used twice?!
+
+        if replacements != 1 {
+            return Err(err.bail(
+                ReplaceSnapshotError::UnexpectedReplacedTargets(
+                    replacements,
+                    1,
+                ),
+            ));
+        }
+
+        let new_volume_data = serde_json::to_string(&new_vcr)
+            .map_err(|e| err.bail(ReplaceSnapshotError::SerdeError(e)))?;
+
+        // Update the existing volume's data
+        diesel::update(volume_dsl::volume)
+            .filter(volume_dsl::id.eq(volume_id.0))
+            .set(volume_dsl::data.eq(new_volume_data))
+            .execute_async(conn)
+            .await
+            .map_err(|e| {
+                err.bail_retryable_or_else(e, |e| {
+                    ReplaceSnapshotError::Public(public_error_from_diesel(
+                        e,
+                        ErrorHandler::Server,
+                    ))
+                })
+            })?;
+
+        // Make a new VCR that will stash the target to delete. The values here
+        // don't matter, just that it gets fed into the volume_delete machinery
+        // later.
+        let vcr = VolumeConstructionRequest::Volume {
+            id: volume_to_delete_id.0,
+            block_size: 512,
+            sub_volumes: vec![VolumeConstructionRequest::Region {
+                block_size: 512,
+                blocks_per_extent: 1,
+                extent_count: 1,
+                gen: 1,
+                opts: sled_agent_client::types::CrucibleOpts {
+                    id: volume_to_delete_id.0,
+                    target: vec![existing.0.to_string()],
+                    lossy: false,
+                    flush_timeout: None,
+                    key: None,
+                    cert_pem: None,
+                    key_pem: None,
+                    root_cert_pem: None,
+                    control: None,
+                    read_only: true,
+                },
+            }],
+            read_only_parent: None,
+        };
+
+        let volume_data = serde_json::to_string(&vcr)
+            .map_err(|e| err.bail(ReplaceSnapshotError::SerdeError(e)))?;
+
+        // Update the volume to delete data
+        let num_updated = diesel::update(volume_dsl::volume)
+            .filter(volume_dsl::id.eq(volume_to_delete_id.0))
+            .filter(volume_dsl::time_deleted.is_null())
+            .set(volume_dsl::data.eq(volume_data))
+            .execute_async(conn)
+            .await?;
+
+        if num_updated != 1 {
+            return Err(err.bail(
+                ReplaceSnapshotError::UnexpectedDatabaseUpdate(num_updated, 1),
+            ));
+        }
+
+        // Update the appropriate volume resource usage records - it could
+        // either be a read-only region or a region snapshot, so determine what
+        // it is first
+
+        let maybe_existing_usage =
+            Self::read_only_target_to_volume_resource_usage(conn, &existing.0)
+                .await?;
+
+        let Some(existing_usage) = maybe_existing_usage else {
+            return Err(err.bail(ReplaceSnapshotError::CouldNotFindResource(
+                format!("could not find resource for {}", existing.0,),
+            )));
+        };
+
+        // The "existing" target moved into the volume to delete
+
+        Self::swap_volume_usage_records_for_resources(
+            conn,
+            existing_usage,
+            volume_id.0,
+            volume_to_delete_id.0,
+        )
+        .await
+        .map_err(|e| {
+            err.bail_retryable_or_else(e, |e| {
+                ReplaceSnapshotError::Public(public_error_from_diesel(
+                    e,
+                    ErrorHandler::Server,
+                ))
+            })
+        })?;
+
+        let maybe_replacement_usage =
+            Self::read_only_target_to_volume_resource_usage(
+                conn,
+                &replacement.0,
+            )
+            .await?;
+
+        let Some(replacement_usage) = maybe_replacement_usage else {
+            return Err(err.bail(ReplaceSnapshotError::CouldNotFindResource(
+                format!("could not find resource for {}", existing.0,),
+            )));
+        };
+
+        // The intention leaving this transaction is that the correct volume
+        // resource usage records exist, so:
+        //
+        // - if no usage record existed for the replacement usage, then create a
+        //   new record that points to the volume id (this can happen if the
+        //   volume to delete was blank when coming into this function)
+        //
+        // - if records exist for the "replacement" usage, then one of those
+        //   will match the volume to delete id, so perform a swap instead to
+        //   the volume id
+
+        let existing_replacement_volume_usage_records =
+            Self::volume_usage_records_for_resource_query(
+                replacement_usage.clone(),
+            )
+            .load_async(conn)
+            .await
+            .map_err(|e| {
+                err.bail_retryable_or_else(e, |e| {
+                    ReplaceSnapshotError::Public(public_error_from_diesel(
+                        e,
+                        ErrorHandler::Server,
+                    ))
+                })
+            })?
+            // TODO be smart enough to .filter the above query
+            .into_iter()
+            .filter(|record| record.volume_id == volume_to_delete_id.0)
+            .count();
+
+        // The "replacement" target moved into the volume
+
+        if existing_replacement_volume_usage_records == 0 {
+            // No matching record
+            let new_record =
+                VolumeResourceUsageRecord::new(volume_id.0, replacement_usage);
+
+            diesel::insert_into(ru_dsl::volume_resource_usage)
+                .values(new_record)
+                .execute_async(conn)
+                .await
+                .map_err(|e| {
+                    err.bail_retryable_or_else(e, |e| {
+                        ReplaceSnapshotError::Public(public_error_from_diesel(
+                            e,
+                            ErrorHandler::Server,
+                        ))
+                    })
+                })?;
+        } else if existing_replacement_volume_usage_records == 1 {
+            // One matching record: perform swap
+            Self::swap_volume_usage_records_for_resources(
+                conn,
+                replacement_usage,
+                volume_to_delete_id.0,
+                volume_id.0,
+            )
+            .await
+            .map_err(|e| {
+                err.bail_retryable_or_else(e, |e| {
+                    ReplaceSnapshotError::Public(public_error_from_diesel(
+                        e,
+                        ErrorHandler::Server,
+                    ))
+                })
+            })?;
+        } else {
+            // More than one matching record!
+            return Err(err.bail(
+                ReplaceSnapshotError::MultipleResourceUsageRecords(format!(
+                    "{replacement_usage:?}"
+                )),
+            ));
+        }
+
+        // After region snapshot replacement, validate invariants for all
+        // volumes
+        #[cfg(any(test, feature = "testing"))]
+        Self::validate_volume_invariants(conn).await?;
+
+        Ok(VolumeReplaceResult::Done)
     }
 
     /// Replace a read-only target in a Volume with a new region
@@ -2843,35 +3216,6 @@ impl DataStore {
         replacement: ReplacementTarget,
         volume_to_delete_id: VolumeToDelete,
     ) -> Result<VolumeReplaceResult, Error> {
-        #[derive(Debug, thiserror::Error)]
-        enum VolumeReplaceSnapshotError {
-            #[error("Error from Volume snapshot replacement: {0}")]
-            Public(Error),
-
-            #[error("Serde error during Volume snapshot replacement: {0}")]
-            SerdeError(#[from] serde_json::Error),
-
-            #[error("Snapshot replacement error: {0}")]
-            SnapshotReplacementError(#[from] anyhow::Error),
-
-            #[error("Replaced {0} targets, expected {1}")]
-            UnexpectedReplacedTargets(usize, usize),
-
-            #[error("Updated {0} database rows, expected {1}")]
-            UnexpectedDatabaseUpdate(usize, usize),
-
-            #[error(
-                "Address parsing error during Volume snapshot \
-            replacement: {0}"
-            )]
-            AddressParseError(#[from] AddrParseError),
-
-            #[error("Could not match read-only resource to {0}")]
-            CouldNotFindResource(String),
-
-            #[error("Multiple volume resource usage records for {0}")]
-            MultipleResourceUsageRecords(String),
-        }
         let err = OptionalError::new();
 
         let conn = self.pool_connection_unauthorized().await?;
@@ -2880,354 +3224,38 @@ impl DataStore {
                 let err = err.clone();
 
                 async move {
-                    use db::schema::volume::dsl as volume_dsl;
-                    use db::schema::volume_resource_usage::dsl as ru_dsl;
-
-                    // Grab the old volume first
-                    let maybe_old_volume = {
-                        volume_dsl::volume
-                            .filter(volume_dsl::id.eq(volume_id.0))
-                            .select(Volume::as_select())
-                            .first_async::<Volume>(&conn)
-                            .await
-                            .optional()
-                            .map_err(|e| {
-                                err.bail_retryable_or_else(e, |e| {
-                                    VolumeReplaceSnapshotError::Public(
-                                        public_error_from_diesel(
-                                            e,
-                                            ErrorHandler::Server,
-                                        )
-                                    )
-                                })
-                            })?
-                    };
-
-                    let old_volume = if let Some(old_volume) = maybe_old_volume {
-                        old_volume
-                    } else {
-                        // Existing volume was hard-deleted, so return here. We
-                        // can't perform the region replacement now, and this
-                        // will short-circuit the rest of the process.
-
-                        return Ok(VolumeReplaceResult::ExistingVolumeDeleted);
-                    };
-
-                    if old_volume.time_deleted.is_some() {
-                        // Existing volume was soft-deleted, so return here for
-                        // the same reason: the region replacement process
-                        // should be short-circuited now.
-                        return Ok(VolumeReplaceResult::ExistingVolumeDeleted);
-                    }
-
-                    let old_vcr: VolumeConstructionRequest =
-                        match serde_json::from_str(&old_volume.data()) {
-                            Ok(vcr) => vcr,
-                            Err(e) => {
-                                return Err(err.bail(
-                                    VolumeReplaceSnapshotError::SerdeError(e)
-                                ));
-                            },
-                        };
-
-                    // Does it look like this replacement already happened?
-                    let old_target_in_vcr = match read_only_target_in_vcr(&old_vcr, &existing.0) {
-                        Ok(v) => v,
-                        Err(e) => {
-                            return Err(err.bail(
-                                VolumeReplaceSnapshotError::SnapshotReplacementError(e)
-                            ));
-                        },
-                    };
-
-                    let new_target_in_vcr = match read_only_target_in_vcr(&old_vcr, &replacement.0) {
-                        Ok(v) => v,
-                        Err(e) => {
-                            return Err(err.bail(
-                                VolumeReplaceSnapshotError::SnapshotReplacementError(e)
-                            ));
-                        },
-                    };
-
-                    if !old_target_in_vcr && new_target_in_vcr {
-                        // It does seem like the replacement happened
-                        return Ok(VolumeReplaceResult::AlreadyHappened);
-                    }
-
-                    // Update the existing volume's construction request to
-                    // replace the existing target's SocketAddrV6 with the
-                    // replacement target's
-
-                    // Copy the old volume's VCR, changing out the old target
-                    // for the new.
-                    let (new_vcr, replacements) = match replace_read_only_target_in_vcr(
-                        &old_vcr,
+                    Self::volume_replace_snapshot_in_txn(
+                        &conn,
+                        err,
+                        volume_id,
                         existing,
                         replacement,
-                    ) {
-                        Ok(new_vcr) => new_vcr,
-                        Err(e) => {
-                            return Err(err.bail(
-                                VolumeReplaceSnapshotError::SnapshotReplacementError(e)
-                            ));
-                        }
-                    };
-
-                    // Expect that this only happened once. If it happened
-                    // multiple times, question everything: how would a snapshot
-                    // be used twice?!
-
-                    if replacements != 1 {
-                        return Err(err.bail(
-                            VolumeReplaceSnapshotError::UnexpectedReplacedTargets(
-                                replacements, 1,
-                            )
-                        ));
-                    }
-
-                    let new_volume_data = serde_json::to_string(
-                        &new_vcr,
-                    )
-                    .map_err(|e| {
-                        err.bail(VolumeReplaceSnapshotError::SerdeError(e))
-                    })?;
-
-                    // Update the existing volume's data
-                    diesel::update(volume_dsl::volume)
-                        .filter(volume_dsl::id.eq(volume_id.0))
-                        .set(volume_dsl::data.eq(new_volume_data))
-                        .execute_async(&conn)
-                        .await
-                        .map_err(|e| {
-                            err.bail_retryable_or_else(e, |e| {
-                                VolumeReplaceSnapshotError::Public(
-                                    public_error_from_diesel(
-                                        e,
-                                        ErrorHandler::Server,
-                                    )
-                                )
-                            })
-                        })?;
-
-                    // Make a new VCR that will stash the target to delete. The
-                    // values here don't matter, just that it gets fed into the
-                    // volume_delete machinery later.
-                    let vcr = VolumeConstructionRequest::Volume {
-                        id: volume_to_delete_id.0,
-                        block_size: 512,
-                        sub_volumes: vec![
-                            VolumeConstructionRequest::Region {
-                                block_size: 512,
-                                blocks_per_extent: 1,
-                                extent_count: 1,
-                                gen: 1,
-                                opts: sled_agent_client::types::CrucibleOpts {
-                                    id: volume_to_delete_id.0,
-                                    target: vec![
-                                        existing.0.to_string(),
-                                    ],
-                                    lossy: false,
-                                    flush_timeout: None,
-                                    key: None,
-                                    cert_pem: None,
-                                    key_pem: None,
-                                    root_cert_pem: None,
-                                    control: None,
-                                    read_only: true,
-                                },
-                            }
-                        ],
-                        read_only_parent: None,
-                    };
-
-                    let volume_data = serde_json::to_string(&vcr)
-                        .map_err(|e| {
-                            err.bail(VolumeReplaceSnapshotError::SerdeError(e))
-                        })?;
-
-                    // Update the volume to delete data
-                    let num_updated =
-                        diesel::update(volume_dsl::volume)
-                            .filter(volume_dsl::id.eq(volume_to_delete_id.0))
-                            .filter(volume_dsl::time_deleted.is_null())
-                            .set(volume_dsl::data.eq(volume_data))
-                            .execute_async(&conn)
-                            .await?;
-
-                    if num_updated != 1 {
-                        return Err(err.bail(
-                            VolumeReplaceSnapshotError::UnexpectedDatabaseUpdate(
-                                num_updated, 1,
-                            )
-                        ));
-                    }
-
-                    // Update the appropriate volume resource usage records - it
-                    // could either be a read-only region or a region snapshot,
-                    // so determine what it is first
-
-                    let maybe_existing_usage = Self::read_only_target_to_volume_resource_usage(
-                        &conn,
-                        &existing.0,
-                    )
-                    .await?;
-
-                    let Some(existing_usage) = maybe_existing_usage else {
-                        return Err(err.bail(
-                            VolumeReplaceSnapshotError::CouldNotFindResource(
-                                format!(
-                                    "could not find resource for {}",
-                                    existing.0,
-                                )
-                            ))
-                        );
-                    };
-
-                    // The "existing" target moved into the volume to delete
-
-                    Self::swap_volume_usage_records_for_resources(
-                        &conn,
-                        existing_usage,
-                        volume_id.0,
-                        volume_to_delete_id.0,
+                        volume_to_delete_id,
                     )
                     .await
-                    .map_err(|e| {
-                        err.bail_retryable_or_else(e, |e| {
-                            VolumeReplaceSnapshotError::Public(
-                                public_error_from_diesel(
-                                    e,
-                                    ErrorHandler::Server,
-                                )
-                            )
-                        })
-                    })?;
-
-                    let maybe_replacement_usage =
-                        Self::read_only_target_to_volume_resource_usage(
-                            &conn,
-                            &replacement.0,
-                        )
-                        .await?;
-
-                    let Some(replacement_usage) = maybe_replacement_usage else {
-                        return Err(err.bail(
-                            VolumeReplaceSnapshotError::CouldNotFindResource(
-                                format!(
-                                    "could not find resource for {}",
-                                    existing.0,
-                                )
-                            ))
-                        );
-                    };
-
-                    // The intention leaving this transaction is that the
-                    // correct volume resource usage records exist, so:
-                    //
-                    // - if no usage record existed for the replacement usage,
-                    //   then create a new record that points to the volume
-                    //   id (this can happen if the volume to delete was blank
-                    //   when coming into this function)
-                    //
-                    // - if records exist for the "replacement" usage, then one
-                    //   of those will match the volume to delete id, so perform
-                    //   a swap instead to the volume id
-
-                    let existing_replacement_volume_usage_records =
-                        Self::volume_usage_records_for_resource_query(
-                            replacement_usage.clone(),
-                        )
-                        .load_async(&conn)
-                        .await
-                        .map_err(|e| {
-                            err.bail_retryable_or_else(e, |e| {
-                                VolumeReplaceSnapshotError::Public(
-                                    public_error_from_diesel(
-                                        e,
-                                        ErrorHandler::Server,
-                                    )
-                                )
-                            })
-                        })?
-                        // TODO be smart enough to .filter the above query
-                        .into_iter()
-                        .filter(|record| record.volume_id == volume_to_delete_id.0)
-                        .count();
-
-                    // The "replacement" target moved into the volume
-
-                    if existing_replacement_volume_usage_records == 0 {
-                        // No matching record
-                        let new_record = VolumeResourceUsageRecord::new(
-                            volume_id.0,
-                            replacement_usage,
-                        );
-
-                        diesel::insert_into(ru_dsl::volume_resource_usage)
-                            .values(new_record)
-                            .execute_async(&conn)
-                            .await
-                            .map_err(|e| {
-                                err.bail_retryable_or_else(e, |e| {
-                                    VolumeReplaceSnapshotError::Public(
-                                        public_error_from_diesel(
-                                            e,
-                                            ErrorHandler::Server,
-                                        )
-                                    )
-                                })
-                            })?;
-                    } else if existing_replacement_volume_usage_records == 1 {
-                        // One matching record: perform swap
-                        Self::swap_volume_usage_records_for_resources(
-                            &conn,
-                            replacement_usage,
-                            volume_to_delete_id.0,
-                            volume_id.0,
-                        )
-                        .await
-                        .map_err(|e| {
-                            err.bail_retryable_or_else(e, |e| {
-                                VolumeReplaceSnapshotError::Public(
-                                    public_error_from_diesel(
-                                        e,
-                                        ErrorHandler::Server,
-                                    )
-                                )
-                            })
-                        })?;
-                    } else {
-                        // More than one matching record!
-                        return Err(err.bail(
-                            VolumeReplaceSnapshotError::MultipleResourceUsageRecords(
-                                format!("{replacement_usage:?}")
-                            )
-                        ));
-                    }
-
-                    // After region snapshot replacement, validate invariants
-                    // for all volumes
-                    #[cfg(any(test, feature = "testing"))]
-                    Self::validate_volume_invariants(&conn).await?;
-
-                    Ok(VolumeReplaceResult::Done)
                 }
             })
             .await
             .map_err(|e| {
                 if let Some(err) = err.take() {
                     match err {
-                        VolumeReplaceSnapshotError::Public(e) => e,
+                        ReplaceSnapshotError::Public(e) => e,
 
-                        VolumeReplaceSnapshotError::SerdeError(_) |
-                        VolumeReplaceSnapshotError::SnapshotReplacementError(_) |
-                        VolumeReplaceSnapshotError::UnexpectedReplacedTargets(_, _) |
-                        VolumeReplaceSnapshotError::UnexpectedDatabaseUpdate(_, _) |
-                        VolumeReplaceSnapshotError::AddressParseError(_) |
-                        VolumeReplaceSnapshotError::CouldNotFindResource(_) |
-                        VolumeReplaceSnapshotError::MultipleResourceUsageRecords(_) => {
-                            Error::internal_error(&err.to_string())
-                        }
+                        ReplaceSnapshotError::SerdeError(_)
+                        | ReplaceSnapshotError::SnapshotReplacementError(_)
+                        | ReplaceSnapshotError::UnexpectedReplacedTargets(
+                            _,
+                            _,
+                        )
+                        | ReplaceSnapshotError::UnexpectedDatabaseUpdate(
+                            _,
+                            _,
+                        )
+                        | ReplaceSnapshotError::AddressParseError(_)
+                        | ReplaceSnapshotError::CouldNotFindResource(_)
+                        | ReplaceSnapshotError::MultipleResourceUsageRecords(
+                            _,
+                        ) => Error::internal_error(&err.to_string()),
                     }
                 } else {
                     public_error_from_diesel(e, ErrorHandler::Server)
@@ -3761,7 +3789,7 @@ impl DataStore {
     }
 
     /// Assert that read-only regions do not have any associated region
-    /// snapshots (see associated comment in `soft_delete_volume_txn`)
+    /// snapshots (see associated comment in `soft_delete_volume_in_txn`)
     async fn validate_read_only_region_has_no_snapshots(
         conn: &async_bb8_diesel::Connection<DbConnection>,
         region: Region,
@@ -3839,8 +3867,8 @@ mod tests {
             .await
             .unwrap();
 
-        // Add old CrucibleResources json in the `resources_to_clean_up` column -
-        // this was before the `deleting` column / field was added to
+        // Add old CrucibleResources json in the `resources_to_clean_up` column
+        // - this was before the `deleting` column / field was added to
         // ResourceSnapshot.
 
         {
@@ -4012,7 +4040,8 @@ mod tests {
                         opts: CrucibleOpts {
                             id: volume_id,
                             target: vec![
-                                region_addresses[0].clone(), // target to replace
+                                // target to replace
+                                region_addresses[0].clone(),
                                 region_addresses[1].clone(),
                                 region_addresses[2].clone(),
                             ],
