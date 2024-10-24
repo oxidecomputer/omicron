@@ -10,6 +10,135 @@
     "version": "0.0.1"
   },
   "paths": {
+    "/artifacts": {
+      "get": {
+        "operationId": "artifact_list",
+        "responses": {
+          "200": {
+            "description": "successful operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Set_of_hex_schema",
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "format": "hex string (32 bytes)"
+                  },
+                  "uniqueItems": true
+                }
+              }
+            }
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/artifacts/{sha256}": {
+      "put": {
+        "operationId": "artifact_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sha256",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "hex string (32 bytes)"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/octet-stream": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "artifact_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sha256",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "hex string (32 bytes)"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "successful deletion"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/artifacts/{sha256}/copy-from-depot": {
+      "post": {
+        "operationId": "artifact_copy_from_depot",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sha256",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "hex string (32 bytes)"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArtifactCopyFromDepotBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "resource updated"
+          },
+          "4XX": {
+            "$ref": "#/components/responses/Error"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
     "/boot-disk/{boot_disk}/os/write": {
       "post": {
         "summary": "Write a new host OS image to the specified boot disk",
@@ -1415,6 +1544,17 @@
         "required": [
           "sled_id",
           "start_request"
+        ]
+      },
+      "ArtifactCopyFromDepotBody": {
+        "type": "object",
+        "properties": {
+          "depot_base_url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "depot_base_url"
         ]
       },
       "Baseboard": {
