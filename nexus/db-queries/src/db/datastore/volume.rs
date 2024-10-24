@@ -3105,18 +3105,17 @@ impl DataStore {
                         );
                     };
 
-                    // This function may be called with a replacement volume
-                    // that is completely blank, to be filled in later by this
-                    // function. `volume_create` will have been called but will
-                    // not have added any volume resource usage records, because
-                    // it was blank!
+                    // The intention leaving this transaction is that the
+                    // correct volume resource usage records exist, so:
                     //
-                    // The indention leaving this transaction is that the
-                    // correct volume resource usage records exist, so if this
-                    // is the case, create a new record.
+                    // - if no usage record existed for the replacement usage,
+                    //   then create a new record that points to the volume
+                    //   id (this can happen if the volume to delete was blank
+                    //   when coming into this function)
                     //
-                    // If the replacement volume usage records exist, then
-                    // perform a swap instead.
+                    // - if records exist for the "replacement" usage, then one
+                    //   of those will match the volume to delete id, so perform
+                    //   a swap instead to the volume id
 
                     let existing_replacement_volume_usage_records =
                         Self::volume_usage_records_for_resource_query(
