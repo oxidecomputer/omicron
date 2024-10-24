@@ -36,6 +36,7 @@ use omicron_common::api::external::Name;
 use omicron_common::api::external::NameOrId;
 use omicron_common::api::external::RouteDestination;
 use omicron_common::api::external::RouteTarget;
+use omicron_common::api::external::SwitchLocation;
 use omicron_common::api::external::UserId;
 use omicron_common::api::external::VpcFirewallRuleUpdateParams;
 use omicron_test_utils::certificates::CertificateChain;
@@ -486,19 +487,32 @@ pub static DEMO_CERTIFICATE_CREATE: Lazy<params::CertificateCreate> =
 
 pub const DEMO_SWITCH_PORT_URL: &'static str =
     "/v1/system/hardware/switch-port";
+
 pub static DEMO_SWITCH_PORT_SETTINGS_APPLY_URL: Lazy<String> = Lazy::new(
     || {
         format!(
-        "/v1/system/hardware/switch-port/qsfp7/settings?rack_id={}&switch_location={}",
-        uuid::Uuid::new_v4(),
-        "switch0",
-    )
+            "/v1/system/hardware/switch-port/qsfp0/settings?rack_id={}&switch_location={}",
+            RACK_UUID,
+            "switch0",
+        )
     },
 );
 pub static DEMO_SWITCH_PORT_SETTINGS: Lazy<params::SwitchPortApplySettings> =
     Lazy::new(|| params::SwitchPortApplySettings {
         port_settings: NameOrId::Name("portofino".parse().unwrap()),
     });
+
+pub static DEMO_SWITCH_PORT_ACTIVE_CONFIGURATION_URL: Lazy<String> = Lazy::new(
+    || {
+        format!(
+            "/v1/system/hardware/racks/{}/switch/{}/switch-port/{}/configuration",
+            RACK_UUID,
+            SwitchLocation::Switch0,
+            "qsfp0",
+        )
+    },
+);
+
 /* TODO requires dpd access
 pub static DEMO_SWITCH_PORT_STATUS_URL: Lazy<String> = Lazy::new(|| {
     format!(
@@ -2358,6 +2372,19 @@ pub static VERIFY_ENDPOINTS: Lazy<Vec<VerifyEndpoint>> = Lazy::new(|| {
             allowed_methods: vec![
                 AllowedMethod::Delete,
                 AllowedMethod::Post(
+                    serde_json::to_value(&*DEMO_SWITCH_PORT_SETTINGS).unwrap(),
+                ),
+            ],
+        },
+
+        VerifyEndpoint {
+            url: &DEMO_SWITCH_PORT_ACTIVE_CONFIGURATION_URL,
+            visibility: Visibility::Public,
+            unprivileged_access: UnprivilegedAccess::None,
+            allowed_methods: vec![
+                AllowedMethod::Get,
+                AllowedMethod::Delete,
+                AllowedMethod::Put(
                     serde_json::to_value(&*DEMO_SWITCH_PORT_SETTINGS).unwrap(),
                 ),
             ],
