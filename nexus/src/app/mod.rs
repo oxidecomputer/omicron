@@ -411,24 +411,23 @@ impl Nexus {
             .map_err(|e| e.to_string())?;
 
         // Client to the ClickHouse database.
-        let timeseries_client = if let Some(http_address) =
-            &config.pkg.timeseries_db.address
-        {
-            let native_address =
-                SocketAddr::new(http_address.ip(), CLICKHOUSE_TCP_PORT);
-            oximeter_db::Client::new(*http_address, native_address.into(), &log)
-        } else {
-            // TODO-cleanup: Remove this when we remove the HTTP client.
-            let http_resolver =
-                qorb_resolver.for_service(ServiceName::Clickhouse);
-            let native_resolver =
-                qorb_resolver.for_service(ServiceName::ClickhouseNative);
-            oximeter_db::Client::new_with_pool(
-                http_resolver,
-                native_resolver,
-                &log,
-            )
-        };
+        let timeseries_client =
+            if let Some(http_address) = &config.pkg.timeseries_db.address {
+                let native_address =
+                    SocketAddr::new(http_address.ip(), CLICKHOUSE_TCP_PORT);
+                oximeter_db::Client::new(*http_address, native_address, &log)
+            } else {
+                // TODO-cleanup: Remove this when we remove the HTTP client.
+                let http_resolver =
+                    qorb_resolver.for_service(ServiceName::Clickhouse);
+                let native_resolver =
+                    qorb_resolver.for_service(ServiceName::ClickhouseNative);
+                oximeter_db::Client::new_with_pool(
+                    http_resolver,
+                    native_resolver,
+                    &log,
+                )
+            };
 
         // TODO-cleanup We may want to make the populator a first-class
         // background task.
