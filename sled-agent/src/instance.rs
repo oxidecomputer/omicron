@@ -1189,7 +1189,7 @@ pub struct Instance {
     /// loop.
     tx: mpsc::Sender<InstanceRequest>,
 
-    /// This is reference
+    /// This is reference-counted so that the `Instance` struct may be cloned.
     #[allow(dead_code)]
     runner_handle: Arc<tokio::task::JoinHandle<()>>,
 }
