@@ -106,15 +106,14 @@ impl RetryHelper {
             + Send
             + Sync,
     {
-        let slef = Arc::new(self);
         let result = conn
-            .transaction_async_with_retry(f, slef.clone().as_callback())
+            .transaction_async_with_retry(f, || self.retry_callback())
             .await;
 
-        let retry_info = slef.inner.lock().unwrap();
+        let retry_info = self.inner.lock().unwrap();
         if retry_info.has_retried() {
             info!(
-                slef.log,
+                self.log,
                 "transaction completed";
                 "attempts" => retry_info.attempts,
             );
@@ -168,17 +167,6 @@ impl RetryHelper {
         // of attempts we've tried.
         let inner = self.inner.lock().unwrap().tick();
         return inner.attempts < MAX_RETRY_ATTEMPTS;
-    }
-
-    // Converts this function to a retryable callback that can be used from
-    // "transaction_async_with_retry".
-    fn as_callback(
-        self: Arc<Self>,
-    ) -> impl Fn() -> futures::future::BoxFuture<'static, bool> {
-        move || {
-            let r = self.clone();
-            Box::pin(async move { r.retry_callback().await })
-        }
     }
 }
 
