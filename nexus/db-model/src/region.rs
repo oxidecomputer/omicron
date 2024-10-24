@@ -46,6 +46,10 @@ pub struct Region {
 
     // A region may be read-only
     read_only: bool,
+
+    // Shared read-only regions require a "deleting" flag to avoid a
+    // use-after-free scenario
+    deleting: bool,
 }
 
 impl Region {
@@ -67,6 +71,7 @@ impl Region {
             extent_count: extent_count as i64,
             port: Some(port.into()),
             read_only,
+            deleting: false,
         }
     }
 
@@ -98,5 +103,8 @@ impl Region {
     }
     pub fn read_only(&self) -> bool {
         self.read_only
+    }
+    pub fn deleting(&self) -> bool {
+        self.deleting
     }
 }

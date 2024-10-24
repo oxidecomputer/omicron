@@ -11,7 +11,8 @@ WITH
         region.blocks_per_extent,
         region.extent_count,
         region.port,
-        region.read_only
+        region.read_only,
+        region.deleting
       FROM
         region
       WHERE
@@ -112,7 +113,8 @@ WITH
         $10 AS blocks_per_extent,
         $11 AS extent_count,
         NULL AS port,
-        $12 AS read_only
+        $12 AS read_only,
+        false AS deleting
       FROM
         shuffled_candidate_datasets
       LIMIT
@@ -222,7 +224,8 @@ WITH
             blocks_per_extent,
             extent_count,
             port,
-            read_only
+            read_only,
+            deleting
           )
       SELECT
         candidate_regions.id,
@@ -234,7 +237,8 @@ WITH
         candidate_regions.blocks_per_extent,
         candidate_regions.extent_count,
         candidate_regions.port,
-        candidate_regions.read_only
+        candidate_regions.read_only,
+        candidate_regions.deleting
       FROM
         candidate_regions
       WHERE
@@ -249,7 +253,8 @@ WITH
         region.blocks_per_extent,
         region.extent_count,
         region.port,
-        region.read_only
+        region.read_only,
+        region.deleting
     ),
   updated_datasets
     AS (
@@ -306,7 +311,8 @@ WITH
     old_regions.blocks_per_extent,
     old_regions.extent_count,
     old_regions.port,
-    old_regions.read_only
+    old_regions.read_only,
+    old_regions.deleting
   FROM
     old_regions INNER JOIN dataset ON old_regions.dataset_id = dataset.id
 )
@@ -333,7 +339,8 @@ UNION
       inserted_regions.blocks_per_extent,
       inserted_regions.extent_count,
       inserted_regions.port,
-      inserted_regions.read_only
+      inserted_regions.read_only,
+      inserted_regions.deleting
     FROM
       inserted_regions
       INNER JOIN updated_datasets ON inserted_regions.dataset_id = updated_datasets.id

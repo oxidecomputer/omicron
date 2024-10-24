@@ -29,20 +29,11 @@ use std::sync::Arc;
 pub struct RegionSnapshotReplacementDetector {
     datastore: Arc<DataStore>,
     sagas: Arc<dyn StartSaga>,
-    disabled: bool,
 }
 
 impl RegionSnapshotReplacementDetector {
-    #[allow(dead_code)]
     pub fn new(datastore: Arc<DataStore>, sagas: Arc<dyn StartSaga>) -> Self {
-        RegionSnapshotReplacementDetector { datastore, sagas, disabled: false }
-    }
-
-    pub fn disabled(
-        datastore: Arc<DataStore>,
-        sagas: Arc<dyn StartSaga>,
-    ) -> Self {
-        RegionSnapshotReplacementDetector { datastore, sagas, disabled: true }
+        RegionSnapshotReplacementDetector { datastore, sagas }
     }
 
     async fn send_start_request(
@@ -245,10 +236,6 @@ impl BackgroundTask for RegionSnapshotReplacementDetector {
     ) -> BoxFuture<'a, serde_json::Value> {
         async {
             let mut status = RegionSnapshotReplacementStartStatus::default();
-
-            if self.disabled {
-                return json!(status);
-            }
 
             self.create_requests_for_region_snapshots_on_expunged_disks(
                 opctx,
