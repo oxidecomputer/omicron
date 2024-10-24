@@ -4478,7 +4478,7 @@ impl ServiceManager {
                             } else {
                                 info!(
                                     self.inner.log,
-                                    "no rack_id/sled_id available yet"
+                                    "no sled info available yet"
                                 );
                             }
                             smfh.delpropvalue_default_instance(
@@ -4584,7 +4584,7 @@ impl ServiceManager {
                             } else {
                                 info!(
                                     self.inner.log,
-                                    "no rack_id/sled_id available yet"
+                                    "no sled info available yet"
                                 );
                             }
                             smfh.delpropvalue_default_instance(
