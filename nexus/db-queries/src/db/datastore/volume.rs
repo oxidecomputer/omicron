@@ -108,7 +108,7 @@ enum VolumeCreationError {
     AddressParseError(#[from] AddrParseError),
 
     #[error("Could not match read-only resource to {0}")]
-    CouldNotFindResource(String),
+    CouldNotFindResource(SocketAddrV6),
 }
 
 enum RegionType {
@@ -159,21 +159,15 @@ impl DataStore {
         use db::schema::volume_resource_usage::dsl as ru_dsl;
 
         for read_only_target in crucible_targets.read_only_targets {
-            let sub_err = OptionalError::new();
+            let read_only_target = read_only_target.parse().map_err(|e| {
+                err.bail(VolumeCreationError::AddressParseError(e))
+            })?;
 
             let maybe_usage = Self::read_only_target_to_volume_resource_usage(
                 conn,
-                &sub_err,
                 &read_only_target,
             )
-            .await
-            .map_err(|e| {
-                if let Some(sub_err) = sub_err.take() {
-                    err.bail(VolumeCreationError::AddressParseError(sub_err))
-                } else {
-                    e
-                }
-            })?;
+            .await?;
 
             match maybe_usage {
                 Some(usage) => {
@@ -209,12 +203,10 @@ impl DataStore {
     /// port
     async fn target_to_region(
         conn: &async_bb8_diesel::Connection<DbConnection>,
-        err: &OptionalError<AddrParseError>,
-        target: &str,
+        target: &SocketAddrV6,
         region_type: RegionType,
     ) -> Result<Option<Region>, diesel::result::Error> {
-        let address: SocketAddrV6 = target.parse().map_err(|e| err.bail(e))?;
-        let ip: db::model::Ipv6Addr = address.ip().into();
+        let ip: db::model::Ipv6Addr = target.ip().into();
 
         use db::schema::dataset::dsl as dataset_dsl;
         use db::schema::region::dsl as region_dsl;
@@ -232,7 +224,7 @@ impl DataStore {
             .filter(dataset_dsl::ip.eq(ip))
             .filter(
                 region_dsl::port
-                    .eq(Some::<db::model::SqlU16>(address.port().into())),
+                    .eq(Some::<db::model::SqlU16>(target.port().into())),
             )
             .filter(region_dsl::read_only.eq(read_only))
             .filter(region_dsl::deleting.eq(false))
@@ -244,8 +236,7 @@ impl DataStore {
 
     async fn read_only_target_to_volume_resource_usage(
         conn: &async_bb8_diesel::Connection<DbConnection>,
-        err: &OptionalError<AddrParseError>,
-        read_only_target: &str,
+        read_only_target: &SocketAddrV6,
     ) -> Result<Option<VolumeResourceUsage>, diesel::result::Error> {
         // Easy case: it's a region snapshot, and we can match by the snapshot
         // address directly
@@ -274,7 +265,6 @@ impl DataStore {
 
         let maybe_region = Self::target_to_region(
             conn,
-            err,
             read_only_target,
             RegionType::ReadOnly,
         )
@@ -1274,24 +1264,13 @@ impl DataStore {
         );
 
         for target in read_write_targets {
-            let sub_err = OptionalError::new();
-
-            let maybe_region = Self::target_to_region(
-                conn,
-                &sub_err,
-                &target,
-                RegionType::ReadWrite,
-            )
-            .await
-            .map_err(|e| {
-                if let Some(sub_err) = sub_err.take() {
-                    err.bail(SoftDeleteTransactionError::AddressParseError(
-                        sub_err,
-                    ))
-                } else {
-                    e
-                }
+            let target = target.parse().map_err(|e| {
+                err.bail(SoftDeleteTransactionError::AddressParseError(e))
             })?;
+
+            let maybe_region =
+                Self::target_to_region(conn, &target, RegionType::ReadWrite)
+                    .await?;
 
             let Some(region) = maybe_region else {
                 return Err(err.bail(
@@ -1319,23 +1298,15 @@ impl DataStore {
         for read_only_target in &crucible_targets.read_only_targets {
             use db::schema::volume_resource_usage::dsl as ru_dsl;
 
-            let sub_err = OptionalError::new();
+            let read_only_target = read_only_target.parse().map_err(|e| {
+                err.bail(SoftDeleteTransactionError::AddressParseError(e))
+            })?;
 
             let maybe_usage = Self::read_only_target_to_volume_resource_usage(
                 conn,
-                &sub_err,
-                read_only_target,
+                &read_only_target,
             )
-            .await
-            .map_err(|e| {
-                if let Some(sub_err) = sub_err.take() {
-                    err.bail(SoftDeleteTransactionError::AddressParseError(
-                        sub_err,
-                    ))
-                } else {
-                    e
-                }
-            })?;
+            .await?;
 
             let Some(usage) = maybe_usage else {
                 return Err(err.bail(
@@ -1504,7 +1475,7 @@ impl DataStore {
                                     .filter(dsl::snapshot_id.eq(snapshot_id))
                                     .filter(
                                         dsl::snapshot_addr
-                                            .eq(read_only_target.clone()),
+                                            .eq(read_only_target.to_string()),
                                     )
                                     .filter(dsl::deleting.eq(false))
                                     .set(dsl::deleting.eq(true))
@@ -1765,7 +1736,12 @@ impl DataStore {
                                         .await?;
 
                                 if num_updated != 1 {
-                                    return Err(err.bail(RemoveReadOnlyParentError::UnexpectedDatabaseUpdate(num_updated, 1)));
+                                    return Err(err.bail(
+                                        RemoveReadOnlyParentError::UnexpectedDatabaseUpdate(
+                                            num_updated,
+                                            1
+                                        )
+                                    ));
                                 }
 
                                 // Update the volume resource usage record for
@@ -1780,21 +1756,17 @@ impl DataStore {
                                 };
 
                                 for read_only_target in crucible_targets.read_only_targets {
-                                    let sub_err = OptionalError::new();
+                                    let read_only_target = read_only_target
+                                        .parse()
+                                        .map_err(|e| err.bail(
+                                            RemoveReadOnlyParentError::AddressParseError(e)
+                                        ))?;
 
                                     let maybe_usage = Self::read_only_target_to_volume_resource_usage(
                                         &conn,
-                                        &sub_err,
                                         &read_only_target,
                                     )
-                                    .await
-                                    .map_err(|e| {
-                                        if let Some(sub_err) = sub_err.take() {
-                                            err.bail(RemoveReadOnlyParentError::AddressParseError(sub_err))
-                                        } else {
-                                            e
-                                        }
-                                    })?;
+                                    .await?;
 
                                     let Some(usage) = maybe_usage else {
                                         return Err(err.bail(
@@ -2519,8 +2491,6 @@ pub struct VolumeReplacementParams {
 #[derive(Debug, Clone, Copy)]
 pub struct VolumeWithTarget(pub Uuid);
 
-// Note: it would be easier to pass around strings, but comparison could fail
-// due to formatting issues, so pass around SocketAddrV6 here
 #[derive(Debug, Clone, Copy)]
 pub struct ExistingTarget(pub SocketAddrV6);
 
@@ -3080,21 +3050,11 @@ impl DataStore {
                     // could either be a read-only region or a region snapshot,
                     // so determine what it is first
 
-                    let sub_err = OptionalError::new();
                     let maybe_existing_usage = Self::read_only_target_to_volume_resource_usage(
                         &conn,
-                        &sub_err,
-                        &existing.0.to_string(),
+                        &existing.0,
                     )
-                    .await
-                    .map_err(|e| if let Some(sub_err) = sub_err.take() {
-                            err.bail(VolumeReplaceSnapshotError::AddressParseError(
-                                sub_err
-                            ))
-                        } else {
-                            e
-                        }
-                    )?;
+                    .await?;
 
                     let Some(existing_usage) = maybe_existing_usage else {
                         return Err(err.bail(
@@ -3127,22 +3087,12 @@ impl DataStore {
                         })
                     })?;
 
-                    let sub_err = OptionalError::new();
                     let maybe_replacement_usage =
                         Self::read_only_target_to_volume_resource_usage(
                             &conn,
-                            &sub_err,
-                            &replacement.0.to_string(),
+                            &replacement.0,
                         )
-                        .await
-                        .map_err(|e| if let Some(sub_err) = sub_err.take() {
-                                err.bail(VolumeReplaceSnapshotError::AddressParseError(
-                                    sub_err
-                                ))
-                            } else {
-                                e
-                            }
-                        )?;
+                        .await?;
 
                     let Some(replacement_usage) = maybe_replacement_usage else {
                         return Err(err.bail(
@@ -3726,11 +3676,17 @@ impl DataStore {
         );
 
         for target in read_write_targets {
-            let sub_err = OptionalError::new();
+            let target = match target.parse() {
+                Ok(t) => t,
+                Err(e) => {
+                    return Err(Self::volume_invariant_violated(format!(
+                        "could not parse {target}: {e}"
+                    )));
+                }
+            };
 
             let maybe_region = DataStore::target_to_region(
                 conn,
-                &sub_err,
                 &target,
                 RegionType::ReadWrite,
             )
@@ -3755,13 +3711,16 @@ impl DataStore {
         };
 
         for read_only_target in &crucible_targets.read_only_targets {
-            let sub_err = OptionalError::new();
+            let read_only_target = read_only_target.parse().map_err(|e| {
+                Self::volume_invariant_violated(format!(
+                    "could not parse {read_only_target}: {e}"
+                ))
+            })?;
 
             let maybe_usage =
                 DataStore::read_only_target_to_volume_resource_usage(
                     conn,
-                    &sub_err,
-                    read_only_target,
+                    &read_only_target,
                 )
                 .await?;
 
