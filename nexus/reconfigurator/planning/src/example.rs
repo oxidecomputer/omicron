@@ -27,6 +27,9 @@ pub struct ExampleSystem {
     pub system: SystemDescription,
     pub input: PlanningInput,
     pub collection: Collection,
+    /// The initial blueprint that was used to describe the system. This
+    /// blueprint has sleds but no zones.
+    pub initial_blueprint: Blueprint,
     // If we add more types of RNGs than just sleds here, we'll need to
     // expand this to be similar to BlueprintBuilderRng where a root RNG
     // creates sub-RNGs.
@@ -388,6 +391,7 @@ impl ExampleSystemBuilder {
             system,
             input: input_builder.build(),
             collection: builder.build(),
+            initial_blueprint,
             sled_rng,
         };
         (example, blueprint)
